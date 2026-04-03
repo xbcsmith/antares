@@ -660,6 +660,92 @@ pub struct AssetManager {
     data_files: Vec<DataFileInfo>,
 }
 
+/// Configuration for [`AssetManager::init_data_files`].
+///
+/// Bundles the 11 individual data-file paths into a single struct so that
+/// `init_data_files` stays under the Clippy `too_many_arguments` threshold.
+///
+/// # Examples
+///
+/// ```no_run
+/// use campaign_builder::asset_manager::DataFilesConfig;
+///
+/// let cfg = DataFilesConfig {
+///     items_file: "data/items.ron",
+///     spells_file: "data/spells.ron",
+///     conditions_file: "data/conditions.ron",
+///     monsters_file: "data/monsters.ron",
+///     quests_file: "data/quests.ron",
+///     classes_file: "data/classes.ron",
+///     races_file: "data/races.ron",
+///     characters_file: "data/characters.ron",
+///     dialogue_file: "data/dialogues.ron",
+///     npcs_file: "data/npcs.ron",
+///     proficiencies_file: "data/proficiencies.ron",
+/// };
+/// assert_eq!(cfg.items_file, "data/items.ron");
+/// ```
+pub struct DataFilesConfig<'a> {
+    pub items_file: &'a str,
+    pub spells_file: &'a str,
+    pub conditions_file: &'a str,
+    pub monsters_file: &'a str,
+    pub quests_file: &'a str,
+    pub classes_file: &'a str,
+    pub races_file: &'a str,
+    pub characters_file: &'a str,
+    pub dialogue_file: &'a str,
+    pub npcs_file: &'a str,
+    pub proficiencies_file: &'a str,
+}
+
+/// Read-only campaign data references for [`AssetManager::scan_references`].
+///
+/// Bundles the seven data slices that `scan_references` needs so the method
+/// stays under the Clippy `too_many_arguments` threshold.
+///
+/// # Examples
+///
+/// ```no_run
+/// use campaign_builder::asset_manager::CampaignRefs;
+/// use antares::domain::items::types::Item;
+///
+/// let items: Vec<Item> = vec![];
+/// let quests = vec![];
+/// let dialogues = vec![];
+/// let maps = vec![];
+/// let classes = vec![];
+/// let characters = vec![];
+/// let npcs = vec![];
+///
+/// let refs = CampaignRefs {
+///     items: &items,
+///     quests: &quests,
+///     dialogues: &dialogues,
+///     maps: &maps,
+///     classes: &classes,
+///     characters: &characters,
+///     npcs: &npcs,
+/// };
+/// assert!(refs.items.is_empty());
+/// ```
+pub struct CampaignRefs<'a> {
+    /// Items loaded from the campaign.
+    pub items: &'a [antares::domain::items::types::Item],
+    /// Quests loaded from the campaign.
+    pub quests: &'a [antares::domain::quest::Quest],
+    /// Dialogue trees loaded from the campaign.
+    pub dialogues: &'a [antares::domain::dialogue::DialogueTree],
+    /// Maps loaded from the campaign.
+    pub maps: &'a [antares::domain::world::Map],
+    /// Class definitions.
+    pub classes: &'a [antares::domain::classes::ClassDefinition],
+    /// Character definitions.
+    pub characters: &'a [antares::domain::character_definition::CharacterDefinition],
+    /// NPC definitions.
+    pub npcs: &'a [antares::domain::world::npc::NpcDefinition],
+}
+
 impl AssetManager {
     /// Creates a new asset manager
     ///
@@ -675,49 +761,24 @@ impl AssetManager {
         }
     }
 
-    /// Initializes data file tracking with the campaign's configured file paths.
     /// Initializes data file tracking for all campaign data files.
     ///
     /// # Arguments
     ///
-    /// * `items_file` - Path to items data file
-    /// * `spells_file` - Path to spells data file
-    /// * `conditions_file` - Path to conditions data file
-    /// * `monsters_file` - Path to monsters data file
-    /// * `map_file_paths` - List of individual map file paths
-    /// * `quests_file` - Path to quests data file
-    /// * `classes_file` - Path to classes data file
-    /// * `races_file` - Path to races data file
-    /// * `characters_file` - Path to characters data file
-    /// * `dialogue_file` - Path to dialogues data file
-    /// * `npcs_file` - Path to NPCs data file
-    /// * `proficiencies_file` - Path to proficiencies data file
-    #[allow(clippy::too_many_arguments)]
-    pub fn init_data_files(
-        &mut self,
-        items_file: &str,
-        spells_file: &str,
-        conditions_file: &str,
-        monsters_file: &str,
-        maps_file_list: &[String],
-        quests_file: &str,
-        classes_file: &str,
-        races_file: &str,
-        characters_file: &str,
-        dialogue_file: &str,
-        npcs_file: &str,
-        proficiencies_file: &str,
-    ) {
+    /// * `cfg` - Bundle of all data-file paths (see [`DataFilesConfig`])
+    /// * `maps_file_list` - List of individual map file paths
+    pub fn init_data_files(&mut self, cfg: &DataFilesConfig<'_>, maps_file_list: &[String]) {
         self.data_files.clear();
 
         // Add data files in EditorTab order: Items, Spells, Conditions, Monsters, Maps, Quests, Classes, Races, Characters, Dialogues, NPCs, Proficiencies
-        self.data_files.push(DataFileInfo::new(items_file, "Items"));
         self.data_files
-            .push(DataFileInfo::new(spells_file, "Spells"));
+            .push(DataFileInfo::new(cfg.items_file, "Items"));
         self.data_files
-            .push(DataFileInfo::new(conditions_file, "Conditions"));
+            .push(DataFileInfo::new(cfg.spells_file, "Spells"));
         self.data_files
-            .push(DataFileInfo::new(monsters_file, "Monsters"));
+            .push(DataFileInfo::new(cfg.conditions_file, "Conditions"));
+        self.data_files
+            .push(DataFileInfo::new(cfg.monsters_file, "Monsters"));
 
         // Add individual map files
         for map_file in maps_file_list {
@@ -725,17 +786,19 @@ impl AssetManager {
         }
 
         self.data_files
-            .push(DataFileInfo::new(quests_file, "Quests"));
+            .push(DataFileInfo::new(cfg.quests_file, "Quests"));
         self.data_files
-            .push(DataFileInfo::new(classes_file, "Classes"));
-        self.data_files.push(DataFileInfo::new(races_file, "Races"));
+            .push(DataFileInfo::new(cfg.classes_file, "Classes"));
         self.data_files
-            .push(DataFileInfo::new(characters_file, "Characters"));
+            .push(DataFileInfo::new(cfg.races_file, "Races"));
         self.data_files
-            .push(DataFileInfo::new(dialogue_file, "Dialogues"));
-        self.data_files.push(DataFileInfo::new(npcs_file, "NPCs"));
+            .push(DataFileInfo::new(cfg.characters_file, "Characters"));
         self.data_files
-            .push(DataFileInfo::new(proficiencies_file, "Proficiencies"));
+            .push(DataFileInfo::new(cfg.dialogue_file, "Dialogues"));
+        self.data_files
+            .push(DataFileInfo::new(cfg.npcs_file, "NPCs"));
+        self.data_files
+            .push(DataFileInfo::new(cfg.proficiencies_file, "Proficiencies"));
 
         // Check which files exist
         for file_info in &mut self.data_files {
@@ -1123,17 +1186,13 @@ impl AssetManager {
     ///
     /// # Arguments
     ///
-    /// * `items` - List of campaign items
-    /// * `quests` - List of campaign quests
-    /// * `dialogues` - List of campaign dialogues
-    /// * `maps` - List of campaign maps
-    /// * `classes` - List of campaign classes
-    /// * `characters` - List of campaign characters
-    /// * `npcs` - List of campaign NPCs
+    /// * `refs` - Bundled read-only slices of all campaign data to scan.
+    ///   See [`CampaignRefs`] for the individual fields.
     ///
     /// # Examples
     ///
     /// ```
+    /// use campaign_builder::asset_manager::{AssetManager, CampaignRefs};
     /// use antares::domain::items::types::Item;
     /// use antares::domain::quest::Quest;
     /// use antares::domain::dialogue::DialogueTree;
@@ -1143,27 +1202,25 @@ impl AssetManager {
     /// use antares::domain::world::npc::NpcDefinition;
     /// use std::path::PathBuf;
     ///
-    /// let mut manager = campaign_builder::asset_manager::AssetManager::new(PathBuf::from("/tmp/campaign"));
-    /// let items = vec![];
-    /// let quests = vec![];
-    /// let dialogues = vec![];
-    /// let maps = vec![];
-    /// let classes = vec![];
-    /// let characters = vec![];
-    /// let npcs = vec![];
-    /// manager.scan_references(&items, &quests, &dialogues, &maps, &classes, &characters, &npcs);
+    /// let mut manager = AssetManager::new(PathBuf::from("/tmp/campaign"));
+    /// let items: Vec<Item> = vec![];
+    /// let quests: Vec<Quest> = vec![];
+    /// let dialogues: Vec<DialogueTree> = vec![];
+    /// let maps: Vec<Map> = vec![];
+    /// let classes: Vec<ClassDefinition> = vec![];
+    /// let characters: Vec<CharacterDefinition> = vec![];
+    /// let npcs: Vec<NpcDefinition> = vec![];
+    /// manager.scan_references(&CampaignRefs {
+    ///     items: &items,
+    ///     quests: &quests,
+    ///     dialogues: &dialogues,
+    ///     maps: &maps,
+    ///     classes: &classes,
+    ///     characters: &characters,
+    ///     npcs: &npcs,
+    /// });
     /// ```
-    #[allow(clippy::too_many_arguments)]
-    pub fn scan_references(
-        &mut self,
-        items: &[antares::domain::items::types::Item],
-        quests: &[antares::domain::quest::Quest],
-        dialogues: &[antares::domain::dialogue::DialogueTree],
-        maps: &[antares::domain::world::Map],
-        classes: &[antares::domain::classes::ClassDefinition],
-        characters: &[antares::domain::character_definition::CharacterDefinition],
-        npcs: &[antares::domain::world::npc::NpcDefinition],
-    ) {
+    pub fn scan_references(&mut self, refs: &CampaignRefs<'_>) {
         // Reset all reference tracking
         for asset in self.assets.values_mut() {
             asset.is_referenced = false;
@@ -1171,25 +1228,25 @@ impl AssetManager {
         }
 
         // Scan items for asset references (e.g., item icons, graphics)
-        self.scan_items_references(items);
+        self.scan_items_references(refs.items);
 
         // Scan quests for asset references (e.g., quest icons, rewards)
-        self.scan_quests_references(quests);
+        self.scan_quests_references(refs.quests);
 
         // Scan dialogues for asset references (e.g., portrait images)
-        self.scan_dialogues_references(dialogues);
+        self.scan_dialogues_references(refs.dialogues);
 
         // Scan maps for asset references (e.g., tilesets, backgrounds)
-        self.scan_maps_references(maps);
+        self.scan_maps_references(refs.maps);
 
         // Scan classes for asset references (e.g., class icons)
-        self.scan_classes_references(classes);
+        self.scan_classes_references(refs.classes);
 
         // Scan characters for asset references (e.g., portrait images)
-        self.scan_characters_references(characters);
+        self.scan_characters_references(refs.characters);
 
         // Scan NPCs for asset references (e.g., portrait images)
-        self.scan_npcs_references(npcs);
+        self.scan_npcs_references(refs.npcs);
     }
 
     /// Scans items for asset references
@@ -1877,20 +1934,20 @@ mod tests {
             "data/maps/map_1.ron".to_string(),
             "data/maps/map_2.ron".to_string(),
         ];
-        manager.init_data_files(
-            "data/items.ron",
-            "data/spells.ron",
-            "data/conditions.ron",
-            "data/monsters.ron",
-            &map_files,
-            "data/quests.ron",
-            "data/classes.ron",
-            "data/races.ron",
-            "data/characters.ron",
-            "data/dialogues.ron",
-            "data/npcs.ron",
-            "data/proficiencies.ron",
-        );
+        let cfg = DataFilesConfig {
+            items_file: "data/items.ron",
+            spells_file: "data/spells.ron",
+            conditions_file: "data/conditions.ron",
+            monsters_file: "data/monsters.ron",
+            quests_file: "data/quests.ron",
+            classes_file: "data/classes.ron",
+            races_file: "data/races.ron",
+            characters_file: "data/characters.ron",
+            dialogue_file: "data/dialogues.ron",
+            npcs_file: "data/npcs.ron",
+            proficiencies_file: "data/proficiencies.ron",
+        };
+        manager.init_data_files(&cfg, &map_files);
 
         // All files should be marked as missing since they don't exist
         // Expected: Items, Spells, Conditions, Monsters, 2 Maps, Quests, Classes, Races, Characters, Dialogues, NPCs, Proficiencies = 13
@@ -1909,20 +1966,20 @@ mod tests {
         let _ = std::fs::create_dir_all(&tmp_dir);
 
         let mut manager = AssetManager::new(tmp_dir.clone());
-        manager.init_data_files(
-            "data/items.ron",
-            "data/spells.ron",
-            "data/conditions.ron",
-            "data/monsters.ron",
-            &[],
-            "data/quests.ron",
-            "data/classes.ron",
-            "data/races.ron",
-            "data/characters.ron",
-            "data/dialogues.ron",
-            "data/npcs.ron",
-            "data/proficiencies.ron",
-        );
+        let cfg = DataFilesConfig {
+            items_file: "data/items.ron",
+            spells_file: "data/spells.ron",
+            conditions_file: "data/conditions.ron",
+            monsters_file: "data/monsters.ron",
+            quests_file: "data/quests.ron",
+            classes_file: "data/classes.ron",
+            races_file: "data/races.ron",
+            characters_file: "data/characters.ron",
+            dialogue_file: "data/dialogues.ron",
+            npcs_file: "data/npcs.ron",
+            proficiencies_file: "data/proficiencies.ron",
+        };
+        manager.init_data_files(&cfg, &[]);
 
         manager.mark_data_file_loaded("data/items.ron", 25);
 
@@ -1944,20 +2001,20 @@ mod tests {
         let _ = std::fs::create_dir_all(&tmp_dir);
 
         let mut manager = AssetManager::new(tmp_dir.clone());
-        manager.init_data_files(
-            "data/items.ron",
-            "data/spells.ron",
-            "data/conditions.ron",
-            "data/monsters.ron",
-            &[],
-            "data/quests.ron",
-            "data/classes.ron",
-            "data/races.ron",
-            "data/characters.ron",
-            "data/dialogues.ron",
-            "data/npcs.ron",
-            "data/proficiencies.ron",
-        );
+        let cfg = DataFilesConfig {
+            items_file: "data/items.ron",
+            spells_file: "data/spells.ron",
+            conditions_file: "data/conditions.ron",
+            monsters_file: "data/monsters.ron",
+            quests_file: "data/quests.ron",
+            classes_file: "data/classes.ron",
+            races_file: "data/races.ron",
+            characters_file: "data/characters.ron",
+            dialogue_file: "data/dialogues.ron",
+            npcs_file: "data/npcs.ron",
+            proficiencies_file: "data/proficiencies.ron",
+        };
+        manager.init_data_files(&cfg, &[]);
 
         assert!(!manager.all_data_files_loaded());
 
@@ -2250,20 +2307,20 @@ mod tests {
         let _ = std::fs::create_dir_all(&tmp_dir);
 
         let mut manager = AssetManager::new(tmp_dir.clone());
-        manager.init_data_files(
-            "data/items.ron",
-            "data/spells.ron",
-            "data/conditions.ron",
-            "data/monsters.ron",
-            &[],
-            "data/quests.ron",
-            "data/classes.ron",
-            "data/races.ron",
-            "data/characters.ron",
-            "data/dialogues.ron",
-            "data/npcs.ron",
-            "data/proficiencies.ron",
-        );
+        let cfg = DataFilesConfig {
+            items_file: "data/items.ron",
+            spells_file: "data/spells.ron",
+            conditions_file: "data/conditions.ron",
+            monsters_file: "data/monsters.ron",
+            quests_file: "data/quests.ron",
+            classes_file: "data/classes.ron",
+            races_file: "data/races.ron",
+            characters_file: "data/characters.ron",
+            dialogue_file: "data/dialogues.ron",
+            npcs_file: "data/npcs.ron",
+            proficiencies_file: "data/proficiencies.ron",
+        };
+        manager.init_data_files(&cfg, &[]);
 
         // Insert an Asset whose path matches one of the tracked data files
         let data_path = PathBuf::from("data/items.ron");
@@ -2335,7 +2392,15 @@ mod tests {
         };
 
         // Scan references
-        manager.scan_references(&[item], &[], &[], &[], &[], &[], &[]);
+        manager.scan_references(&CampaignRefs {
+            items: &[item],
+            quests: &[],
+            dialogues: &[],
+            maps: &[],
+            classes: &[],
+            characters: &[],
+            npcs: &[],
+        });
 
         // Check that the asset was marked as referenced
         let asset = manager.assets.get(&asset_path).unwrap();
@@ -2499,7 +2564,15 @@ mod tests {
             quest_giver_position: None,
         };
 
-        manager.scan_references(&[], &[quest], &[], &[], &[], &[], &[]);
+        manager.scan_references(&CampaignRefs {
+            items: &[],
+            quests: &[quest],
+            dialogues: &[],
+            maps: &[],
+            classes: &[],
+            characters: &[],
+            npcs: &[],
+        });
 
         let asset = manager.assets.get(&quest_icon_path).unwrap();
         assert!(asset.is_referenced);
@@ -2554,7 +2627,15 @@ mod tests {
             associated_quest: None,
             sdk_metadata: Default::default(),
         };
-        manager.scan_references(&[], &[], &[dialogue], &[], &[], &[], &[]);
+        manager.scan_references(&CampaignRefs {
+            items: &[],
+            quests: &[],
+            dialogues: &[dialogue],
+            maps: &[],
+            classes: &[],
+            characters: &[],
+            npcs: &[],
+        });
 
         let asset = manager.assets.get(&portrait_path).unwrap();
         assert!(asset.is_referenced);
@@ -2607,7 +2688,15 @@ mod tests {
             creature_id: None,
         };
 
-        manager.scan_references(&[], &[], &[], &[], &[], &[character], &[]);
+        manager.scan_references(&CampaignRefs {
+            items: &[],
+            quests: &[],
+            dialogues: &[],
+            maps: &[],
+            classes: &[],
+            characters: &[character],
+            npcs: &[],
+        });
 
         let asset = manager.assets.get(&portrait_path).unwrap();
         assert!(asset.is_referenced);
@@ -2662,7 +2751,15 @@ mod tests {
             economy: None,
         };
 
-        manager.scan_references(&[], &[], &[], &[], &[], &[], &[npc]);
+        manager.scan_references(&CampaignRefs {
+            items: &[],
+            quests: &[],
+            dialogues: &[],
+            maps: &[],
+            classes: &[],
+            characters: &[],
+            npcs: &[npc],
+        });
 
         let asset = manager.assets.get(&portrait_path).unwrap();
         assert!(asset.is_referenced);
@@ -2726,7 +2823,15 @@ mod tests {
             economy: None,
         };
 
-        manager.scan_references(&[], &[], &[], &[], &[], &[], &[npc]);
+        manager.scan_references(&CampaignRefs {
+            items: &[],
+            quests: &[],
+            dialogues: &[],
+            maps: &[],
+            classes: &[],
+            characters: &[],
+            npcs: &[npc],
+        });
 
         let asset = manager.assets.get(&sprite_path).unwrap();
         assert!(asset.is_referenced);
@@ -3088,7 +3193,15 @@ mod tests {
         ];
 
         // Scan references
-        manager.scan_references(&[], &[], &[], &[], &[], &characters, &npcs);
+        manager.scan_references(&CampaignRefs {
+            items: &[],
+            quests: &[],
+            dialogues: &[],
+            maps: &[],
+            classes: &[],
+            characters: &characters,
+            npcs: &npcs,
+        });
 
         // Verify character portrait is referenced
         let character_portrait = manager
@@ -3194,7 +3307,15 @@ mod tests {
         eprintln!("Found {} portrait assets", portrait_count_before);
 
         // Scan references
-        manager.scan_references(&[], &[], &[], &[], &[], &characters, &npcs);
+        manager.scan_references(&CampaignRefs {
+            items: &[],
+            quests: &[],
+            dialogues: &[],
+            maps: &[],
+            classes: &[],
+            characters: &characters,
+            npcs: &npcs,
+        });
 
         // Verify that portraits referenced by characters and NPCs are marked as referenced
         let mut referenced_portraits = 0;
@@ -3325,7 +3446,15 @@ mod tests {
             creature_id: None,
         };
 
-        manager.scan_references(&[], &[], &[], &[], &[], &[character1, character2], &[]);
+        manager.scan_references(&CampaignRefs {
+            items: &[],
+            quests: &[],
+            dialogues: &[],
+            maps: &[],
+            classes: &[],
+            characters: &[character1, character2],
+            npcs: &[],
+        });
 
         let asset = manager.assets.get(&portrait_path).unwrap();
         assert!(asset.is_referenced);

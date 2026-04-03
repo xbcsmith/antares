@@ -17,6 +17,7 @@
 //! assert_eq!(state.mode, campaign_builder::furniture_editor::FurnitureEditorMode::List);
 //! ```
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     handle_reload, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
     StandardListItemConfig, ToolbarAction, TwoColumnLayout,
@@ -223,23 +224,13 @@ impl FurnitureEditorState {
     ///
     /// * `ui` – the current egui UI context
     /// * `defs` – mutable reference to the campaign's furniture definition list
-    /// * `campaign_dir` – optional path to the campaign root directory
-    /// * `furniture_file` – relative path of the furniture RON file (e.g.
-    ///   `"data/furniture.ron"`)
-    /// * `unsaved_changes` – set to `true` whenever the list is mutated
-    /// * `status_message` – updated with human-readable feedback
-    /// * `file_load_merge_mode` – when `true` a Load operation merges by ID
-    ///   rather than replacing the full list
-    #[allow(clippy::too_many_arguments)]
+    /// * `ctx` – shared editor context (campaign dir, data file, unsaved flag, status, merge mode)
+    /// * `available_mesh_ids` – list of mesh IDs available for assignment
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         defs: &mut Vec<FurnitureDefinition>,
-        campaign_dir: Option<&PathBuf>,
-        furniture_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        file_load_merge_mode: &mut bool,
+        ctx: &mut EditorContext<'_>,
         available_mesh_ids: &[u32],
     ) {
         ui.heading("🪑 Furniture Editor");
@@ -248,7 +239,7 @@ impl FurnitureEditorState {
         // ----- Toolbar -------------------------------------------------------
         let toolbar_action = EditorToolbar::new("Furniture")
             .with_search(&mut self.search_query)
-            .with_merge_mode(file_load_merge_mode)
+            .with_merge_mode(ctx.file_load_merge_mode)
             .with_total_count(defs.len())
             .with_id_salt("furniture_toolbar")
             .show(ui);
@@ -259,16 +250,16 @@ impl FurnitureEditorState {
                 self.edit_buffer = Self::default_furniture();
                 let next_id = next_available_id(defs);
                 self.edit_buffer.id = next_id;
-                *unsaved_changes = true;
+                *ctx.unsaved_changes = true;
                 ui.ctx().request_repaint();
             }
             ToolbarAction::Save => {
                 self.save_furniture(
                     defs,
-                    campaign_dir,
-                    furniture_file,
-                    unsaved_changes,
-                    status_message,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    ctx.unsaved_changes,
+                    ctx.status_message,
                 );
             }
             ToolbarAction::Load => {
@@ -282,7 +273,7 @@ impl FurnitureEditorState {
                     });
                     match load_result {
                         Ok(loaded) => {
-                            if *file_load_merge_mode {
+                            if *ctx.file_load_merge_mode {
                                 for def in loaded {
                                     if let Some(existing) = defs.iter_mut().find(|d| d.id == def.id)
                                     {
@@ -294,11 +285,12 @@ impl FurnitureEditorState {
                             } else {
                                 *defs = loaded;
                             }
-                            *unsaved_changes = true;
-                            *status_message = format!("Loaded furniture from: {}", path.display());
+                            *ctx.unsaved_changes = true;
+                            *ctx.status_message =
+                                format!("Loaded furniture from: {}", path.display());
                         }
                         Err(e) => {
-                            *status_message = format!("Failed to load furniture: {}", e);
+                            *ctx.status_message = format!("Failed to load furniture: {}", e);
                         }
                     }
                 }
@@ -316,21 +308,21 @@ impl FurnitureEditorState {
                     match ron::ser::to_string_pretty(defs, Default::default()) {
                         Ok(contents) => match std::fs::write(&path, contents) {
                             Ok(_) => {
-                                *status_message =
+                                *ctx.status_message =
                                     format!("Exported furniture to: {}", path.display());
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to export furniture: {}", e);
+                                *ctx.status_message = format!("Failed to export furniture: {}", e);
                             }
                         },
                         Err(e) => {
-                            *status_message = format!("Failed to serialize furniture: {}", e);
+                            *ctx.status_message = format!("Failed to serialize furniture: {}", e);
                         }
                     }
                 }
             }
             ToolbarAction::Reload => {
-                handle_reload(defs, campaign_dir, furniture_file, status_message);
+                handle_reload(defs, ctx.campaign_dir, ctx.data_file, ctx.status_message);
             }
             ToolbarAction::None => {}
         }
@@ -396,35 +388,15 @@ impl FurnitureEditorState {
 
         // ----- Main content --------------------------------------------------
         match self.mode {
-            FurnitureEditorMode::List => self.show_list(
-                ui,
-                defs,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                furniture_file,
-            ),
-            FurnitureEditorMode::Add | FurnitureEditorMode::Edit => self.show_form(
-                ui,
-                defs,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                furniture_file,
-                available_mesh_ids,
-            ),
+            FurnitureEditorMode::List => self.show_list(ui, defs, ctx),
+            FurnitureEditorMode::Add | FurnitureEditorMode::Edit => {
+                self.show_form(ui, defs, ctx, available_mesh_ids)
+            }
         }
 
         // ----- Import / export dialog ----------------------------------------
         if self.show_import_dialog {
-            self.show_import_dialog(
-                ui.ctx(),
-                defs,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                furniture_file,
-            );
+            self.show_import_dialog(ui.ctx(), defs, ctx);
         }
     }
 
@@ -432,15 +404,11 @@ impl FurnitureEditorState {
     // List view
     // =========================================================================
 
-    #[allow(clippy::too_many_arguments)]
     fn show_list(
         &mut self,
         ui: &mut egui::Ui,
         defs: &mut Vec<FurnitureDefinition>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        furniture_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let search_lower = self.search_query.to_lowercase();
 
@@ -577,10 +545,10 @@ impl FurnitureEditorState {
                             self.selected_furniture = None;
                             self.save_furniture(
                                 defs,
-                                campaign_dir,
-                                furniture_file,
-                                unsaved_changes,
-                                status_message,
+                                ctx.campaign_dir,
+                                ctx.data_file,
+                                ctx.unsaved_changes,
+                                ctx.status_message,
                             );
                         }
                     }
@@ -594,10 +562,10 @@ impl FurnitureEditorState {
                             defs.push(new_def);
                             self.save_furniture(
                                 defs,
-                                campaign_dir,
-                                furniture_file,
-                                unsaved_changes,
-                                status_message,
+                                ctx.campaign_dir,
+                                ctx.data_file,
+                                ctx.unsaved_changes,
+                                ctx.status_message,
                             );
                         }
                     }
@@ -612,10 +580,12 @@ impl FurnitureEditorState {
                                 Ok(ron_str) => {
                                     self.import_export_buffer = ron_str;
                                     self.show_import_dialog = true;
-                                    *status_message = "Definition exported to dialog".to_string();
+                                    *ctx.status_message =
+                                        "Definition exported to dialog".to_string();
                                 }
                                 Err(_) => {
-                                    *status_message = "Failed to serialize definition".to_string();
+                                    *ctx.status_message =
+                                        "Failed to serialize definition".to_string();
                                 }
                             }
                         }
@@ -720,15 +690,11 @@ impl FurnitureEditorState {
     // Import / export dialog
     // =========================================================================
 
-    #[allow(clippy::too_many_arguments)]
     fn show_import_dialog(
         &mut self,
-        ctx: &egui::Context,
+        egui_ctx: &egui::Context,
         defs: &mut Vec<FurnitureDefinition>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        furniture_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let mut open = self.show_import_dialog;
 
@@ -737,7 +703,7 @@ impl FurnitureEditorState {
             .open(&mut open)
             .resizable(true)
             .default_width(520.0)
-            .show(ctx, |ui| {
+            .show(egui_ctx, |ui| {
                 ui.strong("Furniture RON Data");
                 ui.separator();
                 ui.label("Paste RON to import, or copy the exported text below:");
@@ -758,23 +724,23 @@ impl FurnitureEditorState {
                                 defs.push(def);
                                 self.save_furniture(
                                     defs,
-                                    campaign_dir,
-                                    furniture_file,
-                                    unsaved_changes,
-                                    status_message,
+                                    ctx.campaign_dir,
+                                    ctx.data_file,
+                                    ctx.unsaved_changes,
+                                    ctx.status_message,
                                 );
-                                *status_message =
+                                *ctx.status_message =
                                     "Furniture definition imported successfully".to_string();
                                 self.show_import_dialog = false;
                             }
                             Err(e) => {
-                                *status_message = format!("Import failed: {}", e);
+                                *ctx.status_message = format!("Import failed: {}", e);
                             }
                         }
                     }
                     if ui.button("📋 Copy to Clipboard").clicked() {
                         ui.ctx().copy_text(self.import_export_buffer.clone());
-                        *status_message = "Copied to clipboard".to_string();
+                        *ctx.status_message = "Copied to clipboard".to_string();
                     }
                     if ui.button("❌ Close").clicked() {
                         self.show_import_dialog = false;
@@ -789,15 +755,11 @@ impl FurnitureEditorState {
     // Add / Edit form
     // =========================================================================
 
-    #[allow(clippy::too_many_arguments)]
     fn show_form(
         &mut self,
         ui: &mut egui::Ui,
         defs: &mut Vec<FurnitureDefinition>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        furniture_file: &str,
+        ctx: &mut EditorContext<'_>,
         available_mesh_ids: &[u32],
     ) {
         let is_add = self.mode == FurnitureEditorMode::Add;
@@ -1007,7 +969,7 @@ impl FurnitureEditorState {
                             if ui.button("Open in OBJ Importer").clicked() {
                                 self.requested_signal =
                                     Some(FurnitureEditorSignal::OpenInObjImporter);
-                                *status_message =
+                                *ctx.status_message =
                                     "Opening OBJ Importer for furniture mesh work".to_string();
                                 ui.ctx().request_repaint();
                             }
@@ -1017,7 +979,7 @@ impl FurnitureEditorState {
                             if ui.button("Open in OBJ Importer").clicked() {
                                 self.requested_signal =
                                     Some(FurnitureEditorSignal::OpenInObjImporter);
-                                *status_message =
+                                *ctx.status_message =
                                     "Opening OBJ Importer for furniture mesh work".to_string();
                                 ui.ctx().request_repaint();
                             }
@@ -1094,10 +1056,10 @@ impl FurnitureEditorState {
                         }
                         self.save_furniture(
                             defs,
-                            campaign_dir,
-                            furniture_file,
-                            unsaved_changes,
-                            status_message,
+                            ctx.campaign_dir,
+                            ctx.data_file,
+                            ctx.unsaved_changes,
+                            ctx.status_message,
                         );
                         self.mode = FurnitureEditorMode::List;
                         ui.ctx().request_repaint();

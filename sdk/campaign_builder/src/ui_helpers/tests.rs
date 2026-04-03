@@ -2557,14 +2557,17 @@ fn test_autocomplete_entity_selector_generic_returns_false_with_no_interaction()
     ctx.begin_pass(raw_input);
     egui::CentralPanel::default().show(&ctx, |ui| {
         let mut select_called = false;
+        let cfg = AutocompleteSelectorConfig {
+            id_salt: "test_generic_no_interaction",
+            buffer_tag: "test",
+            label: "Label:",
+            placeholder: "Type here...",
+        };
         let changed = autocomplete_entity_selector_generic(
             ui,
-            "test_generic_no_interaction",
-            "test",
-            "Label:",
+            &cfg,
             vec!["Alpha".to_string(), "Beta".to_string()],
             String::new(),
-            "Type here...",
             false,
             |_text| {
                 select_called = true;
@@ -2596,14 +2599,17 @@ fn test_autocomplete_entity_selector_generic_empty_label_does_not_panic() {
         // Use RefCell so both closures can share mutation without conflicting borrows.
         let cell = std::cell::RefCell::new(String::new());
         let is_selected = !cell.borrow().is_empty();
+        let cfg = AutocompleteSelectorConfig {
+            id_salt: "test_empty_label",
+            buffer_tag: "test",
+            label: "", // empty label — should be silently skipped
+            placeholder: "Placeholder",
+        };
         let changed = autocomplete_entity_selector_generic(
             ui,
-            "test_empty_label",
-            "test",
-            "", // empty label — should be silently skipped
+            &cfg,
             vec!["Option A".to_string()],
             cell.borrow().clone(),
-            "Placeholder",
             is_selected,
             |text| {
                 *cell.borrow_mut() = text.to_string();
@@ -2631,14 +2637,17 @@ fn test_autocomplete_entity_selector_generic_initialises_buffer_in_egui_memory()
         // Use RefCell so both closures can share mutation without conflicting borrows.
         let cell = std::cell::RefCell::new(String::new());
         let is_selected = !cell.borrow().is_empty();
+        let cfg = AutocompleteSelectorConfig {
+            id_salt: "buf_init_test",
+            buffer_tag: "race",
+            label: "Race:",
+            placeholder: "Type race...",
+        };
         let _ = autocomplete_entity_selector_generic(
             ui,
-            "buf_init_test",
-            "race",
-            "Race:",
+            &cfg,
             vec!["Human".to_string(), "Elf".to_string()],
             cell.borrow().clone(),
-            "Type race...",
             is_selected,
             |text| {
                 *cell.borrow_mut() = text.to_string();
@@ -2676,16 +2685,19 @@ fn test_autocomplete_list_selector_generic_starts_with_no_change() {
     ctx.begin_pass(raw_input);
     egui::CentralPanel::default().show(&ctx, |ui| {
         let mut selected: Vec<String> = Vec::new();
+        let cfg = AutocompleteListSelectorConfig {
+            id_salt: "list_no_change",
+            buffer_tag: "tag_add",
+            label: "Tags:",
+            add_label: "Add tag:",
+            placeholder: "Type here...",
+        };
         let changed = autocomplete_list_selector_generic(
             ui,
-            "list_no_change",
-            "tag_add",
-            "Tags:",
+            &cfg,
             &mut selected,
             |tag: &String| tag.clone(),
             vec!["Alpha".to_string(), "Beta".to_string()],
-            "Add tag:",
-            "Type here...",
             |text: &str| {
                 if !text.is_empty() {
                     Some(text.to_string())
@@ -2730,16 +2742,19 @@ fn test_autocomplete_list_selector_generic_initialises_buffer_in_egui_memory() {
     ctx.begin_pass(raw_input);
     egui::CentralPanel::default().show(&ctx, |ui| {
         let mut selected: Vec<String> = Vec::new();
+        let cfg = AutocompleteListSelectorConfig {
+            id_salt: "list_buf_init",
+            buffer_tag: "tag_add",
+            label: "Tags:",
+            add_label: "Add tag:",
+            placeholder: "Type...",
+        };
         let _ = autocomplete_list_selector_generic(
             ui,
-            "list_buf_init",
-            "tag_add",
-            "Tags:",
+            &cfg,
             &mut selected,
             |t: &String| t.clone(),
             vec!["Foo".to_string()],
-            "Add tag:",
-            "Type...",
             |text: &str| {
                 if !text.is_empty() {
                     Some(text.to_string())
@@ -2793,6 +2808,12 @@ fn test_dispatch_list_action_duplicate() {
     let mut show = false;
     let mut msg = String::new();
 
+    let mut dispatch_state = DispatchActionState {
+        entity_label: "thing",
+        import_export_buffer: &mut buf,
+        show_import_dialog: &mut show,
+        status_message: &mut msg,
+    };
     let changed = dispatch_list_action(
         ItemAction::Duplicate,
         &mut data,
@@ -2801,10 +2822,7 @@ fn test_dispatch_list_action_duplicate() {
             entry.id = all.iter().map(|t| t.id).max().unwrap_or(0) + 1;
             entry.name = format!("{} (Copy)", entry.name);
         },
-        "thing",
-        &mut buf,
-        &mut show,
-        &mut msg,
+        &mut dispatch_state,
     );
 
     assert!(changed);
@@ -2832,15 +2850,18 @@ fn test_dispatch_list_action_delete() {
     let mut show = false;
     let mut msg = String::new();
 
+    let mut dispatch_state = DispatchActionState {
+        entity_label: "thing",
+        import_export_buffer: &mut buf,
+        show_import_dialog: &mut show,
+        status_message: &mut msg,
+    };
     let changed = dispatch_list_action(
         ItemAction::Delete,
         &mut data,
         &mut selected,
         |_, _| {},
-        "thing",
-        &mut buf,
-        &mut show,
-        &mut msg,
+        &mut dispatch_state,
     );
 
     assert!(changed);
@@ -2861,15 +2882,18 @@ fn test_dispatch_list_action_export() {
     let mut show = false;
     let mut msg = String::new();
 
+    let mut dispatch_state = DispatchActionState {
+        entity_label: "thing",
+        import_export_buffer: &mut buf,
+        show_import_dialog: &mut show,
+        status_message: &mut msg,
+    };
     let changed = dispatch_list_action(
         ItemAction::Export,
         &mut data,
         &mut selected,
         |_, _| {},
-        "thing",
-        &mut buf,
-        &mut show,
-        &mut msg,
+        &mut dispatch_state,
     );
 
     assert!(!changed); // Export doesn't mutate collection
@@ -2892,15 +2916,18 @@ fn test_dispatch_list_action_edit_is_noop() {
     let mut show = false;
     let mut msg = String::new();
 
+    let mut dispatch_state = DispatchActionState {
+        entity_label: "thing",
+        import_export_buffer: &mut buf,
+        show_import_dialog: &mut show,
+        status_message: &mut msg,
+    };
     let changed = dispatch_list_action(
         ItemAction::Edit,
         &mut data,
         &mut selected,
         |_, _| {},
-        "thing",
-        &mut buf,
-        &mut show,
-        &mut msg,
+        &mut dispatch_state,
     );
 
     assert!(!changed);
@@ -2919,15 +2946,18 @@ fn test_dispatch_list_action_no_selection_is_noop() {
     let mut show = false;
     let mut msg = String::new();
 
+    let mut dispatch_state = DispatchActionState {
+        entity_label: "thing",
+        import_export_buffer: &mut buf,
+        show_import_dialog: &mut show,
+        status_message: &mut msg,
+    };
     let changed = dispatch_list_action(
         ItemAction::Delete,
         &mut data,
         &mut selected,
         |_, _| {},
-        "thing",
-        &mut buf,
-        &mut show,
-        &mut msg,
+        &mut dispatch_state,
     );
 
     assert!(!changed);

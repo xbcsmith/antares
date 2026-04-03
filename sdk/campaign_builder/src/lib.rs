@@ -32,6 +32,7 @@ pub mod creatures_editor;
 pub mod creatures_manager;
 pub mod creatures_workflow;
 pub mod dialogue_editor;
+pub mod editor_context;
 pub mod editor_state;
 pub mod furniture_editor;
 pub mod icon;
@@ -106,6 +107,7 @@ use antares::domain::world::npc_runtime::MerchantStockTemplate;
 use antares::domain::world::Map;
 use conditions_editor::ConditionsEditorState;
 use dialogue_editor::DialogueEditorState;
+use editor_context::EditorContext;
 use eframe::egui;
 use items_editor::ItemsEditorState;
 use map_editor::MapsEditorState;
@@ -274,30 +276,37 @@ pub fn run() -> Result<(), eframe::Error> {
                                         );
                                     } else {
                                         let map_file_paths = app.discover_map_files();
-                                        manager.init_data_files(
-                                            &app.campaign.items_file,
-                                            &app.campaign.spells_file,
-                                            &app.campaign.conditions_file,
-                                            &app.campaign.monsters_file,
-                                            &map_file_paths,
-                                            &app.campaign.quests_file,
-                                            &app.campaign.classes_file,
-                                            &app.campaign.races_file,
-                                            &app.campaign.characters_file,
-                                            &app.campaign.dialogue_file,
-                                            &app.campaign.npcs_file,
-                                            &app.campaign.proficiencies_file,
-                                        );
+                                        let data_files_cfg = asset_manager::DataFilesConfig {
+                                            items_file: &app.campaign.items_file,
+                                            spells_file: &app.campaign.spells_file,
+                                            conditions_file: &app.campaign.conditions_file,
+                                            monsters_file: &app.campaign.monsters_file,
+                                            quests_file: &app.campaign.quests_file,
+                                            classes_file: &app.campaign.classes_file,
+                                            races_file: &app.campaign.races_file,
+                                            characters_file: &app.campaign.characters_file,
+                                            dialogue_file: &app.campaign.dialogue_file,
+                                            npcs_file: &app.campaign.npcs_file,
+                                            proficiencies_file: &app.campaign.proficiencies_file,
+                                        };
+                                        manager.init_data_files(&data_files_cfg, &map_file_paths);
 
-                                        manager.scan_references(
-                                            &app.campaign_data.items,
-                                            &app.campaign_data.quests,
-                                            &app.campaign_data.dialogues,
-                                            &app.campaign_data.maps,
-                                            &app.editor_registry.classes_editor_state.classes,
-                                            &app.editor_registry.characters_editor_state.characters,
-                                            &app.editor_registry.npc_editor_state.npcs,
-                                        );
+                                        let campaign_refs = asset_manager::CampaignRefs {
+                                            items: &app.campaign_data.items,
+                                            quests: &app.campaign_data.quests,
+                                            dialogues: &app.campaign_data.dialogues,
+                                            maps: &app.campaign_data.maps,
+                                            classes: &app
+                                                .editor_registry
+                                                .classes_editor_state
+                                                .classes,
+                                            characters: &app
+                                                .editor_registry
+                                                .characters_editor_state
+                                                .characters,
+                                            npcs: &app.editor_registry.npc_editor_state.npcs,
+                                        };
+                                        manager.scan_references(&campaign_refs);
                                         manager.mark_data_files_as_referenced();
 
                                         app.ui_state.status_message =
@@ -1126,15 +1135,18 @@ impl eframe::App for CampaignBuilderApp {
                 &mut self.ui_state.status_message,
             ),
             EditorTab::Items => {
+                let mut items_ctx = EditorContext {
+                    campaign_dir: self.campaign_dir.as_ref(),
+                    data_file: &self.campaign.items_file,
+                    unsaved_changes: &mut self.unsaved_changes,
+                    status_message: &mut self.ui_state.status_message,
+                    file_load_merge_mode: &mut self.ui_state.file_load_merge_mode,
+                };
                 self.editor_registry.items_editor_state.show(
                     ui,
                     &mut self.campaign_data.items,
                     &self.editor_registry.classes_editor_state.classes,
-                    self.campaign_dir.as_ref(),
-                    &self.campaign.items_file,
-                    &mut self.unsaved_changes,
-                    &mut self.ui_state.status_message,
-                    &mut self.ui_state.file_load_merge_mode,
+                    &mut items_ctx,
                 );
                 // Handle cross-tab navigation: items editor wants to open the
                 // Item Mesh Editor for a specific item.
@@ -1144,26 +1156,34 @@ impl eframe::App for CampaignBuilderApp {
                     ui.ctx().request_repaint();
                 }
             }
-            EditorTab::Spells => self.editor_registry.spells_editor_state.show(
-                ui,
-                &mut self.campaign_data.spells,
-                &self.campaign_data.conditions,
-                self.campaign_dir.as_ref(),
-                &self.campaign.spells_file,
-                &mut self.unsaved_changes,
-                &mut self.ui_state.status_message,
-                &mut self.ui_state.file_load_merge_mode,
-            ),
-            EditorTab::Conditions => {
-                self.editor_registry.conditions_editor_state.show(
+            EditorTab::Spells => {
+                let mut spells_ctx = EditorContext {
+                    campaign_dir: self.campaign_dir.as_ref(),
+                    data_file: &self.campaign.spells_file,
+                    unsaved_changes: &mut self.unsaved_changes,
+                    status_message: &mut self.ui_state.status_message,
+                    file_load_merge_mode: &mut self.ui_state.file_load_merge_mode,
+                };
+                self.editor_registry.spells_editor_state.show(
                     ui,
-                    &mut self.campaign_data.conditions,
                     &mut self.campaign_data.spells,
+                    &self.campaign_data.conditions,
+                    &mut spells_ctx,
+                );
+            }
+            EditorTab::Conditions => {
+                let mut conditions_ctx = EditorContext::new(
                     self.campaign_dir.as_ref(),
                     &self.campaign.conditions_file,
                     &mut self.unsaved_changes,
                     &mut self.ui_state.status_message,
                     &mut self.ui_state.file_load_merge_mode,
+                );
+                self.editor_registry.conditions_editor_state.show(
+                    ui,
+                    &mut self.campaign_data.conditions,
+                    &mut self.campaign_data.spells,
+                    &mut conditions_ctx,
                 );
                 // Handle navigation request from conditions editor
                 if let Some(spell_name) = self.editor_registry.conditions_editor_state.navigate_to_spell.take() {
@@ -1179,19 +1199,25 @@ impl eframe::App for CampaignBuilderApp {
                     }
                 }
             }
-            EditorTab::Monsters => self.editor_registry.monsters_editor_state.show(
-                ui,
-                &mut self.campaign_data.monsters,
-                self.campaign_dir.as_ref(),
-                &self.campaign.monsters_file,
-                &mut self.unsaved_changes,
-                &mut self.ui_state.status_message,
-                &mut self.ui_state.file_load_merge_mode,
-                self.campaign_dir
+            EditorTab::Monsters => {
+                let monster_creature_manager = self
+                    .campaign_dir
                     .as_ref()
-                    .map(|d| crate::creature_assets::CreatureAssetManager::new(d.clone()))
-                    .as_ref(),
-            ),
+                    .map(|d| crate::creature_assets::CreatureAssetManager::new(d.clone()));
+                let mut monsters_ctx = EditorContext {
+                    campaign_dir: self.campaign_dir.as_ref(),
+                    data_file: &self.campaign.monsters_file,
+                    unsaved_changes: &mut self.unsaved_changes,
+                    status_message: &mut self.ui_state.status_message,
+                    file_load_merge_mode: &mut self.ui_state.file_load_merge_mode,
+                };
+                self.editor_registry.monsters_editor_state.show(
+                    ui,
+                    &mut self.campaign_data.monsters,
+                    monster_creature_manager.as_ref(),
+                    &mut monsters_ctx,
+                );
+            }
             EditorTab::Creatures => {
                 if let Some(msg) = self.editor_registry.creatures_editor_state.show(
                     ui,
@@ -1220,14 +1246,17 @@ impl eframe::App for CampaignBuilderApp {
                     vec![10001]
                 };
 
-                self.editor_registry.furniture_editor_state.show(
-                    ui,
-                    &mut self.campaign_data.furniture_definitions,
+                let mut furniture_ctx = EditorContext::new(
                     self.campaign_dir.as_ref(),
                     &self.campaign.furniture_file,
                     &mut self.unsaved_changes,
                     &mut self.ui_state.status_message,
                     &mut self.ui_state.file_load_merge_mode,
+                );
+                self.editor_registry.furniture_editor_state.show(
+                    ui,
+                    &mut self.campaign_data.furniture_definitions,
+                    &mut furniture_ctx,
                     &available_mesh_ids,
                 );
                 if let Some(furniture_editor::FurnitureEditorSignal::OpenInObjImporter) =
@@ -1269,19 +1298,26 @@ impl eframe::App for CampaignBuilderApp {
                 }
             }
             EditorTab::Maps => {
+                let map_refs = map_editor::MapEditorRefs {
+                    monsters: &self.campaign_data.monsters,
+                    items: &self.campaign_data.items,
+                    conditions: &self.campaign_data.conditions,
+                    npcs: &self.editor_registry.npc_editor_state.npcs,
+                    furniture_definitions: &self.campaign_data.furniture_definitions,
+                    display_config: &self.tool_config.display,
+                };
+                let mut maps_ctx = EditorContext {
+                    campaign_dir: self.campaign_dir.as_ref(),
+                    data_file: &self.campaign.maps_dir,
+                    unsaved_changes: &mut self.unsaved_changes,
+                    status_message: &mut self.ui_state.status_message,
+                    file_load_merge_mode: &mut self.ui_state.file_load_merge_mode,
+                };
                 self.editor_registry.maps_editor_state.show(
                     ui,
                     &mut self.campaign_data.maps,
-                    &self.campaign_data.monsters,
-                    &self.campaign_data.items,
-                    &self.campaign_data.conditions,
-                    &self.editor_registry.npc_editor_state.npcs,
-                    &self.campaign_data.furniture_definitions,
-                    self.campaign_dir.as_ref(),
-                    &self.campaign.maps_dir,
-                    &self.tool_config.display,
-                    &mut self.unsaved_changes,
-                    &mut self.ui_state.status_message,
+                    &map_refs,
+                    &mut maps_ctx,
                 );
 
                 // If the Maps editor requested to open the NPC editor for a placed NPC,
@@ -1305,53 +1341,71 @@ impl eframe::App for CampaignBuilderApp {
                 }
             }
             EditorTab::Quests => self.show_quests_editor(ui),
-            EditorTab::Classes => self.editor_registry.classes_editor_state.show(
-                ui,
-                &self.campaign_data.items,
-                self.campaign_dir.as_ref(),
-                &self.campaign.classes_file,
-                &mut self.unsaved_changes,
-                &mut self.ui_state.status_message,
-                &mut self.ui_state.file_load_merge_mode,
-            ),
-            EditorTab::Races => self.editor_registry.races_editor_state.show(
-                ui,
-                &self.campaign_data.items,
-                self.campaign_dir.as_ref(),
-                &self.campaign.races_file,
-                &mut self.unsaved_changes,
-                &mut self.ui_state.status_message,
-                &mut self.ui_state.file_load_merge_mode,
-            ),
+            EditorTab::Classes => {
+                let mut classes_ctx = EditorContext {
+                    campaign_dir: self.campaign_dir.as_ref(),
+                    data_file: &self.campaign.classes_file,
+                    unsaved_changes: &mut self.unsaved_changes,
+                    status_message: &mut self.ui_state.status_message,
+                    file_load_merge_mode: &mut self.ui_state.file_load_merge_mode,
+                };
+                self.editor_registry.classes_editor_state.show(
+                    ui,
+                    &self.campaign_data.items,
+                    &mut classes_ctx,
+                );
+            }
+            EditorTab::Races => {
+                let mut races_ctx = EditorContext {
+                    campaign_dir: self.campaign_dir.as_ref(),
+                    data_file: &self.campaign.races_file,
+                    unsaved_changes: &mut self.unsaved_changes,
+                    status_message: &mut self.ui_state.status_message,
+                    file_load_merge_mode: &mut self.ui_state.file_load_merge_mode,
+                };
+                self.editor_registry.races_editor_state.show(
+                    ui,
+                    &self.campaign_data.items,
+                    &mut races_ctx,
+                );
+            }
             EditorTab::Characters => {
                 let char_creature_manager = self
                     .campaign_dir
                     .as_ref()
                     .map(|d| crate::creature_assets::CreatureAssetManager::new(d.clone()));
+                let mut chars_ctx = EditorContext {
+                    campaign_dir: self.campaign_dir.as_ref(),
+                    data_file: &self.campaign.characters_file,
+                    unsaved_changes: &mut self.unsaved_changes,
+                    status_message: &mut self.ui_state.status_message,
+                    file_load_merge_mode: &mut self.ui_state.file_load_merge_mode,
+                };
                 self.editor_registry.characters_editor_state.show(
                     ui,
                     &self.editor_registry.races_editor_state.races,
                     &self.editor_registry.classes_editor_state.classes,
                     &self.campaign_data.items,
-                    self.campaign_dir.as_ref(),
-                    &self.campaign.characters_file,
-                    &mut self.unsaved_changes,
-                    &mut self.ui_state.status_message,
-                    &mut self.ui_state.file_load_merge_mode,
                     char_creature_manager.as_ref(),
+                    &mut chars_ctx,
                 )
             }
-            EditorTab::Dialogues => self.editor_registry.dialogue_editor_state.show(
-                ui,
-                &mut self.campaign_data.dialogues,
-                &self.campaign_data.quests,
-                &self.campaign_data.items,
-                self.campaign_dir.as_ref(),
-                &self.campaign.dialogue_file,
-                &mut self.unsaved_changes,
-                &mut self.ui_state.status_message,
-                &mut self.ui_state.file_load_merge_mode,
-            ),
+            EditorTab::Dialogues => {
+                let mut dialogues_ctx = EditorContext {
+                    campaign_dir: self.campaign_dir.as_ref(),
+                    data_file: &self.campaign.dialogue_file,
+                    unsaved_changes: &mut self.unsaved_changes,
+                    status_message: &mut self.ui_state.status_message,
+                    file_load_merge_mode: &mut self.ui_state.file_load_merge_mode,
+                };
+                self.editor_registry.dialogue_editor_state.show(
+                    ui,
+                    &mut self.campaign_data.dialogues,
+                    &self.campaign_data.quests,
+                    &self.campaign_data.items,
+                    &mut dialogues_ctx,
+                );
+            }
             EditorTab::NPCs => {
                 // Always sync the stock_templates mirror from the editor state before
                 // threading into the NPC editor.  The StockTemplatesEditorState::show()
@@ -1370,14 +1424,17 @@ impl eframe::App for CampaignBuilderApp {
                     .as_ref()
                     .map(|d| crate::creature_assets::CreatureAssetManager::new(d.clone()));
 
+                let npc_ctx = npc_editor::NpcEditorContext {
+                    campaign_dir: self.campaign_dir.as_ref(),
+                    npcs_file: &self.campaign.npcs_file,
+                    display_config: &self.tool_config.display,
+                    creature_manager: npc_creature_manager.as_ref(),
+                };
                 if self.editor_registry.npc_editor_state.show(
                     ui,
                     &self.campaign_data.dialogues,
                     &self.campaign_data.quests,
-                    self.campaign_dir.as_ref(),
-                    &self.tool_config.display,
-                    &self.campaign.npcs_file,
-                    npc_creature_manager.as_ref(),
+                    &npc_ctx,
                 ) {
                     self.unsaved_changes = true;
                 }
@@ -1464,18 +1521,23 @@ impl eframe::App for CampaignBuilderApp {
                     self.unsaved_changes = true;
                 }
             }
-            EditorTab::Proficiencies => self.editor_registry.proficiencies_editor_state.show(
-                ui,
-                &mut self.campaign_data.proficiencies,
-                self.campaign_dir.as_ref(),
-                &self.campaign.proficiencies_file,
-                &mut self.unsaved_changes,
-                &mut self.ui_state.status_message,
-                &mut self.ui_state.file_load_merge_mode,
-                &self.editor_registry.classes_editor_state.classes,
-                &self.editor_registry.races_editor_state.races,
-                &self.campaign_data.items,
-            ),
+            EditorTab::Proficiencies => {
+                let mut profs_ctx = EditorContext {
+                    campaign_dir: self.campaign_dir.as_ref(),
+                    data_file: &self.campaign.proficiencies_file,
+                    unsaved_changes: &mut self.unsaved_changes,
+                    status_message: &mut self.ui_state.status_message,
+                    file_load_merge_mode: &mut self.ui_state.file_load_merge_mode,
+                };
+                self.editor_registry.proficiencies_editor_state.show(
+                    ui,
+                    &mut self.campaign_data.proficiencies,
+                    &self.editor_registry.classes_editor_state.classes,
+                    &self.editor_registry.races_editor_state.races,
+                    &self.campaign_data.items,
+                    &mut profs_ctx,
+                );
+            }
             EditorTab::Assets => self.show_assets_editor(ui),
             EditorTab::Validation => self.show_validation_panel(ui),
         });
@@ -1662,14 +1724,19 @@ impl CampaignBuilderApp {
         // Delegate the UI rendering and editing behavior to the dedicated editor
         // state. The editor manages a local buffer and applies changes to the
         // active `self.campaign` when the user saves.
+        let mut campaign_ctx = EditorContext {
+            campaign_dir: self.campaign_dir.as_ref(),
+            data_file: "",
+            unsaved_changes: &mut self.unsaved_changes,
+            status_message: &mut self.ui_state.status_message,
+            file_load_merge_mode: &mut self.ui_state.file_load_merge_mode,
+        };
         self.editor_registry.campaign_editor_state.show(
             ui,
             &mut self.campaign,
             &mut self.campaign_path,
-            self.campaign_dir.as_ref(),
-            &mut self.unsaved_changes,
-            &mut self.ui_state.status_message,
             self.editor_registry.npc_editor_state.npcs.as_slice(),
+            &mut campaign_ctx,
         );
 
         // If the campaign metadata editor requested validation, run the shared
@@ -1686,17 +1753,20 @@ impl CampaignBuilderApp {
 
     /// Show quests editor
     fn show_quests_editor(&mut self, ui: &mut egui::Ui) {
+        let mut quests_ctx = EditorContext {
+            campaign_dir: self.campaign_dir.as_ref(),
+            data_file: &self.campaign.quests_file,
+            unsaved_changes: &mut self.unsaved_changes,
+            status_message: &mut self.ui_state.status_message,
+            file_load_merge_mode: &mut self.ui_state.file_load_merge_mode,
+        };
         self.editor_registry.quest_editor_state.show(
             ui,
             &mut self.campaign_data.quests,
             &self.campaign_data.items,
             &self.campaign_data.monsters,
             &self.campaign_data.maps,
-            self.campaign_dir.as_ref(),
-            &self.campaign.quests_file,
-            &mut self.unsaved_changes,
-            &mut self.ui_state.status_message,
-            &mut self.ui_state.file_load_merge_mode,
+            &mut quests_ctx,
         );
     }
 
@@ -1982,30 +2052,31 @@ impl CampaignBuilderApp {
                     // Discover actual map files from the maps directory
                     let map_file_paths = self.discover_map_files();
 
-                    manager.init_data_files(
-                        &self.campaign.items_file,
-                        &self.campaign.spells_file,
-                        &self.campaign.conditions_file,
-                        &self.campaign.monsters_file,
-                        &map_file_paths,
-                        &self.campaign.quests_file,
-                        &self.campaign.classes_file,
-                        &self.campaign.races_file,
-                        &self.campaign.characters_file,
-                        &self.campaign.dialogue_file,
-                        &self.campaign.npcs_file,
-                        &self.campaign.proficiencies_file,
-                    );
+                    let data_files_cfg = asset_manager::DataFilesConfig {
+                        items_file: &self.campaign.items_file,
+                        spells_file: &self.campaign.spells_file,
+                        conditions_file: &self.campaign.conditions_file,
+                        monsters_file: &self.campaign.monsters_file,
+                        quests_file: &self.campaign.quests_file,
+                        classes_file: &self.campaign.classes_file,
+                        races_file: &self.campaign.races_file,
+                        characters_file: &self.campaign.characters_file,
+                        dialogue_file: &self.campaign.dialogue_file,
+                        npcs_file: &self.campaign.npcs_file,
+                        proficiencies_file: &self.campaign.proficiencies_file,
+                    };
+                    manager.init_data_files(&data_files_cfg, &map_file_paths);
                     // Scan references on initial load so portraits are properly marked as referenced
-                    manager.scan_references(
-                        &self.campaign_data.items,
-                        &self.campaign_data.quests,
-                        &self.campaign_data.dialogues,
-                        &self.campaign_data.maps,
-                        &self.editor_registry.classes_editor_state.classes,
-                        &self.editor_registry.characters_editor_state.characters,
-                        &self.editor_registry.npc_editor_state.npcs,
-                    );
+                    let campaign_refs = asset_manager::CampaignRefs {
+                        items: &self.campaign_data.items,
+                        quests: &self.campaign_data.quests,
+                        dialogues: &self.campaign_data.dialogues,
+                        maps: &self.campaign_data.maps,
+                        classes: &self.editor_registry.classes_editor_state.classes,
+                        characters: &self.editor_registry.characters_editor_state.characters,
+                        npcs: &self.editor_registry.npc_editor_state.npcs,
+                    };
+                    manager.scan_references(&campaign_refs);
                     manager.mark_data_files_as_referenced();
 
                     self.ui_state.status_message =
@@ -2043,15 +2114,16 @@ impl CampaignBuilderApp {
                     } else {
                         // After refreshing assets, rescan references to properly mark portraits
                         // referenced by characters and NPCs
-                        manager.scan_references(
-                            &self.campaign_data.items,
-                            &self.campaign_data.quests,
-                            &self.campaign_data.dialogues,
-                            &self.campaign_data.maps,
-                            &self.editor_registry.classes_editor_state.classes,
-                            &self.editor_registry.characters_editor_state.characters,
-                            &self.editor_registry.npc_editor_state.npcs,
-                        );
+                        let campaign_refs = asset_manager::CampaignRefs {
+                            items: &self.campaign_data.items,
+                            quests: &self.campaign_data.quests,
+                            dialogues: &self.campaign_data.dialogues,
+                            maps: &self.campaign_data.maps,
+                            classes: &self.editor_registry.classes_editor_state.classes,
+                            characters: &self.editor_registry.characters_editor_state.characters,
+                            npcs: &self.editor_registry.npc_editor_state.npcs,
+                        };
+                        manager.scan_references(&campaign_refs);
                         manager.mark_data_files_as_referenced();
                         self.ui_state.status_message =
                             "Assets refreshed and references scanned".to_string();
@@ -2060,15 +2132,16 @@ impl CampaignBuilderApp {
 
                 if ui.button("🔍 Scan References").clicked() {
                     // Scan references across all campaign data
-                    manager.scan_references(
-                        &self.campaign_data.items,
-                        &self.campaign_data.quests,
-                        &self.campaign_data.dialogues,
-                        &self.campaign_data.maps,
-                        &self.editor_registry.classes_editor_state.classes,
-                        &self.editor_registry.characters_editor_state.characters,
-                        &self.editor_registry.npc_editor_state.npcs,
-                    );
+                    let campaign_refs = asset_manager::CampaignRefs {
+                        items: &self.campaign_data.items,
+                        quests: &self.campaign_data.quests,
+                        dialogues: &self.campaign_data.dialogues,
+                        maps: &self.campaign_data.maps,
+                        classes: &self.editor_registry.classes_editor_state.classes,
+                        characters: &self.editor_registry.characters_editor_state.characters,
+                        npcs: &self.editor_registry.npc_editor_state.npcs,
+                    };
+                    manager.scan_references(&campaign_refs);
                     // Mark successfully loaded data files as referenced
                     manager.mark_data_files_as_referenced();
                     self.ui_state.status_message = "Asset references scanned".to_string();

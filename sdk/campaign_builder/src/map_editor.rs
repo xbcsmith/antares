@@ -36,6 +36,7 @@
 //! // state.show(ui, &mut maps, campaign_dir, ...);
 //! ```
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     autocomplete_item_list_selector, autocomplete_monster_list_selector, show_standard_list_item,
     EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
@@ -3094,6 +3095,26 @@ impl Default for MapsEditorState {
     }
 }
 
+/// Read-only data slices passed to the maps editor `show()` method.
+pub struct MapEditorRefs<'a> {
+    pub monsters: &'a [MonsterDefinition],
+    pub items: &'a [Item],
+    pub conditions: &'a [antares::domain::conditions::ConditionDefinition],
+    pub npcs: &'a [NpcDefinition],
+    pub furniture_definitions: &'a [antares::domain::world::furniture::FurnitureDefinition],
+    pub display_config: &'a DisplayConfig,
+}
+
+/// Read-only data slices for the map inspector panel.
+pub struct MapInspectorData<'a> {
+    pub maps: &'a [Map],
+    pub monsters: &'a [MonsterDefinition],
+    pub items: &'a [Item],
+    pub conditions: &'a [antares::domain::conditions::ConditionDefinition],
+    pub npcs: &'a [NpcDefinition],
+    pub furniture_definitions: &'a [antares::domain::world::furniture::FurnitureDefinition],
+}
+
 impl MapsEditorState {
     /// Create a new maps editor state
     pub fn new() -> Self {
@@ -3147,21 +3168,12 @@ impl MapsEditorState {
     ///
     /// This follows the standard editor pattern with EditorToolbar,
     /// TwoColumnLayout, and context-menu list actions.
-    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         maps: &mut Vec<Map>,
-        monsters: &[MonsterDefinition],
-        items: &[Item],
-        conditions: &[antares::domain::conditions::ConditionDefinition],
-        npcs: &[NpcDefinition],
-        furniture_definitions: &[antares::domain::world::furniture::FurnitureDefinition],
-        campaign_dir: Option<&PathBuf>,
-        maps_dir: &str,
-        display_config: &DisplayConfig,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
+        refs: &MapEditorRefs<'_>,
+        ctx: &mut EditorContext<'_>,
     ) {
         ui.heading("🗺️ Maps Editor");
         ui.add_space(5.0);
@@ -3189,15 +3201,15 @@ impl MapsEditorState {
                 self.selected_map_idx = Some(maps.len() - 1);
                 self.active_editor = Some(MapEditorState::new(new_map));
                 self.mode = MapsEditorMode::Add;
-                *unsaved_changes = true;
+                *ctx.unsaved_changes = true;
             }
             ToolbarAction::Save => {
                 self.save_all_maps(
                     maps,
-                    campaign_dir,
-                    maps_dir,
-                    unsaved_changes,
-                    status_message,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    ctx.unsaved_changes,
+                    ctx.status_message,
                 );
             }
             ToolbarAction::Load => {
@@ -3219,15 +3231,16 @@ impl MapsEditorState {
                                 } else {
                                     maps.push(loaded_map);
                                 }
-                                *unsaved_changes = true;
-                                *status_message = format!("Loaded map from: {}", path.display());
+                                *ctx.unsaved_changes = true;
+                                *ctx.status_message =
+                                    format!("Loaded map from: {}", path.display());
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to parse map: {}", e);
+                                *ctx.status_message = format!("Failed to parse map: {}", e);
                             }
                         },
                         Err(e) => {
-                            *status_message = format!("Failed to read map file: {}", e);
+                            *ctx.status_message = format!("Failed to read map file: {}", e);
                         }
                     }
                 }
@@ -3245,20 +3258,21 @@ impl MapsEditorState {
                     match ron::ser::to_string_pretty(maps, Default::default()) {
                         Ok(contents) => match fs::write(&path, contents) {
                             Ok(_) => {
-                                *status_message = format!("Exported maps to: {}", path.display());
+                                *ctx.status_message =
+                                    format!("Exported maps to: {}", path.display());
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to export maps: {}", e);
+                                *ctx.status_message = format!("Failed to export maps: {}", e);
                             }
                         },
                         Err(e) => {
-                            *status_message = format!("Failed to serialize maps: {}", e);
+                            *ctx.status_message = format!("Failed to serialize maps: {}", e);
                         }
                     }
                 }
             }
             ToolbarAction::Reload => {
-                self.load_maps(maps, campaign_dir, maps_dir, status_message);
+                self.load_maps(maps, ctx.campaign_dir, ctx.data_file, ctx.status_message);
             }
             ToolbarAction::None => {}
         }
@@ -3271,33 +3285,33 @@ impl MapsEditorState {
                 self.show_list(
                     ui,
                     maps,
-                    campaign_dir,
-                    maps_dir,
-                    unsaved_changes,
-                    status_message,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    ctx.unsaved_changes,
+                    ctx.status_message,
                 );
             }
             MapsEditorMode::Add | MapsEditorMode::Edit => {
                 self.show_editor(
                     ui,
                     maps,
-                    monsters,
-                    items,
-                    conditions,
-                    npcs,
-                    furniture_definitions,
-                    campaign_dir,
-                    maps_dir,
-                    display_config,
-                    unsaved_changes,
-                    status_message,
+                    refs.monsters,
+                    refs.items,
+                    refs.conditions,
+                    refs.npcs,
+                    refs.furniture_definitions,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    refs.display_config,
+                    ctx.unsaved_changes,
+                    ctx.status_message,
                 );
             }
         }
 
         // Import dialog
         if self.show_import_dialog {
-            self.show_import_dialog_window(ui.ctx(), maps, unsaved_changes, status_message);
+            self.show_import_dialog_window(ui.ctx(), maps, ctx.unsaved_changes, ctx.status_message);
         }
     }
 
@@ -3773,16 +3787,17 @@ impl MapsEditorState {
                             egui::ScrollArea::vertical()
                                 .id_salt("map_editor_inspector_scroll")
                                 .show(right_ui, |ui| {
-                                    if let Some(npc_id) = Self::show_inspector_panel(
-                                        ui,
-                                        editor_ref,
+                                    let inspector_data = MapInspectorData {
                                         maps,
                                         monsters,
                                         items,
                                         conditions,
                                         npcs,
                                         furniture_definitions,
-                                    ) {
+                                    };
+                                    if let Some(npc_id) =
+                                        Self::show_inspector_panel(ui, editor_ref, &inspector_data)
+                                    {
                                         self.requested_open_npc = Some(npc_id);
                                     }
                                 });
@@ -3943,16 +3958,10 @@ impl MapsEditorState {
     ///
     /// Returns `Some(npc_id)` when the user requests to open the NPC editor for
     /// an NPC placed on the currently selected tile.
-    #[allow(clippy::too_many_arguments)]
     fn show_inspector_panel(
         ui: &mut egui::Ui,
         editor: &mut MapEditorState,
-        maps: &[Map],
-        monsters: &[MonsterDefinition],
-        items: &[Item],
-        conditions: &[antares::domain::conditions::ConditionDefinition],
-        npcs: &[NpcDefinition],
-        furniture_definitions: &[antares::domain::world::furniture::FurnitureDefinition],
+        data: &MapInspectorData<'_>,
     ) -> Option<String> {
         let mut requested_open_npc: Option<String> = None;
 
@@ -4000,7 +4009,8 @@ impl MapsEditorState {
                     ui.separator();
                     ui.label("NPC:");
                     // Try to find name if possible
-                    let name = npcs
+                    let name = data
+                        .npcs
                         .iter()
                         .find(|n| n.id == placement.npc_id)
                         .map(|n| n.name.as_str())
@@ -4344,11 +4354,11 @@ impl MapsEditorState {
                 Self::show_event_editor(
                     ui,
                     editor,
-                    maps,
-                    monsters,
-                    items,
-                    conditions,
-                    furniture_definitions,
+                    data.maps,
+                    data.monsters,
+                    data.items,
+                    data.conditions,
+                    data.furniture_definitions,
                 );
             });
         }
@@ -4357,7 +4367,7 @@ impl MapsEditorState {
         if matches!(editor.current_tool, EditorTool::PlaceNpc) {
             ui.group(|ui| {
                 ui.heading("Place NPC");
-                Self::show_npc_placement_editor(ui, editor, npcs);
+                Self::show_npc_placement_editor(ui, editor, data.npcs);
             });
         }
 
@@ -7633,7 +7643,15 @@ mod tests {
 
         egui::CentralPanel::default().show(&ctx, |ui| {
             // Should render the inspector without panicking (and include name/description)
-            MapsEditorState::show_inspector_panel(ui, &mut state, &[], &[], &[], &[], &[], &[]);
+            let data = MapInspectorData {
+                maps: &[],
+                monsters: &[],
+                items: &[],
+                conditions: &[],
+                npcs: &[],
+                furniture_definitions: &[],
+            };
+            MapsEditorState::show_inspector_panel(ui, &mut state, &data);
         });
 
         // Verify selection was preserved and the inspector invocation completed

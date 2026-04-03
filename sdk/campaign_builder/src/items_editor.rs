@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     autocomplete_tag_list_selector, dispatch_list_action, extract_item_tag_candidates,
-    handle_reload, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
-    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    handle_reload, show_standard_list_item, DispatchActionState, EditorToolbar, ItemAction,
+    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::{
@@ -142,17 +143,12 @@ impl ItemsEditorState {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         items: &mut Vec<Item>,
         classes: &[ClassDefinition],
-        campaign_dir: Option<&PathBuf>,
-        items_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        file_load_merge_mode: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
         ui.heading("⚔️ Items Editor");
         ui.add_space(5.0);
@@ -160,7 +156,7 @@ impl ItemsEditorState {
         // Use shared EditorToolbar component
         let toolbar_action = EditorToolbar::new("Items")
             .with_search(&mut self.search_query)
-            .with_merge_mode(file_load_merge_mode)
+            .with_merge_mode(ctx.file_load_merge_mode)
             .with_total_count(items.len())
             .with_id_salt("items_toolbar")
             .show(ui);
@@ -172,15 +168,15 @@ impl ItemsEditorState {
                 self.edit_buffer = Self::default_item();
                 let next_id = items.iter().map(|i| i.id).max().unwrap_or(0) + 1;
                 self.edit_buffer.id = next_id;
-                *unsaved_changes = true;
+                *ctx.unsaved_changes = true;
             }
             ToolbarAction::Save => {
                 self.save_items(
                     items,
-                    campaign_dir,
-                    items_file,
-                    unsaved_changes,
-                    status_message,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    ctx.unsaved_changes,
+                    ctx.status_message,
                 );
             }
             ToolbarAction::Load => {
@@ -195,7 +191,7 @@ impl ItemsEditorState {
 
                     match load_result {
                         Ok(loaded_items) => {
-                            if *file_load_merge_mode {
+                            if *ctx.file_load_merge_mode {
                                 for item in loaded_items {
                                     if let Some(existing) =
                                         items.iter_mut().find(|i| i.id == item.id)
@@ -208,11 +204,11 @@ impl ItemsEditorState {
                             } else {
                                 *items = loaded_items;
                             }
-                            *unsaved_changes = true;
-                            *status_message = format!("Loaded items from: {}", path.display());
+                            *ctx.unsaved_changes = true;
+                            *ctx.status_message = format!("Loaded items from: {}", path.display());
                         }
                         Err(e) => {
-                            *status_message = format!("Failed to load items: {}", e);
+                            *ctx.status_message = format!("Failed to load items: {}", e);
                         }
                     }
                 }
@@ -230,20 +226,20 @@ impl ItemsEditorState {
                     match ron::ser::to_string_pretty(items, Default::default()) {
                         Ok(contents) => match std::fs::write(&path, contents) {
                             Ok(_) => {
-                                *status_message = format!("Saved items to: {}", path.display());
+                                *ctx.status_message = format!("Saved items to: {}", path.display());
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to save items: {}", e);
+                                *ctx.status_message = format!("Failed to save items: {}", e);
                             }
                         },
                         Err(e) => {
-                            *status_message = format!("Failed to serialize items: {}", e);
+                            *ctx.status_message = format!("Failed to serialize items: {}", e);
                         }
                     }
                 }
             }
             ToolbarAction::Reload => {
-                handle_reload(items, campaign_dir, items_file, status_message);
+                handle_reload(items, ctx.campaign_dir, ctx.data_file, ctx.status_message);
             }
             ToolbarAction::None => {}
         }
@@ -321,48 +317,28 @@ impl ItemsEditorState {
         ui.separator();
 
         match self.mode {
-            ItemsEditorMode::List => self.show_list(
-                ui,
-                items,
-                classes,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                items_file,
-            ),
-            ItemsEditorMode::Add | ItemsEditorMode::Edit => self.show_form(
-                ui,
-                items,
-                classes,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                items_file,
-            ),
+            ItemsEditorMode::List => self.show_list(ui, items, classes, ctx),
+            ItemsEditorMode::Add | ItemsEditorMode::Edit => self.show_form(ui, items, classes, ctx),
         }
 
         if self.show_import_dialog {
             self.show_import_dialog(
                 ui.ctx(),
                 items,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                items_file,
+                ctx.unsaved_changes,
+                ctx.status_message,
+                ctx.campaign_dir,
+                ctx.data_file,
             );
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn show_list(
         &mut self,
         ui: &mut egui::Ui,
         items: &mut Vec<Item>,
         classes: &[ClassDefinition],
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        items_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let search_lower = self.search_query.to_lowercase();
 
@@ -519,6 +495,12 @@ impl ItemsEditorState {
                     }
                 }
             } else {
+                let mut dispatch_state = DispatchActionState {
+                    entity_label: "item",
+                    import_export_buffer: &mut self.import_export_buffer,
+                    show_import_dialog: &mut self.show_import_dialog,
+                    status_message: ctx.status_message,
+                };
                 let data_changed = dispatch_list_action(
                     action,
                     items,
@@ -527,18 +509,15 @@ impl ItemsEditorState {
                         entry.id = all.iter().map(|i| i.id).max().unwrap_or(0) + 1;
                         entry.name = format!("{} (Copy)", entry.name);
                     },
-                    "item",
-                    &mut self.import_export_buffer,
-                    &mut self.show_import_dialog,
-                    status_message,
+                    &mut dispatch_state,
                 );
                 if data_changed {
                     self.save_items(
                         items,
-                        campaign_dir,
-                        items_file,
-                        unsaved_changes,
-                        status_message,
+                        ctx.campaign_dir,
+                        ctx.data_file,
+                        ctx.unsaved_changes,
+                        ctx.status_message,
                     );
                 }
             }
@@ -776,16 +755,12 @@ impl ItemsEditorState {
         self.show_import_dialog = open;
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn show_form(
         &mut self,
         ui: &mut egui::Ui,
         items: &mut Vec<Item>,
         _classes: &[ClassDefinition],
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        items_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let is_add = self.mode == ItemsEditorMode::Add;
         ui.heading(if is_add { "Add New Item" } else { "Edit Item" });
@@ -980,7 +955,7 @@ impl ItemsEditorState {
                         &mut self.edit_buffer.tags,
                         &tags_list,
                     ) {
-                        *unsaved_changes = true;
+                        *ctx.unsaved_changes = true;
                     }
 
                     ui.label("ℹ️").on_hover_text(concat!(
@@ -1047,13 +1022,13 @@ impl ItemsEditorState {
                         }
                         self.save_items(
                             items,
-                            campaign_dir,
-                            items_file,
-                            unsaved_changes,
-                            status_message,
+                            ctx.campaign_dir,
+                            ctx.data_file,
+                            ctx.unsaved_changes,
+                            ctx.status_message,
                         );
                         self.mode = ItemsEditorMode::List;
-                        *status_message = "Item saved".to_string();
+                        *ctx.status_message = "Item saved".to_string();
                     }
 
                     if ui.button("❌ Cancel").clicked() {

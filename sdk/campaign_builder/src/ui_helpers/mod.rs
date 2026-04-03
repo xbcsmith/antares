@@ -25,5 +25,15 @@ pub use autocomplete::*;
 pub use file_io::*;
 pub use layout::*;
 
+// Re-export SearchableSelectorConfig at the crate helpers level so editors
+// can import it alongside the other ui_helper types.
+pub use layout::SearchableSelectorConfig;
+
+// Re-export the parameter-bundle structs introduced to keep function argument
+// counts within the Clippy `too_many_arguments` limit.
+pub use autocomplete::AutocompleteListSelectorConfig;
+pub use autocomplete::AutocompleteSelectorConfig;
+pub use autocomplete::DispatchActionState;
+
 #[cfg(test)]
 mod tests;

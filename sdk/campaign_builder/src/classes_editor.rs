@@ -13,6 +13,7 @@
 //! - Proficiency selection uses multi-select autocomplete with quick-add buttons
 //! - Entity validation warnings display for missing item/proficiency references
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     handle_file_load, handle_file_save, show_standard_list_item, EditorToolbar, ItemAction,
     MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
@@ -370,29 +371,15 @@ impl ClassesEditorState {
     ///
     /// * `ui` - The egui UI context
     /// * `items` - Available items for starting equipment selection
-    /// * `campaign_dir` - Optional campaign directory path
-    /// * `classes_file` - Filename for classes data
-    /// * `unsaved_changes` - Mutable flag for tracking unsaved changes
-    /// * `status_message` - Mutable string for status messages
-    /// * `file_load_merge_mode` - Whether to merge or replace when loading files
-    #[allow(clippy::too_many_arguments)]
-    pub fn show(
-        &mut self,
-        ui: &mut egui::Ui,
-        items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        classes_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        file_load_merge_mode: &mut bool,
-    ) {
+    /// * `ctx` - Shared editor context (campaign dir, data file, unsaved flag, status, merge mode)
+    pub fn show(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
         ui.heading("🛡️ Classes Editor");
         ui.add_space(5.0);
 
         // Use shared EditorToolbar component
         let toolbar_action = EditorToolbar::new("Classes")
             .with_search(&mut self.search_filter)
-            .with_merge_mode(file_load_merge_mode)
+            .with_merge_mode(ctx.file_load_merge_mode)
             .with_total_count(self.classes.len())
             .with_id_salt("classes_toolbar")
             .show(ui);
@@ -402,17 +389,17 @@ impl ClassesEditorState {
             ToolbarAction::New => {
                 self.start_new_class();
                 self.buffer.id = self.next_available_class_id();
-                *unsaved_changes = true;
+                *ctx.unsaved_changes = true;
             }
             ToolbarAction::Save => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(classes_file);
+                if let Some(dir) = ctx.campaign_dir {
+                    let path = dir.join(ctx.data_file);
                     match self.save_to_file(&path) {
                         Ok(_) => {
-                            *status_message = format!("Saved {} classes", self.classes.len());
+                            *ctx.status_message = format!("Saved {} classes", self.classes.len());
                         }
                         Err(e) => {
-                            *status_message = format!("Failed to save classes: {}", e);
+                            *ctx.status_message = format!("Failed to save classes: {}", e);
                         }
                     }
                 }
@@ -420,33 +407,34 @@ impl ClassesEditorState {
             ToolbarAction::Load => {
                 handle_file_load(
                     &mut self.classes,
-                    *file_load_merge_mode,
+                    *ctx.file_load_merge_mode,
                     |c: &ClassDefinition| c.id.clone(),
-                    status_message,
-                    unsaved_changes,
+                    ctx.status_message,
+                    ctx.unsaved_changes,
                 );
             }
             ToolbarAction::Import => {
                 // Import not yet implemented for classes
-                *status_message = "Import not yet implemented for classes".to_string();
+                *ctx.status_message = "Import not yet implemented for classes".to_string();
             }
             ToolbarAction::Export => {
-                handle_file_save(&self.classes, "classes.ron", status_message);
+                handle_file_save(&self.classes, "classes.ron", ctx.status_message);
             }
             ToolbarAction::Reload => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(classes_file);
+                if let Some(dir) = ctx.campaign_dir {
+                    let path = dir.join(ctx.data_file);
                     if path.exists() {
                         match self.load_from_file(&path) {
                             Ok(_) => {
-                                *status_message = format!("Loaded {} classes", self.classes.len());
+                                *ctx.status_message =
+                                    format!("Loaded {} classes", self.classes.len());
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to load classes: {}", e);
+                                *ctx.status_message = format!("Failed to load classes: {}", e);
                             }
                         }
                     } else {
-                        *status_message = "Classes file does not exist".to_string();
+                        *ctx.status_message = "Classes file does not exist".to_string();
                     }
                 }
             }
@@ -704,7 +692,7 @@ impl ClassesEditorState {
                         }
                         ItemAction::Delete => {
                             self.delete_class(action_idx);
-                            *unsaved_changes = true;
+                            *ctx.unsaved_changes = true;
                         }
                         ItemAction::Duplicate => {
                             if let Some(class) = self.classes.get(action_idx).cloned() {
@@ -716,8 +704,8 @@ impl ClassesEditorState {
                                     suffix += 1;
                                 }
                                 self.classes.push(dup);
-                                *unsaved_changes = true;
-                                *status_message = "Class duplicated".to_string();
+                                *ctx.unsaved_changes = true;
+                                *ctx.status_message = "Class duplicated".to_string();
                             }
                         }
                         ItemAction::Export => {
@@ -725,10 +713,11 @@ impl ClassesEditorState {
                                 match ron::ser::to_string_pretty(class, Default::default()) {
                                     Ok(contents) => {
                                         ui.ctx().copy_text(contents);
-                                        *status_message = "Copied class to clipboard".to_string();
+                                        *ctx.status_message =
+                                            "Copied class to clipboard".to_string();
                                     }
                                     Err(e) => {
-                                        *status_message =
+                                        *ctx.status_message =
                                             format!("Failed to serialize class: {}", e);
                                     }
                                 }
@@ -739,28 +728,13 @@ impl ClassesEditorState {
                 }
             }
             ClassesEditorMode::Creating | ClassesEditorMode::Editing => {
-                self.show_class_form(
-                    ui,
-                    items,
-                    campaign_dir,
-                    classes_file,
-                    unsaved_changes,
-                    status_message,
-                );
+                self.show_class_form(ui, items, ctx);
             }
         }
     }
 
     /// Shows the class edit form
-    fn show_class_form(
-        &mut self,
-        ui: &mut egui::Ui,
-        items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        classes_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-    ) {
+    fn show_class_form(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
         // If requested, reset persistent autocomplete buffers so the form displays
         // values from the newly loaded buffer rather than stale typed text.
         if self.reset_autocomplete_buffers {
@@ -926,7 +900,7 @@ impl ClassesEditorState {
                     ui.label("Proficiencies");
 
                     // Load proficiency definitions with tri-stage fallback
-                    let prof_defs = crate::ui_helpers::load_proficiencies(campaign_dir, items);
+                    let prof_defs = crate::ui_helpers::load_proficiencies(ctx.campaign_dir, items);
 
                     if crate::ui_helpers::autocomplete_proficiency_list_selector(
                         ui,
@@ -1028,11 +1002,12 @@ impl ClassesEditorState {
                     }
 
                     if ui.button("✅ Save").clicked() {
-                        if let Err(e) = self.save_class(campaign_dir, classes_file, status_message)
+                        if let Err(e) =
+                            self.save_class(ctx.campaign_dir, ctx.data_file, ctx.status_message)
                         {
-                            *status_message = format!("Error saving class: {}", e);
+                            *ctx.status_message = format!("Error saving class: {}", e);
                         } else {
-                            *unsaved_changes = true;
+                            *ctx.unsaved_changes = true;
                         }
                     }
                     if ui.button("❌ Cancel").clicked() {

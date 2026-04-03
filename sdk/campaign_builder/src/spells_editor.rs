@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     autocomplete_condition_selector, dispatch_list_action, handle_reload, show_standard_list_item,
-    EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
-    TwoColumnLayout,
+    DispatchActionState, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::conditions::ConditionDefinition;
 use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
@@ -79,17 +80,12 @@ impl SpellsEditorState {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         spells: &mut Vec<Spell>,
         conditions: &[ConditionDefinition],
-        campaign_dir: Option<&PathBuf>,
-        spells_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        file_load_merge_mode: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
         ui.heading("✨ Spells Editor");
         ui.add_space(5.0);
@@ -97,7 +93,7 @@ impl SpellsEditorState {
         // Use shared EditorToolbar component
         let toolbar_action = EditorToolbar::new("Spells")
             .with_search(&mut self.search_query)
-            .with_merge_mode(file_load_merge_mode)
+            .with_merge_mode(ctx.file_load_merge_mode)
             .with_total_count(spells.len())
             .with_id_salt("spells_toolbar")
             .show(ui);
@@ -109,15 +105,15 @@ impl SpellsEditorState {
                 self.edit_buffer = Self::default_spell();
                 let next_id = spells.iter().map(|s| s.id).max().unwrap_or(0) + 1;
                 self.edit_buffer.id = next_id;
-                *unsaved_changes = true;
+                *ctx.unsaved_changes = true;
             }
             ToolbarAction::Save => {
                 self.save_spells(
                     spells,
-                    campaign_dir,
-                    spells_file,
-                    unsaved_changes,
-                    status_message,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    ctx.unsaved_changes,
+                    ctx.status_message,
                 );
             }
             ToolbarAction::Load => {
@@ -132,7 +128,7 @@ impl SpellsEditorState {
 
                     match load_result {
                         Ok(loaded_spells) => {
-                            if *file_load_merge_mode {
+                            if *ctx.file_load_merge_mode {
                                 for spell in loaded_spells {
                                     if let Some(existing) =
                                         spells.iter_mut().find(|s| s.id == spell.id)
@@ -145,11 +141,11 @@ impl SpellsEditorState {
                             } else {
                                 *spells = loaded_spells;
                             }
-                            *unsaved_changes = true;
-                            *status_message = format!("Loaded spells from: {}", path.display());
+                            *ctx.unsaved_changes = true;
+                            *ctx.status_message = format!("Loaded spells from: {}", path.display());
                         }
                         Err(e) => {
-                            *status_message = format!("Failed to load spells: {}", e);
+                            *ctx.status_message = format!("Failed to load spells: {}", e);
                         }
                     }
                 }
@@ -167,20 +163,21 @@ impl SpellsEditorState {
                     match ron::ser::to_string_pretty(spells, Default::default()) {
                         Ok(contents) => match std::fs::write(&path, contents) {
                             Ok(_) => {
-                                *status_message = format!("Saved spells to: {}", path.display());
+                                *ctx.status_message =
+                                    format!("Saved spells to: {}", path.display());
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to save spells: {}", e);
+                                *ctx.status_message = format!("Failed to save spells: {}", e);
                             }
                         },
                         Err(e) => {
-                            *status_message = format!("Failed to serialize spells: {}", e);
+                            *ctx.status_message = format!("Failed to serialize spells: {}", e);
                         }
                     }
                 }
             }
             ToolbarAction::Reload => {
-                handle_reload(spells, campaign_dir, spells_file, status_message);
+                handle_reload(spells, ctx.campaign_dir, ctx.data_file, ctx.status_message);
             }
             ToolbarAction::None => {}
         }
@@ -251,31 +248,18 @@ impl SpellsEditorState {
             self.show_import_dialog(
                 ui.ctx(),
                 spells,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                spells_file,
+                ctx.unsaved_changes,
+                ctx.status_message,
+                ctx.campaign_dir,
+                ctx.data_file,
             );
         }
 
         match self.mode {
-            SpellsEditorMode::List => self.show_list(
-                ui,
-                spells,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                spells_file,
-            ),
-            SpellsEditorMode::Add | SpellsEditorMode::Edit => self.show_form(
-                ui,
-                spells,
-                conditions,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                spells_file,
-            ),
+            SpellsEditorMode::List => self.show_list(ui, spells, ctx),
+            SpellsEditorMode::Add | SpellsEditorMode::Edit => {
+                self.show_form(ui, spells, conditions, ctx)
+            }
         }
     }
 
@@ -283,10 +267,7 @@ impl SpellsEditorState {
         &mut self,
         ui: &mut egui::Ui,
         spells: &mut Vec<Spell>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        spells_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let search_lower = self.search_query.to_lowercase();
 
@@ -423,6 +404,12 @@ impl SpellsEditorState {
                     }
                 }
             } else {
+                let mut dispatch_state = DispatchActionState {
+                    entity_label: "spell",
+                    import_export_buffer: &mut self.import_export_buffer,
+                    show_import_dialog: &mut self.show_import_dialog,
+                    status_message: ctx.status_message,
+                };
                 let data_changed = dispatch_list_action(
                     action,
                     spells,
@@ -431,18 +418,15 @@ impl SpellsEditorState {
                         entry.id = all.iter().map(|s| s.id).max().unwrap_or(0) + 1;
                         entry.name = format!("{} (Copy)", entry.name);
                     },
-                    "spell",
-                    &mut self.import_export_buffer,
-                    &mut self.show_import_dialog,
-                    status_message,
+                    &mut dispatch_state,
                 );
                 if data_changed {
                     self.save_spells(
                         spells,
-                        campaign_dir,
-                        spells_file,
-                        unsaved_changes,
-                        status_message,
+                        ctx.campaign_dir,
+                        ctx.data_file,
+                        ctx.unsaved_changes,
+                        ctx.status_message,
                     );
                 }
             }
@@ -526,16 +510,12 @@ impl SpellsEditorState {
             });
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn show_form(
         &mut self,
         ui: &mut egui::Ui,
         spells: &mut Vec<Spell>,
         conditions: &[ConditionDefinition],
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        spells_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let is_add = self.mode == SpellsEditorMode::Add;
         ui.heading(if is_add {
@@ -770,13 +750,13 @@ impl SpellsEditorState {
                         }
                         self.save_spells(
                             spells,
-                            campaign_dir,
-                            spells_file,
-                            unsaved_changes,
-                            status_message,
+                            ctx.campaign_dir,
+                            ctx.data_file,
+                            ctx.unsaved_changes,
+                            ctx.status_message,
                         );
                         self.mode = SpellsEditorMode::List;
-                        *status_message = "Spell saved".to_string();
+                        *ctx.status_message = "Spell saved".to_string();
                     }
 
                     if ui.button("❌ Cancel").clicked() {

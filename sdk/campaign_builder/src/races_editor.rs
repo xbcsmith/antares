@@ -7,6 +7,7 @@
 //! rendering via the `show()` method, following the standard editor pattern.
 //! Uses shared UI components for consistent layout.
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     autocomplete_ability_list_selector, autocomplete_proficiency_list_selector,
     autocomplete_tag_list_selector, extract_item_tag_candidates,
@@ -20,7 +21,6 @@ use antares::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModi
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
-use std::path::PathBuf;
 
 /// Editor state for races
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -419,29 +419,16 @@ impl RacesEditorState {
     /// # Arguments
     ///
     /// * `ui` - The egui UI context
-    /// * `campaign_dir` - Optional campaign directory path
-    /// * `races_file` - Filename for races data
-    /// * `unsaved_changes` - Mutable flag for tracking unsaved changes
-    /// * `status_message` - Mutable string for status messages
-    /// * `file_load_merge_mode` - Whether to merge or replace when loading files
-    #[allow(clippy::too_many_arguments)]
-    pub fn show(
-        &mut self,
-        ui: &mut egui::Ui,
-        items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        races_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        file_load_merge_mode: &mut bool,
-    ) {
+    /// * `items` - Available items for starting equipment selection
+    /// * `ctx` - Shared editor context (campaign dir, data file, unsaved flag, status, merge mode)
+    pub fn show(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
         ui.heading("🧬 Races Editor");
         ui.add_space(5.0);
 
         // Use shared EditorToolbar component
         let toolbar_action = EditorToolbar::new("Races")
             .with_search(&mut self.search_filter)
-            .with_merge_mode(file_load_merge_mode)
+            .with_merge_mode(ctx.file_load_merge_mode)
             .with_total_count(self.races.len())
             .with_id_salt("races_toolbar")
             .show(ui);
@@ -451,17 +438,17 @@ impl RacesEditorState {
             ToolbarAction::New => {
                 self.start_new_race();
                 self.buffer.id = self.next_available_race_id();
-                *unsaved_changes = true;
+                *ctx.unsaved_changes = true;
             }
             ToolbarAction::Save => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(races_file);
+                if let Some(dir) = ctx.campaign_dir {
+                    let path = dir.join(ctx.data_file);
                     match self.save_to_file(&path) {
                         Ok(_) => {
-                            *status_message = format!("Saved {} races", self.races.len());
+                            *ctx.status_message = format!("Saved {} races", self.races.len());
                         }
                         Err(e) => {
-                            *status_message = format!("Failed to save races: {}", e);
+                            *ctx.status_message = format!("Failed to save races: {}", e);
                         }
                     }
                 }
@@ -469,10 +456,10 @@ impl RacesEditorState {
             ToolbarAction::Load => {
                 handle_file_load(
                     &mut self.races,
-                    *file_load_merge_mode,
+                    *ctx.file_load_merge_mode,
                     |r: &RaceDefinition| r.id.clone(),
-                    status_message,
-                    unsaved_changes,
+                    ctx.status_message,
+                    ctx.unsaved_changes,
                 );
             }
             ToolbarAction::Import => {
@@ -480,22 +467,22 @@ impl RacesEditorState {
                 self.import_export_buffer.clear();
             }
             ToolbarAction::Export => {
-                handle_file_save(&self.races, "races.ron", status_message);
+                handle_file_save(&self.races, "races.ron", ctx.status_message);
             }
             ToolbarAction::Reload => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(races_file);
+                if let Some(dir) = ctx.campaign_dir {
+                    let path = dir.join(ctx.data_file);
                     if path.exists() {
                         match self.load_from_file(&path) {
                             Ok(_) => {
-                                *status_message = format!("Loaded {} races", self.races.len());
+                                *ctx.status_message = format!("Loaded {} races", self.races.len());
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to load races: {}", e);
+                                *ctx.status_message = format!("Failed to load races: {}", e);
                             }
                         }
                     } else {
-                        *status_message = "Races file does not exist".to_string();
+                        *ctx.status_message = "Races file does not exist".to_string();
                     }
                 }
             }
@@ -506,13 +493,7 @@ impl RacesEditorState {
 
         // Show import/export dialog if requested
         if self.show_import_dialog {
-            self.show_import_dialog(
-                ui.ctx(),
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                races_file,
-            );
+            self.show_import_dialog(ui.ctx(), ctx);
         }
 
         // Main content - use TwoColumnLayout for list mode
@@ -741,7 +722,7 @@ impl RacesEditorState {
                         }
                         ItemAction::Delete => {
                             self.delete_race(idx);
-                            *unsaved_changes = true;
+                            *ctx.unsaved_changes = true;
                         }
                         ItemAction::Duplicate => {
                             if idx < self.races.len() {
@@ -749,7 +730,7 @@ impl RacesEditorState {
                                 new_race.id = format!("{}_copy", new_race.id);
                                 new_race.name = format!("{} (Copy)", new_race.name);
                                 self.races.push(new_race);
-                                *unsaved_changes = true;
+                                *ctx.unsaved_changes = true;
                             }
                         }
                         ItemAction::Export => {
@@ -761,11 +742,11 @@ impl RacesEditorState {
                                     Ok(ron_str) => {
                                         self.import_export_buffer = ron_str;
                                         self.show_import_dialog = true;
-                                        *status_message =
+                                        *ctx.status_message =
                                             "Race exported to clipboard dialog".to_string();
                                     }
                                     Err(e) => {
-                                        *status_message =
+                                        *ctx.status_message =
                                             format!("Failed to serialize race: {}", e);
                                     }
                                 }
@@ -776,21 +757,14 @@ impl RacesEditorState {
                 }
             }
             RacesEditorMode::Creating | RacesEditorMode::Editing => {
-                self.show_race_form(ui, items, campaign_dir, unsaved_changes, status_message);
+                self.show_race_form(ui, items, ctx);
             }
         }
     }
 
     /// Shows the race editing form
     #[allow(clippy::ptr_arg)]
-    fn show_race_form(
-        &mut self,
-        ui: &mut egui::Ui,
-        items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        unsaved_changes: &mut bool,
-        _status_message: &mut String,
-    ) {
+    fn show_race_form(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
         let title = if self.mode == RacesEditorMode::Creating {
             "Create New Race"
         } else {
@@ -971,7 +945,7 @@ impl RacesEditorState {
                 ui.add_space(10.0);
                 ui.heading("Proficiencies");
                 // Load proficiency definitions with tri-stage fallback
-                let prof_defs = crate::ui_helpers::load_proficiencies(campaign_dir, items);
+                let prof_defs = crate::ui_helpers::load_proficiencies(ctx.campaign_dir, items);
 
 
                 if autocomplete_proficiency_list_selector(
@@ -1125,7 +1099,7 @@ impl RacesEditorState {
                     if ui.button("💾 Save").clicked() {
                         match self.save_race() {
                             Ok(_) => {
-                                *unsaved_changes = true;
+                                *ctx.unsaved_changes = true;
                                 self.mode = RacesEditorMode::List;
                             }
                             Err(e) => {
@@ -1142,21 +1116,14 @@ impl RacesEditorState {
 
     /// Shows the import/export dialog for individual races
     #[allow(clippy::ptr_arg)]
-    fn show_import_dialog(
-        &mut self,
-        ctx: &egui::Context,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        races_file: &str,
-    ) {
+    fn show_import_dialog(&mut self, egui_ctx: &egui::Context, ctx: &mut EditorContext<'_>) {
         let mut open = self.show_import_dialog;
 
         egui::Window::new("Import/Export Race")
             .open(&mut open)
             .resizable(true)
             .default_width(500.0)
-            .show(ctx, |ui| {
+            .show(egui_ctx, |ui| {
                 ui.heading("Race RON Data");
                 ui.separator();
 
@@ -1176,37 +1143,37 @@ impl RacesEditorState {
                                 if self.races.iter().any(|r| r.id == race.id) {
                                     let original_id = race.id.clone();
                                     race.id = self.next_available_race_id();
-                                    *status_message = format!(
+                                    *ctx.status_message = format!(
                                         "Race imported with new ID '{}' (original: '{}')",
                                         race.id, original_id
                                     );
                                 } else {
-                                    *status_message = "Race imported successfully".to_string();
+                                    *ctx.status_message = "Race imported successfully".to_string();
                                 }
 
                                 self.races.push(race);
 
                                 // Auto-save to file
-                                if let Some(dir) = campaign_dir {
-                                    let path = dir.join(races_file);
+                                if let Some(dir) = ctx.campaign_dir {
+                                    let path = dir.join(ctx.data_file);
                                     if let Err(e) = self.save_to_file(&path) {
-                                        *status_message =
+                                        *ctx.status_message =
                                             format!("Import succeeded but save failed: {}", e);
                                     }
                                 }
 
-                                *unsaved_changes = true;
+                                *ctx.unsaved_changes = true;
                                 self.show_import_dialog = false;
                             }
                             Err(e) => {
-                                *status_message = format!("Import failed: {}", e);
+                                *ctx.status_message = format!("Import failed: {}", e);
                             }
                         }
                     }
 
                     if ui.button("📋 Copy to Clipboard").clicked() {
                         ui.ctx().copy_text(self.import_export_buffer.clone());
-                        *status_message = "Copied to clipboard".to_string();
+                        *ctx.status_message = "Copied to clipboard".to_string();
                     }
 
                     if ui.button("❌ Close").clicked() {

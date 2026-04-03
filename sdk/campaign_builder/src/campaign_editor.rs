@@ -36,6 +36,7 @@
 //! - `show()` implements a TwoColumn layout and uses `ui_helpers` components for
 //!   consistency with other editors.
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     compute_default_panel_height, show_standard_list_item, EditorToolbar, StandardListItemConfig,
     ToolbarAction, TwoColumnLayout,
@@ -482,27 +483,16 @@ impl CampaignMetadataEditorState {
     /// rendering and form state to `CampaignMetadataEditorState`. The function
     /// accepts references to the running app's `campaign` and state helpers to
     /// persist and save files.
-    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         metadata: &mut crate::CampaignMetadata,
         campaign_path: &mut Option<PathBuf>,
-        campaign_dir: Option<&PathBuf>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
         npcs: &[NpcDefinition],
+        ctx: &mut EditorContext<'_>,
     ) {
         // Render using the provided NPC list so the UI can show the innkeeper dropdown
-        self.render_ui(
-            ui,
-            metadata,
-            campaign_path,
-            campaign_dir,
-            unsaved_changes,
-            status_message,
-            npcs,
-        );
+        self.render_ui(ui, metadata, campaign_path, npcs, ctx);
     }
 
     // Note: `show_with_npcs()` wrapper removed — call `show(..., npcs)` directly.
@@ -512,16 +502,13 @@ impl CampaignMetadataEditorState {
     /// This function contains the full UI logic previously hosted in `show()`.
     /// It accepts an `npcs` slice to allow the starting-innkeeper control to
     /// render a filtered ComboBox when NPCs are available.
-    #[allow(clippy::too_many_arguments)]
     fn render_ui(
         &mut self,
         ui: &mut egui::Ui,
         metadata: &mut crate::CampaignMetadata,
         campaign_path: &mut Option<PathBuf>,
-        _campaign_dir: Option<&PathBuf>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
         npcs: &[NpcDefinition],
+        ctx: &mut EditorContext<'_>,
     ) {
         ui.heading("Campaign Metadata");
         ui.add_space(5.0);
@@ -539,10 +526,10 @@ impl CampaignMetadataEditorState {
                 self.apply_buffer_to_metadata();
                 if let Some(path) = campaign_path.as_ref() {
                     if let Err(e) = self.save_to_file(path.as_path()) {
-                        *status_message = format!("Save failed: {}", e);
+                        *ctx.status_message = format!("Save failed: {}", e);
                     } else {
-                        *unsaved_changes = false;
-                        *status_message = format!("Saved campaign to: {}", path.display());
+                        *ctx.unsaved_changes = false;
+                        *ctx.status_message = format!("Saved campaign to: {}", path.display());
                         // Apply the updated metadata back to the shared campaign metadata
                         *metadata = self.metadata.clone();
                         // Request a validation run so the Validation panel reflects the saved changes
@@ -554,10 +541,10 @@ impl CampaignMetadataEditorState {
                     .save_file()
                 {
                     if let Err(e) = self.save_to_file(path.as_path()) {
-                        *status_message = format!("Save failed: {}", e);
+                        *ctx.status_message = format!("Save failed: {}", e);
                     } else {
-                        *unsaved_changes = false;
-                        *status_message = format!("Saved campaign to: {}", path.display());
+                        *ctx.unsaved_changes = false;
+                        *ctx.status_message = format!("Saved campaign to: {}", path.display());
                         *campaign_path = Some(path);
                         // Also update the shared campaign metadata and request validation on Save As
                         *metadata = self.metadata.clone();
@@ -573,11 +560,12 @@ impl CampaignMetadataEditorState {
                     match self.load_from_file(path.as_path()) {
                         Ok(_) => {
                             *metadata = self.metadata.clone();
-                            *unsaved_changes = false;
-                            *status_message = format!("Loaded campaign from: {}", path.display());
+                            *ctx.unsaved_changes = false;
+                            *ctx.status_message =
+                                format!("Loaded campaign from: {}", path.display());
                         }
                         Err(e) => {
-                            *status_message = format!("Failed to load campaign: {}", e);
+                            *ctx.status_message = format!("Failed to load campaign: {}", e);
                         }
                     }
                 }
@@ -649,28 +637,28 @@ impl CampaignMetadataEditorState {
                                     ui.label("Campaign ID:");
                                     if ui.text_edit_singleline(&mut self.buffer.id).changed() {
                                         self.has_unsaved_changes = true;
-                                        *unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
                                     }
                                     ui.end_row();
 
                                     ui.label("Name:");
                                     if ui.text_edit_singleline(&mut self.buffer.name).changed() {
                                         self.has_unsaved_changes = true;
-                                        *unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
                                     }
                                     ui.end_row();
 
                                     ui.label("Version:");
                                     if ui.text_edit_singleline(&mut self.buffer.version).changed() {
                                         self.has_unsaved_changes = true;
-                                        *unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
                                     }
                                     ui.end_row();
 
                                     ui.label("Author:");
                                     if ui.text_edit_singleline(&mut self.buffer.author).changed() {
                                         self.has_unsaved_changes = true;
-                                        *unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
                                     }
                                     ui.end_row();
 
@@ -680,7 +668,7 @@ impl CampaignMetadataEditorState {
                                         .changed()
                                     {
                                         self.has_unsaved_changes = true;
-                                        *unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
                                     }
                                     ui.end_row();
                                 });
@@ -693,7 +681,7 @@ impl CampaignMetadataEditorState {
                             );
                             if response.changed() {
                                 self.has_unsaved_changes = true;
-                                *unsaved_changes = true;
+                                *ctx.unsaved_changes = true;
                             }
                         }
 
@@ -713,7 +701,7 @@ impl CampaignMetadataEditorState {
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.button("📁").on_hover_text("Browse").clicked() {
                                             if let Some(p) = rfd::FileDialog::new()
@@ -722,7 +710,7 @@ impl CampaignMetadataEditorState {
                                             {
                                                 self.buffer.items_file = p.display().to_string();
                                                 self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
                                             }
                                         }
                                     });
@@ -736,7 +724,7 @@ impl CampaignMetadataEditorState {
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.button("📁").on_hover_text("Browse").clicked() {
                                             if let Some(p) = rfd::FileDialog::new()
@@ -745,7 +733,7 @@ impl CampaignMetadataEditorState {
                                             {
                                                 self.buffer.spells_file = p.display().to_string();
                                                 self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
                                             }
                                         }
                                     });
@@ -759,7 +747,7 @@ impl CampaignMetadataEditorState {
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.button("📁").on_hover_text("Browse").clicked() {
                                             if let Some(p) = rfd::FileDialog::new()
@@ -769,7 +757,7 @@ impl CampaignMetadataEditorState {
                                                 self.buffer.conditions_file =
                                                     p.display().to_string();
                                                 self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
                                             }
                                         }
                                     });
@@ -783,7 +771,7 @@ impl CampaignMetadataEditorState {
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.button("📁").on_hover_text("Browse").clicked() {
                                             if let Some(p) = rfd::FileDialog::new()
@@ -792,7 +780,7 @@ impl CampaignMetadataEditorState {
                                             {
                                                 self.buffer.monsters_file = p.display().to_string();
                                                 self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
                                             }
                                         }
                                     });
@@ -806,14 +794,14 @@ impl CampaignMetadataEditorState {
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.button("📂").on_hover_text("Browse Folder").clicked()
                                         {
                                             if let Some(p) = rfd::FileDialog::new().pick_folder() {
                                                 self.buffer.maps_dir = p.display().to_string();
                                                 self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
                                             }
                                         }
                                     });
@@ -827,7 +815,7 @@ impl CampaignMetadataEditorState {
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.button("📁").on_hover_text("Browse").clicked() {
                                             if let Some(p) = rfd::FileDialog::new()
@@ -836,7 +824,7 @@ impl CampaignMetadataEditorState {
                                             {
                                                 self.buffer.quests_file = p.display().to_string();
                                                 self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
                                             }
                                         }
                                     });
@@ -850,7 +838,7 @@ impl CampaignMetadataEditorState {
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.button("📁").on_hover_text("Browse").clicked() {
                                             if let Some(p) = rfd::FileDialog::new()
@@ -859,7 +847,7 @@ impl CampaignMetadataEditorState {
                                             {
                                                 self.buffer.classes_file = p.display().to_string();
                                                 self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
                                             }
                                         }
                                     });
@@ -873,7 +861,7 @@ impl CampaignMetadataEditorState {
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.button("📁").on_hover_text("Browse").clicked() {
                                             if let Some(p) = rfd::FileDialog::new()
@@ -882,7 +870,7 @@ impl CampaignMetadataEditorState {
                                             {
                                                 self.buffer.races_file = p.display().to_string();
                                                 self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
                                             }
                                         }
                                     });
@@ -896,7 +884,7 @@ impl CampaignMetadataEditorState {
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.button("📁").on_hover_text("Browse").clicked() {
                                             if let Some(p) = rfd::FileDialog::new()
@@ -906,7 +894,7 @@ impl CampaignMetadataEditorState {
                                                 self.buffer.characters_file =
                                                     p.display().to_string();
                                                 self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
                                             }
                                         }
                                     });
@@ -920,7 +908,7 @@ impl CampaignMetadataEditorState {
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.button("📁").on_hover_text("Browse").clicked() {
                                             if let Some(p) = rfd::FileDialog::new()
@@ -929,7 +917,7 @@ impl CampaignMetadataEditorState {
                                             {
                                                 self.buffer.dialogue_file = p.display().to_string();
                                                 self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
                                             }
                                         }
                                     });
@@ -943,7 +931,7 @@ impl CampaignMetadataEditorState {
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.button("📁").on_hover_text("Browse").clicked() {
                                             if let Some(p) = rfd::FileDialog::new()
@@ -952,7 +940,7 @@ impl CampaignMetadataEditorState {
                                             {
                                                 self.buffer.npcs_file = p.display().to_string();
                                                 self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
                                             }
                                         }
                                     });
@@ -966,7 +954,7 @@ impl CampaignMetadataEditorState {
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.button("📁").on_hover_text("Browse").clicked() {
                                             if let Some(p) = rfd::FileDialog::new()
@@ -976,7 +964,7 @@ impl CampaignMetadataEditorState {
                                                 self.buffer.stock_templates_file =
                                                     p.display().to_string();
                                                 self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
                                             }
                                         }
                                     });
@@ -990,7 +978,7 @@ impl CampaignMetadataEditorState {
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.button("📁").on_hover_text("Browse").clicked() {
                                             if let Some(p) = rfd::FileDialog::new()
@@ -1000,7 +988,7 @@ impl CampaignMetadataEditorState {
                                                 self.buffer.proficiencies_file =
                                                     p.display().to_string();
                                                 self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
                                             }
                                         }
                                     });
@@ -1014,7 +1002,7 @@ impl CampaignMetadataEditorState {
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.button("📁").on_hover_text("Browse").clicked() {
                                             if let Some(p) = rfd::FileDialog::new()
@@ -1024,7 +1012,7 @@ impl CampaignMetadataEditorState {
                                                 self.buffer.creatures_file =
                                                     p.display().to_string();
                                                 self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
                                             }
                                         }
                                     });
@@ -1038,7 +1026,7 @@ impl CampaignMetadataEditorState {
                                             .changed()
                                         {
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.button("📁").on_hover_text("Browse").clicked() {
                                             if let Some(p) = rfd::FileDialog::new()
@@ -1048,7 +1036,7 @@ impl CampaignMetadataEditorState {
                                                 self.buffer.furniture_file =
                                                     p.display().to_string();
                                                 self.has_unsaved_changes = true;
-                                                *unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
                                             }
                                         }
                                     });
@@ -1069,7 +1057,7 @@ impl CampaignMetadataEditorState {
                                         .changed()
                                     {
                                         self.has_unsaved_changes = true;
-                                        *unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
                                     }
                                     ui.end_row();
 
@@ -1080,12 +1068,12 @@ impl CampaignMetadataEditorState {
                                         if ui.add(egui::DragValue::new(&mut x)).changed() {
                                             self.buffer.starting_position.0 = x.max(0) as u32;
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                         if ui.add(egui::DragValue::new(&mut y)).changed() {
                                             self.buffer.starting_position.1 = y.max(0) as u32;
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
                                     });
                                     ui.end_row();
@@ -1101,7 +1089,7 @@ impl CampaignMetadataEditorState {
                                                     dir = (*d).to_string();
                                                     self.buffer.starting_direction = dir.clone();
                                                     self.has_unsaved_changes = true;
-                                                    *unsaved_changes = true;
+                                                    *ctx.unsaved_changes = true;
                                                 }
                                             }
                                         });
@@ -1118,7 +1106,7 @@ impl CampaignMetadataEditorState {
                                         {
                                             self.buffer.starting_year = year.max(1) as u32;
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
 
                                         ui.label("Month");
@@ -1130,7 +1118,7 @@ impl CampaignMetadataEditorState {
                                             self.buffer.starting_month =
                                                 month.clamp(1, 12) as u32;
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
 
                                         ui.label("Day");
@@ -1141,7 +1129,7 @@ impl CampaignMetadataEditorState {
                                         {
                                             self.buffer.starting_day = day.max(1) as u32;
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
 
                                         ui.label("Hour");
@@ -1152,7 +1140,7 @@ impl CampaignMetadataEditorState {
                                         {
                                             self.buffer.starting_hour = hour.clamp(0, 23) as u8;
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
 
                                         ui.label("Min");
@@ -1164,7 +1152,7 @@ impl CampaignMetadataEditorState {
                                             self.buffer.starting_minute =
                                                 minute.clamp(0, 59) as u8;
                                             self.has_unsaved_changes = true;
-                                            *unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
                                         }
 
                                         // Preview the time-of-day period next to the spinners
@@ -1197,7 +1185,7 @@ impl CampaignMetadataEditorState {
                                     {
                                         self.buffer.starting_gold = gold.max(0) as u32;
                                         self.has_unsaved_changes = true;
-                                        *unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
                                     }
                                     ui.end_row();
 
@@ -1213,7 +1201,7 @@ impl CampaignMetadataEditorState {
                                         self.buffer.starting_food =
                                             (food.max(FOOD_MIN as i64)) as u32;
                                         self.has_unsaved_changes = true;
-                                        *unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
                                     }
                                     ui.end_row();
 
@@ -1258,7 +1246,7 @@ impl CampaignMetadataEditorState {
                                                             )
                                                             .clicked()
                                                         {
-                                                            self.set_starting_innkeeper(npc.id.clone(), unsaved_changes);
+                                                            self.set_starting_innkeeper(npc.id.clone(), ctx.unsaved_changes);
                                                         }
                                                     }
                                                 });
@@ -1276,7 +1264,7 @@ impl CampaignMetadataEditorState {
                                         {
                                             // Trim and store the new innkeeper ID
                                             let new_id = self.buffer.starting_innkeeper.trim().to_string();
-                                            self.set_starting_innkeeper(new_id, unsaved_changes);
+                                            self.set_starting_innkeeper(new_id, ctx.unsaved_changes);
                                         }
                                     });
                                     ui.end_row();
@@ -1296,7 +1284,7 @@ impl CampaignMetadataEditorState {
                                                 {
                                                     self.buffer.difficulty = diff;
                                                     self.has_unsaved_changes = true;
-                                                    *unsaved_changes = true;
+                                                    *ctx.unsaved_changes = true;
                                                 }
                                             }
                                         });
@@ -1305,7 +1293,7 @@ impl CampaignMetadataEditorState {
                                     ui.label("Permadeath:");
                                     if ui.checkbox(&mut self.buffer.permadeath, "").changed() {
                                         self.has_unsaved_changes = true;
-                                        *unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
                                     }
                                     ui.end_row();
 
@@ -1315,7 +1303,7 @@ impl CampaignMetadataEditorState {
                                         .changed()
                                     {
                                         self.has_unsaved_changes = true;
-                                        *unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
                                     }
                                     ui.end_row();
 
@@ -1327,7 +1315,7 @@ impl CampaignMetadataEditorState {
                                     {
                                         self.buffer.starting_level = (start_level.max(1)) as u8;
                                         self.has_unsaved_changes = true;
-                                        *unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
                                     }
                                     ui.end_row();
 
@@ -1339,7 +1327,7 @@ impl CampaignMetadataEditorState {
                                     {
                                         self.buffer.max_level = (max_level.max(1)) as u8;
                                         self.has_unsaved_changes = true;
-                                        *unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
                                     }
                                     ui.end_row();
 
@@ -1354,7 +1342,7 @@ impl CampaignMetadataEditorState {
                                     {
                                         self.buffer.max_party_size = max_party.max(1) as usize;
                                         self.has_unsaved_changes = true;
-                                        *unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
                                     }
                                     ui.end_row();
 
@@ -1370,7 +1358,7 @@ impl CampaignMetadataEditorState {
                                         self.buffer.max_roster_size =
                                             roster.max(self.buffer.max_party_size as i32) as usize;
                                         self.has_unsaved_changes = true;
-                                        *unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
                                     }
                                     ui.end_row();
                                 });
@@ -1461,15 +1449,15 @@ impl CampaignMetadataEditorState {
                             if let Some(path) = campaign_path.as_ref() {
                                 match self.save_to_file(path.as_path()) {
                                     Ok(_) => {
-                                        *unsaved_changes = false;
-                                        *status_message =
+                                        *ctx.unsaved_changes = false;
+                                        *ctx.status_message =
                                             format!("Saved campaign to {}", path.display());
                                         *metadata = self.metadata.clone();
                                         // Request a validation run after a successful save so the
                                         // Validation panel shows updated results.
                                         self.validate_requested = true;
                                     }
-                                    Err(e) => *status_message = format!("Save failed: {}", e),
+                                    Err(e) => *ctx.status_message = format!("Save failed: {}", e),
                                 }
                             } else if let Some(path) = rfd::FileDialog::new()
                                 .set_file_name("campaign.ron")
@@ -1479,15 +1467,15 @@ impl CampaignMetadataEditorState {
                                 match self.save_to_file(path.as_path()) {
                                     Ok(_) => {
                                         *campaign_path = Some(path.clone());
-                                        *unsaved_changes = false;
-                                        *status_message =
+                                        *ctx.unsaved_changes = false;
+                                        *ctx.status_message =
                                             format!("Saved campaign to {}", path.display());
                                         *metadata = self.metadata.clone();
                                         // Request a validation run after a successful Save As
                                         // so the Validation panel shows updated results.
                                         self.validate_requested = true;
                                     }
-                                    Err(e) => *status_message = format!("Save failed: {}", e),
+                                    Err(e) => *ctx.status_message = format!("Save failed: {}", e),
                                 }
                             }
                         }
@@ -1504,7 +1492,7 @@ impl CampaignMetadataEditorState {
                             // this flag is set.
                             self.validate_requested = true;
 
-                            *status_message =
+                            *ctx.status_message =
                                 "Validation requested from Campaign metadata editor".to_string();
                         }
                     });

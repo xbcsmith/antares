@@ -16,6 +16,7 @@
 //! - Prerequisite chain management
 //! - Quest validation and preview
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     handle_reload, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
     StandardListItemConfig, ToolbarAction, TwoColumnLayout,
@@ -26,13 +27,35 @@ use antares::domain::quest::{Quest, QuestId, QuestObjective, QuestReward, QuestS
 use antares::domain::types::{ItemId, MapId, MonsterId, Position};
 use antares::domain::world::Map;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 /// Context containing reference data for quest editor
 pub struct QuestEditorContext<'a> {
     pub items: &'a [Item],
     pub monsters: &'a [MonsterDefinition],
     pub maps: &'a [Map],
+}
+
+/// Bundled reference data passed to [`QuestEditorState::show_quest_objectives_editor`].
+///
+/// Groups the three read-only reference slices so that the objectives editor stays
+/// within the Clippy `too_many_arguments` threshold (≤ 7 non-`self` parameters).
+pub(crate) struct QuestObjectivesRefs<'a> {
+    pub items: &'a [Item],
+    pub monsters: &'a [MonsterDefinition],
+    pub maps: &'a [Map],
+}
+
+/// Context bundle for [`QuestEditorState::show_quest_objectives_editor`].
+///
+/// Groups three parameters so the function stays within the Clippy
+/// `too_many_arguments` limit.
+pub(crate) struct ObjectiveEditorContext<'a> {
+    /// Index of the parent quest in the quests vector.
+    pub quest_idx: usize,
+    /// Index of the stage within the quest.
+    pub stage_idx: usize,
+    /// Set to `true` whenever an objective is added, edited, or removed.
+    pub unsaved_changes: &'a mut bool,
 }
 
 /// Editor state for quest designer
@@ -1020,11 +1043,8 @@ impl QuestEditorState {
     /// * `items` - Available items used for objective/reward selection
     /// * `monsters` - Monster definitions used for objective selection
     /// * `maps` - Map definitions and NPC lists used for location/objective selection
-    /// * `campaign_dir` - Optional campaign directory path used for file saving/loading
-    /// * `quests_file` - Filename within the campaign directory for quests
-    /// * `unsaved_changes` - Mutable flag indicating application-level unsaved changes
-    /// * `status_message` - Mutable status string to show operation results to the user
-    /// * `file_load_merge_mode` - Toggle controlling whether imported quests replace or merge
+    /// * `ctx` - Shared editor context providing campaign directory, data file,
+    ///   unsaved-changes flag, status message, and file-load merge mode
     ///
     /// # Examples
     ///
@@ -1036,7 +1056,6 @@ impl QuestEditorState {
     /// editor.start_new_quest(&mut quests, "1".to_string());
     /// assert_eq!(editor.mode, QuestEditorMode::Creating);
     /// ```
-    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -1044,11 +1063,7 @@ impl QuestEditorState {
         items: &[Item],
         monsters: &[MonsterDefinition],
         maps: &[Map],
-        campaign_dir: Option<&PathBuf>,
-        quests_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        file_load_merge_mode: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
         ui.heading("📜 Quests Editor");
         ui.add_space(5.0);
@@ -1056,7 +1071,7 @@ impl QuestEditorState {
         // Use shared EditorToolbar component
         let toolbar_action = EditorToolbar::new("Quests")
             .with_search(&mut self.search_filter)
-            .with_merge_mode(file_load_merge_mode)
+            .with_merge_mode(ctx.file_load_merge_mode)
             .with_total_count(quests.len())
             .with_id_salt("quests_toolbar")
             .show(ui);
@@ -1066,11 +1081,11 @@ impl QuestEditorState {
             ToolbarAction::New => {
                 let next_id = quests.iter().map(|q| q.id).max().unwrap_or(0) + 1;
                 self.start_new_quest(quests, next_id.to_string());
-                *unsaved_changes = true;
+                *ctx.unsaved_changes = true;
             }
             ToolbarAction::Save => {
-                if let Some(dir) = campaign_dir {
-                    let quests_path = dir.join(quests_file);
+                if let Some(dir) = ctx.campaign_dir {
+                    let quests_path = dir.join(ctx.data_file);
                     if let Some(parent) = quests_path.parent() {
                         if let Err(e) = std::fs::create_dir_all(parent) {
                             // Non-critical: if the directory cannot be created here, the
@@ -1082,15 +1097,15 @@ impl QuestEditorState {
                     match ron::ser::to_string_pretty(&quests, Default::default()) {
                         Ok(contents) => match std::fs::write(&quests_path, contents) {
                             Ok(_) => {
-                                *status_message =
+                                *ctx.status_message =
                                     format!("Saved quests to: {}", quests_path.display());
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to save quests: {}", e);
+                                *ctx.status_message = format!("Failed to save quests: {}", e);
                             }
                         },
                         Err(e) => {
-                            *status_message = format!("Failed to serialize quests: {}", e);
+                            *ctx.status_message = format!("Failed to serialize quests: {}", e);
                         }
                     }
                 }
@@ -1107,7 +1122,7 @@ impl QuestEditorState {
 
                     match load_result {
                         Ok(loaded_quests) => {
-                            if *file_load_merge_mode {
+                            if *ctx.file_load_merge_mode {
                                 for quest in loaded_quests {
                                     if let Some(existing) =
                                         quests.iter_mut().find(|q| q.id == quest.id)
@@ -1120,18 +1135,18 @@ impl QuestEditorState {
                             } else {
                                 *quests = loaded_quests;
                             }
-                            *unsaved_changes = true;
-                            *status_message = format!("Loaded quests from: {}", path.display());
+                            *ctx.unsaved_changes = true;
+                            *ctx.status_message = format!("Loaded quests from: {}", path.display());
                         }
                         Err(e) => {
-                            *status_message = format!("Failed to load quests: {}", e);
+                            *ctx.status_message = format!("Failed to load quests: {}", e);
                         }
                     }
                 }
             }
             ToolbarAction::Import => {
                 // Import not yet implemented for quests
-                *status_message = "Import not yet implemented for quests".to_string();
+                *ctx.status_message = "Import not yet implemented for quests".to_string();
             }
             ToolbarAction::Export => {
                 if let Some(path) = rfd::FileDialog::new()
@@ -1142,20 +1157,21 @@ impl QuestEditorState {
                     match ron::ser::to_string_pretty(&quests, Default::default()) {
                         Ok(contents) => match std::fs::write(&path, contents) {
                             Ok(_) => {
-                                *status_message = format!("Saved quests to: {}", path.display());
+                                *ctx.status_message =
+                                    format!("Saved quests to: {}", path.display());
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to save quests: {}", e);
+                                *ctx.status_message = format!("Failed to save quests: {}", e);
                             }
                         },
                         Err(e) => {
-                            *status_message = format!("Failed to serialize quests: {}", e);
+                            *ctx.status_message = format!("Failed to serialize quests: {}", e);
                         }
                     }
                 }
             }
             ToolbarAction::Reload => {
-                handle_reload(quests, campaign_dir, quests_file, status_message);
+                handle_reload(quests, ctx.campaign_dir, ctx.data_file, ctx.status_message);
             }
             ToolbarAction::None => {}
         }
@@ -1289,7 +1305,7 @@ impl QuestEditorState {
                         ItemAction::Delete => {
                             self.delete_quest(quests, action_idx);
                             self.selected_quest = None;
-                            *unsaved_changes = true;
+                            *ctx.unsaved_changes = true;
                         }
                         ItemAction::Duplicate => {
                             if action_idx < quests.len() {
@@ -1298,8 +1314,8 @@ impl QuestEditorState {
                                 new_quest.id = next_id;
                                 new_quest.name = format!("{} (Copy)", new_quest.name);
                                 quests.push(new_quest);
-                                *unsaved_changes = true;
-                                *status_message = "Quest duplicated".to_string();
+                                *ctx.unsaved_changes = true;
+                                *ctx.status_message = "Quest duplicated".to_string();
                             }
                         }
                         ItemAction::Export => {
@@ -1309,9 +1325,9 @@ impl QuestEditorState {
                                     ron::ser::PrettyConfig::default(),
                                 ) {
                                     ui.ctx().copy_text(ron_str);
-                                    *status_message = "Quest copied to clipboard".to_string();
+                                    *ctx.status_message = "Quest copied to clipboard".to_string();
                                 } else {
-                                    *status_message = "Failed to export quest".to_string();
+                                    *ctx.status_message = "Failed to export quest".to_string();
                                 }
                             }
                         }
@@ -1321,12 +1337,18 @@ impl QuestEditorState {
             }
             QuestEditorMode::Creating | QuestEditorMode::Editing => {
                 // Full-screen quest form editor
-                let ctx = QuestEditorContext {
+                let quest_ctx = QuestEditorContext {
                     items,
                     monsters,
                     maps,
                 };
-                self.show_quest_form(ui, quests, &ctx, unsaved_changes, status_message);
+                self.show_quest_form(
+                    ui,
+                    quests,
+                    &quest_ctx,
+                    ctx.unsaved_changes,
+                    ctx.status_message,
+                );
             }
         }
     }
@@ -1829,16 +1851,22 @@ impl QuestEditorState {
                                     ui.separator();
 
                                     // Show objectives with edit/delete controls
-                                    self.show_quest_objectives_editor(
-                                        ui,
-                                        selected_idx,
-                                        stage_idx,
-                                        &stage.objectives,
-                                        quests,
+                                    let refs = QuestObjectivesRefs {
                                         items,
                                         monsters,
                                         maps,
+                                    };
+                                    let mut octx = ObjectiveEditorContext {
+                                        quest_idx: selected_idx,
+                                        stage_idx,
                                         unsaved_changes,
+                                    };
+                                    self.show_quest_objectives_editor(
+                                        ui,
+                                        &stage.objectives,
+                                        quests,
+                                        &refs,
+                                        &mut octx,
                                     );
                                 });
 
@@ -1942,19 +1970,17 @@ impl QuestEditorState {
     }
 
     /// Show quest objectives editor
-    #[allow(clippy::too_many_arguments)]
     fn show_quest_objectives_editor(
         &mut self,
         ui: &mut egui::Ui,
-        quest_idx: usize,
-        stage_idx: usize,
         objectives: &[QuestObjective],
         quests: &mut [Quest],
-        items: &[Item],
-        monsters: &[MonsterDefinition],
-        maps: &[Map],
-        unsaved_changes: &mut bool,
+        refs: &QuestObjectivesRefs<'_>,
+        octx: &mut ObjectiveEditorContext<'_>,
     ) {
+        let quest_idx = octx.quest_idx;
+        let stage_idx = octx.stage_idx;
+        let unsaved_changes = &mut *octx.unsaved_changes;
         ui.label(format!("Objectives ({})", objectives.len()));
         ui.horizontal(|ui| {
             if ui
@@ -2098,7 +2124,7 @@ impl QuestEditorState {
                                 let mut monster_name = if let Ok(monster_id) =
                                     self.objective_buffer.monster_id.parse::<u8>()
                                 {
-                                    monsters
+                                    refs.monsters
                                         .iter()
                                         .find(|m| m.id == monster_id)
                                         .map(|m| m.name.clone())
@@ -2112,10 +2138,10 @@ impl QuestEditorState {
                                     &format!("quest_objective_monster_{}", obj_idx),
                                     "Monster Name:",
                                     &mut monster_name,
-                                    monsters,
+                                    refs.monsters,
                                 ) {
                                     if let Some(monster) =
-                                        monsters.iter().find(|m| m.name == monster_name)
+                                        refs.monsters.iter().find(|m| m.name == monster_name)
                                     {
                                         self.objective_buffer.monster_id = monster.id.to_string();
                                         *unsaved_changes = true;
@@ -2142,7 +2168,7 @@ impl QuestEditorState {
                                     &format!("quest_objective_item_{}", obj_idx),
                                     "Item:",
                                     &mut item_id_num,
-                                    items,
+                                    refs.items,
                                 ) {
                                     self.objective_buffer.item_id = item_id_num.to_string();
                                     *unsaved_changes = true;
@@ -2162,7 +2188,7 @@ impl QuestEditorState {
                                     &format!("quest_objective_map_{}", obj_idx),
                                     "Map:",
                                     &mut self.objective_buffer.map_id,
-                                    maps,
+                                    refs.maps,
                                 ) {
                                     *unsaved_changes = true;
                                 }
@@ -2189,7 +2215,7 @@ impl QuestEditorState {
                                     &format!("quest_objective_npc_map_{}", obj_idx),
                                     "Map:",
                                     &mut self.objective_buffer.map_id,
-                                    maps,
+                                    refs.maps,
                                 ) {
                                     *unsaved_changes = true;
                                 }
@@ -2202,7 +2228,7 @@ impl QuestEditorState {
                                     &format!("quest_objective_npc_{}", obj_idx),
                                     "NPC:",
                                     &mut self.objective_buffer.npc_id,
-                                    maps,
+                                    refs.maps,
                                 ) {
                                     *unsaved_changes = true;
                                 }
@@ -2219,7 +2245,7 @@ impl QuestEditorState {
                                     &format!("quest_objective_deliver_item_{}", obj_idx),
                                     "Item:",
                                     &mut item_id_num,
-                                    items,
+                                    refs.items,
                                 ) {
                                     self.objective_buffer.item_id = item_id_num.to_string();
                                     *unsaved_changes = true;
@@ -2233,7 +2259,7 @@ impl QuestEditorState {
                                     &format!("quest_objective_deliver_npc_{}", obj_idx),
                                     "Deliver to NPC:",
                                     &mut self.objective_buffer.npc_id,
-                                    maps,
+                                    refs.maps,
                                 ) {
                                     *unsaved_changes = true;
                                 }
@@ -2252,7 +2278,7 @@ impl QuestEditorState {
                                     &format!("quest_objective_escort_map_{}", obj_idx),
                                     "Map:",
                                     &mut self.objective_buffer.map_id,
-                                    maps,
+                                    refs.maps,
                                 ) {
                                     *unsaved_changes = true;
                                 }
@@ -2265,7 +2291,7 @@ impl QuestEditorState {
                                     &format!("quest_objective_escort_npc_{}", obj_idx),
                                     "NPC:",
                                     &mut self.objective_buffer.npc_id,
-                                    maps,
+                                    refs.maps,
                                 ) {
                                     *unsaved_changes = true;
                                 }

@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     dispatch_list_action, handle_file_load, handle_file_save, handle_reload,
-    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
-    ToolbarAction, TwoColumnLayout, DEFAULT_PANEL_MIN_HEIGHT,
+    show_standard_list_item, DispatchActionState, EditorToolbar, ItemAction, MetadataBadge,
+    StandardListItemConfig, ToolbarAction, TwoColumnLayout, DEFAULT_PANEL_MIN_HEIGHT,
 };
 use antares::domain::character::{ATTRIBUTE_MODIFIER_MAX, ATTRIBUTE_MODIFIER_MIN};
 use antares::domain::conditions::{
@@ -308,17 +309,12 @@ impl ConditionsEditorState {
     ///
     /// This follows the toolbar, import/load/save patterns used across other
     /// editors (items, monsters, spells).
-    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         conditions: &mut Vec<ConditionDefinition>,
         spells: &mut [Spell],
-        campaign_dir: Option<&PathBuf>,
-        conditions_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        _file_load_merge_mode: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
         ui.heading("⚕️ Conditions Editor");
         ui.add_space(5.0);
@@ -341,10 +337,10 @@ impl ConditionsEditorState {
             ToolbarAction::Save => {
                 self.save_conditions(
                     conditions,
-                    campaign_dir,
-                    conditions_file,
-                    unsaved_changes,
-                    status_message,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    ctx.unsaved_changes,
+                    ctx.status_message,
                 );
             }
             ToolbarAction::Load => {
@@ -352,8 +348,8 @@ impl ConditionsEditorState {
                     conditions,
                     self.file_load_merge_mode,
                     |c: &ConditionDefinition| c.id.clone(),
-                    status_message,
-                    unsaved_changes,
+                    ctx.status_message,
+                    ctx.unsaved_changes,
                 );
             }
             ToolbarAction::Import => {
@@ -361,10 +357,15 @@ impl ConditionsEditorState {
                 self.import_export_buffer.clear();
             }
             ToolbarAction::Export => {
-                handle_file_save(conditions, "conditions.ron", status_message);
+                handle_file_save(conditions, "conditions.ron", ctx.status_message);
             }
             ToolbarAction::Reload => {
-                handle_reload(conditions, campaign_dir, conditions_file, status_message);
+                handle_reload(
+                    conditions,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    ctx.status_message,
+                );
             }
             ToolbarAction::None => {}
         }
@@ -437,62 +438,29 @@ impl ConditionsEditorState {
 
         // Show appropriate view based on mode
         match self.mode {
-            ConditionsEditorMode::List => self.show_list(
-                ui,
-                conditions,
-                spells,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                conditions_file,
-            ),
-            ConditionsEditorMode::Add | ConditionsEditorMode::Edit => self.show_form(
-                ui,
-                conditions,
-                spells,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                conditions_file,
-            ),
+            ConditionsEditorMode::List => self.show_list(ui, conditions, spells, ctx),
+            ConditionsEditorMode::Add | ConditionsEditorMode::Edit => {
+                self.show_form(ui, conditions, spells, ctx)
+            }
         }
 
         // Import dialog window handling
         if self.show_import_dialog {
-            self.show_import_dialog_window(
-                ui.ctx(),
-                conditions,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                conditions_file,
-            );
+            self.show_import_dialog_window(ui.ctx(), conditions, ctx);
         }
 
         // Delete confirmation dialog
         if self.delete_confirmation_open {
-            self.show_delete_confirmation(
-                ui.ctx(),
-                conditions,
-                spells,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                conditions_file,
-            );
+            self.show_delete_confirmation(ui.ctx(), conditions, spells, ctx);
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn show_list(
         &mut self,
         ui: &mut egui::Ui,
         conditions: &mut Vec<ConditionDefinition>,
         spells: &mut [Spell],
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        conditions_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let search_lower = self.search_filter.to_lowercase();
 
@@ -674,6 +642,12 @@ impl ConditionsEditorState {
                     if action_idx < conditions.len() {
                         let mut dummy_show = false;
                         let mut dummy_buf = String::new();
+                        let mut dispatch_state = DispatchActionState {
+                            entity_label: "condition",
+                            import_export_buffer: &mut dummy_buf,
+                            show_import_dialog: &mut dummy_show,
+                            status_message: ctx.status_message,
+                        };
                         if dispatch_list_action(
                             ItemAction::Duplicate,
                             conditions,
@@ -687,31 +661,31 @@ impl ConditionsEditorState {
                                 }
                                 entry.name = format!("{} (Copy)", entry.name);
                             },
-                            "condition",
-                            &mut dummy_buf,
-                            &mut dummy_show,
-                            status_message,
+                            &mut dispatch_state,
                         ) {
                             self.save_conditions(
                                 conditions,
-                                campaign_dir,
-                                conditions_file,
-                                unsaved_changes,
-                                status_message,
+                                ctx.campaign_dir,
+                                ctx.data_file,
+                                ctx.unsaved_changes,
+                                ctx.status_message,
                             );
                         }
                     }
                 }
                 ItemAction::Export => {
+                    let mut dispatch_state = DispatchActionState {
+                        entity_label: "condition",
+                        import_export_buffer: &mut self.import_export_buffer,
+                        show_import_dialog: &mut self.show_import_dialog,
+                        status_message: ctx.status_message,
+                    };
                     dispatch_list_action(
                         ItemAction::Export,
                         conditions,
                         &mut self.selected_condition_idx,
                         |_, _| {},
-                        "condition",
-                        &mut self.import_export_buffer,
-                        &mut self.show_import_dialog,
-                        status_message,
+                        &mut dispatch_state,
                     );
                 }
                 ItemAction::None => {}
@@ -783,16 +757,12 @@ impl ConditionsEditorState {
             });
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn show_form(
         &mut self,
         ui: &mut egui::Ui,
         conditions: &mut Vec<ConditionDefinition>,
         spells: &mut [Spell],
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        conditions_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let is_edit = self.mode == ConditionsEditorMode::Edit;
         let title = if is_edit {
@@ -828,7 +798,8 @@ impl ConditionsEditorState {
                                 .clicked()
                             {
                                 ui.ctx().copy_text(s.clone());
-                                *status_message = format!("Copied spell name to clipboard: {}", s);
+                                *ctx.status_message =
+                                    format!("Copied spell name to clipboard: {}", s);
                             }
                             if ui
                                 .small_button("→")
@@ -1333,8 +1304,8 @@ impl ConditionsEditorState {
                     new_cond,
                 ) {
                     Ok(()) => {
-                        *unsaved_changes = true;
-                        *status_message = if self.editing_original_id.is_some() {
+                        *ctx.unsaved_changes = true;
+                        *ctx.status_message = if self.editing_original_id.is_some() {
                             "Condition updated".to_string()
                         } else {
                             "Condition added".to_string()
@@ -1347,14 +1318,14 @@ impl ConditionsEditorState {
                         self.mode = ConditionsEditorMode::List;
                         self.save_conditions(
                             conditions,
-                            campaign_dir,
-                            conditions_file,
-                            unsaved_changes,
-                            status_message,
+                            ctx.campaign_dir,
+                            ctx.data_file,
+                            ctx.unsaved_changes,
+                            ctx.status_message,
                         );
                     }
                     Err(e) => {
-                        *status_message = format!("Failed to save condition: {}", e);
+                        *ctx.status_message = format!("Failed to save condition: {}", e);
                     }
                 }
             }
@@ -1369,19 +1340,16 @@ impl ConditionsEditorState {
 
     fn show_import_dialog_window(
         &mut self,
-        ctx: &egui::Context,
+        egui_ctx: &egui::Context,
         conditions: &mut Vec<ConditionDefinition>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        conditions_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let mut open = self.show_import_dialog;
         egui::Window::new("Import/Export Conditions")
             .open(&mut open)
             .resizable(true)
             .default_width(600.0)
-            .show(ctx, |ui| {
+            .show(egui_ctx, |ui| {
                 ui.label("Paste RON data below to import, or copy from here to export:");
                 ui.add(
                     egui::TextEdit::multiline(&mut self.import_export_buffer)
@@ -1393,7 +1361,7 @@ impl ConditionsEditorState {
                 ui.horizontal(|ui| {
                     if ui.button("📋 Copy to Clipboard").clicked() {
                         ui.ctx().copy_text(self.import_export_buffer.clone());
-                        *status_message = "Copied to clipboard".to_string();
+                        *ctx.status_message = "Copied to clipboard".to_string();
                     }
 
                     if ui.button("📥 Import").clicked() {
@@ -1413,14 +1381,15 @@ impl ConditionsEditorState {
                                 } else {
                                     *conditions = imported;
                                 }
-                                *unsaved_changes = true;
-                                *status_message = "Conditions imported successfully".to_string();
+                                *ctx.unsaved_changes = true;
+                                *ctx.status_message =
+                                    "Conditions imported successfully".to_string();
                                 self.save_conditions(
                                     conditions,
-                                    campaign_dir,
-                                    conditions_file,
-                                    unsaved_changes,
-                                    status_message,
+                                    ctx.campaign_dir,
+                                    ctx.data_file,
+                                    ctx.unsaved_changes,
+                                    ctx.status_message,
                                 );
                                 self.show_import_dialog = false;
                             }
@@ -1437,20 +1406,20 @@ impl ConditionsEditorState {
                                         } else {
                                             conditions.push(cond);
                                         }
-                                        *unsaved_changes = true;
-                                        *status_message =
+                                        *ctx.unsaved_changes = true;
+                                        *ctx.status_message =
                                             "Single condition imported successfully".to_string();
                                         self.save_conditions(
                                             conditions,
-                                            campaign_dir,
-                                            conditions_file,
-                                            unsaved_changes,
-                                            status_message,
+                                            ctx.campaign_dir,
+                                            ctx.data_file,
+                                            ctx.unsaved_changes,
+                                            ctx.status_message,
                                         );
                                         self.show_import_dialog = false;
                                     }
                                     Err(_) => {
-                                        *status_message = format!("Failed to parse RON: {}", e);
+                                        *ctx.status_message = format!("Failed to parse RON: {}", e);
                                     }
                                 }
                             }
@@ -1465,22 +1434,18 @@ impl ConditionsEditorState {
         self.show_import_dialog = open;
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn show_delete_confirmation(
         &mut self,
-        ctx: &egui::Context,
+        egui_ctx: &egui::Context,
         conditions: &mut Vec<ConditionDefinition>,
         spells: &mut [Spell],
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        conditions_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let mut open = self.delete_confirmation_open;
         egui::Window::new("Delete Condition")
             .open(&mut open)
             .resizable(false)
-            .show(ctx, |ui| {
+            .show(egui_ctx, |ui| {
                 ui.label("Are you sure you want to delete this condition?");
                 if let Some(del_id) = &self.selected_for_delete {
                     let used_spells = spells_referencing_condition(spells, del_id);
@@ -1501,7 +1466,7 @@ impl ConditionsEditorState {
                                     .clicked()
                                 {
                                     ui.ctx().copy_text(s.clone());
-                                    *status_message =
+                                    *ctx.status_message =
                                         format!("Copied spell name to clipboard: {}", s);
                                 }
                                 if ui
@@ -1537,15 +1502,15 @@ impl ConditionsEditorState {
                                     "Condition deleted".to_string()
                                 };
 
-                                *unsaved_changes = true;
-                                *status_message = message;
+                                *ctx.unsaved_changes = true;
+                                *ctx.status_message = message;
                                 self.selected_condition_idx = None;
                                 self.save_conditions(
                                     conditions,
-                                    campaign_dir,
-                                    conditions_file,
-                                    unsaved_changes,
-                                    status_message,
+                                    ctx.campaign_dir,
+                                    ctx.data_file,
+                                    ctx.unsaved_changes,
+                                    ctx.status_message,
                                 );
                             }
                         }
@@ -2065,16 +2030,14 @@ pub fn render_conditions_editor(
     let mut status_message = String::new();
     let mut file_load_merge_mode = false;
     let mut dummy_spells: Vec<Spell> = Vec::new();
-    state.show(
-        ui,
-        conditions,
-        &mut dummy_spells,
+    let mut ctx = EditorContext::new(
         None,
         "data/conditions.ron",
         &mut unsaved_changes,
         &mut status_message,
         &mut file_load_merge_mode,
     );
+    state.show(ui, conditions, &mut dummy_spells, &mut ctx);
 }
 
 #[cfg(test)]

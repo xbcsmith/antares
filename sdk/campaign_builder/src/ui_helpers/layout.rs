@@ -307,46 +307,68 @@ where
         .collect()
 }
 
+/// Configuration bundle for [`searchable_selector_single`] and [`searchable_selector_multi`].
+///
+/// Groups the three non-data parameters (`id_salt`, `label`, and `search_query`) into a
+/// single struct so that the selector functions stay under the Clippy
+/// `too_many_arguments` threshold.
+///
+/// # Examples
+///
+/// ```no_run
+/// use campaign_builder::ui_helpers::SearchableSelectorConfig;
+///
+/// let mut query = String::new();
+/// let mut cfg = SearchableSelectorConfig {
+///     id_salt: "my_selector",
+///     label: "Select item:",
+///     search_query: &mut query,
+/// };
+/// ```
+pub struct SearchableSelectorConfig<'a> {
+    /// Unique egui ID salt for the `ComboBox` widget.  Must be unique within the frame.
+    pub id_salt: &'a str,
+    /// User-visible label rendered to the left of the `ComboBox`.
+    pub label: &'a str,
+    /// Mutable search-query buffer persisted by the caller across frames.
+    pub search_query: &'a mut String,
+}
+
 /// Single-selection searchable selector UI helper.
 ///
 /// - `ui`: egui UI reference
-/// - `id_salt`: Unique id salt (used for ComboBox id)
-/// - `label`: Label text shown before the widget
+/// - `cfg`: [`SearchableSelectorConfig`] bundling id_salt, label, and search_query
 /// - `selected`: Mutable reference to current selection (`Option<ID>`)
 /// - `items`, `id_fn`, `label_fn` describe the available values and how to extract id/label
-/// - `search_query`: Mutable reference that stores the current query string (persisted by caller)
 ///
 /// Returns `true` if the selection changed.
 ///
 /// This helper wraps `egui::ComboBox` and provides an inline search text field inside the
 /// ComboBox dropdown to filter options.
-#[allow(clippy::too_many_arguments)]
 pub fn searchable_selector_single<T, ID, FId, FLabel>(
     ui: &mut egui::Ui,
-    id_salt: &str,
-    label: &str,
+    cfg: &mut SearchableSelectorConfig<'_>,
     selected: &mut Option<ID>,
     items: &[T],
     id_fn: FId,
     label_fn: FLabel,
-    search_query: &mut String,
 ) -> bool
 where
     ID: Clone + PartialEq + Display,
     FId: Fn(&T) -> ID,
     FLabel: Fn(&T) -> String,
 {
-    ui.label(label);
+    ui.label(cfg.label);
     let mut changed = false;
     let selected_text = selected
         .as_ref()
         .map_or("(None)".to_string(), |id| id.to_string());
-    egui::ComboBox::from_id_salt(id_salt)
+    egui::ComboBox::from_id_salt(cfg.id_salt)
         .selected_text(selected_text)
         .show_ui(ui, |ui| {
             // Search input at the top
-            ui.text_edit_singleline(search_query);
-            let q = search_query.to_lowercase();
+            ui.text_edit_singleline(cfg.search_query);
+            let q = cfg.search_query.to_lowercase();
 
             // Filtered list
             for item in items.iter() {
@@ -369,29 +391,26 @@ where
 
 /// Multi-selection searchable selector UI helper.
 ///
-/// - `label`: user-visible label
+/// - `ui`: egui UI reference
+/// - `cfg`: [`SearchableSelectorConfig`] bundling id_salt, label, and search_query
 /// - `selection`: mutable vector of selected IDs (caller manages order/persistence)
 /// - `items`, `id_fn`, `label_fn` describe the available values
-/// - `search_query` is used to store the user's search input and is persisted by the caller
 ///
 /// Returns `true` if the selection changed (items added or removed).
-#[allow(clippy::too_many_arguments)]
 pub fn searchable_selector_multi<T, ID, FId, FLabel>(
     ui: &mut egui::Ui,
-    _id_salt: &str,
-    label: &str,
+    cfg: &mut SearchableSelectorConfig<'_>,
     selection: &mut Vec<ID>,
     items: &[T],
     id_fn: FId,
     label_fn: FLabel,
-    search_query: &mut String,
 ) -> bool
 where
     ID: Clone + PartialEq + Display,
     FId: Fn(&T) -> ID,
     FLabel: Fn(&T) -> String,
 {
-    ui.label(label);
+    ui.label(cfg.label);
     let mut changed = false;
 
     // Render chips for selected items with a small remove button.
@@ -419,9 +438,9 @@ where
 
     // Add control: search box and Add button
     ui.horizontal(|ui| {
-        ui.text_edit_singleline(search_query);
+        ui.text_edit_singleline(cfg.search_query);
         if ui.button("Add").clicked() {
-            let q = search_query.to_lowercase();
+            let q = cfg.search_query.to_lowercase();
             // Try to find the first match by label text
             if let Some(item) = items
                 .iter()
@@ -432,13 +451,13 @@ where
                     selection.push(id);
                     changed = true;
                 }
-                *search_query = String::new();
+                *cfg.search_query = String::new();
             }
         }
     });
 
     // Suggestion buttons (compact)
-    let q = search_query.to_lowercase();
+    let q = cfg.search_query.to_lowercase();
     ui.horizontal_wrapped(|ui| {
         for item in items {
             let label_text = label_fn(item);

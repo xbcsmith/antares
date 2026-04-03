@@ -46,10 +46,11 @@
 //! preserve SDK-managed merchant branches inside otherwise custom dialogue
 //! trees.
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     autocomplete_quest_selector, dispatch_list_action, show_standard_list_item, ActionButtons,
-    EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
-    TwoColumnLayout,
+    DispatchActionState, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::dialogue::{
     DialogueAction, DialogueChoice, DialogueCondition, DialogueId, DialogueNode, DialogueTree,
@@ -61,7 +62,6 @@ use antares::domain::types::ItemId;
 use antares::domain::world::npc::NpcDefinition;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 /// Errors produced by dialogue editor operations.
 #[derive(Debug, thiserror::Error)]
@@ -1422,20 +1422,14 @@ impl DialogueEditorState {
     /// * `campaign_dir` - Optional campaign directory path
     /// * `dialogue_file` - Filename for dialogue data
     /// * `unsaved_changes` - Mutable flag for tracking unsaved changes
-    /// * `status_message` - Mutable string for status messages
-    /// * `file_load_merge_mode` - Whether to merge or replace when loading files
-    #[allow(clippy::too_many_arguments)]
+    /// * `ctx` - Shared editor context (campaign dir, data file, unsaved changes, status, merge mode)
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         dialogues: &mut Vec<DialogueTree>,
         quests: &[Quest],
         items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        dialogue_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        file_load_merge_mode: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
         // Only sync dialogues if they differ (prevents losing edits on every frame)
         if self.dialogues.len() != dialogues.len()
@@ -1456,7 +1450,7 @@ impl DialogueEditorState {
         // Use shared EditorToolbar component
         let toolbar_action = EditorToolbar::new("Dialogues")
             .with_search(&mut self.search_filter)
-            .with_merge_mode(file_load_merge_mode)
+            .with_merge_mode(ctx.file_load_merge_mode)
             .with_total_count(self.dialogues.len())
             .with_id_salt("dialogues_toolbar")
             .show(ui);
@@ -1468,15 +1462,16 @@ impl DialogueEditorState {
             }
             ToolbarAction::Save => {
                 // Save to campaign directory
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(dialogue_file);
+                if let Some(dir) = ctx.campaign_dir {
+                    let path = dir.join(ctx.data_file);
                     match self.save_to_file(&path) {
                         Ok(()) => {
                             *dialogues = self.dialogues.clone();
-                            *status_message = format!("Saved {} dialogues", self.dialogues.len());
+                            *ctx.status_message =
+                                format!("Saved {} dialogues", self.dialogues.len());
                         }
                         Err(e) => {
-                            *status_message = format!("Failed to save dialogues: {}", e);
+                            *ctx.status_message = format!("Failed to save dialogues: {}", e);
                         }
                     }
                 }
@@ -1489,10 +1484,11 @@ impl DialogueEditorState {
                     match self.load_from_file(&path) {
                         Ok(()) => {
                             *dialogues = self.dialogues.clone();
-                            *status_message = format!("Loaded {} dialogues", self.dialogues.len());
+                            *ctx.status_message =
+                                format!("Loaded {} dialogues", self.dialogues.len());
                         }
                         Err(e) => {
-                            *status_message = format!("Failed to load dialogues: {}", e);
+                            *ctx.status_message = format!("Failed to load dialogues: {}", e);
                         }
                     }
                 }
@@ -1505,29 +1501,29 @@ impl DialogueEditorState {
                 match ron::ser::to_string_pretty(&self.dialogues, Default::default()) {
                     Ok(ron_str) => {
                         ui.ctx().copy_text(ron_str.clone());
-                        *status_message = "Dialogues exported to clipboard".to_string();
+                        *ctx.status_message = "Dialogues exported to clipboard".to_string();
                     }
                     Err(e) => {
-                        *status_message = format!("Export failed: {:?}", e);
+                        *ctx.status_message = format!("Export failed: {:?}", e);
                     }
                 }
             }
             ToolbarAction::Reload => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(dialogue_file);
+                if let Some(dir) = ctx.campaign_dir {
+                    let path = dir.join(ctx.data_file);
                     if path.exists() {
                         match self.load_from_file(&path) {
                             Ok(()) => {
                                 *dialogues = self.dialogues.clone();
-                                *status_message =
+                                *ctx.status_message =
                                     format!("Reloaded {} dialogues", self.dialogues.len());
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to reload dialogues: {}", e);
+                                *ctx.status_message = format!("Failed to reload dialogues: {}", e);
                             }
                         }
                     } else {
-                        *status_message = "Dialogues file does not exist".to_string();
+                        *ctx.status_message = "Dialogues file does not exist".to_string();
                     }
                 }
             }
@@ -1542,15 +1538,15 @@ impl DialogueEditorState {
         ui.separator();
 
         // Import dialog
-        self.show_import_dialog_window(ui, dialogues, status_message);
+        self.show_import_dialog_window(ui, dialogues, ctx.status_message);
 
         // Main content area
         match self.mode {
             DialogueEditorMode::List => {
-                self.show_dialogue_list(ui, dialogues, unsaved_changes, status_message);
+                self.show_dialogue_list(ui, dialogues, ctx);
             }
             DialogueEditorMode::Creating | DialogueEditorMode::Editing => {
-                self.show_dialogue_form(ui, dialogues, status_message);
+                self.show_dialogue_form(ui, dialogues, ctx.status_message);
             }
         }
     }
@@ -1627,8 +1623,7 @@ impl DialogueEditorState {
         &mut self,
         ui: &mut egui::Ui,
         dialogues: &mut Vec<DialogueTree>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
+        ctx: &mut EditorContext<'_>,
     ) {
         // Clone data for closures
         let search_filter = self.search_filter.clone();
@@ -1861,13 +1856,19 @@ impl DialogueEditorState {
                 ItemAction::Delete => {
                     self.delete_dialogue(action_idx);
                     *dialogues = self.dialogues.clone();
-                    *unsaved_changes = true;
+                    *ctx.unsaved_changes = true;
                 }
                 ItemAction::Duplicate => {
                     let next_id = self.next_available_dialogue_id();
                     let mut dummy_show = false;
                     let mut dummy_buf = String::new();
                     let mut dummy_msg = String::new();
+                    let mut dispatch_state = DispatchActionState {
+                        entity_label: "dialogue",
+                        import_export_buffer: &mut dummy_buf,
+                        show_import_dialog: &mut dummy_show,
+                        status_message: &mut dummy_msg,
+                    };
                     if dispatch_list_action(
                         ItemAction::Duplicate,
                         &mut self.dialogues,
@@ -1876,14 +1877,11 @@ impl DialogueEditorState {
                             entry.id = next_id;
                             entry.name = format!("{} (Copy)", entry.name);
                         },
-                        "dialogue",
-                        &mut dummy_buf,
-                        &mut dummy_show,
-                        &mut dummy_msg,
+                        &mut dispatch_state,
                     ) {
                         *dialogues = self.dialogues.clone();
-                        *unsaved_changes = true;
-                        *status_message = "Dialogue duplicated".to_string();
+                        *ctx.unsaved_changes = true;
+                        *ctx.status_message = "Dialogue duplicated".to_string();
                     }
                 }
                 ItemAction::Export => {
@@ -1891,10 +1889,11 @@ impl DialogueEditorState {
                         match ron::ser::to_string_pretty(dialogue, Default::default()) {
                             Ok(contents) => {
                                 ui.ctx().copy_text(contents);
-                                *status_message = "Copied dialogue to clipboard".to_string();
+                                *ctx.status_message = "Copied dialogue to clipboard".to_string();
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to serialize dialogue: {}", e);
+                                *ctx.status_message =
+                                    format!("Failed to serialize dialogue: {}", e);
                             }
                         }
                     }

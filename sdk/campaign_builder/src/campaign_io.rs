@@ -2706,15 +2706,16 @@ impl CampaignBuilderApp {
 
                     // Scan asset references and mark loaded data files
                     if let Some(ref mut manager) = self.asset_manager {
-                        manager.scan_references(
-                            &self.campaign_data.items,
-                            &self.campaign_data.quests,
-                            &self.campaign_data.dialogues,
-                            &self.campaign_data.maps,
-                            &self.editor_registry.classes_editor_state.classes,
-                            &self.editor_registry.characters_editor_state.characters,
-                            &self.editor_registry.npc_editor_state.npcs,
-                        );
+                        let campaign_refs = asset_manager::CampaignRefs {
+                            items: &self.campaign_data.items,
+                            quests: &self.campaign_data.quests,
+                            dialogues: &self.campaign_data.dialogues,
+                            maps: &self.campaign_data.maps,
+                            classes: &self.editor_registry.classes_editor_state.classes,
+                            characters: &self.editor_registry.characters_editor_state.characters,
+                            npcs: &self.editor_registry.npc_editor_state.npcs,
+                        };
+                        manager.scan_references(&campaign_refs);
                         manager.mark_data_files_as_referenced();
                     }
 

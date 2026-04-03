@@ -327,6 +327,38 @@ impl Default for NpcEditorState {
     }
 }
 
+/// Context bundle for [`NpcEditorState::show`].
+///
+/// Collapses four per-call parameters so the `show()` signature stays
+/// under the Clippy `too_many_arguments` limit.
+///
+/// # Examples
+///
+/// ```no_run
+/// use campaign_builder::npc_editor::NpcEditorContext;
+/// use antares::sdk::tool_config::DisplayConfig;
+/// use std::path::PathBuf;
+///
+/// let dir = PathBuf::from("/campaigns/demo");
+/// let cfg = NpcEditorContext {
+///     campaign_dir: Some(&dir),
+///     npcs_file: "data/npcs.ron",
+///     display_config: &DisplayConfig::default(),
+///     creature_manager: None,
+/// };
+/// assert_eq!(cfg.npcs_file, "data/npcs.ron");
+/// ```
+pub struct NpcEditorContext<'a> {
+    /// Path to the open campaign root directory, or `None` if no campaign is loaded.
+    pub campaign_dir: Option<&'a std::path::PathBuf>,
+    /// Relative path to the NPCs data file.
+    pub npcs_file: &'a str,
+    /// Display configuration for layout calculations.
+    pub display_config: &'a antares::sdk::tool_config::DisplayConfig,
+    /// Optional creature asset manager for creature-picker support.
+    pub creature_manager: Option<&'a crate::creature_assets::CreatureAssetManager>,
+}
+
 impl NpcEditorState {
     /// Creates a new NPC editor state
     pub fn new() -> Self {
@@ -351,32 +383,27 @@ impl NpcEditorState {
     /// * `ui` - The egui UI context
     /// * `dialogues` - Available dialogue trees for autocomplete and merchant dialogue policy checks
     /// * `quests` - Available quests for multi-select
-    /// * `campaign_dir` - Optional campaign directory for portrait loading
-    /// * `display_config` - Display configuration for layout
-    /// * `npcs_file` - Relative path to the NPCs data file
-    /// * `creature_manager` - Optional creature asset manager for picker support
+    /// * `npc_ctx` - Context bundle providing campaign directory, display configuration,
+    ///   NPCs file path, and optional creature manager
     ///
     /// # Returns
     ///
     /// Returns `true` if changes were made requiring save
-    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         dialogues: &[DialogueTree],
         quests: &[Quest],
-        campaign_dir: Option<&PathBuf>,
-        display_config: &DisplayConfig,
-        npcs_file: &str,
-        creature_manager: Option<&CreatureAssetManager>,
+        npc_ctx: &NpcEditorContext<'_>,
     ) -> bool {
         // Update portrait and sprite sheet candidates if campaign directory changed
-        if self.last_campaign_dir != campaign_dir.cloned() {
-            self.available_portraits = extract_portrait_candidates(campaign_dir);
+        if self.last_campaign_dir != npc_ctx.campaign_dir.cloned() {
+            self.available_portraits = extract_portrait_candidates(npc_ctx.campaign_dir);
             self.available_sprite_sheets =
-                crate::ui_helpers::extract_sprite_sheet_candidates(campaign_dir);
+                crate::ui_helpers::extract_sprite_sheet_candidates(npc_ctx.campaign_dir);
             // Rebuild creature candidates for autocomplete whenever the campaign dir changes.
-            self.available_creatures = creature_manager
+            self.available_creatures = npc_ctx
+                .creature_manager
                 .and_then(|m| m.load_all_creatures().ok())
                 .map(|creatures| {
                     creatures
@@ -385,11 +412,11 @@ impl NpcEditorState {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            self.last_campaign_dir = campaign_dir.cloned();
+            self.last_campaign_dir = npc_ctx.campaign_dir.cloned();
         }
 
         // Cache the npcs filename so Save from the editor can persist immediately
-        self.last_npcs_file = Some(npcs_file.to_string());
+        self.last_npcs_file = Some(npc_ctx.npcs_file.to_string());
 
         // Update available references
         self.available_dialogues = dialogues.to_vec();
@@ -401,7 +428,9 @@ impl NpcEditorState {
 
         // Show portrait grid picker popup if open
         if self.portrait_picker_open {
-            if let Some(selected_id) = self.show_portrait_grid_picker(ui.ctx(), campaign_dir) {
+            if let Some(selected_id) =
+                self.show_portrait_grid_picker(ui.ctx(), npc_ctx.campaign_dir)
+            {
                 self.edit_buffer.portrait_id = selected_id;
                 needs_save = true;
                 // Persist the selected portrait into the autocomplete buffer so the input
@@ -416,7 +445,7 @@ impl NpcEditorState {
 
         // Show sprite sheet picker popup if open
         if self.sprite_picker_open {
-            if let Some(selected) = self.show_sprite_sheet_picker(ui.ctx(), campaign_dir) {
+            if let Some(selected) = self.show_sprite_sheet_picker(ui.ctx(), npc_ctx.campaign_dir) {
                 self.edit_buffer.sprite_sheet = selected;
                 needs_save = true;
                 crate::ui_helpers::store_autocomplete_buffer(
@@ -438,8 +467,8 @@ impl NpcEditorState {
                 needs_save |= self.export_all_npcs();
             }
             ToolbarAction::Reload => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(npcs_file);
+                if let Some(dir) = npc_ctx.campaign_dir {
+                    let path = dir.join(npc_ctx.npcs_file);
                     if path.exists() {
                         match self.load_from_file(&path) {
                             Ok(()) => {
@@ -508,11 +537,20 @@ impl NpcEditorState {
         // Mode-specific UI
         match self.mode {
             NpcEditorMode::List => {
-                needs_save |=
-                    self.show_list_view(ui, display_config, campaign_dir, creature_manager);
+                needs_save |= self.show_list_view(
+                    ui,
+                    npc_ctx.display_config,
+                    npc_ctx.campaign_dir,
+                    npc_ctx.creature_manager,
+                );
             }
             NpcEditorMode::Add | NpcEditorMode::Edit => {
-                needs_save |= self.show_edit_view(ui, campaign_dir, npcs_file, creature_manager);
+                needs_save |= self.show_edit_view(
+                    ui,
+                    npc_ctx.campaign_dir,
+                    npc_ctx.npcs_file,
+                    npc_ctx.creature_manager,
+                );
             }
         }
 

@@ -165,6 +165,104 @@ impl<'a> AutocompleteInput<'a> {
     }
 }
 
+// =============================================================================
+// Config Structs for Bundled Function Parameters
+// =============================================================================
+
+/// State bundle for [`dispatch_list_action`].
+///
+/// Groups the four output-state parameters so the function stays under the
+/// Clippy `too_many_arguments` limit.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::ui_helpers::DispatchActionState;
+///
+/// let mut buf = String::new();
+/// let mut show = false;
+/// let mut msg = String::new();
+///
+/// let mut state = DispatchActionState {
+///     entity_label: "item",
+///     import_export_buffer: &mut buf,
+///     show_import_dialog: &mut show,
+///     status_message: &mut msg,
+/// };
+/// assert_eq!(state.entity_label, "item");
+/// ```
+pub struct DispatchActionState<'a> {
+    /// Human-readable entity label used in status messages (e.g. `"item"`, `"spell"`).
+    pub entity_label: &'a str,
+    /// Buffer holding RON text for import/export dialogs.
+    pub import_export_buffer: &'a mut String,
+    /// When set to `true`, the import/export dialog window will be shown.
+    pub show_import_dialog: &'a mut bool,
+    /// One-line status bar text updated by the action.
+    pub status_message: &'a mut String,
+}
+
+/// Configuration bundle for [`autocomplete_entity_selector_generic`].
+///
+/// Groups the four non-data display parameters so the function stays under
+/// the Clippy `too_many_arguments` limit.
+///
+/// # Examples
+///
+/// ```no_run
+/// use campaign_builder::ui_helpers::AutocompleteSelectorConfig;
+///
+/// let cfg = AutocompleteSelectorConfig {
+///     id_salt: "item_selector",
+///     buffer_tag: "item",
+///     label: "Item:",
+///     placeholder: "Start typing...",
+/// };
+/// assert_eq!(cfg.buffer_tag, "item");
+/// ```
+pub struct AutocompleteSelectorConfig<'a> {
+    /// Unique egui ID salt for the autocomplete widget.
+    pub id_salt: &'a str,
+    /// Short tag used as part of the egui memory key (e.g. `"item"`, `"quest"`).
+    pub buffer_tag: &'a str,
+    /// Text label shown to the left of the input (empty string = no label).
+    pub label: &'a str,
+    /// Placeholder text shown when the field is empty.
+    pub placeholder: &'a str,
+}
+
+/// Configuration bundle for [`autocomplete_list_selector_generic`].
+///
+/// Groups the five string parameters so the function stays under the Clippy
+/// `too_many_arguments` limit.
+///
+/// # Examples
+///
+/// ```no_run
+/// use campaign_builder::ui_helpers::AutocompleteListSelectorConfig;
+///
+/// let cfg = AutocompleteListSelectorConfig {
+///     id_salt: "items_list",
+///     buffer_tag: "item_add",
+///     label: "Items:",
+///     add_label: "Add item:",
+///     placeholder: "Start typing...",
+/// };
+/// assert_eq!(cfg.add_label, "Add item:");
+/// ```
+pub struct AutocompleteListSelectorConfig<'a> {
+    /// Unique egui ID salt for the autocomplete widget.
+    pub id_salt: &'a str,
+    /// Short tag used as part of the egui memory key.
+    pub buffer_tag: &'a str,
+    /// Group label shown above the selector.
+    pub label: &'a str,
+    /// Label shown next to the "add" input field.
+    pub add_label: &'a str,
+    /// Placeholder text for the add input field.
+    pub placeholder: &'a str,
+}
+
 /// Generic list-action dispatcher for standard editor CRUD operations.
 ///
 /// Handles `Delete`, `Duplicate`, and `Export` (to the import-export buffer)
@@ -195,11 +293,7 @@ impl<'a> AutocompleteInput<'a> {
 /// * `prepare_duplicate` — Called as `prepare_duplicate(new_entry, data)`
 ///   just before pushing the duplicate; should set the new entry's ID and
 ///   update its name (e.g. append `" (Copy)"`)
-/// * `entity_label` — Human-readable entity type label used in status
-///   messages, e.g. `"item"`, `"spell"`, `"condition"`
-/// * `import_export_buffer` — Set to the serialised RON string on `Export`
-/// * `show_import_dialog` — Set to `true` on `Export`
-/// * `status_message` — Updated with a description of the result
+/// * `state` — Bundle of output-state parameters; see [`DispatchActionState`]
 ///
 /// # Returns
 ///
@@ -209,7 +303,7 @@ impl<'a> AutocompleteInput<'a> {
 /// # Examples
 ///
 /// ```
-/// use campaign_builder::ui_helpers::{dispatch_list_action, ItemAction};
+/// use campaign_builder::ui_helpers::{dispatch_list_action, DispatchActionState, ItemAction};
 ///
 /// #[derive(Clone, serde::Serialize, serde::Deserialize)]
 /// struct Thing { id: u32, name: String }
@@ -222,6 +316,12 @@ impl<'a> AutocompleteInput<'a> {
 /// let mut show = false;
 /// let mut msg = String::new();
 ///
+/// let mut state = DispatchActionState {
+///     entity_label: "thing",
+///     import_export_buffer: &mut buf,
+///     show_import_dialog: &mut show,
+///     status_message: &mut msg,
+/// };
 /// let changed = dispatch_list_action(
 ///     ItemAction::Duplicate,
 ///     &mut data,
@@ -230,26 +330,19 @@ impl<'a> AutocompleteInput<'a> {
 ///         entry.id = all.iter().map(|t| t.id).max().unwrap_or(0) + 1;
 ///         entry.name = format!("{} (Copy)", entry.name);
 ///     },
-///     "thing",
-///     &mut buf,
-///     &mut show,
-///     &mut msg,
+///     &mut state,
 /// );
 ///
 /// assert!(changed);
 /// assert_eq!(data.len(), 2);
 /// assert_eq!(data[1].name, "Alpha (Copy)");
 /// ```
-#[allow(clippy::too_many_arguments)]
 pub fn dispatch_list_action<T, C>(
     action: ItemAction,
     data: &mut Vec<T>,
     selected_idx: &mut Option<usize>,
     prepare_duplicate: C,
-    entity_label: &str,
-    import_export_buffer: &mut String,
-    show_import_dialog: &mut bool,
-    status_message: &mut String,
+    state: &mut DispatchActionState<'_>,
 ) -> bool
 where
     T: Clone + serde::Serialize,
@@ -281,13 +374,14 @@ where
                     match ron::ser::to_string_pretty(&data[idx], ron::ser::PrettyConfig::default())
                     {
                         Ok(ron_str) => {
-                            *import_export_buffer = ron_str;
-                            *show_import_dialog = true;
-                            *status_message =
-                                format!("{} exported to clipboard dialog", entity_label);
+                            *state.import_export_buffer = ron_str;
+                            *state.show_import_dialog = true;
+                            *state.status_message =
+                                format!("{} exported to clipboard dialog", state.entity_label);
                         }
                         Err(e) => {
-                            *status_message = format!("Failed to export {}: {}", entity_label, e);
+                            *state.status_message =
+                                format!("Failed to export {}: {}", state.entity_label, e);
                         }
                     }
                 }
@@ -311,12 +405,9 @@ where
 /// # Arguments
 ///
 /// * `ui` — egui UI context
-/// * `id_salt` — unique salt for this widget instance
-/// * `buffer_tag` — short tag used as part of the egui memory key (e.g. `"item"`, `"quest"`)
-/// * `label` — text label shown to the left of the input (skipped if empty)
+/// * `cfg` — display configuration bundle; see [`AutocompleteSelectorConfig`]
 /// * `candidates` — list of display strings shown in the autocomplete dropdown
 /// * `current_name` — display string for the currently selected entity (empty if none)
-/// * `placeholder` — placeholder text when the field is empty
 /// * `is_selected` — whether there is a current selection (controls ✖ clear button)
 /// * `on_select` — called with the user's typed/selected text; should update the
 ///   backing field and return `true` if the value was valid and changed
@@ -326,30 +417,26 @@ where
 /// # Returns
 ///
 /// `true` if the selection changed this frame.
-#[allow(clippy::too_many_arguments)]
 pub fn autocomplete_entity_selector_generic(
     ui: &mut egui::Ui,
-    id_salt: &str,
-    buffer_tag: &str,
-    label: &str,
+    cfg: &AutocompleteSelectorConfig<'_>,
     candidates: Vec<String>,
     current_name: String,
-    placeholder: &str,
     is_selected: bool,
     mut on_select: impl FnMut(&str) -> bool,
     mut on_clear: impl FnMut(),
 ) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
-        if !label.is_empty() {
-            ui.label(label);
+        if !cfg.label.is_empty() {
+            ui.label(cfg.label);
         }
-        let buffer_id = make_autocomplete_id(ui, buffer_tag, id_salt);
+        let buffer_id = make_autocomplete_id(ui, cfg.buffer_tag, cfg.id_salt);
         let mut text_buffer =
             load_autocomplete_buffer(ui.ctx(), buffer_id, || current_name.clone());
 
-        let response = AutocompleteInput::new(id_salt, &candidates)
-            .with_placeholder(placeholder)
+        let response = AutocompleteInput::new(cfg.id_salt, &candidates)
+            .with_placeholder(cfg.placeholder)
             .show(ui, &mut text_buffer);
 
         if response.changed()
@@ -430,14 +517,17 @@ pub fn autocomplete_item_selector(
     // Use Cell so both on_select and on_clear can share mutation without conflicting borrows.
     let cell = std::cell::Cell::new(*selected_item_id);
     let is_selected = *selected_item_id != 0;
+    let cfg = AutocompleteSelectorConfig {
+        id_salt,
+        buffer_tag: "item",
+        label,
+        placeholder: "Start typing item name...",
+    };
     let changed = autocomplete_entity_selector_generic(
         ui,
-        id_salt,
-        "item",
-        label,
+        &cfg,
         candidates,
         current_name,
-        "Start typing item name...",
         is_selected,
         |text| {
             if let Some(item) = items.iter().find(|i| i.name == text) {
@@ -501,14 +591,17 @@ pub fn autocomplete_quest_selector(
     // Use RefCell so both on_select and on_clear can share mutation without conflicting borrows.
     let is_selected = !selected_quest_id_str.is_empty();
     let cell = std::cell::RefCell::new(std::mem::take(selected_quest_id_str));
+    let cfg = AutocompleteSelectorConfig {
+        id_salt,
+        buffer_tag: "quest",
+        label,
+        placeholder: "Start typing quest name...",
+    };
     let changed = autocomplete_entity_selector_generic(
         ui,
-        id_salt,
-        "quest",
-        label,
+        &cfg,
         candidates,
         current_name,
-        "Start typing quest name...",
         is_selected,
         |text| {
             if let Some(quest) = quests.iter().find(|q| q.name == text) {
@@ -551,14 +644,17 @@ pub fn autocomplete_monster_selector(
     // Use RefCell so both on_select and on_clear can share mutation without conflicting borrows.
     let is_selected = !selected_monster_name.is_empty();
     let cell = std::cell::RefCell::new(std::mem::take(selected_monster_name));
+    let cfg = AutocompleteSelectorConfig {
+        id_salt,
+        buffer_tag: "monster",
+        label,
+        placeholder: "Start typing monster name...",
+    };
     let changed = autocomplete_entity_selector_generic(
         ui,
-        id_salt,
-        "monster",
-        label,
+        &cfg,
         candidates,
         current_name,
-        "Start typing monster name...",
         is_selected,
         |text| {
             if monsters.iter().any(|m| m.name == text) {
@@ -726,14 +822,17 @@ pub fn autocomplete_condition_selector(
     // Use RefCell so both on_select and on_clear can share mutation without conflicting borrows.
     let is_selected = !selected_condition_id.is_empty();
     let cell = std::cell::RefCell::new(std::mem::take(selected_condition_id));
+    let cfg = AutocompleteSelectorConfig {
+        id_salt,
+        buffer_tag: "condition",
+        label,
+        placeholder: "Start typing condition name...",
+    };
     let changed = autocomplete_entity_selector_generic(
         ui,
-        id_salt,
-        "condition",
-        label,
+        &cfg,
         candidates,
         current_name,
-        "Start typing condition name...",
         is_selected,
         |text| {
             if let Some(condition) = conditions.iter().find(|c| c.name == text) {
@@ -787,14 +886,17 @@ pub fn autocomplete_map_selector(
     // Use RefCell so both on_select and on_clear can share mutation without conflicting borrows.
     let is_selected = !selected_map_id.is_empty();
     let cell = std::cell::RefCell::new(std::mem::take(selected_map_id));
+    let cfg = AutocompleteSelectorConfig {
+        id_salt,
+        buffer_tag: "map",
+        label,
+        placeholder: "Start typing map name...",
+    };
     let changed = autocomplete_entity_selector_generic(
         ui,
-        id_salt,
-        "map",
-        label,
+        &cfg,
         candidates,
         current_map_name,
-        "Start typing map name...",
         is_selected,
         |text| {
             if let Some(id_start) = text.rfind("(ID: ") {
@@ -860,14 +962,17 @@ pub fn autocomplete_npc_selector(
     // Use RefCell so both on_select and on_clear can share mutation without conflicting borrows.
     let is_selected = !selected_npc_id.is_empty();
     let cell = std::cell::RefCell::new(std::mem::take(selected_npc_id));
+    let cfg = AutocompleteSelectorConfig {
+        id_salt,
+        buffer_tag: "npc",
+        label,
+        placeholder: "Start typing NPC name...",
+    };
     let changed = autocomplete_entity_selector_generic(
         ui,
-        id_salt,
-        "npc",
-        label,
+        &cfg,
         candidates,
         current_display,
-        "Start typing NPC name...",
         is_selected,
         |text| {
             for (display, npc_id) in extract_npc_candidates(maps) {
@@ -904,14 +1009,10 @@ pub fn autocomplete_npc_selector(
 /// # Arguments
 ///
 /// * `ui` — egui UI context
-/// * `id_salt` — unique salt for this widget instance
-/// * `buffer_tag` — short tag used in the egui memory key (e.g. `"item_add"`)
-/// * `label` — group label shown above the list
+/// * `cfg` — display configuration bundle; see [`AutocompleteListSelectorConfig`]
 /// * `selected` — mutable reference to the currently-selected items
 /// * `display_fn` — how to render each selected item as a label string
 /// * `candidates` — autocomplete suggestions
-/// * `add_label` — label text for the "add" row (e.g. `"Add item:"`)
-/// * `placeholder` — placeholder text for the autocomplete input
 /// * `on_changed` — called when autocomplete fires `changed()`
 /// * `on_enter` — called when Enter is pressed; may differ from `on_changed`
 ///   for types that allow free-text entry
@@ -919,17 +1020,12 @@ pub fn autocomplete_npc_selector(
 /// # Returns
 ///
 /// `true` if the selection changed this frame.
-#[allow(clippy::too_many_arguments)]
 pub fn autocomplete_list_selector_generic<T, D, A, E>(
     ui: &mut egui::Ui,
-    id_salt: &str,
-    buffer_tag: &str,
-    label: &str,
+    cfg: &AutocompleteListSelectorConfig<'_>,
     selected: &mut Vec<T>,
     display_fn: D,
     candidates: Vec<String>,
-    add_label: &str,
-    placeholder: &str,
     mut on_changed: A,
     mut on_enter: E,
 ) -> bool
@@ -942,7 +1038,7 @@ where
     let mut changed = false;
 
     ui.group(|ui| {
-        ui.label(label);
+        ui.label(cfg.label);
 
         let mut remove_idx: Option<usize> = None;
         for (idx, item) in selected.iter().enumerate() {
@@ -961,13 +1057,13 @@ where
 
         ui.separator();
 
-        let buffer_id = make_autocomplete_id(ui, buffer_tag, id_salt);
+        let buffer_id = make_autocomplete_id(ui, cfg.buffer_tag, cfg.id_salt);
         let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, String::new);
 
         ui.horizontal(|ui| {
-            ui.label(add_label);
-            let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
-                .with_placeholder(placeholder)
+            ui.label(cfg.add_label);
+            let response = AutocompleteInput::new(&format!("{}_add", cfg.id_salt), &candidates)
+                .with_placeholder(cfg.placeholder)
                 .show(ui, &mut text_buffer);
 
             let tb = text_buffer.trim().to_string();
@@ -1025,11 +1121,16 @@ pub fn autocomplete_item_list_selector(
     items: &[antares::domain::items::types::Item],
 ) -> bool {
     let candidates: Vec<String> = items.iter().map(|i| i.name.clone()).collect();
+    let cfg = AutocompleteListSelectorConfig {
+        id_salt,
+        buffer_tag: "item_add",
+        label,
+        add_label: "Add item:",
+        placeholder: "Start typing item name...",
+    };
     autocomplete_list_selector_generic(
         ui,
-        id_salt,
-        "item_add",
-        label,
+        &cfg,
         selected_items,
         |id| {
             items
@@ -1039,8 +1140,6 @@ pub fn autocomplete_item_list_selector(
                 .unwrap_or_else(|| format!("Unknown item (ID: {})", id))
         },
         candidates,
-        "Add item:",
-        "Start typing item name...",
         |text| items.iter().find(|i| i.name == text).map(|i| i.id),
         |text| items.iter().find(|i| i.name == text).map(|i| i.id),
     )
@@ -1069,11 +1168,16 @@ pub fn autocomplete_proficiency_list_selector(
     proficiencies: &[antares::domain::proficiency::ProficiencyDefinition],
 ) -> bool {
     let candidates: Vec<String> = proficiencies.iter().map(|p| p.name.clone()).collect();
+    let cfg = AutocompleteListSelectorConfig {
+        id_salt,
+        buffer_tag: "prof_add",
+        label,
+        add_label: "Add proficiency:",
+        placeholder: "Start typing proficiency...",
+    };
     autocomplete_list_selector_generic(
         ui,
-        id_salt,
-        "prof_add",
-        label,
+        &cfg,
         selected_proficiencies,
         |id| {
             proficiencies
@@ -1083,8 +1187,6 @@ pub fn autocomplete_proficiency_list_selector(
                 .unwrap_or_else(|| format!("Unknown proficiency (ID: {})", id))
         },
         candidates,
-        "Add proficiency:",
-        "Start typing proficiency...",
         |text| {
             proficiencies
                 .iter()
@@ -1124,16 +1226,19 @@ pub fn autocomplete_tag_list_selector(
 ) -> bool {
     let candidates: Vec<String> = available_tags.to_vec();
     let candidates_clone = candidates.clone();
+    let cfg = AutocompleteListSelectorConfig {
+        id_salt,
+        buffer_tag: "tag_add",
+        label,
+        add_label: "Add tag:",
+        placeholder: "Start typing tag...",
+    };
     autocomplete_list_selector_generic(
         ui,
-        id_salt,
-        "tag_add",
-        label,
+        &cfg,
         selected_tags,
         |tag| tag.clone(),
         candidates,
-        "Add tag:",
-        "Start typing tag...",
         move |text: &str| {
             if candidates_clone.iter().any(|c| c.as_str() == text) {
                 Some(text.to_string())
@@ -1175,16 +1280,19 @@ pub fn autocomplete_ability_list_selector(
 ) -> bool {
     let candidates: Vec<String> = available_abilities.to_vec();
     let candidates_clone = candidates.clone();
+    let cfg = AutocompleteListSelectorConfig {
+        id_salt,
+        buffer_tag: "ability_add",
+        label,
+        add_label: "Add ability:",
+        placeholder: "Start typing ability...",
+    };
     autocomplete_list_selector_generic(
         ui,
-        id_salt,
-        "ability_add",
-        label,
+        &cfg,
         selected_abilities,
         |ability| ability.clone(),
         candidates,
-        "Add ability:",
-        "Start typing ability...",
         move |text: &str| {
             if candidates_clone.iter().any(|c| c.as_str() == text) {
                 Some(text.to_string())
@@ -1221,14 +1329,17 @@ pub fn autocomplete_race_selector(
     // Use RefCell so both on_select and on_clear can share mutation without conflicting borrows.
     let is_selected = !selected_race_id.is_empty();
     let cell = std::cell::RefCell::new(std::mem::take(selected_race_id));
+    let cfg = AutocompleteSelectorConfig {
+        id_salt,
+        buffer_tag: "race",
+        label,
+        placeholder: "Start typing race name...",
+    };
     let changed = autocomplete_entity_selector_generic(
         ui,
-        id_salt,
-        "race",
-        label,
+        &cfg,
         candidates,
         current_name,
-        "Start typing race name...",
         is_selected,
         |text| {
             if let Some(race) = races.iter().find(|r| r.name == text) {
@@ -1263,14 +1374,17 @@ pub fn autocomplete_class_selector(
     // Use RefCell so both on_select and on_clear can share mutation without conflicting borrows.
     let is_selected = !selected_class_id.is_empty();
     let cell = std::cell::RefCell::new(std::mem::take(selected_class_id));
+    let cfg = AutocompleteSelectorConfig {
+        id_salt,
+        buffer_tag: "class",
+        label,
+        placeholder: "Start typing class name...",
+    };
     let changed = autocomplete_entity_selector_generic(
         ui,
-        id_salt,
-        "class",
-        label,
+        &cfg,
         candidates,
         current_name,
-        "Start typing class name...",
         is_selected,
         |text| {
             if let Some(class) = classes.iter().find(|c| c.name == text) {
@@ -1297,11 +1411,16 @@ pub fn autocomplete_monster_list_selector(
     monsters: &[antares::domain::combat::database::MonsterDefinition],
 ) -> bool {
     let candidates: Vec<String> = monsters.iter().map(|m| m.name.clone()).collect();
+    let cfg = AutocompleteListSelectorConfig {
+        id_salt,
+        buffer_tag: "monster_add",
+        label,
+        add_label: "Add monster:",
+        placeholder: "Start typing monster name...",
+    };
     autocomplete_list_selector_generic(
         ui,
-        id_salt,
-        "monster_add",
-        label,
+        &cfg,
         selected_monsters,
         |monster_id| {
             monsters
@@ -1311,8 +1430,6 @@ pub fn autocomplete_monster_list_selector(
                 .unwrap_or_else(|| format!("Unknown monster (ID: {})", monster_id))
         },
         candidates,
-        "Add monster:",
-        "Start typing monster name...",
         |text| monsters.iter().find(|m| m.name == text).map(|m| m.id),
         |text| monsters.iter().find(|m| m.name == text).map(|m| m.id),
     )

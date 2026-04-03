@@ -35,10 +35,11 @@
 //! );
 //! ```
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     dispatch_list_action, handle_file_load, handle_file_save, handle_reload,
-    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
-    ToolbarAction, TwoColumnLayout,
+    show_standard_list_item, DispatchActionState, EditorToolbar, ItemAction, MetadataBadge,
+    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::Item;
@@ -337,19 +338,14 @@ impl ProficienciesEditorState {
     }
 
     /// Show the proficiencies editor UI
-    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         proficiencies: &mut Vec<ProficiencyDefinition>,
-        campaign_dir: Option<&PathBuf>,
-        proficiencies_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        file_load_merge_mode: &mut bool,
         classes: &[ClassDefinition],
         races: &[RaceDefinition],
         items: &[Item],
+        ctx: &mut EditorContext<'_>,
     ) {
         ui.heading("🎯 Proficiencies Editor");
         ui.add_space(5.0);
@@ -361,7 +357,7 @@ impl ProficienciesEditorState {
         // Use shared EditorToolbar component
         let toolbar_action = EditorToolbar::new("Proficiencies")
             .with_search(&mut self.search_query)
-            .with_merge_mode(file_load_merge_mode)
+            .with_merge_mode(ctx.file_load_merge_mode)
             .with_total_count(proficiencies.len())
             .with_id_salt("proficiencies_toolbar")
             .show(ui);
@@ -373,24 +369,24 @@ impl ProficienciesEditorState {
                 self.edit_buffer = Self::default_proficiency();
                 self.edit_buffer.id =
                     Self::next_proficiency_id(proficiencies, self.edit_buffer.category);
-                *unsaved_changes = true;
+                *ctx.unsaved_changes = true;
             }
             ToolbarAction::Save => {
                 self.save_proficiencies(
                     proficiencies,
-                    campaign_dir,
-                    proficiencies_file,
-                    unsaved_changes,
-                    status_message,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    ctx.unsaved_changes,
+                    ctx.status_message,
                 );
             }
             ToolbarAction::Load => {
                 handle_file_load(
                     proficiencies,
-                    *file_load_merge_mode,
+                    *ctx.file_load_merge_mode,
                     |p: &ProficiencyDefinition| p.id.clone(),
-                    status_message,
-                    unsaved_changes,
+                    ctx.status_message,
+                    ctx.unsaved_changes,
                 );
             }
             ToolbarAction::Import => {
@@ -398,14 +394,14 @@ impl ProficienciesEditorState {
                 self.import_export_buffer.clear();
             }
             ToolbarAction::Export => {
-                handle_file_save(proficiencies, "proficiencies.ron", status_message);
+                handle_file_save(proficiencies, "proficiencies.ron", ctx.status_message);
             }
             ToolbarAction::Reload => {
                 handle_reload(
                     proficiencies,
-                    campaign_dir,
-                    proficiencies_file,
-                    status_message,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    ctx.status_message,
                 );
             }
             ToolbarAction::None => {}
@@ -430,18 +426,18 @@ impl ProficienciesEditorState {
             self.show_import_dialog_window(
                 ui.ctx(),
                 proficiencies,
-                unsaved_changes,
-                status_message,
+                ctx.unsaved_changes,
+                ctx.status_message,
             );
         }
 
         // Show list or form based on mode
         match self.mode {
             ProficienciesEditorMode::List => {
-                self.show_list(ui, proficiencies, unsaved_changes, status_message)
+                self.show_list(ui, proficiencies, ctx.unsaved_changes, ctx.status_message)
             }
             ProficienciesEditorMode::Add | ProficienciesEditorMode::Edit => {
-                self.show_form(ui, proficiencies, unsaved_changes, status_message)
+                self.show_form(ui, proficiencies, ctx.unsaved_changes, ctx.status_message)
             }
         }
     }
@@ -623,6 +619,12 @@ impl ProficienciesEditorState {
                         let mut dummy_show = false;
                         let mut dummy_buf = String::new();
                         let category = proficiencies[action_idx].category;
+                        let mut dispatch_state = DispatchActionState {
+                            entity_label: "proficiency",
+                            import_export_buffer: &mut dummy_buf,
+                            show_import_dialog: &mut dummy_show,
+                            status_message,
+                        };
                         if dispatch_list_action(
                             ItemAction::Duplicate,
                             proficiencies,
@@ -632,10 +634,7 @@ impl ProficienciesEditorState {
                                     ProficienciesEditorState::next_proficiency_id(all, category);
                                 entry.name = format!("{} (Copy)", entry.name);
                             },
-                            "proficiency",
-                            &mut dummy_buf,
-                            &mut dummy_show,
-                            status_message,
+                            &mut dispatch_state,
                         ) {
                             *unsaved_changes = true;
                             *status_message = "Duplicated proficiency".to_string();

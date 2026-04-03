@@ -8,6 +8,7 @@
 //! Uses shared UI components for consistent layout.
 
 use crate::creature_assets::CreatureAssetManager;
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     autocomplete_class_selector, autocomplete_creature_selector, autocomplete_item_list_selector,
     autocomplete_item_selector, autocomplete_portrait_selector, autocomplete_race_selector,
@@ -1082,27 +1083,19 @@ impl CharactersEditorState {
     /// * `races` - Available races for dropdown selection
     /// * `classes` - Available classes for dropdown selection
     /// * `items` - Available items for equipment/item selection
-    /// * `campaign_dir` - Optional campaign directory path
-    /// * `characters_file` - Filename for characters data
-    /// * `unsaved_changes` - Mutable flag for tracking unsaved changes
-    /// * `status_message` - Mutable string for status messages
-    /// * `file_load_merge_mode` - Whether to merge or replace when loading files
-    #[allow(clippy::too_many_arguments)]
+    /// * `creature_manager` - Optional creature asset manager for visual asset binding
+    /// * `ctx` - Shared editor context (campaign dir, data file, unsaved flag, status, merge mode)
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         races: &[RaceDefinition],
         classes: &[ClassDefinition],
         items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        characters_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        file_load_merge_mode: &mut bool,
         creature_manager: Option<&CreatureAssetManager>,
+        ctx: &mut EditorContext<'_>,
     ) {
         // Scan portraits if campaign directory changed
-        let campaign_dir_changed = match (&self.last_campaign_dir, campaign_dir) {
+        let campaign_dir_changed = match (&self.last_campaign_dir, ctx.campaign_dir) {
             (None, Some(_)) => true,
             (Some(_), None) => true,
             (Some(last), Some(current)) => last != current,
@@ -1110,7 +1103,7 @@ impl CharactersEditorState {
         };
 
         if campaign_dir_changed {
-            self.available_portraits = extract_portrait_candidates(campaign_dir);
+            self.available_portraits = extract_portrait_candidates(ctx.campaign_dir);
             // Rebuild creature candidates from the manager whenever the campaign dir changes.
             self.available_creatures = creature_manager
                 .and_then(|m| m.load_all_creatures().ok())
@@ -1121,11 +1114,11 @@ impl CharactersEditorState {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            self.last_campaign_dir = campaign_dir.cloned();
+            self.last_campaign_dir = ctx.campaign_dir.cloned();
         }
 
         // Cache the characters file name so `save_character()` can persist immediately
-        self.last_characters_file = Some(characters_file.to_string());
+        self.last_characters_file = Some(ctx.data_file.to_string());
 
         ui.heading("👤 Characters Editor");
         ui.add_space(5.0);
@@ -1133,7 +1126,7 @@ impl CharactersEditorState {
         // Use shared EditorToolbar component
         let toolbar_action = EditorToolbar::new("Characters")
             .with_search(&mut self.search_filter)
-            .with_merge_mode(file_load_merge_mode)
+            .with_merge_mode(ctx.file_load_merge_mode)
             .with_total_count(self.characters.len())
             .with_id_salt("characters_toolbar")
             .show(ui);
@@ -1143,17 +1136,18 @@ impl CharactersEditorState {
             ToolbarAction::New => {
                 self.start_new_character();
                 self.buffer.id = self.next_available_character_id();
-                *unsaved_changes = true;
+                *ctx.unsaved_changes = true;
             }
             ToolbarAction::Save => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(characters_file);
+                if let Some(dir) = ctx.campaign_dir {
+                    let path = dir.join(ctx.data_file);
                     match self.save_to_file(&path) {
                         Ok(_) => {
-                            *status_message = format!("Saved {} characters", self.characters.len());
+                            *ctx.status_message =
+                                format!("Saved {} characters", self.characters.len());
                         }
                         Err(e) => {
-                            *status_message = format!("Failed to save characters: {}", e);
+                            *ctx.status_message = format!("Failed to save characters: {}", e);
                         }
                     }
                 }
@@ -1161,33 +1155,33 @@ impl CharactersEditorState {
             ToolbarAction::Load => {
                 handle_file_load(
                     &mut self.characters,
-                    *file_load_merge_mode,
+                    *ctx.file_load_merge_mode,
                     |c: &CharacterDefinition| c.id.clone(),
-                    status_message,
-                    unsaved_changes,
+                    ctx.status_message,
+                    ctx.unsaved_changes,
                 );
             }
             ToolbarAction::Import => {
-                *status_message = "Import not yet implemented for characters".to_string();
+                *ctx.status_message = "Import not yet implemented for characters".to_string();
             }
             ToolbarAction::Export => {
-                handle_file_save(&self.characters, "characters.ron", status_message);
+                handle_file_save(&self.characters, "characters.ron", ctx.status_message);
             }
             ToolbarAction::Reload => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(characters_file);
+                if let Some(dir) = ctx.campaign_dir {
+                    let path = dir.join(ctx.data_file);
                     if path.exists() {
                         match self.load_from_file(&path) {
                             Ok(_) => {
-                                *status_message =
+                                *ctx.status_message =
                                     format!("Loaded {} characters", self.characters.len());
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to load characters: {}", e);
+                                *ctx.status_message = format!("Failed to load characters: {}", e);
                             }
                         }
                     } else {
-                        *status_message = "Characters file does not exist".to_string();
+                        *ctx.status_message = "Characters file does not exist".to_string();
                     }
                 }
             }
@@ -1202,24 +1196,16 @@ impl CharactersEditorState {
         // Main content - use TwoColumnLayout for list mode
         match self.mode {
             CharactersEditorMode::List => {
-                self.show_list(ui, items, campaign_dir, unsaved_changes);
+                self.show_list(ui, items, ctx);
             }
             CharactersEditorMode::Add | CharactersEditorMode::Edit => {
-                self.show_character_form(
-                    ui,
-                    races,
-                    classes,
-                    items,
-                    campaign_dir,
-                    characters_file,
-                    creature_manager,
-                );
+                self.show_character_form(ui, races, classes, items, creature_manager, ctx);
             }
         }
 
         // Show portrait grid picker popup if open
         if self.portrait_picker_open {
-            if let Some(selected_id) = self.show_portrait_grid_picker(ui.ctx(), campaign_dir) {
+            if let Some(selected_id) = self.show_portrait_grid_picker(ui.ctx(), ctx.campaign_dir) {
                 // Use a small helper so tests can exercise selection logic directly
                 self.apply_selected_portrait(Some(selected_id));
                 // Persist the selected portrait into the autocomplete buffer so the input
@@ -1383,13 +1369,7 @@ impl CharactersEditorState {
     }
 
     /// Show list view with two-column layout
-    fn show_list(
-        &mut self,
-        ui: &mut egui::Ui,
-        items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        unsaved_changes: &mut bool,
-    ) {
+    fn show_list(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
         // Clone data needed for closures to avoid borrow conflicts
         let selected_character_idx = self.selected_character;
         let filtered_characters: Vec<(usize, CharacterDefinition)> = self
@@ -1468,7 +1448,7 @@ impl CharactersEditorState {
                 // Right panel: preview of selected character
                 if let Some(idx) = selected_character_idx {
                     if let Some(character) = self.characters.get(idx).cloned() {
-                        self.show_character_preview(right_ui, &character, items, campaign_dir);
+                        self.show_character_preview(right_ui, &character, items, ctx.campaign_dir);
                     }
                 } else {
                     right_ui.label("Select a character to view details.");
@@ -1487,11 +1467,11 @@ impl CharactersEditorState {
             match action_type {
                 ItemAction::Edit => {
                     self.start_edit_character(idx);
-                    *unsaved_changes = true;
+                    *ctx.unsaved_changes = true;
                 }
                 ItemAction::Delete => {
                     self.delete_character(idx);
-                    *unsaved_changes = true;
+                    *ctx.unsaved_changes = true;
                 }
                 ItemAction::Duplicate => {
                     if let Some(character) = self.characters.get(idx).cloned() {
@@ -1500,7 +1480,7 @@ impl CharactersEditorState {
                         new_character.id = new_id.clone();
                         new_character.name = format!("{} (Copy)", new_character.name);
                         self.characters.push(new_character);
-                        *unsaved_changes = true;
+                        *ctx.unsaved_changes = true;
                     }
                 }
                 _ => {}
@@ -1726,16 +1706,14 @@ impl CharactersEditorState {
     }
 
     /// Show character edit/create form
-    #[allow(clippy::too_many_arguments)]
     fn show_character_form(
         &mut self,
         ui: &mut egui::Ui,
         races: &[RaceDefinition],
         classes: &[ClassDefinition],
         items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        characters_file: &str,
         creature_manager: Option<&CreatureAssetManager>,
+        ctx: &mut EditorContext<'_>,
     ) {
         let title = if self.mode == CharactersEditorMode::Add {
             "New Character"
@@ -1860,7 +1838,7 @@ impl CharactersEditorState {
                                 "",
                                 &mut self.buffer.portrait_id,
                                 &self.available_portraits,
-                                campaign_dir,
+                                ctx.campaign_dir,
                             );
 
                             // Grid picker button
@@ -2094,8 +2072,8 @@ impl CharactersEditorState {
                     if ui.button("💾 Save").clicked() {
                         match self.save_character() {
                             Ok(_) => {
-                                if let Some(dir) = campaign_dir {
-                                    let path = dir.join(characters_file);
+                                if let Some(dir) = ctx.campaign_dir {
+                                    let path = dir.join(ctx.data_file);
                                     match self.save_to_file(&path) {
                                         Ok(_) => {
                                             // Persisted to disk; clear unsaved changes flag
@@ -3368,15 +3346,17 @@ mod tests {
         // Render the form (this will clear previous buffers and store current values)
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                state.show_character_form(
-                    ui,
-                    &races,
-                    &classes,
-                    &items,
+                let mut unsaved = false;
+                let mut status = String::new();
+                let mut merge = false;
+                let mut editor_ctx = crate::editor_context::EditorContext::new(
                     None,
                     "data/characters.ron",
-                    None,
+                    &mut unsaved,
+                    &mut status,
+                    &mut merge,
                 );
+                state.show_character_form(ui, &races, &classes, &items, None, &mut editor_ctx);
             });
         });
 
