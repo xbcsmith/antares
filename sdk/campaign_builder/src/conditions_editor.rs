@@ -1692,7 +1692,7 @@ fn compute_condition_severity(condition: &ConditionDefinition) -> &'static str {
 /// # Returns
 ///
 /// Returns `Ok(())` on success, or an error message on failure.
-pub(crate) fn apply_condition_edits(
+pub fn apply_condition_edits(
     conditions: &mut Vec<ConditionDefinition>,
     original_id: Option<&str>,
     new_cond: &ConditionDefinition,
@@ -1823,9 +1823,7 @@ pub(crate) fn render_condition_effect_preview(effect: &ConditionEffect, magnitud
 }
 
 /// Validate the UI-side effect edit buffer.
-pub(crate) fn validate_effect_edit_buffer(
-    buf: &EffectEditBuffer,
-) -> Result<(), ConditionEditorError> {
+pub fn validate_effect_edit_buffer(buf: &EffectEditBuffer) -> Result<(), ConditionEditorError> {
     match buf.effect_type.as_deref() {
         Some("AttributeModifier") => {
             if buf.attribute.trim().is_empty() {
@@ -1955,7 +1953,7 @@ pub fn update_effect_in_condition(
 }
 
 /// Returns a vector of spell names that reference condition_id.
-pub(crate) fn spells_referencing_condition(spells: &[Spell], condition_id: &str) -> Vec<String> {
+pub fn spells_referencing_condition(spells: &[Spell], condition_id: &str) -> Vec<String> {
     let mut result = Vec::new();
     for spell in spells.iter() {
         if spell.applied_conditions.iter().any(|c| c == condition_id) {
@@ -1966,10 +1964,7 @@ pub(crate) fn spells_referencing_condition(spells: &[Spell], condition_id: &str)
 }
 
 /// Remove references of condition_id from spells and return the number of spells modified.
-pub(crate) fn remove_condition_references_from_spells(
-    spells: &mut [Spell],
-    condition_id: &str,
-) -> usize {
+pub fn remove_condition_references_from_spells(spells: &mut [Spell], condition_id: &str) -> usize {
     let mut modified = 0usize;
     for spell in spells.iter_mut() {
         let original_len = spell.applied_conditions.len();

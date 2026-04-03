@@ -82,7 +82,7 @@ fn read_ron_collection<T: serde::de::DeserializeOwned>(
 /// * `path`       - Absolute destination path
 /// * `data`       - The value to serialise (any `Serialize` type)
 /// * `type_label` - Human-readable label used in error messages, e.g. `"items"`
-fn write_ron_to_path<T: serde::Serialize>(
+fn write_ron_to_path<T: serde::Serialize + ?Sized>(
     path: &std::path::Path,
     data: &T,
     type_label: &str,
@@ -137,7 +137,7 @@ impl CampaignBuilderApp {
     /// the loaded NPC definitions and, if found, switch to the NPCs tab and
     /// start editing that NPC. If the NPC isn't found, set an informative
     /// `status_message` for the user.
-    pub(crate) fn handle_maps_open_npc_request(&mut self) {
+    pub fn handle_maps_open_npc_request(&mut self) {
         if let Some(requested_id) = self
             .editor_registry
             .maps_editor_state
@@ -161,7 +161,7 @@ impl CampaignBuilderApp {
     }
 
     /// Synchronize importer state that depends on the active campaign.
-    pub(crate) fn sync_obj_importer_campaign_state(&mut self) {
+    pub fn sync_obj_importer_campaign_state(&mut self) {
         if let Some(campaign_dir) = self.campaign_dir.clone() {
             match self.obj_importer_state.load_custom_palette(&campaign_dir) {
                 Ok(()) => {
@@ -202,7 +202,7 @@ impl CampaignBuilderApp {
     /// Validate item IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    pub(crate) fn validate_item_ids(&self) -> Vec<validation::ValidationResult> {
+    pub fn validate_item_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
@@ -220,7 +220,7 @@ impl CampaignBuilderApp {
     /// Validate spell IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    pub(crate) fn validate_spell_ids(&self) -> Vec<validation::ValidationResult> {
+    pub fn validate_spell_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
@@ -238,7 +238,7 @@ impl CampaignBuilderApp {
     /// Validate monster IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    pub(crate) fn validate_monster_ids(&self) -> Vec<validation::ValidationResult> {
+    pub fn validate_monster_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
@@ -256,7 +256,7 @@ impl CampaignBuilderApp {
     /// Validate map IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    pub(crate) fn validate_map_ids(&self) -> Vec<validation::ValidationResult> {
+    pub fn validate_map_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
@@ -274,7 +274,7 @@ impl CampaignBuilderApp {
     /// Validate condition IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    pub(crate) fn validate_condition_ids(&self) -> Vec<validation::ValidationResult> {
+    pub fn validate_condition_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
@@ -292,7 +292,7 @@ impl CampaignBuilderApp {
     /// Validate NPC IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
-    pub(crate) fn validate_npc_ids(&self) -> Vec<validation::ValidationResult> {
+    pub fn validate_npc_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
@@ -335,7 +335,7 @@ impl CampaignBuilderApp {
     /// - merchant NPC whose dialogue is missing explicit OpenMerchant
     /// - merchant NPC whose assigned OpenMerchant targets the wrong npc_id
     /// - non-merchant NPC whose assigned dialogue still contains SDK-managed merchant content
-    pub(crate) fn validate_merchant_dialogue_rules(&self) -> Vec<validation::ValidationResult> {
+    pub fn validate_merchant_dialogue_rules(&self) -> Vec<validation::ValidationResult> {
         let mut results = Vec::new();
 
         for npc in &self.editor_registry.npc_editor_state.npcs {
@@ -437,9 +437,7 @@ impl CampaignBuilderApp {
     /// Applies merchant dialogue repairs across loaded NPC and dialogue content.
     ///
     /// Returns a summary validation result describing the number of repairs applied.
-    pub(crate) fn repair_merchant_dialogue_validation_issues(
-        &mut self,
-    ) -> validation::ValidationResult {
+    pub fn repair_merchant_dialogue_validation_issues(&mut self) -> validation::ValidationResult {
         self.editor_registry.npc_editor_state.available_dialogues =
             self.campaign_data.dialogues.clone();
         self.editor_registry
@@ -567,7 +565,7 @@ impl CampaignBuilderApp {
     ///
     /// Returns warnings for template entries and magic pool entries whose item
     /// IDs do not exist in the loaded `items` list.
-    pub(crate) fn validate_stock_template_refs(&self) -> Vec<validation::ValidationResult> {
+    pub fn validate_stock_template_refs(&self) -> Vec<validation::ValidationResult> {
         let mut results = Vec::new();
 
         for tmpl in &self.campaign_data.stock_templates {
@@ -612,7 +610,7 @@ impl CampaignBuilderApp {
     /// - Empty character names (warning)
     /// - Non-existent class references
     /// - Non-existent race references
-    pub(crate) fn validate_character_ids(&self) -> Vec<validation::ValidationResult> {
+    pub fn validate_character_ids(&self) -> Vec<validation::ValidationResult> {
         let mut results = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
@@ -716,7 +714,7 @@ impl CampaignBuilderApp {
     /// - Proficiencies referenced by races that don't exist
     /// - Proficiencies required by items that don't exist
     /// - Info messages for unreferenced proficiencies
-    pub(crate) fn validate_proficiency_ids(&self) -> Vec<validation::ValidationResult> {
+    pub fn validate_proficiency_ids(&self) -> Vec<validation::ValidationResult> {
         let mut results = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
 
@@ -853,7 +851,7 @@ impl CampaignBuilderApp {
     /// This function checks each data category and adds:
     /// - ✅ Passed check if data exists and has no errors
     /// - ℹ️ Info message if no data is loaded for the category
-    pub(crate) fn generate_category_status_checks(&self) -> Vec<validation::ValidationResult> {
+    pub fn generate_category_status_checks(&self) -> Vec<validation::ValidationResult> {
         let mut results = Vec::new();
 
         // Items category
@@ -1008,7 +1006,7 @@ impl CampaignBuilderApp {
     /// lifetime/borrow conflicts with UI closures that can overlap `&mut self`
     /// borrows. Cloning is acceptable for this UI-only structure and keeps the
     /// UI code simpler and safer.
-    pub(crate) fn grouped_filtered_validation_results(
+    pub fn grouped_filtered_validation_results(
         &self,
     ) -> Vec<(
         validation::ValidationCategory,
@@ -1067,7 +1065,7 @@ impl CampaignBuilderApp {
     /// # Returns
     ///
     /// A vector of map file paths relative to the campaign directory.
-    pub(crate) fn discover_map_files(&self) -> Vec<String> {
+    pub fn discover_map_files(&self) -> Vec<String> {
         let mut map_files = Vec::new();
 
         if let Some(ref campaign_dir) = self.campaign_dir {
@@ -1093,7 +1091,7 @@ impl CampaignBuilderApp {
     }
 
     /// Load items from RON file
-    pub(crate) fn load_items(&mut self) {
+    pub fn load_items(&mut self) {
         self.logger.debug(category::FILE_IO, "load_items() called");
         let items_file = self.campaign.items_file.clone();
         self.logger
@@ -1148,7 +1146,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save items to RON file
-    pub(crate) fn save_items(&mut self) -> Result<(), CampaignIoError> {
+    pub fn save_items(&mut self) -> Result<(), CampaignIoError> {
         self.logger.debug(category::FILE_IO, "save_items() called");
         let mut sorted = self.campaign_data.items.clone();
         sorted.sort_by_key(|i| i.id);
@@ -1167,7 +1165,7 @@ impl CampaignBuilderApp {
     }
 
     /// Load spells from RON file
-    pub(crate) fn load_spells(&mut self) {
+    pub fn load_spells(&mut self) {
         let spells_file = self.campaign.spells_file.clone();
         if let Some(spells) = read_ron_collection::<Spell>(
             &self.campaign_dir,
@@ -1198,7 +1196,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save spells to RON file
-    pub(crate) fn save_spells(&mut self) -> Result<(), CampaignIoError> {
+    pub fn save_spells(&mut self) -> Result<(), CampaignIoError> {
         let mut sorted = self.campaign_data.spells.clone();
         sorted.sort_by_key(|s| s.id);
         write_ron_collection(
@@ -1212,7 +1210,7 @@ impl CampaignBuilderApp {
     }
 
     /// Load conditions from RON file
-    pub(crate) fn load_conditions(&mut self) {
+    pub fn load_conditions(&mut self) {
         let conditions_file = self.campaign.conditions_file.clone();
         if let Some(conditions) = read_ron_collection::<ConditionDefinition>(
             &self.campaign_dir,
@@ -1239,7 +1237,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save conditions to RON file
-    pub(crate) fn save_conditions(&mut self) -> Result<(), CampaignIoError> {
+    pub fn save_conditions(&mut self) -> Result<(), CampaignIoError> {
         let mut sorted = self.campaign_data.conditions.clone();
         sorted.sort_by(|a, b| a.id.cmp(&b.id));
         write_ron_collection(
@@ -1253,7 +1251,7 @@ impl CampaignBuilderApp {
     }
 
     /// Load proficiencies from RON file
-    pub(crate) fn load_proficiencies(&mut self) {
+    pub fn load_proficiencies(&mut self) {
         self.logger
             .debug(category::FILE_IO, "load_proficiencies() called");
         let proficiencies_file = self.campaign.proficiencies_file.clone();
@@ -1293,7 +1291,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save proficiencies to RON file
-    pub(crate) fn save_proficiencies(&mut self) -> Result<(), CampaignIoError> {
+    pub fn save_proficiencies(&mut self) -> Result<(), CampaignIoError> {
         self.logger
             .debug(category::FILE_IO, "save_proficiencies() called");
         // Sort by ID (String) before serializing for stable file order.
@@ -1325,10 +1323,7 @@ impl CampaignBuilderApp {
     /// # Returns
     ///
     /// Returns `Ok(())` if save was successful
-    pub(crate) fn save_dialogues_to_file(
-        &self,
-        path: &std::path::Path,
-    ) -> Result<(), CampaignIoError> {
+    pub fn save_dialogues_to_file(&self, path: &std::path::Path) -> Result<(), CampaignIoError> {
         // Sort by dialogue ID before serializing for stable file order.
         let mut sorted = self.campaign_data.dialogues.clone();
         sorted.sort_by_key(|d| d.id);
@@ -1344,7 +1339,7 @@ impl CampaignBuilderApp {
     /// # Returns
     ///
     /// Returns `Ok(())` if save was successful
-    pub(crate) fn save_npcs_to_file(&self, path: &std::path::Path) -> Result<(), CampaignIoError> {
+    pub fn save_npcs_to_file(&self, path: &std::path::Path) -> Result<(), CampaignIoError> {
         // Sort by NPC ID (String) before serializing for stable file order.
         let mut sorted = self.editor_registry.npc_editor_state.npcs.clone();
         sorted.sort_by(|a, b| a.id.cmp(&b.id));
@@ -1352,7 +1347,7 @@ impl CampaignBuilderApp {
     }
 
     /// Load NPCs from campaign file
-    pub(crate) fn load_npcs(&mut self) -> Result<(), CampaignError> {
+    pub fn load_npcs(&mut self) -> Result<(), CampaignError> {
         if let Some(dir) = &self.campaign_dir {
             let npcs_path = dir.join(&self.campaign.npcs_file);
 
@@ -1390,7 +1385,7 @@ impl CampaignBuilderApp {
     /// the `stock_templates` mirror list.  Logs a warning (but does not fail)
     /// when the file is absent — an empty template list is a valid state for a
     /// new campaign.
-    pub(crate) fn load_stock_templates(&mut self) {
+    pub fn load_stock_templates(&mut self) {
         if let Some(dir) = &self.campaign_dir {
             let path = dir.join(&self.campaign.stock_templates_file);
             if path.exists() {
@@ -1438,7 +1433,7 @@ impl CampaignBuilderApp {
     }
 
     /// Load monsters from RON file
-    pub(crate) fn load_monsters(&mut self) {
+    pub fn load_monsters(&mut self) {
         let monsters_file = self.campaign.monsters_file.clone();
         if let Some(monsters) = read_ron_collection::<MonsterDefinition>(
             &self.campaign_dir,
@@ -1469,7 +1464,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save monsters to RON file
-    pub(crate) fn save_monsters(&mut self) -> Result<(), CampaignIoError> {
+    pub fn save_monsters(&mut self) -> Result<(), CampaignIoError> {
         let mut sorted = self.campaign_data.monsters.clone();
         sorted.sort_by_key(|m| m.id);
         write_ron_collection(
@@ -1486,7 +1481,7 @@ impl CampaignBuilderApp {
     ///
     /// Missing file is not an error — furniture support is opt-in per campaign.
     /// Syncs the loaded definitions into `furniture_editor_state` too.
-    pub(crate) fn load_furniture(&mut self) {
+    pub fn load_furniture(&mut self) {
         if let Some(defs) = read_ron_collection::<antares::domain::FurnitureDefinition>(
             &self.campaign_dir,
             &self.campaign.furniture_file,
@@ -1514,7 +1509,7 @@ impl CampaignBuilderApp {
     /// Save furniture definitions to the campaign furniture RON file.
     ///
     /// Returns an `Err` on failure so the caller can aggregate warnings.
-    pub(crate) fn save_furniture(&mut self) -> Result<(), CampaignIoError> {
+    pub fn save_furniture(&mut self) -> Result<(), CampaignIoError> {
         write_ron_collection(
             &self.campaign_dir,
             &self.campaign.furniture_file,
@@ -1532,7 +1527,7 @@ impl CampaignBuilderApp {
     }
 
     /// Load creatures from RON file
-    pub(crate) fn load_creatures(&mut self) {
+    pub fn load_creatures(&mut self) {
         let creatures_file = self.campaign.creatures_file.clone();
         if let Some(ref dir) = self.campaign_dir {
             let creatures_path = dir.join(&creatures_file);
@@ -1663,7 +1658,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save creatures to RON file
-    pub(crate) fn save_creatures(&mut self) -> Result<(), CampaignIoError> {
+    pub fn save_creatures(&mut self) -> Result<(), CampaignIoError> {
         if let Some(ref dir) = self.campaign_dir {
             // Step 1: Create registry entries from creatures
             let references: Vec<CreatureReference> = self
@@ -1755,7 +1750,7 @@ impl CampaignBuilderApp {
     }
 
     /// Load maps from the maps directory
-    pub(crate) fn load_maps(&mut self) {
+    pub fn load_maps(&mut self) {
         self.campaign_data.maps.clear();
 
         if let Some(ref dir) = self.campaign_dir {
@@ -1840,7 +1835,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save a map to RON file
-    pub(crate) fn save_map(&mut self, map: &Map) -> Result<(), CampaignIoError> {
+    pub fn save_map(&mut self, map: &Map) -> Result<(), CampaignIoError> {
         if let Some(ref dir) = self.campaign_dir {
             let maps_dir = dir.join(&self.campaign.maps_dir);
 
@@ -1869,7 +1864,7 @@ impl CampaignBuilderApp {
     }
 
     /// Validate the campaign metadata
-    pub(crate) fn validate_campaign(&mut self) {
+    pub fn validate_campaign(&mut self) {
         self.logger
             .debug(category::VALIDATION, "validate_campaign() called");
 
@@ -2290,7 +2285,7 @@ impl CampaignBuilderApp {
     }
 
     /// Create a new campaign
-    pub(crate) fn new_campaign(&mut self) {
+    pub fn new_campaign(&mut self) {
         if self.unsaved_changes {
             self.ui_state.show_unsaved_warning = true;
             self.pending_action = Some(PendingAction::New);
@@ -2299,7 +2294,7 @@ impl CampaignBuilderApp {
         }
     }
 
-    pub(crate) fn do_new_campaign(&mut self) {
+    pub fn do_new_campaign(&mut self) {
         // Reset stock templates editor so it does not retain data from a
         // previously opened campaign.  The flag inside reset_for_new_campaign
         // tells show() to auto-load if the user adds a templates file later.
@@ -2385,7 +2380,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save campaign to file
-    pub(crate) fn save_campaign(&mut self) -> Result<(), CampaignError> {
+    pub fn save_campaign(&mut self) -> Result<(), CampaignError> {
         if self.campaign_path.is_none() {
             return Err(CampaignError::NoPath);
         }
@@ -2393,7 +2388,7 @@ impl CampaignBuilderApp {
         self.do_save_campaign()
     }
 
-    pub(crate) fn do_save_campaign(&mut self) -> Result<(), CampaignError> {
+    pub fn do_save_campaign(&mut self) -> Result<(), CampaignError> {
         // Clone path early to avoid borrow checker issues with mutable save methods
         let path = self.campaign_path.clone().ok_or(CampaignError::NoPath)?;
 
@@ -2526,7 +2521,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save campaign as (with file dialog)
-    pub(crate) fn save_campaign_as(&mut self) {
+    pub fn save_campaign_as(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .set_file_name("campaign.ron")
             .add_filter("RON Files", &["ron"])
@@ -2549,7 +2544,7 @@ impl CampaignBuilderApp {
     }
 
     /// Open campaign from file
-    pub(crate) fn open_campaign(&mut self) {
+    pub fn open_campaign(&mut self) {
         if self.unsaved_changes {
             self.ui_state.show_unsaved_warning = true;
             self.pending_action = Some(PendingAction::Open);
@@ -2558,7 +2553,7 @@ impl CampaignBuilderApp {
         }
     }
 
-    pub(crate) fn do_open_campaign(&mut self) {
+    pub fn do_open_campaign(&mut self) {
         self.logger
             .debug(category::FILE_IO, "do_open_campaign() called");
         if let Some(path) = rfd::FileDialog::new()
@@ -2693,14 +2688,14 @@ impl CampaignBuilderApp {
         }
     }
 
-    pub(crate) fn load_campaign_file(&mut self, path: &PathBuf) -> Result<(), CampaignError> {
+    pub fn load_campaign_file(&mut self, path: &PathBuf) -> Result<(), CampaignError> {
         let contents = fs::read_to_string(path)?;
         self.campaign = ron::from_str(&contents)?;
         Ok(())
     }
 
     /// Update the file tree view
-    pub(crate) fn update_file_tree(&mut self, dir: &PathBuf) {
+    pub fn update_file_tree(&mut self, dir: &PathBuf) {
         self.ui_state.file_tree.clear();
 
         if let Ok(entries) = fs::read_dir(dir) {
@@ -2734,7 +2729,7 @@ impl CampaignBuilderApp {
             });
     }
 
-    pub(crate) fn read_directory(&self, dir: &PathBuf) -> Vec<FileNode> {
+    pub fn read_directory(&self, dir: &PathBuf) -> Vec<FileNode> {
         let mut children = Vec::new();
 
         if let Ok(entries) = fs::read_dir(dir) {
@@ -2761,7 +2756,7 @@ impl CampaignBuilderApp {
     }
 
     /// Check for unsaved changes before action
-    pub(crate) fn check_unsaved_and_exit(&mut self) {
+    pub fn check_unsaved_and_exit(&mut self) {
         if self.unsaved_changes {
             self.ui_state.show_unsaved_warning = true;
             self.pending_action = Some(PendingAction::Exit);
@@ -2771,7 +2766,7 @@ impl CampaignBuilderApp {
     }
 
     /// Converts asset-manager tree texture diagnostics into validation-panel results.
-    pub(crate) fn validate_tree_texture_assets(
+    pub fn validate_tree_texture_assets(
         &self,
         asset_manager: &asset_manager::AssetManager,
     ) -> Vec<validation::ValidationResult> {
@@ -2795,7 +2790,7 @@ impl CampaignBuilderApp {
     }
 
     /// Converts asset-manager grass texture diagnostics into validation-panel results.
-    pub(crate) fn validate_grass_texture_assets(
+    pub fn validate_grass_texture_assets(
         &self,
         asset_manager: &asset_manager::AssetManager,
     ) -> Vec<validation::ValidationResult> {
@@ -2819,7 +2814,7 @@ impl CampaignBuilderApp {
     }
 
     /// Run advanced validation and generate report
-    pub(crate) fn run_advanced_validation(&mut self) {
+    pub fn run_advanced_validation(&mut self) {
         let validator = advanced_validation::AdvancedValidator::new(
             self.campaign_data.items.clone(),
             self.campaign_data.monsters.clone(),
@@ -2833,7 +2828,7 @@ impl CampaignBuilderApp {
 
 impl CampaignBuilderApp {
     /// Load quests from file
-    pub(crate) fn load_quests(&mut self) -> Result<(), CampaignError> {
+    pub fn load_quests(&mut self) -> Result<(), CampaignError> {
         if let Some(dir) = &self.campaign_dir {
             let quests_path = dir.join(&self.campaign.quests_file);
             if quests_path.exists() {
@@ -2881,7 +2876,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save quests to file
-    pub(crate) fn save_quests(&self) -> Result<(), CampaignError> {
+    pub fn save_quests(&self) -> Result<(), CampaignError> {
         if let Some(dir) = &self.campaign_dir {
             let quests_path = dir.join(&self.campaign.quests_file);
             // Create quests directory if it doesn't exist
@@ -2900,7 +2895,7 @@ impl CampaignBuilderApp {
     }
 
     /// Load classes from campaign directory
-    pub(crate) fn load_classes_from_campaign(&mut self) {
+    pub fn load_classes_from_campaign(&mut self) {
         if let Some(dir) = &self.campaign_dir {
             let path = dir.join(&self.campaign.classes_file);
             if path.exists() {
@@ -2938,7 +2933,7 @@ impl CampaignBuilderApp {
     }
 
     /// Load characters from campaign directory
-    pub(crate) fn load_characters_from_campaign(&mut self) {
+    pub fn load_characters_from_campaign(&mut self) {
         if let Some(dir) = &self.campaign_dir {
             let path = dir.join(&self.campaign.characters_file);
             if path.exists() {
@@ -2990,7 +2985,7 @@ impl CampaignBuilderApp {
     }
 
     /// Load races from campaign directory
-    pub(crate) fn load_races_from_campaign(&mut self) {
+    pub fn load_races_from_campaign(&mut self) {
         if let Some(dir) = &self.campaign_dir {
             let path = dir.join(&self.campaign.races_file);
             if path.exists() {
@@ -3028,7 +3023,7 @@ impl CampaignBuilderApp {
     }
 
     /// Load dialogues from campaign file
-    pub(crate) fn load_dialogues(&mut self) -> Result<(), CampaignError> {
+    pub fn load_dialogues(&mut self) -> Result<(), CampaignError> {
         if let Some(dir) = &self.campaign_dir {
             let dialogue_path = dir.join(&self.campaign.dialogue_file);
             if dialogue_path.exists() {
@@ -3068,7 +3063,7 @@ impl CampaignBuilderApp {
 
     /// Handle a request emitted by merchant validation workflows to open the NPC
     /// editor for a specific NPC ID.
-    pub(crate) fn handle_validation_open_npc_request(&mut self) {
+    pub fn handle_validation_open_npc_request(&mut self) {
         if let Some(requested_id) = self
             .editor_registry
             .npc_editor_state

@@ -1,5 +1,248 @@
 # Implementations
 
+## SDK Codebase Cleanup — Phase 9: Final Structural Cleanup (Complete)
+
+### Overview
+
+Phase 9 closes three remaining Phase 5 structural items (two files over 4,000
+lines, one misplaced test module set) and completes the Phase 6.2
+`SearchableSelectorContext` that was planned but never implemented.
+
+Four sub-tasks were completed:
+
+| Sub-task | Description                                               |
+| -------- | --------------------------------------------------------- |
+| 9.1      | Split `npc_editor.rs` into a module directory             |
+| 9.2      | Split `creatures_editor.rs` into a module directory       |
+| 9.3      | Relocate test modules from `src/` to `tests/`             |
+| 9.4      | Create `SearchableSelectorContext` (completing Phase 6.2) |
+
+---
+
+## Phase 9.1 — Break `npc_editor.rs` Below 4,000 Lines
+
+`npc_editor.rs` had 4,397 lines. It was converted to a module directory:
+
+| File                            | Lines | Contents                                                               |
+| ------------------------------- | ----- | ---------------------------------------------------------------------- |
+| `npc_editor/mod.rs`             | 3,795 | All enums, main state struct, impl blocks, merchant dialogue, tests    |
+| `npc_editor/context.rs`         | 70    | `NpcEditorContext<'a>` struct + `debug_info()` helper impl             |
+| `npc_editor/portrait_picker.rs` | 665   | Portrait/sprite picker impl methods + standalone NPC preview functions |
+
+**Extracted to `context.rs`**: `NpcEditorContext<'a>` struct with its
+full doc comment and a new `debug_info()` method.
+
+**Extracted to `portrait_picker.rs`**: Three `impl NpcEditorState` methods
+(`load_portrait_texture`, `show_portrait_grid_picker`, `show_sprite_sheet_picker`)
+plus four standalone free functions (`load_npc_portrait_texture`,
+`merchant_dialogue_status_for_preview`, `show_npc_preview` as `pub(super)`,
+`show_portrait_placeholder`).
+
+**Wiring in `mod.rs`**:
+
+```rust
+mod context;
+mod portrait_picker;
+
+pub use context::NpcEditorContext;
+use self::portrait_picker::show_npc_preview;
+```
+
+`lib.rs` required no changes — Rust's module resolution automatically
+prefers `npc_editor/mod.rs` once the flat `npc_editor.rs` file is removed.
+
+### Pre-existing Test Fixes (surfaced during split)
+
+Three pre-existing test bugs were discovered and fixed:
+
+- `test_generated_merchant_dialogue_roundtrip_remains_runtime_valid` and
+  `test_repaired_merchant_dialogue_roundtrip_remains_runtime_valid` — both
+  called `build_npc_from_edit_buffer` but never pushed the result into
+  `state.npcs`, so the subsequent `save_to_file` wrote an empty list. Fixed
+  by adding `state.npcs.push(npc.clone())` before the save.
+
+- `test_save_npc_merchant_dialogue_generation_is_idempotent` — two issues:
+  (a) `auto_apply_merchant_dialogue_to_edit_buffer` returned `Ok(String::new())`
+  instead of an "already valid" message on the second call; fixed by returning
+  `format!("Merchant dialogue already valid for '{}'", self.edit_buffer.id)`.
+  (b) The assertion `assert_eq!(merchant_nodes, 1)` was wrong because
+  `has_sdk_managed_merchant_content` returns `true` for both the root node
+  (which receives the SDK-managed merchant choice) AND the new merchant node;
+  corrected to `assert_eq!(merchant_nodes, 2)`.
+
+---
+
+## Phase 9.2 — Break `creatures_editor.rs` Below 4,000 Lines
+
+`creatures_editor.rs` had 4,358 lines. It was converted to a module directory:
+
+| File                                | Lines | Contents                                              |
+| ----------------------------------- | ----- | ----------------------------------------------------- |
+| `creatures_editor/mod.rs`           | 3,878 | Main struct, registry mode, edit mode, tests          |
+| `creatures_editor/preview_panel.rs` | 198   | 5 preview-related `pub(super)` impl methods           |
+| `creatures_editor/mesh_ui.rs`       | 315   | `show_mesh_properties_panel` `pub(super)` impl method |
+
+**Extracted to `preview_panel.rs`** (`pub(super)` visibility, called from
+`show_edit_mode` in mod.rs):
+`show_preview_panel`, `show_preview_fallback`,
+`sync_preview_renderer_from_edit_buffer`, `current_mesh_visibility`,
+`build_preview_statistics`.
+
+**Extracted to `mesh_ui.rs`** (`pub(super)` visibility):
+`show_mesh_properties_panel`.
+
+`lib.rs` required no changes.
+
+---
+
+## Phase 9.3 — Relocate Test Modules from `src/` to `tests/`
+
+Three large test files were moved from `sdk/campaign_builder/src/` to
+`sdk/campaign_builder/tests/`:
+
+| Old path (`src/`)                | New path (`tests/`)                |
+| -------------------------------- | ---------------------------------- |
+| `src/editor_state_tests.rs`      | `tests/editor_state_tests.rs`      |
+| `src/campaign_io_tests.rs`       | `tests/campaign_io_tests.rs`       |
+| `src/ron_serialization_tests.rs` | `tests/ron_serialization_tests.rs` |
+
+The three `#[cfg(test)] mod xxx;` declarations were removed from the bottom of
+`src/lib.rs`.
+
+### Visibility Changes Required
+
+Moving the tests outside the crate required promoting a number of previously
+`pub(crate)` or private items to `pub`. All promotions on implementation-detail
+types use `#[doc(hidden)]`.
+
+#### `src/lib.rs`
+
+| Item                                                          | Before            | After                       |
+| ------------------------------------------------------------- | ----------------- | --------------------------- |
+| `struct CampaignBuilderApp`                                   | private           | `#[doc(hidden)] pub struct` |
+| `enum EditorTab`                                              | private           | `#[doc(hidden)] pub enum`   |
+| `enum ValidationFilter`                                       | private           | `#[doc(hidden)] pub enum`   |
+| `enum EditorMode`                                             | `#[cfg(test)]`    | `#[doc(hidden)] pub enum`   |
+| `enum ItemTypeFilter`                                         | `#[cfg(test)]`    | `#[doc(hidden)] pub enum`   |
+| `struct FileNode`                                             | private           | `#[doc(hidden)] pub struct` |
+| Selected `CampaignBuilderApp` fields                          | private           | `pub`                       |
+| All `CampaignMetadata` fields                                 | private           | `pub`                       |
+| `Difficulty::as_str`, `Difficulty::all`                       | `fn`              | `pub fn`                    |
+| `EditorTab::name`                                             | `fn`              | `pub fn`                    |
+| `ItemTypeFilter::matches`                                     | `#[cfg(test)] fn` | `pub fn`                    |
+| `CampaignBuilderApp::default_item/spell/monster`              | `#[cfg(test)] fn` | `pub fn`                    |
+| `CampaignBuilderApp::next_available_*_id` (5 methods)         | `#[cfg(test)] fn` | `pub fn`                    |
+| `CampaignBuilderApp::reset_validation_filters`, `focus_asset` | private           | `pub fn`                    |
+| `default_starting_time`, `default_starting_innkeeper`         | private           | `pub fn`                    |
+| `#[cfg(test)]` import guards for domain types                 | conditional       | unconditional               |
+
+#### `src/editor_state.rs`
+
+All four grouped-state structs: `CampaignData`, `EditorRegistry`,
+`EditorUiState`, `ValidationState` — `pub(crate)` → `pub`.
+
+#### `src/campaign_io.rs`
+
+All 58 `pub(crate) fn` methods across two `impl CampaignBuilderApp` blocks
+changed to `pub fn`.
+
+#### `src/app_dialogs.rs`
+
+All `pub(crate) fn` methods → `pub fn`.
+
+#### `src/conditions_editor.rs`
+
+Four functions — `apply_condition_edits`, `validate_effect_edit_buffer`,
+`spells_referencing_condition`, `remove_condition_references_from_spells` —
+`pub(crate)` → `pub`.
+
+### Import Updates in Test Files
+
+Each test file's `use super::*;` was replaced with `use campaign_builder::*;`.
+All `crate::module::Type` paths were rewritten as `campaign_builder::module::Type`.
+Explicit `use antares::domain::…` imports were added for every domain type
+previously injected by `super::*`. Two struct-update literals that used private
+fields were refactored to `Default::default()` + field assignment.
+
+### Pre-existing Test Fix
+
+`test_repair_merchant_dialogue_validation_issues_rebinds_wrong_target` was
+failing because the `RebindMerchantTarget` repair path removed only SDK-managed
+content but left authored `OpenMerchant` actions targeting the wrong NPC.
+Fixed by adding a pre-pass in `repair_merchant_dialogue_for_buffer` that walks
+all nodes/choices in the dialogue and rebinds any `OpenMerchant` action to the
+correct `npc_id` before the standard remove-then-re-add flow.
+
+### Test Campaign Portrait Fixture
+
+`test_scan_with_actual_test_campaign_data` expected portrait image files in
+`data/test_campaign/assets/portraits/` but that directory did not exist.
+Created minimal valid 1×1 PNG placeholder files for each portrait ID referenced
+in `data/test_campaign/data/characters.ron` and `data/test_campaign/data/npcs.ron`.
+
+---
+
+## Phase 9.4 — Create `SearchableSelectorContext` (Completing Phase 6.2)
+
+`searchable_selector_single` and `searchable_selector_multi` in
+`ui_helpers/layout.rs` each accepted 6–7 parameters. Four of those —
+the candidate slice, mutable search buffer, id accessor, and label accessor —
+were bundled into a new `SearchableSelectorContext` struct.
+
+### New type: `SearchableSelectorContext<'a, T, ID>`
+
+```rust
+pub struct SearchableSelectorContext<'a, T, ID> {
+    /// Full candidate list to filter and display.
+    pub candidates: &'a [T],
+    /// Mutable search string typed by the user.
+    pub search_buf: &'a mut String,
+    /// Extracts the comparable ID from a candidate item.
+    pub id_fn: fn(&T) -> ID,
+    /// Extracts the display label from a candidate item.
+    pub label_fn: fn(&T) -> &str,
+}
+```
+
+### Updated function signatures
+
+```rust
+// Before
+pub fn searchable_selector_single<T, ID, FId, FLabel>(
+    ui: &mut egui::Ui, cfg: &mut SearchableSelectorConfig<'_>,
+    selected: &mut Option<ID>, items: &[T], id_fn: FId, label_fn: FLabel,
+) -> bool where ID: Clone + PartialEq + Display, FId: Fn(&T)->ID, FLabel: Fn(&T)->String
+
+// After
+pub fn searchable_selector_single<T, ID>(
+    ui: &mut egui::Ui, cfg: &SearchableSelectorConfig<'_>,
+    selected: &mut Option<ID>, ctx: SearchableSelectorContext<'_, T, ID>,
+) -> bool where ID: Clone + PartialEq + Display
+```
+
+`SearchableSelectorConfig` was simplified to retain only `id_salt` and `label`
+(the `search_query` field moved into `SearchableSelectorContext`).
+
+`SearchableSelectorContext` is exported from `ui_helpers/mod.rs` via
+`pub use layout::SearchableSelectorContext;`.
+
+The struct carries a doc-test verifying construction and field access.
+There are no existing call sites for these functions so no call sites required
+updating.
+
+---
+
+## Quality Gates
+
+```
+cargo fmt --all                                          → no output
+cargo check --all-targets --all-features                → Finished, 0 errors, 0 warnings
+cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+cargo nextest run --all-features                        → 2183 passed, 0 failed, 0 skipped
+```
+
+---
+
 ## SDK Codebase Cleanup — Phase 8: Complete Code Deduplication (Complete)
 
 ### Overview

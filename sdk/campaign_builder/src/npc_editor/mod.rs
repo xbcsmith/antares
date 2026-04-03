@@ -60,8 +60,8 @@ use crate::creature_assets::CreatureAssetManager;
 use crate::dialogue_editor::{DialogueEditorState, MerchantDialogueUpdate};
 use crate::ui_helpers::{
     autocomplete_creature_selector, autocomplete_portrait_selector, extract_portrait_candidates,
-    resolve_portrait_path, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
-    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::dialogue::{DialogueAction, DialogueId, DialogueTree};
 use antares::domain::inventory::{NpcEconomySettings, ServiceCatalog};
@@ -75,6 +75,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
+
+mod context;
+mod portrait_picker;
+
+use self::portrait_picker::show_npc_preview;
+pub use context::NpcEditorContext;
 
 /// Errors that can occur in the NPC Editor.
 #[derive(Debug, thiserror::Error)]
@@ -339,38 +345,6 @@ impl Default for NpcEditorState {
             requested_open_npc: None,
         }
     }
-}
-
-/// Context bundle for [`NpcEditorState::show`].
-///
-/// Collapses four per-call parameters so the `show()` signature stays
-/// under the Clippy `too_many_arguments` limit.
-///
-/// # Examples
-///
-/// ```no_run
-/// use campaign_builder::npc_editor::NpcEditorContext;
-/// use antares::sdk::tool_config::DisplayConfig;
-/// use std::path::PathBuf;
-///
-/// let dir = PathBuf::from("/campaigns/demo");
-/// let cfg = NpcEditorContext {
-///     campaign_dir: Some(&dir),
-///     npcs_file: "data/npcs.ron",
-///     display_config: &DisplayConfig::default(),
-///     creature_manager: None,
-/// };
-/// assert_eq!(cfg.npcs_file, "data/npcs.ron");
-/// ```
-pub struct NpcEditorContext<'a> {
-    /// Path to the open campaign root directory, or `None` if no campaign is loaded.
-    pub campaign_dir: Option<&'a std::path::PathBuf>,
-    /// Relative path to the NPCs data file.
-    pub npcs_file: &'a str,
-    /// Display configuration for layout calculations.
-    pub display_config: &'a antares::sdk::tool_config::DisplayConfig,
-    /// Optional creature asset manager for creature-picker support.
-    pub creature_manager: Option<&'a crate::creature_assets::CreatureAssetManager>,
 }
 
 impl NpcEditorState {
@@ -1435,315 +1409,6 @@ impl NpcEditorState {
         self.reset_autocomplete_buffers = true;
     }
 
-    /// Loads a portrait texture from the campaign assets directory
-    ///
-    /// This method caches loaded textures to avoid reloading. If the texture is already
-    /// cached, it returns immediately. Failed loads are also cached to prevent repeated
-    /// attempts.
-    ///
-    /// # Arguments
-    ///
-    /// * `ctx` - The egui context for texture registration
-    /// * `campaign_dir` - The campaign directory containing assets/portraits
-    /// * `portrait_id` - The portrait ID to load (e.g., "0", "1", "warrior")
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if the texture was successfully loaded (or was already cached),
-    /// `false` if the load failed.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use campaign_builder::npc_editor::NpcEditorState;
-    /// use std::path::PathBuf;
-    ///
-    /// let mut state = NpcEditorState::new();
-    /// let campaign_dir = PathBuf::from("/path/to/campaign");
-    /// // In egui context:
-    /// // let texture = state.load_portrait_texture(ctx, Some(&campaign_dir), "0");
-    /// ```
-    pub fn load_portrait_texture(
-        &mut self,
-        ctx: &egui::Context,
-        campaign_dir: Option<&PathBuf>,
-        portrait_id: &str,
-    ) -> bool {
-        // Check if already cached
-        if self.portrait_textures.contains_key(portrait_id) {
-            return self
-                .portrait_textures
-                .get(portrait_id)
-                .is_some_and(|t| t.is_some());
-        }
-
-        // Attempt to load and decode image
-        let texture_handle = (|| {
-            let path = resolve_portrait_path(campaign_dir, portrait_id)?;
-
-            // Read image file; return None on failure (caller sees a "?" placeholder)
-            let image_bytes = match std::fs::read(&path) {
-                Ok(bytes) => bytes,
-                Err(_) => {
-                    return None;
-                }
-            };
-
-            // Decode image; return None on failure
-            let dynamic_image = match image::load_from_memory(&image_bytes) {
-                Ok(img) => img,
-                Err(_) => {
-                    return None;
-                }
-            };
-
-            // Convert to RGBA8
-            let rgba_image = dynamic_image.to_rgba8();
-            let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-            let pixels = rgba_image.as_flat_samples();
-
-            // Create egui ColorImage
-            let color_image = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
-
-            // Register texture with egui
-            let texture_handle = ctx.load_texture(
-                format!("npc_portrait_{}", portrait_id),
-                color_image,
-                egui::TextureOptions::LINEAR,
-            );
-
-            Some(texture_handle)
-        })();
-
-        // Cache result (even None for failed loads to avoid repeated attempts)
-        let loaded = texture_handle.is_some();
-
-        self.portrait_textures
-            .insert(portrait_id.to_string(), texture_handle);
-
-        loaded
-    }
-
-    /// Shows portrait grid picker popup for visual portrait selection
-    ///
-    /// Displays a popup window with a grid of portrait thumbnails that the user can click to select.
-    /// The popup is modal and closes when a portrait is selected or the close button is clicked.
-    ///
-    /// # Arguments
-    ///
-    /// * `ctx` - The egui context for rendering
-    /// * `campaign_dir` - The campaign directory containing assets/portraits
-    ///
-    /// # Returns
-    ///
-    /// Returns `Some(portrait_id)` if the user clicked on a portrait to select it,
-    /// or `None` if no selection was made this frame.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use campaign_builder::npc_editor::NpcEditorState;
-    /// use std::path::PathBuf;
-    ///
-    /// let mut state = NpcEditorState::new();
-    /// let campaign_dir = PathBuf::from("/path/to/campaign");
-    /// // In egui context:
-    /// // if let Some(selected_id) = state.show_portrait_grid_picker(ctx, Some(&campaign_dir)) {
-    /// //     println!("Selected portrait: {}", selected_id);
-    /// // }
-    /// ```
-    pub fn show_portrait_grid_picker(
-        &mut self,
-        ctx: &egui::Context,
-        campaign_dir: Option<&PathBuf>,
-    ) -> Option<String> {
-        let mut selected_portrait: Option<String> = None;
-
-        // Clone the portraits list to avoid borrow issues
-        let available_portraits = self.available_portraits.clone();
-
-        egui::Window::new("Select Portrait")
-            .collapsible(false)
-            .resizable(true)
-            .default_width(400.0)
-            .default_height(500.0)
-            .show(ctx, |ui| {
-                ui.label("Click a portrait to select:");
-                ui.separator();
-
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    // Display portraits in a grid with 4 columns
-                    const COLUMNS: usize = 4;
-                    const THUMBNAIL_SIZE: f32 = 80.0;
-
-                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-
-                    let total_portraits = available_portraits.len();
-                    let rows = total_portraits.div_ceil(COLUMNS);
-
-                    for row in 0..rows {
-                        ui.horizontal(|ui| {
-                            for col in 0..COLUMNS {
-                                let idx = row * COLUMNS + col;
-                                if idx >= total_portraits {
-                                    break;
-                                }
-
-                                let portrait_id = &available_portraits[idx];
-
-                                ui.vertical(|ui| {
-                                    // Try to load texture
-                                    self.load_portrait_texture(ctx, campaign_dir, portrait_id);
-                                    let has_texture = self
-                                        .portrait_textures
-                                        .get(portrait_id)
-                                        .and_then(|opt| opt.as_ref())
-                                        .is_some();
-
-                                    // Build tooltip text with portrait path
-                                    let tooltip_text = if let Some(path) =
-                                        resolve_portrait_path(campaign_dir, portrait_id)
-                                    {
-                                        format!(
-                                            "Portrait ID: {}\nPath: {}",
-                                            portrait_id,
-                                            path.display()
-                                        )
-                                    } else {
-                                        format!("Portrait ID: {}\n⚠ File not found", portrait_id)
-                                    };
-
-                                    // Create image button or placeholder
-                                    let button_response = if has_texture {
-                                        let texture = self
-                                            .portrait_textures
-                                            .get(portrait_id)
-                                            .and_then(|t| t.as_ref())
-                                            .expect("texture present since has_texture is true");
-                                        ui.add(
-                                            egui::Button::image(
-                                                egui::Image::new(texture).fit_to_exact_size(
-                                                    egui::vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE),
-                                                ),
-                                            )
-                                            .frame(true),
-                                        )
-                                        .on_hover_text(&tooltip_text)
-                                    } else {
-                                        // Placeholder for failed/missing images
-                                        let (rect, response) = ui.allocate_exact_size(
-                                            egui::vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE),
-                                            egui::Sense::click(),
-                                        );
-                                        ui.painter().rect_filled(
-                                            rect,
-                                            2.0,
-                                            egui::Color32::from_gray(50),
-                                        );
-                                        ui.painter().text(
-                                            rect.center(),
-                                            egui::Align2::CENTER_CENTER,
-                                            "?",
-                                            egui::FontId::proportional(24.0),
-                                            egui::Color32::from_gray(150),
-                                        );
-                                        response.on_hover_text(&tooltip_text)
-                                    };
-
-                                    // Check if clicked
-                                    if button_response.clicked() {
-                                        selected_portrait = Some(portrait_id.clone());
-                                        self.portrait_picker_open = false;
-                                    }
-
-                                    // Show portrait ID below thumbnail
-                                    ui.label(
-                                        egui::RichText::new(portrait_id)
-                                            .size(10.0)
-                                            .color(egui::Color32::from_gray(200)),
-                                    );
-                                });
-                            }
-                        });
-                    }
-
-                    // Show message if no portraits found
-                    if total_portraits == 0 {
-                        ui.label("No portraits found in campaign assets/portraits directory.");
-                    }
-                });
-
-                ui.separator();
-                ui.horizontal(|ui| {
-                    if ui.button("Close").clicked() {
-                        self.portrait_picker_open = false;
-                    }
-                });
-            });
-
-        selected_portrait
-    }
-
-    pub fn show_sprite_sheet_picker(
-        &mut self,
-        ctx: &egui::Context,
-        campaign_dir: Option<&PathBuf>,
-    ) -> Option<String> {
-        let mut selected_sheet: Option<String> = None;
-
-        // Clone the list to avoid borrow conflicts in the UI closure
-        let available = self.available_sprite_sheets.clone();
-
-        egui::Window::new("Select Sprite Sheet")
-            .collapsible(false)
-            .resizable(true)
-            .default_width(500.0)
-            .default_height(500.0)
-            .show(ctx, |ui| {
-                ui.label("Click a sprite sheet to select:");
-                ui.separator();
-
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-
-                    for sheet in &available {
-                        // Show each candidate as a selectable label with a small preview/action area
-                        ui.horizontal(|ui| {
-                            let resp = ui.selectable_label(false, sheet);
-                            if resp.clicked() {
-                                selected_sheet = Some(sheet.clone());
-                            }
-
-                            // Hover tooltip showing full path (if campaign dir known)
-                            if let Some(dir) = campaign_dir {
-                                let full = dir.join(sheet);
-                                if full.exists() {
-                                    ui.label(egui::RichText::new("•").weak())
-                                        .on_hover_text(format!("Path: {}", full.display()));
-                                } else {
-                                    ui.label(
-                                        egui::RichText::new("⚠")
-                                            .color(egui::Color32::from_rgb(255, 180, 0)),
-                                    )
-                                    .on_hover_text(format!("Missing: {}", full.display()));
-                                }
-                            }
-                        });
-                    }
-                });
-
-                ui.separator();
-
-                ui.horizontal(|ui| {
-                    if ui.button("Close").clicked() {
-                        self.sprite_picker_open = false;
-                    }
-                });
-            });
-
-        selected_sheet
-    }
-
     pub(crate) fn start_edit_npc(&mut self, idx: usize) {
         if let Some(npc) = self.npcs.get(idx) {
             self.edit_buffer = NpcEditBuffer {
@@ -2175,6 +1840,44 @@ impl NpcEditorState {
             }
             Some(MerchantDialogueRepairAction::RebindMerchantTarget) => {
                 let dialogue_id = self.edit_buffer.dialogue_id.clone();
+                let correct_npc_id = self.edit_buffer.id.clone();
+
+                // Rebind all OpenMerchant actions in the dialogue to the correct NPC.
+                // This handles authored (non-SDK-managed) choices as well as SDK-managed
+                // content, so the entire dialogue is consistently retargeted.
+                if let Ok(d_id) = dialogue_id.parse::<DialogueId>() {
+                    if let Some(dialogue) = self
+                        .merchant_dialogue_editor
+                        .dialogues
+                        .iter_mut()
+                        .find(|d| d.id == d_id)
+                    {
+                        for node in dialogue.nodes.values_mut() {
+                            for action in &mut node.actions {
+                                if let DialogueAction::OpenMerchant {
+                                    npc_id: ref mut target,
+                                } = action
+                                {
+                                    *target = correct_npc_id.clone();
+                                }
+                            }
+                            for choice in &mut node.choices {
+                                for action in &mut choice.actions {
+                                    if let DialogueAction::OpenMerchant {
+                                        npc_id: ref mut target,
+                                    } = action
+                                    {
+                                        *target = correct_npc_id.clone();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Sync rebound dialogues back to available_dialogues so that
+                    // subsequent SDK repair steps see the updated content.
+                    self.available_dialogues = self.merchant_dialogue_editor.dialogues.clone();
+                }
+
                 let removal_message = self.remove_merchant_dialogue_from_edit_buffer()?;
                 self.edit_buffer.is_merchant = true;
                 self.edit_buffer.dialogue_id = dialogue_id;
@@ -2357,7 +2060,10 @@ impl NpcEditorState {
             return self.create_or_repair_merchant_dialogue_for_buffer();
         }
 
-        Ok(String::new())
+        Ok(format!(
+            "Merchant dialogue already valid for '{}'",
+            self.edit_buffer.id
+        ))
     }
 
     fn save_npc(&mut self) -> bool {
@@ -2584,324 +2290,6 @@ impl NpcEditorState {
             counter += 1;
         }
     }
-}
-
-/// Helper function to show portrait placeholder
-fn load_npc_portrait_texture(
-    ctx: &egui::Context,
-    campaign_dir: Option<&PathBuf>,
-    portrait_id: &str,
-    portrait_textures: &mut HashMap<String, Option<egui::TextureHandle>>,
-) -> bool {
-    if portrait_textures.contains_key(portrait_id) {
-        return portrait_textures
-            .get(portrait_id)
-            .and_then(|value| value.as_ref())
-            .is_some();
-    }
-
-    let texture_handle = (|| {
-        let path = resolve_portrait_path(campaign_dir, portrait_id)?;
-
-        let image_bytes = match std::fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(_e) => {
-                // Portrait read failure is non-critical; the UI shows a "?" placeholder.
-                return None;
-            }
-        };
-
-        let dynamic_image = match image::load_from_memory(&image_bytes) {
-            Ok(img) => img,
-            Err(_e) => {
-                // Portrait decode failure is non-critical; the UI shows a "?" placeholder.
-                return None;
-            }
-        };
-
-        let rgba_image = dynamic_image.to_rgba8();
-        let size = [rgba_image.width() as usize, rgba_image.height() as usize];
-        let pixels = rgba_image.as_flat_samples();
-
-        let color_image = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
-
-        Some(ctx.load_texture(
-            format!("npc_portrait_{}", portrait_id),
-            color_image,
-            egui::TextureOptions::LINEAR,
-        ))
-    })();
-
-    let loaded = texture_handle.is_some();
-    // If loading failed, `loaded` is false and the UI will show a "?" placeholder.
-
-    portrait_textures.insert(portrait_id.to_string(), texture_handle);
-    loaded
-}
-
-fn merchant_dialogue_status_for_preview(
-    npc: &NpcDefinition,
-    dialogue: Option<&DialogueTree>,
-) -> &'static str {
-    if !npc.is_merchant {
-        if dialogue.is_some_and(DialogueTree::has_sdk_managed_merchant_content) {
-            return "Non-merchant has stale merchant content";
-        }
-        return "Not a merchant";
-    }
-
-    let Some(dialogue) = dialogue else {
-        return if npc.dialogue_id.is_some() {
-            "Assigned dialogue missing"
-        } else {
-            "No dialogue assigned"
-        };
-    };
-
-    if dialogue.contains_open_merchant_for_npc(&npc.id) {
-        if dialogue.has_sdk_managed_merchant_content() {
-            "SDK-managed merchant branch present"
-        } else {
-            "Merchant dialogue valid"
-        }
-    } else {
-        let opens_other_merchant = dialogue.nodes.values().any(|node| {
-            node.actions.iter().any(|action| {
-                matches!(
-                    action,
-                    DialogueAction::OpenMerchant { npc_id } if npc_id != &npc.id
-                )
-            }) || node.choices.iter().any(|choice| {
-                choice.actions.iter().any(|action| {
-                    matches!(
-                        action,
-                        DialogueAction::OpenMerchant { npc_id } if npc_id != &npc.id
-                    )
-                })
-            })
-        });
-
-        if opens_other_merchant {
-            "Merchant dialogue targets wrong NPC"
-        } else {
-            "Merchant dialogue missing OpenMerchant"
-        }
-    }
-}
-
-fn show_npc_preview(
-    ui: &mut egui::Ui,
-    npc: &NpcDefinition,
-    campaign_dir: Option<&PathBuf>,
-    creature_manager: Option<&CreatureAssetManager>,
-    available_dialogues: &[DialogueTree],
-    portrait_textures: &mut HashMap<String, Option<egui::TextureHandle>>,
-) {
-    let assigned_dialogue = npc.dialogue_id.and_then(|dialogue_id| {
-        available_dialogues
-            .iter()
-            .find(|dialogue| dialogue.id == dialogue_id)
-    });
-
-    ui.horizontal(|ui| {
-        let portrait_size = egui::vec2(128.0, 128.0);
-
-        let has_texture =
-            load_npc_portrait_texture(ui.ctx(), campaign_dir, &npc.portrait_id, portrait_textures);
-
-        if has_texture {
-            if let Some(Some(texture)) = portrait_textures.get(&npc.portrait_id) {
-                ui.add(egui::Image::new(texture).fit_to_exact_size(portrait_size));
-            } else {
-                show_portrait_placeholder(ui, portrait_size);
-            }
-        } else {
-            show_portrait_placeholder(ui, portrait_size);
-        }
-
-        ui.add_space(10.0);
-
-        ui.vertical(|ui| {
-            ui.heading(&npc.name);
-            ui.label(format!("ID: {}", npc.id));
-
-            if !npc.portrait_id.is_empty() {
-                ui.label(format!("Portrait: {}", npc.portrait_id));
-            }
-
-            ui.add_space(4.0);
-
-            if npc.is_merchant {
-                ui.label(egui::RichText::new("🏪 Merchant").color(egui::Color32::GOLD));
-                ui.small(
-                    "Merchant authoring standard: assigned dialogue must explicitly contain OpenMerchant. The I key during dialogue is only a runtime shortcut; the SDK will generate or repair merchant dialogue automatically and preserve custom dialogue where possible.",
-                );
-            }
-            if npc.is_innkeeper {
-                ui.label(egui::RichText::new("🛏️ Innkeeper").color(egui::Color32::LIGHT_BLUE));
-            }
-            if npc.is_priest {
-                ui.label(
-                    egui::RichText::new("✝ Priest")
-                        .color(egui::Color32::from_rgb(200, 180, 255)),
-                );
-            }
-            if !npc.is_merchant && !npc.is_innkeeper && !npc.is_priest {
-                ui.label(egui::RichText::new("🧑 NPC").color(egui::Color32::GRAY));
-            }
-        });
-    });
-
-    ui.add_space(10.0);
-    ui.separator();
-
-    egui::Grid::new("npc_preview_identity_grid")
-        .num_columns(2)
-        .spacing([20.0, 4.0])
-        .show(ui, |ui| {
-            if let Some(faction) = &npc.faction {
-                if !faction.trim().is_empty() {
-                    ui.label("Faction:");
-                    ui.label(faction.as_str());
-                    ui.end_row();
-                }
-            }
-
-            ui.label("Dialogue:");
-            ui.label(
-                npc.dialogue_id
-                    .map(|d| d.to_string())
-                    .as_deref()
-                    .unwrap_or("(none)"),
-            );
-            ui.end_row();
-
-            ui.label("Merchant Dialogue:");
-            ui.label(merchant_dialogue_status_for_preview(npc, assigned_dialogue));
-            ui.end_row();
-
-            ui.label("Quests:");
-            if npc.quest_ids.is_empty() {
-                ui.label("(none)");
-            } else {
-                ui.label(format!("{} assigned", npc.quest_ids.len()));
-            }
-            ui.end_row();
-
-            if let Some(creature_id) = npc.creature_id {
-                ui.label("Creature ID:");
-                ui.label(creature_id.to_string());
-                ui.end_row();
-            }
-
-            if let (Some(creature_id), Some(manager)) = (npc.creature_id, creature_manager) {
-                let resolved = manager
-                    .load_creature(creature_id)
-                    .map(|c| c.name)
-                    .unwrap_or_else(|_| "⚠ Unknown".to_string());
-                ui.label("Asset:");
-                ui.label(resolved);
-                ui.end_row();
-            }
-        });
-
-    if let Some(sprite) = &npc.sprite {
-        ui.add_space(10.0);
-        ui.heading("Sprite");
-        ui.separator();
-
-        egui::Grid::new("npc_preview_sprite_grid")
-            .num_columns(2)
-            .spacing([20.0, 4.0])
-            .show(ui, |ui| {
-                ui.label("Sheet:");
-                ui.label(&sprite.sheet_path);
-                ui.end_row();
-
-                ui.label("Index:");
-                ui.label(sprite.sprite_index.to_string());
-                ui.end_row();
-            });
-    }
-
-    if npc.is_merchant {
-        ui.add_space(10.0);
-        ui.heading("Merchant");
-        ui.separator();
-
-        egui::Grid::new("npc_preview_merchant_grid")
-            .num_columns(2)
-            .spacing([20.0, 4.0])
-            .show(ui, |ui| {
-                ui.label("Stock Template:");
-                ui.label(npc.stock_template.as_deref().unwrap_or("(none)"));
-                ui.end_row();
-
-                if let Some(economy) = &npc.economy {
-                    ui.label("Buy Rate:");
-                    ui.label(format!("{:.0}%", economy.buy_rate * 100.0));
-                    ui.end_row();
-
-                    ui.label("Sell Rate:");
-                    ui.label(format!("{:.0}%", economy.sell_rate * 100.0));
-                    ui.end_row();
-                }
-            });
-    }
-
-    if (npc.is_priest || npc.is_innkeeper) && npc.service_catalog.is_some() {
-        ui.add_space(10.0);
-        ui.heading("Services");
-        ui.separator();
-        ui.label("(service catalog configured)");
-    }
-
-    if !npc.quest_ids.is_empty() {
-        ui.add_space(10.0);
-        ui.heading("Quests");
-        ui.separator();
-
-        for quest_id in &npc.quest_ids {
-            ui.label(format!("• {}", quest_id));
-        }
-    }
-
-    if !npc.description.is_empty() {
-        ui.add_space(10.0);
-        ui.heading("Description");
-        ui.separator();
-        ui.label(&npc.description);
-    }
-}
-
-fn show_portrait_placeholder(ui: &mut egui::Ui, size: egui::Vec2) {
-    let (rect, _response) = ui.allocate_exact_size(size, egui::Sense::hover());
-
-    // Background
-    ui.painter().rect_filled(
-        rect,
-        egui::CornerRadius::same(4),
-        egui::Color32::from_gray(40),
-    );
-
-    // Border
-    ui.painter().rect_stroke(
-        rect,
-        egui::CornerRadius::same(4),
-        egui::Stroke::new(1.0, egui::Color32::from_gray(80)),
-        egui::StrokeKind::Outside,
-    );
-
-    // Icon
-    let center = rect.center();
-    let icon_size = size.y * 0.4;
-    ui.painter().text(
-        center,
-        egui::Align2::CENTER_CENTER,
-        "🖼",
-        egui::FontId::proportional(icon_size),
-        egui::Color32::from_rgb(150, 150, 150),
-    );
 }
 
 #[cfg(test)]
@@ -3167,7 +2555,10 @@ mod tests {
             .values()
             .filter(|node| node.has_sdk_managed_merchant_content())
             .count();
-        assert_eq!(merchant_nodes, 1);
+        // After augmentation there are 2 nodes with SDK merchant content:
+        // (1) the root node, which received a new SDK-managed merchant choice, and
+        // (2) the dedicated merchant node that was inserted.
+        assert_eq!(merchant_nodes, 2);
     }
 
     #[test]
@@ -3371,6 +2762,9 @@ mod tests {
             "generated merchant dialogue should remain structurally valid"
         );
 
+        // Commit the built NPC into the editor's list so it is included in save_to_file.
+        state.npcs.push(npc.clone());
+
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let dialogues_path = temp_dir.path().join("dialogues.ron");
         let npcs_path = temp_dir.path().join("npcs.ron");
@@ -3443,6 +2837,10 @@ mod tests {
         let npc = state
             .build_npc_from_edit_buffer(true)
             .expect("edit buffer should produce repaired merchant npc");
+
+        // Commit the built NPC into the editor's list so it is included in save_to_file.
+        state.npcs.push(npc.clone());
+
         let repaired_dialogue = state
             .available_dialogues
             .iter()

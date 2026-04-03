@@ -11,7 +11,7 @@ use super::*;
 
 impl CampaignBuilderApp {
     /// Show template browser dialog
-    pub(crate) fn show_template_browser_dialog(&mut self, ctx: &egui::Context) {
+    pub fn show_template_browser_dialog(&mut self, ctx: &egui::Context) {
         let mut open = self.ui_state.show_template_browser;
         egui::Window::new("📋 Template Browser")
             .open(&mut open)
@@ -148,7 +148,7 @@ impl CampaignBuilderApp {
     }
 
     /// Build registry references from the currently loaded creature definitions.
-    pub(crate) fn creature_references_from_current_registry(&self) -> Vec<CreatureReference> {
+    pub fn creature_references_from_current_registry(&self) -> Vec<CreatureReference> {
         self.campaign_data
             .creatures
             .iter()
@@ -164,7 +164,7 @@ impl CampaignBuilderApp {
     }
 
     /// Synchronize the creature ID manager from the current in-memory registry.
-    pub(crate) fn sync_creature_id_manager_from_creatures(&mut self) {
+    pub fn sync_creature_id_manager_from_creatures(&mut self) {
         let references = self.creature_references_from_current_registry();
         self.editor_registry
             .creatures_editor_state
@@ -176,7 +176,7 @@ impl CampaignBuilderApp {
     ///
     /// This method always refreshes the ID manager from `self.campaign_data.creatures` first so
     /// menu-entry order does not affect ID assignment correctness.
-    pub(crate) fn next_available_creature_id_for_category(
+    pub fn next_available_creature_id_for_category(
         &mut self,
         category: creature_id_manager::CreatureCategory,
     ) -> Result<CreatureId, String> {
@@ -245,7 +245,7 @@ impl CampaignBuilderApp {
     /// //     self.show_creature_template_browser_dialog(ctx);
     /// // }
     /// ```
-    pub(crate) fn show_creature_template_browser_dialog(&mut self, ctx: &egui::Context) {
+    pub fn show_creature_template_browser_dialog(&mut self, ctx: &egui::Context) {
         let mut open = self.ui_state.show_creature_template_browser;
 
         // Split borrows: `entries` borrows `creature_template_registry`
@@ -403,7 +403,7 @@ impl CampaignBuilderApp {
     }
 
     /// Show validation report dialog
-    pub(crate) fn show_validation_report_dialog(&mut self, ctx: &egui::Context) {
+    pub fn show_validation_report_dialog(&mut self, ctx: &egui::Context) {
         let mut open = self.validation_state.show_validation_report;
         egui::Window::new("📊 Advanced Validation Report")
             .open(&mut open)
@@ -433,7 +433,7 @@ impl CampaignBuilderApp {
     /// - Current editor state
     /// - Loaded data counts
     /// - Recent log messages with filtering
-    pub(crate) fn show_debug_panel_window(&mut self, ctx: &egui::Context) {
+    pub fn show_debug_panel_window(&mut self, ctx: &egui::Context) {
         let mut open = self.ui_state.show_debug_panel;
         egui::Window::new("🐛 Debug Panel")
             .open(&mut open)
@@ -624,7 +624,7 @@ impl CampaignBuilderApp {
     }
 
     /// Show balance statistics dialog
-    pub(crate) fn show_balance_stats_dialog(&mut self, ctx: &egui::Context) {
+    pub fn show_balance_stats_dialog(&mut self, ctx: &egui::Context) {
         let mut open = self.ui_state.show_balance_stats;
         egui::Window::new("⚖️ Balance Statistics")
             .open(&mut open)

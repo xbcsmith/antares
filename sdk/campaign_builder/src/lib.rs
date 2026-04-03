@@ -79,28 +79,21 @@ pub mod variation_editor;
 use antares::sdk::tool_config::ToolConfig;
 use logging::{category, LogLevel, Logger};
 
-#[cfg(test)]
 use antares::domain::character::Stats;
 use antares::domain::character::{FOOD_MAX, FOOD_MIN, PARTY_MAX_SIZE};
 use antares::domain::combat::database::MonsterDefinition;
-#[cfg(test)]
 use antares::domain::combat::monster::{LootTable, MonsterResistances};
-#[cfg(test)]
 use antares::domain::combat::types::{Attack, AttackType};
 use antares::domain::conditions::ConditionDefinition;
 use antares::domain::dialogue::{DialogueAction, DialogueTree};
 use antares::domain::items::types::Item;
-#[cfg(test)]
 use antares::domain::items::types::{ItemType, WeaponClassification, WeaponData};
 use antares::domain::magic::types::Spell;
-#[cfg(test)]
 use antares::domain::magic::types::{SpellContext, SpellSchool, SpellTarget};
 use antares::domain::proficiency::ProficiencyDefinition;
 use antares::domain::quest::Quest;
-#[cfg(test)]
 use antares::domain::quest::QuestId;
 use antares::domain::types::{CreatureId, GameTime};
-#[cfg(test)]
 use antares::domain::types::{DiceRoll, ItemId, MapId, MonsterId, SpellId};
 use antares::domain::visual::CreatureReference;
 use antares::domain::world::npc_runtime::MerchantStockTemplate;
@@ -387,45 +380,45 @@ pub fn run() -> Result<(), eframe::Error> {
 /// Campaign metadata structure matching campaign.ron schema
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CampaignMetadata {
-    id: String,
-    name: String,
-    version: String,
-    author: String,
-    description: String,
-    engine_version: String,
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub author: String,
+    pub description: String,
+    pub engine_version: String,
 
     // Campaign configuration
-    starting_map: String,
-    starting_position: (u32, u32),
-    starting_direction: String,
-    starting_gold: u32,
-    starting_food: u32,
+    pub starting_map: String,
+    pub starting_position: (u32, u32),
+    pub starting_direction: String,
+    pub starting_gold: u32,
+    pub starting_food: u32,
     #[serde(default = "default_starting_innkeeper")]
-    starting_innkeeper: String,
-    max_party_size: usize,
-    max_roster_size: usize,
-    difficulty: Difficulty,
-    permadeath: bool,
-    allow_multiclassing: bool,
-    starting_level: u8,
-    max_level: u8,
+    pub starting_innkeeper: String,
+    pub max_party_size: usize,
+    pub max_roster_size: usize,
+    pub difficulty: Difficulty,
+    pub permadeath: bool,
+    pub allow_multiclassing: bool,
+    pub starting_level: u8,
+    pub max_level: u8,
 
     // Data file paths
-    items_file: String,
-    spells_file: String,
-    monsters_file: String,
-    classes_file: String,
-    races_file: String,
-    characters_file: String,
-    maps_dir: String,
-    quests_file: String,
-    dialogue_file: String,
-    conditions_file: String,
-    npcs_file: String,
+    pub items_file: String,
+    pub spells_file: String,
+    pub monsters_file: String,
+    pub classes_file: String,
+    pub races_file: String,
+    pub characters_file: String,
+    pub maps_dir: String,
+    pub quests_file: String,
+    pub dialogue_file: String,
+    pub conditions_file: String,
+    pub npcs_file: String,
     #[serde(default = "default_proficiencies_file")]
-    proficiencies_file: String,
+    pub proficiencies_file: String,
     #[serde(default = "default_creatures_file")]
-    creatures_file: String,
+    pub creatures_file: String,
     /// Relative path to the NPC stock templates RON file
     #[serde(default = "default_stock_templates_file")]
     pub stock_templates_file: String,
@@ -456,7 +449,7 @@ pub enum Difficulty {
 }
 
 impl Difficulty {
-    fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         match self {
             Difficulty::Easy => "Easy",
             Difficulty::Normal => "Normal",
@@ -465,7 +458,7 @@ impl Difficulty {
         }
     }
 
-    fn all() -> [Difficulty; 4] {
+    pub fn all() -> [Difficulty; 4] {
         [
             Difficulty::Easy,
             Difficulty::Normal,
@@ -475,7 +468,7 @@ impl Difficulty {
     }
 }
 
-fn default_starting_innkeeper() -> String {
+pub fn default_starting_innkeeper() -> String {
     "tutorial_innkeeper_town".to_string()
 }
 
@@ -496,7 +489,7 @@ fn default_furniture_file() -> String {
 }
 
 /// Default starting time: Day 1, 08:00 — campaign begins in the morning.
-fn default_starting_time() -> GameTime {
+pub fn default_starting_time() -> GameTime {
     GameTime::new(1, 8, 0)
 }
 
@@ -545,8 +538,9 @@ impl Default for CampaignMetadata {
 }
 
 /// Active tab in the UI
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EditorTab {
+pub enum EditorTab {
     Metadata,
     Config,
     Items,
@@ -571,7 +565,7 @@ enum EditorTab {
 }
 
 impl EditorTab {
-    fn name(&self) -> &str {
+    pub fn name(&self) -> &str {
         match self {
             EditorTab::Metadata => "Metadata",
             EditorTab::Config => "Config",
@@ -605,8 +599,9 @@ impl EditorTab {
 ///
 /// The filter controls which severities the UI will display. These are user-facing
 /// selections and are persisted via the `CampaignBuilderApp` state.
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ValidationFilter {
+pub enum ValidationFilter {
     /// Show all severities (default)
     All,
     /// Only show `Error` severity checks
@@ -637,12 +632,13 @@ pub enum CampaignError {
 /// editor instances in [`editor_state::EditorRegistry`]; UI visibility flags
 /// in [`editor_state::EditorUiState`]; and validation results in
 /// [`editor_state::ValidationState`].
-struct CampaignBuilderApp {
+#[doc(hidden)]
+pub struct CampaignBuilderApp {
     // ─── Campaign identity ────────────────────────────────────────────────
-    campaign: CampaignMetadata,
-    campaign_path: Option<PathBuf>,
-    campaign_dir: Option<PathBuf>,
-    unsaved_changes: bool,
+    pub campaign: CampaignMetadata,
+    pub campaign_path: Option<PathBuf>,
+    pub campaign_dir: Option<PathBuf>,
+    pub unsaved_changes: bool,
     pending_action: Option<PendingAction>,
 
     // ─── Special editors ─────────────────────────────────────────────────
@@ -651,19 +647,19 @@ struct CampaignBuilderApp {
 
     // ─── Runtime services ────────────────────────────────────────────────
     undo_redo_manager: undo_redo::UndoRedoManager,
-    asset_manager: Option<asset_manager::AssetManager>,
+    pub asset_manager: Option<asset_manager::AssetManager>,
     template_manager: templates::TemplateManager,
-    creature_template_registry: template_metadata::TemplateRegistry,
+    pub creature_template_registry: template_metadata::TemplateRegistry,
     creature_template_browser_state: template_browser::TemplateBrowserState,
     logger: Logger,
     tool_config: ToolConfig,
     logo_texture: Option<egui::TextureHandle>,
 
     // ─── Grouped state (each counts as 1 field) ───────────────────────────
-    campaign_data: editor_state::CampaignData,
-    editor_registry: editor_state::EditorRegistry,
-    ui_state: editor_state::EditorUiState,
-    validation_state: editor_state::ValidationState,
+    pub campaign_data: editor_state::CampaignData,
+    pub editor_registry: editor_state::EditorRegistry,
+    pub ui_state: editor_state::EditorUiState,
+    pub validation_state: editor_state::ValidationState,
 
     // ─── Future / unused fields ──────────────────────────────────────────
     _export_wizard: Option<packager::ExportWizard>,
@@ -684,11 +680,12 @@ enum PendingAction {
     Exit,
 }
 
+#[doc(hidden)]
 #[derive(Debug, Clone)]
-struct FileNode {
-    name: String,
-    is_directory: bool,
-    _children: Vec<FileNode>,
+pub struct FileNode {
+    pub name: String,
+    pub is_directory: bool,
+    pub _children: Vec<FileNode>,
 }
 
 impl Default for CampaignBuilderApp {
@@ -2026,14 +2023,14 @@ impl CampaignBuilderApp {
     /// When a user clicks a file path in the validation panel, we set this value,
     /// open the Asset Manager, and surface a useful status message. The asset
     /// editor UI will highlight the focused asset if present.
-    fn reset_validation_filters(&mut self) {
+    pub fn reset_validation_filters(&mut self) {
         // Restore default validation filter state and clear any asset focus
         self.validation_state.validation_filter = ValidationFilter::All;
         self.validation_state.validation_focus_asset = None;
         self.ui_state.status_message = "Validation filters reset".to_string();
     }
 
-    fn focus_asset(&mut self, path: PathBuf) {
+    pub fn focus_asset(&mut self, path: PathBuf) {
         self.validation_state.validation_focus_asset = Some(path.clone());
         self.ui_state.show_asset_manager = true;
         self.ui_state.status_message = format!("🔎 Focused asset: {}", path.display());
@@ -2594,26 +2591,25 @@ impl CampaignBuilderApp {
     }
 }
 
-/// Editor mode for data editing panels (test-only)
-#[cfg(test)]
+/// Editor mode for data editing panels
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum EditorMode {
+pub enum EditorMode {
     List,
     Add,
     Edit,
 }
 
-/// Item type filter for search (test-only)
-#[cfg(test)]
+/// Item type filter for search
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ItemTypeFilter {
+pub enum ItemTypeFilter {
     Weapon,
     Armor,
 }
 
-#[cfg(test)]
 impl ItemTypeFilter {
-    fn matches(&self, item: &Item) -> bool {
+    pub fn matches(&self, item: &Item) -> bool {
         match self {
             ItemTypeFilter::Weapon => item.is_weapon(),
             ItemTypeFilter::Armor => item.is_armor(),
@@ -2621,10 +2617,9 @@ impl ItemTypeFilter {
     }
 }
 
-#[cfg(test)]
 impl CampaignBuilderApp {
     /// Create a default item for the edit buffer
-    fn default_item() -> Item {
+    pub fn default_item() -> Item {
         Item {
             id: 0,
             name: String::new(),
@@ -2650,7 +2645,7 @@ impl CampaignBuilderApp {
     }
 
     /// Create a default spell for the edit buffer
-    fn default_spell() -> Spell {
+    pub fn default_spell() -> Spell {
         Spell::new(
             0,
             "",
@@ -2668,7 +2663,7 @@ impl CampaignBuilderApp {
     }
 
     /// Create a default monster for the edit buffer
-    fn default_monster() -> MonsterDefinition {
+    pub fn default_monster() -> MonsterDefinition {
         use antares::domain::character::{AttributePair, AttributePair16};
         use antares::domain::combat::monster::MonsterCondition;
 
@@ -2709,7 +2704,7 @@ impl CampaignBuilderApp {
     /// Get next available item ID
     ///
     /// Returns the next unique ID by finding the maximum existing ID and adding 1.
-    fn next_available_item_id(&self) -> ItemId {
+    pub fn next_available_item_id(&self) -> ItemId {
         self.campaign_data
             .items
             .iter()
@@ -2722,7 +2717,7 @@ impl CampaignBuilderApp {
     /// Get next available spell ID
     ///
     /// Returns the next unique ID by finding the maximum existing ID and adding 1.
-    fn next_available_spell_id(&self) -> SpellId {
+    pub fn next_available_spell_id(&self) -> SpellId {
         self.campaign_data
             .spells
             .iter()
@@ -2735,7 +2730,7 @@ impl CampaignBuilderApp {
     /// Get next available monster ID
     ///
     /// Returns the next unique ID by finding the maximum existing ID and adding 1.
-    fn next_available_monster_id(&self) -> MonsterId {
+    pub fn next_available_monster_id(&self) -> MonsterId {
         self.campaign_data
             .monsters
             .iter()
@@ -2748,7 +2743,7 @@ impl CampaignBuilderApp {
     /// Get next available map ID
     ///
     /// Returns the next unique ID by finding the maximum existing ID and adding 1.
-    fn next_available_map_id(&self) -> MapId {
+    pub fn next_available_map_id(&self) -> MapId {
         self.campaign_data
             .maps
             .iter()
@@ -2759,7 +2754,7 @@ impl CampaignBuilderApp {
     }
 
     /// Get next available quest ID
-    fn next_available_quest_id(&self) -> QuestId {
+    pub fn next_available_quest_id(&self) -> QuestId {
         self.campaign_data
             .quests
             .iter()
@@ -2769,10 +2764,3 @@ impl CampaignBuilderApp {
             + 1
     }
 }
-
-#[cfg(test)]
-mod campaign_io_tests;
-#[cfg(test)]
-mod editor_state_tests;
-#[cfg(test)]
-mod ron_serialization_tests;

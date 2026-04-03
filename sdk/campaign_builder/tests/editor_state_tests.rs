@@ -4,16 +4,20 @@
 //! Editor state management, defaults, filter, compliance checker,
 //! and creature template tests.
 
-use super::*;
 use antares::domain::character::{AttributePair, AttributePair16, Stats};
+use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
 use antares::domain::combat::types::{Attack, AttackType};
 use antares::domain::combat::SpecialEffect;
+use antares::domain::conditions::ConditionDefinition;
+use antares::domain::dialogue::DialogueTree;
 use antares::domain::items::types::{ItemType, WeaponClassification, WeaponData};
 use antares::domain::items::ArmorClassification;
-use antares::domain::magic::types::{SpellContext, SpellSchool, SpellTarget};
-use antares::domain::quest::QuestStage;
+use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+use antares::domain::quest::{Quest, QuestStage};
 use antares::domain::types::DiceRoll;
+use antares::domain::world::Map;
+use campaign_builder::*;
 
 #[test]
 fn test_campaign_metadata_default() {
@@ -730,7 +734,7 @@ fn test_magic_resistance_range() {
 
 #[test]
 fn test_apply_condition_edits_insert() {
-    use crate::conditions_editor::apply_condition_edits;
+    use campaign_builder::conditions_editor::apply_condition_edits;
 
     let mut conditions: Vec<ConditionDefinition> = Vec::new();
 
@@ -751,7 +755,7 @@ fn test_apply_condition_edits_insert() {
 
 #[test]
 fn test_apply_condition_edits_update_success() {
-    use crate::conditions_editor::apply_condition_edits;
+    use campaign_builder::conditions_editor::apply_condition_edits;
 
     let mut conditions: Vec<ConditionDefinition> = Vec::new();
 
@@ -795,7 +799,7 @@ fn test_apply_condition_edits_update_success() {
 
 #[test]
 fn test_apply_condition_edits_update_duplicate_error() {
-    use crate::conditions_editor::apply_condition_edits;
+    use campaign_builder::conditions_editor::apply_condition_edits;
 
     let mut conditions: Vec<ConditionDefinition> = Vec::new();
 
@@ -828,7 +832,7 @@ fn test_apply_condition_edits_update_duplicate_error() {
 
 #[test]
 fn test_apply_condition_edits_insert_duplicate_error() {
-    use crate::conditions_editor::apply_condition_edits;
+    use campaign_builder::conditions_editor::apply_condition_edits;
 
     let mut conditions: Vec<ConditionDefinition> = Vec::new();
 
@@ -859,7 +863,7 @@ fn test_apply_condition_edits_insert_duplicate_error() {
 // Effect Editing Helper Tests
 #[test]
 fn test_condition_effect_helpers_success_flow() {
-    use crate::conditions_editor::{
+    use campaign_builder::conditions_editor::{
         add_effect_to_condition, delete_effect_from_condition, duplicate_effect_in_condition,
         move_effect_in_condition, update_effect_in_condition,
     };
@@ -920,8 +924,8 @@ fn test_condition_effect_helpers_success_flow() {
 
 #[test]
 fn test_update_effect_out_of_range() {
-    use crate::conditions_editor::update_effect_in_condition;
     use antares::domain::conditions::{ConditionDefinition, ConditionDuration, ConditionEffect};
+    use campaign_builder::conditions_editor::update_effect_in_condition;
 
     let mut condition = ConditionDefinition {
         id: "c_effects2".to_string(),
@@ -942,11 +946,11 @@ fn test_update_effect_out_of_range() {
 
 #[test]
 fn test_spells_referencing_condition_and_removal() {
-    use crate::conditions_editor::{
-        remove_condition_references_from_spells, spells_referencing_condition,
-    };
     use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
     use antares::domain::types::DiceRoll;
+    use campaign_builder::conditions_editor::{
+        remove_condition_references_from_spells, spells_referencing_condition,
+    };
 
     // Create a small set of spells, some referencing 'bless', others not.
     let mut spells: Vec<Spell> = Vec::new();
@@ -1002,9 +1006,9 @@ fn test_spells_referencing_condition_and_removal() {
 
 #[test]
 fn test_apply_condition_edits_validation_and_effect_types() {
-    use crate::conditions_editor::apply_condition_edits;
     use antares::domain::conditions::{ConditionDefinition, ConditionDuration, ConditionEffect};
     use antares::domain::types::DiceRoll;
+    use campaign_builder::conditions_editor::apply_condition_edits;
 
     let mut conditions: Vec<ConditionDefinition> = Vec::new();
 
@@ -1067,8 +1071,8 @@ fn test_apply_condition_edits_validation_and_effect_types() {
 
 #[test]
 fn test_validate_effect_edit_buffer() {
-    use crate::conditions_editor::{validate_effect_edit_buffer, EffectEditBuffer};
     use antares::domain::types::DiceRoll;
+    use campaign_builder::conditions_editor::{validate_effect_edit_buffer, EffectEditBuffer};
 
     // Attribute modifier - empty attribute fails
     let mut buf = EffectEditBuffer {
@@ -3130,9 +3134,9 @@ fn test_dialogue_validation_errors_cleared() {
 
 #[test]
 fn test_effect_type_filter_matches() {
-    use crate::conditions_editor::EffectTypeFilter;
     use antares::domain::conditions::{ConditionDefinition, ConditionDuration, ConditionEffect};
     use antares::domain::types::DiceRoll;
+    use campaign_builder::conditions_editor::EffectTypeFilter;
 
     // Condition with AttributeModifier
     let attr_cond = ConditionDefinition {
@@ -3205,7 +3209,7 @@ fn test_effect_type_filter_matches() {
 
 #[test]
 fn test_condition_sort_order_as_str() {
-    use crate::conditions_editor::ConditionSortOrder;
+    use campaign_builder::conditions_editor::ConditionSortOrder;
 
     assert_eq!(ConditionSortOrder::NameAsc.as_str(), "Name (A-Z)");
     assert_eq!(ConditionSortOrder::NameDesc.as_str(), "Name (Z-A)");
@@ -3216,9 +3220,9 @@ fn test_condition_sort_order_as_str() {
 
 #[test]
 fn test_condition_statistics_computation() {
-    use crate::conditions_editor::compute_condition_statistics;
     use antares::domain::conditions::{ConditionDefinition, ConditionDuration, ConditionEffect};
     use antares::domain::types::DiceRoll;
+    use campaign_builder::conditions_editor::compute_condition_statistics;
 
     let conditions = vec![
         ConditionDefinition {
@@ -3297,7 +3301,7 @@ fn test_conditions_editor_navigation_request() {
 
 #[test]
 fn test_conditions_editor_state_qol_defaults() {
-    use crate::conditions_editor::{ConditionSortOrder, EffectTypeFilter};
+    use campaign_builder::conditions_editor::{ConditionSortOrder, EffectTypeFilter};
 
     let state = conditions_editor::ConditionsEditorState::new();
 
@@ -3310,7 +3314,7 @@ fn test_conditions_editor_state_qol_defaults() {
 
 #[test]
 fn test_effect_type_filter_all_variants() {
-    use crate::conditions_editor::EffectTypeFilter;
+    use campaign_builder::conditions_editor::EffectTypeFilter;
 
     let all = EffectTypeFilter::all();
     assert_eq!(all.len(), 5);
@@ -3323,7 +3327,7 @@ fn test_effect_type_filter_all_variants() {
 
 #[test]
 fn test_effect_type_filter_as_str() {
-    use crate::conditions_editor::EffectTypeFilter;
+    use campaign_builder::conditions_editor::EffectTypeFilter;
 
     assert_eq!(EffectTypeFilter::All.as_str(), "All");
     assert_eq!(EffectTypeFilter::AttributeModifier.as_str(), "Attribute");
@@ -3339,7 +3343,7 @@ fn test_effect_type_filter_as_str() {
 
 #[test]
 fn test_pattern_matcher_combobox_id_salt_detection() {
-    use crate::test_utils::PatternMatcher;
+    use campaign_builder::test_utils::PatternMatcher;
 
     let matcher = PatternMatcher::combobox_id_salt();
 
@@ -3355,7 +3359,7 @@ fn test_pattern_matcher_combobox_id_salt_detection() {
 
 #[test]
 fn test_pattern_matcher_combobox_from_label_detection() {
-    use crate::test_utils::PatternMatcher;
+    use campaign_builder::test_utils::PatternMatcher;
 
     let matcher = PatternMatcher::combobox_from_label();
 
@@ -3369,7 +3373,7 @@ fn test_pattern_matcher_combobox_from_label_detection() {
 
 #[test]
 fn test_pattern_matcher_pub_fn_show_detection() {
-    use crate::test_utils::PatternMatcher;
+    use campaign_builder::test_utils::PatternMatcher;
 
     let matcher = PatternMatcher::pub_fn_show();
 
@@ -3386,7 +3390,7 @@ fn test_pattern_matcher_pub_fn_show_detection() {
 
 #[test]
 fn test_pattern_matcher_editor_state_struct_detection() {
-    use crate::test_utils::PatternMatcher;
+    use campaign_builder::test_utils::PatternMatcher;
 
     let matcher = PatternMatcher::editor_state_struct();
 
@@ -3402,7 +3406,7 @@ fn test_pattern_matcher_editor_state_struct_detection() {
 
 #[test]
 fn test_source_file_creation_and_analysis() {
-    use crate::test_utils::SourceFile;
+    use campaign_builder::test_utils::SourceFile;
 
     let content = r#"
 pub struct TestEditorState {
@@ -3436,7 +3440,7 @@ fn test_something() {}
 
 #[test]
 fn test_editor_compliance_check_detects_issues() {
-    use crate::test_utils::{check_editor_compliance, SourceFile};
+    use campaign_builder::test_utils::{check_editor_compliance, SourceFile};
 
     // Editor with from_label violation
     let bad_content = r#"
@@ -3458,7 +3462,7 @@ pub fn show(&mut self, ui: &mut egui::Ui) {
 
 #[test]
 fn test_editor_compliance_check_passes_good_editor() {
-    use crate::test_utils::{check_editor_compliance, SourceFile};
+    use campaign_builder::test_utils::{check_editor_compliance, SourceFile};
 
     let good_content = r#"
 pub struct GoodEditorState {
@@ -3499,7 +3503,7 @@ fn test_good_editor() {}
 
 #[test]
 fn test_compliance_score_calculation() {
-    use crate::test_utils::EditorComplianceResult;
+    use campaign_builder::test_utils::EditorComplianceResult;
 
     // Full compliance = 100 points
     let full = EditorComplianceResult {
@@ -3536,7 +3540,7 @@ fn test_compliance_score_calculation() {
 
 #[test]
 fn test_collect_combobox_id_salts() {
-    use crate::test_utils::{collect_combobox_id_salts, SourceFile};
+    use campaign_builder::test_utils::{collect_combobox_id_salts, SourceFile};
 
     let content = r#"
 egui::ComboBox::from_id_salt("difficulty_combo")
@@ -3558,7 +3562,7 @@ egui::ComboBox::from_id_salt("wall_combo")
 
 #[test]
 fn test_find_duplicate_combobox_ids_detects_conflicts() {
-    use crate::test_utils::{find_duplicate_combobox_ids, SourceFile};
+    use campaign_builder::test_utils::{find_duplicate_combobox_ids, SourceFile};
 
     let file1 = SourceFile::new(
         "editor1.rs",
@@ -3582,7 +3586,7 @@ fn test_find_duplicate_combobox_ids_detects_conflicts() {
 
 #[test]
 fn test_compliance_summary_calculation() {
-    use crate::test_utils::{ComplianceSummary, EditorComplianceResult};
+    use campaign_builder::test_utils::{ComplianceSummary, EditorComplianceResult};
     use std::collections::HashMap;
 
     let mut results = HashMap::new();
@@ -3632,7 +3636,7 @@ fn test_compliance_summary_calculation() {
 
 #[test]
 fn test_pattern_match_line_numbers() {
-    use crate::test_utils::PatternMatcher;
+    use campaign_builder::test_utils::PatternMatcher;
 
     let content = r#"line 1
 line 2
@@ -3652,7 +3656,7 @@ line 7"#;
 
 #[test]
 fn test_pattern_matcher_test_annotation() {
-    use crate::test_utils::PatternMatcher;
+    use campaign_builder::test_utils::PatternMatcher;
 
     let matcher = PatternMatcher::test_annotation();
     let content = r#"
@@ -3668,7 +3672,7 @@ fn test_another() {}
 
 #[test]
 fn test_pattern_matcher_toolbar_usage() {
-    use crate::test_utils::PatternMatcher;
+    use campaign_builder::test_utils::PatternMatcher;
 
     let matcher = PatternMatcher::editor_toolbar_usage();
 
@@ -3679,7 +3683,7 @@ fn test_pattern_matcher_toolbar_usage() {
 
 #[test]
 fn test_pattern_matcher_action_buttons_usage() {
-    use crate::test_utils::PatternMatcher;
+    use campaign_builder::test_utils::PatternMatcher;
 
     let matcher = PatternMatcher::action_buttons_usage();
 
@@ -3690,7 +3694,7 @@ fn test_pattern_matcher_action_buttons_usage() {
 
 #[test]
 fn test_pattern_matcher_two_column_layout_usage() {
-    use crate::test_utils::PatternMatcher;
+    use campaign_builder::test_utils::PatternMatcher;
 
     let matcher = PatternMatcher::two_column_layout_usage();
 
@@ -3701,7 +3705,7 @@ fn test_pattern_matcher_two_column_layout_usage() {
 
 #[test]
 fn test_editor_compliance_result_is_compliant() {
-    use crate::test_utils::EditorComplianceResult;
+    use campaign_builder::test_utils::EditorComplianceResult;
 
     // Compliant: no issues and no from_label
     let compliant = EditorComplianceResult {
@@ -3754,7 +3758,7 @@ fn test_editor_compliance_result_is_compliant() {
 
 #[test]
 fn test_compliance_summary_to_string_format() {
-    use crate::test_utils::ComplianceSummary;
+    use campaign_builder::test_utils::ComplianceSummary;
 
     let summary = ComplianceSummary {
         total_editors: 5,

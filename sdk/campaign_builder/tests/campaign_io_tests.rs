@@ -4,13 +4,20 @@
 //! Campaign I/O tests – load/save/validate methods, merchant dialogue,
 //! NPC validation, ID uniqueness checks.
 
-use super::*;
-use antares::domain::character::{Alignment, Sex};
+use antares::domain::character::{Alignment, Sex, FOOD_MAX};
 use antares::domain::character_definition::CharacterDefinition;
 use antares::domain::classes::ClassDefinition;
+use antares::domain::conditions::ConditionDefinition;
+use antares::domain::dialogue::{DialogueAction, DialogueTree};
 use antares::domain::items::types::{ItemType, WeaponClassification, WeaponData};
+use antares::domain::proficiency::ProficiencyDefinition;
+
 use antares::domain::races::RaceDefinition;
 use antares::domain::types::DiceRoll;
+use antares::domain::world::Map;
+use campaign_builder::items_editor::ItemsEditorState;
+use campaign_builder::monsters_editor::MonstersEditorState;
+use campaign_builder::*;
 
 #[test]
 fn test_handle_maps_open_npc_request_success() {
@@ -46,7 +53,7 @@ fn test_handle_maps_open_npc_request_success() {
     assert_eq!(app.ui_state.active_tab, EditorTab::NPCs);
     assert_eq!(
         app.editor_registry.npc_editor_state.mode,
-        crate::npc_editor::NpcEditorMode::Edit
+        campaign_builder::npc_editor::NpcEditorMode::Edit
     );
     assert_eq!(app.editor_registry.npc_editor_state.selected_npc, Some(0));
     assert!(app.ui_state.status_message.contains("Opening NPC editor"));
@@ -615,10 +622,8 @@ fn test_load_races_from_campaign_populates_races_editor_state() {
     fs::write(&races_path, races_ron).expect("Failed to write races.ron");
 
     // Setup the CampaignBuilderApp, and point it at our temporary campaign
-    let mut app = CampaignBuilderApp {
-        campaign_dir: Some(tmpdir.clone()),
-        ..Default::default()
-    };
+    let mut app = CampaignBuilderApp::default();
+    app.campaign_dir = Some(tmpdir.clone());
     // Use the default "data/races.ron" path; set explicitly to be safe
     app.campaign.races_file = "data/races.ron".to_string();
 
@@ -1553,11 +1558,9 @@ starting_time: GameTime(year: 1, month: 1, day: 1, hour: 8, minute: 0),
 
     // --- Build app state that mirrors "opened campaign, never visited
     //     Stock Templates tab, stock_templates_editor_state.loaded_from_file = false" ---
-    let mut app = CampaignBuilderApp {
-        campaign_path: Some(campaign_path.clone()),
-        campaign_dir: Some(dir.path().to_path_buf()),
-        ..Default::default()
-    };
+    let mut app = CampaignBuilderApp::default();
+    app.campaign_path = Some(campaign_path.clone());
+    app.campaign_dir = Some(dir.path().to_path_buf());
     // stock_templates_editor_state starts with loaded_from_file = false
     // and templates = Vec::new() — the exact pre-bug state.
     assert!(

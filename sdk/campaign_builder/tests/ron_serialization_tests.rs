@@ -3,13 +3,17 @@
 
 //! RON serialization round-trip tests for all major game data types.
 
-use super::*;
 use antares::domain::character::{AttributePair, AttributePair16, Stats};
+use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
 use antares::domain::combat::types::{Attack, AttackType};
 use antares::domain::combat::SpecialEffect;
-use antares::domain::magic::types::{SpellContext, SpellSchool, SpellTarget};
+use antares::domain::conditions::ConditionDefinition;
+use antares::domain::dialogue::DialogueTree;
+use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+use antares::domain::quest::Quest;
 use antares::domain::types::DiceRoll;
+use campaign_builder::*;
 
 #[test]
 fn test_ron_serialization() {

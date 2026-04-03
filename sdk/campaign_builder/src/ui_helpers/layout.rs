@@ -309,20 +309,21 @@ where
 
 /// Configuration bundle for [`searchable_selector_single`] and [`searchable_selector_multi`].
 ///
-/// Groups the three non-data parameters (`id_salt`, `label`, and `search_query`) into a
+/// Groups the two presentation parameters (`id_salt` and `label`) into a
 /// single struct so that the selector functions stay under the Clippy
 /// `too_many_arguments` threshold.
+///
+/// The mutable search buffer and candidate data are now carried by
+/// [`SearchableSelectorContext`].
 ///
 /// # Examples
 ///
 /// ```no_run
 /// use campaign_builder::ui_helpers::SearchableSelectorConfig;
 ///
-/// let mut query = String::new();
-/// let mut cfg = SearchableSelectorConfig {
+/// let cfg = SearchableSelectorConfig {
 ///     id_salt: "my_selector",
 ///     label: "Select item:",
-///     search_query: &mut query,
 /// };
 /// ```
 pub struct SearchableSelectorConfig<'a> {
@@ -330,34 +331,71 @@ pub struct SearchableSelectorConfig<'a> {
     pub id_salt: &'a str,
     /// User-visible label rendered to the left of the `ComboBox`.
     pub label: &'a str,
-    /// Mutable search-query buffer persisted by the caller across frames.
-    pub search_query: &'a mut String,
+}
+
+/// Context bundle for [`searchable_selector_single`] and [`searchable_selector_multi`].
+///
+/// Bundles the candidate slice, mutable search buffer, and accessor closures so
+/// call sites pass one argument instead of four.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::ui_helpers::SearchableSelectorContext;
+///
+/// struct Planet { id: u32, name: String }
+///
+/// let planets = vec![
+///     Planet { id: 1, name: "Mercury".to_string() },
+///     Planet { id: 2, name: "Venus".to_string() },
+/// ];
+/// let mut search = String::new();
+/// let ctx = SearchableSelectorContext {
+///     candidates: &planets,
+///     search_buf: &mut search,
+///     id_fn: |p: &Planet| p.id,
+///     label_fn: |p: &Planet| p.name.as_str(),
+/// };
+/// assert_eq!(ctx.candidates.len(), 2);
+/// assert_eq!((ctx.label_fn)(&planets[0]), "Mercury");
+/// ```
+pub struct SearchableSelectorContext<'a, T, ID> {
+    /// Full candidate list to filter and display.
+    pub candidates: &'a [T],
+    /// Mutable search string typed by the user, persisted by the caller across frames.
+    pub search_buf: &'a mut String,
+    /// Extracts the comparable ID from a candidate item.
+    pub id_fn: fn(&T) -> ID,
+    /// Extracts the display label from a candidate item.
+    pub label_fn: fn(&T) -> &str,
 }
 
 /// Single-selection searchable selector UI helper.
 ///
 /// - `ui`: egui UI reference
-/// - `cfg`: [`SearchableSelectorConfig`] bundling id_salt, label, and search_query
+/// - `cfg`: [`SearchableSelectorConfig`] bundling `id_salt` and `label`
 /// - `selected`: Mutable reference to current selection (`Option<ID>`)
-/// - `items`, `id_fn`, `label_fn` describe the available values and how to extract id/label
+/// - `ctx`: [`SearchableSelectorContext`] bundling candidates, search buffer, and accessor fns
 ///
 /// Returns `true` if the selection changed.
 ///
 /// This helper wraps `egui::ComboBox` and provides an inline search text field inside the
 /// ComboBox dropdown to filter options.
-pub fn searchable_selector_single<T, ID, FId, FLabel>(
+pub fn searchable_selector_single<T, ID>(
     ui: &mut egui::Ui,
-    cfg: &mut SearchableSelectorConfig<'_>,
+    cfg: &SearchableSelectorConfig<'_>,
     selected: &mut Option<ID>,
-    items: &[T],
-    id_fn: FId,
-    label_fn: FLabel,
+    ctx: SearchableSelectorContext<'_, T, ID>,
 ) -> bool
 where
     ID: Clone + PartialEq + Display,
-    FId: Fn(&T) -> ID,
-    FLabel: Fn(&T) -> String,
 {
+    let SearchableSelectorContext {
+        candidates,
+        search_buf,
+        id_fn,
+        label_fn,
+    } = ctx;
     ui.label(cfg.label);
     let mut changed = false;
     let selected_text = selected
@@ -367,19 +405,16 @@ where
         .selected_text(selected_text)
         .show_ui(ui, |ui| {
             // Search input at the top
-            ui.text_edit_singleline(cfg.search_query);
-            let q = cfg.search_query.to_lowercase();
+            ui.text_edit_singleline(search_buf);
+            let q = search_buf.to_lowercase();
 
             // Filtered list
-            for item in items.iter() {
+            for item in candidates.iter() {
                 let label_text = label_fn(item);
                 if q.is_empty() || label_text.to_lowercase().contains(&q) {
                     let id = id_fn(item);
                     let is_selected = selected.as_ref().map(|s| s == &id).unwrap_or(false);
-                    if ui
-                        .selectable_label(is_selected, label_text.clone())
-                        .clicked()
-                    {
+                    if ui.selectable_label(is_selected, label_text).clicked() {
                         *selected = Some(id);
                         changed = true;
                     }
@@ -392,24 +427,26 @@ where
 /// Multi-selection searchable selector UI helper.
 ///
 /// - `ui`: egui UI reference
-/// - `cfg`: [`SearchableSelectorConfig`] bundling id_salt, label, and search_query
+/// - `cfg`: [`SearchableSelectorConfig`] bundling `id_salt` and `label`
 /// - `selection`: mutable vector of selected IDs (caller manages order/persistence)
-/// - `items`, `id_fn`, `label_fn` describe the available values
+/// - `ctx`: [`SearchableSelectorContext`] bundling candidates, search buffer, and accessor fns
 ///
 /// Returns `true` if the selection changed (items added or removed).
-pub fn searchable_selector_multi<T, ID, FId, FLabel>(
+pub fn searchable_selector_multi<T, ID>(
     ui: &mut egui::Ui,
-    cfg: &mut SearchableSelectorConfig<'_>,
+    cfg: &SearchableSelectorConfig<'_>,
     selection: &mut Vec<ID>,
-    items: &[T],
-    id_fn: FId,
-    label_fn: FLabel,
+    ctx: SearchableSelectorContext<'_, T, ID>,
 ) -> bool
 where
     ID: Clone + PartialEq + Display,
-    FId: Fn(&T) -> ID,
-    FLabel: Fn(&T) -> String,
 {
+    let SearchableSelectorContext {
+        candidates,
+        search_buf,
+        id_fn,
+        label_fn,
+    } = ctx;
     ui.label(cfg.label);
     let mut changed = false;
 
@@ -417,10 +454,10 @@ where
     ui.horizontal_wrapped(|ui| {
         let mut idx_to_remove: Option<usize> = None;
         for (idx, sel) in selection.iter().enumerate() {
-            let label_text = items
+            let label_text = candidates
                 .iter()
                 .find(|it| id_fn(it) == *sel)
-                .map(&label_fn)
+                .map(|it| label_fn(it).to_owned())
                 .unwrap_or_else(|| sel.to_string());
             ui.horizontal(|ui| {
                 ui.label(label_text);
@@ -438,11 +475,11 @@ where
 
     // Add control: search box and Add button
     ui.horizontal(|ui| {
-        ui.text_edit_singleline(cfg.search_query);
+        ui.text_edit_singleline(search_buf);
         if ui.button("Add").clicked() {
-            let q = cfg.search_query.to_lowercase();
+            let q = search_buf.to_lowercase();
             // Try to find the first match by label text
-            if let Some(item) = items
+            if let Some(item) = candidates
                 .iter()
                 .find(|it| label_fn(it).to_lowercase().contains(&q))
             {
@@ -451,18 +488,18 @@ where
                     selection.push(id);
                     changed = true;
                 }
-                *cfg.search_query = String::new();
+                *search_buf = String::new();
             }
         }
     });
 
     // Suggestion buttons (compact)
-    let q = cfg.search_query.to_lowercase();
+    let q = search_buf.to_lowercase();
     ui.horizontal_wrapped(|ui| {
-        for item in items {
+        for item in candidates {
             let label_text = label_fn(item);
             if (q.is_empty() || label_text.to_lowercase().contains(&q))
-                && ui.small_button(label_text.clone()).clicked()
+                && ui.small_button(label_text).clicked()
             {
                 let id = id_fn(item);
                 if !selection.contains(&id) {

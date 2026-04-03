@@ -24,7 +24,7 @@ use super::*;
 /// collection. They are loaded from RON files by the methods in
 /// [`super::campaign_io`] and are written back to disk on every save.
 #[derive(Default)]
-pub(crate) struct CampaignData {
+pub struct CampaignData {
     /// Items loaded from `data/items.ron`.
     pub items: Vec<Item>,
 
@@ -66,7 +66,7 @@ pub(crate) struct CampaignData {
 /// Each editor owns its search buffers, selection indices, mode flags, and
 /// in-progress edit buffers. The data the editors display lives in
 /// [`CampaignData`]; the editors hold only the *view* state.
-pub(crate) struct EditorRegistry {
+pub struct EditorRegistry {
     /// Campaign metadata editor (edits [`super::CampaignMetadata`]).
     pub campaign_editor_state: campaign_editor::CampaignMetadataEditorState,
 
@@ -168,7 +168,7 @@ impl Default for EditorRegistry {
 /// Transient UI state: which tab is active, what dialogs are open, and
 /// other display-only flags that do not belong in the campaign data or
 /// in the per-editor state structs.
-pub(crate) struct EditorUiState {
+pub struct EditorUiState {
     /// Currently selected top-level editor tab.
     pub active_tab: EditorTab,
 
@@ -256,7 +256,7 @@ impl Default for EditorUiState {
 ///
 /// Keeping these together makes it easy to reset, pass around, or inspect the
 /// entire validation subsystem without touching editor or data state.
-pub(crate) struct ValidationState {
+pub struct ValidationState {
     /// All validation results from the most recent `validate_campaign()` run.
     pub validation_errors: Vec<validation::ValidationResult>,
 
