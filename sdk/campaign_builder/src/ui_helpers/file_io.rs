@@ -337,6 +337,17 @@ pub fn load_ron_file<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> 
         .map_err(|e| format!("Failed to parse RON from {}: {}", path.display(), e))
 }
 
+/// Errors that can occur during RON file I/O operations.
+#[derive(Debug, thiserror::Error)]
+pub enum FileIoError {
+    /// An OS-level I/O error (file not found, permission denied, etc.).
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    /// The data could not be serialised to RON.
+    #[error("RON serialisation error: {0}")]
+    Serialization(String),
+}
+
 /// Saves data to a RON file with pretty formatting.
 ///
 /// # Type Parameters
@@ -350,7 +361,7 @@ pub fn load_ron_file<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> 
 ///
 /// # Returns
 ///
-/// `Ok(())` on success, `Err(String)` with error message on failure.
+/// `Ok(())` on success, `Err(FileIoError)` on failure.
 ///
 /// # Examples
 ///
@@ -362,12 +373,15 @@ pub fn load_ron_file<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> 
 /// let items: Vec<Item> = vec![];
 /// save_ron_file(&items, Path::new("data/items.ron")).expect("Failed to save");
 /// ```
-pub fn save_ron_file<T: serde::Serialize>(data: &T, path: &std::path::Path) -> Result<(), String> {
+pub fn save_ron_file<T: serde::Serialize>(
+    data: &T,
+    path: &std::path::Path,
+) -> Result<(), FileIoError> {
     let contents = ron::ser::to_string_pretty(data, Default::default())
-        .map_err(|e| format!("Failed to serialize data: {}", e))?;
+        .map_err(|e| FileIoError::Serialization(e.to_string()))?;
 
-    std::fs::write(path, contents)
-        .map_err(|e| format!("Failed to write file {}: {}", path.display(), e))
+    std::fs::write(path, contents)?;
+    Ok(())
 }
 
 /// Handles file load action for an editor.
@@ -467,7 +481,7 @@ pub fn handle_file_save<T: serde::Serialize>(
                 return true;
             }
             Err(e) => {
-                *status_message = e;
+                *status_message = e.to_string();
             }
         }
     }

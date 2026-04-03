@@ -11,6 +11,23 @@
 
 use super::*;
 
+/// Errors produced by campaign I/O operations (save/write to the filesystem).
+#[derive(Debug, thiserror::Error)]
+pub enum CampaignIoError {
+    /// No campaign directory has been set.
+    #[error("No campaign directory set")]
+    NoCampaignDir,
+    /// A parent directory could not be created.
+    #[error("Failed to create directory: {0}")]
+    CreateDirectoryFailed(String),
+    /// RON serialisation of campaign data failed.
+    #[error("Failed to serialize data: {0}")]
+    SerializationFailed(String),
+    /// Writing the data file to disk failed.
+    #[error("Failed to write file: {0}")]
+    WriteFileFailed(String),
+}
+
 /// Reads a RON file and parses it as `Vec<T>`.
 ///
 /// Returns `Some(Vec<T>)` on success and updates `status_message`.
@@ -73,21 +90,23 @@ fn write_ron_collection<T: serde::Serialize>(
     filename: &str,
     data: &[T],
     type_label: &str,
-) -> Result<(), String> {
+) -> Result<(), CampaignIoError> {
     let dir = campaign_dir
         .as_ref()
-        .ok_or_else(|| "No campaign directory set".to_string())?;
+        .ok_or(CampaignIoError::NoCampaignDir)?;
     let path = dir.join(filename);
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create {} directory: {}", type_label, e))?;
+        fs::create_dir_all(parent).map_err(|e| {
+            CampaignIoError::CreateDirectoryFailed(format!("{}: {}", type_label, e))
+        })?;
     }
     let ron_config = ron::ser::PrettyConfig::new()
         .struct_names(false)
         .enumerate_arrays(false);
     let contents = ron::ser::to_string_pretty(data, ron_config)
-        .map_err(|e| format!("Failed to serialize {}: {}", type_label, e))?;
-    fs::write(&path, contents).map_err(|e| format!("Failed to write {} file: {}", type_label, e))
+        .map_err(|e| CampaignIoError::SerializationFailed(format!("{}: {}", type_label, e)))?;
+    fs::write(&path, contents)
+        .map_err(|e| CampaignIoError::WriteFileFailed(format!("{}: {}", type_label, e)))
 }
 
 impl CampaignBuilderApp {
@@ -1109,7 +1128,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save items to RON file
-    pub(crate) fn save_items(&mut self) -> Result<(), String> {
+    pub(crate) fn save_items(&mut self) -> Result<(), CampaignIoError> {
         self.logger.debug(category::FILE_IO, "save_items() called");
         let mut sorted = self.campaign_data.items.clone();
         sorted.sort_by_key(|i| i.id);
@@ -1159,7 +1178,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save spells to RON file
-    pub(crate) fn save_spells(&mut self) -> Result<(), String> {
+    pub(crate) fn save_spells(&mut self) -> Result<(), CampaignIoError> {
         let mut sorted = self.campaign_data.spells.clone();
         sorted.sort_by_key(|s| s.id);
         write_ron_collection(
@@ -1200,7 +1219,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save conditions to RON file
-    pub(crate) fn save_conditions(&mut self) -> Result<(), String> {
+    pub(crate) fn save_conditions(&mut self) -> Result<(), CampaignIoError> {
         let mut sorted = self.campaign_data.conditions.clone();
         sorted.sort_by(|a, b| a.id.cmp(&b.id));
         write_ron_collection(
@@ -1302,7 +1321,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save proficiencies to RON file
-    pub(crate) fn save_proficiencies(&mut self) -> Result<(), String> {
+    pub(crate) fn save_proficiencies(&mut self) -> Result<(), CampaignIoError> {
         self.logger
             .debug(category::FILE_IO, "save_proficiencies() called");
         if let Some(ref dir) = self.campaign_dir {
@@ -1318,8 +1337,9 @@ impl CampaignBuilderApp {
 
             // Create proficiencies directory if it doesn't exist
             if let Some(parent) = proficiencies_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create proficiencies directory: {}", e))?;
+                fs::create_dir_all(parent).map_err(|e| {
+                    CampaignIoError::CreateDirectoryFailed(format!("proficiencies: {}", e))
+                })?;
             }
 
             let ron_config = ron::ser::PrettyConfig::new()
@@ -1330,11 +1350,13 @@ impl CampaignBuilderApp {
             let mut sorted_proficiencies = self.campaign_data.proficiencies.clone();
             sorted_proficiencies.sort_by(|a, b| a.id.cmp(&b.id));
 
-            let contents = ron::ser::to_string_pretty(&sorted_proficiencies, ron_config)
-                .map_err(|e| format!("Failed to serialize proficiencies: {}", e))?;
+            let contents =
+                ron::ser::to_string_pretty(&sorted_proficiencies, ron_config).map_err(|e| {
+                    CampaignIoError::SerializationFailed(format!("proficiencies: {}", e))
+                })?;
 
             fs::write(&proficiencies_path, &contents)
-                .map_err(|e| format!("Failed to write proficiencies file: {}", e))?;
+                .map_err(|e| CampaignIoError::WriteFileFailed(format!("proficiencies: {}", e)))?;
 
             self.logger.info(
                 category::FILE_IO,
@@ -1351,7 +1373,7 @@ impl CampaignBuilderApp {
                 category::FILE_IO,
                 "No campaign directory set when trying to save proficiencies",
             );
-            Err("No campaign directory set".to_string())
+            Err(CampaignIoError::NoCampaignDir)
         }
     }
 
@@ -1364,11 +1386,14 @@ impl CampaignBuilderApp {
     /// # Returns
     ///
     /// Returns `Ok(())` if save was successful
-    pub(crate) fn save_dialogues_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+    pub(crate) fn save_dialogues_to_file(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<(), CampaignIoError> {
         // Create directory if it doesn't exist
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create dialogues directory: {}", e))?;
+                .map_err(|e| CampaignIoError::CreateDirectoryFailed(format!("dialogues: {}", e)))?;
         }
 
         let ron_config = ron::ser::PrettyConfig::new()
@@ -1380,10 +1405,10 @@ impl CampaignBuilderApp {
         sorted_dialogues.sort_by_key(|d| d.id);
 
         let contents = ron::ser::to_string_pretty(&sorted_dialogues, ron_config)
-            .map_err(|e| format!("Failed to serialize dialogues: {}", e))?;
+            .map_err(|e| CampaignIoError::SerializationFailed(format!("dialogues: {}", e)))?;
 
         std::fs::write(path, contents)
-            .map_err(|e| format!("Failed to write dialogues file: {}", e))?;
+            .map_err(|e| CampaignIoError::WriteFileFailed(format!("dialogues: {}", e)))?;
 
         Ok(())
     }
@@ -1397,11 +1422,11 @@ impl CampaignBuilderApp {
     /// # Returns
     ///
     /// Returns `Ok(())` if save was successful
-    pub(crate) fn save_npcs_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+    pub(crate) fn save_npcs_to_file(&self, path: &std::path::Path) -> Result<(), CampaignIoError> {
         // Create directory if it doesn't exist
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create NPCs directory: {}", e))?;
+                .map_err(|e| CampaignIoError::CreateDirectoryFailed(format!("NPCs: {}", e)))?;
         }
 
         let ron_config = ron::ser::PrettyConfig::new()
@@ -1413,9 +1438,10 @@ impl CampaignBuilderApp {
         sorted_npcs.sort_by(|a, b| a.id.cmp(&b.id));
 
         let contents = ron::ser::to_string_pretty(&sorted_npcs, ron_config)
-            .map_err(|e| format!("Failed to serialize NPCs: {}", e))?;
+            .map_err(|e| CampaignIoError::SerializationFailed(format!("NPCs: {}", e)))?;
 
-        std::fs::write(path, contents).map_err(|e| format!("Failed to write NPCs file: {}", e))?;
+        std::fs::write(path, contents)
+            .map_err(|e| CampaignIoError::WriteFileFailed(format!("NPCs: {}", e)))?;
 
         Ok(())
     }
@@ -1538,7 +1564,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save monsters to RON file
-    pub(crate) fn save_monsters(&mut self) -> Result<(), String> {
+    pub(crate) fn save_monsters(&mut self) -> Result<(), CampaignIoError> {
         let mut sorted = self.campaign_data.monsters.clone();
         sorted.sort_by_key(|m| m.id);
         write_ron_collection(
@@ -1582,8 +1608,8 @@ impl CampaignBuilderApp {
 
     /// Save furniture definitions to the campaign furniture RON file.
     ///
-    /// Returns an Err string on failure so the caller can aggregate warnings.
-    pub(crate) fn save_furniture(&mut self) -> Result<(), String> {
+    /// Returns an `Err` on failure so the caller can aggregate warnings.
+    pub(crate) fn save_furniture(&mut self) -> Result<(), CampaignIoError> {
         write_ron_collection(
             &self.campaign_dir,
             &self.campaign.furniture_file,
@@ -1732,7 +1758,7 @@ impl CampaignBuilderApp {
     }
 
     /// Save creatures to RON file
-    pub(crate) fn save_creatures(&mut self) -> Result<(), String> {
+    pub(crate) fn save_creatures(&mut self) -> Result<(), CampaignIoError> {
         if let Some(ref dir) = self.campaign_dir {
             // Step 1: Create registry entries from creatures
             let references: Vec<CreatureReference> = self
@@ -1758,8 +1784,9 @@ impl CampaignBuilderApp {
             // Step 2: Save registry file (creatures.ron)
             let creatures_path = dir.join(&self.campaign.creatures_file);
             if let Some(parent) = creatures_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create creatures directory: {}", e))?;
+                fs::create_dir_all(parent).map_err(|e| {
+                    CampaignIoError::CreateDirectoryFailed(format!("creatures: {}", e))
+                })?;
             }
 
             let registry_ron_config = ron::ser::PrettyConfig::new()
@@ -1769,15 +1796,19 @@ impl CampaignBuilderApp {
                 .depth_limit(2);
 
             let registry_contents = ron::ser::to_string_pretty(&references, registry_ron_config)
-                .map_err(|e| format!("Failed to serialize creatures registry: {}", e))?;
+                .map_err(|e| {
+                    CampaignIoError::SerializationFailed(format!("creatures registry: {}", e))
+                })?;
 
-            fs::write(&creatures_path, registry_contents)
-                .map_err(|e| format!("Failed to write creatures registry: {}", e))?;
+            fs::write(&creatures_path, registry_contents).map_err(|e| {
+                CampaignIoError::WriteFileFailed(format!("creatures registry: {}", e))
+            })?;
 
             // Step 3: Save individual creature files (assets/creatures/*.ron)
             let creatures_dir = dir.join("assets/creatures");
-            fs::create_dir_all(&creatures_dir)
-                .map_err(|e| format!("Failed to create creatures assets directory: {}", e))?;
+            fs::create_dir_all(&creatures_dir).map_err(|e| {
+                CampaignIoError::CreateDirectoryFailed(format!("creatures assets: {}", e))
+            })?;
 
             let creature_ron_config = ron::ser::PrettyConfig::new()
                 .struct_names(false)
@@ -1790,14 +1821,19 @@ impl CampaignBuilderApp {
 
                 let creature_contents =
                     ron::ser::to_string_pretty(creature, creature_ron_config.clone()).map_err(
-                        |e| format!("Failed to serialize creature {}: {}", reference.name, e),
+                        |e| {
+                            CampaignIoError::SerializationFailed(format!(
+                                "creature {}: {}",
+                                reference.name, e
+                            ))
+                        },
                     )?;
 
                 fs::write(&creature_path, creature_contents).map_err(|e| {
-                    format!(
-                        "Failed to write creature file {}: {}",
+                    CampaignIoError::WriteFileFailed(format!(
+                        "creature file {}: {}",
                         reference.filepath, e
-                    )
+                    ))
                 })?;
             }
 
@@ -1809,7 +1845,7 @@ impl CampaignBuilderApp {
             self.unsaved_changes = true;
             Ok(())
         } else {
-            Err("No campaign directory set".to_string())
+            Err(CampaignIoError::NoCampaignDir)
         }
     }
 
@@ -1899,13 +1935,13 @@ impl CampaignBuilderApp {
     }
 
     /// Save a map to RON file
-    pub(crate) fn save_map(&mut self, map: &Map) -> Result<(), String> {
+    pub(crate) fn save_map(&mut self, map: &Map) -> Result<(), CampaignIoError> {
         if let Some(ref dir) = self.campaign_dir {
             let maps_dir = dir.join(&self.campaign.maps_dir);
 
             // Create maps directory if it doesn't exist
             fs::create_dir_all(&maps_dir)
-                .map_err(|e| format!("Failed to create maps directory: {}", e))?;
+                .map_err(|e| CampaignIoError::CreateDirectoryFailed(format!("maps: {}", e)))?;
 
             let map_filename = format!("map_{}.ron", map.id);
             let map_path = maps_dir.join(map_filename);
@@ -1915,15 +1951,15 @@ impl CampaignBuilderApp {
                 .enumerate_arrays(false);
 
             let contents = ron::ser::to_string_pretty(map, ron_config)
-                .map_err(|e| format!("Failed to serialize map: {}", e))?;
+                .map_err(|e| CampaignIoError::SerializationFailed(format!("map: {}", e)))?;
 
             fs::write(&map_path, contents)
-                .map_err(|e| format!("Failed to write map file: {}", e))?;
+                .map_err(|e| CampaignIoError::WriteFileFailed(format!("map: {}", e)))?;
 
             self.unsaved_changes = true;
             Ok(())
         } else {
-            Err("No campaign directory set".to_string())
+            Err(CampaignIoError::NoCampaignDir)
         }
     }
 

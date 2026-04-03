@@ -20,13 +20,25 @@ use serde::{Deserialize, Serialize};
 /// Maximum number of actions in the undo/redo history
 pub const MAX_HISTORY_SIZE: usize = 50;
 
+/// Errors produced by undo/redo command execution.
+#[derive(Debug, thiserror::Error)]
+pub enum CommandError {
+    /// An entity was not found when undoing a command (e.g. the item was
+    /// already removed before the undo ran).
+    #[error("{0}")]
+    EntityNotFound(String),
+    /// A data-collection index was out of bounds during command execute/undo.
+    #[error("{0}")]
+    InvalidIndex(String),
+}
+
 /// Command trait for reversible operations
 pub(crate) trait Command: std::fmt::Debug {
     /// Execute the command
-    fn execute(&self, data: &mut CampaignData) -> Result<(), String>;
+    fn execute(&self, data: &mut CampaignData) -> Result<(), CommandError>;
 
     /// Undo the command
-    fn undo(&self, data: &mut CampaignData) -> Result<(), String>;
+    fn undo(&self, data: &mut CampaignData) -> Result<(), CommandError>;
 
     /// Get a human-readable description of this command
     fn description(&self) -> String;
@@ -416,12 +428,12 @@ impl UndoRedoManager {
     ///
     /// This method is part of the planned undo/redo API and will be wired to
     /// editor actions in a future milestone.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn execute(
         &mut self,
         command: Box<dyn Command>,
         data: &mut CampaignData,
-    ) -> Result<(), String> {
+    ) -> Result<(), CommandError> {
         command.execute(data)?;
         self.stack.push_new(command);
         Ok(())
@@ -433,7 +445,7 @@ impl UndoRedoManager {
     pub(crate) fn undo(&mut self, data: &mut CampaignData) -> Result<String, String> {
         if let Some(command) = self.stack.pop_undo() {
             let description = command.description();
-            command.undo(data)?;
+            command.undo(data).map_err(|e| e.to_string())?;
             self.stack.push_to_redo(command);
             Ok(description)
         } else {
@@ -447,7 +459,7 @@ impl UndoRedoManager {
     pub(crate) fn redo(&mut self, data: &mut CampaignData) -> Result<String, String> {
         if let Some(command) = self.stack.pop_redo() {
             let description = command.description();
-            command.execute(data)?;
+            command.execute(data).map_err(|e| e.to_string())?;
             self.stack.push_to_undo(command);
             Ok(description)
         } else {
@@ -508,17 +520,20 @@ impl AddItemCommand {
 }
 
 impl Command for AddItemCommand {
-    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn execute(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         data.items.push(self.item.clone());
         Ok(())
     }
 
-    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn undo(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if let Some(pos) = data.items.iter().position(|i| i.id == self.item.id) {
             data.items.remove(pos);
             Ok(())
         } else {
-            Err(format!("Item {} not found for undo", self.item.id))
+            Err(CommandError::EntityNotFound(format!(
+                "Item {} not found for undo",
+                self.item.id
+            )))
         }
     }
 
@@ -541,21 +556,27 @@ impl DeleteItemCommand {
 }
 
 impl Command for DeleteItemCommand {
-    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn execute(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if self.index < data.items.len() {
             data.items.remove(self.index);
             Ok(())
         } else {
-            Err(format!("Invalid item index: {}", self.index))
+            Err(CommandError::InvalidIndex(format!(
+                "Invalid item index: {}",
+                self.index
+            )))
         }
     }
 
-    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn undo(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if self.index <= data.items.len() {
             data.items.insert(self.index, self.item.clone());
             Ok(())
         } else {
-            Err(format!("Invalid item index for undo: {}", self.index))
+            Err(CommandError::InvalidIndex(format!(
+                "Invalid item index for undo: {}",
+                self.index
+            )))
         }
     }
 
@@ -583,21 +604,27 @@ impl EditItemCommand {
 }
 
 impl Command for EditItemCommand {
-    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn execute(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if self.index < data.items.len() {
             data.items[self.index] = self.new_item.clone();
             Ok(())
         } else {
-            Err(format!("Invalid item index: {}", self.index))
+            Err(CommandError::InvalidIndex(format!(
+                "Invalid item index: {}",
+                self.index
+            )))
         }
     }
 
-    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn undo(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if self.index < data.items.len() {
             data.items[self.index] = self.old_item.clone();
             Ok(())
         } else {
-            Err(format!("Invalid item index for undo: {}", self.index))
+            Err(CommandError::InvalidIndex(format!(
+                "Invalid item index for undo: {}",
+                self.index
+            )))
         }
     }
 
@@ -623,17 +650,20 @@ impl AddSpellCommand {
 }
 
 impl Command for AddSpellCommand {
-    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn execute(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         data.spells.push(self.spell.clone());
         Ok(())
     }
 
-    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn undo(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if let Some(pos) = data.spells.iter().position(|s| s.id == self.spell.id) {
             data.spells.remove(pos);
             Ok(())
         } else {
-            Err(format!("Spell {} not found for undo", self.spell.id))
+            Err(CommandError::EntityNotFound(format!(
+                "Spell {} not found for undo",
+                self.spell.id
+            )))
         }
     }
 
@@ -656,21 +686,27 @@ impl DeleteSpellCommand {
 }
 
 impl Command for DeleteSpellCommand {
-    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn execute(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if self.index < data.spells.len() {
             data.spells.remove(self.index);
             Ok(())
         } else {
-            Err(format!("Invalid spell index: {}", self.index))
+            Err(CommandError::InvalidIndex(format!(
+                "Invalid spell index: {}",
+                self.index
+            )))
         }
     }
 
-    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn undo(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if self.index <= data.spells.len() {
             data.spells.insert(self.index, self.spell.clone());
             Ok(())
         } else {
-            Err(format!("Invalid spell index for undo: {}", self.index))
+            Err(CommandError::InvalidIndex(format!(
+                "Invalid spell index for undo: {}",
+                self.index
+            )))
         }
     }
 
@@ -698,21 +734,27 @@ impl EditSpellCommand {
 }
 
 impl Command for EditSpellCommand {
-    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn execute(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if self.index < data.spells.len() {
             data.spells[self.index] = self.new_spell.clone();
             Ok(())
         } else {
-            Err(format!("Invalid spell index: {}", self.index))
+            Err(CommandError::InvalidIndex(format!(
+                "Invalid spell index: {}",
+                self.index
+            )))
         }
     }
 
-    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn undo(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if self.index < data.spells.len() {
             data.spells[self.index] = self.old_spell.clone();
             Ok(())
         } else {
-            Err(format!("Invalid spell index for undo: {}", self.index))
+            Err(CommandError::InvalidIndex(format!(
+                "Invalid spell index for undo: {}",
+                self.index
+            )))
         }
     }
 
@@ -738,17 +780,20 @@ impl AddMonsterCommand {
 }
 
 impl Command for AddMonsterCommand {
-    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn execute(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         data.monsters.push(self.monster.clone());
         Ok(())
     }
 
-    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn undo(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if let Some(pos) = data.monsters.iter().position(|m| m.id == self.monster.id) {
             data.monsters.remove(pos);
             Ok(())
         } else {
-            Err(format!("Monster {} not found for undo", self.monster.id))
+            Err(CommandError::EntityNotFound(format!(
+                "Monster {} not found for undo",
+                self.monster.id
+            )))
         }
     }
 
@@ -771,21 +816,27 @@ impl DeleteMonsterCommand {
 }
 
 impl Command for DeleteMonsterCommand {
-    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn execute(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if self.index < data.monsters.len() {
             data.monsters.remove(self.index);
             Ok(())
         } else {
-            Err(format!("Invalid monster index: {}", self.index))
+            Err(CommandError::InvalidIndex(format!(
+                "Invalid monster index: {}",
+                self.index
+            )))
         }
     }
 
-    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn undo(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if self.index <= data.monsters.len() {
             data.monsters.insert(self.index, self.monster.clone());
             Ok(())
         } else {
-            Err(format!("Invalid monster index for undo: {}", self.index))
+            Err(CommandError::InvalidIndex(format!(
+                "Invalid monster index for undo: {}",
+                self.index
+            )))
         }
     }
 
@@ -817,21 +868,27 @@ impl EditMonsterCommand {
 }
 
 impl Command for EditMonsterCommand {
-    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn execute(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if self.index < data.monsters.len() {
             data.monsters[self.index] = self.new_monster.clone();
             Ok(())
         } else {
-            Err(format!("Invalid monster index: {}", self.index))
+            Err(CommandError::InvalidIndex(format!(
+                "Invalid monster index: {}",
+                self.index
+            )))
         }
     }
 
-    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn undo(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if self.index < data.monsters.len() {
             data.monsters[self.index] = self.old_monster.clone();
             Ok(())
         } else {
-            Err(format!("Invalid monster index for undo: {}", self.index))
+            Err(CommandError::InvalidIndex(format!(
+                "Invalid monster index for undo: {}",
+                self.index
+            )))
         }
     }
 
@@ -857,17 +914,20 @@ impl AddQuestCommand {
 }
 
 impl Command for AddQuestCommand {
-    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn execute(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         data.quests.push(self.quest.clone());
         Ok(())
     }
 
-    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn undo(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if let Some(pos) = data.quests.iter().position(|q| q.id == self.quest.id) {
             data.quests.remove(pos);
             Ok(())
         } else {
-            Err(format!("Quest {} not found for undo", self.quest.id))
+            Err(CommandError::EntityNotFound(format!(
+                "Quest {} not found for undo",
+                self.quest.id
+            )))
         }
     }
 
@@ -890,21 +950,27 @@ impl DeleteQuestCommand {
 }
 
 impl Command for DeleteQuestCommand {
-    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn execute(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if self.index < data.quests.len() {
             data.quests.remove(self.index);
             Ok(())
         } else {
-            Err(format!("Invalid quest index: {}", self.index))
+            Err(CommandError::InvalidIndex(format!(
+                "Invalid quest index: {}",
+                self.index
+            )))
         }
     }
 
-    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+    fn undo(&self, data: &mut CampaignData) -> Result<(), CommandError> {
         if self.index <= data.quests.len() {
             data.quests.insert(self.index, self.quest.clone());
             Ok(())
         } else {
-            Err(format!("Invalid quest index for undo: {}", self.index))
+            Err(CommandError::InvalidIndex(format!(
+                "Invalid quest index for undo: {}",
+                self.index
+            )))
         }
     }
 

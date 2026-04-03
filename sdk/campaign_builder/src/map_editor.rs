@@ -2998,6 +2998,20 @@ impl<'a> Widget for MapPreviewWidget<'a> {
 
 // ===== Main Maps Editor State =====
 
+/// Errors that can occur when saving a map to disk.
+#[derive(Debug, thiserror::Error)]
+pub enum MapEditorError {
+    /// OS-level I/O failure.
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    /// The map could not be serialised to RON.
+    #[error("Serialisation error: {0}")]
+    Serialization(String),
+    /// No campaign directory has been set.
+    #[error("No campaign directory set")]
+    NoCampaignDir,
+}
+
 /// Main maps editor state following the standard SDK editor pattern.
 ///
 /// This struct holds all state for the maps editor, including the list of maps,
@@ -6484,13 +6498,12 @@ impl MapsEditorState {
         map: &Map,
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), MapEditorError> {
         if let Some(dir) = campaign_dir {
             let maps_path = dir.join(maps_dir);
 
             // Create maps directory if it doesn't exist
-            fs::create_dir_all(&maps_path)
-                .map_err(|e| format!("Failed to create maps directory: {}", e))?;
+            fs::create_dir_all(&maps_path)?;
 
             let map_filename = format!("map_{}.ron", map.id);
             let map_path = maps_path.join(map_filename);
@@ -6500,14 +6513,13 @@ impl MapsEditorState {
                 .enumerate_arrays(false);
 
             let contents = ron::ser::to_string_pretty(map, ron_config)
-                .map_err(|e| format!("Failed to serialize map: {}", e))?;
+                .map_err(|e| MapEditorError::Serialization(e.to_string()))?;
 
-            fs::write(&map_path, contents)
-                .map_err(|e| format!("Failed to write map file: {}", e))?;
+            fs::write(&map_path, contents)?;
 
             Ok(())
         } else {
-            Err("No campaign directory set".to_string())
+            Err(MapEditorError::NoCampaignDir)
         }
     }
 

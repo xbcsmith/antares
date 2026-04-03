@@ -42,6 +42,20 @@ use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// Errors that can occur in the Stock Templates Editor.
+#[derive(Debug, thiserror::Error)]
+pub enum StockTemplatesEditorError {
+    /// OS-level I/O failure.
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    /// The file could not be parsed as RON.
+    #[error("Parse error: {0}")]
+    Parse(String),
+    /// The data could not be serialised to RON.
+    #[error("Serialisation error: {0}")]
+    Serialization(String),
+}
+
 // ===== Mode =====
 
 /// Editor mode for the stock templates editor
@@ -1361,12 +1375,11 @@ impl StockTemplatesEditorState {
     /// let result = state.load_from_file(std::path::Path::new("/nonexistent/path.ron"));
     /// assert!(result.is_err());
     /// ```
-    pub fn load_from_file(&mut self, path: &Path) -> Result<(), String> {
-        let contents = std::fs::read_to_string(path)
-            .map_err(|e| format!("Could not read '{}': {}", path.display(), e))?;
+    pub fn load_from_file(&mut self, path: &Path) -> Result<(), StockTemplatesEditorError> {
+        let contents = std::fs::read_to_string(path)?;
 
         let templates: Vec<MerchantStockTemplate> = ron::from_str(&contents)
-            .map_err(|e| format!("Could not parse '{}': {}", path.display(), e))?;
+            .map_err(|e| StockTemplatesEditorError::Parse(e.to_string()))?;
 
         self.templates = templates;
         self.selected_template = None;
@@ -1392,11 +1405,10 @@ impl StockTemplatesEditorState {
     /// let result = state.save_to_file(std::path::Path::new("/tmp/npc_stock_templates.ron"));
     /// // Depends on filesystem access; just calling to show the API.
     /// ```
-    pub fn save_to_file(&self, path: &Path) -> Result<(), String> {
+    pub fn save_to_file(&self, path: &Path) -> Result<(), StockTemplatesEditorError> {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Could not create directory '{}': {}", parent.display(), e))?;
+            std::fs::create_dir_all(parent)?;
         }
 
         let config = ron::ser::PrettyConfig::new()
@@ -1405,10 +1417,9 @@ impl StockTemplatesEditorState {
             .depth_limit(6);
 
         let ron_string = ron::ser::to_string_pretty(&self.templates, config)
-            .map_err(|e| format!("Serialisation failed: {}", e))?;
+            .map_err(|e| StockTemplatesEditorError::Serialization(e.to_string()))?;
 
-        std::fs::write(path, ron_string)
-            .map_err(|e| format!("Could not write '{}': {}", path.display(), e))?;
+        std::fs::write(path, ron_string)?;
 
         Ok(())
     }

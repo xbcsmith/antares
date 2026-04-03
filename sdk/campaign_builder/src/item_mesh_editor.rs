@@ -54,6 +54,15 @@ pub enum ItemMeshEditorError {
     ReadError(String, String),
     #[error("'{0}' is not a valid ItemMeshDescriptor or CreatureDefinition")]
     InvalidFormat(String),
+    /// Cannot revert while the editor is in Registry mode.
+    #[error("Cannot revert: editor is in Registry mode")]
+    RegistryMode,
+    /// Cannot revert because no registry entry is selected.
+    #[error("Cannot revert: no entry selected")]
+    NoEntrySelected,
+    /// The expected registry entry no longer exists.
+    #[error("Registry entry {0} no longer exists")]
+    EntryNotFound(usize),
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -251,6 +260,11 @@ pub struct ItemMeshEditorState {
 
     // ── Dirty tracking ──────────────────────────────────────────────────────
     unsaved_changes: bool,
+
+    // ── Operation status ────────────────────────────────────────────────────
+    /// Last operation status message (success or error), displayed in the edit
+    /// mode toolbar.  Cleared when the user navigates away from Edit mode.
+    pub operation_status: Option<String>,
 }
 
 impl Default for ItemMeshEditorState {
@@ -295,6 +309,7 @@ impl Default for ItemMeshEditorState {
             registry: Vec::new(),
             camera_distance: 5.0,
             unsaved_changes: false,
+            operation_status: None,
         }
     }
 }
@@ -597,6 +612,7 @@ impl ItemMeshEditorState {
         self.unsaved_changes = false;
         self.validation_errors.clear();
         self.validation_warnings.clear();
+        self.operation_status = None;
         self.workflow.return_to_registry();
     }
 
@@ -1196,19 +1212,19 @@ impl ItemMeshEditorState {
     /// state.revert_edit_buffer_from_registry().unwrap();
     /// assert_eq!(state.edit_buffer.as_ref().unwrap().scale, 1.0);
     /// ```
-    pub fn revert_edit_buffer_from_registry(&mut self) -> Result<(), String> {
+    pub fn revert_edit_buffer_from_registry(&mut self) -> Result<(), ItemMeshEditorError> {
         if matches!(self.workflow.mode(), ItemMeshEditorMode::Registry) {
-            return Err("Cannot revert: editor is in Registry mode".to_string());
+            return Err(ItemMeshEditorError::RegistryMode);
         }
 
         let idx = self
             .selected_entry
-            .ok_or_else(|| "Cannot revert: no entry selected".to_string())?;
+            .ok_or(ItemMeshEditorError::NoEntrySelected)?;
 
         let descriptor = self
             .registry
             .get(idx)
-            .ok_or_else(|| format!("Registry entry {} no longer exists", idx))?
+            .ok_or(ItemMeshEditorError::EntryNotFound(idx))?
             .descriptor
             .clone();
 
@@ -2021,8 +2037,14 @@ impl ItemMeshEditorState {
                 .on_hover_text("Reload from registry")
                 .clicked()
             {
-                // Intentional: revert is best-effort and the editor remains in its current state on failure
-                let _ = self.revert_edit_buffer_from_registry();
+                match self.revert_edit_buffer_from_registry() {
+                    Ok(()) => {
+                        self.operation_status = Some("Reverted to registry state".to_string());
+                    }
+                    Err(e) => {
+                        self.operation_status = Some(format!("Revert failed: {}", e));
+                    }
+                }
                 ui.ctx().request_repaint();
             }
 
@@ -2058,6 +2080,14 @@ impl ItemMeshEditorState {
                 ui.colored_label(egui::Color32::from_rgb(255, 165, 0), "● Unsaved changes");
             }
         });
+
+        if let Some(msg) = &self.operation_status {
+            if msg.starts_with("Revert failed") {
+                ui.colored_label(egui::Color32::RED, msg);
+            } else {
+                ui.colored_label(egui::Color32::DARK_GREEN, msg);
+            }
+        }
 
         ui.separator();
 

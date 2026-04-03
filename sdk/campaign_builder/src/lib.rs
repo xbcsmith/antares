@@ -149,8 +149,16 @@ pub fn run() -> Result<(), eframe::Error> {
         .with_min_inner_size([800.0, 600.0])
         .with_title("Antares Campaign Builder");
 
-    if let Some(icon_data) = icon::app_icon_data() {
-        viewport = viewport.with_icon(icon_data);
+    match icon::app_icon_data() {
+        Ok(icon_data) => {
+            viewport = viewport.with_icon(icon_data);
+        }
+        Err(e) => {
+            logger.warn(
+                category::APP,
+                &format!("Failed to decode application icon: {e}"),
+            );
+        }
     }
 
     let options = eframe::NativeOptions {

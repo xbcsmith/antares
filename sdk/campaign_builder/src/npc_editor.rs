@@ -76,6 +76,20 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+/// Errors that can occur in the NPC Editor.
+#[derive(Debug, thiserror::Error)]
+pub enum NpcEditorError {
+    /// OS-level I/O failure.
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    /// The file could not be parsed as RON.
+    #[error("Parse error: {0}")]
+    Parse(String),
+    /// The data could not be serialised to RON.
+    #[error("Serialisation error: {0}")]
+    Serialization(String),
+}
+
 /// Merchant dialogue validation state derived from an NPC plus its assigned
 /// dialogue tree.
 ///
@@ -2463,7 +2477,7 @@ impl NpcEditorState {
     ///
     /// # Returns
     ///
-    /// `Ok(())` on success, `Err(String)` with a description on failure.
+    /// `Ok(())` on success, `Err(NpcEditorError)` on failure.
     ///
     /// # Examples
     ///
@@ -2474,11 +2488,10 @@ impl NpcEditorState {
     /// let mut state = NpcEditorState::new();
     /// // state.load_from_file(Path::new("data/npcs.ron")).unwrap();
     /// ```
-    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), String> {
-        let contents = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-        let loaded: Vec<NpcDefinition> = ron::from_str(&contents)
-            .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))?;
+    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), NpcEditorError> {
+        let contents = std::fs::read_to_string(path)?;
+        let loaded: Vec<NpcDefinition> =
+            ron::from_str(&contents).map_err(|e| NpcEditorError::Parse(e.to_string()))?;
         self.npcs = loaded;
         self.selected_npc = None;
         self.mode = NpcEditorMode::List;
@@ -2486,14 +2499,13 @@ impl NpcEditorState {
         Ok(())
     }
 
-    fn save_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+    fn save_to_file(&self, path: &std::path::Path) -> Result<(), NpcEditorError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+            std::fs::create_dir_all(parent)?;
         }
         let content = ron::ser::to_string_pretty(&self.npcs, ron::ser::PrettyConfig::default())
-            .map_err(|e| format!("Failed to serialize npcs: {}", e))?;
-        std::fs::write(path, content).map_err(|e| format!("Failed to write file: {}", e))?;
+            .map_err(|e| NpcEditorError::Serialization(e.to_string()))?;
+        std::fs::write(path, content)?;
         Ok(())
     }
 
@@ -4278,8 +4290,8 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err();
         assert!(
-            msg.contains("Failed to read"),
-            "error should mention read failure, got: {msg}"
+            msg.to_string().contains("IO error"),
+            "error should mention IO error, got: {msg}"
         );
     }
 
@@ -4295,7 +4307,7 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err();
         assert!(
-            msg.contains("Failed to parse"),
+            msg.to_string().contains("Parse error"),
             "error should mention parse failure, got: {msg}"
         );
     }

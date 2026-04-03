@@ -1019,6 +1019,23 @@ pub fn validate_armor_classification(
     ))
 }
 
+/// Errors returned by NPC reference validation helpers.
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum NpcReferenceError {
+    /// The NPC ID string is empty.
+    #[error("NPC ID cannot be empty")]
+    EmptyId,
+    /// The NPC ID is not in the known-IDs set.
+    #[error("NPC placement references unknown NPC ID: '{0}'")]
+    UnknownNpcId(String),
+    /// The dialogue ID is not in the known-IDs set.
+    #[error("NPC references unknown dialogue ID: {0}")]
+    UnknownDialogueId(u16),
+    /// One of the quest IDs is not in the known-IDs set.
+    #[error("NPC references unknown quest ID: {0}")]
+    UnknownQuestId(u32),
+}
+
 #[cfg(test)]
 /// Validates NPC placement references
 ///
@@ -1035,16 +1052,13 @@ pub fn validate_armor_classification(
 pub fn validate_npc_placement_reference(
     npc_id: &str,
     available_npc_ids: &std::collections::HashSet<String>,
-) -> Result<(), String> {
+) -> Result<(), NpcReferenceError> {
     if npc_id.is_empty() {
-        return Err("NPC ID cannot be empty".to_string());
+        return Err(NpcReferenceError::EmptyId);
     }
 
     if !available_npc_ids.contains(npc_id) {
-        return Err(format!(
-            "NPC placement references unknown NPC ID: '{}'",
-            npc_id
-        ));
+        return Err(NpcReferenceError::UnknownNpcId(npc_id.to_string()));
     }
 
     Ok(())
@@ -1065,10 +1079,10 @@ pub fn validate_npc_placement_reference(
 pub fn validate_npc_dialogue_reference(
     dialogue_id: Option<u16>,
     available_dialogue_ids: &std::collections::HashSet<u16>,
-) -> Result<(), String> {
+) -> Result<(), NpcReferenceError> {
     if let Some(id) = dialogue_id {
         if !available_dialogue_ids.contains(&id) {
-            return Err(format!("NPC references unknown dialogue ID: {}", id));
+            return Err(NpcReferenceError::UnknownDialogueId(id));
         }
     }
     Ok(())
@@ -1089,10 +1103,10 @@ pub fn validate_npc_dialogue_reference(
 pub fn validate_npc_quest_references(
     quest_ids: &[u32],
     available_quest_ids: &std::collections::HashSet<u32>,
-) -> Result<(), String> {
+) -> Result<(), NpcReferenceError> {
     for quest_id in quest_ids {
         if !available_quest_ids.contains(quest_id) {
-            return Err(format!("NPC references unknown quest ID: {}", quest_id));
+            return Err(NpcReferenceError::UnknownQuestId(*quest_id));
         }
     }
     Ok(())
@@ -1738,7 +1752,7 @@ mod tests {
 
         let result = validate_npc_placement_reference("unknown_npc", &available);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unknown NPC ID"));
+        assert!(result.unwrap_err().to_string().contains("unknown NPC ID"));
     }
 
     #[test]
@@ -1746,7 +1760,7 @@ mod tests {
         let available = std::collections::HashSet::new();
         let result = validate_npc_placement_reference("", &available);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("cannot be empty"));
+        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
     }
 
     #[test]
@@ -1766,7 +1780,10 @@ mod tests {
 
         let result = validate_npc_dialogue_reference(Some(99), &available);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unknown dialogue ID"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("unknown dialogue ID"));
     }
 
     #[test]
@@ -1788,7 +1805,10 @@ mod tests {
 
         let result = validate_npc_quest_references(&[1, 99], &available);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unknown quest ID: 99"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("unknown quest ID: 99"));
     }
 
     #[test]
@@ -1799,7 +1819,7 @@ mod tests {
         // Should fail on first invalid quest
         let result = validate_npc_quest_references(&[99, 100], &available);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unknown quest ID"));
+        assert!(result.unwrap_err().to_string().contains("unknown quest ID"));
     }
 
     #[test]

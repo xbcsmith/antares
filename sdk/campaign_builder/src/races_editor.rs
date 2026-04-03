@@ -22,6 +22,23 @@ use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
 
+/// Errors that can occur in the Races Editor.
+#[derive(Debug, thiserror::Error)]
+pub enum RaceEditorError {
+    /// OS-level I/O failure.
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    /// The file could not be parsed as RON.
+    #[error("Parse error: {0}")]
+    Parse(String),
+    /// The data could not be serialised to RON.
+    #[error("Serialisation error: {0}")]
+    Serialization(String),
+    /// A field failed validation.
+    #[error("{0}")]
+    Validation(String),
+}
+
 /// Editor state for races
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RacesEditorState {
@@ -182,15 +199,19 @@ impl RacesEditorState {
     }
 
     /// Saves the current race from the edit buffer
-    pub fn save_race(&mut self) -> Result<(), String> {
+    pub fn save_race(&mut self) -> Result<(), RaceEditorError> {
         let id = self.buffer.id.trim().to_string();
         if id.is_empty() {
-            return Err("ID cannot be empty".to_string());
+            return Err(RaceEditorError::Validation(
+                "ID cannot be empty".to_string(),
+            ));
         }
 
         let name = self.buffer.name.trim().to_string();
         if name.is_empty() {
-            return Err("Name cannot be empty".to_string());
+            return Err(RaceEditorError::Validation(
+                "Name cannot be empty".to_string(),
+            ));
         }
 
         // Parse stat modifiers
@@ -198,79 +219,74 @@ impl RacesEditorState {
             .buffer
             .might
             .parse::<i8>()
-            .map_err(|_| "Invalid Might value")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Might value".to_string()))?;
         let intellect = self
             .buffer
             .intellect
             .parse::<i8>()
-            .map_err(|_| "Invalid Intellect value")?;
-        let personality = self
-            .buffer
-            .personality
-            .parse::<i8>()
-            .map_err(|_| "Invalid Personality value")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Intellect value".to_string()))?;
+        let personality =
+            self.buffer.personality.parse::<i8>().map_err(|_| {
+                RaceEditorError::Validation("Invalid Personality value".to_string())
+            })?;
         let endurance = self
             .buffer
             .endurance
             .parse::<i8>()
-            .map_err(|_| "Invalid Endurance value")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Endurance value".to_string()))?;
         let speed = self
             .buffer
             .speed
             .parse::<i8>()
-            .map_err(|_| "Invalid Speed value")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Speed value".to_string()))?;
         let accuracy = self
             .buffer
             .accuracy
             .parse::<i8>()
-            .map_err(|_| "Invalid Accuracy value")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Accuracy value".to_string()))?;
         let luck = self
             .buffer
             .luck
             .parse::<i8>()
-            .map_err(|_| "Invalid Luck value")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Luck value".to_string()))?;
 
         // Parse resistances
         let magic_resist = self
             .buffer
             .magic_resist
             .parse::<u8>()
-            .map_err(|_| "Invalid Magic resistance")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Magic resistance".to_string()))?;
         let fire_resist = self
             .buffer
             .fire_resist
             .parse::<u8>()
-            .map_err(|_| "Invalid Fire resistance")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Fire resistance".to_string()))?;
         let cold_resist = self
             .buffer
             .cold_resist
             .parse::<u8>()
-            .map_err(|_| "Invalid Cold resistance")?;
-        let electricity_resist = self
-            .buffer
-            .electricity_resist
-            .parse::<u8>()
-            .map_err(|_| "Invalid Electricity resistance")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Cold resistance".to_string()))?;
+        let electricity_resist = self.buffer.electricity_resist.parse::<u8>().map_err(|_| {
+            RaceEditorError::Validation("Invalid Electricity resistance".to_string())
+        })?;
         let acid_resist = self
             .buffer
             .acid_resist
             .parse::<u8>()
-            .map_err(|_| "Invalid Acid resistance")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Acid resistance".to_string()))?;
         let fear_resist = self
             .buffer
             .fear_resist
             .parse::<u8>()
-            .map_err(|_| "Invalid Fear resistance")?;
-        let poison_resist = self
-            .buffer
-            .poison_resist
-            .parse::<u8>()
-            .map_err(|_| "Invalid Poison resistance")?;
-        let psychic_resist = self
-            .buffer
-            .psychic_resist
-            .parse::<u8>()
-            .map_err(|_| "Invalid Psychic resistance")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Fear resistance".to_string()))?;
+        let poison_resist =
+            self.buffer.poison_resist.parse::<u8>().map_err(|_| {
+                RaceEditorError::Validation("Invalid Poison resistance".to_string())
+            })?;
+        let psychic_resist =
+            self.buffer.psychic_resist.parse::<u8>().map_err(|_| {
+                RaceEditorError::Validation("Invalid Psychic resistance".to_string())
+            })?;
 
         let special_abilities: Vec<String> = self
             .buffer
@@ -330,7 +346,9 @@ impl RacesEditorState {
         } else {
             // Check for duplicate ID if creating new
             if self.races.iter().any(|r| r.id == id) {
-                return Err("Race ID already exists".to_string());
+                return Err(RaceEditorError::Validation(
+                    "Race ID already exists".to_string(),
+                ));
             }
             self.races.push(race_def);
         }
@@ -388,11 +406,10 @@ impl RacesEditorState {
     }
 
     /// Loads races from a file path
-    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), String> {
-        let content =
-            std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
+    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), RaceEditorError> {
+        let content = std::fs::read_to_string(path)?;
         let races: Vec<RaceDefinition> =
-            ron::from_str(&content).map_err(|e| format!("Failed to parse races: {}", e))?;
+            ron::from_str(&content).map_err(|e| RaceEditorError::Parse(e.to_string()))?;
         self.races = races;
         self.has_unsaved_changes = false;
         // Do not auto-select a race on load; wait for the user to select one
@@ -403,14 +420,13 @@ impl RacesEditorState {
     }
 
     /// Saves races to a file path
-    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), RaceEditorError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+            std::fs::create_dir_all(parent)?;
         }
         let content = ron::ser::to_string_pretty(&self.races, Default::default())
-            .map_err(|e| format!("Failed to serialize races: {}", e))?;
-        std::fs::write(path, content).map_err(|e| format!("Failed to write file: {}", e))?;
+            .map_err(|e| RaceEditorError::Serialization(e.to_string()))?;
+        std::fs::write(path, content)?;
         Ok(())
     }
 
@@ -1103,7 +1119,7 @@ impl RacesEditorState {
                                 self.mode = RacesEditorMode::List;
                             }
                             Err(e) => {
-                                ui.label(egui::RichText::new(e).color(egui::Color32::RED));
+                                ui.label(egui::RichText::new(e.to_string()).color(egui::Color32::RED));
                             }
                         }
                     }
@@ -1225,7 +1241,10 @@ mod tests {
 
         let result = state.save_race();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("ID cannot be empty"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("ID cannot be empty"));
     }
 
     #[test]
@@ -1236,7 +1255,10 @@ mod tests {
 
         let result = state.save_race();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Name cannot be empty"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Name cannot be empty"));
     }
 
     #[test]
@@ -1256,7 +1278,7 @@ mod tests {
 
         let result = state.save_race();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("already exists"));
+        assert!(result.unwrap_err().to_string().contains("already exists"));
     }
 
     #[test]

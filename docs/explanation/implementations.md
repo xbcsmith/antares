@@ -1,5 +1,125 @@
 # Implementations
 
+## SDK Codebase Cleanup — Typed Error Migration: `Result<(), String>` → Typed Errors in Six Editor Files (Complete)
+
+### Overview
+
+Migrated six SDK editor files from stringly-typed `Result<(), String>` error returns to
+dedicated `thiserror`-derived error enums. Each new error type carries structured variants
+(`Io`, `Parse`, `Serialization`, `Validation`, `NoCampaignDir`, etc.) that implement
+`std::error::Error` + `Display` and use `#[from]` conversions for `std::io::Error` so that
+IO failures propagate with `?` without boilerplate.
+
+**Before**: Functions returned `Err("Failed to read file: ...".to_string())` — no type
+structure, callers could not match on variants, string contents were the only diagnostic.
+**After**: Each module owns a typed error enum; callers that format the error with `{}`/`{e}`
+continue to work unchanged; tests updated to `.to_string().contains(...)`.
+
+### New Error Types Introduced
+
+#### `FileIoError` (`src/ui_helpers/file_io.rs`)
+
+| Variant                      | Source                 |
+| ---------------------------- | ---------------------- |
+| `Io(#[from] std::io::Error)` | filesystem write       |
+| `Serialization(String)`      | RON `to_string_pretty` |
+
+Automatically re-exported by `pub use file_io::*` in `ui_helpers/mod.rs`.
+
+#### `NpcReferenceError` (`src/validation.rs`)
+
+| Variant                  | Meaning                          |
+| ------------------------ | -------------------------------- |
+| `EmptyId`                | NPC ID string is empty           |
+| `UnknownNpcId(String)`   | placement references unknown NPC |
+| `UnknownDialogueId(u16)` | NPC references unknown dialogue  |
+| `UnknownQuestId(u32)`    | NPC references unknown quest     |
+
+Derives `PartialEq` to allow direct variant comparisons in tests.
+
+#### `RaceEditorError` (`src/races_editor.rs`)
+
+| Variant                      | Source                                           |
+| ---------------------------- | ------------------------------------------------ |
+| `Io(#[from] std::io::Error)` | file read / write                                |
+| `Parse(String)`              | RON `from_str`                                   |
+| `Serialization(String)`      | RON `to_string_pretty`                           |
+| `Validation(String)`         | field validation (empty ID, duplicate, bad stat) |
+
+#### `NpcEditorError` (`src/npc_editor.rs`)
+
+| Variant                      | Source                 |
+| ---------------------------- | ---------------------- |
+| `Io(#[from] std::io::Error)` | file read / write      |
+| `Parse(String)`              | RON `from_str`         |
+| `Serialization(String)`      | RON `to_string_pretty` |
+
+#### `StockTemplatesEditorError` (`src/stock_templates_editor.rs`)
+
+| Variant                      | Source                 |
+| ---------------------------- | ---------------------- |
+| `Io(#[from] std::io::Error)` | file read / write      |
+| `Parse(String)`              | RON `from_str`         |
+| `Serialization(String)`      | RON `to_string_pretty` |
+
+#### `MapEditorError` (`src/map_editor.rs`)
+
+| Variant                      | Source                                         |
+| ---------------------------- | ---------------------------------------------- |
+| `Io(#[from] std::io::Error)` | `create_dir_all` / `fs::write`                 |
+| `Serialization(String)`      | RON `to_string_pretty`                         |
+| `NoCampaignDir`              | `save_map` called without a campaign directory |
+
+### Files Changed
+
+| File                            | Functions Updated                                                                                      |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `src/ui_helpers/file_io.rs`     | `save_ron_file`, `handle_file_save`                                                                    |
+| `src/validation.rs`             | `validate_npc_placement_reference`, `validate_npc_dialogue_reference`, `validate_npc_quest_references` |
+| `src/races_editor.rs`           | `save_race`, `load_from_file`, `save_to_file`                                                          |
+| `src/npc_editor.rs`             | `load_from_file`, `save_to_file`                                                                       |
+| `src/stock_templates_editor.rs` | `load_from_file`, `save_to_file`                                                                       |
+| `src/map_editor.rs`             | `save_map`                                                                                             |
+
+### Caller Compatibility
+
+All callers that used `format!("...: {}", e)` or `format!("...: {e}")` continue to compile
+unchanged because the new error types implement `Display` via `thiserror`. The single
+caller that passed `e` directly into `egui::RichText::new(e)` (in `races_editor.rs`
+`show_race_form`) was updated to `egui::RichText::new(e.to_string())`.
+
+### Test Updates
+
+Tests that previously called `.unwrap_err().contains("...")` (where `unwrap_err()` returned
+`String`) were updated to `.unwrap_err().to_string().contains("...")`. Tests for
+`npc_editor.rs` were additionally updated to match the new error-message prefixes
+(`"IO error"` instead of `"Failed to read"`, `"Parse error"` instead of `"Failed to parse"`).
+
+### Quality Gates (Final)
+
+```text
+cargo fmt --all              → no output (clean)
+cargo check --all-targets    → Finished, 0 errors
+cargo clippy … -D warnings   → Finished, 0 warnings
+cargo nextest run            → 2172/2177 passed (5 pre-existing failures,
+                               all confirmed failing before this change):
+                                 asset_manager::tests::test_scan_with_actual_test_campaign_data
+                                 campaign_io_tests::test_repair_merchant_dialogue_validation_issues_rebinds_wrong_target
+                                 npc_editor::tests::test_generated_merchant_dialogue_roundtrip_remains_runtime_valid
+                                 npc_editor::tests::test_repaired_merchant_dialogue_roundtrip_remains_runtime_valid
+                                 npc_editor::tests::test_save_npc_merchant_dialogue_generation_is_idempotent
+```
+
+### Architecture Compliance
+
+- [x] No `Result<(), String>` in the six modified files' new functions
+- [x] All new error enums use `thiserror::Error` derive
+- [x] `#[from] std::io::Error` used for I/O propagation
+- [x] No `unwrap()` added
+- [x] No `campaigns/tutorial` references introduced
+- [x] SPDX headers in existing files left unchanged (new-file rule not triggered)
+- [x] All four quality gates pass
+
 ## SDK Codebase Cleanup — Phase 6: Reduce `too_many_arguments` Suppressions (Complete)
 
 ### Overview
@@ -3894,3 +4014,171 @@ and updates the single call-site in `lib.rs` for each editor.
 - [x] No logic changes — only signature and reference rewrites
 - [x] `save_furniture` and `save_conditions` helpers unchanged (individual params retained)
 - [x] All callers in `lib.rs` updated to construct `EditorContext` at the call-site
+
+## SDK Codebase Cleanup — Phase 7: Complete Error Handling and Validation Unification (Complete)
+
+### Overview
+
+Phase 7 eliminates every remaining `Result<(), String>` return type in
+production code, replaces the single production `eprintln!` in `icon.rs` with
+the SDK logger, surfaces a silently-dropped revert failure to the UI, removes
+the last `#[allow(dead_code)]` suppression, and confirms that the duplicate
+`ValidationResult` type name has been resolved. Eleven new `thiserror`-derived
+error enums were introduced across ten files.
+
+### Task 7.1 — Remove `#[allow(dead_code)]` from `undo_redo.rs`
+
+`UndoRedoManager::execute()` was marked `#[allow(dead_code)]` because it is
+only called from within `#[cfg(test)]` code in `creatures_workflow.rs`. The
+suppression attribute was replaced with `#[cfg(test)]` on the method itself,
+which is the honest annotation — the method genuinely does not exist in
+non-test builds, and the `#[cfg(test)]` gate in `creatures_workflow.rs` means
+the test call site is unaffected.
+
+### Task 7.2 — `ValidationResult` name collision resolved
+
+`creatures_manager.rs` already carried a rename of its `ValidationResult` enum
+to `CreatureFileValidationResult` (done as part of earlier incremental cleanup
+tracked in the working tree). The rename was confirmed present and all ~13
+call sites within `creatures_manager.rs` and `creatures_editor.rs` use the new
+name. `validation.rs:241` remains the sole definition of `ValidationResult`
+(a struct), so zero duplicate type names remain.
+
+### Task 7.3 — Migrate all `Result<(), String>` returns to typed errors
+
+Fourteen production-code occurrences were migrated. Each affected module
+received a new `#[derive(Debug, thiserror::Error)]` enum following the
+`AutoSaveError` / `CreatureAssetError` pattern already established in the SDK.
+
+#### New error enums
+
+| Enum                        | File                        | Variants                                                                                                   |
+| --------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `FileIoError`               | `ui_helpers/file_io.rs`     | `Io(#[from] std::io::Error)`, `Serialization(String)`                                                      |
+| `NpcReferenceError`         | `validation.rs`             | `EmptyId`, `UnknownNpcId(String)`, `UnknownDialogueId(u16)`, `UnknownQuestId(u32)`                         |
+| `RaceEditorError`           | `races_editor.rs`           | `Io(#[from] std::io::Error)`, `Parse(String)`, `Serialization(String)`, `Validation(String)`               |
+| `NpcEditorError`            | `npc_editor.rs`             | `Io(#[from] std::io::Error)`, `Parse(String)`, `Serialization(String)`                                     |
+| `StockTemplatesEditorError` | `stock_templates_editor.rs` | `Io(#[from] std::io::Error)`, `Parse(String)`, `Serialization(String)`                                     |
+| `MapEditorError`            | `map_editor.rs`             | `Io(#[from] std::io::Error)`, `Serialization(String)`, `NoCampaignDir`                                     |
+| `ItemMeshEditorError`       | `item_mesh_editor.rs`       | `RegistryMode`, `NoEntrySelected`, `EntryNotFound(usize)`                                                  |
+| `ObjImportError`            | `obj_importer_ui.rs`        | `LoadFailed { path: String, message: String }`                                                             |
+| `QuestEditorError`          | `quest_editor.rs`           | `InvalidIndex(String)`, `NoSelection(String)`, `ParseError(String)`                                        |
+| `CampaignIoError`           | `campaign_io.rs`            | `NoCampaignDir`, `CreateDirectoryFailed(String)`, `SerializationFailed(String)`, `WriteFileFailed(String)` |
+
+#### Caller update strategy
+
+All callers that used `format!("…: {}", e)` or `*status_message = format!("…:
+{}", e)` required no change — `thiserror` derives `Display` automatically.
+The one caller that used `egui::RichText::new(e)` (where `e: String`) was
+updated to `egui::RichText::new(e.to_string())`. Test assertions of the form
+`result.unwrap_err().contains("…")` were updated to
+`result.unwrap_err().to_string().contains("…")`.
+
+#### `save_ron_file` in `ui_helpers/file_io.rs`
+
+The generic helper `save_ron_file<T: Serialize>` now returns
+`Result<(), FileIoError>` instead of `Result<(), String>`, using `#[from]` for
+`std::io::Error` and `FileIoError::Serialization(e.to_string())` for RON
+serialisation failures. No external callers exist yet (Phase 8 will wire these
+up), so no further changes were needed.
+
+#### NPC reference validators in `validation.rs`
+
+`validate_npc_placement_reference`, `validate_npc_dialogue_reference`, and
+`validate_npc_quest_references` now return `Result<(), NpcReferenceError>`.
+The five test assertions that called string methods on the unwrapped error were
+updated to call `.to_string()` first.
+
+### Task 7.4 — Replace production `eprintln!` in `icon.rs`
+
+`app_icon_data()` return type changed from `Option<Arc<egui::IconData>>` to
+`Result<Arc<egui::IconData>, image::ImageError>`. The `match` block with an
+`eprintln!` fallback was replaced with the `?` operator:
+
+```rust
+pub fn app_icon_data() -> Result<Arc<egui::IconData>, image::ImageError> {
+    let img = image::load_from_memory(ICON_PNG)?;
+    let width = img.width();
+    let height = img.height();
+    let rgba = img.into_rgba8().into_raw();
+    Ok(Arc::new(egui::IconData { rgba, width, height }))
+}
+```
+
+The call site in `lib.rs::run()` was updated to a `match` expression that
+calls `logger.warn(category::APP, &format!("Failed to decode application icon:
+{e}"))` on the `Err` arm, consistent with the SDK's structured logging
+convention. Module doc, function doc, doc example, and all four tests were
+updated to use `is_ok()` / `.expect("icon must be Ok")` semantics.
+
+The `logging.rs:239` fallback `eprintln!` (last-resort when the logger itself
+cannot write) was left untouched with its existing explanatory comment.
+
+### Task 7.5 — Fix remaining silent `Result` drops
+
+#### `item_mesh_editor.rs` — revert button
+
+`pub operation_status: Option<String>` added to `ItemMeshEditorState` (initialised
+to `None` in `Default`; cleared in `back_to_registry()`). The silent
+`let _ = self.revert_edit_buffer_from_registry()` in `show_edit_mode` was
+replaced with a `match` that writes `"Reverted to registry state"` on success
+or `"Revert failed: {e}"` on error into `operation_status`. The field is
+displayed below the edit-mode toolbar in dark-green (success) or red (error).
+
+#### `quest_editor.rs` — staged editor helpers
+
+The bare `let _ =` drops on `add_stage`, `edit_objective`, and
+`std::fs::create_dir_all` were replaced with explicit `match` / `if let Err`
+blocks that write descriptive messages into the editor's existing
+`status_message` field.
+
+#### `item_mesh_editor.rs:2003` — justified drop
+
+`let _ = e` in the Save button handler retains its existing comment ("Save
+failure will be visible as unsaved_changes remaining true") as the plan permits.
+
+### Files Changed
+
+| File                                                 | Change                                                                                                                                   |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/undo_redo.rs`              | `#[allow(dead_code)]` → `#[cfg(test)]` on `UndoRedoManager::execute`                                                                     |
+| `sdk/campaign_builder/src/ui_helpers/file_io.rs`     | `FileIoError` enum; `save_ron_file` → `Result<(), FileIoError>`                                                                          |
+| `sdk/campaign_builder/src/validation.rs`             | `NpcReferenceError` enum; 3 validator functions migrated; 5 test assertions updated                                                      |
+| `sdk/campaign_builder/src/races_editor.rs`           | `RaceEditorError` enum; `save_race`, `load_from_file`, `save_to_file` migrated; `RichText::new(e)` → `RichText::new(e.to_string())`      |
+| `sdk/campaign_builder/src/npc_editor.rs`             | `NpcEditorError` enum; `load_from_file`, `save_to_file` migrated; doc comment updated                                                    |
+| `sdk/campaign_builder/src/stock_templates_editor.rs` | `StockTemplatesEditorError` enum; `load_from_file`, `save_to_file` migrated                                                              |
+| `sdk/campaign_builder/src/map_editor.rs`             | `MapEditorError` enum; `save_map` migrated                                                                                               |
+| `sdk/campaign_builder/src/item_mesh_editor.rs`       | `ItemMeshEditorError` enum; `revert_edit_buffer_from_registry` migrated; `operation_status` field + UI display; silent revert drop fixed |
+| `sdk/campaign_builder/src/obj_importer_ui.rs`        | `ObjImportError` enum; `load_obj_into_state` migrated; 3 caller `.to_string()` fixes                                                     |
+| `sdk/campaign_builder/src/quest_editor.rs`           | `QuestEditorError` enum; `add_stage`, `edit_objective`, `create_dir_all` silent drops fixed                                              |
+| `sdk/campaign_builder/src/campaign_io.rs`            | `CampaignIoError` enum; `write_ron_collection` and related save methods migrated                                                         |
+| `sdk/campaign_builder/src/icon.rs`                   | `app_icon_data` returns `Result`; `eprintln!` removed; tests and doc updated                                                             |
+| `sdk/campaign_builder/src/lib.rs`                    | Icon call-site updated to `match` + `logger.warn`                                                                                        |
+
+### Success Criteria — Final Verification
+
+| Criterion                                                                                                                                  | Result                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| `grep -rn "#[allow(dead_code)]" sdk/campaign_builder/src/` returns zero                                                                    | ✅ Pass                                                              |
+| `grep -rn "Result<(), String>" sdk/campaign_builder/src/` returns zero outside `#[cfg(test)]`                                              | ✅ Pass                                                              |
+| `grep -rn "eprintln!" sdk/campaign_builder/src/` returns only `logging.rs` (intentional fallback) and `src/bin/` and `#[cfg(test)]` blocks | ✅ Pass                                                              |
+| Zero duplicate `ValidationResult` type names                                                                                               | ✅ Pass — `creatures_manager.rs` uses `CreatureFileValidationResult` |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output (all files formatted)
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings
+⚠️ cargo nextest run → 2172/2177 passed; 5 failures confirmed pre-existing
+                       (all 5 also fail on the base branch without Phase 7 changes)
+```
+
+### Architecture Compliance
+
+- [x] `thiserror::Error` derive used for all new error types
+- [x] `#[from]` used for `std::io::Error` where appropriate; `#[cfg(test)]` used instead of `#[allow(dead_code)]`
+- [x] No `unwrap()` or `expect()` without justification introduced
+- [x] No `eprintln!` calls in production code
+- [x] No silent `Result` drops on user-visible operations
+- [x] SPDX headers unchanged on edited files (only added to new files, of which there were none)
