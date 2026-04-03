@@ -70,31 +70,23 @@ fn read_ron_collection<T: serde::de::DeserializeOwned>(
     }
 }
 
-/// Serialises `data` as pretty-printed RON and writes it to
-/// `<campaign_dir>/<filename>`.
+/// Serialises `data` as pretty-printed RON and writes it to `path`.
+/// Creates parent directories as needed.
 ///
-/// Returns `Ok(())` on success or `Err(String)` with an error description.
-///
-/// This is a private helper shared by the various `save_X` methods on
-/// [`CampaignBuilderApp`] to avoid duplicating the dir-create / serialize /
-/// write pattern.
+/// This is the lowest-level write helper.  All other RON-write helpers
+/// (`write_ron_collection`, `save_dialogues_to_file`, `save_npcs_to_file`)
+/// delegate here so that the serialise / write pattern appears exactly once.
 ///
 /// # Arguments
 ///
-/// * `campaign_dir` - Optional campaign directory; `None` → `Err("No campaign directory set")`
-/// * `filename` - Relative filename within the campaign directory
-/// * `data` - The slice to serialise
+/// * `path`       - Absolute destination path
+/// * `data`       - The value to serialise (any `Serialize` type)
 /// * `type_label` - Human-readable label used in error messages, e.g. `"items"`
-fn write_ron_collection<T: serde::Serialize>(
-    campaign_dir: &Option<PathBuf>,
-    filename: &str,
-    data: &[T],
+fn write_ron_to_path<T: serde::Serialize>(
+    path: &std::path::Path,
+    data: &T,
     type_label: &str,
 ) -> Result<(), CampaignIoError> {
-    let dir = campaign_dir
-        .as_ref()
-        .ok_or(CampaignIoError::NoCampaignDir)?;
-    let path = dir.join(filename);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| {
             CampaignIoError::CreateDirectoryFailed(format!("{}: {}", type_label, e))
@@ -105,8 +97,36 @@ fn write_ron_collection<T: serde::Serialize>(
         .enumerate_arrays(false);
     let contents = ron::ser::to_string_pretty(data, ron_config)
         .map_err(|e| CampaignIoError::SerializationFailed(format!("{}: {}", type_label, e)))?;
-    fs::write(&path, contents)
+    fs::write(path, contents)
         .map_err(|e| CampaignIoError::WriteFileFailed(format!("{}: {}", type_label, e)))
+}
+
+/// Serialises `data` as pretty-printed RON and writes it to
+/// `<campaign_dir>/<filename>`.
+///
+/// Returns `Ok(())` on success or a [`CampaignIoError`] on failure.
+///
+/// This is a private helper shared by the various `save_X` methods on
+/// [`CampaignBuilderApp`] to avoid duplicating the dir-create / serialize /
+/// write pattern.  It delegates to [`write_ron_to_path`] for the actual I/O.
+///
+/// # Arguments
+///
+/// * `campaign_dir` - Optional campaign directory; `None` → [`CampaignIoError::NoCampaignDir`]
+/// * `filename`     - Relative filename within the campaign directory
+/// * `data`         - The slice to serialise
+/// * `type_label`   - Human-readable label used in error messages, e.g. `"items"`
+fn write_ron_collection<T: serde::Serialize>(
+    campaign_dir: &Option<PathBuf>,
+    filename: &str,
+    data: &[T],
+    type_label: &str,
+) -> Result<(), CampaignIoError> {
+    let dir = campaign_dir
+        .as_ref()
+        .ok_or(CampaignIoError::NoCampaignDir)?;
+    let path = dir.join(filename);
+    write_ron_to_path(&path, data, type_label)
 }
 
 impl CampaignBuilderApp {
@@ -1237,144 +1257,63 @@ impl CampaignBuilderApp {
         self.logger
             .debug(category::FILE_IO, "load_proficiencies() called");
         let proficiencies_file = self.campaign.proficiencies_file.clone();
-        if let Some(ref dir) = self.campaign_dir {
-            let proficiencies_path = dir.join(&proficiencies_file);
-            self.logger.verbose(
+        if let Some(proficiencies) = read_ron_collection::<ProficiencyDefinition>(
+            &self.campaign_dir,
+            &proficiencies_file,
+            "proficiencies",
+            &mut self.ui_state.status_message,
+        ) {
+            let count = proficiencies.len();
+            self.campaign_data.proficiencies = proficiencies;
+            if let Some(ref mut manager) = self.asset_manager {
+                manager.mark_data_file_loaded(&proficiencies_file, count);
+            }
+            self.logger.info(
                 category::FILE_IO,
-                &format!(
-                    "Loading proficiencies from: {}",
-                    proficiencies_path.display()
-                ),
+                &format!("Loaded {} proficiencies", count),
             );
-            if proficiencies_path.exists() {
-                match fs::read_to_string(&proficiencies_path) {
-                    Ok(contents) => {
-                        self.logger.verbose(
-                            category::FILE_IO,
-                            &format!("Read {} bytes from proficiencies file", contents.len()),
-                        );
-                        match ron::from_str::<Vec<ProficiencyDefinition>>(&contents) {
-                            Ok(proficiencies) => {
-                                let count = proficiencies.len();
-                                self.campaign_data.proficiencies = proficiencies;
-
-                                // Mark data file as loaded in asset manager
-                                if let Some(ref mut manager) = self.asset_manager {
-                                    manager.mark_data_file_loaded(&proficiencies_file, count);
-                                }
-
-                                self.logger.info(
-                                    category::FILE_IO,
-                                    &format!(
-                                        "Loaded {} proficiencies",
-                                        self.campaign_data.proficiencies.len()
-                                    ),
-                                );
-                                self.ui_state.status_message = format!(
-                                    "Loaded {} proficiencies",
-                                    self.campaign_data.proficiencies.len()
-                                );
-                            }
-                            Err(e) => {
-                                // Mark data file as error in asset manager
-                                if let Some(ref mut manager) = self.asset_manager {
-                                    manager
-                                        .mark_data_file_error(&proficiencies_file, &e.to_string());
-                                }
-                                self.logger.error(
-                                    category::FILE_IO,
-                                    &format!("Failed to parse proficiencies: {}", e),
-                                );
-                                self.ui_state.status_message =
-                                    format!("Failed to parse proficiencies: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        // Mark data file as error in asset manager
-                        if let Some(ref mut manager) = self.asset_manager {
-                            manager.mark_data_file_error(&proficiencies_file, &e.to_string());
-                        }
-                        self.logger.error(
-                            category::FILE_IO,
-                            &format!("Failed to read proficiencies file: {}", e),
-                        );
-                        self.ui_state.status_message =
-                            format!("Failed to read proficiencies file: {}", e);
-                    }
-                }
-            } else {
-                self.logger.warn(
-                    category::FILE_IO,
-                    &format!(
-                        "Proficiencies file does not exist: {}",
-                        proficiencies_path.display()
-                    ),
+            self.ui_state.status_message = format!("Loaded {} proficiencies", count);
+        } else if !self.ui_state.status_message.is_empty() {
+            // read_ron_collection set an error message — propagate to asset manager.
+            if let Some(ref mut manager) = self.asset_manager {
+                manager.mark_data_file_error(
+                    &proficiencies_file,
+                    &self.ui_state.status_message.clone(),
                 );
             }
-        } else {
             self.logger.warn(
                 category::FILE_IO,
-                "No campaign directory set when trying to load proficiencies",
+                &format!(
+                    "Failed to load proficiencies: {}",
+                    self.ui_state.status_message
+                ),
             );
         }
+        // If status_message was not updated, the file simply does not exist — silent skip.
     }
 
     /// Save proficiencies to RON file
     pub(crate) fn save_proficiencies(&mut self) -> Result<(), CampaignIoError> {
         self.logger
             .debug(category::FILE_IO, "save_proficiencies() called");
-        if let Some(ref dir) = self.campaign_dir {
-            let proficiencies_path = dir.join(&self.campaign.proficiencies_file);
-            self.logger.verbose(
-                category::FILE_IO,
-                &format!(
-                    "Saving {} proficiencies to: {}",
-                    self.campaign_data.proficiencies.len(),
-                    proficiencies_path.display()
-                ),
-            );
-
-            // Create proficiencies directory if it doesn't exist
-            if let Some(parent) = proficiencies_path.parent() {
-                fs::create_dir_all(parent).map_err(|e| {
-                    CampaignIoError::CreateDirectoryFailed(format!("proficiencies: {}", e))
-                })?;
-            }
-
-            let ron_config = ron::ser::PrettyConfig::new()
-                .struct_names(false)
-                .enumerate_arrays(false);
-
-            // Sort by ID (String) before serializing for stable file order.
-            let mut sorted_proficiencies = self.campaign_data.proficiencies.clone();
-            sorted_proficiencies.sort_by(|a, b| a.id.cmp(&b.id));
-
-            let contents =
-                ron::ser::to_string_pretty(&sorted_proficiencies, ron_config).map_err(|e| {
-                    CampaignIoError::SerializationFailed(format!("proficiencies: {}", e))
-                })?;
-
-            fs::write(&proficiencies_path, &contents)
-                .map_err(|e| CampaignIoError::WriteFileFailed(format!("proficiencies: {}", e)))?;
-
-            self.logger.info(
-                category::FILE_IO,
-                &format!(
-                    "Saved {} proficiencies ({} bytes)",
-                    self.campaign_data.proficiencies.len(),
-                    contents.len()
-                ),
-            );
-            self.unsaved_changes = true;
-            Ok(())
-        } else {
-            self.logger.error(
-                category::FILE_IO,
-                "No campaign directory set when trying to save proficiencies",
-            );
-            Err(CampaignIoError::NoCampaignDir)
-        }
+        // Sort by ID (String) before serializing for stable file order.
+        let mut sorted = self.campaign_data.proficiencies.clone();
+        sorted.sort_by(|a, b| a.id.cmp(&b.id));
+        write_ron_collection(
+            &self.campaign_dir,
+            &self.campaign.proficiencies_file,
+            &sorted,
+            "proficiencies",
+        )?;
+        self.logger.info(
+            category::FILE_IO,
+            &format!(
+                "Saved {} proficiencies",
+                self.campaign_data.proficiencies.len()
+            ),
+        );
+        self.unsaved_changes = true;
+        Ok(())
     }
 
     /// Save dialogues to a file path
@@ -1390,27 +1329,10 @@ impl CampaignBuilderApp {
         &self,
         path: &std::path::Path,
     ) -> Result<(), CampaignIoError> {
-        // Create directory if it doesn't exist
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| CampaignIoError::CreateDirectoryFailed(format!("dialogues: {}", e)))?;
-        }
-
-        let ron_config = ron::ser::PrettyConfig::new()
-            .struct_names(false)
-            .enumerate_arrays(false);
-
         // Sort by dialogue ID before serializing for stable file order.
-        let mut sorted_dialogues = self.campaign_data.dialogues.clone();
-        sorted_dialogues.sort_by_key(|d| d.id);
-
-        let contents = ron::ser::to_string_pretty(&sorted_dialogues, ron_config)
-            .map_err(|e| CampaignIoError::SerializationFailed(format!("dialogues: {}", e)))?;
-
-        std::fs::write(path, contents)
-            .map_err(|e| CampaignIoError::WriteFileFailed(format!("dialogues: {}", e)))?;
-
-        Ok(())
+        let mut sorted = self.campaign_data.dialogues.clone();
+        sorted.sort_by_key(|d| d.id);
+        write_ron_to_path(path, &sorted, "dialogues")
     }
 
     /// Save NPCs to a file path
@@ -1423,27 +1345,10 @@ impl CampaignBuilderApp {
     ///
     /// Returns `Ok(())` if save was successful
     pub(crate) fn save_npcs_to_file(&self, path: &std::path::Path) -> Result<(), CampaignIoError> {
-        // Create directory if it doesn't exist
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| CampaignIoError::CreateDirectoryFailed(format!("NPCs: {}", e)))?;
-        }
-
-        let ron_config = ron::ser::PrettyConfig::new()
-            .struct_names(false)
-            .enumerate_arrays(false);
-
         // Sort by NPC ID (String) before serializing for stable file order.
-        let mut sorted_npcs = self.editor_registry.npc_editor_state.npcs.clone();
-        sorted_npcs.sort_by(|a, b| a.id.cmp(&b.id));
-
-        let contents = ron::ser::to_string_pretty(&sorted_npcs, ron_config)
-            .map_err(|e| CampaignIoError::SerializationFailed(format!("NPCs: {}", e)))?;
-
-        std::fs::write(path, contents)
-            .map_err(|e| CampaignIoError::WriteFileFailed(format!("NPCs: {}", e)))?;
-
-        Ok(())
+        let mut sorted = self.editor_registry.npc_editor_state.npcs.clone();
+        sorted.sort_by(|a, b| a.id.cmp(&b.id));
+        write_ron_to_path(path, &sorted, "NPCs")
     }
 
     /// Load NPCs from campaign file

@@ -12,7 +12,7 @@ use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     autocomplete_class_selector, autocomplete_creature_selector, autocomplete_item_list_selector,
     autocomplete_item_selector, autocomplete_portrait_selector, autocomplete_race_selector,
-    extract_portrait_candidates, handle_file_load, handle_file_save, resolve_portrait_path,
+    extract_portrait_candidates, handle_toolbar_action, resolve_portrait_path,
     show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
     ToolbarAction, TwoColumnLayout,
 };
@@ -1131,61 +1131,26 @@ impl CharactersEditorState {
             .with_id_salt("characters_toolbar")
             .show(ui);
 
-        // Handle toolbar actions
+        // Handle toolbar actions — New and Import are characters-specific;
+        // all other arms are handled by the shared generic dispatcher.
         match toolbar_action {
             ToolbarAction::New => {
                 self.start_new_character();
                 self.buffer.id = self.next_available_character_id();
                 *ctx.unsaved_changes = true;
             }
-            ToolbarAction::Save => {
-                if let Some(dir) = ctx.campaign_dir {
-                    let path = dir.join(ctx.data_file);
-                    match self.save_to_file(&path) {
-                        Ok(_) => {
-                            *ctx.status_message =
-                                format!("Saved {} characters", self.characters.len());
-                        }
-                        Err(e) => {
-                            *ctx.status_message = format!("Failed to save characters: {}", e);
-                        }
-                    }
-                }
-            }
-            ToolbarAction::Load => {
-                handle_file_load(
-                    &mut self.characters,
-                    *ctx.file_load_merge_mode,
-                    |c: &CharacterDefinition| c.id.clone(),
-                    ctx.status_message,
-                    ctx.unsaved_changes,
-                );
-            }
             ToolbarAction::Import => {
                 *ctx.status_message = "Import not yet implemented for characters".to_string();
             }
-            ToolbarAction::Export => {
-                handle_file_save(&self.characters, "characters.ron", ctx.status_message);
-            }
-            ToolbarAction::Reload => {
-                if let Some(dir) = ctx.campaign_dir {
-                    let path = dir.join(ctx.data_file);
-                    if path.exists() {
-                        match self.load_from_file(&path) {
-                            Ok(_) => {
-                                *ctx.status_message =
-                                    format!("Loaded {} characters", self.characters.len());
-                            }
-                            Err(e) => {
-                                *ctx.status_message = format!("Failed to load characters: {}", e);
-                            }
-                        }
-                    } else {
-                        *ctx.status_message = "Characters file does not exist".to_string();
-                    }
-                }
-            }
-            ToolbarAction::None => {}
+            other => handle_toolbar_action(
+                other,
+                &mut self.characters,
+                |c: &CharacterDefinition| c.id.clone(),
+                &mut self.has_unsaved_changes,
+                ctx,
+                "characters.ron",
+                "characters",
+            ),
         }
 
         // Show filters

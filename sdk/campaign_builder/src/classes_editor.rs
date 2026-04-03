@@ -15,8 +15,8 @@
 
 use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
-    handle_file_load, handle_file_save, show_standard_list_item, EditorToolbar, ItemAction,
-    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    handle_toolbar_action, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
+    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::classes::{ClassDefinition, SpellSchool, SpellStat};
 use antares::domain::items::types::Item;
@@ -384,61 +384,27 @@ impl ClassesEditorState {
             .with_id_salt("classes_toolbar")
             .show(ui);
 
-        // Handle toolbar actions
+        // Handle toolbar actions — New and Import are classes-specific;
+        // all other arms are handled by the shared generic dispatcher.
         match toolbar_action {
             ToolbarAction::New => {
                 self.start_new_class();
                 self.buffer.id = self.next_available_class_id();
                 *ctx.unsaved_changes = true;
             }
-            ToolbarAction::Save => {
-                if let Some(dir) = ctx.campaign_dir {
-                    let path = dir.join(ctx.data_file);
-                    match self.save_to_file(&path) {
-                        Ok(_) => {
-                            *ctx.status_message = format!("Saved {} classes", self.classes.len());
-                        }
-                        Err(e) => {
-                            *ctx.status_message = format!("Failed to save classes: {}", e);
-                        }
-                    }
-                }
-            }
-            ToolbarAction::Load => {
-                handle_file_load(
-                    &mut self.classes,
-                    *ctx.file_load_merge_mode,
-                    |c: &ClassDefinition| c.id.clone(),
-                    ctx.status_message,
-                    ctx.unsaved_changes,
-                );
-            }
             ToolbarAction::Import => {
                 // Import not yet implemented for classes
                 *ctx.status_message = "Import not yet implemented for classes".to_string();
             }
-            ToolbarAction::Export => {
-                handle_file_save(&self.classes, "classes.ron", ctx.status_message);
-            }
-            ToolbarAction::Reload => {
-                if let Some(dir) = ctx.campaign_dir {
-                    let path = dir.join(ctx.data_file);
-                    if path.exists() {
-                        match self.load_from_file(&path) {
-                            Ok(_) => {
-                                *ctx.status_message =
-                                    format!("Loaded {} classes", self.classes.len());
-                            }
-                            Err(e) => {
-                                *ctx.status_message = format!("Failed to load classes: {}", e);
-                            }
-                        }
-                    } else {
-                        *ctx.status_message = "Classes file does not exist".to_string();
-                    }
-                }
-            }
-            ToolbarAction::None => {}
+            other => handle_toolbar_action(
+                other,
+                &mut self.classes,
+                |c: &ClassDefinition| c.id.clone(),
+                &mut self.has_unsaved_changes,
+                ctx,
+                "classes.ron",
+                "classes",
+            ),
         }
 
         ui.separator();

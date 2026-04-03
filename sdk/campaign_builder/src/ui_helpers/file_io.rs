@@ -8,6 +8,8 @@
 //! [`load_ron_file`], [`save_ron_file`], [`handle_file_load`],
 //! [`handle_file_save`], and [`handle_reload`].
 
+use crate::editor_context::EditorContext;
+use crate::ui_helpers::layout::ToolbarAction;
 use eframe::egui;
 use std::fmt::Display;
 use std::path::PathBuf;
@@ -532,4 +534,349 @@ pub fn handle_reload<T: serde::de::DeserializeOwned>(
         *status_message = "No campaign directory set".to_string();
     }
     false
+}
+
+/// Dispatches the common toolbar actions (`Save`, `Load`, `Export`, `Reload`,
+/// `None`) for any list-based editor that holds a `Vec<T>`.
+///
+/// The `New` and `Import` arms are intentionally **not** handled here because
+/// they differ between editors.  In the calling `match` block, pattern those
+/// arms first and pass everything else through a catch-all arm:
+///
+/// ```no_run
+/// # use campaign_builder::ui_helpers::{ToolbarAction, handle_toolbar_action};
+/// # use campaign_builder::editor_context::EditorContext;
+/// # use std::path::PathBuf;
+/// # let action = ToolbarAction::None;
+/// # let mut data: Vec<u32> = vec![];
+/// # let mut editor_unsaved = false;
+/// # let dir = PathBuf::from("/tmp");
+/// # let mut unsaved = false;
+/// # let mut status = String::new();
+/// # let mut merge = false;
+/// # let mut ctx = EditorContext::new(Some(&dir), "data.ron", &mut unsaved, &mut status, &mut merge);
+/// match action {
+///     ToolbarAction::New    => { /* editor-specific */ }
+///     ToolbarAction::Import => { /* editor-specific */ }
+///     other => handle_toolbar_action(
+///         other,
+///         &mut data,
+///         |x: &u32| *x,
+///         &mut editor_unsaved,
+///         &mut ctx,
+///         "data.ron",
+///         "items",
+///     ),
+/// }
+/// ```
+///
+/// # Type Parameters
+///
+/// * `T` - Entity type.  Must be cloneable and round-trip through RON.
+/// * `K` - The ID key type used by `id_getter` for merge-load deduplication.
+/// * `F` - Closure that extracts the deduplication key from an entity.
+///
+/// # Arguments
+///
+/// * `action`          – The toolbar action returned by [`EditorToolbar::show`].
+/// * `data`            – Mutable reference to the editor's data vector.
+/// * `id_getter`       – Extracts the key used to deduplicate on merge-load.
+/// * `editor_unsaved`  – Editor-level dirty flag; set to `false` on `Reload`.
+/// * `ctx`             – Shared editor context (campaign dir, data file, …).
+/// * `export_filename` – Default filename suggested to the user by Export dialog.
+/// * `noun`            – Human-readable plural noun for status messages (e.g. `"classes"`).
+pub fn handle_toolbar_action<T, K, F>(
+    action: ToolbarAction,
+    data: &mut Vec<T>,
+    id_getter: F,
+    editor_unsaved: &mut bool,
+    ctx: &mut EditorContext<'_>,
+    export_filename: &str,
+    noun: &str,
+) where
+    T: Clone + serde::Serialize + serde::de::DeserializeOwned,
+    K: PartialEq + Clone,
+    F: Fn(&T) -> K,
+{
+    match action {
+        ToolbarAction::Save => {
+            if let Some(dir) = ctx.campaign_dir {
+                let path = dir.join(ctx.data_file);
+                if let Some(parent) = path.parent() {
+                    if let Err(e) = std::fs::create_dir_all(parent) {
+                        *ctx.status_message = format!("Failed to save {}: {}", noun, e);
+                        return;
+                    }
+                }
+                match save_ron_file(data, &path) {
+                    Ok(()) => {
+                        *ctx.status_message = format!("Saved {} {}", data.len(), noun);
+                    }
+                    Err(e) => {
+                        *ctx.status_message = format!("Failed to save {}: {}", noun, e);
+                    }
+                }
+            }
+        }
+        ToolbarAction::Load => {
+            handle_file_load(
+                data,
+                *ctx.file_load_merge_mode,
+                id_getter,
+                ctx.status_message,
+                ctx.unsaved_changes,
+            );
+        }
+        ToolbarAction::Export => {
+            handle_file_save(data, export_filename, ctx.status_message);
+        }
+        ToolbarAction::Reload => {
+            if let Some(dir) = ctx.campaign_dir {
+                let path = dir.join(ctx.data_file);
+                if path.exists() {
+                    match load_ron_file::<Vec<T>>(&path) {
+                        Ok(loaded_data) => {
+                            let count = loaded_data.len();
+                            *data = loaded_data;
+                            *editor_unsaved = false;
+                            *ctx.status_message = format!("Loaded {} {}", count, noun);
+                        }
+                        Err(e) => {
+                            *ctx.status_message = format!("Failed to load {}: {}", noun, e);
+                        }
+                    }
+                } else {
+                    *ctx.status_message = format!("{} file does not exist", noun);
+                }
+            }
+        }
+        // New and Import are editor-specific; the calling match block handles them.
+        ToolbarAction::New | ToolbarAction::Import | ToolbarAction::None => {}
+    }
+}
+
+#[cfg(test)]
+mod toolbar_action_tests {
+    use super::*;
+    use crate::editor_context::EditorContext;
+    use serde::{Deserialize, Serialize};
+    use std::path::PathBuf;
+
+    /// Minimal test entity that round-trips through RON.
+    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+    struct TestItem {
+        id: u32,
+        name: String,
+    }
+
+    fn make_items() -> Vec<TestItem> {
+        vec![
+            TestItem {
+                id: 1,
+                name: "alpha".into(),
+            },
+            TestItem {
+                id: 2,
+                name: "beta".into(),
+            },
+        ]
+    }
+
+    fn make_ctx<'a>(
+        dir: Option<&'a PathBuf>,
+        data_file: &'a str,
+        unsaved: &'a mut bool,
+        status: &'a mut String,
+        merge: &'a mut bool,
+    ) -> EditorContext<'a> {
+        EditorContext::new(dir, data_file, unsaved, status, merge)
+    }
+
+    // ── None ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_toolbar_action_none_is_no_op() {
+        let mut data = make_items();
+        let snapshot = data.clone();
+        let mut editor_unsaved = false;
+        let mut unsaved = false;
+        let mut status = String::from("before");
+        let mut merge = false;
+
+        let mut ctx = make_ctx(None, "items.ron", &mut unsaved, &mut status, &mut merge);
+        handle_toolbar_action(
+            ToolbarAction::None,
+            &mut data,
+            |i: &TestItem| i.id,
+            &mut editor_unsaved,
+            &mut ctx,
+            "items.ron",
+            "items",
+        );
+
+        assert_eq!(data, snapshot, "None must not modify data");
+        assert_eq!(status, "before", "None must not touch status");
+        assert!(!editor_unsaved, "None must not set editor_unsaved");
+    }
+
+    // ── Save ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_toolbar_action_save_writes_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
+        let file = "items.ron";
+        let path = dir.join(file);
+
+        let mut data = make_items();
+        let mut editor_unsaved = true;
+        let mut unsaved = false;
+        let mut status = String::new();
+        let mut merge = false;
+
+        let mut ctx = make_ctx(Some(&dir), file, &mut unsaved, &mut status, &mut merge);
+        handle_toolbar_action(
+            ToolbarAction::Save,
+            &mut data,
+            |i: &TestItem| i.id,
+            &mut editor_unsaved,
+            &mut ctx,
+            "items.ron",
+            "items",
+        );
+
+        assert!(path.exists(), "Save must create the file");
+        assert!(
+            status.contains("Saved 2 items"),
+            "status should report count: {status}"
+        );
+        // editor_unsaved is unchanged by Save (was true, stays true)
+        assert!(editor_unsaved);
+    }
+
+    #[test]
+    fn test_toolbar_action_save_no_campaign_dir_is_no_op() {
+        let mut data = make_items();
+        let snapshot = data.clone();
+        let mut editor_unsaved = false;
+        let mut unsaved = false;
+        let mut status = String::from("initial");
+        let mut merge = false;
+
+        let mut ctx = make_ctx(None, "items.ron", &mut unsaved, &mut status, &mut merge);
+        handle_toolbar_action(
+            ToolbarAction::Save,
+            &mut data,
+            |i: &TestItem| i.id,
+            &mut editor_unsaved,
+            &mut ctx,
+            "items.ron",
+            "items",
+        );
+
+        assert_eq!(data, snapshot, "no campaign dir — data must be unchanged");
+        assert_eq!(
+            status, "initial",
+            "no campaign dir — status must be unchanged"
+        );
+    }
+
+    // ── Reload ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_toolbar_action_reload_replaces_data() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
+        let file = "items.ron";
+
+        // Write a file with different data to reload from.
+        let on_disk = vec![TestItem {
+            id: 99,
+            name: "disk".into(),
+        }];
+        let contents = ron::ser::to_string_pretty(&on_disk, Default::default()).unwrap();
+        std::fs::write(dir.join(file), contents).unwrap();
+
+        let mut data = make_items(); // different from on_disk
+        let mut editor_unsaved = true;
+        let mut unsaved = false;
+        let mut status = String::new();
+        let mut merge = false;
+
+        let mut ctx = make_ctx(Some(&dir), file, &mut unsaved, &mut status, &mut merge);
+        handle_toolbar_action(
+            ToolbarAction::Reload,
+            &mut data,
+            |i: &TestItem| i.id,
+            &mut editor_unsaved,
+            &mut ctx,
+            "items.ron",
+            "items",
+        );
+
+        assert_eq!(data, on_disk, "Reload must replace data with file contents");
+        assert!(!editor_unsaved, "Reload must clear editor_unsaved flag");
+        assert!(
+            status.contains("Loaded 1 items"),
+            "status should report count: {status}"
+        );
+    }
+
+    #[test]
+    fn test_toolbar_action_reload_missing_file_sets_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
+        let file = "missing.ron";
+
+        let mut data = make_items();
+        let snapshot = data.clone();
+        let mut editor_unsaved = true;
+        let mut unsaved = false;
+        let mut status = String::new();
+        let mut merge = false;
+
+        let mut ctx = make_ctx(Some(&dir), file, &mut unsaved, &mut status, &mut merge);
+        handle_toolbar_action(
+            ToolbarAction::Reload,
+            &mut data,
+            |i: &TestItem| i.id,
+            &mut editor_unsaved,
+            &mut ctx,
+            "missing.ron",
+            "items",
+        );
+
+        assert_eq!(data, snapshot, "missing file — data must be unchanged");
+        assert!(
+            status.contains("does not exist"),
+            "status should indicate missing file: {status}"
+        );
+        // editor_unsaved was true and stays true since no reload happened
+        assert!(editor_unsaved);
+    }
+
+    #[test]
+    fn test_toolbar_action_reload_no_campaign_dir_is_no_op() {
+        let mut data = make_items();
+        let snapshot = data.clone();
+        let mut editor_unsaved = true;
+        let mut unsaved = false;
+        let mut status = String::from("before");
+        let mut merge = false;
+
+        let mut ctx = make_ctx(None, "items.ron", &mut unsaved, &mut status, &mut merge);
+        handle_toolbar_action(
+            ToolbarAction::Reload,
+            &mut data,
+            |i: &TestItem| i.id,
+            &mut editor_unsaved,
+            &mut ctx,
+            "items.ron",
+            "items",
+        );
+
+        assert_eq!(data, snapshot);
+        assert_eq!(status, "before");
+        assert!(editor_unsaved, "editor_unsaved unchanged when dir is None");
+    }
 }

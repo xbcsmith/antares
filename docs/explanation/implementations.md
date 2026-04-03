@@ -1,5 +1,170 @@
 # Implementations
 
+## SDK Codebase Cleanup — Phase 8: Complete Code Deduplication (Complete)
+
+### Overview
+
+Phase 8 closes the two remaining Phase 4 items:
+
+1. **Phase 8.1** — Extract a generic `handle_toolbar_action<T>()` dispatcher into
+   `ui_helpers/file_io.rs` and migrate the three editors (`classes_editor.rs`,
+   `races_editor.rs`, `characters_editor.rs`) to use it, reducing each toolbar
+   `match` block from ~55–80 lines to ≤ 12 lines.
+
+2. **Phase 8.2** — Eliminate inline `ron::ser::to_string_pretty` duplication from
+   `campaign_io.rs` method bodies by introducing a `write_ron_to_path` private
+   helper and migrating `save_proficiencies`, `save_dialogues_to_file`,
+   `save_npcs_to_file`, and `load_proficiencies` to use shared helpers.
+
+### Phase 8.1 — Generic Toolbar Action Handler
+
+#### New Function: `handle_toolbar_action<T, K, F>` (`src/ui_helpers/file_io.rs`)
+
+```sdk/campaign_builder/src/ui_helpers/file_io.rs#L583-640
+pub fn handle_toolbar_action<T, K, F>(
+    action: ToolbarAction,
+    data: &mut Vec<T>,
+    id_getter: F,
+    editor_unsaved: &mut bool,
+    ctx: &mut EditorContext<'_>,
+    export_filename: &str,
+    noun: &str,
+) where
+    T: Clone + serde::Serialize + serde::de::DeserializeOwned,
+    K: PartialEq + Clone,
+    F: Fn(&T) -> K,
+```
+
+Dispatches `Save`, `Load`, `Export`, `Reload`, and `None` toolbar arms for any
+list-based editor holding a `Vec<T>`. `New` and `Import` are intentionally
+excluded and handled by each editor's own match arms.
+
+**Arm behaviour:**
+
+| Arm              | Action                                                                          |
+| ---------------- | ------------------------------------------------------------------------------- |
+| `Save`           | Creates parent dirs then calls `save_ron_file(data, path)`                      |
+| `Load`           | Delegates to existing `handle_file_load` (opens file dialog)                    |
+| `Export`         | Delegates to existing `handle_file_save` (opens save dialog)                    |
+| `Reload`         | Calls `load_ron_file::<Vec<T>>(path)`, replaces `data`, clears `editor_unsaved` |
+| `None`           | No-op                                                                           |
+| `New` / `Import` | No-op (caller handles these before reaching this function)                      |
+
+**Editor changes (before → after):**
+
+| File                   | Match block before | Match block after |
+| ---------------------- | ------------------ | ----------------- |
+| `classes_editor.rs`    | ~55 lines          | 12 lines          |
+| `races_editor.rs`      | ~55 lines          | 12 lines          |
+| `characters_editor.rs` | ~80 lines          | 11 lines          |
+
+Each editor's match block is now:
+
+```sdk/campaign_builder/src/classes_editor.rs#L387-399
+match toolbar_action {
+    ToolbarAction::New => {
+        self.start_new_class();
+        self.buffer.id = self.next_available_class_id();
+        *ctx.unsaved_changes = true;
+    }
+    ToolbarAction::Import => {
+        *ctx.status_message = "Import not yet implemented for classes".to_string();
+    }
+    other => handle_toolbar_action(
+        other,
+        &mut self.classes,
+        |c: &ClassDefinition| c.id.clone(),
+        &mut self.has_unsaved_changes,
+        ctx,
+        "classes.ron",
+        "classes",
+    ),
+}
+```
+
+**Imports updated** in all three editors: `handle_file_load` and `handle_file_save`
+removed; `handle_toolbar_action` added.
+
+**Tests added** (`src/ui_helpers/file_io.rs` — `toolbar_action_tests` module):
+
+- `test_toolbar_action_none_is_no_op`
+- `test_toolbar_action_save_writes_file`
+- `test_toolbar_action_save_no_campaign_dir_is_no_op`
+- `test_toolbar_action_reload_replaces_data`
+- `test_toolbar_action_reload_missing_file_sets_status`
+- `test_toolbar_action_reload_no_campaign_dir_is_no_op`
+
+### Phase 8.2 — Eliminate Inline RON Serialisation from `campaign_io.rs`
+
+#### New private helper: `write_ron_to_path` (`src/campaign_io.rs`)
+
+```sdk/campaign_builder/src/campaign_io.rs#L88-110
+fn write_ron_to_path<T: serde::Serialize>(
+    path: &std::path::Path,
+    data: &T,
+    type_label: &str,
+) -> Result<(), CampaignIoError>
+```
+
+Single location for the `create_dir_all + PrettyConfig + to_string_pretty + fs::write`
+pattern that was previously duplicated in three method bodies.
+
+`write_ron_collection` now delegates to `write_ron_to_path`, eliminating its own
+copy of the pattern.
+
+#### Methods refactored
+
+| Method                   | Before (approx.) | After (approx.) | Technique              |
+| ------------------------ | ---------------- | --------------- | ---------------------- |
+| `load_proficiencies`     | ~85 lines        | ~28 lines       | `read_ron_collection`  |
+| `save_proficiencies`     | ~50 lines        | ~15 lines       | `write_ron_collection` |
+| `save_dialogues_to_file` | ~25 lines        | ~5 lines        | `write_ron_to_path`    |
+| `save_npcs_to_file`      | ~25 lines        | ~5 lines        | `write_ron_to_path`    |
+
+`load_proficiencies` now follows the same `read_ron_collection` pattern used by
+`load_items`, `load_spells`, `load_conditions`, etc. Asset-manager error marking
+and logger calls are preserved; the only behavioural difference is that
+"file does not exist" is now a silent no-op (consistent with other loaders) rather
+than a separate `logger.warn` branch.
+
+### Files Changed
+
+| File                                             | Change                                                                                                                                                             |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sdk/campaign_builder/src/ui_helpers/file_io.rs` | Added `handle_toolbar_action<T>()` + 6 unit tests                                                                                                                  |
+| `sdk/campaign_builder/src/classes_editor.rs`     | Toolbar match simplified; imports updated                                                                                                                          |
+| `sdk/campaign_builder/src/races_editor.rs`       | Toolbar match simplified; imports updated                                                                                                                          |
+| `sdk/campaign_builder/src/characters_editor.rs`  | Toolbar match simplified; imports updated                                                                                                                          |
+| `sdk/campaign_builder/src/campaign_io.rs`        | `write_ron_to_path` added; `write_ron_collection` refactored; `load_proficiencies`, `save_proficiencies`, `save_dialogues_to_file`, `save_npcs_to_file` simplified |
+
+### Deliverables Checklist
+
+- [x] `handle_toolbar_action<T>()` created in `ui_helpers/file_io.rs`
+- [x] `classes_editor.rs` match block reduced to ≤ 15 lines (→ 12 lines)
+- [x] `races_editor.rs` match block reduced to ≤ 15 lines (→ 12 lines)
+- [x] `characters_editor.rs` match block reduced to ≤ 15 lines (→ 11 lines)
+- [x] `campaign_io.rs` save methods delegate to `write_ron_to_path` / `write_ron_collection`
+- [x] `campaign_io.rs` `load_proficiencies` delegates to `read_ron_collection`
+
+### Quality Gates (Final)
+
+```text
+cargo fmt         → no output (all files formatted)
+cargo check       → Finished dev profile [unoptimized + debuginfo] — 0 errors
+cargo clippy      → Finished dev profile [unoptimized + debuginfo] — 0 warnings
+cargo nextest run → 4095 tests run: 4095 passed, 0 failed, 8 skipped
+```
+
+### Architecture Compliance
+
+- All new code uses `///` doc comments on every public function.
+- Copyright / SPDX headers unchanged (files already had them).
+- No new data files created.
+- No `campaigns/tutorial` references introduced.
+- `handle_toolbar_action` is exported via the existing `pub use file_io::*` glob in `ui_helpers/mod.rs` — no module changes required.
+
+---
+
 ## SDK Codebase Cleanup — Typed Error Migration: `Result<(), String>` → Typed Errors in Six Editor Files (Complete)
 
 ### Overview
