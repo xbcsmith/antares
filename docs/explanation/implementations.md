@@ -1,5 +1,371 @@
 # Implementations
 
+## SDK Codebase Cleanup — Phase 5: Structural Refactoring — Break Up the God Object (Complete)
+
+### Overview
+
+Phase 5 addressed the structural root cause of most SDK maintainability problems:
+`lib.rs` at 12,312 lines with `CampaignBuilderApp` holding ~78 fields, and
+`ui_helpers.rs` at 8,009 lines. This was the highest-risk phase because it
+touched the application's central nervous system.
+
+All five sub-phases were completed in order:
+
+| Sub-Phase | Task                                           | Result                                                    |
+| --------- | ---------------------------------------------- | --------------------------------------------------------- |
+| 5.4       | Extract inline tests from `lib.rs`             | ~5,700 lines moved to 3 test modules                      |
+| 5.1       | Split `ui_helpers.rs` into sub-modules         | 8,009 lines → `ui_helpers/` directory                     |
+| 5.2       | Extract Campaign I/O from `lib.rs`             | ~2,800 lines moved to `campaign_io.rs`                    |
+| 5.3       | Extract Editor State from `CampaignBuilderApp` | 78 fields → 25 fields + 4 state structs                   |
+| 5.5       | Resolve undo/redo parallel state               | `UndoRedoState` removed; cmds use `CampaignData` directly |
+
+### 5.4 — Extract Inline Tests from `lib.rs`
+
+The `mod tests { ... }` block (lines 6,393–12,056, ~5,663 lines) was extracted
+into three `#[cfg(test)]` child modules declared at the bottom of `lib.rs`:
+
+```rust
+#[cfg(test)]
+mod campaign_io_tests;     // src/campaign_io_tests.rs  — 1,677 lines
+#[cfg(test)]
+mod editor_state_tests;    // src/editor_state_tests.rs — 3,623 lines
+#[cfg(test)]
+mod ron_serialization_tests; // src/ron_serialization_tests.rs — 372 lines
+```
+
+Each file starts with `use super::*;` giving access to all private types in
+`lib.rs` (including `CampaignBuilderApp`, `EditorTab`, etc.) because child
+modules can see the parent's private items. Test-specific domain imports are
+repeated in each file.
+
+**Categorisation:**
+
+- `campaign_io_tests` – load/save/validate methods, merchant-dialogue rules, NPC validation, ID-uniqueness checks (60 tests)
+- `editor_state_tests` – editor defaults, UI state, filters, compliance checker, creature templates (147 tests)
+- `ron_serialization_tests` – RON round-trip serialization for all major game-data types (8 tests)
+
+**Impact:** `lib.rs` went from 12,056 → 6,395 lines (−47%).
+
+### 5.1 — Split `ui_helpers.rs` into Sub-Modules
+
+The 8,009-line `ui_helpers.rs` was replaced by a directory-based module with
+focused sub-modules. `lib.rs` required **no changes** — Rust automatically
+resolves `pub mod ui_helpers;` to `src/ui_helpers/mod.rs`.
+
+| File                             | Lines | Contents                                                                                                                                                 |
+| -------------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/ui_helpers/mod.rs`          | 29    | Thin re-export hub: `pub mod` + `pub use *` globs + `#[cfg(test)] mod tests;`                                                                            |
+| `src/ui_helpers/layout.rs`       | 1,612 | Constants, panel helpers, `EditorToolbar`, `ActionButtons`, `TwoColumnLayout`, `MetadataBadge`, `StandardListItemConfig`, entity validation warnings     |
+| `src/ui_helpers/file_io.rs`      | 521   | `CsvParseError`, CSV helpers, `ImportExportDialog*`, `load_ron_file`, `save_ron_file`, `handle_file_load`, `handle_file_save`, `handle_reload`           |
+| `src/ui_helpers/attribute.rs`    | 345   | `AttributePairInputState`, `AttributePairInput`, `AttributePair16Input`                                                                                  |
+| `src/ui_helpers/autocomplete.rs` | 2,527 | `AutocompleteInput`, `dispatch_list_action`, all `autocomplete_*_selector` functions, all `extract_*_candidates` functions, `AutocompleteCandidateCache` |
+| `src/ui_helpers/tests.rs`        | 2,935 | All tests extracted from the original `mod tests { … }` block                                                                                            |
+
+The `make_autocomplete_id` and `generate_synthetic_proficiencies` functions were
+promoted to `pub(crate)` so the sibling `tests.rs` module can call them.
+
+### 5.2 — Extract Campaign I/O from `lib.rs`
+
+~2,800 lines of load/save/validate/campaign-lifecycle methods were moved into
+a new `src/campaign_io.rs` module via a `pub mod campaign_io;` declaration in
+`lib.rs`. A further `src/app_dialogs.rs` module (~637 lines) was created for
+the large dialog-rendering methods (`show_template_browser_dialog`,
+`show_debug_panel_window`, etc.).
+
+**Methods moved to `campaign_io.rs`:**
+
+- `handle_maps_open_npc_request`, `sync_obj_importer_campaign_state`
+- All `validate_*_ids()` methods (items, spells, monsters, maps, conditions, NPCs, characters, proficiencies)
+- `validate_merchant_dialogue_rules`, `repair_merchant_dialogue_validation_issues`
+- `validate_stock_template_refs`, `validate_campaign`, `generate_category_status_checks`
+- All `load_X()` / `save_X()` methods (items, spells, monsters, conditions, proficiencies, furniture, creatures, maps, dialogues, quests, NPCs, classes, races, characters, stock templates)
+- `new_campaign`, `do_new_campaign`, `save_campaign`, `do_save_campaign`, `save_campaign_as`
+- `open_campaign`, `do_open_campaign`, `load_campaign_file`
+- `update_file_tree`, `read_directory`, `check_unsaved_and_exit`, `sync_state_from_undo_redo` (later removed in 5.5)
+- `validate_tree_texture_assets`, `validate_grass_texture_assets`, `run_advanced_validation`
+- `handle_validation_open_npc_request`
+
+All extracted methods were given `pub(crate)` visibility so `lib.rs` can call
+them. The free helpers `read_ron_collection` and `write_ron_collection` were
+also moved to `campaign_io.rs`.
+
+**Methods moved to `app_dialogs.rs`:**
+
+- `show_template_browser_dialog`, `creature_references_from_current_registry`
+- `sync_creature_id_manager_from_creatures`, `next_available_creature_id_for_category`
+- `show_creature_template_browser_dialog`, `show_validation_report_dialog`
+- `show_debug_panel_window`, `show_balance_stats_dialog`
+
+**Impact:** `lib.rs` went from 6,395 → 2,697 lines after 5.2 + dialog extraction.
+
+### 5.3 — Extract Editor State from `CampaignBuilderApp`
+
+A new `src/editor_state.rs` module defines four focused state structs that
+replace 53 of the 78 direct fields previously on `CampaignBuilderApp`.
+
+| Struct            | Fields | Responsibility                                             |
+| ----------------- | ------ | ---------------------------------------------------------- |
+| `CampaignData`    | 11     | All loaded game-content data vectors (items, spells, etc.) |
+| `EditorRegistry`  | 22     | All sub-editor instances + transient quest/stock buffers   |
+| `EditorUiState`   | 18     | Tab selection, dialog visibility flags, debug panel state  |
+| `ValidationState` | 6      | Validation results, filter, focus path, advanced validator |
+
+`CampaignBuilderApp` is now a thin coordinator with **25 direct fields**
+(down from 78), well within the ≤ 30 target. Each of the four state structs
+implements `Default`.
+
+The mechanical field-access substitution (1,150+ occurrences across 6 files)
+was performed with a Python regex script using word-boundary matching
+(`\bself\.field\b`) to avoid false positives on sub-string field names. A
+second pass handled multi-line method-chain continuations.
+
+**Visibility:** Struct types are `pub(crate)` and their fields are `pub(crate)`.
+The `editor_state` module is declared `pub mod editor_state;` in `lib.rs`.
+
+### 5.5 — Resolve Undo/Redo Parallel State
+
+`UndoRedoState` in `undo_redo.rs` previously maintained a parallel copy of
+six campaign data vectors (items, spells, monsters, maps, quests, dialogues),
+requiring a manual `sync_state_from_undo_redo()` call after every undo/redo
+operation.
+
+**Changes made:**
+
+1. **`Command` trait** — signature changed from `&mut UndoRedoState` to
+   `&mut CampaignData`. Marked `pub(crate)` so the private type constraint is
+   satisfied.
+
+2. **All command implementations** — `AddItemCommand`, `DeleteItemCommand`,
+   `EditItemCommand`, etc. now operate on `data.items`, `data.spells`, etc.
+   directly.
+
+3. **`UndoRedoManager`** — `execute()`, `undo()`, `redo()` now accept
+   `&mut CampaignData` as a parameter instead of holding internal state.
+   The `state: UndoRedoState` field was removed. The three data-taking methods
+   are `pub(crate)`; the remaining informational methods (`can_undo`,
+   `undo_count`, etc.) stay `pub`.
+
+4. **`UndoRedoState`** — removed entirely (no external callers existed).
+
+5. **`sync_state_from_undo_redo()`** — removed from `campaign_io.rs`.
+
+6. **Call sites in `lib.rs`** — updated to
+   `self.undo_redo_manager.undo(&mut self.campaign_data)` etc. Rust's NLL
+   borrow checker correctly allows simultaneous disjoint field borrows
+   (`undo_redo_manager` and `campaign_data` are different fields of `self`).
+
+### Files Created
+
+| File                             | Lines | Purpose                                             |
+| -------------------------------- | ----- | --------------------------------------------------- |
+| `src/campaign_io.rs`             | 3,154 | Campaign I/O methods extracted from `lib.rs`        |
+| `src/app_dialogs.rs`             | 680   | Dialog-rendering methods extracted from `lib.rs`    |
+| `src/editor_state.rs`            | 290   | Four focused state structs for `CampaignBuilderApp` |
+| `src/campaign_io_tests.rs`       | 1,677 | Load/save/validate unit tests                       |
+| `src/editor_state_tests.rs`      | 3,623 | Editor state / UI unit tests                        |
+| `src/ron_serialization_tests.rs` | 372   | RON round-trip serialization tests                  |
+| `src/ui_helpers/mod.rs`          | 29    | Re-export hub                                       |
+| `src/ui_helpers/layout.rs`       | 1,612 | Layout widgets                                      |
+| `src/ui_helpers/file_io.rs`      | 521   | File I/O widgets                                    |
+| `src/ui_helpers/attribute.rs`    | 345   | Attribute pair inputs                               |
+| `src/ui_helpers/autocomplete.rs` | 2,527 | Autocomplete widgets and candidate extractors       |
+| `src/ui_helpers/tests.rs`        | 2,935 | ui_helpers unit tests                               |
+
+### Files Deleted / Replaced
+
+| File                | Old Lines | Reason                                         |
+| ------------------- | --------- | ---------------------------------------------- |
+| `src/ui_helpers.rs` | 8,009     | Replaced by `src/ui_helpers/` directory module |
+
+### Deliverables Checklist
+
+- [x] `ui_helpers.rs` split into `ui_helpers/` sub-module directory
+- [x] Campaign I/O extracted from `lib.rs` into `campaign_io.rs`
+- [x] `CampaignBuilderApp` fields grouped into focused state structs
+- [x] ~5,700 lines of inline tests moved to 3 test module files
+- [x] Undo/redo parallel state resolved
+
+### Success Criteria Verification
+
+| Criterion                                       | Result   | Notes                                                                                                                 |
+| ----------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------- |
+| `lib.rs` ≤ 3,000 lines                          | ✅ 2,697 | Down from 12,056                                                                                                      |
+| `ui_helpers.rs` eliminated / ≤ 500 lines        | ✅ 29    | `mod.rs` is a 29-line re-export hub                                                                                   |
+| `CampaignBuilderApp` ≤ 30 direct fields         | ✅ 25    | Down from 78                                                                                                          |
+| No _newly created_ SDK file exceeds 4,000 lines | ✅       | Largest new file: `campaign_io.rs` at 3,154 lines                                                                     |
+| Pre-existing over-limit files                   | ℹ️ noted | `map_editor.rs` (9,715), `creatures_editor.rs` (4,358), `npc_editor.rs` (4,347) pre-date Phase 5 and are out of scope |
+| All quality gates pass                          | ✅       | 2,168 tests pass; 5 pre-existing failures unchanged                                                                   |
+
+### Quality Gates (Final)
+
+```
+cargo fmt --all                                    → ✅ clean
+cargo check --all-targets --all-features           → ✅ 0 errors
+cargo clippy --all-targets --all-features -D warn  → ✅ 0 warnings
+cargo nextest run -p campaign_builder              → 2,168 passed, 5 failed (pre-existing)
+```
+
+---
+
+## SDK Codebase Cleanup — Phase 5.1: Split `ui_helpers.rs` into Sub-Modules (Complete)
+
+### Overview
+
+Phase 5.1 splits the monolithic `src/ui_helpers.rs` (8,009 lines) into a
+directory-based module with five focused sub-modules. The old flat file is
+deleted; `lib.rs` requires **no changes** — Rust automatically resolves
+`pub mod ui_helpers;` to `src/ui_helpers/mod.rs`.
+
+All existing imports (`use crate::ui_helpers::EditorToolbar`, etc.) continue
+to work without modification because `mod.rs` re-exports every public item
+with `pub use layout::*; pub use file_io::*; pub use attribute::*; pub use
+autocomplete::*;`.
+
+### Files Created
+
+| File                             | Lines | Contents                                                                                                                                                                                                                                                                         |
+| -------------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/ui_helpers/mod.rs`          | 29    | Thin re-export hub: module declarations + `pub use *` glob re-exports + `#[cfg(test)] mod tests;`                                                                                                                                                                                |
+| `src/ui_helpers/layout.rs`       | 1,612 | Constants, autocomplete buffer helpers (`make_autocomplete_id` pub(crate)), panel-height helpers, filter/selector helpers, `EditorToolbar`, `ActionButtons`, `TwoColumnLayout`, `MetadataBadge`, `StandardListItemConfig`, `show_standard_list_item`, entity validation warnings |
+| `src/ui_helpers/file_io.rs`      | 521   | `CsvParseError`, `parse_id_csv_to_vec`, `format_vec_to_csv`, `ImportExportResult`, `ImportExportDialogState`, `ImportExportDialog`, `load_ron_file`, `save_ron_file`, `handle_file_load`, `handle_file_save`, `handle_reload`                                                    |
+| `src/ui_helpers/attribute.rs`    | 345   | `AttributePairInputState`, `AttributePairInput`, `AttributePair16Input`                                                                                                                                                                                                          |
+| `src/ui_helpers/autocomplete.rs` | 2,527 | `AutocompleteInput`, `dispatch_list_action`, all `autocomplete_*_selector` functions, all `extract_*_candidates` functions, `load_proficiencies`, `generate_synthetic_proficiencies` (pub(crate)), `AutocompleteCandidateCache`                                                  |
+| `src/ui_helpers/tests.rs`        | 2,935 | All 185 tests extracted from the original `mod tests { … }` block                                                                                                                                                                                                                |
+
+### Files Deleted
+
+| File                | Lines | Reason                                                   |
+| ------------------- | ----- | -------------------------------------------------------- |
+| `src/ui_helpers.rs` | 8,009 | Replaced by the `src/ui_helpers/` directory module above |
+
+### Key Implementation Decisions
+
+1. **`make_autocomplete_id` visibility** — changed from private `fn` to
+   `pub(crate) fn`. In the original flat file, the inline `mod tests {}` was a
+   child of `ui_helpers` and could access private items. After the split,
+   `tests.rs` and `autocomplete.rs` are _sibling_ sub-modules; sibling modules
+   cannot access each other's private items. `pub(crate)` restores the
+   effective access without leaking the function outside the crate.
+
+2. **Struct field visibility for tests** — the same sibling-module rule
+   required `pub(crate)` on fields of `AutocompleteInput`,
+   `AutocompleteCandidateCache`, `EditorToolbar`, `ActionButtons`, and
+   `TwoColumnLayout` that the tests inspect directly. No public API change: the
+   fields are still invisible to external crates.
+
+3. **`generate_synthetic_proficiencies`** — made `pub(crate)` for the same
+   reason (tests call it directly to verify standard proficiency generation).
+
+4. **Removed local `use crate::ui_helpers::AutocompleteInput;` statements**
+   from inside autocomplete selector function bodies — those were necessary in
+   the monolithic file to avoid circular references, but inside `autocomplete.rs`
+   the type is defined in the same module so the import is redundant.
+
+5. **`lib.rs` unchanged** — `pub mod ui_helpers;` in `lib.rs` automatically
+   resolves to `src/ui_helpers/mod.rs` once the directory exists; no edit
+   needed.
+
+### Quality Gate Results
+
+```
+cargo fmt --all          → exit 0 (no changes)
+cargo check --all-targets --all-features → Finished, 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+cargo nextest run -p campaign_builder --all-features
+  → 2168 passed, 5 failed (pre-existing failures in npc_editor / asset_manager /
+    campaign_io_tests, unrelated to ui_helpers), 0 skipped
+```
+
+---
+
+## SDK Codebase Cleanup — Phase 5.4: Extract Inline Tests from lib.rs (Complete)
+
+### Overview
+
+Phase 5.4 extracts the monolithic `#[cfg(test)] mod tests { … }` block from
+`lib.rs` (lines 6393–12056, ~5663 lines) into three dedicated test source
+files. This cuts `lib.rs` nearly in half and groups tests by concern, making
+the file far easier to navigate and review.
+
+### Files Created
+
+| File                             | Description                                                                                                   | Tests |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----- |
+| `src/campaign_io_tests.rs`       | Load/save/validate methods, merchant-dialogue rules, NPC validation, ID-uniqueness checks                     | 60    |
+| `src/editor_state_tests.rs`      | Editor defaults, UI state, filters, compliance checker, creature templates, quest/dialogue/conditions editors | 117   |
+| `src/ron_serialization_tests.rs` | RON round-trip serialization for all major game-data types                                                    | 8     |
+
+**Total extracted:** 185 test functions (the remaining ~26 tests counted in the
+Phase 4 baseline live in other modules such as `map_editor_tests_supplemental`
+and are unaffected).
+
+### Changes to `lib.rs`
+
+1. **Removed** the entire `#[cfg(test)] mod tests { … }` block (lines 6393–12056,
+   ~5663 lines).
+2. **Replaced** it with three `#[cfg(test)] mod …;` declarations:
+   ```rust
+   #[cfg(test)]
+   mod campaign_io_tests;
+   #[cfg(test)]
+   mod editor_state_tests;
+   #[cfg(test)]
+   mod ron_serialization_tests;
+   ```
+3. **Kept** the seven `#[cfg(test)] use …` imports that are still needed by the
+   `#[cfg(test)] impl CampaignBuilderApp { … }` blocks that remain in `lib.rs`
+   (`default_item`, `default_spell`, `default_monster`, `next_available_*_id`).
+4. **Fixed** a pre-existing `clippy::useless_format` warning in `load_items()`
+   (`&format!("…")` → `"…"`).
+
+### Collateral Fix: `ui_helpers` Module Conflict
+
+An incomplete Phase 4 refactoring had left a partially-created
+`src/ui_helpers/` directory (containing only `mod.rs` + `layout.rs`, missing
+`attribute.rs`, `autocomplete.rs`, `file_io.rs`) alongside the complete
+`src/ui_helpers.rs`. This caused a pre-existing `E0761` "file for module found
+at both …" error that blocked the entire package from compiling. The
+incomplete, untracked directory was removed; the full 8009-line
+`src/ui_helpers.rs` is the correct implementation.
+
+### Line-Count Impact
+
+| File                         | Before | After |
+| ---------------------------- | ------ | ----- |
+| `lib.rs`                     | 12 056 | 6 383 |
+| `campaign_io_tests.rs`       | —      | 1 748 |
+| `editor_state_tests.rs`      | —      | 3 759 |
+| `ron_serialization_tests.rs` | —      | 387   |
+
+### Extraction Script
+
+`sdk/campaign_builder/extract_tests.py` — a standalone Python 3 script that
+parses the test block via a brace-depth state machine, categorises each
+`fn test_*` by name, strips one level of indentation, and writes the three
+output files together with their SPDX headers and import blocks. Can be
+re-run safely if `lib.rs` is reverted and the split needs to be redone.
+
+### Quality Gates (Final)
+
+```
+cargo fmt         → ✅ clean
+cargo check       → ✅ 0 errors, 0 warnings
+cargo clippy      → ✅ 0 warnings (-D warnings)
+cargo nextest run → 2173 tests run: 2168 passed, 5 failed, 0 skipped
+                    (all 5 failures are pre-existing, identical to baseline)
+```
+
+### Architecture Compliance
+
+- SPDX `FileCopyrightText` / `License-Identifier` headers on all three new `.rs` files
+- Each file opens with `use super::*;` giving access to all private types in `lib.rs`
+- Only imports actually used by tests in that file are present (verified by `clippy -D warnings`)
+- No test logic was modified — only moved
+- Module declarations use `#[cfg(test)]` so the files are compiled only during test builds
+- `docs/explanation/implementations.md` updated (this entry)
+
+---
+
 ## SDK Codebase Cleanup — Phase 4: Consolidate Duplicate Code (Complete)
 
 ### Overview

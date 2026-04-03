@@ -10,39 +10,26 @@
 //! - Map editor tile placement
 //! - Quest and dialogue modifications
 
+use crate::editor_state::CampaignData;
 use antares::domain::combat::database::MonsterDefinition;
-use antares::domain::dialogue::DialogueTree;
 use antares::domain::items::types::Item;
 use antares::domain::magic::types::Spell;
 use antares::domain::quest::Quest;
-use antares::domain::world::Map;
 use serde::{Deserialize, Serialize};
 
 /// Maximum number of actions in the undo/redo history
 pub const MAX_HISTORY_SIZE: usize = 50;
 
 /// Command trait for reversible operations
-pub trait Command: std::fmt::Debug {
+pub(crate) trait Command: std::fmt::Debug {
     /// Execute the command
-    fn execute(&self, state: &mut UndoRedoState) -> Result<(), String>;
+    fn execute(&self, data: &mut CampaignData) -> Result<(), String>;
 
     /// Undo the command
-    fn undo(&self, state: &mut UndoRedoState) -> Result<(), String>;
+    fn undo(&self, data: &mut CampaignData) -> Result<(), String>;
 
     /// Get a human-readable description of this command
     fn description(&self) -> String;
-}
-
-/// Global state that commands operate on
-#[derive(Debug, Clone, Default)]
-pub struct UndoRedoState {
-    pub metadata_changed: bool,
-    pub items: Vec<Item>,
-    pub spells: Vec<Spell>,
-    pub monsters: Vec<MonsterDefinition>,
-    pub maps: Vec<Map>,
-    pub quests: Vec<Quest>,
-    pub dialogues: Vec<DialogueTree>,
 }
 
 /// A generic push-down undo/redo stack.
@@ -405,7 +392,6 @@ impl<C> UndoRedoStack<C> {
 #[derive(Debug)]
 pub struct UndoRedoManager {
     stack: UndoRedoStack<Box<dyn Command>>,
-    state: UndoRedoState,
 }
 
 impl Default for UndoRedoManager {
@@ -419,22 +405,35 @@ impl UndoRedoManager {
     pub fn new() -> Self {
         Self {
             stack: UndoRedoStack::new(MAX_HISTORY_SIZE),
-            state: UndoRedoState::default(),
         }
     }
 
-    /// Execute a command and add it to the undo stack
-    pub fn execute(&mut self, command: Box<dyn Command>) -> Result<(), String> {
-        command.execute(&mut self.state)?;
+    /// Execute a command, applying it to `data` and pushing it to the undo stack.
+    ///
+    /// The redo stack is cleared because a new command branches the history.
+    ///
+    /// # Note
+    ///
+    /// This method is part of the planned undo/redo API and will be wired to
+    /// editor actions in a future milestone.
+    #[allow(dead_code)]
+    pub(crate) fn execute(
+        &mut self,
+        command: Box<dyn Command>,
+        data: &mut CampaignData,
+    ) -> Result<(), String> {
+        command.execute(data)?;
         self.stack.push_new(command);
         Ok(())
     }
 
-    /// Undo the last command
-    pub fn undo(&mut self) -> Result<String, String> {
+    /// Undo the most recent command, restoring `data` to its previous state.
+    ///
+    /// The undone command is pushed to the redo stack so it can be re-applied.
+    pub(crate) fn undo(&mut self, data: &mut CampaignData) -> Result<String, String> {
         if let Some(command) = self.stack.pop_undo() {
             let description = command.description();
-            command.undo(&mut self.state)?;
+            command.undo(data)?;
             self.stack.push_to_redo(command);
             Ok(description)
         } else {
@@ -442,11 +441,13 @@ impl UndoRedoManager {
         }
     }
 
-    /// Redo the last undone command
-    pub fn redo(&mut self) -> Result<String, String> {
+    /// Redo the most recently undone command, re-applying it to `data`.
+    ///
+    /// The redone command is pushed back to the undo stack.
+    pub(crate) fn redo(&mut self, data: &mut CampaignData) -> Result<String, String> {
         if let Some(command) = self.stack.pop_redo() {
             let description = command.description();
-            command.execute(&mut self.state)?;
+            command.execute(data)?;
             self.stack.push_to_undo(command);
             Ok(description)
         } else {
@@ -488,16 +489,6 @@ impl UndoRedoManager {
     pub fn clear(&mut self) {
         self.stack.clear();
     }
-
-    /// Get read-only access to state
-    pub fn state(&self) -> &UndoRedoState {
-        &self.state
-    }
-
-    /// Get mutable access to state (use with caution)
-    pub fn state_mut(&mut self) -> &mut UndoRedoState {
-        &mut self.state
-    }
 }
 
 // ============================================================================
@@ -517,14 +508,14 @@ impl AddItemCommand {
 }
 
 impl Command for AddItemCommand {
-    fn execute(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        state.items.push(self.item.clone());
+    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+        data.items.push(self.item.clone());
         Ok(())
     }
 
-    fn undo(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if let Some(pos) = state.items.iter().position(|i| i.id == self.item.id) {
-            state.items.remove(pos);
+    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+        if let Some(pos) = data.items.iter().position(|i| i.id == self.item.id) {
+            data.items.remove(pos);
             Ok(())
         } else {
             Err(format!("Item {} not found for undo", self.item.id))
@@ -550,18 +541,18 @@ impl DeleteItemCommand {
 }
 
 impl Command for DeleteItemCommand {
-    fn execute(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if self.index < state.items.len() {
-            state.items.remove(self.index);
+    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+        if self.index < data.items.len() {
+            data.items.remove(self.index);
             Ok(())
         } else {
             Err(format!("Invalid item index: {}", self.index))
         }
     }
 
-    fn undo(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if self.index <= state.items.len() {
-            state.items.insert(self.index, self.item.clone());
+    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+        if self.index <= data.items.len() {
+            data.items.insert(self.index, self.item.clone());
             Ok(())
         } else {
             Err(format!("Invalid item index for undo: {}", self.index))
@@ -592,18 +583,18 @@ impl EditItemCommand {
 }
 
 impl Command for EditItemCommand {
-    fn execute(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if self.index < state.items.len() {
-            state.items[self.index] = self.new_item.clone();
+    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+        if self.index < data.items.len() {
+            data.items[self.index] = self.new_item.clone();
             Ok(())
         } else {
             Err(format!("Invalid item index: {}", self.index))
         }
     }
 
-    fn undo(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if self.index < state.items.len() {
-            state.items[self.index] = self.old_item.clone();
+    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+        if self.index < data.items.len() {
+            data.items[self.index] = self.old_item.clone();
             Ok(())
         } else {
             Err(format!("Invalid item index for undo: {}", self.index))
@@ -632,14 +623,14 @@ impl AddSpellCommand {
 }
 
 impl Command for AddSpellCommand {
-    fn execute(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        state.spells.push(self.spell.clone());
+    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+        data.spells.push(self.spell.clone());
         Ok(())
     }
 
-    fn undo(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if let Some(pos) = state.spells.iter().position(|s| s.id == self.spell.id) {
-            state.spells.remove(pos);
+    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+        if let Some(pos) = data.spells.iter().position(|s| s.id == self.spell.id) {
+            data.spells.remove(pos);
             Ok(())
         } else {
             Err(format!("Spell {} not found for undo", self.spell.id))
@@ -665,18 +656,18 @@ impl DeleteSpellCommand {
 }
 
 impl Command for DeleteSpellCommand {
-    fn execute(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if self.index < state.spells.len() {
-            state.spells.remove(self.index);
+    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+        if self.index < data.spells.len() {
+            data.spells.remove(self.index);
             Ok(())
         } else {
             Err(format!("Invalid spell index: {}", self.index))
         }
     }
 
-    fn undo(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if self.index <= state.spells.len() {
-            state.spells.insert(self.index, self.spell.clone());
+    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+        if self.index <= data.spells.len() {
+            data.spells.insert(self.index, self.spell.clone());
             Ok(())
         } else {
             Err(format!("Invalid spell index for undo: {}", self.index))
@@ -707,18 +698,18 @@ impl EditSpellCommand {
 }
 
 impl Command for EditSpellCommand {
-    fn execute(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if self.index < state.spells.len() {
-            state.spells[self.index] = self.new_spell.clone();
+    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+        if self.index < data.spells.len() {
+            data.spells[self.index] = self.new_spell.clone();
             Ok(())
         } else {
             Err(format!("Invalid spell index: {}", self.index))
         }
     }
 
-    fn undo(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if self.index < state.spells.len() {
-            state.spells[self.index] = self.old_spell.clone();
+    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+        if self.index < data.spells.len() {
+            data.spells[self.index] = self.old_spell.clone();
             Ok(())
         } else {
             Err(format!("Invalid spell index for undo: {}", self.index))
@@ -747,14 +738,14 @@ impl AddMonsterCommand {
 }
 
 impl Command for AddMonsterCommand {
-    fn execute(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        state.monsters.push(self.monster.clone());
+    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+        data.monsters.push(self.monster.clone());
         Ok(())
     }
 
-    fn undo(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if let Some(pos) = state.monsters.iter().position(|m| m.id == self.monster.id) {
-            state.monsters.remove(pos);
+    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+        if let Some(pos) = data.monsters.iter().position(|m| m.id == self.monster.id) {
+            data.monsters.remove(pos);
             Ok(())
         } else {
             Err(format!("Monster {} not found for undo", self.monster.id))
@@ -780,18 +771,18 @@ impl DeleteMonsterCommand {
 }
 
 impl Command for DeleteMonsterCommand {
-    fn execute(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if self.index < state.monsters.len() {
-            state.monsters.remove(self.index);
+    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+        if self.index < data.monsters.len() {
+            data.monsters.remove(self.index);
             Ok(())
         } else {
             Err(format!("Invalid monster index: {}", self.index))
         }
     }
 
-    fn undo(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if self.index <= state.monsters.len() {
-            state.monsters.insert(self.index, self.monster.clone());
+    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+        if self.index <= data.monsters.len() {
+            data.monsters.insert(self.index, self.monster.clone());
             Ok(())
         } else {
             Err(format!("Invalid monster index for undo: {}", self.index))
@@ -826,18 +817,18 @@ impl EditMonsterCommand {
 }
 
 impl Command for EditMonsterCommand {
-    fn execute(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if self.index < state.monsters.len() {
-            state.monsters[self.index] = self.new_monster.clone();
+    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+        if self.index < data.monsters.len() {
+            data.monsters[self.index] = self.new_monster.clone();
             Ok(())
         } else {
             Err(format!("Invalid monster index: {}", self.index))
         }
     }
 
-    fn undo(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if self.index < state.monsters.len() {
-            state.monsters[self.index] = self.old_monster.clone();
+    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+        if self.index < data.monsters.len() {
+            data.monsters[self.index] = self.old_monster.clone();
             Ok(())
         } else {
             Err(format!("Invalid monster index for undo: {}", self.index))
@@ -866,14 +857,14 @@ impl AddQuestCommand {
 }
 
 impl Command for AddQuestCommand {
-    fn execute(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        state.quests.push(self.quest.clone());
+    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+        data.quests.push(self.quest.clone());
         Ok(())
     }
 
-    fn undo(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if let Some(pos) = state.quests.iter().position(|q| q.id == self.quest.id) {
-            state.quests.remove(pos);
+    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+        if let Some(pos) = data.quests.iter().position(|q| q.id == self.quest.id) {
+            data.quests.remove(pos);
             Ok(())
         } else {
             Err(format!("Quest {} not found for undo", self.quest.id))
@@ -899,18 +890,18 @@ impl DeleteQuestCommand {
 }
 
 impl Command for DeleteQuestCommand {
-    fn execute(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if self.index < state.quests.len() {
-            state.quests.remove(self.index);
+    fn execute(&self, data: &mut CampaignData) -> Result<(), String> {
+        if self.index < data.quests.len() {
+            data.quests.remove(self.index);
             Ok(())
         } else {
             Err(format!("Invalid quest index: {}", self.index))
         }
     }
 
-    fn undo(&self, state: &mut UndoRedoState) -> Result<(), String> {
-        if self.index <= state.quests.len() {
-            state.quests.insert(self.index, self.quest.clone());
+    fn undo(&self, data: &mut CampaignData) -> Result<(), String> {
+        if self.index <= data.quests.len() {
+            data.quests.insert(self.index, self.quest.clone());
             Ok(())
         } else {
             Err(format!("Invalid quest index for undo: {}", self.index))
@@ -964,162 +955,172 @@ mod tests {
 
     #[test]
     fn test_add_item_command() {
+        let mut data = CampaignData::default();
         let mut manager = UndoRedoManager::new();
         let item = create_test_item(1, "Sword");
 
         let cmd = AddItemCommand::new(item.clone());
-        manager.execute(cmd).unwrap();
+        manager.execute(cmd, &mut data).unwrap();
 
-        assert_eq!(manager.state().items.len(), 1);
-        assert_eq!(manager.state().items[0].name, "Sword");
+        assert_eq!(data.items.len(), 1);
+        assert_eq!(data.items[0].name, "Sword");
         assert!(manager.can_undo());
         assert!(!manager.can_redo());
     }
 
     #[test]
     fn test_undo_add_item() {
+        let mut data = CampaignData::default();
         let mut manager = UndoRedoManager::new();
         let item = create_test_item(1, "Sword");
 
         let cmd = AddItemCommand::new(item.clone());
-        manager.execute(cmd).unwrap();
-        assert_eq!(manager.state().items.len(), 1);
+        manager.execute(cmd, &mut data).unwrap();
+        assert_eq!(data.items.len(), 1);
 
-        manager.undo().unwrap();
-        assert_eq!(manager.state().items.len(), 0);
+        manager.undo(&mut data).unwrap();
+        assert_eq!(data.items.len(), 0);
         assert!(!manager.can_undo());
         assert!(manager.can_redo());
     }
 
     #[test]
     fn test_redo_add_item() {
+        let mut data = CampaignData::default();
         let mut manager = UndoRedoManager::new();
         let item = create_test_item(1, "Sword");
 
         let cmd = AddItemCommand::new(item.clone());
-        manager.execute(cmd).unwrap();
-        manager.undo().unwrap();
+        manager.execute(cmd, &mut data).unwrap();
+        manager.undo(&mut data).unwrap();
 
-        manager.redo().unwrap();
-        assert_eq!(manager.state().items.len(), 1);
-        assert_eq!(manager.state().items[0].name, "Sword");
+        manager.redo(&mut data).unwrap();
+        assert_eq!(data.items.len(), 1);
+        assert_eq!(data.items[0].name, "Sword");
         assert!(manager.can_undo());
         assert!(!manager.can_redo());
     }
 
     #[test]
     fn test_delete_item_command() {
+        let mut data = CampaignData::default();
         let mut manager = UndoRedoManager::new();
         let item = create_test_item(1, "Sword");
-        manager.state_mut().items.push(item.clone());
+        data.items.push(item.clone());
 
         let cmd = DeleteItemCommand::new(item, 0);
-        manager.execute(cmd).unwrap();
+        manager.execute(cmd, &mut data).unwrap();
 
-        assert_eq!(manager.state().items.len(), 0);
+        assert_eq!(data.items.len(), 0);
     }
 
     #[test]
     fn test_undo_delete_item() {
+        let mut data = CampaignData::default();
         let mut manager = UndoRedoManager::new();
         let item = create_test_item(1, "Sword");
-        manager.state_mut().items.push(item.clone());
+        data.items.push(item.clone());
 
         let cmd = DeleteItemCommand::new(item.clone(), 0);
-        manager.execute(cmd).unwrap();
-        assert_eq!(manager.state().items.len(), 0);
+        manager.execute(cmd, &mut data).unwrap();
+        assert_eq!(data.items.len(), 0);
 
-        manager.undo().unwrap();
-        assert_eq!(manager.state().items.len(), 1);
-        assert_eq!(manager.state().items[0].name, "Sword");
+        manager.undo(&mut data).unwrap();
+        assert_eq!(data.items.len(), 1);
+        assert_eq!(data.items[0].name, "Sword");
     }
 
     #[test]
     fn test_edit_item_command() {
+        let mut data = CampaignData::default();
         let mut manager = UndoRedoManager::new();
         let old_item = create_test_item(1, "Sword");
         let new_item = create_test_item(1, "Magic Sword");
-        manager.state_mut().items.push(old_item.clone());
+        data.items.push(old_item.clone());
 
         let cmd = EditItemCommand::new(0, old_item.clone(), new_item.clone());
-        manager.execute(cmd).unwrap();
+        manager.execute(cmd, &mut data).unwrap();
 
-        assert_eq!(manager.state().items[0].name, "Magic Sword");
+        assert_eq!(data.items[0].name, "Magic Sword");
     }
 
     #[test]
     fn test_undo_edit_item() {
+        let mut data = CampaignData::default();
         let mut manager = UndoRedoManager::new();
         let old_item = create_test_item(1, "Sword");
         let new_item = create_test_item(1, "Magic Sword");
-        manager.state_mut().items.push(old_item.clone());
+        data.items.push(old_item.clone());
 
         let cmd = EditItemCommand::new(0, old_item.clone(), new_item.clone());
-        manager.execute(cmd).unwrap();
-        assert_eq!(manager.state().items[0].name, "Magic Sword");
+        manager.execute(cmd, &mut data).unwrap();
+        assert_eq!(data.items[0].name, "Magic Sword");
 
-        manager.undo().unwrap();
-        assert_eq!(manager.state().items[0].name, "Sword");
+        manager.undo(&mut data).unwrap();
+        assert_eq!(data.items[0].name, "Sword");
     }
 
     #[test]
     fn test_multiple_undo_redo() {
+        let mut data = CampaignData::default();
         let mut manager = UndoRedoManager::new();
 
         // Add three items
         for i in 1..=3 {
             let item = create_test_item(i, &format!("Item {}", i));
             let cmd = AddItemCommand::new(item);
-            manager.execute(cmd).unwrap();
+            manager.execute(cmd, &mut data).unwrap();
         }
 
-        assert_eq!(manager.state().items.len(), 3);
+        assert_eq!(data.items.len(), 3);
         assert_eq!(manager.undo_count(), 3);
 
         // Undo all
-        manager.undo().unwrap();
-        manager.undo().unwrap();
-        manager.undo().unwrap();
+        manager.undo(&mut data).unwrap();
+        manager.undo(&mut data).unwrap();
+        manager.undo(&mut data).unwrap();
 
-        assert_eq!(manager.state().items.len(), 0);
+        assert_eq!(data.items.len(), 0);
         assert_eq!(manager.redo_count(), 3);
 
         // Redo all
-        manager.redo().unwrap();
-        manager.redo().unwrap();
-        manager.redo().unwrap();
+        manager.redo(&mut data).unwrap();
+        manager.redo(&mut data).unwrap();
+        manager.redo(&mut data).unwrap();
 
-        assert_eq!(manager.state().items.len(), 3);
+        assert_eq!(data.items.len(), 3);
     }
 
     #[test]
     fn test_new_command_clears_redo_stack() {
+        let mut data = CampaignData::default();
         let mut manager = UndoRedoManager::new();
 
         let item1 = create_test_item(1, "Item 1");
         let cmd1 = AddItemCommand::new(item1);
-        manager.execute(cmd1).unwrap();
+        manager.execute(cmd1, &mut data).unwrap();
 
-        manager.undo().unwrap();
+        manager.undo(&mut data).unwrap();
         assert!(manager.can_redo());
 
         // New command should clear redo stack
         let item2 = create_test_item(2, "Item 2");
         let cmd2 = AddItemCommand::new(item2);
-        manager.execute(cmd2).unwrap();
+        manager.execute(cmd2, &mut data).unwrap();
 
         assert!(!manager.can_redo());
     }
 
     #[test]
     fn test_max_history_size() {
+        let mut data = CampaignData::default();
         let mut manager = UndoRedoManager::new();
 
         // Add more than MAX_HISTORY_SIZE commands
         for i in 0..(MAX_HISTORY_SIZE + 10) {
             let item = create_test_item(i as u32, &format!("Item {}", i));
             let cmd = AddItemCommand::new(item);
-            manager.execute(cmd).unwrap();
+            manager.execute(cmd, &mut data).unwrap();
         }
 
         // Should be limited to MAX_HISTORY_SIZE
@@ -1142,20 +1143,21 @@ mod tests {
 
     #[test]
     fn test_next_undo_redo_descriptions() {
+        let mut data = CampaignData::default();
         let mut manager = UndoRedoManager::new();
         assert_eq!(manager.next_undo_description(), None);
         assert_eq!(manager.next_redo_description(), None);
 
         let item = create_test_item(1, "Sword");
         let cmd = AddItemCommand::new(item);
-        manager.execute(cmd).unwrap();
+        manager.execute(cmd, &mut data).unwrap();
 
         assert_eq!(
             manager.next_undo_description(),
             Some("Add item: Sword".to_string())
         );
 
-        manager.undo().unwrap();
+        manager.undo(&mut data).unwrap();
         assert_eq!(
             manager.next_redo_description(),
             Some("Add item: Sword".to_string())
@@ -1164,11 +1166,12 @@ mod tests {
 
     #[test]
     fn test_clear_history() {
+        let mut data = CampaignData::default();
         let mut manager = UndoRedoManager::new();
 
         let item = create_test_item(1, "Sword");
         let cmd = AddItemCommand::new(item);
-        manager.execute(cmd).unwrap();
+        manager.execute(cmd, &mut data).unwrap();
 
         assert!(manager.can_undo());
         manager.clear();
