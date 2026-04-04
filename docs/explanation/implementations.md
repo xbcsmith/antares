@@ -1,5 +1,313 @@
 # Implementations
 
+## Spell System — Phase 2.3/2.4: Spell Selection Panel UI and Improved Spell Cast Feedback (Complete)
+
+### Overview
+
+Implemented Phase 2.3 (spell selection panel UI) and Phase 2.4 (improved spell
+cast feedback messages) of the Spell System Updates.
+
+Players can now click the **Cast** action button to open a scrollable spell
+selection panel that lists all known spells organised by level. Each spell
+button shows its name, SP cost, and gem cost (if any), and is greyed out when
+the spell cannot currently be cast. Selecting a single-monster spell enters the
+existing target-selection flow; self/group/all-monster spells fire immediately.
+The panel is closed by clicking Cancel, pressing Escape, or selecting a spell.
+
+Spell combat feedback now emits `SpellCast` / `SpellHeal` variants that carry
+the spell name, producing log lines like:
+
+> _Ariadne: Casts Fireball at Goblin for [25] damage_ > _Ariadne: Casts Cure Wounds healing Ariadne for [12] HP_
+
+Condition applications are also surfaced as a follow-up `Status` log entry.
+
+### Files Changed
+
+- `src/game/systems/combat.rs` — sole modified file
+
+### A — New Components
+
+| Component           | Purpose                                             |
+| ------------------- | --------------------------------------------------- |
+| `SpellCancelButton` | Marker on the Cancel button inside the spell panel. |
+
+`SpellSelectionPanel` and `SpellButton` were already defined but not spawned;
+this phase wires them up.
+
+### B — New Resources
+
+| Resource           | Default        | Purpose                                                                                                                                              |
+| ------------------ | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SpellPanelState`  | `caster: None` | Tracks whether the spell panel is open and for whom. Set to `Some(actor)` when Cast is dispatched; cleared when a spell is chosen or Escape pressed. |
+| `PendingSpellCast` | `data: None`   | Holds `(caster, spell_id)` when a SingleMonster spell needs a target; consumed by the keyboard target-confirm flow.                                  |
+
+Both are registered in `CombatPlugin::build`.
+
+### C — New `CombatFeedbackEffect` Variants
+
+```antares/src/game/systems/combat.rs#L663-676
+    SpellCast {
+        name: String,
+        damage: u32,
+    },
+    SpellHeal {
+        name: String,
+        amount: u32,
+    },
+```
+
+`format_combat_log_line` and `spawn_combat_feedback` both handle these variants
+in their existing match blocks (both the source-known and source-unknown paths).
+
+### D — `format_combat_log_line` Changes
+
+Two new arms added in the `if let Some(source)` block (with early `return`)
+and two matching arms in the fallback block:
+
+- `SpellCast { damage > 0 }` → `"Source: Casts Name at Target for [N] damage"` (blue spell colour)
+- `SpellCast { damage == 0 }` → `"Source: Casts Name — no effect"` (blue spell colour)
+- `SpellHeal` → `"Source: Casts Name healing Target for [N] HP"` (teal spell colour)
+
+### E — `spawn_combat_feedback` Changes
+
+Text/colour match extended:
+
+- `SpellCast { damage > 0 }` → `"Name! -N"` in `FEEDBACK_COLOR_DAMAGE`, font 18
+- `SpellCast { damage == 0 }` → `"Name — no effect"` in `FEEDBACK_COLOR_MISS`, font 15
+- `SpellHeal` → `"Name! +N"` in `FEEDBACK_COLOR_HEAL`, font 18
+
+### F — `handle_cast_spell_action` Changes
+
+1. Spell name and `applied_conditions` are looked up from the content DB
+   **before** the cast (using `get_spell(action.spell_id)`).
+2. After computing `pre_hp − post_hp`, both `dmg` (positive delta = damage)
+   and `healed` (negative delta = HP restored) are derived.
+3. Emits `SpellHeal` when `healed > 0`, otherwise `SpellCast { damage: dmg }`.
+4. If the spell has `applied_conditions`, a follow-up `Status` feedback is
+   emitted with the condition label, e.g. `"Goblin is now poisoned!"`.
+5. SFX trigger updated to fire `combat_hit` for both `dmg > 0` **and**
+   `healed > 0`.
+
+### G — `dispatch_combat_action` Changes
+
+Signature gained `spell_panel_state: &mut SpellPanelState`. The combined
+`Cast | Item` arm is now two separate arms:
+
+```antares/src/game/systems/combat.rs#L2690-2697
+        ActionButtonType::Cast => {
+            spell_panel_state.caster = Some(actor);
+        }
+        ActionButtonType::Item => {
+            // Item submenu — handled by separate systems
+        }
+```
+
+`#[allow(clippy::too_many_arguments)]` added to the function (now 8 params).
+All three call sites in `combat_input_system` pass `&mut spell_panel_state`.
+
+### H — `combat_input_system` Changes
+
+Three new parameters:
+
+- `mut cast_writer: Option<MessageWriter<CastSpellAction>>`
+- `mut spell_panel_state: ResMut<SpellPanelState>`
+- `mut pending_spell: ResMut<PendingSpellCast>`
+
+Keyboard behaviour changes:
+
+| Mode          | Key    | Old behaviour                  | New behaviour                                                                       |
+| ------------- | ------ | ------------------------------ | ----------------------------------------------------------------------------------- |
+| Target-select | Enter  | always `confirm_attack_target` | `confirm_spell_target` if `pending_spell.data` is set, else `confirm_attack_target` |
+| Target-select | Escape | clear target selection         | also clears `pending_spell.data`                                                    |
+| Action menu   | Escape | no-op                          | closes spell panel if open                                                          |
+
+### I — New `confirm_spell_target` Function
+
+Mirrors `confirm_attack_target`. Writes a `CastSpellAction` targeting the
+confirmed monster participant index, then clears `TargetSelection` and
+`active_target_index`.
+
+### J — New Systems
+
+| System                               | Registered after               |
+| ------------------------------------ | ------------------------------ |
+| `update_spell_selection_panel`       | `combat_input_system`          |
+| `handle_spell_button_interaction`    | `update_spell_selection_panel` |
+| `cleanup_spell_panel_on_combat_exit` | (unconditional)                |
+
+**`update_spell_selection_panel`**: spawns the panel node when
+`SpellPanelState.caster` becomes `Some`, despawns it when it becomes `None`.
+Spells are grouped under level headers (1–7); castability is checked via
+`validate_spell_cast`; disabled spells use `ACTION_BUTTON_DISABLED_COLOR`.
+
+**`handle_spell_button_interaction`**: responds to `Interaction::Pressed` on
+`SpellButton` and `SpellCancelButton`. Routes `SingleMonster` spells into
+target-selection mode (populates `PendingSpellCast`); all other target types
+fire `CastSpellAction` directly.
+
+**`cleanup_spell_panel_on_combat_exit`**: resets `SpellPanelState` and
+`PendingSpellCast` to defaults when the game mode leaves `Combat`.
+
+### K — Tests Added
+
+All tests live in existing test modules (no new files created).
+
+**`mod combat_log_format_tests`**:
+
+| Test                                      | Asserts                                                                 |
+| ----------------------------------------- | ----------------------------------------------------------------------- |
+| `test_spell_cast_feedback_has_spell_name` | Log line contains "Fireball" and "25" for `SpellCast { damage: 25 }`    |
+| `test_spell_heal_feedback_has_spell_name` | Log line contains "Cure Wounds" and "12" for `SpellHeal { amount: 12 }` |
+| `test_spell_panel_state_default_is_none`  | `SpellPanelState::default().caster` is `None`                           |
+| `test_pending_spell_cast_default_is_none` | `PendingSpellCast::default().data` is `None`                            |
+
+**`mod tests`** (main combat test block):
+
+| Test                                               | Asserts                                                                                                                  |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `test_dispatch_cast_sets_spell_panel`              | `dispatch_combat_action(Cast, …)` sets `spell_panel_state.caster = Some(actor)` and does not enter target-selection mode |
+| `test_dispatch_item_does_not_set_spell_panel`      | `dispatch_combat_action(Item, …)` leaves `spell_panel_state.caster = None`                                               |
+| (extended `test_combat_plugin_registers_messages`) | Both `SpellPanelState` and `PendingSpellCast` are present and default to `None` after `CombatPlugin` init                |
+
+### Quality Gates
+
+All four gates passed with zero errors and zero warnings:
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt --all          → no output
+cargo check              → Finished, 0 errors
+cargo clippy -D warnings → Finished, 0 warnings
+cargo nextest run        → 4147 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Spell System — Phase 2: SP Bar in HUD Character Cards (Complete)
+
+### Overview
+
+Implemented Phase 2 of the Spell System Updates: SP (Spell Point) bars are now
+rendered on each character card in the HUD. Spellcasting characters show a
+colour-coded SP bar beneath their HP bar; non-casters (characters whose
+`sp.base == 0`, e.g. Knights and Robbers) have the bar hidden entirely via
+`Display::None`.
+
+### Files Changed
+
+- `src/game/systems/hud.rs` — sole modified file
+
+### 2.1 — New Constants
+
+Added to the constants block after `HP_CRITICAL_THRESHOLD`:
+
+| Constant               | Value                         | Purpose                                        |
+| ---------------------- | ----------------------------- | ---------------------------------------------- |
+| `SP_HEALTHY_COLOR`     | `srgb(0.2, 0.4, 0.9)`         | Blue fill when SP ≥ 50%                        |
+| `SP_LOW_COLOR`         | `srgb(0.4, 0.6, 0.8)`         | Light-blue fill when SP > 0% and < 50%         |
+| `SP_EMPTY_COLOR`       | `srgb(0.31, 0.31, 0.31)`      | Grey fill when SP == 0%                        |
+| `SP_BAR_HEIGHT`        | `Val::Px(8.0)`                | Thinner than HP bar (10 px)                    |
+| `SP_HEALTHY_THRESHOLD` | `0.5`                         | 50% — boundary between healthy and low colours |
+| `SP_TEXT_COLOR`        | `srgba(0.80, 0.90, 1.0, 1.0)` | Light-blue tint for overlay text               |
+
+### 2.2 — New Marker Components
+
+Three new `#[derive(Component)]` structs, all carrying `pub party_index: usize`:
+
+- `SpBarBackground` — the grey backing container; `display` is toggled per frame
+- `SpBarFill` — the coloured inner fill; `width` is driven by `sp.current / sp.base`
+- `SpBarTextOverlay` — absolute-positioned text overlay showing "SP: current/max"
+
+### 2.3 — New Type Aliases
+
+Four type aliases now sit alongside `HpOverlayQuery` / `ConditionTextQuery`:
+
+- `SpBarBgQuery` — mutable `Node` on `SpBarBackground` entities, excluding
+  `CharacterCard`, `HpBarFill`, and `SpBarFill` from the filter
+- `SpBarFillQuery` — mutable `Node` + `BackgroundColor` on `SpBarFill`, with
+  the symmetric filter set
+- `SpBarTextQuery` — mutable `Text` + `TextColor` on `SpBarTextOverlay`,
+  excluding `HpTextOverlay` and `ConditionText`
+
+Extracting these aliases was necessary to satisfy `clippy::type_complexity`.
+
+### 2.4 — `setup_hud` Changes
+
+Inside the per-party-index card spawning loop, a new SP bar container is
+spawned between the HP bar `.with_children(…)` block and the `ConditionText`
+spawn. Its children are `SpBarFill` and `SpBarTextOverlay`, mirroring the
+existing HP bar structure but using `SP_BAR_HEIGHT` (8 px) and font size 8.
+
+### 2.5 — `update_hud` Changes
+
+The function gained `#[allow(clippy::too_many_arguments)]` and three new
+parameters (`sp_bar_bg_query`, `sp_bar_fill_query`, `sp_text_query`). Three
+new loops run after the condition-text loop:
+
+1. **SP background visibility** — sets `node.display` to `Display::None` when
+   `character.sp.base == 0`, otherwise `Display::Flex`.
+2. **SP fill width + colour** — computes `sp_percent = current / base`,
+   sets `node.width = Val::Percent(sp_percent * 100.0)`, and calls
+   `sp_bar_color(sp_percent)`.
+3. **SP text overlay** — writes `format_sp_display(current, base)` and
+   adjusts `TextColor` based on whether `sp_percent >= SP_HEALTHY_THRESHOLD`.
+
+### 2.6 — New Public Functions
+
+#### `sp_bar_color(sp_percent: f32) -> Color`
+
+```antares/src/game/systems/hud.rs#L2199-2207
+pub fn sp_bar_color(sp_percent: f32) -> Color {
+    if sp_percent >= SP_HEALTHY_THRESHOLD {
+        SP_HEALTHY_COLOR
+    } else if sp_percent > 0.0 {
+        SP_LOW_COLOR
+    } else {
+        SP_EMPTY_COLOR
+    }
+}
+```
+
+#### `format_sp_display(current: u16, max: u16) -> String`
+
+Returns `"SP: {current}/{max}"` — symmetric to `format_hp_display`.
+
+### 2.7 — Tests Added
+
+**Unit tests** (in `mod tests`):
+
+| Test                                     | Asserts                                  |
+| ---------------------------------------- | ---------------------------------------- |
+| `test_sp_bar_color_healthy`              | `sp_bar_color(1.0) == SP_HEALTHY_COLOR`  |
+| `test_sp_bar_color_at_threshold`         | boundary at exactly 0.5 → healthy colour |
+| `test_sp_bar_color_low`                  | `sp_bar_color(0.25) == SP_LOW_COLOR`     |
+| `test_sp_bar_color_empty`                | `sp_bar_color(0.0) == SP_EMPTY_COLOR`    |
+| `test_sp_bar_color_just_above_threshold` | 0.51 → healthy                           |
+| `test_sp_bar_color_just_below_threshold` | 0.49 → low                               |
+| `test_format_sp_display`                 | `"SP: 15/30"`                            |
+| `test_format_sp_display_full`            | `"SP: 30/30"`                            |
+| `test_format_sp_display_zero`            | `"SP: 0/30"`                             |
+
+**Integration tests** (Bevy `App` + `HudPlugin`):
+
+- `test_update_hud_sp_bar_hidden_for_non_caster` — Knight with `sp.base == 0`:
+  verifies `SpBarBackground` node has `display == Display::None`.
+- `test_update_hud_sp_bar_visible_for_caster` — Sorcerer with
+  `sp = { base: 30, current: 20 }`: verifies `Display::Flex` on the background
+  and `Val::Percent(≈66.67)` on the fill.
+
+### Quality Gates
+
+All four gates passed with zero errors and zero warnings:
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt --all          → no output
+cargo check              → Finished, 0 errors
+cargo clippy -D warnings → Finished, 0 warnings
+cargo nextest run        → 4141 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Spell System — Phase 1: Spell Effect Resolution Engine (Complete)
 
 ### Overview

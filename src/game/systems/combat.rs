@@ -584,6 +584,10 @@ pub struct SpellButton {
     pub sp_cost: u16,
 }
 
+/// Marker component for the "Cancel" button in the spell selection panel.
+#[derive(Component)]
+pub struct SpellCancelButton;
+
 /// Marker component for the item selection panel UI
 ///
 /// Spawned when the player requests to use an item for a specific caster.
@@ -642,7 +646,10 @@ pub struct DamageText;
 /// let heal = CombatFeedbackEffect::Heal(8);
 /// let status = CombatFeedbackEffect::Status("Poison".to_string());
 /// let fizzle = CombatFeedbackEffect::Fizzle("Insufficient SP".to_string());
+/// let spell_cast = CombatFeedbackEffect::SpellCast { name: "Fireball".to_string(), damage: 20 };
+/// let spell_heal = CombatFeedbackEffect::SpellHeal { name: "Cure Wounds".to_string(), amount: 8 };
 /// assert_ne!(hit, miss);
+/// assert_ne!(spell_cast, spell_heal);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum CombatFeedbackEffect {
@@ -656,6 +663,20 @@ pub enum CombatFeedbackEffect {
     Status(String),
     /// The spell fizzled — cast attempt failed for the given reason.
     Fizzle(String),
+    /// A spell was cast that dealt damage to the target.
+    SpellCast {
+        /// Name of the spell that was cast.
+        name: String,
+        /// Damage dealt (0 if it missed or had no damage effect).
+        damage: u32,
+    },
+    /// A spell was cast that healed the target.
+    SpellHeal {
+        /// Name of the spell that was cast.
+        name: String,
+        /// HP restored.
+        amount: u32,
+    },
 }
 
 /// Message emitted whenever a combat action produces a visible result.
@@ -787,6 +808,27 @@ pub struct ActionMenuState {
     /// `Some(n)` when target-select mode is active (set to `Some(0)` on entry).
     /// `None` when not in target-select mode.
     pub active_target_index: Option<usize>,
+}
+
+/// Tracks whether the spell selection panel is open and for which caster.
+///
+/// Set to `Some(actor)` when the player selects the Cast action.
+/// Cleared to `None` when a spell is selected, Escape is pressed, or combat ends.
+#[derive(Resource, Default)]
+pub struct SpellPanelState {
+    /// The CombatantId of the player whose spells are being shown.
+    pub caster: Option<CombatantId>,
+}
+
+/// Tracks a spell that has been selected but needs a monster target.
+///
+/// When a spell requiring `SingleMonster` targeting is chosen from the spell
+/// panel, this resource is populated so that the existing target-selection
+/// keyboard/mouse flow can emit a `CastSpellAction` instead of `AttackAction`.
+#[derive(Resource, Default)]
+pub struct PendingSpellCast {
+    /// (caster, spell_id) once a spell is chosen, `None` otherwise.
+    pub data: Option<(CombatantId, crate::domain::types::SpellId)>,
 }
 
 /// One coloured text segment inside a combat log line.
@@ -929,6 +971,8 @@ impl Plugin for CombatPlugin {
             .insert_resource(CombatLogState::default())
             .insert_resource(CombatLogColorState::default())
             .insert_resource(RangedAttackPending::default())
+            .insert_resource(SpellPanelState::default())
+            .insert_resource(PendingSpellCast::default())
             // Monster-turn delay: start finished so the very first EnemyTurn
             // frame arms it (see execute_monster_turn for the reset logic).
             .insert_resource({
@@ -1042,6 +1086,15 @@ impl Plugin for CombatPlugin {
                     .before(update_combat_ui),
             )
             .add_systems(Update, cleanup_combat_ui)
+            .add_systems(
+                Update,
+                update_spell_selection_panel.after(combat_input_system),
+            )
+            .add_systems(
+                Update,
+                handle_spell_button_interaction.after(update_spell_selection_panel),
+            )
+            .add_systems(Update, cleanup_spell_panel_on_combat_exit)
             .add_systems(Update, update_combat_ui)
             .add_systems(
                 Update,
@@ -1989,6 +2042,374 @@ fn cleanup_combat_ui(
     }
 }
 
+/// System: Spawn or despawn the spell selection panel based on `SpellPanelState`.
+///
+/// Spawns a modal panel listing the caster's known spells, organized by level,
+/// when `SpellPanelState.caster` is `Some`. Each spell is shown with its name,
+/// SP cost, gem cost, and enabled/disabled state based on castability.
+/// Despawns the panel when `SpellPanelState.caster` is `None`.
+#[allow(clippy::too_many_arguments)]
+fn update_spell_selection_panel(
+    mut commands: Commands,
+    spell_panel_state: Res<SpellPanelState>,
+    combat_res: Res<CombatResource>,
+    content: Option<Res<GameContent>>,
+    _global_state: Res<GlobalState>,
+    existing_panel: Query<Entity, With<SpellSelectionPanel>>,
+) {
+    // ── Despawn if panel should be closed ────────────────────────────────────
+    if spell_panel_state.caster.is_none() {
+        for entity in existing_panel.iter() {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+
+    // ── Already open — nothing to do ────────────────────────────────────────
+    if !existing_panel.is_empty() {
+        return;
+    }
+
+    // ── Resolve caster data ──────────────────────────────────────────────────
+    let Some(caster) = spell_panel_state.caster else {
+        return;
+    };
+    let CombatantId::Player(caster_idx) = caster else {
+        return;
+    };
+    let Some(Combatant::Player(pc)) = combat_res.state.participants.get(caster_idx) else {
+        return;
+    };
+    let character = pc.as_ref();
+
+    let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+    let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
+
+    // ── Collect all spell IDs from the character's spellbook ────────────────
+    // cleric_spells and sorcerer_spells are each [Vec<SpellId>; 7] (one Vec per level)
+    let mut all_spell_ids: Vec<crate::domain::types::SpellId> = Vec::new();
+    for level_spells in &character.spells.cleric_spells {
+        all_spell_ids.extend_from_slice(level_spells);
+    }
+    for level_spells in &character.spells.sorcerer_spells {
+        all_spell_ids.extend_from_slice(level_spells);
+    }
+    all_spell_ids.sort_unstable();
+    all_spell_ids.dedup();
+
+    // ── Spawn the panel ──────────────────────────────────────────────────────
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(16.0),
+                bottom: Val::Px(110.0),
+                width: Val::Px(300.0),
+                max_height: Val::Px(380.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(10.0)),
+                row_gap: Val::Px(4.0),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.08, 0.08, 0.16, 0.97)),
+            BorderRadius::all(Val::Px(8.0)),
+            SpellSelectionPanel { caster },
+        ))
+        .with_children(|panel| {
+            // Title
+            panel.spawn((
+                Text::new(format!("{} — Select Spell", character.name)),
+                TextFont {
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.9, 0.9, 1.0)),
+            ));
+
+            if all_spell_ids.is_empty() {
+                panel.spawn((
+                    Text::new("No spells known."),
+                    TextFont {
+                        font_size: 12.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.6, 0.6, 0.6)),
+                ));
+            } else {
+                // Group spells by level (1..=7)
+                for level in 1u8..=7 {
+                    let spells_this_level: Vec<_> = all_spell_ids
+                        .iter()
+                        .filter_map(|&sid| content_ref.db().spells.get_spell(sid))
+                        .filter(|s| s.level == level)
+                        .collect();
+
+                    if spells_this_level.is_empty() {
+                        continue;
+                    }
+
+                    // Level header
+                    panel.spawn((
+                        Text::new(format!("─── Level {} ───", level)),
+                        TextFont {
+                            font_size: 10.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.55, 0.55, 0.85)),
+                    ));
+
+                    for spell in spells_this_level {
+                        // Check if this spell can be cast right now
+                        let game_mode_dummy = crate::application::GameMode::Combat(
+                            crate::domain::combat::engine::CombatState::new(
+                                crate::domain::combat::types::Handicap::Even,
+                            ),
+                        );
+                        let castable = crate::domain::combat::spell_casting::validate_spell_cast(
+                            character,
+                            spell,
+                            &game_mode_dummy,
+                            true,
+                            false,
+                        )
+                        .is_ok();
+
+                        let btn_color = if castable {
+                            ACTION_BUTTON_COLOR
+                        } else {
+                            ACTION_BUTTON_DISABLED_COLOR
+                        };
+                        let text_color = if castable {
+                            Color::WHITE
+                        } else {
+                            Color::srgb(0.45, 0.45, 0.45)
+                        };
+
+                        let label = if spell.gem_cost > 0 {
+                            format!(
+                                "{} (SP:{} Gems:{})",
+                                spell.name, spell.sp_cost, spell.gem_cost
+                            )
+                        } else {
+                            format!("{} (SP:{})", spell.name, spell.sp_cost)
+                        };
+
+                        panel
+                            .spawn((
+                                Button,
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+                                    justify_content: JustifyContent::FlexStart,
+                                    ..default()
+                                },
+                                BackgroundColor(btn_color),
+                                BorderRadius::all(Val::Px(4.0)),
+                                SpellButton {
+                                    spell_id: spell.id,
+                                    sp_cost: spell.sp_cost,
+                                },
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    Text::new(label),
+                                    TextFont {
+                                        font_size: 11.0,
+                                        ..default()
+                                    },
+                                    TextColor(text_color),
+                                ));
+                            });
+                    }
+                }
+            }
+
+            // Cancel button
+            panel
+                .spawn((
+                    Button,
+                    Node {
+                        width: Val::Percent(100.0),
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+                        justify_content: JustifyContent::Center,
+                        margin: UiRect {
+                            top: Val::Px(6.0),
+                            ..default()
+                        },
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.35, 0.15, 0.15)),
+                    BorderRadius::all(Val::Px(4.0)),
+                    SpellCancelButton,
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        Text::new("Cancel"),
+                        TextFont {
+                            font_size: 11.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+        });
+}
+
+/// System: Handle interactions with spell selection panel buttons.
+///
+/// Listens for mouse clicks on `SpellButton` and `SpellCancelButton` entities
+/// within the spell selection panel.
+///
+/// - Clicking a `SpellButton` for a castable spell either:
+///   - Directly emits `CastSpellAction` (for self/group/all-monster target spells)
+///   - Enters monster target selection mode (for `SingleMonster` spells)
+/// - Clicking `SpellCancelButton` closes the panel.
+#[allow(clippy::too_many_arguments)]
+fn handle_spell_button_interaction(
+    spell_buttons: Query<(&Interaction, &SpellButton), Changed<Interaction>>,
+    cancel_buttons: Query<&Interaction, (Changed<Interaction>, With<SpellCancelButton>)>,
+    mut spell_panel_state: ResMut<SpellPanelState>,
+    mut pending_spell: ResMut<PendingSpellCast>,
+    mut target_sel: ResMut<TargetSelection>,
+    mut action_menu_state: ResMut<ActionMenuState>,
+    combat_res: Res<CombatResource>,
+    content: Option<Res<GameContent>>,
+    mut cast_writer: Option<MessageWriter<CastSpellAction>>,
+) {
+    // Handle cancel button
+    for interaction in cancel_buttons.iter() {
+        if *interaction == Interaction::Pressed {
+            spell_panel_state.caster = None;
+            return;
+        }
+    }
+
+    let Some(caster) = spell_panel_state.caster else {
+        return;
+    };
+
+    let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+    let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
+
+    for (interaction, spell_btn) in spell_buttons.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        // Look up the spell to determine target type
+        let Some(spell) = content_ref.db().spells.get_spell(spell_btn.spell_id) else {
+            continue;
+        };
+
+        // Validate castability
+        let CombatantId::Player(caster_idx) = caster else {
+            continue;
+        };
+        let Some(Combatant::Player(pc)) = combat_res.state.participants.get(caster_idx) else {
+            continue;
+        };
+        let gm =
+            crate::application::GameMode::Combat(crate::domain::combat::engine::CombatState::new(
+                crate::domain::combat::types::Handicap::Even,
+            ));
+        if crate::domain::combat::spell_casting::validate_spell_cast(
+            pc.as_ref(),
+            spell,
+            &gm,
+            true,
+            false,
+        )
+        .is_err()
+        {
+            // Spell cannot be cast — ignore click (button is visually greyed-out)
+            continue;
+        }
+
+        // Close the panel regardless of targeting path
+        spell_panel_state.caster = None;
+
+        // Determine the target for the spell
+        use crate::domain::magic::types::SpellTarget;
+        match spell.target {
+            SpellTarget::SingleMonster => {
+                // Enter target-selection mode — pending spell cast is emitted on confirm
+                pending_spell.data = Some((caster, spell_btn.spell_id));
+                target_sel.0 = Some(caster);
+                action_menu_state.active_target_index = Some(0);
+            }
+            SpellTarget::Self_ => {
+                // Target is the caster themselves
+                if let Some(ref mut w) = cast_writer {
+                    w.write(CastSpellAction {
+                        caster,
+                        spell_id: spell_btn.spell_id,
+                        target: caster,
+                    });
+                }
+            }
+            SpellTarget::SingleCharacter => {
+                // Default: target the caster (for healing/buff spells)
+                if let Some(ref mut w) = cast_writer {
+                    w.write(CastSpellAction {
+                        caster,
+                        spell_id: spell_btn.spell_id,
+                        target: caster,
+                    });
+                }
+            }
+            SpellTarget::AllMonsters
+            | SpellTarget::MonsterGroup
+            | SpellTarget::SpecificMonsters => {
+                // Use the first alive monster as target placeholder;
+                // the domain layer will apply damage to all monsters.
+                let first_monster_idx = combat_res
+                    .state
+                    .participants
+                    .iter()
+                    .enumerate()
+                    .find(|(_, p)| matches!(p, Combatant::Monster(m) if m.hp.current > 0))
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                if let Some(ref mut w) = cast_writer {
+                    w.write(CastSpellAction {
+                        caster,
+                        spell_id: spell_btn.spell_id,
+                        target: CombatantId::Monster(first_monster_idx),
+                    });
+                }
+            }
+            SpellTarget::AllCharacters => {
+                // Target the caster as placeholder; domain layer heals all.
+                if let Some(ref mut w) = cast_writer {
+                    w.write(CastSpellAction {
+                        caster,
+                        spell_id: spell_btn.spell_id,
+                        target: caster,
+                    });
+                }
+            }
+        }
+
+        break; // Process only one button click per frame
+    }
+}
+
+/// System: Clean up spell panel state when combat ends.
+///
+/// Resets `SpellPanelState` and `PendingSpellCast` to defaults so no stale
+/// data carries over into the next encounter.
+fn cleanup_spell_panel_on_combat_exit(
+    global_state: Res<GlobalState>,
+    mut spell_panel_state: ResMut<SpellPanelState>,
+    mut pending_spell: ResMut<PendingSpellCast>,
+) {
+    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        spell_panel_state.caster = None;
+        pending_spell.data = None;
+    }
+}
+
 /// System: Update combat UI to reflect current combat state
 ///
 /// Updates enemy HP bars, turn order display, and action menu visibility.
@@ -2241,14 +2662,18 @@ const ACTION_BUTTON_ORDER: [ActionButtonType; COMBAT_ACTION_COUNT] = COMBAT_ACTI
 /// * `ranged_pending` - Mutable reference to `RangedAttackPending`; set to
 ///   `true` when `RangedAttack` is dispatched so target-confirmation writes a
 ///   `RangedAttackAction` instead of an `AttackAction`.
+/// * `spell_panel_state` - Mutable reference to `SpellPanelState`; set to
+///   `Some(actor)` when `Cast` is dispatched to open the spell selection panel.
 /// * `defend_writer` - Optional message writer for `DefendAction`.
 /// * `flee_writer` - Optional message writer for `FleeAction`.
+#[allow(clippy::too_many_arguments)]
 fn dispatch_combat_action(
     button_type: ActionButtonType,
     actor: CombatantId,
     target_sel: &mut TargetSelection,
     action_menu_state: &mut ActionMenuState,
     ranged_pending: &mut RangedAttackPending,
+    spell_panel_state: &mut SpellPanelState,
     defend_writer: &mut Option<MessageWriter<DefendAction>>,
     flee_writer: &mut Option<MessageWriter<FleeAction>>,
 ) {
@@ -2276,8 +2701,11 @@ fn dispatch_combat_action(
                 w.write(FleeAction);
             }
         }
-        ActionButtonType::Cast | ActionButtonType::Item => {
-            // Submenu open — handled by separate systems
+        ActionButtonType::Cast => {
+            spell_panel_state.caster = Some(actor);
+        }
+        ActionButtonType::Item => {
+            // Item submenu — handled by separate systems
         }
     }
 }
@@ -2330,6 +2758,30 @@ fn confirm_attack_target(
     action_menu_state.active_target_index = None;
 }
 
+/// Write a `CastSpellAction` targeting the confirmed monster and clear
+/// target-selection state.
+///
+/// Called from `combat_input_system` when Enter is pressed during
+/// monster-target-selection mode while a spell is pending.
+fn confirm_spell_target(
+    caster: CombatantId,
+    target_monster_idx: usize,
+    spell_id: crate::domain::types::SpellId,
+    target_sel: &mut TargetSelection,
+    action_menu_state: &mut ActionMenuState,
+    cast_writer: &mut Option<MessageWriter<CastSpellAction>>,
+) {
+    if let Some(ref mut w) = cast_writer {
+        w.write(CastSpellAction {
+            caster,
+            spell_id,
+            target: CombatantId::Monster(target_monster_idx),
+        });
+    }
+    target_sel.0 = None;
+    action_menu_state.active_target_index = None;
+}
+
 /// Handle input from action buttons and keyboard shortcuts during PlayerTurn.
 ///
 /// # Keyboard Controls (action menu — when NOT in target-select mode)
@@ -2370,9 +2822,12 @@ fn combat_input_system(
     mut flee_writer: Option<MessageWriter<FleeAction>>,
     mut attack_writer: Option<MessageWriter<AttackAction>>,
     mut ranged_writer: Option<MessageWriter<RangedAttackAction>>,
+    mut cast_writer: Option<MessageWriter<CastSpellAction>>,
     mut ranged_pending: ResMut<RangedAttackPending>,
     turn_state: Res<CombatTurnStateResource>,
     mut action_menu_state: ResMut<ActionMenuState>,
+    mut spell_panel_state: ResMut<SpellPanelState>,
+    mut pending_spell: ResMut<PendingSpellCast>,
 ) {
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
         return;
@@ -2440,6 +2895,7 @@ fn combat_input_system(
                     &mut target_sel,
                     &mut action_menu_state,
                     &mut ranged_pending,
+                    &mut spell_panel_state,
                     &mut defend_writer,
                     &mut flee_writer,
                 );
@@ -2477,7 +2933,7 @@ fn combat_input_system(
                         Some((current + 1) % alive_monster_count);
                 }
             } else if kb.just_pressed(KeyCode::Enter) {
-                // Confirm attack on the currently highlighted target.
+                // Confirm attack (or spell cast) on the currently highlighted target.
                 if let Some(attacker) = current_actor {
                     let target_idx = action_menu_state.active_target_index.unwrap_or(0);
                     // Resolve the alive-monster index to the actual participant index.
@@ -2486,22 +2942,35 @@ fn combat_input_system(
                         target_idx,
                     );
                     if let Some(pidx) = participant_idx {
-                        confirm_attack_target(
-                            attacker,
-                            pidx,
-                            &mut target_sel,
-                            &mut action_menu_state,
-                            &mut ranged_pending,
-                            &mut attack_writer,
-                            &mut ranged_writer,
-                        );
+                        if let Some((spell_caster, spell_id)) = pending_spell.data.take() {
+                            // Confirm spell cast targeting the selected monster
+                            confirm_spell_target(
+                                spell_caster,
+                                pidx,
+                                spell_id,
+                                &mut target_sel,
+                                &mut action_menu_state,
+                                &mut cast_writer,
+                            );
+                        } else {
+                            confirm_attack_target(
+                                attacker,
+                                pidx,
+                                &mut target_sel,
+                                &mut action_menu_state,
+                                &mut ranged_pending,
+                                &mut attack_writer,
+                                &mut ranged_writer,
+                            );
+                        }
                     }
                 }
             } else if kb.just_pressed(KeyCode::Escape) {
-                // Cancel target selection — also clear ranged pending flag.
+                // Cancel target selection — also clear ranged pending flag and pending spell.
                 target_sel.0 = None;
                 action_menu_state.active_target_index = None;
                 ranged_pending.0 = false;
+                pending_spell.data = None;
             }
         } else {
             // ---- Action-menu keyboard handling ----
@@ -2523,7 +2992,10 @@ fn combat_input_system(
                 execute_selected_action = true;
                 action_menu_state.confirmed = false;
             } else if kb.just_pressed(KeyCode::Escape) {
-                // No-op: no target selection is active.
+                // Close spell panel if open, otherwise no-op.
+                if spell_panel_state.caster.is_some() {
+                    spell_panel_state.caster = None;
+                }
             }
         }
     }
@@ -2561,6 +3033,7 @@ fn combat_input_system(
                         &mut target_sel,
                         &mut action_menu_state,
                         &mut ranged_pending,
+                        &mut spell_panel_state,
                         &mut defend_writer,
                         &mut flee_writer,
                     );
@@ -2572,6 +3045,7 @@ fn combat_input_system(
                     &mut target_sel,
                     &mut action_menu_state,
                     &mut ranged_pending,
+                    &mut spell_panel_state,
                     &mut defend_writer,
                     &mut flee_writer,
                 );
@@ -3694,6 +4168,20 @@ fn handle_cast_spell_action(
     for action in reader.read() {
         let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
 
+        // Look up spell name and conditions for feedback (before the cast)
+        let spell_name = content_ref
+            .db()
+            .spells
+            .get_spell(action.spell_id)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| format!("Spell #{}", action.spell_id));
+        let spell_applied_conditions = content_ref
+            .db()
+            .spells
+            .get_spell(action.spell_id)
+            .map(|s| s.applied_conditions.clone())
+            .unwrap_or_default();
+
         // Capture pre-spell HP for the target so we can show damage numbers
         let pre_hp: u16 = match action.target {
             CombatantId::Player(idx) => combat_res
@@ -3775,13 +4263,21 @@ fn handle_cast_spell_action(
                 .unwrap_or(0),
         };
 
-        let dmg = (pre_hp as i32 - post_hp as i32).max(0) as u32;
+        let hp_delta = pre_hp as i32 - post_hp as i32;
+        let dmg = hp_delta.max(0) as u32;
+        let healed = (-hp_delta).max(0) as u32;
 
-        // Emit typed feedback instead of inline spawn
-        let effect = if dmg > 0 {
-            CombatFeedbackEffect::Damage(dmg)
+        // Emit spell-specific feedback
+        let effect = if healed > 0 {
+            CombatFeedbackEffect::SpellHeal {
+                name: spell_name.clone(),
+                amount: healed,
+            }
         } else {
-            CombatFeedbackEffect::Miss
+            CombatFeedbackEffect::SpellCast {
+                name: spell_name.clone(),
+                damage: dmg,
+            }
         };
         emit_combat_feedback(
             Some(action.caster),
@@ -3790,13 +4286,53 @@ fn handle_cast_spell_action(
             &mut feedback_writer,
         );
 
+        // Emit condition application messages for relevant spells
+        if !spell_applied_conditions.is_empty() {
+            let condition_label = spell_applied_conditions
+                .first()
+                .map(|c| c.to_string())
+                .unwrap_or_default();
+            if !condition_label.is_empty() {
+                let target_display_name = match action.target {
+                    CombatantId::Monster(idx) => combat_res
+                        .state
+                        .participants
+                        .get(idx)
+                        .and_then(|p| match p {
+                            Combatant::Monster(m) => Some(m.name.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| "Target".to_string()),
+                    CombatantId::Player(idx) => combat_res
+                        .state
+                        .participants
+                        .get(idx)
+                        .and_then(|p| match p {
+                            Combatant::Player(pc) => Some(pc.name.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| "Target".to_string()),
+                };
+                emit_combat_feedback(
+                    Some(action.caster),
+                    action.target,
+                    CombatFeedbackEffect::Status(format!(
+                        "{} is now {}!",
+                        target_display_name,
+                        condition_label.replace('_', " ")
+                    )),
+                    &mut feedback_writer,
+                );
+            }
+        }
+
         // Restore turn state after action
         if matches!(turn_state.0, CombatTurnState::Animating) {
             turn_state.0 = prior_turn_state;
         }
 
         // Play SFX
-        if dmg > 0 {
+        if dmg > 0 || healed > 0 {
             if let Some(ref mut w) = sfx_writer {
                 w.write(crate::game::systems::audio::PlaySfx {
                     sfx_id: "combat_hit".to_string(),
@@ -5155,6 +5691,65 @@ fn format_combat_log_line(
                     ],
                 };
             }
+            CombatFeedbackEffect::SpellCast { name, damage } => {
+                if *damage > 0 {
+                    return CombatLogLine {
+                        segments: vec![
+                            CombatLogSegment {
+                                text: source_name,
+                                color: source_color,
+                            },
+                            CombatLogSegment {
+                                text: format!(": Casts {} at ", name),
+                                color: Color::srgb(0.6, 0.6, 1.0),
+                            },
+                            CombatLogSegment {
+                                text: target_name,
+                                color: target_color,
+                            },
+                            CombatLogSegment {
+                                text: format!(" for [{}] damage", damage),
+                                color: Color::WHITE,
+                            },
+                        ],
+                    };
+                } else {
+                    return CombatLogLine {
+                        segments: vec![
+                            CombatLogSegment {
+                                text: source_name,
+                                color: source_color,
+                            },
+                            CombatLogSegment {
+                                text: format!(": Casts {} — no effect", name),
+                                color: Color::srgb(0.6, 0.6, 1.0),
+                            },
+                        ],
+                    };
+                }
+            }
+            CombatFeedbackEffect::SpellHeal { name, amount } => {
+                return CombatLogLine {
+                    segments: vec![
+                        CombatLogSegment {
+                            text: source_name,
+                            color: source_color,
+                        },
+                        CombatLogSegment {
+                            text: format!(": Casts {} healing ", name),
+                            color: Color::srgb(0.4, 0.8, 1.0),
+                        },
+                        CombatLogSegment {
+                            text: target_name,
+                            color: target_color,
+                        },
+                        CombatLogSegment {
+                            text: format!(" for [{}] HP", amount),
+                            color: Color::WHITE,
+                        },
+                    ],
+                };
+            }
         }
     }
 
@@ -5211,6 +5806,38 @@ fn format_combat_log_line(
                 CombatLogSegment {
                     text: format!(": Spell fizzled — {}", reason),
                     color: FEEDBACK_COLOR_MISS,
+                },
+            ],
+        },
+        CombatFeedbackEffect::SpellCast { name, damage } => CombatLogLine {
+            segments: vec![
+                CombatLogSegment {
+                    text: format!("Spell [{}]", name),
+                    color: Color::srgb(0.6, 0.6, 1.0),
+                },
+                CombatLogSegment {
+                    text: if *damage > 0 {
+                        format!(": [{}] damage to ", damage)
+                    } else {
+                        ": no effect on ".to_string()
+                    },
+                    color: Color::WHITE,
+                },
+                CombatLogSegment {
+                    text: target_name,
+                    color: target_color,
+                },
+            ],
+        },
+        CombatFeedbackEffect::SpellHeal { name, amount } => CombatLogLine {
+            segments: vec![
+                CombatLogSegment {
+                    text: format!("Spell [{}]", name),
+                    color: Color::srgb(0.4, 0.8, 1.0),
+                },
+                CombatLogSegment {
+                    text: format!(": heals {} for [{}] HP", target_name, amount),
+                    color: Color::WHITE,
                 },
             ],
         },
@@ -5455,6 +6082,63 @@ mod combat_log_format_tests {
 
         assert!(joined.contains("Ariadne: Attacks Goblin for [9] damage"));
     }
+
+    #[test]
+    fn test_spell_cast_feedback_has_spell_name() {
+        let cr = make_combat_resource_for_log();
+        let mut colors = CombatLogColorState::default();
+        let mut rng = StdRng::seed_from_u64(42);
+
+        let event = CombatFeedbackEvent {
+            source: Some(CombatantId::Player(0)),
+            target: CombatantId::Monster(1),
+            effect: CombatFeedbackEffect::SpellCast {
+                name: "Fireball".to_string(),
+                damage: 25,
+            },
+        };
+
+        let line = format_combat_log_line(&cr, &event, &mut colors, &mut rng);
+        let text = line.plain_text();
+        assert!(text.contains("Fireball"), "Log should contain spell name");
+        assert!(text.contains("25"), "Log should contain damage amount");
+    }
+
+    #[test]
+    fn test_spell_heal_feedback_has_spell_name() {
+        let cr = make_combat_resource_for_log();
+        let mut colors = CombatLogColorState::default();
+        let mut rng = StdRng::seed_from_u64(99);
+
+        let event = CombatFeedbackEvent {
+            source: Some(CombatantId::Player(0)),
+            target: CombatantId::Player(0),
+            effect: CombatFeedbackEffect::SpellHeal {
+                name: "Cure Wounds".to_string(),
+                amount: 12,
+            },
+        };
+
+        let line = format_combat_log_line(&cr, &event, &mut colors, &mut rng);
+        let text = line.plain_text();
+        assert!(
+            text.contains("Cure Wounds"),
+            "Log should contain spell name"
+        );
+        assert!(text.contains("12"), "Log should contain heal amount");
+    }
+
+    #[test]
+    fn test_spell_panel_state_default_is_none() {
+        let state = SpellPanelState::default();
+        assert!(state.caster.is_none());
+    }
+
+    #[test]
+    fn test_pending_spell_cast_default_is_none() {
+        let pending = PendingSpellCast::default();
+        assert!(pending.data.is_none());
+    }
 }
 
 /// Clear the persistent combat log when combat ends so the next encounter starts fresh.
@@ -5502,10 +6186,28 @@ fn spawn_combat_feedback(
             CombatFeedbackEffect::Fizzle(reason) => {
                 (format!("Fizzled: {}", reason), FEEDBACK_COLOR_MISS)
             }
+            CombatFeedbackEffect::SpellCast { name, damage } => {
+                if *damage > 0 {
+                    (format!("{}! -{}", name, damage), FEEDBACK_COLOR_DAMAGE)
+                } else {
+                    (format!("{} — no effect", name), FEEDBACK_COLOR_MISS)
+                }
+            }
+            CombatFeedbackEffect::SpellHeal { name, amount } => {
+                (format!("{}! +{}", name, amount), FEEDBACK_COLOR_HEAL)
+            }
         };
 
         let font_size = match &event.effect {
             CombatFeedbackEffect::Damage(_) | CombatFeedbackEffect::Heal(_) => 18.0,
+            CombatFeedbackEffect::SpellCast { damage, .. } => {
+                if *damage > 0 {
+                    18.0
+                } else {
+                    15.0
+                }
+            }
+            CombatFeedbackEffect::SpellHeal { .. } => 18.0,
             _ => 15.0,
         };
 
@@ -5897,6 +6599,83 @@ mod tests {
 
         // RangedAttackPending resource should be registered
         let _pending = app.world().resource::<RangedAttackPending>();
+
+        // SpellPanelState and PendingSpellCast resources should be registered
+        let spell_panel = app.world().resource::<SpellPanelState>();
+        assert!(
+            spell_panel.caster.is_none(),
+            "SpellPanelState should start None"
+        );
+        let pending_spell = app.world().resource::<PendingSpellCast>();
+        assert!(
+            pending_spell.data.is_none(),
+            "PendingSpellCast should start None"
+        );
+    }
+
+    #[test]
+    fn test_dispatch_cast_sets_spell_panel() {
+        use crate::domain::combat::types::CombatantId;
+
+        let mut target_sel = TargetSelection::default();
+        let mut action_menu_state = ActionMenuState::default();
+        let mut ranged_pending = RangedAttackPending::default();
+        let mut spell_panel_state = SpellPanelState::default();
+        let mut defend_writer: Option<MessageWriter<DefendAction>> = None;
+        let mut flee_writer: Option<MessageWriter<FleeAction>> = None;
+
+        let actor = CombatantId::Player(0);
+
+        dispatch_combat_action(
+            ActionButtonType::Cast,
+            actor,
+            &mut target_sel,
+            &mut action_menu_state,
+            &mut ranged_pending,
+            &mut spell_panel_state,
+            &mut defend_writer,
+            &mut flee_writer,
+        );
+
+        assert_eq!(
+            spell_panel_state.caster,
+            Some(actor),
+            "dispatch_combat_action(Cast) should set spell_panel_state.caster"
+        );
+        assert!(
+            target_sel.0.is_none(),
+            "Cast should not enter target-selection mode directly"
+        );
+    }
+
+    #[test]
+    fn test_dispatch_item_does_not_set_spell_panel() {
+        use crate::domain::combat::types::CombatantId;
+
+        let mut target_sel = TargetSelection::default();
+        let mut action_menu_state = ActionMenuState::default();
+        let mut ranged_pending = RangedAttackPending::default();
+        let mut spell_panel_state = SpellPanelState::default();
+        let mut defend_writer: Option<MessageWriter<DefendAction>> = None;
+        let mut flee_writer: Option<MessageWriter<FleeAction>> = None;
+
+        let actor = CombatantId::Player(0);
+
+        dispatch_combat_action(
+            ActionButtonType::Item,
+            actor,
+            &mut target_sel,
+            &mut action_menu_state,
+            &mut ranged_pending,
+            &mut spell_panel_state,
+            &mut defend_writer,
+            &mut flee_writer,
+        );
+
+        assert!(
+            spell_panel_state.caster.is_none(),
+            "Item action should not set spell_panel_state.caster"
+        );
     }
 
     /// Party -> Combat sync should copy party members into CombatResource when entering combat.

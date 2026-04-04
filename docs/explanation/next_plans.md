@@ -164,3 +164,7 @@ Foliage particularly Bushes clip tree trunks. And seems like editing them in the
 All the doors are facing the wrong way
 
 Show/Hide Tray ICON SDK is not working
+
+Recruitable Characters mesh does not disappear until they are walked over. It should disappear immediately on recruitment.
+
+Game log is not part of a Game Save. Loading a save game from the main menu on restart does not restore the game log. The game log should be saved and loaded with the rest of the game state.
