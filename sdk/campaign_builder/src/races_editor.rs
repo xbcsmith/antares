@@ -746,7 +746,6 @@ impl RacesEditorState {
     }
 
     /// Shows the race editing form
-    #[allow(clippy::ptr_arg)]
     fn show_race_form(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
         let title = if self.mode == RacesEditorMode::Creating {
             "Create New Race"
@@ -1098,7 +1097,6 @@ impl RacesEditorState {
     }
 
     /// Shows the import/export dialog for individual races
-    #[allow(clippy::ptr_arg)]
     fn show_import_dialog(&mut self, egui_ctx: &egui::Context, ctx: &mut EditorContext<'_>) {
         let mut open = self.show_import_dialog;
 

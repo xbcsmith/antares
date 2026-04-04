@@ -4590,3 +4590,99 @@ failure will be visible as unsaved_changes remaining true") as the plan permits.
 - [x] No `eprintln!` calls in production code
 - [x] No silent `Result` drops on user-visible operations
 - [x] SPDX headers unchanged on edited files (only added to new files, of which there were none)
+
+---
+
+## SDK Codebase Cleanup — Remaining Items: Phase 1.3, 6.6, and 9.3 Orphan File (Complete)
+
+**Date**: 2025
+**Plan reference**: `docs/explanation/sdk_codebase_cleanup_plan.md` §1.3, §6.6, §9.3
+
+### What Was Done
+
+Four outstanding items identified in the post-Phase-7 audit were fixed:
+
+#### 1. Phase 1.3 — `clippy::map_clone` in `ui_helpers/layout.rs`
+
+`load_autocomplete_buffer` (previously `ui_helpers.rs`, now `ui_helpers/layout.rs:71`)
+held a `#[allow(clippy::map_clone)]` suppressing `.map(|s| s.clone())` on the result
+of `egui::Memory::data.get_temp::<String>(id)`. The `get_temp` call already returns an
+owned `Option<String>`, so the `.map(|s| s.clone())` was a redundant double-clone.
+
+**Fix**: Removed the `.map(|s| s.clone())` call entirely; `get_temp` returns the value
+directly. Removed the `#[allow(clippy::map_clone)]` annotation.
+
+#### 2. Phase 1.3 — Stale `#[allow(clippy::ptr_arg)]` in `races_editor.rs`
+
+Two private methods — `show_race_form` (L749) and `show_import_dialog` (L1101) — each
+carried `#[allow(clippy::ptr_arg)]`. These suppressed warnings that were valid when the
+functions had `Option<&PathBuf>` parameters, but those parameters were removed during the
+Phase 6 `EditorContext` migration. With the migration complete, neither function has any
+`&PathBuf`, `&Vec<T>`, or `&String` parameter.
+
+**Fix**: Removed both stale `#[allow(clippy::ptr_arg)]` annotations.
+
+#### 3. Phase 6.6 / 1.3 — Last `#[allow(clippy::too_many_arguments, clippy::ptr_arg)]` in `map_editor.rs`
+
+`MapsEditorState::show_editor` had 12 parameters (excluding `&mut self`) and was
+suppressed with both `too_many_arguments` and `ptr_arg`. Specifically:
+
+- `maps: &mut Vec<Map>` — needed `&mut [Map]` (no `push`/`remove` used inside)
+- `campaign_dir: Option<&PathBuf>` — needed `Option<&Path>`
+- 10 individual data-slice and context parameters — well over Clippy's 7-parameter threshold
+
+`MapEditorRefs` already existed and bundled `monsters`, `items`, `conditions`, `npcs`,
+`furniture_definitions`, and `display_config`. `EditorContext` already bundled
+`campaign_dir`, `data_file` (used as `maps_dir`), `unsaved_changes`, and `status_message`.
+
+**Fix**: Replaced the 12-parameter list with `maps: &mut [Map]`, `refs: &MapEditorRefs<'_>`,
+and `ctx: &mut EditorContext<'_>` (3 parameters). Updated all 8 internal usages to read
+from `refs.*` and `ctx.*`. Updated the sole call site in `show()` from 13 individual
+arguments to `self.show_editor(ui, maps, refs, ctx)`. Removed the `#[allow(...)]`
+annotation.
+
+#### 4. Phase 9.3 — Delete orphaned `src/map_editor_tests_supplemental.rs`
+
+`sdk/campaign_builder/src/map_editor_tests_supplemental.rs` (82 lines) existed in `src/`
+with no `mod` declaration in `map_editor.rs`, `lib.rs`, or any other file. The file was
+completely unreachable by `cargo nextest` and contained no `use` imports, meaning it could
+not compile even if included. All three test functions it contained
+(`test_terrain_controls_single_select_fallback`, `test_preset_palette_single_tile`,
+`test_state_reset_on_back_to_list`) were exact duplicates of tests already present in
+the inline `#[cfg(test)]` module of `map_editor.rs`.
+
+**Fix**: Deleted the file.
+
+### Files Changed
+
+| File                                                        | Change                                                                                                                                                                                                |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/ui_helpers/layout.rs`             | Removed `#[allow(clippy::map_clone)]`; replaced `.map(\|s\| s.clone())` with direct return from `get_temp`                                                                                            |
+| `sdk/campaign_builder/src/races_editor.rs`                  | Removed two stale `#[allow(clippy::ptr_arg)]` annotations from `show_race_form` and `show_import_dialog`                                                                                              |
+| `sdk/campaign_builder/src/map_editor.rs`                    | Removed `#[allow(clippy::too_many_arguments, clippy::ptr_arg)]` from `show_editor`; replaced 12-parameter signature with `maps: &mut [Map]`, `refs`, `ctx`; updated call site and all internal usages |
+| `sdk/campaign_builder/src/map_editor_tests_supplemental.rs` | **Deleted** (orphaned duplicate test file)                                                                                                                                                            |
+
+### Success Criteria — Final Verification
+
+| Criterion                                                                           | Result                                                           |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `grep -rn "#[allow(" sdk/campaign_builder/src/` returns zero results                | ✅ Pass — zero `#[allow(...)]` directives anywhere in SDK source |
+| `grep -rn "too_many_arguments" sdk/campaign_builder/src/` returns only doc comments | ✅ Pass                                                          |
+| `grep -rn "ptr_arg" sdk/campaign_builder/src/` returns zero results                 | ✅ Pass                                                          |
+| `grep -rn "map_clone" sdk/campaign_builder/src/` returns zero results               | ✅ Pass                                                          |
+| `src/map_editor_tests_supplemental.rs` deleted                                      | ✅ Pass                                                          |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output (all files formatted)
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings  (zero remaining #[allow] in SDK source)
+✅ cargo nextest run → 2183/2183 passed, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] No `#[allow(...)]` directives remain in SDK source
+- [x] `show_editor` uses `MapEditorRefs` and `EditorContext` consistently with every other editor in the codebase
+- [x] No orphaned test files remain in `src/`; all tests reachable by `cargo nextest`

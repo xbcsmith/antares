@@ -3306,20 +3306,7 @@ impl MapsEditorState {
                 );
             }
             MapsEditorMode::Add | MapsEditorMode::Edit => {
-                self.show_editor(
-                    ui,
-                    maps,
-                    refs.monsters,
-                    refs.items,
-                    refs.conditions,
-                    refs.npcs,
-                    refs.furniture_definitions,
-                    ctx.campaign_dir,
-                    ctx.data_file,
-                    refs.display_config,
-                    ctx.unsaved_changes,
-                    ctx.status_message,
-                );
+                self.show_editor(ui, maps, refs, ctx);
             }
         }
 
@@ -3533,21 +3520,12 @@ impl MapsEditorState {
     }
 
     /// Show the full map editor
-    #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
     fn show_editor(
         &mut self,
         ui: &mut egui::Ui,
-        maps: &mut Vec<Map>,
-        monsters: &[MonsterDefinition],
-        items: &[Item],
-        conditions: &[antares::domain::conditions::ConditionDefinition],
-        npcs: &[NpcDefinition],
-        furniture_definitions: &[antares::domain::world::furniture::FurnitureDefinition],
-        campaign_dir: Option<&PathBuf>,
-        maps_dir: &str,
-        display_config: &DisplayConfig,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
+        maps: &mut [Map],
+        refs: &MapEditorRefs<'_>,
+        ctx: &mut EditorContext<'_>,
     ) {
         // Top bar with back button and save
         let mut back_clicked = false;
@@ -3691,7 +3669,8 @@ impl MapsEditorState {
                 let total_width = ui.available_width();
                 let sep_margin = 12.0;
                 // Use configured inspector minimum width (fallback to default helper constant if needed).
-                let inspector_min_width = display_config
+                let inspector_min_width = refs
+                    .display_config
                     .inspector_min_width
                     .max(crate::ui_helpers::DEFAULT_INSPECTOR_MIN_WIDTH);
 
@@ -3711,7 +3690,7 @@ impl MapsEditorState {
                     inspector_min_width,
                     sep_margin,
                     crate::ui_helpers::MIN_SAFE_LEFT_COLUMN_WIDTH,
-                    display_config.left_column_max_ratio,
+                    refs.display_config.left_column_max_ratio,
                 );
 
                 // Debug prints removed: layout diagnostics no longer logged to stderr.
@@ -3720,8 +3699,8 @@ impl MapsEditorState {
                 TwoColumnLayout::new("maps")
                     .with_left_width(left_width)
                     .with_min_height(panel_height)
-                    .with_inspector_min_width(display_config.inspector_min_width)
-                    .with_max_left_ratio(display_config.left_column_max_ratio)
+                    .with_inspector_min_width(refs.display_config.inspector_min_width)
+                    .with_max_left_ratio(refs.display_config.left_column_max_ratio)
                     .show_split(
                         ui,
                         |left_ui| {
@@ -3796,18 +3775,18 @@ impl MapsEditorState {
                             let editor_ref: &mut MapEditorState = unsafe { &mut *editor_ptr };
 
                             // Right panel: Inspector and tool-specific editors
-                            right_ui.set_min_width(display_config.inspector_min_width);
+                            right_ui.set_min_width(refs.display_config.inspector_min_width);
 
                             egui::ScrollArea::vertical()
                                 .id_salt("map_editor_inspector_scroll")
                                 .show(right_ui, |ui| {
                                     let inspector_data = MapInspectorData {
                                         maps,
-                                        monsters,
-                                        items,
-                                        conditions,
-                                        npcs,
-                                        furniture_definitions,
+                                        monsters: refs.monsters,
+                                        items: refs.items,
+                                        conditions: refs.conditions,
+                                        npcs: refs.npcs,
+                                        furniture_definitions: refs.furniture_definitions,
                                     };
                                     if let Some(npc_id) =
                                         Self::show_inspector_panel(ui, editor_ref, &inspector_data)
@@ -3848,11 +3827,11 @@ impl MapsEditorState {
                     }
 
                     // Save to file (mutable borrow released)
-                    if let Err(e) = self.save_map(&map, campaign_dir, maps_dir) {
-                        *status_message = format!("Failed to save map: {}", e);
+                    if let Err(e) = self.save_map(&map, ctx.campaign_dir, ctx.data_file) {
+                        *ctx.status_message = format!("Failed to save map: {}", e);
                     } else {
-                        *status_message = "Map saved".to_string();
-                        *unsaved_changes = true;
+                        *ctx.status_message = "Map saved".to_string();
+                        *ctx.unsaved_changes = true;
                         // Re-borrow to update the editor with the saved map and clear dirty flag
                         if let Some(editor) = self.active_editor.as_mut() {
                             editor.map = map;
@@ -3880,11 +3859,11 @@ impl MapsEditorState {
                         maps[idx] = map.clone();
                     }
                 }
-                if let Err(e) = self.save_map(&map, campaign_dir, maps_dir) {
-                    *status_message = format!("Failed to save map: {}", e);
+                if let Err(e) = self.save_map(&map, ctx.campaign_dir, ctx.data_file) {
+                    *ctx.status_message = format!("Failed to save map: {}", e);
                 } else {
-                    *status_message = format!("Map {} saved", map.id);
-                    *unsaved_changes = true;
+                    *ctx.status_message = format!("Map {} saved", map.id);
+                    *ctx.unsaved_changes = true;
                     // Re-borrow to clear flags and update editor's map
                     if let Some(editor) = self.active_editor.as_mut() {
                         editor.has_changes = false;

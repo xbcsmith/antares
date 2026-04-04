@@ -68,13 +68,12 @@ pub(crate) fn make_autocomplete_id(_ui: &egui::Ui, prefix: &str, id_salt: &str) 
 /// * `ctx` - the `egui::Context` (e.g. `ui.ctx()`)
 /// * `id` - the `egui::Id` identifying the buffer
 /// * `default` - fallback factory invoked when no buffer exists
-#[allow(clippy::map_clone)]
 pub fn load_autocomplete_buffer(
     ctx: &egui::Context,
     id: egui::Id,
     default: impl FnOnce() -> String,
 ) -> String {
-    ctx.memory(|mem| mem.data.get_temp::<String>(id).map(|s| s.clone()))
+    ctx.memory(|mem| mem.data.get_temp::<String>(id))
         .unwrap_or_else(default)
 }
 
