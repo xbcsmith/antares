@@ -11,10 +11,10 @@
 //!
 //! * The asset path is relative to this source file, so the SDK crate is
 //!   self-contained — it does not depend on the workspace root layout.
-//! * Decoding failure is treated defensively: `None` is returned and a warning
-//!   is printed to `stderr` so the application still launches with a generic
-//!   icon.  In practice the failure path is unreachable because `include_bytes!`
-//!   verifies the file exists at compile time.
+//! * Decoding failure returns an `Err` so the caller can decide how to handle
+//!   it (e.g. log a warning and continue without an icon).  In practice the
+//!   failure path is unreachable because `include_bytes!` verifies the file
+//!   exists at compile time.
 
 use eframe::egui;
 use std::sync::Arc;
@@ -31,10 +31,10 @@ const ICON_PNG: &[u8] = include_bytes!("../assets/antares_tray.png");
 /// an [`Arc`]-wrapped [`egui::IconData`] is returned so it can be passed
 /// directly to `ViewportBuilder::with_icon()`.
 ///
-/// Returns `None` and emits a warning to `stderr` if the embedded bytes cannot
-/// be decoded.  This cannot happen in practice — `include_bytes!` guarantees
-/// the file is present at compile time — but the defensive fallback ensures the
-/// application always starts even under unexpected conditions.
+/// Returns an `Err` if the embedded bytes cannot be decoded.  This cannot
+/// happen in practice — `include_bytes!` guarantees the file is present at
+/// compile time — but the typed error allows callers to handle the failure
+/// gracefully without panicking.
 ///
 /// # Examples
 ///
@@ -42,25 +42,18 @@ const ICON_PNG: &[u8] = include_bytes!("../assets/antares_tray.png");
 /// use campaign_builder::icon::app_icon_data;
 ///
 /// let icon = app_icon_data();
-/// assert!(icon.is_some(), "embedded icon must always decode successfully");
+/// assert!(icon.is_ok(), "embedded icon must always decode successfully");
 /// ```
-pub fn app_icon_data() -> Option<Arc<egui::IconData>> {
-    match image::load_from_memory(ICON_PNG) {
-        Ok(img) => {
-            let width = img.width();
-            let height = img.height();
-            let rgba = img.into_rgba8().into_raw();
-            Some(Arc::new(egui::IconData {
-                rgba,
-                width,
-                height,
-            }))
-        }
-        Err(e) => {
-            eprintln!("[WARN] Failed to decode application icon: {e}");
-            None
-        }
-    }
+pub fn app_icon_data() -> Result<Arc<egui::IconData>, image::ImageError> {
+    let img = image::load_from_memory(ICON_PNG)?;
+    let width = img.width();
+    let height = img.height();
+    let rgba = img.into_rgba8().into_raw();
+    Ok(Arc::new(egui::IconData {
+        rgba,
+        width,
+        height,
+    }))
 }
 
 #[cfg(test)]
@@ -72,19 +65,16 @@ mod tests {
     /// Defined by the PNG specification (ISO/IEC 15948:2003, section 5.2).
     const PNG_MAGIC: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
 
-    /// `app_icon_data()` must return `Some` for the embedded asset.
+    /// `app_icon_data()` must return `Ok` for the embedded asset.
     #[test]
     fn test_app_icon_data_returns_some() {
-        assert!(
-            app_icon_data().is_some(),
-            "embedded icon must decode to Some"
-        );
+        assert!(app_icon_data().is_ok(), "embedded icon must decode to Ok");
     }
 
     /// Both decoded dimensions must be greater than zero.
     #[test]
     fn test_app_icon_data_dimensions_non_zero() {
-        let icon = app_icon_data().expect("icon must be Some");
+        let icon = app_icon_data().expect("icon must be Ok");
         assert!(icon.width > 0, "decoded icon width must be > 0");
         assert!(icon.height > 0, "decoded icon height must be > 0");
     }
@@ -92,7 +82,7 @@ mod tests {
     /// The RGBA byte buffer must be exactly `width * height * 4` bytes long.
     #[test]
     fn test_app_icon_data_rgba_length_matches_dimensions() {
-        let icon = app_icon_data().expect("icon must be Some");
+        let icon = app_icon_data().expect("icon must be Ok");
         let expected = (icon.width * icon.height * 4) as usize;
         assert_eq!(
             icon.rgba.len(),

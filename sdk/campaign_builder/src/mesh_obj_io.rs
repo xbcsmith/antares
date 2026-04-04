@@ -579,13 +579,6 @@ pub fn import_meshes_from_obj_with_options(
     )
 }
 
-pub(crate) fn import_meshes_for_importer_with_options(
-    obj_string: &str,
-    options: &ObjImportOptions,
-) -> Result<Vec<ImportedObjMesh>, ObjError> {
-    Ok(import_obj_scene_for_importer_with_options(obj_string, options)?.meshes)
-}
-
 pub(crate) fn import_obj_scene_for_importer_with_options(
     obj_string: &str,
     options: &ObjImportOptions,
@@ -656,13 +649,6 @@ pub fn import_meshes_from_obj_file_with_options(
             .map(|mesh| mesh.mesh_def)
             .collect(),
     )
-}
-
-pub(crate) fn import_meshes_for_importer_from_obj_file_with_options(
-    path: &str,
-    options: &ObjImportOptions,
-) -> Result<Vec<ImportedObjMesh>, ObjError> {
-    Ok(import_obj_scene_for_importer_from_obj_file_with_options(path, options)?.meshes)
 }
 
 pub(crate) fn import_obj_scene_for_importer_from_obj_file_with_options(
@@ -833,10 +819,11 @@ fn resolve_material_library_paths(
     material_library_names: &[String],
 ) -> Vec<PathBuf> {
     if let Some(manual_mtl_path) = options.manual_mtl_path.as_ref() {
-        return manual_mtl_path
-            .exists()
-            .then(|| vec![manual_mtl_path.clone()])
-            .unwrap_or_default();
+        return if manual_mtl_path.exists() {
+            vec![manual_mtl_path.clone()]
+        } else {
+            Vec::new()
+        };
     }
 
     let Some(source_path) = options.source_path.as_ref() else {

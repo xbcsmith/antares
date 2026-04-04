@@ -40,15 +40,23 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+/// Errors that can occur when importing an OBJ file into editor state.
+#[derive(Debug, thiserror::Error)]
+enum ObjImportError {
+    /// The OBJ file could not be loaded or parsed.
+    #[error("Failed to load OBJ '{path}': {message}")]
+    LoadFailed { path: String, message: String },
+}
+
 /// Signal emitted by the importer tab when an export completes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ObjImporterUiSignal {
     /// A creature asset was exported and the creature registry should be reloaded.
-    CreatureExported,
+    Creature,
     /// An item asset was exported.
-    ItemExported,
+    Item,
     /// A furniture mesh asset was exported.
-    FurnitureExported,
+    Furniture,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -231,7 +239,7 @@ fn render_idle_mode(ui: &mut egui::Ui, state: &mut ObjImporterState, logger: &mu
                 ui.ctx().request_repaint();
             }
             Err(error) => {
-                state.status_message = error;
+                state.status_message = error.to_string();
                 logger.error(category::FILE_IO, &state.status_message);
             }
         }
@@ -383,7 +391,7 @@ fn render_loaded_mode(
                         ui.ctx().request_repaint();
                     }
                     Err(error) => {
-                        state.status_message = error;
+                        state.status_message = error.to_string();
                         logger.error(category::FILE_IO, &state.status_message);
                     }
                 }
@@ -406,9 +414,9 @@ fn render_loaded_mode(
             match export_state_to_campaign(state, campaign_dir.map(|path| path.as_path())) {
                 Ok(outcome) => {
                     let signal = match outcome.export_type {
-                        ExportType::Creature => ObjImporterUiSignal::CreatureExported,
-                        ExportType::Item => ObjImporterUiSignal::ItemExported,
-                        ExportType::Furniture => ObjImporterUiSignal::FurnitureExported,
+                        ExportType::Creature => ObjImporterUiSignal::Creature,
+                        ExportType::Item => ObjImporterUiSignal::Item,
+                        ExportType::Furniture => ObjImporterUiSignal::Furniture,
                     };
                     logger.info(category::FILE_IO, &outcome.status_message);
                     state.clear();
@@ -770,11 +778,11 @@ fn render_custom_palette_section(
             });
 
         if let Some(label) = remove_label {
-            if state.remove_custom_color(&label) {
-                if persist_custom_palette(state, campaign_dir, logger) {
-                    state.status_message = format!("Removed custom color '{}'.", label);
-                    ui.ctx().request_repaint();
-                }
+            if state.remove_custom_color(&label)
+                && persist_custom_palette(state, campaign_dir, logger)
+            {
+                state.status_message = format!("Removed custom color '{}'.", label);
+                ui.ctx().request_repaint();
             }
         }
     }
@@ -839,10 +847,13 @@ fn persist_custom_palette(
     }
 }
 
-fn load_obj_into_state(state: &mut ObjImporterState, path: &Path) -> Result<(), String> {
+fn load_obj_into_state(state: &mut ObjImporterState, path: &Path) -> Result<(), ObjImportError> {
     state
         .load_obj_file(path)
-        .map_err(|error| format!("Failed to load OBJ '{}': {}", path.display(), error))?;
+        .map_err(|error| ObjImportError::LoadFailed {
+            path: path.display().to_string(),
+            message: error.to_string(),
+        })?;
 
     if state.creature_name.trim().is_empty() {
         state.creature_name = display_name_from_path(path);
@@ -952,7 +963,7 @@ fn reload_obj_after_mtl_change(
             );
         }
         Err(error) => {
-            state.status_message = error;
+            state.status_message = error.to_string();
             logger.error(category::FILE_IO, &state.status_message);
         }
     }

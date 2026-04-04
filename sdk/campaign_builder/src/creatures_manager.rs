@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Creatures Manager for Phase 6: Campaign Builder Creatures Editor Integration
+//! Creatures Manager: Campaign Builder Creatures Editor Integration
 //!
 //! This module provides file I/O and validation logic for creature registry management.
 //! It complements the UI-focused `creatures_editor.rs` module by handling persistent
@@ -25,7 +25,7 @@
 //! # fn main() -> Result<(), EditorError> {
 //! // Load creatures from a campaign's creatures.ron file
 //! let mut manager = CreaturesManager::load_from_file(
-//!     PathBuf::from("campaigns/tutorial/data/creatures.ron")
+//!     PathBuf::from("data/test_campaign/data/creatures.ron")
 //! )?;
 //!
 //! // Validate all creature references
@@ -83,7 +83,7 @@ pub enum EditorError {
 
 /// Validation result for individual creature references
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ValidationResult {
+pub enum CreatureFileValidationResult {
     /// Creature is valid and file exists
     Valid,
     /// File reference does not exist
@@ -101,19 +101,21 @@ pub enum ValidationResult {
     InvalidRonSyntax(String),
 }
 
-impl std::fmt::Display for ValidationResult {
+impl std::fmt::Display for CreatureFileValidationResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ValidationResult::Valid => write!(f, "Valid"),
-            ValidationResult::FileNotFound(path) => {
+            CreatureFileValidationResult::Valid => write!(f, "Valid"),
+            CreatureFileValidationResult::FileNotFound(path) => {
                 write!(f, "File not found: {}", path.display())
             }
-            ValidationResult::InvalidPath(msg) => write!(f, "Invalid path: {}", msg),
-            ValidationResult::DuplicateId(id) => write!(f, "Duplicate ID: {}", id),
-            ValidationResult::IdOutOfRange { id, expected_range } => {
+            CreatureFileValidationResult::InvalidPath(msg) => write!(f, "Invalid path: {}", msg),
+            CreatureFileValidationResult::DuplicateId(id) => write!(f, "Duplicate ID: {}", id),
+            CreatureFileValidationResult::IdOutOfRange { id, expected_range } => {
                 write!(f, "ID {} out of range: {}", id, expected_range)
             }
-            ValidationResult::InvalidRonSyntax(msg) => write!(f, "Invalid RON: {}", msg),
+            CreatureFileValidationResult::InvalidRonSyntax(msg) => {
+                write!(f, "Invalid RON: {}", msg)
+            }
         }
     }
 }
@@ -128,7 +130,7 @@ pub struct ValidationReport {
     /// Warnings (non-blocking issues)
     pub warnings: Vec<(CreatureId, String)>,
     /// Errors (blocking issues)
-    pub errors: Vec<(CreatureId, ValidationResult)>,
+    pub errors: Vec<(CreatureId, CreatureFileValidationResult)>,
 }
 
 impl ValidationReport {
@@ -214,7 +216,7 @@ pub struct CreaturesManager {
     /// Whether the registry has unsaved changes
     is_dirty: bool,
     /// Validation results cache
-    validation_results: HashMap<CreatureId, ValidationResult>,
+    validation_results: HashMap<CreatureId, CreatureFileValidationResult>,
 }
 
 impl CreaturesManager {
@@ -269,7 +271,7 @@ impl CreaturesManager {
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let manager = CreaturesManager::load_from_file(
-    ///     PathBuf::from("campaigns/tutorial/data/creatures.ron")
+    ///     PathBuf::from("data/test_campaign/data/creatures.ron")
     /// )?;
     /// println!("Loaded {} creatures", manager.creature_count());
     /// # Ok(())
@@ -462,7 +464,7 @@ impl CreaturesManager {
         for dup_id in duplicates {
             for creature in &self.creatures {
                 if creature.id == dup_id {
-                    let result = ValidationResult::DuplicateId(dup_id);
+                    let result = CreatureFileValidationResult::DuplicateId(dup_id);
                     report.errors.push((creature.id, result.clone()));
                     self.validation_results.insert(creature.id, result);
                 }
@@ -476,23 +478,23 @@ impl CreaturesManager {
                 continue;
             }
 
-            let mut result = ValidationResult::Valid;
+            let mut result = CreatureFileValidationResult::Valid;
 
             // Check ID range
             let category = CreatureCategory::from_id(creature.id);
             let range = category.id_range();
             if !range.contains(&creature.id) {
-                result = ValidationResult::IdOutOfRange {
+                result = CreatureFileValidationResult::IdOutOfRange {
                     id: creature.id,
                     expected_range: format!("{}-{}", range.start, range.end.saturating_sub(1)),
                 };
             }
 
             // Check file exists
-            if result == ValidationResult::Valid {
+            if result == CreatureFileValidationResult::Valid {
                 let file_path = PathBuf::from(&creature.filepath);
                 if !file_path.exists() {
-                    result = ValidationResult::FileNotFound(file_path);
+                    result = CreatureFileValidationResult::FileNotFound(file_path);
                     report.warnings.push((
                         creature.id,
                         format!("File not found: {}", creature.filepath),
@@ -501,11 +503,11 @@ impl CreaturesManager {
             }
 
             // Update results
-            if result == ValidationResult::Valid {
+            if result == CreatureFileValidationResult::Valid {
                 report.valid_count += 1;
             } else {
                 match &result {
-                    ValidationResult::Valid => {}
+                    CreatureFileValidationResult::Valid => {}
                     _ => {
                         report.errors.push((creature.id, result.clone()));
                     }
@@ -885,7 +887,10 @@ mod tests {
             total_creatures: 10,
             valid_count: 8,
             warnings: vec![(1, "Warning 1".to_string())],
-            errors: vec![(2, ValidationResult::FileNotFound(PathBuf::from("test.ron")))],
+            errors: vec![(
+                2,
+                CreatureFileValidationResult::FileNotFound(PathBuf::from("test.ron")),
+            )],
         };
 
         let summary = report.summary();
@@ -909,13 +914,13 @@ mod tests {
 
     #[test]
     fn test_validation_result_display() {
-        let result = ValidationResult::Valid;
+        let result = CreatureFileValidationResult::Valid;
         assert_eq!(result.to_string(), "Valid");
 
-        let result = ValidationResult::DuplicateId(42);
+        let result = CreatureFileValidationResult::DuplicateId(42);
         assert_eq!(result.to_string(), "Duplicate ID: 42");
 
-        let result = ValidationResult::IdOutOfRange {
+        let result = CreatureFileValidationResult::IdOutOfRange {
             id: 201,
             expected_range: "1-50".to_string(),
         };

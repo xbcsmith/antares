@@ -480,10 +480,10 @@ pub fn generate_pyramid(base_size: f32, color: [f32; 4]) -> MeshDefinition {
         [v[0] / len, v[1] / len, v[2] / len]
     };
 
-    let front_normal = normalize(front_normal);
-    let back_normal = normalize(back_normal);
-    let left_normal = normalize(left_normal);
-    let right_normal = normalize(right_normal);
+    let _front_normal = normalize(front_normal);
+    let _back_normal = normalize(back_normal);
+    let _left_normal = normalize(left_normal);
+    let _right_normal = normalize(right_normal);
 
     #[rustfmt::skip]
     let normals = vec![

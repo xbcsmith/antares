@@ -612,8 +612,6 @@ pub enum TemplateBrowserAction {
 mod tests {
     use super::*;
     use crate::creature_templates::initialize_template_registry;
-    use crate::template_metadata::{TemplateMetadata, TemplateRegistry};
-    use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
 
     #[test]
     fn test_template_browser_state_new() {
@@ -661,29 +659,6 @@ mod tests {
         assert_eq!(SortOrder::NameAscending.name(), "Name (A-Z)");
         assert_eq!(SortOrder::NameDescending.name(), "Name (Z-A)");
         assert_eq!(SortOrder::DateAdded.name(), "Date Added");
-    }
-
-    /// Helper function to create a minimal creature for tests
-    fn create_test_creature(name: &str, id: u32) -> CreatureDefinition {
-        CreatureDefinition {
-            id,
-            name: name.to_string(),
-            meshes: vec![MeshDefinition {
-                name: None,
-                vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
-                indices: vec![0, 1, 2],
-                normals: None,
-                uvs: None,
-                color: [1.0, 1.0, 1.0, 1.0],
-                lod_levels: None,
-                lod_distances: None,
-                material: None,
-                texture_path: None,
-            }],
-            mesh_transforms: vec![MeshTransform::default()],
-            scale: 1.0,
-            color_tint: None,
-        }
     }
 
     #[test]

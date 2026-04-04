@@ -742,6 +742,309 @@ Start with the most-suppressed files and work outward:
 
 ---
 
+### Phase 7: Complete Error Handling and Validation Unification (Medium Risk, High Impact)
+
+Continues Phase 3 work that was not fully completed. Addresses the remaining
+duplicate type definition in `creatures_manager.rs`, 61 `Result<(), String>`
+signatures still in production code, the single production `eprintln!` in
+`icon.rs`, and the bare `let _ =` silent drops in `quest_editor.rs` and
+`item_mesh_editor.rs`. Also removes the last straggler `#[allow(dead_code)]`
+carried over from Phase 1.
+
+**Prerequisite**: Phase 3 partial work is already merged — `MeshError` has
+`thiserror::Error` (`mesh_validation.rs:87`) and `ValidationSeverity` is
+unified in `validation.rs`. Phase 7 continues from that foundation.
+
+#### 7.1 Remove Final `#[allow(dead_code)]` from `undo_redo.rs`
+
+`undo_redo.rs:419` carries `#[allow(dead_code)]` on the `execute()` method of
+`UndoRedoStack<C>`. The method is called from `creatures_workflow.rs:891`.
+Verify the call site compiles without the attribute, then remove it.
+
+#### 7.2 Rename Duplicate `ValidationResult` in `creatures_manager.rs`
+
+Two types share the name `ValidationResult` in the SDK:
+
+| File                   | Line | Kind     | Purpose                                                                                                      |
+| ---------------------- | ---- | -------- | ------------------------------------------------------------------------------------------------------------ |
+| `creatures_manager.rs` | L86  | `enum`   | File-validation status code: `Valid, FileNotFound, InvalidPath, DuplicateId, IdOutOfRange, InvalidRonSyntax` |
+| `validation.rs`        | L241 | `struct` | Rich validation report entry with `severity`, `category`, `message` fields                                   |
+
+The two types are unrelated; the name collision violates Phase 3.1's success
+criterion of zero duplicate `ValidationResult` definitions.
+
+**Action**:
+
+1. Rename `creatures_manager.rs`'s `ValidationResult` to
+   `CreatureFileValidationResult`.
+2. Update all ~13 references within `creatures_manager.rs` and
+   `creatures_editor.rs`.
+3. Confirm `advanced_validation.rs` no longer defines its own
+   `ValidationSeverity` (should already be resolved by Phase 3).
+
+#### 7.3 Migrate Remaining `Result<(), String>` Returns to Typed Errors
+
+61 occurrences remain (`grep -rn "Result<(), String>" sdk/campaign_builder/src/ | wc -l`).
+Audit each: skip any inside `#[cfg(test)]` blocks. Migrate all production
+function signatures following the `thiserror::Error` pattern established by
+`AutoSaveError` and `CreatureAssetError`.
+
+Priority order:
+
+| File                    | Approx. count | Suggested error type   |
+| ----------------------- | ------------- | ---------------------- |
+| `campaign_io.rs`        | 11            | `CampaignIoError`      |
+| `creature_undo_redo.rs` | ~12           | `CreatureCommandError` |
+| `dialogue_editor.rs`    | ~10           | `DialogueEditorError`  |
+| `conditions_editor.rs`  | ~6            | `ConditionEditorError` |
+| `characters_editor.rs`  | ~3            | `CharacterEditorError` |
+| `classes_editor.rs`     | ~3            | `ClassEditorError`     |
+| `config_editor.rs`      | ~3            | `ConfigEditorError`    |
+| `npc_editor.rs`         | 2             | `NpcEditorError`       |
+| `item_mesh_editor.rs`   | 2             | `ItemMeshEditorError`  |
+| `creatures_editor.rs`   | 2             | `CreatureEditorError`  |
+| `map_editor.rs`         | 1             | `MapEditorError`       |
+
+Each error enum must use `#[derive(thiserror::Error)]` with `#[error("...")]`
+attributes and `#[from]` for `std::io::Error` and `ron::Error` where
+appropriate.
+
+#### 7.4 Replace Production `eprintln!` in `icon.rs`
+
+`icon.rs:60` contains one remaining production `eprintln!`:
+
+```rust
+eprintln!("[WARN] Failed to decode application icon: {e}");
+```
+
+Replace with the SDK `Logger` from `logging.rs`. The `logging.rs:239` fallback
+`eprintln!` is intentional (last-resort when the logger itself cannot write)
+and must remain with an explanatory comment confirming its purpose.
+
+#### 7.5 Fix Remaining Silent `Result` Drops
+
+Four bare `let _ =` patterns remain on user-visible operations:
+
+| File                  | Line | Operation                            | Fix                              |
+| --------------------- | ---- | ------------------------------------ | -------------------------------- |
+| `item_mesh_editor.rs` | 2025 | `revert_edit_buffer_from_registry()` | Log error + set `status_message` |
+| `quest_editor.rs`     | 1093 | `std::fs::create_dir_all(parent)`    | Propagate with `?` or log        |
+| `quest_editor.rs`     | 1820 | `add_stage(quests)`                  | Log error + set `status_message` |
+| `quest_editor.rs`     | 1995 | `edit_objective(...)`                | Log error + set `status_message` |
+
+`item_mesh_editor.rs:2003` (`let _ = e`) has a justifying comment ("Save
+failure will be visible as unsaved_changes remaining true") and may remain.
+
+#### 7.6 Testing Requirements
+
+- All tests pass after renaming `ValidationResult` → `CreatureFileValidationResult`.
+- New error enums have unit tests for `Display` formatting.
+- No public function returns `Result<(), String>` outside `#[cfg(test)]` blocks.
+
+#### 7.7 Deliverables
+
+- [x] `#[allow(dead_code)]` removed from `undo_redo.rs:419` (replaced with `#[cfg(test)]`)
+- [x] `creatures_manager.rs` `ValidationResult` renamed to `CreatureFileValidationResult`; all ~13 call sites updated
+- [x] All `Result<(), String>` returns in production code migrated to typed errors
+- [x] `icon.rs:60` `eprintln!` replaced with SDK `Logger`
+- [x] 4 silent `Result` drops fixed with logging or propagation
+
+#### 7.8 Success Criteria
+
+- `grep -rn "#\[allow(dead_code)\]" sdk/campaign_builder/src/` returns zero results.
+- `grep -rn "Result<(), String>" sdk/campaign_builder/src/` returns zero results outside `#[cfg(test)]` blocks.
+- `grep -rn "eprintln!" sdk/campaign_builder/src/` returns only `logging.rs` (intentional fallback) and files under `src/bin/` (CLI binaries).
+- Zero duplicate `ValidationResult` type names in the SDK.
+- All quality gates pass.
+
+---
+
+### Phase 8: Complete Code Deduplication (Medium Risk, Medium Effort)
+
+Closes the two remaining Phase 4 items: the generic toolbar action handler for
+three editors still inlining the full `match` block, and the integration of
+`load_ron_file`/`save_ron_file` into `campaign_io.rs`'s load/save method pairs.
+
+**Prerequisite**: Phase 7.3 (`Result<(), String>` migration) must land first
+because the typed errors affect the function signatures that Phases 8.1 and 8.2
+will touch.
+
+#### 8.1 Extract Generic Toolbar Action Handler for Three Editors
+
+`classes_editor.rs` (~55 lines, L389–L441), `races_editor.rs` (~55 lines,
+L438–L489), and `characters_editor.rs` (~80 lines, L1136–L1175) each contain
+a nearly-identical `match toolbar_action` block handling `Save`, `Load`,
+`Export`, `Reload`, and `None` arms inline. Only `New` and `Import` arms
+differ between editors.
+
+`ToolbarAction` already lives in `ui_helpers/layout.rs`. `handle_file_load`,
+`handle_file_save`, and `handle_reload` already live in `ui_helpers/file_io.rs`.
+
+**Action**: Create `handle_toolbar_action<T: Serialize + DeserializeOwned>()`
+in `ui_helpers/file_io.rs` that dispatches the common arms (`Save`, `Load`,
+`Export`, `Reload`, `None`) for any serialisable type. Each editor's match
+block then reduces to only its unique `New` and `Import` arms plus a single
+call to the generic dispatcher.
+
+Expected savings after migration:
+
+| File                   | Current match block     | Target     |
+| ---------------------- | ----------------------- | ---------- |
+| `classes_editor.rs`    | ~55 lines (L389–L441)   | ≤ 15 lines |
+| `races_editor.rs`      | ~55 lines (L438–L489)   | ≤ 15 lines |
+| `characters_editor.rs` | ~80 lines (L1136–L1175) | ≤ 15 lines |
+
+#### 8.2 Integrate `load_ron_file`/`save_ron_file` into `campaign_io.rs`
+
+`ui_helpers/file_io.rs` exports `load_ron_file<T: DeserializeOwned>()` and
+`save_ron_file<T: Serialize>()`, but `campaign_io.rs` still contains 11
+hand-rolled methods that duplicate the same
+`std::fs::read_to_string` + `ron::from_str` + `ron::ser::to_string_pretty`
+pattern inline.
+
+Replace the bodies of these save methods with calls to `save_ron_file` and
+their corresponding load methods with calls to `load_ron_file`:
+
+| Method                   | Approx. line          |
+| ------------------------ | --------------------- |
+| `save_items`             | `campaign_io.rs:1112` |
+| `save_spells`            | `campaign_io.rs:1162` |
+| `save_conditions`        | `campaign_io.rs:1203` |
+| `save_proficiencies`     | `campaign_io.rs:1305` |
+| `save_dialogues_to_file` | `campaign_io.rs:1367` |
+| `save_npcs_to_file`      | `campaign_io.rs:1400` |
+
+After Phase 7.3 has migrated signatures away from `Result<(), String>`, thread
+the typed error through the generic helper call using `map_err`.
+
+#### 8.3 Testing Requirements
+
+- All existing tests pass after the toolbar-action refactor.
+- The new `handle_toolbar_action` generic function has unit tests covering
+  `Save`, `Load`, `Reload`, and `None` arms with a test type.
+- `campaign_io_tests.rs` round-trip tests continue to pass.
+
+#### 8.4 Deliverables
+
+- [ ] `handle_toolbar_action<T>()` created in `ui_helpers/file_io.rs`
+- [ ] `classes_editor.rs` match block reduced to ≤ 15 lines
+- [ ] `races_editor.rs` match block reduced to ≤ 15 lines
+- [ ] `characters_editor.rs` match block reduced to ≤ 15 lines
+- [ ] `campaign_io.rs` save methods delegate to `save_ron_file`
+- [ ] `campaign_io.rs` load methods delegate to `load_ron_file`
+
+#### 8.5 Success Criteria
+
+- Net additional line-count reduction ≥ 300 lines across the three editors.
+- No `ron::ser::to_string_pretty` call patterns duplicated in `campaign_io.rs` method bodies.
+- All quality gates pass.
+
+---
+
+### Phase 9: Final Structural Cleanup (Medium Risk, Long-Term Maintainability)
+
+Closes three remaining Phase 5 structural items — two files still over 4,000
+lines and test modules that landed in `src/` rather than `tests/` — and
+completes Phase 6.2 with the missing `SearchableSelectorContext` struct.
+
+**Prerequisite**: Phases 7 and 8 must land first to stabilise the API surfaces
+before splitting the files those phases touch.
+
+#### 9.1 Break `npc_editor.rs` Below 4,000 Lines
+
+`npc_editor.rs` is 4,385 lines — 385 over the Phase 5.8 limit. Extract these
+cohesive sections into a `npc_editor/` sub-module directory:
+
+| New file                     | Content                                                                   | Approx. lines |
+| ---------------------------- | ------------------------------------------------------------------------- | ------------- |
+| `npc_editor/context.rs`      | `NpcEditorContext<'a>` struct (L338–L396) and its `impl` display helpers  | ~150          |
+| `npc_editor/stock_editor.rs` | `NpcStockEditor` sub-editor state and `show()` method                     | ~300          |
+| `npc_editor/mod.rs`          | Re-exports all public items; retains main `NpcEditor` struct and `show()` | ~3,935        |
+
+#### 9.2 Break `creatures_editor.rs` Below 4,000 Lines
+
+`creatures_editor.rs` is 4,358 lines — 358 over the limit. Extract:
+
+| New file                            | Content                                                                                                        | Approx. lines |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------- |
+| `creatures_editor/mesh_ui.rs`       | Mesh asset UI block surrounding the TODO at L2081 ("Add View/Edit Table buttons for vertices/indices/normals") | ~400          |
+| `creatures_editor/preview_panel.rs` | Appearance tab and preview renderer panel                                                                      | ~300          |
+| `creatures_editor/mod.rs`           | Re-exports all public items; retains main `CreaturesEditor` struct                                             | ~3,658        |
+
+#### 9.3 Relocate Extracted Test Modules from `src/` to `tests/`
+
+Three test files landed in `src/` rather than `tests/` as Phase 5.4 specified:
+
+| Current path                     | Target path                        |
+| -------------------------------- | ---------------------------------- |
+| `src/editor_state_tests.rs`      | `tests/editor_state_tests.rs`      |
+| `src/campaign_io_tests.rs`       | `tests/campaign_io_tests.rs`       |
+| `src/ron_serialization_tests.rs` | `tests/ron_serialization_tests.rs` |
+
+Steps:
+
+1. Move each file.
+2. Remove the corresponding `mod` declarations from `lib.rs` (or wherever they
+   are declared as inline modules).
+3. Convert any `pub(crate)` items accessed by the tests to `pub`, or add
+   re-exports under a `#[cfg(test)]` guard as needed.
+4. Verify `cargo nextest run --all-features` continues to pass.
+
+#### 9.4 Create `SearchableSelectorContext` (Completing Phase 6.2)
+
+Phase 6.2 was planned but never implemented. The two generic selector functions
+`searchable_selector_single<T, ID, FId, FLabel>()` and
+`searchable_selector_multi<T, ID, FId, FLabel>()` in
+`ui_helpers/layout.rs:348–450` each accept 8–10 parameters. Create a context
+struct to bundle the invariant parameters and reduce call-site arity:
+
+```rust
+/// Context bundle for [`searchable_selector_single`] and
+/// [`searchable_selector_multi`]. Bundles the candidate slice, mutable
+/// search buffer, and accessor closures so call sites pass one argument
+/// instead of four.
+pub struct SearchableSelectorContext<'a, T, ID> {
+    /// Full candidate list to filter and display.
+    pub candidates: &'a [T],
+    /// Mutable search string typed by the user.
+    pub search_buf: &'a mut String,
+    /// Extracts the comparable ID from a candidate item.
+    pub id_fn: fn(&T) -> ID,
+    /// Extracts the display label from a candidate item.
+    pub label_fn: fn(&T) -> &str,
+}
+```
+
+Update `searchable_selector_single` and `searchable_selector_multi` to accept
+`SearchableSelectorContext` in place of the four individual parameters. Update
+all call sites in the thin entity-specific wrapper functions in
+`ui_helpers/autocomplete.rs`.
+
+#### 9.5 Testing Requirements
+
+- All existing tests pass after file splits and test relocations.
+- `cargo nextest run --all-features` passes with test files in `tests/`.
+- `SearchableSelectorContext` has a doc-test example on the struct definition.
+
+#### 9.6 Deliverables
+
+- [ ] `npc_editor.rs` split into `npc_editor/` sub-module; entry-point file ≤ 4,000 lines
+- [ ] `creatures_editor.rs` split into `creatures_editor/` sub-module; entry-point file ≤ 4,000 lines
+- [ ] `src/editor_state_tests.rs` moved to `tests/editor_state_tests.rs`
+- [ ] `src/campaign_io_tests.rs` moved to `tests/campaign_io_tests.rs`
+- [ ] `src/ron_serialization_tests.rs` moved to `tests/ron_serialization_tests.rs`
+- [ ] `SearchableSelectorContext` struct created and exported from `ui_helpers`
+- [ ] `searchable_selector_single` and `searchable_selector_multi` updated to use `SearchableSelectorContext`
+
+#### 9.7 Success Criteria
+
+- No SDK source file outside `map_editor.rs` exceeds 4,000 lines.
+- `grep -rn "mod editor_state_tests\|mod campaign_io_tests\|mod ron_serialization_tests" sdk/campaign_builder/src/` returns zero results.
+- `SearchableSelectorContext` is exported from `ui_helpers` and used by both selector functions.
+- All quality gates pass.
+
+---
+
 ## Appendix A: Genuine TODOs and Future Enhancement Gaps
 
 These items are genuine future work identified during the audit. They are NOT
@@ -757,14 +1060,17 @@ cleanup — they should be tracked separately as feature requests:
 
 ## Appendix B: Files Changed Per Phase
 
-| Phase                           | Files touched (approx.)                                    |
-| ------------------------------- | ---------------------------------------------------------- |
-| Phase 1: Dead code + lint fixes | ~30 files (blanket allow removal ripple)                   |
-| Phase 2: Phase references       | ~40 files + README.md + QUICKSTART.md                      |
-| Phase 3: Error handling         | ~15 files (8 editor modules + validation + lib + logging)  |
-| Phase 4: Consolidate duplicates | ~20 files (ui_helpers + 8 editors + 3 undo + 2 mesh + lib) |
-| Phase 5: Structural refactoring | ~10 files (lib.rs split + ui_helpers split + test moves)   |
-| Phase 6: too_many_arguments     | ~18 files (15 editors + ui_helpers + new context structs)  |
+| Phase                              | Files touched (approx.)                                                                                                         |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Phase 1: Dead code + lint fixes    | ~30 files (blanket allow removal ripple)                                                                                        |
+| Phase 2: Phase references          | ~40 files + README.md + QUICKSTART.md                                                                                           |
+| Phase 3: Error handling            | ~15 files (8 editor modules + validation + lib + logging)                                                                       |
+| Phase 4: Consolidate duplicates    | ~20 files (ui_helpers + 8 editors + 3 undo + 2 mesh + lib)                                                                      |
+| Phase 5: Structural refactoring    | ~10 files (lib.rs split + ui_helpers split + test moves)                                                                        |
+| Phase 6: too_many_arguments        | ~18 files (15 editors + ui_helpers + new context structs)                                                                       |
+| Phase 7: Error handling completion | ~10 files (`creatures_manager` + `campaign_io` + `quest_editor` + `icon` + `item_mesh_editor` + `undo_redo` + 5 editor modules) |
+| Phase 8: Code dedup completion     | ~5 files (`ui_helpers/file_io` + `classes_editor` + `races_editor` + `characters_editor` + `campaign_io`)                       |
+| Phase 9: Final structural cleanup  | ~10 files (`npc_editor` split + `creatures_editor` split + 3 test moves + `ui_helpers/layout`)                                  |
 
 ## Appendix C: Metrics Summary
 
@@ -784,3 +1090,32 @@ cleanup — they should be tracked separately as feature requests:
 | Duplicate `ValidationSeverity` defs    | 2            | 1                                  |
 | `campaigns/tutorial` violations        | 2            | 0                                  |
 | `CampaignBuilderApp` fields            | ~140         | ≤ 30 (via state structs)           |
+
+## Appendix D: Post-Phase-1–6 Actual State and Phase 7–9 Targets
+
+Tracks the metrics as they stood after Phases 1–6 completed and the targets
+that Phases 7–9 are designed to achieve. Use this table to verify progress;
+Appendix C remains the original pre-cleanup baseline for historical reference.
+
+| Metric                                     | Post-Phase-1–6 Actual                | Target after Phases 7–9                             |
+| ------------------------------------------ | ------------------------------------ | --------------------------------------------------- |
+| Total SDK source lines                     | ~101,281                             | ~99,000                                             |
+| Largest file (`map_editor.rs`)             | 9,733 lines                          | ~9,000 (acknowledged; minimal change)               |
+| `npc_editor.rs`                            | 4,385 lines                          | ≤ 4,000 lines                                       |
+| `creatures_editor.rs`                      | 4,358 lines                          | ≤ 4,000 lines                                       |
+| `campaign_io.rs`                           | 3,155 lines                          | ~2,500 lines (after RON helper integration)         |
+| `lib.rs`                                   | 2,770 lines ✅                       | ≤ 3,000 lines (already met)                         |
+| `#[allow(dead_code)]`                      | 1                                    | 0                                                   |
+| `#[allow(deprecated)]`                     | 0 ✅                                 | 0                                                   |
+| `#[allow(clippy::too_many_arguments)]`     | 0 ✅                                 | 0                                                   |
+| Phase references in source                 | 0 ✅                                 | 0                                                   |
+| `campaigns/tutorial` violations            | 0 ✅                                 | 0                                                   |
+| `Result<(), String>` returns in production | 61                                   | 0                                                   |
+| Production `eprintln!` calls               | 1 (`icon.rs:60`)                     | 0                                                   |
+| Silent `let _ =` drops on user-facing ops  | 4                                    | 0                                                   |
+| Duplicate `ValidationResult` type names    | 2                                    | 1 (renamed to `CreatureFileValidationResult`)       |
+| Test files in `src/` instead of `tests/`   | 3                                    | 0                                                   |
+| `SearchableSelectorContext`                | Missing                              | Created and adopted                                 |
+| Editors with inline toolbar match block    | 3 (`classes`, `races`, `characters`) | 0                                                   |
+| `campaign_io.rs` inline RON I/O pairs      | 11                                   | 0 (all delegate to `load_ron_file`/`save_ron_file`) |
+| `CampaignBuilderApp` direct fields         | ~25 ✅                               | ≤ 30 (already met)                                  |

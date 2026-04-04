@@ -31,6 +31,7 @@
 
 use antares::domain::visual::MeshDefinition;
 use std::collections::{HashMap, HashSet};
+use thiserror::Error;
 
 /// Comprehensive validation report for a mesh
 #[derive(Debug, Clone, Default)]
@@ -83,70 +84,39 @@ impl MeshValidationReport {
 }
 
 /// Critical mesh errors that prevent valid rendering
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Error)]
 pub enum MeshError {
     /// Mesh has no vertices
+    #[error("Mesh has no vertices")]
     NoVertices,
 
     /// Mesh has no indices
+    #[error("Mesh has no indices")]
     NoIndices,
 
     /// Triangle index references non-existent vertex
+    #[error("Invalid index {index} (max vertex index: {max})")]
     InvalidIndex { index: u32, max: usize },
 
     /// Triangle has zero area (degenerate)
+    #[error("Degenerate triangle at index {triangle_idx}")]
     DegenerateTriangle { triangle_idx: usize },
 
     /// Edge is shared by more than 2 triangles (non-manifold geometry)
+    #[error("Non-manifold edge between vertices {vertex_a} and {vertex_b}")]
     NonManifoldEdge { vertex_a: u32, vertex_b: u32 },
 
     /// Normal count doesn't match vertex count
+    #[error("Normal count ({normals}) doesn't match vertex count ({vertices})")]
     MismatchedNormalCount { vertices: usize, normals: usize },
 
     /// UV count doesn't match vertex count
+    #[error("UV count ({uvs}) doesn't match vertex count ({vertices})")]
     MismatchedUvCount { vertices: usize, uvs: usize },
 
     /// Indices list length is not a multiple of 3
+    #[error("Index count ({count}) is not a multiple of 3")]
     IndicesNotTriangles { count: usize },
-}
-
-impl std::fmt::Display for MeshError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MeshError::NoVertices => write!(f, "Mesh has no vertices"),
-            MeshError::NoIndices => write!(f, "Mesh has no indices"),
-            MeshError::InvalidIndex { index, max } => {
-                write!(f, "Invalid index {} (max vertex index: {})", index, max - 1)
-            }
-            MeshError::DegenerateTriangle { triangle_idx } => {
-                write!(f, "Degenerate triangle at index {}", triangle_idx)
-            }
-            MeshError::NonManifoldEdge { vertex_a, vertex_b } => {
-                write!(
-                    f,
-                    "Non-manifold edge between vertices {} and {}",
-                    vertex_a, vertex_b
-                )
-            }
-            MeshError::MismatchedNormalCount { vertices, normals } => {
-                write!(
-                    f,
-                    "Normal count ({}) doesn't match vertex count ({})",
-                    normals, vertices
-                )
-            }
-            MeshError::MismatchedUvCount { vertices, uvs } => {
-                write!(
-                    f,
-                    "UV count ({}) doesn't match vertex count ({})",
-                    uvs, vertices
-                )
-            }
-            MeshError::IndicesNotTriangles { count } => {
-                write!(f, "Index count ({}) is not a multiple of 3", count)
-            }
-        }
-    }
 }
 
 /// Non-critical mesh warnings that may indicate issues
@@ -322,7 +292,7 @@ pub fn validate_mesh(mesh: &MeshDefinition) -> MeshValidationReport {
 
     // Validate indices
     let max_vertex_index = mesh.vertices.len();
-    for (i, &index) in mesh.indices.iter().enumerate() {
+    for &index in mesh.indices.iter() {
         if index as usize >= max_vertex_index {
             report.errors.push(MeshError::InvalidIndex {
                 index,

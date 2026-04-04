@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
-    handle_reload, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
+    dispatch_list_action, handle_file_load, handle_file_save, handle_reload,
+    show_standard_list_item, DispatchActionState, EditorToolbar, ItemAction, MetadataBadge,
     StandardListItemConfig, ToolbarAction, TwoColumnLayout, DEFAULT_PANEL_MIN_HEIGHT,
 };
 use antares::domain::character::{ATTRIBUTE_MODIFIER_MAX, ATTRIBUTE_MODIFIER_MIN};
@@ -15,11 +17,60 @@ use eframe::egui;
 use std::fs;
 use std::path::PathBuf;
 
+/// Errors produced by condition editor operations.
+#[derive(Debug, thiserror::Error)]
+pub enum ConditionEditorError {
+    #[error("ID cannot be empty")]
+    EmptyId,
+    #[error("Name cannot be empty")]
+    EmptyName,
+    #[error("Attribute modifier must have a non-empty attribute")]
+    EmptyAttribute,
+    #[error("Attribute modifier value {0} is out of range ({1} to {2})")]
+    AttributeValueOutOfRange(i16, i16, i16),
+    #[error("Status effect must have a non-empty tag")]
+    EmptyStatusTag,
+    #[error("Damage over time dice count must be >= 1")]
+    DotDiceCountTooLow,
+    #[error("Damage over time dice sides must be >= 2")]
+    DotDiceSidesTooLow,
+    #[error("Damage over time must have a non-empty element")]
+    EmptyDotElement,
+    #[error("Heal over time dice count must be >= 1")]
+    HotDiceCountTooLow,
+    #[error("Heal over time dice sides must be >= 2")]
+    HotDiceSidesTooLow,
+    #[error("ID already in use")]
+    DuplicateId,
+    #[error("Original condition not found")]
+    ConditionNotFound,
+    #[error("Index {0} out of bounds (effects count: {1})")]
+    IndexOutOfBounds(usize, usize),
+    #[error("New index {0} out of bounds (effects count: {1})")]
+    NewIndexOutOfBounds(usize, usize),
+    #[error("Attribute name cannot be empty")]
+    EmptyAttributeName,
+    #[error("Attribute value must be in range [-255..255]")]
+    AttributeValueRange,
+    #[error("Status tag cannot be empty")]
+    EmptyStatusTagBuffer,
+    #[error("Damage dice count must be >= 1")]
+    DamageDiceCountTooLow,
+    #[error("Damage dice sides must be >= 2")]
+    DamageDiceSidesTooLow,
+    #[error("Damage element cannot be empty")]
+    EmptyDamageElement,
+    #[error("Heal dice count must be >= 1")]
+    HealDiceCountTooLow,
+    #[error("Heal dice sides must be >= 2")]
+    HealDiceSidesTooLow,
+}
+
 /// Transient state used by the Conditions editor UI.
 ///
 /// This state keeps the user's current search filter, the currently selected
 /// condition (if any), a temporary edit buffer for creating or editing a
-/// condition, and whether the preview pane is visible. In Phase 1 we also add
+/// condition, and whether the preview pane is visible. Additional fields include
 /// import/export and basic delete/duplicate dialog state.
 ///
 /// # Examples
@@ -131,7 +182,7 @@ pub struct ConditionsEditorState {
     /// When deleting a condition, optionally remove references from spells (UI toggle)
     pub remove_refs_on_delete: bool,
 
-    // Phase 1 additions
+    // Additional fields
     pub show_import_dialog: bool,
     pub import_export_buffer: String,
     pub delete_confirmation_open: bool,
@@ -258,17 +309,12 @@ impl ConditionsEditorState {
     ///
     /// This follows the toolbar, import/load/save patterns used across other
     /// editors (items, monsters, spells).
-    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         conditions: &mut Vec<ConditionDefinition>,
         spells: &mut [Spell],
-        campaign_dir: Option<&PathBuf>,
-        conditions_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        _file_load_merge_mode: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
         ui.heading("⚕️ Conditions Editor");
         ui.add_space(5.0);
@@ -291,74 +337,35 @@ impl ConditionsEditorState {
             ToolbarAction::Save => {
                 self.save_conditions(
                     conditions,
-                    campaign_dir,
-                    conditions_file,
-                    unsaved_changes,
-                    status_message,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    ctx.unsaved_changes,
+                    ctx.status_message,
                 );
             }
             ToolbarAction::Load => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("RON", &["ron"])
-                    .pick_file()
-                {
-                    let load_result = fs::read_to_string(&path).and_then(|contents| {
-                        ron::from_str::<Vec<ConditionDefinition>>(&contents)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    });
-
-                    match load_result {
-                        Ok(loaded_conditions) => {
-                            if self.file_load_merge_mode {
-                                for cond in loaded_conditions {
-                                    if let Some(existing) =
-                                        conditions.iter_mut().find(|c| c.id == cond.id)
-                                    {
-                                        *existing = cond;
-                                    } else {
-                                        conditions.push(cond);
-                                    }
-                                }
-                            } else {
-                                *conditions = loaded_conditions;
-                            }
-                            *unsaved_changes = true;
-                            *status_message = format!("Loaded conditions from: {}", path.display());
-                        }
-                        Err(e) => {
-                            *status_message = format!("Failed to load conditions: {}", e);
-                        }
-                    }
-                }
+                handle_file_load(
+                    conditions,
+                    self.file_load_merge_mode,
+                    |c: &ConditionDefinition| c.id.clone(),
+                    ctx.status_message,
+                    ctx.unsaved_changes,
+                );
             }
             ToolbarAction::Import => {
                 self.show_import_dialog = true;
                 self.import_export_buffer.clear();
             }
             ToolbarAction::Export => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("conditions.ron")
-                    .add_filter("RON", &["ron"])
-                    .save_file()
-                {
-                    match ron::ser::to_string_pretty(conditions, Default::default()) {
-                        Ok(contents) => match fs::write(&path, contents) {
-                            Ok(_) => {
-                                *status_message =
-                                    format!("Saved conditions to: {}", path.display());
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to save conditions: {}", e);
-                            }
-                        },
-                        Err(e) => {
-                            *status_message = format!("Failed to serialize conditions: {}", e);
-                        }
-                    }
-                }
+                handle_file_save(conditions, "conditions.ron", ctx.status_message);
             }
             ToolbarAction::Reload => {
-                handle_reload(conditions, campaign_dir, conditions_file, status_message);
+                handle_reload(
+                    conditions,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    ctx.status_message,
+                );
             }
             ToolbarAction::None => {}
         }
@@ -431,62 +438,29 @@ impl ConditionsEditorState {
 
         // Show appropriate view based on mode
         match self.mode {
-            ConditionsEditorMode::List => self.show_list(
-                ui,
-                conditions,
-                spells,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                conditions_file,
-            ),
-            ConditionsEditorMode::Add | ConditionsEditorMode::Edit => self.show_form(
-                ui,
-                conditions,
-                spells,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                conditions_file,
-            ),
+            ConditionsEditorMode::List => self.show_list(ui, conditions, spells, ctx),
+            ConditionsEditorMode::Add | ConditionsEditorMode::Edit => {
+                self.show_form(ui, conditions, spells, ctx)
+            }
         }
 
         // Import dialog window handling
         if self.show_import_dialog {
-            self.show_import_dialog_window(
-                ui.ctx(),
-                conditions,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                conditions_file,
-            );
+            self.show_import_dialog_window(ui.ctx(), conditions, ctx);
         }
 
         // Delete confirmation dialog
         if self.delete_confirmation_open {
-            self.show_delete_confirmation(
-                ui.ctx(),
-                conditions,
-                spells,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                conditions_file,
-            );
+            self.show_delete_confirmation(ui.ctx(), conditions, spells, ctx);
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn show_list(
         &mut self,
         ui: &mut egui::Ui,
         conditions: &mut Vec<ConditionDefinition>,
         spells: &mut [Spell],
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        conditions_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let search_lower = self.search_filter.to_lowercase();
 
@@ -666,37 +640,53 @@ impl ConditionsEditorState {
                 }
                 ItemAction::Duplicate => {
                     if action_idx < conditions.len() {
-                        let mut dup = conditions[action_idx].clone();
-                        let base = dup.id.clone();
-                        let mut suffix = 1;
-                        while conditions.iter().any(|c| c.id == dup.id) {
-                            dup.id = format!("{}_copy{}", base, suffix);
-                            suffix += 1;
-                        }
-                        dup.name = format!("{} (Copy)", dup.name);
-                        conditions.push(dup);
-                        self.save_conditions(
+                        let mut dummy_show = false;
+                        let mut dummy_buf = String::new();
+                        let mut dispatch_state = DispatchActionState {
+                            entity_label: "condition",
+                            import_export_buffer: &mut dummy_buf,
+                            show_import_dialog: &mut dummy_show,
+                            status_message: ctx.status_message,
+                        };
+                        if dispatch_list_action(
+                            ItemAction::Duplicate,
                             conditions,
-                            campaign_dir,
-                            conditions_file,
-                            unsaved_changes,
-                            status_message,
-                        );
+                            &mut self.selected_condition_idx,
+                            |entry, all| {
+                                let base = entry.id.clone();
+                                let mut suffix = 1;
+                                while all.iter().any(|c| c.id == entry.id) {
+                                    entry.id = format!("{}_copy{}", base, suffix);
+                                    suffix += 1;
+                                }
+                                entry.name = format!("{} (Copy)", entry.name);
+                            },
+                            &mut dispatch_state,
+                        ) {
+                            self.save_conditions(
+                                conditions,
+                                ctx.campaign_dir,
+                                ctx.data_file,
+                                ctx.unsaved_changes,
+                                ctx.status_message,
+                            );
+                        }
                     }
                 }
                 ItemAction::Export => {
-                    if action_idx < conditions.len() {
-                        if let Ok(ron_str) = ron::ser::to_string_pretty(
-                            &conditions[action_idx],
-                            ron::ser::PrettyConfig::default(),
-                        ) {
-                            self.import_export_buffer = ron_str;
-                            self.show_import_dialog = true;
-                            *status_message = "Condition exported to clipboard dialog".to_string();
-                        } else {
-                            *status_message = "Failed to export condition".to_string();
-                        }
-                    }
+                    let mut dispatch_state = DispatchActionState {
+                        entity_label: "condition",
+                        import_export_buffer: &mut self.import_export_buffer,
+                        show_import_dialog: &mut self.show_import_dialog,
+                        status_message: ctx.status_message,
+                    };
+                    dispatch_list_action(
+                        ItemAction::Export,
+                        conditions,
+                        &mut self.selected_condition_idx,
+                        |_, _| {},
+                        &mut dispatch_state,
+                    );
                 }
                 ItemAction::None => {}
             }
@@ -767,16 +757,12 @@ impl ConditionsEditorState {
             });
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn show_form(
         &mut self,
         ui: &mut egui::Ui,
         conditions: &mut Vec<ConditionDefinition>,
         spells: &mut [Spell],
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        conditions_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let is_edit = self.mode == ConditionsEditorMode::Edit;
         let title = if is_edit {
@@ -812,7 +798,8 @@ impl ConditionsEditorState {
                                 .clicked()
                             {
                                 ui.ctx().copy_text(s.clone());
-                                *status_message = format!("Copied spell name to clipboard: {}", s);
+                                *ctx.status_message =
+                                    format!("Copied spell name to clipboard: {}", s);
                             }
                             if ui
                                 .small_button("→")
@@ -888,13 +875,12 @@ impl ConditionsEditorState {
                                         "Rounds",
                                     )
                                     .clicked()
-                                {
-                                    if !matches!(
+                                    && !matches!(
                                         new_cond.default_duration,
                                         ConditionDuration::Rounds(_)
-                                    ) {
-                                        new_cond.default_duration = ConditionDuration::Rounds(1);
-                                    }
+                                    )
+                                {
+                                    new_cond.default_duration = ConditionDuration::Rounds(1);
                                 }
                                 if ui
                                     .selectable_label(
@@ -905,13 +891,12 @@ impl ConditionsEditorState {
                                         "Minutes",
                                     )
                                     .clicked()
-                                {
-                                    if !matches!(
+                                    && !matches!(
                                         new_cond.default_duration,
                                         ConditionDuration::Minutes(_)
-                                    ) {
-                                        new_cond.default_duration = ConditionDuration::Minutes(1);
-                                    }
+                                    )
+                                {
+                                    new_cond.default_duration = ConditionDuration::Minutes(1);
                                 }
                             });
                         // If Rounds or Minutes selected, show a numeric editor
@@ -965,14 +950,13 @@ impl ConditionsEditorState {
             // Effects list & editing
             ui.horizontal(|ui| {
                 ui.label("Effects:");
-                if !new_cond.effects.is_empty() {
-                    if ui
+                if !new_cond.effects.is_empty()
+                    && ui
                         .small_button("🗑️ Clear All")
                         .on_hover_text("Remove all effects from this condition")
                         .clicked()
-                    {
-                        new_cond.effects.clear();
-                    }
+                {
+                    new_cond.effects.clear();
                 }
             });
 
@@ -1253,7 +1237,7 @@ impl ConditionsEditorState {
                 ui.horizontal(|ui| {
                     let effect_validation = validate_effect_edit_buffer(&buf);
                     if let Err(ref validation_error) = effect_validation {
-                        ui.colored_label(egui::Color32::RED, validation_error);
+                        ui.colored_label(egui::Color32::RED, validation_error.to_string());
                         ui.add_enabled(false, egui::Button::new("💾 Save Effect"));
                     } else if ui.button("💾 Save Effect").clicked() {
                         let new_effect = match buf.effect_type.as_deref() {
@@ -1320,8 +1304,8 @@ impl ConditionsEditorState {
                     new_cond,
                 ) {
                     Ok(()) => {
-                        *unsaved_changes = true;
-                        *status_message = if self.editing_original_id.is_some() {
+                        *ctx.unsaved_changes = true;
+                        *ctx.status_message = if self.editing_original_id.is_some() {
                             "Condition updated".to_string()
                         } else {
                             "Condition added".to_string()
@@ -1334,14 +1318,14 @@ impl ConditionsEditorState {
                         self.mode = ConditionsEditorMode::List;
                         self.save_conditions(
                             conditions,
-                            campaign_dir,
-                            conditions_file,
-                            unsaved_changes,
-                            status_message,
+                            ctx.campaign_dir,
+                            ctx.data_file,
+                            ctx.unsaved_changes,
+                            ctx.status_message,
                         );
                     }
                     Err(e) => {
-                        *status_message = format!("Failed to save condition: {}", e);
+                        *ctx.status_message = format!("Failed to save condition: {}", e);
                     }
                 }
             }
@@ -1356,19 +1340,16 @@ impl ConditionsEditorState {
 
     fn show_import_dialog_window(
         &mut self,
-        ctx: &egui::Context,
+        egui_ctx: &egui::Context,
         conditions: &mut Vec<ConditionDefinition>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        conditions_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let mut open = self.show_import_dialog;
         egui::Window::new("Import/Export Conditions")
             .open(&mut open)
             .resizable(true)
             .default_width(600.0)
-            .show(ctx, |ui| {
+            .show(egui_ctx, |ui| {
                 ui.label("Paste RON data below to import, or copy from here to export:");
                 ui.add(
                     egui::TextEdit::multiline(&mut self.import_export_buffer)
@@ -1380,7 +1361,7 @@ impl ConditionsEditorState {
                 ui.horizontal(|ui| {
                     if ui.button("📋 Copy to Clipboard").clicked() {
                         ui.ctx().copy_text(self.import_export_buffer.clone());
-                        *status_message = "Copied to clipboard".to_string();
+                        *ctx.status_message = "Copied to clipboard".to_string();
                     }
 
                     if ui.button("📥 Import").clicked() {
@@ -1400,14 +1381,15 @@ impl ConditionsEditorState {
                                 } else {
                                     *conditions = imported;
                                 }
-                                *unsaved_changes = true;
-                                *status_message = "Conditions imported successfully".to_string();
+                                *ctx.unsaved_changes = true;
+                                *ctx.status_message =
+                                    "Conditions imported successfully".to_string();
                                 self.save_conditions(
                                     conditions,
-                                    campaign_dir,
-                                    conditions_file,
-                                    unsaved_changes,
-                                    status_message,
+                                    ctx.campaign_dir,
+                                    ctx.data_file,
+                                    ctx.unsaved_changes,
+                                    ctx.status_message,
                                 );
                                 self.show_import_dialog = false;
                             }
@@ -1424,20 +1406,20 @@ impl ConditionsEditorState {
                                         } else {
                                             conditions.push(cond);
                                         }
-                                        *unsaved_changes = true;
-                                        *status_message =
+                                        *ctx.unsaved_changes = true;
+                                        *ctx.status_message =
                                             "Single condition imported successfully".to_string();
                                         self.save_conditions(
                                             conditions,
-                                            campaign_dir,
-                                            conditions_file,
-                                            unsaved_changes,
-                                            status_message,
+                                            ctx.campaign_dir,
+                                            ctx.data_file,
+                                            ctx.unsaved_changes,
+                                            ctx.status_message,
                                         );
                                         self.show_import_dialog = false;
                                     }
                                     Err(_) => {
-                                        *status_message = format!("Failed to parse RON: {}", e);
+                                        *ctx.status_message = format!("Failed to parse RON: {}", e);
                                     }
                                 }
                             }
@@ -1452,22 +1434,18 @@ impl ConditionsEditorState {
         self.show_import_dialog = open;
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn show_delete_confirmation(
         &mut self,
-        ctx: &egui::Context,
+        egui_ctx: &egui::Context,
         conditions: &mut Vec<ConditionDefinition>,
         spells: &mut [Spell],
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        conditions_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let mut open = self.delete_confirmation_open;
         egui::Window::new("Delete Condition")
             .open(&mut open)
             .resizable(false)
-            .show(ctx, |ui| {
+            .show(egui_ctx, |ui| {
                 ui.label("Are you sure you want to delete this condition?");
                 if let Some(del_id) = &self.selected_for_delete {
                     let used_spells = spells_referencing_condition(spells, del_id);
@@ -1488,7 +1466,7 @@ impl ConditionsEditorState {
                                     .clicked()
                                 {
                                     ui.ctx().copy_text(s.clone());
-                                    *status_message =
+                                    *ctx.status_message =
                                         format!("Copied spell name to clipboard: {}", s);
                                 }
                                 if ui
@@ -1524,15 +1502,15 @@ impl ConditionsEditorState {
                                     "Condition deleted".to_string()
                                 };
 
-                                *unsaved_changes = true;
-                                *status_message = message;
+                                *ctx.unsaved_changes = true;
+                                *ctx.status_message = message;
                                 self.selected_condition_idx = None;
                                 self.save_conditions(
                                     conditions,
-                                    campaign_dir,
-                                    conditions_file,
-                                    unsaved_changes,
-                                    status_message,
+                                    ctx.campaign_dir,
+                                    ctx.data_file,
+                                    ctx.unsaved_changes,
+                                    ctx.status_message,
                                 );
                             }
                         }
@@ -1714,17 +1692,17 @@ fn compute_condition_severity(condition: &ConditionDefinition) -> &'static str {
 /// # Returns
 ///
 /// Returns `Ok(())` on success, or an error message on failure.
-pub(crate) fn apply_condition_edits(
+pub fn apply_condition_edits(
     conditions: &mut Vec<ConditionDefinition>,
     original_id: Option<&str>,
     new_cond: &ConditionDefinition,
-) -> Result<(), String> {
+) -> Result<(), ConditionEditorError> {
     // Validate the condition
     if new_cond.id.trim().is_empty() {
-        return Err("ID cannot be empty".to_string());
+        return Err(ConditionEditorError::EmptyId);
     }
     if new_cond.name.trim().is_empty() {
-        return Err("Name cannot be empty".to_string());
+        return Err(ConditionEditorError::EmptyName);
     }
 
     // Validate each effect
@@ -1732,38 +1710,39 @@ pub(crate) fn apply_condition_edits(
         match effect {
             ConditionEffect::AttributeModifier { attribute, value } => {
                 if attribute.trim().is_empty() {
-                    return Err("Attribute modifier must have a non-empty attribute".to_string());
+                    return Err(ConditionEditorError::EmptyAttribute);
                 }
                 // Check value is in reasonable range using defined constants
                 if *value < ATTRIBUTE_MODIFIER_MIN || *value > ATTRIBUTE_MODIFIER_MAX {
-                    return Err(format!(
-                        "Attribute modifier value {} is out of range ({} to {})",
-                        value, ATTRIBUTE_MODIFIER_MIN, ATTRIBUTE_MODIFIER_MAX
+                    return Err(ConditionEditorError::AttributeValueOutOfRange(
+                        *value,
+                        ATTRIBUTE_MODIFIER_MIN,
+                        ATTRIBUTE_MODIFIER_MAX,
                     ));
                 }
             }
             ConditionEffect::StatusEffect(tag) => {
                 if tag.trim().is_empty() {
-                    return Err("Status effect must have a non-empty tag".to_string());
+                    return Err(ConditionEditorError::EmptyStatusTag);
                 }
             }
             ConditionEffect::DamageOverTime { damage, element } => {
                 if damage.count < 1 {
-                    return Err("Damage over time dice count must be >= 1".to_string());
+                    return Err(ConditionEditorError::DotDiceCountTooLow);
                 }
                 if damage.sides < 2 {
-                    return Err("Damage over time dice sides must be >= 2".to_string());
+                    return Err(ConditionEditorError::DotDiceSidesTooLow);
                 }
                 if element.trim().is_empty() {
-                    return Err("Damage over time must have a non-empty element".to_string());
+                    return Err(ConditionEditorError::EmptyDotElement);
                 }
             }
             ConditionEffect::HealOverTime { amount } => {
                 if amount.count < 1 {
-                    return Err("Heal over time dice count must be >= 1".to_string());
+                    return Err(ConditionEditorError::HotDiceCountTooLow);
                 }
                 if amount.sides < 2 {
-                    return Err("Heal over time dice sides must be >= 2".to_string());
+                    return Err(ConditionEditorError::HotDiceSidesTooLow);
                 }
             }
         }
@@ -1780,7 +1759,7 @@ pub(crate) fn apply_condition_edits(
     });
 
     if id_collision {
-        return Err("ID already in use".to_string());
+        return Err(ConditionEditorError::DuplicateId);
     }
 
     if let Some(orig_id) = original_id {
@@ -1788,7 +1767,7 @@ pub(crate) fn apply_condition_edits(
         if let Some(existing) = conditions.iter_mut().find(|c| c.id == orig_id) {
             *existing = new_cond.clone();
         } else {
-            return Err("Original condition not found".to_string());
+            return Err(ConditionEditorError::ConditionNotFound);
         }
     } else {
         // Add new condition
@@ -1844,41 +1823,41 @@ pub(crate) fn render_condition_effect_preview(effect: &ConditionEffect, magnitud
 }
 
 /// Validate the UI-side effect edit buffer.
-pub(crate) fn validate_effect_edit_buffer(buf: &EffectEditBuffer) -> Result<(), String> {
+pub fn validate_effect_edit_buffer(buf: &EffectEditBuffer) -> Result<(), ConditionEditorError> {
     match buf.effect_type.as_deref() {
         Some("AttributeModifier") => {
             if buf.attribute.trim().is_empty() {
-                return Err("Attribute name cannot be empty".to_string());
+                return Err(ConditionEditorError::EmptyAttributeName);
             }
             if buf.attribute_value.abs() > 255 {
-                return Err("Attribute value must be in range [-255..255]".to_string());
+                return Err(ConditionEditorError::AttributeValueRange);
             }
             Ok(())
         }
         Some("StatusEffect") => {
             if buf.status_tag.trim().is_empty() {
-                return Err("Status tag cannot be empty".to_string());
+                return Err(ConditionEditorError::EmptyStatusTagBuffer);
             }
             Ok(())
         }
         Some("DamageOverTime") => {
             if buf.dice.count < 1 {
-                return Err("Damage dice count must be >= 1".to_string());
+                return Err(ConditionEditorError::DamageDiceCountTooLow);
             }
             if buf.dice.sides < 2 {
-                return Err("Damage dice sides must be >= 2".to_string());
+                return Err(ConditionEditorError::DamageDiceSidesTooLow);
             }
             if buf.element.trim().is_empty() {
-                return Err("Damage element cannot be empty".to_string());
+                return Err(ConditionEditorError::EmptyDamageElement);
             }
             Ok(())
         }
         Some("HealOverTime") => {
             if buf.dice.count < 1 {
-                return Err("Heal dice count must be >= 1".to_string());
+                return Err(ConditionEditorError::HealDiceCountTooLow);
             }
             if buf.dice.sides < 2 {
-                return Err("Heal dice sides must be >= 2".to_string());
+                return Err(ConditionEditorError::HealDiceSidesTooLow);
             }
             Ok(())
         }
@@ -1901,12 +1880,11 @@ pub fn add_effect_to_condition(
 pub fn delete_effect_from_condition(
     condition: &mut antares::domain::conditions::ConditionDefinition,
     index: usize,
-) -> Result<(), String> {
+) -> Result<(), ConditionEditorError> {
     if index >= condition.effects.len() {
-        return Err(format!(
-            "Index {} out of bounds (effects count: {})",
+        return Err(ConditionEditorError::IndexOutOfBounds(
             index,
-            condition.effects.len()
+            condition.effects.len(),
         ));
     }
     condition.effects.remove(index);
@@ -1919,12 +1897,11 @@ pub fn delete_effect_from_condition(
 pub fn duplicate_effect_in_condition(
     condition: &mut antares::domain::conditions::ConditionDefinition,
     index: usize,
-) -> Result<(), String> {
+) -> Result<(), ConditionEditorError> {
     if index >= condition.effects.len() {
-        return Err(format!(
-            "Index {} out of bounds (effects count: {})",
+        return Err(ConditionEditorError::IndexOutOfBounds(
             index,
-            condition.effects.len()
+            condition.effects.len(),
         ));
     }
     let effect = condition.effects[index].clone();
@@ -1939,20 +1916,18 @@ pub fn move_effect_in_condition(
     condition: &mut antares::domain::conditions::ConditionDefinition,
     index: usize,
     offset: i32,
-) -> Result<(), String> {
+) -> Result<(), ConditionEditorError> {
     if index >= condition.effects.len() {
-        return Err(format!(
-            "Index {} out of bounds (effects count: {})",
+        return Err(ConditionEditorError::IndexOutOfBounds(
             index,
-            condition.effects.len()
+            condition.effects.len(),
         ));
     }
     let new_index = (index as i32 + offset) as usize;
     if new_index >= condition.effects.len() {
-        return Err(format!(
-            "New index {} out of bounds (effects count: {})",
+        return Err(ConditionEditorError::NewIndexOutOfBounds(
             new_index,
-            condition.effects.len()
+            condition.effects.len(),
         ));
     }
     let effect = condition.effects.remove(index);
@@ -1966,12 +1941,11 @@ pub fn update_effect_in_condition(
     condition: &mut antares::domain::conditions::ConditionDefinition,
     index: usize,
     new_effect: antares::domain::conditions::ConditionEffect,
-) -> Result<(), String> {
+) -> Result<(), ConditionEditorError> {
     if index >= condition.effects.len() {
-        return Err(format!(
-            "Index {} out of bounds (effects count: {})",
+        return Err(ConditionEditorError::IndexOutOfBounds(
             index,
-            condition.effects.len()
+            condition.effects.len(),
         ));
     }
     condition.effects[index] = new_effect;
@@ -1979,7 +1953,7 @@ pub fn update_effect_in_condition(
 }
 
 /// Returns a vector of spell names that reference condition_id.
-pub(crate) fn spells_referencing_condition(spells: &[Spell], condition_id: &str) -> Vec<String> {
+pub fn spells_referencing_condition(spells: &[Spell], condition_id: &str) -> Vec<String> {
     let mut result = Vec::new();
     for spell in spells.iter() {
         if spell.applied_conditions.iter().any(|c| c == condition_id) {
@@ -1990,10 +1964,7 @@ pub(crate) fn spells_referencing_condition(spells: &[Spell], condition_id: &str)
 }
 
 /// Remove references of condition_id from spells and return the number of spells modified.
-pub(crate) fn remove_condition_references_from_spells(
-    spells: &mut [Spell],
-    condition_id: &str,
-) -> usize {
+pub fn remove_condition_references_from_spells(spells: &mut [Spell], condition_id: &str) -> usize {
     let mut modified = 0usize;
     for spell in spells.iter_mut() {
         let original_len = spell.applied_conditions.len();
@@ -2054,16 +2025,14 @@ pub fn render_conditions_editor(
     let mut status_message = String::new();
     let mut file_load_merge_mode = false;
     let mut dummy_spells: Vec<Spell> = Vec::new();
-    state.show(
-        ui,
-        conditions,
-        &mut dummy_spells,
+    let mut ctx = EditorContext::new(
         None,
         "data/conditions.ron",
         &mut unsaved_changes,
         &mut status_message,
         &mut file_load_merge_mode,
     );
+    state.show(ui, conditions, &mut dummy_spells, &mut ctx);
 }
 
 #[cfg(test)]
@@ -2380,5 +2349,17 @@ mod tests {
 
         state.show_statistics = false;
         assert!(!state.show_statistics);
+    }
+
+    #[test]
+    fn test_condition_editor_error_display() {
+        assert_eq!(
+            ConditionEditorError::EmptyId.to_string(),
+            "ID cannot be empty"
+        );
+        assert_eq!(
+            ConditionEditorError::DuplicateId.to_string(),
+            "ID already in use"
+        );
     }
 }

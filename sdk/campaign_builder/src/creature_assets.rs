@@ -15,7 +15,7 @@ use antares::domain::types::CreatureId;
 use antares::domain::visual::{CreatureDefinition, CreatureReference};
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use thiserror::Error;
 
 /// Errors that can occur during creature asset operations
@@ -394,8 +394,9 @@ fn sanitize_creature_filename(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use antares::domain::visual::MeshTransform;
+
     use std::collections::HashSet;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn create_test_creature(id: CreatureId, name: &str) -> CreatureDefinition {

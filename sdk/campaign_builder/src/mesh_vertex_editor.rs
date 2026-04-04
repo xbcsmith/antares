@@ -54,11 +54,8 @@ pub struct MeshVertexEditor {
     /// Grid snap size
     grid_snap_size: f32,
 
-    /// Vertex manipulation history for undo
-    history: Vec<VertexOperation>,
-
-    /// Current position in history (for undo/redo)
-    history_position: usize,
+    /// Vertex manipulation history for undo/redo
+    history: crate::linear_history::LinearHistory<VertexOperation>,
 }
 
 /// Selection mode for vertex picking
@@ -147,8 +144,7 @@ impl MeshVertexEditor {
             gizmo_mode: GizmoMode::Translate,
             snap_to_grid: false,
             grid_snap_size: 0.1,
-            history: Vec::new(),
-            history_position: 0,
+            history: crate::linear_history::LinearHistory::with_default_max(),
         }
     }
 
@@ -715,19 +711,7 @@ impl MeshVertexEditor {
 
     /// Adds an operation to the history
     fn add_to_history(&mut self, operation: VertexOperation) {
-        // Remove any operations after current position
-        self.history.truncate(self.history_position);
-
-        // Add new operation
         self.history.push(operation);
-        self.history_position = self.history.len();
-
-        // Limit history size
-        const MAX_HISTORY: usize = 100;
-        if self.history.len() > MAX_HISTORY {
-            self.history.remove(0);
-            self.history_position -= 1;
-        }
     }
 
     /// Undoes the last operation
@@ -736,21 +720,16 @@ impl MeshVertexEditor {
     ///
     /// `true` if an operation was undone, `false` if there's nothing to undo
     pub fn undo(&mut self) -> bool {
-        if self.history_position == 0 {
-            return false;
-        }
-
-        self.history_position -= 1;
-        let operation = &self.history[self.history_position];
-
-        // Restore old positions
-        for (i, &index) in operation.affected_vertices.iter().enumerate() {
-            if index < self.mesh.vertices.len() {
-                self.mesh.vertices[index] = operation.old_positions[i];
+        if let Some(operation) = self.history.undo() {
+            for (i, &index) in operation.affected_vertices.iter().enumerate() {
+                if index < self.mesh.vertices.len() {
+                    self.mesh.vertices[index] = operation.old_positions[i];
+                }
             }
+            true
+        } else {
+            false
         }
-
-        true
     }
 
     /// Redoes the last undone operation
@@ -759,37 +738,31 @@ impl MeshVertexEditor {
     ///
     /// `true` if an operation was redone, `false` if there's nothing to redo
     pub fn redo(&mut self) -> bool {
-        if self.history_position >= self.history.len() {
-            return false;
-        }
-
-        let operation = &self.history[self.history_position];
-
-        // Apply new positions
-        for (i, &index) in operation.affected_vertices.iter().enumerate() {
-            if index < self.mesh.vertices.len() {
-                self.mesh.vertices[index] = operation.new_positions[i];
+        if let Some(operation) = self.history.redo() {
+            for (i, &index) in operation.affected_vertices.iter().enumerate() {
+                if index < self.mesh.vertices.len() {
+                    self.mesh.vertices[index] = operation.new_positions[i];
+                }
             }
+            true
+        } else {
+            false
         }
-
-        self.history_position += 1;
-        true
     }
 
     /// Returns whether undo is available
     pub fn can_undo(&self) -> bool {
-        self.history_position > 0
+        self.history.can_undo()
     }
 
     /// Returns whether redo is available
     pub fn can_redo(&self) -> bool {
-        self.history_position < self.history.len()
+        self.history.can_redo()
     }
 
     /// Clears the operation history
     pub fn clear_history(&mut self) {
         self.history.clear();
-        self.history_position = 0;
     }
 }
 

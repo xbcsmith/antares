@@ -28,7 +28,6 @@
 //! // state.show(ui, &mut mesh);
 //! ```
 
-use antares::domain::visual::lod::generate_lod_levels;
 use antares::domain::visual::MeshDefinition;
 use eframe::egui;
 

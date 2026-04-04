@@ -4,7 +4,7 @@
 //! Campaign Builder GUI Integration Tests
 //!
 //! Tests for the visual metadata preset system and bulk editing functionality
-//! added to the Campaign Builder map editor in Phase 4.
+//! added to the Campaign Builder map editor.
 
 use antares::domain::types::Position;
 use antares::domain::world::{Map, TileVisualMetadata};
@@ -441,7 +441,7 @@ fn test_editor_state_initialization_with_phase4_fields() {
     let map = Map::new(1, "Test Map".to_string(), "Test".to_string(), 10, 10);
     let editor = MapEditorState::new(map);
 
-    // Verify Phase 4 fields are initialized correctly
+    // Verify fields are initialized correctly
     assert_eq!(editor.selected_tiles.len(), 0);
     assert!(!editor.multi_select_mode);
     assert!(!editor.visual_editor.enable_height);

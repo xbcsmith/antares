@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 4: Advanced Mesh Editing Tools - Integration Tests
+//! Advanced Mesh Editing Tools - Integration Tests
 //!
 //! Tests the complete mesh editing workflow including:
 //! - Mesh validation system

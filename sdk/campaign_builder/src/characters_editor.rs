@@ -8,24 +8,103 @@
 //! Uses shared UI components for consistent layout.
 
 use crate::creature_assets::CreatureAssetManager;
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     autocomplete_class_selector, autocomplete_creature_selector, autocomplete_item_list_selector,
     autocomplete_item_selector, autocomplete_portrait_selector, autocomplete_race_selector,
-    extract_portrait_candidates, resolve_portrait_path, show_standard_list_item, EditorToolbar,
-    ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    extract_portrait_candidates, handle_toolbar_action, resolve_portrait_path,
+    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::character::{Alignment, Sex, Stats};
-use antares::domain::character_definition::{
-    CharacterDefinition, CharacterDefinitionId, StartingEquipment,
-};
+use antares::domain::character_definition::{CharacterDefinition, StartingEquipment};
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::Item;
 use antares::domain::races::RaceDefinition;
-use antares::domain::types::{CreatureId, ItemId, RaceId};
+use antares::domain::types::{CreatureId, ItemId};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+
+/// Errors produced by character editor operations.
+#[derive(Debug, thiserror::Error)]
+pub enum CharacterEditorError {
+    #[error("ID cannot be empty")]
+    EmptyId,
+    #[error("Name cannot be empty")]
+    EmptyName,
+    #[error("Race ID cannot be empty")]
+    EmptyRaceId,
+    #[error("Class ID cannot be empty")]
+    EmptyClassId,
+    #[error("Invalid Might base value")]
+    InvalidMightBase,
+    #[error("Invalid Might current value")]
+    InvalidMightCurrent,
+    #[error("Might current cannot exceed base")]
+    MightCurrentExceedsBase,
+    #[error("Invalid Intellect base value")]
+    InvalidIntellectBase,
+    #[error("Invalid Intellect current value")]
+    InvalidIntellectCurrent,
+    #[error("Intellect current cannot exceed base")]
+    IntellectCurrentExceedsBase,
+    #[error("Invalid Personality base value")]
+    InvalidPersonalityBase,
+    #[error("Invalid Personality current value")]
+    InvalidPersonalityCurrent,
+    #[error("Personality current cannot exceed base")]
+    PersonalityCurrentExceedsBase,
+    #[error("Invalid Endurance base value")]
+    InvalidEnduranceBase,
+    #[error("Invalid Endurance current value")]
+    InvalidEnduranceCurrent,
+    #[error("Endurance current cannot exceed base")]
+    EnduranceCurrentExceedsBase,
+    #[error("Invalid Speed base value")]
+    InvalidSpeedBase,
+    #[error("Invalid Speed current value")]
+    InvalidSpeedCurrent,
+    #[error("Speed current cannot exceed base")]
+    SpeedCurrentExceedsBase,
+    #[error("Invalid Accuracy base value")]
+    InvalidAccuracyBase,
+    #[error("Invalid Accuracy current value")]
+    InvalidAccuracyCurrent,
+    #[error("Accuracy current cannot exceed base")]
+    AccuracyCurrentExceedsBase,
+    #[error("Invalid Luck base value")]
+    InvalidLuckBase,
+    #[error("Invalid Luck current value")]
+    InvalidLuckCurrent,
+    #[error("Luck current cannot exceed base")]
+    LuckCurrentExceedsBase,
+    #[error("Invalid HP override base value")]
+    InvalidHpOverrideBase,
+    #[error("Invalid HP override current value")]
+    InvalidHpOverrideCurrent,
+    #[error("HP override current cannot exceed base")]
+    HpOverrideCurrentExceedsBase,
+    #[error("Invalid Starting Gold")]
+    InvalidStartingGold,
+    #[error("Invalid Starting Gems")]
+    InvalidStartingGems,
+    #[error("Invalid Starting Food")]
+    InvalidStartingFood,
+    #[error("Character ID already exists")]
+    DuplicateId,
+    #[error("Failed to read file: {0}")]
+    ReadError(String),
+    #[error("Failed to parse characters: {0}")]
+    ParseError(String),
+    #[error("Failed to create directory: {0}")]
+    DirectoryError(String),
+    #[error("Failed to serialize characters: {0}")]
+    SerializationError(String),
+    #[error("Failed to write file: {0}")]
+    WriteError(String),
+}
 
 /// Editor state for characters
 #[derive(Serialize, Deserialize)]
@@ -300,25 +379,25 @@ impl CharactersEditorState {
     }
 
     /// Saves the current character from the edit buffer
-    pub fn save_character(&mut self) -> Result<(), String> {
+    pub fn save_character(&mut self) -> Result<(), CharacterEditorError> {
         let id = self.buffer.id.trim().to_string();
         if id.is_empty() {
-            return Err("ID cannot be empty".to_string());
+            return Err(CharacterEditorError::EmptyId);
         }
 
         let name = self.buffer.name.trim().to_string();
         if name.is_empty() {
-            return Err("Name cannot be empty".to_string());
+            return Err(CharacterEditorError::EmptyName);
         }
 
         let race_id = self.buffer.race_id.trim().to_string();
         if race_id.is_empty() {
-            return Err("Race ID cannot be empty".to_string());
+            return Err(CharacterEditorError::EmptyRaceId);
         }
 
         let class_id = self.buffer.class_id.trim().to_string();
         if class_id.is_empty() {
-            return Err("Class ID cannot be empty".to_string());
+            return Err(CharacterEditorError::EmptyClassId);
         }
 
         // Parse base stats (base and current for each attribute)
@@ -327,15 +406,15 @@ impl CharactersEditorState {
             .might_base
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Might base value")?;
+            .map_err(|_| CharacterEditorError::InvalidMightBase)?;
         let might_current = self
             .buffer
             .might_current
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Might current value")?;
+            .map_err(|_| CharacterEditorError::InvalidMightCurrent)?;
         if might_current > might_base {
-            return Err("Might current cannot exceed base".to_string());
+            return Err(CharacterEditorError::MightCurrentExceedsBase);
         }
 
         let intellect_base = self
@@ -343,15 +422,15 @@ impl CharactersEditorState {
             .intellect_base
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Intellect base value")?;
+            .map_err(|_| CharacterEditorError::InvalidIntellectBase)?;
         let intellect_current = self
             .buffer
             .intellect_current
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Intellect current value")?;
+            .map_err(|_| CharacterEditorError::InvalidIntellectCurrent)?;
         if intellect_current > intellect_base {
-            return Err("Intellect current cannot exceed base".to_string());
+            return Err(CharacterEditorError::IntellectCurrentExceedsBase);
         }
 
         let personality_base = self
@@ -359,15 +438,15 @@ impl CharactersEditorState {
             .personality_base
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Personality base value")?;
+            .map_err(|_| CharacterEditorError::InvalidPersonalityBase)?;
         let personality_current = self
             .buffer
             .personality_current
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Personality current value")?;
+            .map_err(|_| CharacterEditorError::InvalidPersonalityCurrent)?;
         if personality_current > personality_base {
-            return Err("Personality current cannot exceed base".to_string());
+            return Err(CharacterEditorError::PersonalityCurrentExceedsBase);
         }
 
         let endurance_base = self
@@ -375,15 +454,15 @@ impl CharactersEditorState {
             .endurance_base
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Endurance base value")?;
+            .map_err(|_| CharacterEditorError::InvalidEnduranceBase)?;
         let endurance_current = self
             .buffer
             .endurance_current
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Endurance current value")?;
+            .map_err(|_| CharacterEditorError::InvalidEnduranceCurrent)?;
         if endurance_current > endurance_base {
-            return Err("Endurance current cannot exceed base".to_string());
+            return Err(CharacterEditorError::EnduranceCurrentExceedsBase);
         }
 
         let speed_base = self
@@ -391,15 +470,15 @@ impl CharactersEditorState {
             .speed_base
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Speed base value")?;
+            .map_err(|_| CharacterEditorError::InvalidSpeedBase)?;
         let speed_current = self
             .buffer
             .speed_current
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Speed current value")?;
+            .map_err(|_| CharacterEditorError::InvalidSpeedCurrent)?;
         if speed_current > speed_base {
-            return Err("Speed current cannot exceed base".to_string());
+            return Err(CharacterEditorError::SpeedCurrentExceedsBase);
         }
 
         let accuracy_base = self
@@ -407,15 +486,15 @@ impl CharactersEditorState {
             .accuracy_base
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Accuracy base value")?;
+            .map_err(|_| CharacterEditorError::InvalidAccuracyBase)?;
         let accuracy_current = self
             .buffer
             .accuracy_current
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Accuracy current value")?;
+            .map_err(|_| CharacterEditorError::InvalidAccuracyCurrent)?;
         if accuracy_current > accuracy_base {
-            return Err("Accuracy current cannot exceed base".to_string());
+            return Err(CharacterEditorError::AccuracyCurrentExceedsBase);
         }
 
         let luck_base = self
@@ -423,15 +502,15 @@ impl CharactersEditorState {
             .luck_base
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Luck base value")?;
+            .map_err(|_| CharacterEditorError::InvalidLuckBase)?;
         let luck_current = self
             .buffer
             .luck_current
             .trim()
             .parse::<u8>()
-            .map_err(|_| "Invalid Luck current value")?;
+            .map_err(|_| CharacterEditorError::InvalidLuckCurrent)?;
         if luck_current > luck_base {
-            return Err("Luck current cannot exceed base".to_string());
+            return Err(CharacterEditorError::LuckCurrentExceedsBase);
         }
 
         // Create Stats with AttributePair for each stat
@@ -478,7 +557,7 @@ impl CharactersEditorState {
                 .hp_override_base
                 .trim()
                 .parse::<u16>()
-                .map_err(|_| "Invalid HP override base value")?;
+                .map_err(|_| CharacterEditorError::InvalidHpOverrideBase)?;
             let current = if self.buffer.hp_override_current.trim().is_empty() {
                 base // If current is empty, default to base
             } else {
@@ -486,10 +565,10 @@ impl CharactersEditorState {
                     .hp_override_current
                     .trim()
                     .parse::<u16>()
-                    .map_err(|_| "Invalid HP override current value")?
+                    .map_err(|_| CharacterEditorError::InvalidHpOverrideCurrent)?
             };
             if current > base {
-                return Err("HP override current cannot exceed base".to_string());
+                return Err(CharacterEditorError::HpOverrideCurrentExceedsBase);
             }
             Some(AttributePair16 { base, current })
         };
@@ -502,17 +581,17 @@ impl CharactersEditorState {
             .buffer
             .starting_gold
             .parse::<u32>()
-            .map_err(|_| "Invalid Starting Gold")?;
+            .map_err(|_| CharacterEditorError::InvalidStartingGold)?;
         let starting_gems = self
             .buffer
             .starting_gems
             .parse::<u32>()
-            .map_err(|_| "Invalid Starting Gems")?;
+            .map_err(|_| CharacterEditorError::InvalidStartingGems)?;
         let starting_food = self
             .buffer
             .starting_food
             .parse::<u8>()
-            .map_err(|_| "Invalid Starting Food")?;
+            .map_err(|_| CharacterEditorError::InvalidStartingFood)?;
 
         // Starting items as typed Vec<ItemId> from the edit buffer
         let starting_items: Vec<ItemId> = self.buffer.starting_items.clone();
@@ -592,7 +671,7 @@ impl CharactersEditorState {
         } else {
             // Check for duplicate ID if creating new
             if self.characters.iter().any(|c| c.id == id) {
-                return Err("Character ID already exists".to_string());
+                return Err(CharacterEditorError::DuplicateId);
             }
             self.characters.push(character);
         }
@@ -609,8 +688,9 @@ impl CharactersEditorState {
                     // Successfully persisted: clear unsaved flag
                     self.has_unsaved_changes = false;
                 }
-                Err(e) => {
-                    eprintln!("Failed to persist characters to {}: {}", path.display(), e);
+                Err(_persist_err) => {
+                    // Persistence failure: character is saved in memory; has_unsaved_changes
+                    // stays true to indicate a pending disk write.
                 }
             }
         }
@@ -739,27 +819,28 @@ impl CharactersEditorState {
     ) -> bool {
         // Check if already cached
         if self.portrait_textures.contains_key(portrait_id) {
-            return self.portrait_textures.get(portrait_id).unwrap().is_some();
+            return self
+                .portrait_textures
+                .get(portrait_id)
+                .is_some_and(|t| t.is_some());
         }
 
-        // Attempt to load and decode image with error logging
+        // Attempt to load and decode image
         let texture_handle = (|| {
             let path = resolve_portrait_path(campaign_dir, portrait_id)?;
 
-            // Read image file with error handling
+            // Read image file; return None on failure (caller sees a "?" placeholder)
             let image_bytes = match std::fs::read(&path) {
                 Ok(bytes) => bytes,
-                Err(e) => {
-                    eprintln!("Failed to read portrait file '{}': {}", path.display(), e);
+                Err(_) => {
                     return None;
                 }
             };
 
-            // Decode image using image crate with error handling
+            // Decode image; return None on failure
             let dynamic_image = match image::load_from_memory(&image_bytes) {
                 Ok(img) => img,
-                Err(e) => {
-                    eprintln!("Failed to decode portrait '{}': {}", portrait_id, e);
+                Err(_) => {
                     return None;
                 }
             };
@@ -784,12 +865,6 @@ impl CharactersEditorState {
 
         // Cache result (even None for failed loads to avoid repeated attempts)
         let loaded = texture_handle.is_some();
-        if !loaded {
-            eprintln!(
-                "Portrait '{}' could not be loaded or was not found",
-                portrait_id
-            );
-        }
 
         self.portrait_textures
             .insert(portrait_id.to_string(), texture_handle);
@@ -891,9 +966,8 @@ impl CharactersEditorState {
                                         let texture = self
                                             .portrait_textures
                                             .get(portrait_id)
-                                            .unwrap()
-                                            .as_ref()
-                                            .unwrap();
+                                            .and_then(|t| t.as_ref())
+                                            .expect("texture present since has_texture is true");
                                         ui.add(
                                             egui::Button::image(
                                                 egui::Image::new(texture).fit_to_exact_size(
@@ -959,11 +1033,11 @@ impl CharactersEditorState {
     }
 
     /// Loads characters from a file path
-    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), String> {
-        let content =
-            std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
+    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), CharacterEditorError> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| CharacterEditorError::ReadError(e.to_string()))?;
         let characters: Vec<CharacterDefinition> =
-            ron::from_str(&content).map_err(|e| format!("Failed to parse characters: {}", e))?;
+            ron::from_str(&content).map_err(|e| CharacterEditorError::ParseError(e.to_string()))?;
         self.characters = characters;
         self.has_unsaved_changes = false;
         Ok(())
@@ -989,14 +1063,15 @@ impl CharactersEditorState {
     }
 
     /// Saves characters to a file path
-    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), CharacterEditorError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+                .map_err(|e| CharacterEditorError::DirectoryError(e.to_string()))?;
         }
         let content = ron::ser::to_string_pretty(&self.characters, Default::default())
-            .map_err(|e| format!("Failed to serialize characters: {}", e))?;
-        std::fs::write(path, content).map_err(|e| format!("Failed to write file: {}", e))?;
+            .map_err(|e| CharacterEditorError::SerializationError(e.to_string()))?;
+        std::fs::write(path, content)
+            .map_err(|e| CharacterEditorError::WriteError(e.to_string()))?;
         Ok(())
     }
 
@@ -1008,27 +1083,19 @@ impl CharactersEditorState {
     /// * `races` - Available races for dropdown selection
     /// * `classes` - Available classes for dropdown selection
     /// * `items` - Available items for equipment/item selection
-    /// * `campaign_dir` - Optional campaign directory path
-    /// * `characters_file` - Filename for characters data
-    /// * `unsaved_changes` - Mutable flag for tracking unsaved changes
-    /// * `status_message` - Mutable string for status messages
-    /// * `file_load_merge_mode` - Whether to merge or replace when loading files
-    #[allow(clippy::too_many_arguments)]
+    /// * `creature_manager` - Optional creature asset manager for visual asset binding
+    /// * `ctx` - Shared editor context (campaign dir, data file, unsaved flag, status, merge mode)
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         races: &[RaceDefinition],
         classes: &[ClassDefinition],
         items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        characters_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        file_load_merge_mode: &mut bool,
         creature_manager: Option<&CreatureAssetManager>,
+        ctx: &mut EditorContext<'_>,
     ) {
         // Scan portraits if campaign directory changed
-        let campaign_dir_changed = match (&self.last_campaign_dir, campaign_dir) {
+        let campaign_dir_changed = match (&self.last_campaign_dir, ctx.campaign_dir) {
             (None, Some(_)) => true,
             (Some(_), None) => true,
             (Some(last), Some(current)) => last != current,
@@ -1036,7 +1103,7 @@ impl CharactersEditorState {
         };
 
         if campaign_dir_changed {
-            self.available_portraits = extract_portrait_candidates(campaign_dir);
+            self.available_portraits = extract_portrait_candidates(ctx.campaign_dir);
             // Rebuild creature candidates from the manager whenever the campaign dir changes.
             self.available_creatures = creature_manager
                 .and_then(|m| m.load_all_creatures().ok())
@@ -1047,11 +1114,11 @@ impl CharactersEditorState {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            self.last_campaign_dir = campaign_dir.cloned();
+            self.last_campaign_dir = ctx.campaign_dir.cloned();
         }
 
         // Cache the characters file name so `save_character()` can persist immediately
-        self.last_characters_file = Some(characters_file.to_string());
+        self.last_characters_file = Some(ctx.data_file.to_string());
 
         ui.heading("👤 Characters Editor");
         ui.add_space(5.0);
@@ -1059,109 +1126,31 @@ impl CharactersEditorState {
         // Use shared EditorToolbar component
         let toolbar_action = EditorToolbar::new("Characters")
             .with_search(&mut self.search_filter)
-            .with_merge_mode(file_load_merge_mode)
+            .with_merge_mode(ctx.file_load_merge_mode)
             .with_total_count(self.characters.len())
             .with_id_salt("characters_toolbar")
             .show(ui);
 
-        // Handle toolbar actions
+        // Handle toolbar actions — New and Import are characters-specific;
+        // all other arms are handled by the shared generic dispatcher.
         match toolbar_action {
             ToolbarAction::New => {
                 self.start_new_character();
                 self.buffer.id = self.next_available_character_id();
-                *unsaved_changes = true;
-            }
-            ToolbarAction::Save => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(characters_file);
-                    match self.save_to_file(&path) {
-                        Ok(_) => {
-                            *status_message = format!("Saved {} characters", self.characters.len());
-                        }
-                        Err(e) => {
-                            *status_message = format!("Failed to save characters: {}", e);
-                        }
-                    }
-                }
-            }
-            ToolbarAction::Load => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("RON", &["ron"])
-                    .pick_file()
-                {
-                    let load_result = std::fs::read_to_string(&path).and_then(|contents| {
-                        ron::from_str::<Vec<CharacterDefinition>>(&contents)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    });
-
-                    match load_result {
-                        Ok(loaded_characters) => {
-                            if *file_load_merge_mode {
-                                for character in loaded_characters {
-                                    if let Some(existing) =
-                                        self.characters.iter_mut().find(|c| c.id == character.id)
-                                    {
-                                        *existing = character;
-                                    } else {
-                                        self.characters.push(character);
-                                    }
-                                }
-                            } else {
-                                self.characters = loaded_characters;
-                            }
-                            *unsaved_changes = true;
-                            *status_message = format!("Loaded characters from: {}", path.display());
-                        }
-                        Err(e) => {
-                            *status_message = format!("Failed to load characters: {}", e);
-                        }
-                    }
-                }
+                *ctx.unsaved_changes = true;
             }
             ToolbarAction::Import => {
-                *status_message = "Import not yet implemented for characters".to_string();
+                *ctx.status_message = "Import not yet implemented for characters".to_string();
             }
-            ToolbarAction::Export => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("characters.ron")
-                    .add_filter("RON", &["ron"])
-                    .save_file()
-                {
-                    match ron::ser::to_string_pretty(&self.characters, Default::default()) {
-                        Ok(contents) => match std::fs::write(&path, contents) {
-                            Ok(_) => {
-                                *status_message =
-                                    format!("Exported characters to: {}", path.display());
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to export characters: {}", e);
-                            }
-                        },
-                        Err(e) => {
-                            *status_message = format!("Failed to serialize characters: {}", e);
-                        }
-                    }
-                }
-            }
-            ToolbarAction::Reload => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(characters_file);
-                    if path.exists() {
-                        match self.load_from_file(&path) {
-                            Ok(_) => {
-                                *status_message =
-                                    format!("Loaded {} characters", self.characters.len());
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to load characters: {}", e);
-                            }
-                        }
-                    } else {
-                        *status_message = "Characters file does not exist".to_string();
-                    }
-                }
-            }
-            ToolbarAction::None => {}
+            other => handle_toolbar_action(
+                other,
+                &mut self.characters,
+                |c: &CharacterDefinition| c.id.clone(),
+                &mut self.has_unsaved_changes,
+                ctx,
+                "characters.ron",
+                "characters",
+            ),
         }
 
         // Show filters
@@ -1172,24 +1161,16 @@ impl CharactersEditorState {
         // Main content - use TwoColumnLayout for list mode
         match self.mode {
             CharactersEditorMode::List => {
-                self.show_list(ui, items, campaign_dir, unsaved_changes);
+                self.show_list(ui, items, ctx);
             }
             CharactersEditorMode::Add | CharactersEditorMode::Edit => {
-                self.show_character_form(
-                    ui,
-                    races,
-                    classes,
-                    items,
-                    campaign_dir,
-                    characters_file,
-                    creature_manager,
-                );
+                self.show_character_form(ui, races, classes, items, creature_manager, ctx);
             }
         }
 
         // Show portrait grid picker popup if open
         if self.portrait_picker_open {
-            if let Some(selected_id) = self.show_portrait_grid_picker(ui.ctx(), campaign_dir) {
+            if let Some(selected_id) = self.show_portrait_grid_picker(ui.ctx(), ctx.campaign_dir) {
                 // Use a small helper so tests can exercise selection logic directly
                 self.apply_selected_portrait(Some(selected_id));
                 // Persist the selected portrait into the autocomplete buffer so the input
@@ -1353,13 +1334,7 @@ impl CharactersEditorState {
     }
 
     /// Show list view with two-column layout
-    fn show_list(
-        &mut self,
-        ui: &mut egui::Ui,
-        items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        unsaved_changes: &mut bool,
-    ) {
+    fn show_list(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
         // Clone data needed for closures to avoid borrow conflicts
         let selected_character_idx = self.selected_character;
         let filtered_characters: Vec<(usize, CharacterDefinition)> = self
@@ -1438,7 +1413,7 @@ impl CharactersEditorState {
                 // Right panel: preview of selected character
                 if let Some(idx) = selected_character_idx {
                     if let Some(character) = self.characters.get(idx).cloned() {
-                        self.show_character_preview(right_ui, &character, items, campaign_dir);
+                        self.show_character_preview(right_ui, &character, items, ctx.campaign_dir);
                     }
                 } else {
                     right_ui.label("Select a character to view details.");
@@ -1457,11 +1432,11 @@ impl CharactersEditorState {
             match action_type {
                 ItemAction::Edit => {
                     self.start_edit_character(idx);
-                    *unsaved_changes = true;
+                    *ctx.unsaved_changes = true;
                 }
                 ItemAction::Delete => {
                     self.delete_character(idx);
-                    *unsaved_changes = true;
+                    *ctx.unsaved_changes = true;
                 }
                 ItemAction::Duplicate => {
                     if let Some(character) = self.characters.get(idx).cloned() {
@@ -1470,7 +1445,7 @@ impl CharactersEditorState {
                         new_character.id = new_id.clone();
                         new_character.name = format!("{} (Copy)", new_character.name);
                         self.characters.push(new_character);
-                        *unsaved_changes = true;
+                        *ctx.unsaved_changes = true;
                     }
                 }
                 _ => {}
@@ -1702,9 +1677,8 @@ impl CharactersEditorState {
         races: &[RaceDefinition],
         classes: &[ClassDefinition],
         items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        characters_file: &str,
         creature_manager: Option<&CreatureAssetManager>,
+        ctx: &mut EditorContext<'_>,
     ) {
         let title = if self.mode == CharactersEditorMode::Add {
             "New Character"
@@ -1829,7 +1803,7 @@ impl CharactersEditorState {
                                 "",
                                 &mut self.buffer.portrait_id,
                                 &self.available_portraits,
-                                campaign_dir,
+                                ctx.campaign_dir,
                             );
 
                             // Grid picker button
@@ -1855,10 +1829,9 @@ impl CharactersEditorState {
                                 .button("🦎")
                                 .on_hover_text("Browse creature assets")
                                 .clicked()
+                                && creature_manager.is_some()
                             {
-                                if creature_manager.is_some() {
-                                    self.creature_picker_open = true;
-                                }
+                                self.creature_picker_open = true;
                             }
                             ui.label("ℹ").on_hover_text(
                                 "Links this character to a procedural mesh creature definition. \
@@ -2064,8 +2037,8 @@ impl CharactersEditorState {
                     if ui.button("💾 Save").clicked() {
                         match self.save_character() {
                             Ok(_) => {
-                                if let Some(dir) = campaign_dir {
-                                    let path = dir.join(characters_file);
+                                if let Some(dir) = ctx.campaign_dir {
+                                    let path = dir.join(ctx.data_file);
                                     match self.save_to_file(&path) {
                                         Ok(_) => {
                                             // Persisted to disk; clear unsaved changes flag
@@ -2092,7 +2065,9 @@ impl CharactersEditorState {
                             }
                             Err(e) => {
                                 // Show error - in real impl this would be a toast/status
-                                ui.label(egui::RichText::new(e).color(egui::Color32::RED));
+                                ui.label(
+                                    egui::RichText::new(e.to_string()).color(egui::Color32::RED),
+                                );
                             }
                         }
                     }
@@ -2254,34 +2229,6 @@ fn item_name_by_id(items: &[Item], item_id: ItemId) -> String {
         .unwrap_or_else(|| format!("Unknown (ID: {})", item_id))
 }
 
-/// Helper function for tests - creates a test item
-#[cfg(test)]
-fn create_test_item(id: ItemId, name: &str) -> Item {
-    use antares::domain::items::types::{ConsumableData, ConsumableEffect, ItemType};
-
-    Item {
-        id,
-        name: name.to_string(),
-        item_type: ItemType::Consumable(ConsumableData {
-            effect: ConsumableEffect::HealHp(0),
-            is_combat_usable: false,
-            duration_minutes: None,
-        }),
-        base_cost: 10,
-        sell_cost: 5,
-        alignment_restriction: None,
-        constant_bonus: None,
-        temporary_bonus: None,
-        spell_effect: None,
-        max_charges: 0,
-        is_cursed: false,
-        icon_path: None,
-        tags: Vec::new(),
-        mesh_descriptor_override: None,
-        mesh_id: None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2390,7 +2337,7 @@ mod tests {
 
         let result = state.save_character();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "ID cannot be empty");
+        assert_eq!(result.unwrap_err().to_string(), "ID cannot be empty");
     }
 
     #[test]
@@ -2403,7 +2350,7 @@ mod tests {
 
         let result = state.save_character();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Name cannot be empty");
+        assert_eq!(result.unwrap_err().to_string(), "Name cannot be empty");
     }
 
     #[test]
@@ -2416,7 +2363,7 @@ mod tests {
 
         let result = state.save_character();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Race ID cannot be empty");
+        assert_eq!(result.unwrap_err().to_string(), "Race ID cannot be empty");
     }
 
     #[test]
@@ -2429,7 +2376,7 @@ mod tests {
 
         let result = state.save_character();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Class ID cannot be empty");
+        assert_eq!(result.unwrap_err().to_string(), "Class ID cannot be empty");
     }
 
     #[test]
@@ -2453,7 +2400,10 @@ mod tests {
 
         let result = state.save_character();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Character ID already exists");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Character ID already exists"
+        );
     }
 
     #[test]
@@ -2900,7 +2850,31 @@ mod tests {
 
         let result = state.save_character();
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "Invalid Starting Gold");
+        assert_eq!(result.unwrap_err().to_string(), "Invalid Starting Gold");
+    }
+
+    #[test]
+    fn test_character_editor_error_display() {
+        assert_eq!(
+            CharacterEditorError::EmptyId.to_string(),
+            "ID cannot be empty"
+        );
+        assert_eq!(
+            CharacterEditorError::DuplicateId.to_string(),
+            "Character ID already exists"
+        );
+        assert_eq!(
+            CharacterEditorError::ReadError("test".to_string()).to_string(),
+            "Failed to read file: test"
+        );
+        assert_eq!(
+            CharacterEditorError::ParseError("bad ron".to_string()).to_string(),
+            "Failed to parse characters: bad ron"
+        );
+        assert_eq!(
+            CharacterEditorError::WriteError("disk full".to_string()).to_string(),
+            "Failed to write file: disk full"
+        );
     }
 
     #[test]
@@ -3189,7 +3163,7 @@ mod tests {
         assert!(state.portrait_textures.is_empty());
     }
 
-    // Phase 5: Polish and Edge Cases Tests
+    // Polish and Edge Cases Tests
 
     #[test]
     fn test_portrait_texture_error_handling_missing_file() {
@@ -3337,15 +3311,17 @@ mod tests {
         // Render the form (this will clear previous buffers and store current values)
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                state.show_character_form(
-                    ui,
-                    &races,
-                    &classes,
-                    &items,
+                let mut unsaved = false;
+                let mut status = String::new();
+                let mut merge = false;
+                let mut editor_ctx = crate::editor_context::EditorContext::new(
                     None,
                     "data/characters.ron",
-                    None,
+                    &mut unsaved,
+                    &mut status,
+                    &mut merge,
                 );
+                state.show_character_form(ui, &races, &classes, &items, None, &mut editor_ctx);
             });
         });
 

@@ -36,6 +36,7 @@
 //! // state.show(ui, &mut maps, campaign_dir, ...);
 //! ```
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     autocomplete_item_list_selector, autocomplete_monster_list_selector, show_standard_list_item,
     EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
@@ -47,9 +48,9 @@ use antares::domain::items::types::Item;
 use antares::domain::types::{Direction, EventId, ItemId, MapId, MonsterId, Position};
 use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
 use antares::domain::world::{
-    FurnitureAppearancePreset, FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType,
-    GrassBladeConfig, GrassDensity, LayeredSprite, Map, MapEvent, RockVariant, SpriteLayer,
-    SpriteReference, TerrainType, Tile, TileVisualMetadata, TreeType, WallType, WaterFlowDirection,
+    FurnitureMaterial, FurnitureType, GrassBladeConfig, GrassDensity, LayeredSprite, Map, MapEvent,
+    RockVariant, SpriteLayer, SpriteReference, TerrainType, Tile, TileVisualMetadata, TreeType,
+    WallType, WaterFlowDirection,
 };
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
@@ -198,13 +199,13 @@ enum EditorAction {
     EventAdded {
         position: Position,
         event: MapEvent,
-        event_id: Option<EventId>,
+        _event_id: Option<EventId>,
     },
     /// Event was removed
     EventRemoved {
         position: Position,
         event: MapEvent,
-        event_id: Option<EventId>,
+        _event_id: Option<EventId>,
     },
     /// NPC placement was added
     NpcPlacementAdded { placement: NpcPlacement },
@@ -262,11 +263,6 @@ impl UndoStack {
         } else {
             None
         }
-    }
-
-    fn clear(&mut self) {
-        self.actions.clear();
-        self.current = 0;
     }
 }
 
@@ -399,7 +395,7 @@ pub enum VisualPreset {
     /// Diagonal wall (rotation_y=45.0, width_z=0.2)
     DiagonalWall,
 
-    // ===== Phase 6: Advanced Terrain Variants =====
+    // ===== Advanced Terrain Variants =====
     /// Short tree (height=1.0, scale=0.6, medium green tint)
     ShortTree,
     /// Medium tree (height=2.0, scale=0.8, medium green tint)
@@ -462,28 +458,28 @@ impl VisualPreset {
             VisualPreset::Rotated45 => "Rotated 45°",
             VisualPreset::Rotated90 => "Rotated 90°",
             VisualPreset::DiagonalWall => "Diagonal Wall",
-            // Phase 6 trees
+            // Tree variants
             VisualPreset::ShortTree => "Short Tree",
             VisualPreset::MediumTree => "Medium Tree",
             VisualPreset::TallTree => "Tall Tree",
             VisualPreset::DeadTree => "Dead Tree",
-            // Phase 6 shrubs
+            // Shrub variants
             VisualPreset::SmallShrub => "Small Shrub",
             VisualPreset::LargeShrub => "Large Shrub",
             VisualPreset::FloweringShrub => "Flowering Shrub",
-            // Phase 6 grass
+            // Grass variants
             VisualPreset::ShortGrass => "Short Grass",
             VisualPreset::TallGrass => "Tall Grass",
             VisualPreset::DriedGrass => "Dried Grass",
-            // Phase 6 mountains
+            // Mountain variants
             VisualPreset::LowPeak => "Low Peak",
             VisualPreset::HighPeak => "High Peak",
             VisualPreset::JaggedPeak => "Jagged Peak",
-            // Phase 6 swamp
+            // Swamp variants
             VisualPreset::ShallowSwamp => "Shallow Swamp",
             VisualPreset::DeepSwamp => "Deep Swamp",
             VisualPreset::MurkySwamp => "Murky Swamp",
-            // Phase 6 lava
+            // Lava variants
             VisualPreset::LavaPool => "Lava Pool",
             VisualPreset::LavaFlow => "Lava Flow",
             VisualPreset::VolcanicVent => "Volcanic Vent",
@@ -556,28 +552,28 @@ impl VisualPreset {
             VisualPreset::Rotated45,
             VisualPreset::Rotated90,
             VisualPreset::DiagonalWall,
-            // Phase 6 trees
+            // Tree variants
             VisualPreset::ShortTree,
             VisualPreset::MediumTree,
             VisualPreset::TallTree,
             VisualPreset::DeadTree,
-            // Phase 6 shrubs
+            // Shrub variants
             VisualPreset::SmallShrub,
             VisualPreset::LargeShrub,
             VisualPreset::FloweringShrub,
-            // Phase 6 grass
+            // Grass variants
             VisualPreset::ShortGrass,
             VisualPreset::TallGrass,
             VisualPreset::DriedGrass,
-            // Phase 6 mountains
+            // Mountain variants
             VisualPreset::LowPeak,
             VisualPreset::HighPeak,
             VisualPreset::JaggedPeak,
-            // Phase 6 swamp
+            // Swamp variants
             VisualPreset::ShallowSwamp,
             VisualPreset::DeepSwamp,
             VisualPreset::MurkySwamp,
-            // Phase 6 lava
+            // Lava variants
             VisualPreset::LavaPool,
             VisualPreset::LavaFlow,
             VisualPreset::VolcanicVent,
@@ -600,28 +596,28 @@ impl VisualPreset {
             VisualPreset::Rotated45,
             VisualPreset::Rotated90,
             VisualPreset::DiagonalWall,
-            // Phase 6 trees
+            // Tree variants
             VisualPreset::ShortTree,
             VisualPreset::MediumTree,
             VisualPreset::TallTree,
             VisualPreset::DeadTree,
-            // Phase 6 shrubs
+            // Shrub variants
             VisualPreset::SmallShrub,
             VisualPreset::LargeShrub,
             VisualPreset::FloweringShrub,
-            // Phase 6 grass
+            // Grass variants
             VisualPreset::ShortGrass,
             VisualPreset::TallGrass,
             VisualPreset::DriedGrass,
-            // Phase 6 mountains
+            // Mountain variants
             VisualPreset::LowPeak,
             VisualPreset::HighPeak,
             VisualPreset::JaggedPeak,
-            // Phase 6 swamp
+            // Swamp variants
             VisualPreset::ShallowSwamp,
             VisualPreset::DeepSwamp,
             VisualPreset::MurkySwamp,
-            // Phase 6 lava
+            // Lava variants
             VisualPreset::LavaPool,
             VisualPreset::LavaFlow,
             VisualPreset::VolcanicVent,
@@ -687,7 +683,7 @@ impl VisualPreset {
                 width_z: Some(0.2),
                 ..Default::default()
             },
-            // Phase 6: Tree variants
+            // Tree variants
             VisualPreset::ShortTree => TileVisualMetadata {
                 height: Some(1.0),
                 scale: Some(0.6),
@@ -712,7 +708,7 @@ impl VisualPreset {
                 color_tint: Some((0.6, 0.5, 0.4)), // Brown/gray tint
                 ..Default::default()
             },
-            // Phase 6: Shrub variants
+            // Shrub variants
             VisualPreset::SmallShrub => TileVisualMetadata {
                 height: Some(0.4),
                 scale: Some(0.4),
@@ -731,7 +727,7 @@ impl VisualPreset {
                 color_tint: Some((0.8, 0.5, 0.7)), // Flower pink tint
                 ..Default::default()
             },
-            // Phase 6: Grass variants
+            // Grass variants
             VisualPreset::ShortGrass => TileVisualMetadata {
                 height: Some(0.2),
                 scale: Some(0.8),
@@ -750,7 +746,7 @@ impl VisualPreset {
                 color_tint: Some((0.7, 0.6, 0.4)), // Brown/tan tint
                 ..Default::default()
             },
-            // Phase 6: Mountain variants
+            // Mountain variants
             VisualPreset::LowPeak => TileVisualMetadata {
                 height: Some(1.5),
                 rotation_y: Some(0.0),
@@ -769,7 +765,7 @@ impl VisualPreset {
                 color_tint: Some((0.5, 0.5, 0.5)), // Dark gray tint
                 ..Default::default()
             },
-            // Phase 6: Swamp variants
+            // Swamp variants
             VisualPreset::ShallowSwamp => TileVisualMetadata {
                 height: Some(0.1),
                 scale: Some(1.2),
@@ -788,7 +784,7 @@ impl VisualPreset {
                 color_tint: Some((0.15, 0.2, 0.2)), // Very dark swamp tint
                 ..Default::default()
             },
-            // Phase 6: Lava variants
+            // Lava variants
             VisualPreset::LavaPool => TileVisualMetadata {
                 height: Some(0.2),
                 scale: Some(1.0),
@@ -1600,29 +1596,6 @@ impl MapEditorState {
         }
     }
 
-    /// Paints terrain at position (kept for undo compatibility)
-    fn paint_terrain(&mut self, pos: Position, terrain: TerrainType) {
-        if let Some(tile) = self.map.get_tile(pos).cloned() {
-            let mut new_tile = tile;
-            new_tile.terrain = terrain;
-            new_tile.blocked = matches!(terrain, TerrainType::Mountain | TerrainType::Water)
-                || matches!(new_tile.wall_type, WallType::Normal);
-            self.set_tile(pos, new_tile);
-        }
-    }
-
-    /// Paints wall at position (kept for undo compatibility)
-    fn paint_wall(&mut self, pos: Position, wall: WallType) {
-        if let Some(tile) = self.map.get_tile(pos).cloned() {
-            let mut new_tile = tile;
-            new_tile.wall_type = wall;
-            new_tile.blocked =
-                matches!(new_tile.terrain, TerrainType::Mountain | TerrainType::Water)
-                    || matches!(wall, WallType::Normal);
-            self.set_tile(pos, new_tile);
-        }
-    }
-
     /// Fills a rectangular region
     pub fn fill_region(
         &mut self,
@@ -1687,7 +1660,7 @@ impl MapEditorState {
         self.undo_stack.push(EditorAction::EventAdded {
             position: pos,
             event,
-            event_id: None,
+            _event_id: None,
         });
         self.has_changes = true;
     }
@@ -1699,7 +1672,7 @@ impl MapEditorState {
             self.undo_stack.push(EditorAction::EventRemoved {
                 position: pos,
                 event,
-                event_id: None,
+                _event_id: None,
             });
             self.has_changes = true;
         }
@@ -1828,7 +1801,7 @@ impl MapEditorState {
         }
 
         // Check for unreachable events
-        for (pos, _) in &self.map.events {
+        for pos in self.map.events.keys() {
             if self.map.is_blocked(*pos) {
                 self.validation_errors.push(format!(
                     "Error: Event at ({}, {}) is on a blocked tile",
@@ -1964,7 +1937,7 @@ pub struct EventEditorState {
     pub npc_id_input_buffer: String,
     pub recruit_character_id_input_buffer: String,
 
-    // Facing / behaviour fields (Phase 5 — applies to Sign, NpcDialogue, Encounter,
+    // Facing / behaviour fields (applies to Sign, NpcDialogue, Encounter,
     // and RecruitableCharacter event types)
     /// Initial facing direction for the spawned entity.
     /// `None` means the engine default (North). Applies to Sign, NpcDialogue,
@@ -2044,8 +2017,9 @@ impl Default for EventEditorState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EventType {
+    #[default]
     Encounter,
     Treasure,
     Teleport,
@@ -2056,12 +2030,6 @@ pub enum EventType {
     EnterInn,
     Furniture,
     Container,
-}
-
-impl Default for EventType {
-    fn default() -> Self {
-        EventType::Encounter
-    }
 }
 
 impl EventType {
@@ -3028,29 +2996,21 @@ impl<'a> Widget for MapPreviewWidget<'a> {
 
 // ===== Main Maps Editor State =====
 
-/// Suggest maps by partial input (id or name)
-fn suggest_maps_for_partial(maps: &[Map], partial: &str) -> Vec<(MapId, String)> {
-    let partial_lower = partial.to_lowercase();
+// ===== Main Maps Editor State =====
 
-    let mut suggestions: Vec<(MapId, String)> = maps
-        .iter()
-        .filter(|m| {
-            // Match against id text or name substring, case-insensitive
-            m.id.to_string().contains(&partial_lower)
-                || m.name.to_lowercase().contains(&partial_lower)
-        })
-        .map(|m| (m.id, m.name.clone()))
-        .take(10)
-        .collect();
-
-    // Sort by ID for deterministic ordering
-    suggestions.sort_unstable_by_key(|(id, _name)| *id);
-    suggestions
+/// Errors that can occur when saving a map to disk.
+#[derive(Debug, thiserror::Error)]
+pub enum MapEditorError {
+    /// OS-level I/O failure.
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    /// The map could not be serialised to RON.
+    #[error("Serialisation error: {0}")]
+    Serialization(String),
+    /// No campaign directory has been set.
+    #[error("No campaign directory set")]
+    NoCampaignDir,
 }
-
-// ===== Main Maps Editor State =====
-
-// ===== Main Maps Editor State =====
 
 /// Main maps editor state following the standard SDK editor pattern.
 ///
@@ -3149,6 +3109,26 @@ impl Default for MapsEditorState {
     }
 }
 
+/// Read-only data slices passed to the maps editor `show()` method.
+pub struct MapEditorRefs<'a> {
+    pub monsters: &'a [MonsterDefinition],
+    pub items: &'a [Item],
+    pub conditions: &'a [antares::domain::conditions::ConditionDefinition],
+    pub npcs: &'a [NpcDefinition],
+    pub furniture_definitions: &'a [antares::domain::world::furniture::FurnitureDefinition],
+    pub display_config: &'a DisplayConfig,
+}
+
+/// Read-only data slices for the map inspector panel.
+pub struct MapInspectorData<'a> {
+    pub maps: &'a [Map],
+    pub monsters: &'a [MonsterDefinition],
+    pub items: &'a [Item],
+    pub conditions: &'a [antares::domain::conditions::ConditionDefinition],
+    pub npcs: &'a [NpcDefinition],
+    pub furniture_definitions: &'a [antares::domain::world::furniture::FurnitureDefinition],
+}
+
 impl MapsEditorState {
     /// Create a new maps editor state
     pub fn new() -> Self {
@@ -3202,21 +3182,12 @@ impl MapsEditorState {
     ///
     /// This follows the standard editor pattern with EditorToolbar,
     /// TwoColumnLayout, and context-menu list actions.
-    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         maps: &mut Vec<Map>,
-        monsters: &[MonsterDefinition],
-        items: &[Item],
-        conditions: &[antares::domain::conditions::ConditionDefinition],
-        npcs: &[NpcDefinition],
-        furniture_definitions: &[antares::domain::world::furniture::FurnitureDefinition],
-        campaign_dir: Option<&PathBuf>,
-        maps_dir: &str,
-        display_config: &DisplayConfig,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
+        refs: &MapEditorRefs<'_>,
+        ctx: &mut EditorContext<'_>,
     ) {
         ui.heading("🗺️ Maps Editor");
         ui.add_space(5.0);
@@ -3244,15 +3215,15 @@ impl MapsEditorState {
                 self.selected_map_idx = Some(maps.len() - 1);
                 self.active_editor = Some(MapEditorState::new(new_map));
                 self.mode = MapsEditorMode::Add;
-                *unsaved_changes = true;
+                *ctx.unsaved_changes = true;
             }
             ToolbarAction::Save => {
                 self.save_all_maps(
                     maps,
-                    campaign_dir,
-                    maps_dir,
-                    unsaved_changes,
-                    status_message,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    ctx.unsaved_changes,
+                    ctx.status_message,
                 );
             }
             ToolbarAction::Load => {
@@ -3274,15 +3245,16 @@ impl MapsEditorState {
                                 } else {
                                     maps.push(loaded_map);
                                 }
-                                *unsaved_changes = true;
-                                *status_message = format!("Loaded map from: {}", path.display());
+                                *ctx.unsaved_changes = true;
+                                *ctx.status_message =
+                                    format!("Loaded map from: {}", path.display());
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to parse map: {}", e);
+                                *ctx.status_message = format!("Failed to parse map: {}", e);
                             }
                         },
                         Err(e) => {
-                            *status_message = format!("Failed to read map file: {}", e);
+                            *ctx.status_message = format!("Failed to read map file: {}", e);
                         }
                     }
                 }
@@ -3300,20 +3272,21 @@ impl MapsEditorState {
                     match ron::ser::to_string_pretty(maps, Default::default()) {
                         Ok(contents) => match fs::write(&path, contents) {
                             Ok(_) => {
-                                *status_message = format!("Exported maps to: {}", path.display());
+                                *ctx.status_message =
+                                    format!("Exported maps to: {}", path.display());
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to export maps: {}", e);
+                                *ctx.status_message = format!("Failed to export maps: {}", e);
                             }
                         },
                         Err(e) => {
-                            *status_message = format!("Failed to serialize maps: {}", e);
+                            *ctx.status_message = format!("Failed to serialize maps: {}", e);
                         }
                     }
                 }
             }
             ToolbarAction::Reload => {
-                self.load_maps(maps, campaign_dir, maps_dir, status_message);
+                self.load_maps(maps, ctx.campaign_dir, ctx.data_file, ctx.status_message);
             }
             ToolbarAction::None => {}
         }
@@ -3326,33 +3299,20 @@ impl MapsEditorState {
                 self.show_list(
                     ui,
                     maps,
-                    campaign_dir,
-                    maps_dir,
-                    unsaved_changes,
-                    status_message,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    ctx.unsaved_changes,
+                    ctx.status_message,
                 );
             }
             MapsEditorMode::Add | MapsEditorMode::Edit => {
-                self.show_editor(
-                    ui,
-                    maps,
-                    monsters,
-                    items,
-                    conditions,
-                    npcs,
-                    furniture_definitions,
-                    campaign_dir,
-                    maps_dir,
-                    display_config,
-                    unsaved_changes,
-                    status_message,
-                );
+                self.show_editor(ui, maps, refs, ctx);
             }
         }
 
         // Import dialog
         if self.show_import_dialog {
-            self.show_import_dialog_window(ui.ctx(), maps, unsaved_changes, status_message);
+            self.show_import_dialog_window(ui.ctx(), maps, ctx.unsaved_changes, ctx.status_message);
         }
     }
 
@@ -3560,21 +3520,12 @@ impl MapsEditorState {
     }
 
     /// Show the full map editor
-    #[allow(clippy::too_many_arguments, clippy::ptr_arg)]
     fn show_editor(
         &mut self,
         ui: &mut egui::Ui,
-        maps: &mut Vec<Map>,
-        monsters: &[MonsterDefinition],
-        items: &[Item],
-        conditions: &[antares::domain::conditions::ConditionDefinition],
-        npcs: &[NpcDefinition],
-        furniture_definitions: &[antares::domain::world::furniture::FurnitureDefinition],
-        campaign_dir: Option<&PathBuf>,
-        maps_dir: &str,
-        display_config: &DisplayConfig,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
+        maps: &mut [Map],
+        refs: &MapEditorRefs<'_>,
+        ctx: &mut EditorContext<'_>,
     ) {
         // Top bar with back button and save
         let mut back_clicked = false;
@@ -3718,7 +3669,8 @@ impl MapsEditorState {
                 let total_width = ui.available_width();
                 let sep_margin = 12.0;
                 // Use configured inspector minimum width (fallback to default helper constant if needed).
-                let inspector_min_width = display_config
+                let inspector_min_width = refs
+                    .display_config
                     .inspector_min_width
                     .max(crate::ui_helpers::DEFAULT_INSPECTOR_MIN_WIDTH);
 
@@ -3738,7 +3690,7 @@ impl MapsEditorState {
                     inspector_min_width,
                     sep_margin,
                     crate::ui_helpers::MIN_SAFE_LEFT_COLUMN_WIDTH,
-                    display_config.left_column_max_ratio,
+                    refs.display_config.left_column_max_ratio,
                 );
 
                 // Debug prints removed: layout diagnostics no longer logged to stderr.
@@ -3747,8 +3699,8 @@ impl MapsEditorState {
                 TwoColumnLayout::new("maps")
                     .with_left_width(left_width)
                     .with_min_height(panel_height)
-                    .with_inspector_min_width(display_config.inspector_min_width)
-                    .with_max_left_ratio(display_config.left_column_max_ratio)
+                    .with_inspector_min_width(refs.display_config.inspector_min_width)
+                    .with_max_left_ratio(refs.display_config.left_column_max_ratio)
                     .show_split(
                         ui,
                         |left_ui| {
@@ -3808,7 +3760,7 @@ impl MapsEditorState {
                                 .show(left_ui, |ui| {
                                     // Debug logging removed: no additional stderr logs.
 
-                                    let map_response = ui.add(
+                                    let _map_response = ui.add(
                                         MapGridWidget::new(editor_ref)
                                             .tile_size(effective_tile_size),
                                     );
@@ -3823,21 +3775,22 @@ impl MapsEditorState {
                             let editor_ref: &mut MapEditorState = unsafe { &mut *editor_ptr };
 
                             // Right panel: Inspector and tool-specific editors
-                            right_ui.set_min_width(display_config.inspector_min_width);
+                            right_ui.set_min_width(refs.display_config.inspector_min_width);
 
                             egui::ScrollArea::vertical()
                                 .id_salt("map_editor_inspector_scroll")
                                 .show(right_ui, |ui| {
-                                    if let Some(npc_id) = Self::show_inspector_panel(
-                                        ui,
-                                        editor_ref,
+                                    let inspector_data = MapInspectorData {
                                         maps,
-                                        monsters,
-                                        items,
-                                        conditions,
-                                        npcs,
-                                        furniture_definitions,
-                                    ) {
+                                        monsters: refs.monsters,
+                                        items: refs.items,
+                                        conditions: refs.conditions,
+                                        npcs: refs.npcs,
+                                        furniture_definitions: refs.furniture_definitions,
+                                    };
+                                    if let Some(npc_id) =
+                                        Self::show_inspector_panel(ui, editor_ref, &inspector_data)
+                                    {
                                         self.requested_open_npc = Some(npc_id);
                                     }
                                 });
@@ -3874,11 +3827,11 @@ impl MapsEditorState {
                     }
 
                     // Save to file (mutable borrow released)
-                    if let Err(e) = self.save_map(&map, campaign_dir, maps_dir) {
-                        *status_message = format!("Failed to save map: {}", e);
+                    if let Err(e) = self.save_map(&map, ctx.campaign_dir, ctx.data_file) {
+                        *ctx.status_message = format!("Failed to save map: {}", e);
                     } else {
-                        *status_message = "Map saved".to_string();
-                        *unsaved_changes = true;
+                        *ctx.status_message = "Map saved".to_string();
+                        *ctx.unsaved_changes = true;
                         // Re-borrow to update the editor with the saved map and clear dirty flag
                         if let Some(editor) = self.active_editor.as_mut() {
                             editor.map = map;
@@ -3906,11 +3859,11 @@ impl MapsEditorState {
                         maps[idx] = map.clone();
                     }
                 }
-                if let Err(e) = self.save_map(&map, campaign_dir, maps_dir) {
-                    *status_message = format!("Failed to save map: {}", e);
+                if let Err(e) = self.save_map(&map, ctx.campaign_dir, ctx.data_file) {
+                    *ctx.status_message = format!("Failed to save map: {}", e);
                 } else {
-                    *status_message = format!("Map {} saved", map.id);
-                    *unsaved_changes = true;
+                    *ctx.status_message = format!("Map {} saved", map.id);
+                    *ctx.unsaved_changes = true;
                     // Re-borrow to clear flags and update editor's map
                     if let Some(editor) = self.active_editor.as_mut() {
                         editor.has_changes = false;
@@ -3925,7 +3878,7 @@ impl MapsEditorState {
     fn show_tool_palette(
         ui: &mut egui::Ui,
         editor: &mut MapEditorState,
-        current_zoom: f32,
+        _current_zoom: f32,
     ) -> Option<ZoomAction> {
         let action: Option<ZoomAction> = None;
 
@@ -3994,50 +3947,6 @@ impl MapsEditorState {
         action
     }
 
-    /// Show map view toggle controls (Grid, Events, NPCs, Auto Fit) and Zoom controls.
-    fn show_map_view_controls(
-        ui: &mut egui::Ui,
-        editor: &mut MapEditorState,
-        current_zoom: f32,
-    ) -> Option<ZoomAction> {
-        let mut action: Option<ZoomAction> = None;
-
-        ui.horizontal(|ui| {
-            // View options
-            ui.checkbox(&mut editor.show_grid, "Grid");
-            ui.checkbox(&mut editor.show_events, "Events");
-            ui.checkbox(&mut editor.show_npcs, "NPCs");
-
-            ui.checkbox(&mut editor.auto_fit_on_resize, "Auto Fit").on_hover_text(
-                "When enabled, the map will automatically scale to fit the left column when the window is resized. Manual zoom persists until Fit is clicked.",
-            );
-
-            ui.separator();
-
-            // Zoom controls
-            ui.label("Zoom:");
-            if ui.button("➖").on_hover_text("Zoom Out").clicked() {
-                action = Some(ZoomAction::Out);
-            }
-
-            ui.label(format!("{}%", (current_zoom * 100.0) as i32));
-
-            if ui.button("➕").on_hover_text("Zoom In").clicked() {
-                action = Some(ZoomAction::In);
-            }
-
-            if ui.button("⊡ Fit").on_hover_text("Fit map to available space").clicked() {
-                action = Some(ZoomAction::Fit);
-            }
-
-            if ui.button("100%").on_hover_text("Reset to 100%").clicked() {
-                action = Some(ZoomAction::Reset);
-            }
-        });
-
-        action
-    }
-
     /// Show inspector panel
     ///
     /// Returns `Some(npc_id)` when the user requests to open the NPC editor for
@@ -4045,12 +3954,7 @@ impl MapsEditorState {
     fn show_inspector_panel(
         ui: &mut egui::Ui,
         editor: &mut MapEditorState,
-        maps: &[Map],
-        monsters: &[MonsterDefinition],
-        items: &[Item],
-        conditions: &[antares::domain::conditions::ConditionDefinition],
-        npcs: &[NpcDefinition],
-        furniture_definitions: &[antares::domain::world::furniture::FurnitureDefinition],
+        data: &MapInspectorData<'_>,
     ) -> Option<String> {
         let mut requested_open_npc: Option<String> = None;
 
@@ -4098,7 +4002,8 @@ impl MapsEditorState {
                     ui.separator();
                     ui.label("NPC:");
                     // Try to find name if possible
-                    let name = npcs
+                    let name = data
+                        .npcs
                         .iter()
                         .find(|n| n.id == placement.npc_id)
                         .map(|n| n.name.as_str())
@@ -4442,11 +4347,11 @@ impl MapsEditorState {
                 Self::show_event_editor(
                     ui,
                     editor,
-                    maps,
-                    monsters,
-                    items,
-                    conditions,
-                    furniture_definitions,
+                    data.maps,
+                    data.monsters,
+                    data.items,
+                    data.conditions,
+                    data.furniture_definitions,
                 );
             });
         }
@@ -4455,7 +4360,7 @@ impl MapsEditorState {
         if matches!(editor.current_tool, EditorTool::PlaceNpc) {
             ui.group(|ui| {
                 ui.heading("Place NPC");
-                Self::show_npc_placement_editor(ui, editor, npcs);
+                Self::show_npc_placement_editor(ui, editor, data.npcs);
             });
         }
 
@@ -5485,24 +5390,21 @@ impl MapsEditorState {
                         });
 
                     // Furniture-specific flags
-                    if event_editor.furniture_type == FurnitureType::Torch {
-                        if ui
+                    if event_editor.furniture_type == FurnitureType::Torch
+                        && ui
                             .checkbox(&mut event_editor.furniture_lit, "Lit (emissive)")
                             .changed()
-                        {
-                            editor.has_changes = true;
-                        }
+                    {
+                        editor.has_changes = true;
                     }
 
-                    if event_editor.furniture_type == FurnitureType::Chest
-                        || event_editor.furniture_type == FurnitureType::Door
-                    {
-                        if ui
+                    if (event_editor.furniture_type == FurnitureType::Chest
+                        || event_editor.furniture_type == FurnitureType::Door)
+                        && ui
                             .checkbox(&mut event_editor.furniture_locked, "🔒 Starts Locked")
                             .changed()
-                        {
-                            editor.has_changes = true;
-                        }
+                    {
+                        editor.has_changes = true;
                     }
 
                     // Door-specific: key item ID
@@ -5977,7 +5879,7 @@ impl MapsEditorState {
         }
 
         // Draw event markers
-        for (pos, _) in &map.events {
+        for pos in map.events.keys() {
             if pos.x >= 0 && pos.x < map.width as i32 && pos.y >= 0 && pos.y < map.height as i32 {
                 let marker_pos = rect.min
                     + Vec2::new(
@@ -6175,10 +6077,8 @@ impl MapsEditorState {
                 editor.toggle_multi_select_mode();
             }
 
-            if !editor.selected_tiles.is_empty() {
-                if ui.button("Clear Selection").clicked() {
-                    editor.clear_tile_selection();
-                }
+            if !editor.selected_tiles.is_empty() && ui.button("Clear Selection").clicked() {
+                editor.clear_tile_selection();
             }
         });
 
@@ -6577,13 +6477,12 @@ impl MapsEditorState {
         map: &Map,
         campaign_dir: Option<&PathBuf>,
         maps_dir: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), MapEditorError> {
         if let Some(dir) = campaign_dir {
             let maps_path = dir.join(maps_dir);
 
             // Create maps directory if it doesn't exist
-            fs::create_dir_all(&maps_path)
-                .map_err(|e| format!("Failed to create maps directory: {}", e))?;
+            fs::create_dir_all(&maps_path)?;
 
             let map_filename = format!("map_{}.ron", map.id);
             let map_path = maps_path.join(map_filename);
@@ -6593,14 +6492,13 @@ impl MapsEditorState {
                 .enumerate_arrays(false);
 
             let contents = ron::ser::to_string_pretty(map, ron_config)
-                .map_err(|e| format!("Failed to serialize map: {}", e))?;
+                .map_err(|e| MapEditorError::Serialization(e.to_string()))?;
 
-            fs::write(&map_path, contents)
-                .map_err(|e| format!("Failed to write map file: {}", e))?;
+            fs::write(&map_path, contents)?;
 
             Ok(())
         } else {
-            Err("No campaign directory set".to_string())
+            Err(MapEditorError::NoCampaignDir)
         }
     }
 
@@ -6836,33 +6734,6 @@ mod tests {
     }
 
     #[test]
-    fn test_paint_terrain() {
-        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
-        let mut state = MapEditorState::new(map);
-
-        let pos = Position::new(3, 3);
-        state.paint_terrain(pos, TerrainType::Forest);
-
-        assert_eq!(
-            state.map.get_tile(pos).unwrap().terrain,
-            TerrainType::Forest
-        );
-        assert!(state.has_changes);
-    }
-
-    #[test]
-    fn test_paint_wall() {
-        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
-        let mut state = MapEditorState::new(map);
-
-        let pos = Position::new(3, 3);
-        state.paint_wall(pos, WallType::Door);
-
-        assert_eq!(state.map.get_tile(pos).unwrap().wall_type, WallType::Door);
-        assert!(state.has_changes);
-    }
-
-    #[test]
     fn test_add_remove_event() {
         let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
         let mut state = MapEditorState::new(map);
@@ -6946,32 +6817,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validation_events_on_blocked_tiles() {
-        let map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
-        let mut state = MapEditorState::new(map);
-
-        // Place a wall
-        let pos = Position::new(5, 5);
-        state.paint_wall(pos, WallType::Normal);
-
-        // Add event on blocked tile
-        let event = MapEvent::Sign {
-            name: "Sign".to_string(),
-            description: "Desc".to_string(),
-            text: "Test".to_string(),
-            time_condition: None,
-            facing: None,
-        };
-        state.add_event(pos, event);
-
-        // Validate
-        state.validate();
-
-        assert!(!state.validation_errors.is_empty());
-        assert!(state.validation_errors[0].contains("blocked tile"));
-    }
-
-    #[test]
     fn test_event_editor_state_to_encounter() {
         let editor = EventEditorState {
             event_type: EventType::Encounter,
@@ -6984,8 +6829,8 @@ mod tests {
         let event = editor.to_map_event().unwrap();
         match event {
             MapEvent::Encounter {
-                name,
-                description,
+                name: _,
+                description: _,
                 monster_group,
                 ..
             } => {
@@ -7703,32 +7548,6 @@ mod tests {
     }
 
     #[test]
-    fn test_suggest_maps_for_partial() {
-        // Create a small set of maps to test suggestion behavior
-        let maps = vec![
-            Map::new(1, "Starter Town".to_string(), "Desc".to_string(), 10, 10),
-            Map::new(2, "Dark Forest".to_string(), "Desc".to_string(), 10, 10),
-            Map::new(3, "Ancient Ruins".to_string(), "Desc".to_string(), 10, 10),
-        ];
-
-        // Partial name match
-        let results = suggest_maps_for_partial(&maps, "Dark");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0, 2);
-        assert!(results[0].1.to_lowercase().contains("dark"));
-
-        // Partial id match
-        let results = suggest_maps_for_partial(&maps, "1");
-        assert!(!results.is_empty());
-        assert!(results.iter().any(|(id, _)| *id == 1));
-
-        // Partial lowercase name fragment
-        let results = suggest_maps_for_partial(&maps, "anc");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].0, 3);
-    }
-
-    #[test]
     fn test_add_event_at_position() {
         let mut state =
             MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
@@ -7815,7 +7634,15 @@ mod tests {
 
         egui::CentralPanel::default().show(&ctx, |ui| {
             // Should render the inspector without panicking (and include name/description)
-            MapsEditorState::show_inspector_panel(ui, &mut state, &[], &[], &[], &[], &[], &[]);
+            let data = MapInspectorData {
+                maps: &[],
+                monsters: &[],
+                items: &[],
+                conditions: &[],
+                npcs: &[],
+                furniture_definitions: &[],
+            };
+            MapsEditorState::show_inspector_panel(ui, &mut state, &data);
         });
 
         // Verify selection was preserved and the inspector invocation completed
@@ -8104,7 +7931,7 @@ mod tests {
         assert_eq!(state.npc_id_input_buffer, "Guard (Map: Castle, NPC ID: 5)");
     }
 
-    /// Phase 1: Test that edit button activates PlaceEvent tool
+    /// Test that edit button activates PlaceEvent tool
     #[test]
     fn test_edit_event_button_activates_place_event_tool() {
         let mut editor =
@@ -8133,7 +7960,7 @@ mod tests {
         assert!(editor.event_editor.is_some());
     }
 
-    /// Phase 1: Test that edit button loads correct event into EventEditorState
+    /// Test that edit button loads correct event into EventEditorState
     #[test]
     fn test_edit_event_button_loads_event_into_editor() {
         let mut editor =
@@ -8166,7 +7993,7 @@ mod tests {
         assert_eq!(editor_state.encounter_monsters, vec![1, 2, 3]);
     }
 
-    /// Phase 1: Test editing state indicator when event is being edited
+    /// Test editing state indicator when event is being edited
     #[test]
     fn test_edit_event_button_shows_editing_state() {
         let mut editor =
@@ -8204,7 +8031,7 @@ mod tests {
         assert!(!is_editing_other);
     }
 
-    /// Phase 1: Test that save resets tool to Select mode
+    /// Test that save resets tool to Select mode
     #[test]
     fn test_edit_event_save_resets_tool_to_select() {
         let mut editor =
@@ -8232,7 +8059,7 @@ mod tests {
         assert!(editor.event_editor.is_none());
     }
 
-    /// Phase 1: Test that remove resets tool to Select mode
+    /// Test that remove resets tool to Select mode
     #[test]
     fn test_edit_event_remove_resets_tool_to_select() {
         let mut editor =
@@ -8259,7 +8086,7 @@ mod tests {
         assert!(matches!(editor.current_tool, EditorTool::Select));
     }
 
-    /// Phase 1: Test switching between editing different events
+    /// Test switching between editing different events
     #[test]
     fn test_edit_event_switch_between_multiple_events() {
         let mut editor =
@@ -8306,7 +8133,7 @@ mod tests {
         assert_eq!(editor.event_editor.as_ref().unwrap().trap_damage, 25);
     }
 
-    // Phase 2: Visual Feedback Tests
+    // Visual Feedback Tests
 
     #[test]
     fn test_edit_highlight_appears_when_event_editor_active() {
@@ -9113,7 +8940,7 @@ mod tests {
         assert!(state.selected_tiles.is_empty());
     }
 
-    // ── Phase 7: Container event type tests ──────────────────────────────────
+    // ── Container event type tests ──────────────────────────────────
 
     #[test]
     fn test_event_type_container_name() {
@@ -9264,7 +9091,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 5: Campaign Builder SDK UI — EventEditorState facing / behaviour tests =====
+    // ===== EventEditorState facing / behaviour tests =====
 
     #[test]
     fn test_event_editor_state_default_facing_none() {
@@ -9567,7 +9394,7 @@ mod tests {
         }
     }
 
-    // ===== Phase 5: CombatEventType UI tests =====
+    // ===== CombatEventType UI tests =====
 
     #[test]
     fn test_event_editor_state_default_combat_type() {

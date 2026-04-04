@@ -44,18 +44,13 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
 /// Camera control mode for the 3D preview
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum CameraMode {
     /// Orbit around target point
+    #[default]
     Orbit,
     /// Free-look camera (not yet implemented)
     FreeLook,
-}
-
-impl Default for CameraMode {
-    fn default() -> Self {
-        Self::Orbit
-    }
 }
 
 /// State for the 3D preview camera
@@ -176,7 +171,7 @@ impl Default for PreviewOptions {
 ///
 /// # Note
 ///
-/// For Phase 3, this is a simplified implementation that doesn't actually
+/// This is a simplified implementation that does not actually
 /// spawn a full Bevy app (to avoid complexity with nested event loops).
 /// Instead, it provides the state management and will render using egui's
 /// built-in painting primitives or a simple software rasterizer.
@@ -203,7 +198,7 @@ pub struct PreviewRenderer {
     mesh_visibility: Vec<bool>,
 
     /// Last mouse position for drag interactions
-    last_mouse_pos: Option<(f32, f32)>,
+    _last_mouse_pos: Option<(f32, f32)>,
 }
 
 impl Default for PreviewRenderer {
@@ -230,7 +225,7 @@ impl PreviewRenderer {
             needs_update: true,
             selected_mesh_index: None,
             mesh_visibility: Vec::new(),
-            last_mouse_pos: None,
+            _last_mouse_pos: None,
         }
     }
 
@@ -401,7 +396,7 @@ impl PreviewRenderer {
         changed
     }
 
-    /// Render the 3D preview (simplified version for Phase 3)
+    /// Render the 3D preview (simplified implementation)
     ///
     /// This renders a basic wireframe representation of the creature.
     /// Future phases will integrate full Bevy rendering.
@@ -558,8 +553,8 @@ impl PreviewRenderer {
         global_scale: f32,
         is_selected: bool,
     ) {
-        // Simple orthographic-ish projection for Phase 3
-        // This is a placeholder - Phase 5 will use proper 3D rendering
+        // Simple orthographic-ish projection
+        // TODO: use proper 3D rendering
 
         let center = rect.center();
         let scale = 50.0 * global_scale;

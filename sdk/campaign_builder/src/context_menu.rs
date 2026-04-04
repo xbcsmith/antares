@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Context Menu System - Phase 5.4
+//! Context Menu System
 //!
 //! Provides right-click context menu management for the creature editor.
 //! Supports:

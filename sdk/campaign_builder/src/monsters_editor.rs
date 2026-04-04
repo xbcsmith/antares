@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::creature_assets::CreatureAssetManager;
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
-    handle_reload, show_standard_list_item, AttributePair16Input, AttributePairInput,
-    EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
-    TwoColumnLayout,
+    dispatch_list_action, handle_reload, show_standard_list_item, AttributePair16Input,
+    AttributePairInput, DispatchActionState, EditorToolbar, ItemAction, MetadataBadge,
+    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::character::{AttributePair, AttributePair16, Stats};
 use antares::domain::combat::database::MonsterDefinition;
@@ -109,23 +110,14 @@ impl MonstersEditorState {
     ///
     /// * `ui` - The egui UI context
     /// * `monsters` - Mutable reference to the monsters list for editing
-    /// * `campaign_dir` - Optional campaign directory path for file operations
-    /// * `monsters_file` - Name of the monsters file
-    /// * `unsaved_changes` - Flag to track if there are unsaved changes
-    /// * `status_message` - Status message to display to user
-    /// * `file_load_merge_mode` - Whether to merge or replace when loading files
     /// * `creature_manager` - Optional creature asset manager for visual asset binding
-    #[allow(clippy::too_many_arguments)]
+    /// * `ctx` - Shared editor context (campaign dir, data file, unsaved flag, status, merge mode)
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         monsters: &mut Vec<MonsterDefinition>,
-        campaign_dir: Option<&PathBuf>,
-        monsters_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        file_load_merge_mode: &mut bool,
         creature_manager: Option<&CreatureAssetManager>,
+        ctx: &mut EditorContext<'_>,
     ) {
         ui.heading("👹 Monsters Editor");
         ui.add_space(5.0);
@@ -133,7 +125,7 @@ impl MonstersEditorState {
         // Use shared EditorToolbar component
         let toolbar_action = EditorToolbar::new("Monsters")
             .with_search(&mut self.search_query)
-            .with_merge_mode(file_load_merge_mode)
+            .with_merge_mode(ctx.file_load_merge_mode)
             .with_total_count(monsters.len())
             .with_id_salt("monsters_toolbar")
             .show(ui);
@@ -145,15 +137,15 @@ impl MonstersEditorState {
                 self.edit_buffer = Self::default_monster();
                 let next_id = monsters.iter().map(|m| m.id).max().unwrap_or(0) + 1;
                 self.edit_buffer.id = next_id;
-                *unsaved_changes = true;
+                *ctx.unsaved_changes = true;
             }
             ToolbarAction::Save => {
                 self.save_monsters(
                     monsters,
-                    campaign_dir,
-                    monsters_file,
-                    unsaved_changes,
-                    status_message,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    ctx.unsaved_changes,
+                    ctx.status_message,
                 );
             }
             ToolbarAction::Load => {
@@ -168,7 +160,7 @@ impl MonstersEditorState {
 
                     match load_result {
                         Ok(loaded_monsters) => {
-                            if *file_load_merge_mode {
+                            if *ctx.file_load_merge_mode {
                                 for monster in loaded_monsters {
                                     if let Some(existing) =
                                         monsters.iter_mut().find(|m| m.id == monster.id)
@@ -181,11 +173,12 @@ impl MonstersEditorState {
                             } else {
                                 *monsters = loaded_monsters;
                             }
-                            *unsaved_changes = true;
-                            *status_message = format!("Loaded monsters from: {}", path.display());
+                            *ctx.unsaved_changes = true;
+                            *ctx.status_message =
+                                format!("Loaded monsters from: {}", path.display());
                         }
                         Err(e) => {
-                            *status_message = format!("Failed to load monsters: {}", e);
+                            *ctx.status_message = format!("Failed to load monsters: {}", e);
                         }
                     }
                 }
@@ -203,20 +196,26 @@ impl MonstersEditorState {
                     match ron::ser::to_string_pretty(monsters, Default::default()) {
                         Ok(contents) => match std::fs::write(&path, contents) {
                             Ok(_) => {
-                                *status_message = format!("Saved monsters to: {}", path.display());
+                                *ctx.status_message =
+                                    format!("Saved monsters to: {}", path.display());
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to save monsters: {}", e);
+                                *ctx.status_message = format!("Failed to save monsters: {}", e);
                             }
                         },
                         Err(e) => {
-                            *status_message = format!("Failed to serialize monsters: {}", e);
+                            *ctx.status_message = format!("Failed to serialize monsters: {}", e);
                         }
                     }
                 }
             }
             ToolbarAction::Reload => {
-                handle_reload(monsters, campaign_dir, monsters_file, status_message);
+                handle_reload(
+                    monsters,
+                    ctx.campaign_dir,
+                    ctx.data_file,
+                    ctx.status_message,
+                );
             }
             ToolbarAction::None => {}
         }
@@ -229,40 +228,18 @@ impl MonstersEditorState {
         ui.separator();
 
         if self.show_import_dialog {
-            self.show_import_dialog(
-                ui.ctx(),
-                monsters,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                monsters_file,
-            );
+            self.show_import_dialog(ui.ctx(), monsters, ctx);
         }
 
         match self.mode {
-            MonstersEditorMode::List => self.show_list(
-                ui,
-                monsters,
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                monsters_file,
-            ),
+            MonstersEditorMode::List => self.show_list(ui, monsters, ctx),
             MonstersEditorMode::Add | MonstersEditorMode::Edit => {
                 // Initialize autocomplete buffer with current monster name when entering edit mode
                 if self.monster_name_input_buffer.is_empty() && !self.edit_buffer.name.is_empty() {
                     self.monster_name_input_buffer = self.edit_buffer.name.clone();
                 }
 
-                self.show_form(
-                    ui,
-                    monsters,
-                    unsaved_changes,
-                    status_message,
-                    campaign_dir,
-                    monsters_file,
-                    creature_manager,
-                )
+                self.show_form(ui, monsters, creature_manager, ctx)
             }
         }
     }
@@ -271,10 +248,7 @@ impl MonstersEditorState {
         &mut self,
         ui: &mut egui::Ui,
         monsters: &mut Vec<MonsterDefinition>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        monsters_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let search_lower = self.search_query.to_lowercase();
 
@@ -393,66 +367,39 @@ impl MonstersEditorState {
 
         // Handle action button clicks after closures
         if let Some(action) = action_requested {
-            match action {
-                ItemAction::Edit => {
-                    if let Some(idx) = self.selected_monster {
-                        if idx < monsters.len() {
-                            self.mode = MonstersEditorMode::Edit;
-                            self.edit_buffer = monsters[idx].clone();
-                        }
+            if action == ItemAction::Edit {
+                if let Some(idx) = self.selected_monster {
+                    if idx < monsters.len() {
+                        self.mode = MonstersEditorMode::Edit;
+                        self.edit_buffer = monsters[idx].clone();
                     }
                 }
-                ItemAction::Delete => {
-                    if let Some(idx) = self.selected_monster {
-                        if idx < monsters.len() {
-                            monsters.remove(idx);
-                            self.selected_monster = None;
-                            self.save_monsters(
-                                monsters,
-                                campaign_dir,
-                                monsters_file,
-                                unsaved_changes,
-                                status_message,
-                            );
-                        }
-                    }
+            } else {
+                let mut dispatch_state = DispatchActionState {
+                    entity_label: "monster",
+                    import_export_buffer: &mut self.import_export_buffer,
+                    show_import_dialog: &mut self.show_import_dialog,
+                    status_message: ctx.status_message,
+                };
+                let data_changed = dispatch_list_action(
+                    action,
+                    monsters,
+                    &mut self.selected_monster,
+                    |entry, all| {
+                        entry.id = all.iter().map(|m| m.id).max().unwrap_or(0) + 1;
+                        entry.name = format!("{} (Copy)", entry.name);
+                    },
+                    &mut dispatch_state,
+                );
+                if data_changed {
+                    self.save_monsters(
+                        monsters,
+                        ctx.campaign_dir,
+                        ctx.data_file,
+                        ctx.unsaved_changes,
+                        ctx.status_message,
+                    );
                 }
-                ItemAction::Duplicate => {
-                    if let Some(idx) = self.selected_monster {
-                        if idx < monsters.len() {
-                            let mut new_monster = monsters[idx].clone();
-                            let next_id = monsters.iter().map(|m| m.id).max().unwrap_or(0) + 1;
-                            new_monster.id = next_id;
-                            new_monster.name = format!("{} (Copy)", new_monster.name);
-                            monsters.push(new_monster);
-                            self.save_monsters(
-                                monsters,
-                                campaign_dir,
-                                monsters_file,
-                                unsaved_changes,
-                                status_message,
-                            );
-                        }
-                    }
-                }
-                ItemAction::Export => {
-                    if let Some(idx) = self.selected_monster {
-                        if idx < monsters.len() {
-                            if let Ok(ron_str) = ron::ser::to_string_pretty(
-                                &monsters[idx],
-                                ron::ser::PrettyConfig::default(),
-                            ) {
-                                self.import_export_buffer = ron_str;
-                                self.show_import_dialog = true;
-                                *status_message =
-                                    "Monster exported to clipboard dialog".to_string();
-                            } else {
-                                *status_message = "Failed to export monster".to_string();
-                            }
-                        }
-                    }
-                }
-                ItemAction::None => {}
             }
         }
     }
@@ -680,12 +627,9 @@ impl MonstersEditorState {
 
     fn show_import_dialog(
         &mut self,
-        ctx: &egui::Context,
+        egui_ctx: &egui::Context,
         monsters: &mut Vec<MonsterDefinition>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        monsters_file: &str,
+        ctx: &mut EditorContext<'_>,
     ) {
         let mut open = self.show_import_dialog;
 
@@ -693,7 +637,7 @@ impl MonstersEditorState {
             .open(&mut open)
             .resizable(true)
             .default_width(500.0)
-            .show(ctx, |ui| {
+            .show(egui_ctx, |ui| {
                 ui.heading("Monster RON Data");
                 ui.separator();
 
@@ -714,23 +658,23 @@ impl MonstersEditorState {
                                 monsters.push(monster);
                                 self.save_monsters(
                                     monsters,
-                                    campaign_dir,
-                                    monsters_file,
-                                    unsaved_changes,
-                                    status_message,
+                                    ctx.campaign_dir,
+                                    ctx.data_file,
+                                    ctx.unsaved_changes,
+                                    ctx.status_message,
                                 );
-                                *status_message = "Monster imported successfully".to_string();
+                                *ctx.status_message = "Monster imported successfully".to_string();
                                 self.show_import_dialog = false;
                             }
                             Err(e) => {
-                                *status_message = format!("Import failed: {}", e);
+                                *ctx.status_message = format!("Import failed: {}", e);
                             }
                         }
                     }
 
                     if ui.button("📋 Copy to Clipboard").clicked() {
                         ui.ctx().copy_text(self.import_export_buffer.clone());
-                        *status_message = "Copied to clipboard".to_string();
+                        *ctx.status_message = "Copied to clipboard".to_string();
                     }
 
                     if ui.button("❌ Close").clicked() {
@@ -750,11 +694,8 @@ impl MonstersEditorState {
         &mut self,
         ui: &mut egui::Ui,
         monsters: &mut Vec<MonsterDefinition>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        monsters_file: &str,
         creature_manager: Option<&CreatureAssetManager>,
+        ctx: &mut EditorContext<'_>,
     ) {
         let is_add = self.mode == MonstersEditorMode::Add;
         ui.heading(if is_add {
@@ -790,7 +731,7 @@ impl MonstersEditorState {
                     ) {
                         // Update edit buffer when selection changes
                         self.edit_buffer.name = self.monster_name_input_buffer.clone();
-                        *unsaved_changes = true;
+                        *ctx.unsaved_changes = true;
                     }
 
                     // Also allow direct text editing for new names
@@ -801,7 +742,7 @@ impl MonstersEditorState {
                             .changed()
                         {
                             self.monster_name_input_buffer = self.edit_buffer.name.clone();
-                            *unsaved_changes = true;
+                            *ctx.unsaved_changes = true;
                         }
                     });
 
@@ -1049,14 +990,14 @@ impl MonstersEditorState {
                         }
                         self.save_monsters(
                             monsters,
-                            campaign_dir,
-                            monsters_file,
-                            unsaved_changes,
-                            status_message,
+                            ctx.campaign_dir,
+                            ctx.data_file,
+                            ctx.unsaved_changes,
+                            ctx.status_message,
                         );
                         self.mode = MonstersEditorMode::List;
                         self.monster_name_input_buffer.clear();
-                        *status_message = "Monster saved".to_string();
+                        *ctx.status_message = "Monster saved".to_string();
                     }
 
                     if ui.button("❌ Cancel").clicked() {

@@ -56,8 +56,6 @@
 //! }
 //! ```
 
-#![cfg(target_os = "macos")]
-
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::OnceLock;
 use tray_icon::{
@@ -72,12 +70,6 @@ use tray_icon::{
 /// Produced by `scripts/generate_icons.sh` from `assets/icons/antares_tray.png`
 /// and committed to `sdk/campaign_builder/assets/icons/tray_icon_1x.png`.
 const TRAY_ICON_1X: &[u8] = include_bytes!("../assets/icons/tray_icon_1x.png");
-
-/// 44×44 PNG reserved for Retina (2×) menu-bar displays.
-///
-/// Available for future HiDPI support.  Embedded here so that it is
-/// compile-time verified regardless of whether it is currently used.
-const TRAY_ICON_2X: &[u8] = include_bytes!("../assets/icons/tray_icon_2x.png");
 
 // ── Menu item IDs ─────────────────────────────────────────────────────────────
 
@@ -283,10 +275,10 @@ pub fn handle_tray_events() {
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
 //
-// Phase 2 tests: embedded-asset properties (PNG magic bytes, decoded
+// Embedded-asset property tests (PNG magic bytes, decoded
 // dimensions, RGBA buffer length).  No NSApp / NSStatusItem is touched.
 //
-// Phase 3 tests: `TrayCommand` variant distinctness and channel round-trip.
+// `TrayCommand` variant distinctness and channel round-trip tests.
 // These tests only exercise pure Rust types and require no macOS APIs.
 
 #[cfg(test)]
@@ -297,7 +289,7 @@ mod tests {
     /// The first 8 bytes of every valid PNG file (ISO/IEC 15948:2003 §5.2).
     const PNG_MAGIC: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
 
-    // ── Phase 2: PNG magic ────────────────────────────────────────────────────
+    // ── PNG magic ────────────────────────────────────────────────────────────
 
     /// The 1× asset must begin with the PNG magic number.
     ///
@@ -316,24 +308,7 @@ mod tests {
         );
     }
 
-    /// The 2× asset must begin with the PNG magic number.
-    ///
-    /// This confirms that `assets/icons/tray_icon_2x.png` is a valid PNG file
-    /// and has not been accidentally replaced or truncated.
-    #[test]
-    fn test_tray_icon_2x_png_magic() {
-        assert!(
-            TRAY_ICON_2X.len() >= PNG_MAGIC.len(),
-            "TRAY_ICON_2X must be at least 8 bytes long"
-        );
-        assert_eq!(
-            &TRAY_ICON_2X[..PNG_MAGIC.len()],
-            &PNG_MAGIC,
-            "TRAY_ICON_2X must start with the PNG magic number"
-        );
-    }
-
-    // ── Phase 2: Decoded dimensions ───────────────────────────────────────────
+    // ── Decoded dimensions ────────────────────────────────────────────────────
 
     /// The 1× asset must decode to exactly 22×22 pixels.
     ///
@@ -347,19 +322,7 @@ mod tests {
         assert_eq!(img.height(), 22, "1× tray icon height must be 22 px");
     }
 
-    /// The 2× asset must decode to exactly 44×44 pixels.
-    ///
-    /// macOS uses 44×44 for Retina (2×) menu-bar status items.
-    #[test]
-    fn test_tray_icon_2x_dimensions() {
-        let img = image::load_from_memory(TRAY_ICON_2X)
-            .expect("TRAY_ICON_2X must decode successfully")
-            .into_rgba8();
-        assert_eq!(img.width(), 44, "2× tray icon width must be 44 px");
-        assert_eq!(img.height(), 44, "2× tray icon height must be 44 px");
-    }
-
-    // ── Phase 2: RGBA buffer length ───────────────────────────────────────────
+    // ── RGBA buffer length ────────────────────────────────────────────────────
 
     /// The RGBA byte buffer for the 1× asset must be exactly 22 × 22 × 4 bytes.
     ///
@@ -378,7 +341,7 @@ mod tests {
         );
     }
 
-    // ── Phase 3: TrayCommand enum ─────────────────────────────────────────────
+    // ── TrayCommand enum ──────────────────────────────────────────────────────
 
     /// `TrayCommand::ShowWindow` and `TrayCommand::HideWindow` must be distinct
     /// values so that the `update()` match arm dispatches them to different
@@ -398,7 +361,7 @@ mod tests {
     /// A `TrayCommand::ShowWindow` value sent over an `mpsc` sync channel must
     /// be received on the other end without blocking.
     ///
-    /// This exercises the channel-based dispatch path introduced in Phase 3:
+    /// This exercises the channel-based dispatch path:
     /// `handle_tray_events` sends commands and `update()` drains the receiver
     /// via `try_recv()`.
     #[test]
