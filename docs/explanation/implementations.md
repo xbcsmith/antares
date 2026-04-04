@@ -1,5 +1,484 @@
 # Implementations
 
+## Phase 3: Exploration-Mode Spell Casting (Complete)
+
+### Overview
+
+Implements the full exploration-mode spell casting system — allowing characters
+to cast healing, buff, utility, and cure spells outside of combat. Covers the
+domain logic, application state, Bevy ECS plugin (UI + input), input key
+binding, and world-effect integration (food creation, light, levitation, etc.).
+
+This phase depends on Phase 1 (spell effect dispatcher) and Phase 2 (SP bar in
+the HUD). The Phase 2 SP bar automatically reflects SP changes from exploration
+casts because `update_hud` runs every frame in all non-combat modes.
+
+### Deliverables
+
+| Deliverable                                                 | File                                                 | Status |
+| ----------------------------------------------------------- | ---------------------------------------------------- | ------ |
+| Exploration casting domain module                           | `src/domain/magic/exploration_casting.rs`            | ✅     |
+| Application spell-casting state                             | `src/application/spell_casting_state.rs`             | ✅     |
+| `GameMode::SpellCasting` variant                            | `src/application/mod.rs`                             | ✅     |
+| `enter_spell_casting` / `exit_spell_casting` on `GameState` | `src/application/mod.rs`                             | ✅     |
+| Bevy exploration spell plugin                               | `src/game/systems/exploration_spells.rs`             | ✅     |
+| `cast` key in `ControlsConfig`                              | `src/sdk/game_config.rs`                             | ✅     |
+| `GameAction::Cast` in key map                               | `src/game/systems/input/keymap.rs`                   | ✅     |
+| `FrameInputIntent.cast` field                               | `src/game/systems/input/frame_input.rs`              | ✅     |
+| `SpellCasting` blocks movement                              | `src/game/systems/input/mode_guards.rs`              | ✅     |
+| Global toggle: `C` opens / `Esc` closes                     | `src/game/systems/input/global_toggles.rs`           | ✅     |
+| Plugin registered in binary                                 | `src/bin/antares.rs`                                 | ✅     |
+| Module exports updated                                      | `src/domain/magic/mod.rs`, `src/game/systems/mod.rs` | ✅     |
+
+### Architecture
+
+#### Domain Layer — `exploration_casting.rs`
+
+Pure domain functions with no Bevy dependency:
+
+- **`can_cast_exploration_spell(character, spell, is_outdoor) -> Result<(), SpellError>`**
+  Validates that a spell can be cast in exploration context. Rejects
+  `CombatOnly` spells and all monster-targeting spells with
+  `SpellError::CombatOnly`. Delegates remaining checks (class, level,
+  SP/gems, conditions) to the existing `can_cast_spell` function.
+
+- **`cast_exploration_spell(caster_index, spell, target, game_state, item_db, rng) -> Result<SpellEffectResult, SpellError>`**
+  Validates, consumes SP/gems, applies effects via `apply_spell_effect`,
+  and wires `food_created` directly into party inventories via
+  `add_food_to_party`. Uses Rust field-splitting (`let GameState { ref mut
+active_spells, ref mut party, .. } = *game_state`) to hold two
+  simultaneous mutable borrows without `unsafe`.
+
+- **`get_castable_exploration_spells<'a>(character, spell_db, is_outdoor) -> Vec<&'a Spell>`**
+  Returns all spells the character can currently cast during exploration,
+  sorted by `(level, id)` for deterministic display order. Uses
+  `crate::sdk::database::SpellDatabase` (the SDK type stored in
+  `ContentDatabase`).
+
+- **`add_food_to_party(party, item_db, amount) -> u32`**
+  Finds the lowest-ID `IsFood(1)` item in the database (same algorithm as
+  `grant_starting_food`) and adds that many inventory slots to party
+  members in order, respecting `Inventory::MAX_ITEMS`.
+
+- **`ExplorationTarget` enum**: `Self_`, `Character(usize)`,
+  `AllCharacters`. Static factory `ExplorationTarget::from_spell_target`
+  maps `SpellTarget` to exploration target; returns `None` for
+  `SingleCharacter` (UI prompt required) and all monster targets.
+
+#### Application Layer — `spell_casting_state.rs`
+
+- **`SpellCastingStep`**: `SelectCaster`, `SelectSpell`, `SelectTarget`,
+  `ShowResult`.
+
+- **`SpellCastingState`**: Stores step, caster index, selected spell ID,
+  target index, `selected_row` (cursor), feedback message, and
+  `Box<GameMode>` (previous mode — boxed to break recursive type
+  dependency, matching the `InventoryState` / `MenuState` pattern).
+
+- **Methods**: `new(prev, caster_index)` starts at `SelectSpell`;
+  `new_with_caster_select(prev)` starts at `SelectCaster`;
+  `get_resume_mode()`, `select_spell()`, `select_target()`,
+  `show_result()`, `cursor_up()`, `cursor_down()`.
+
+**`application/mod.rs` additions**:
+
+- `GameMode::SpellCasting(SpellCastingState)` variant
+- `GameState::enter_spell_casting(caster_index)` — starts at `SelectSpell`
+- `GameState::enter_spell_casting_with_caster_select()` — starts at `SelectCaster`
+- `GameState::exit_spell_casting()` — restores previous mode
+
+#### Input Layer
+
+- **`ControlsConfig.cast: Vec<String>`** — defaults to `["C"]`. Uses
+  `#[serde(default = "default_cast_keys")]` for backward-compatible RON
+  deserialization.
+- **`GameAction::Cast`** — new variant in the key-map enum.
+- **`FrameInputIntent.cast: bool`** — decoded with `just_pressed` semantics
+  (toggle, not held).
+- **`movement_blocked_for_mode`** — `SpellCasting(_)` added so movement and
+  interaction are blocked while the spell menu is open.
+- **`handle_global_mode_toggles`** — `frame_input.cast` in `Exploration`
+  calls `enter_spell_casting_with_caster_select()`; `menu_toggle`
+  (Escape) in `SpellCasting` calls `exit_spell_casting()`.
+
+#### Game Systems Layer — `exploration_spells.rs`
+
+**`ExplorationSpellPlugin`** registers four systems chained in `Update`:
+
+1. **`setup_spell_casting_ui`** — Spawns the full-screen dark overlay with a
+   centred panel (title + `SpellCastingContent` list area + hint line) when
+   the game enters `SpellCasting` mode. Idempotent (checks
+   `existing: Query<Entity, With<SpellCastingOverlay>>`).
+
+2. **`update_spell_casting_ui`** — Runs every frame. Clears and rebuilds the
+   `SpellCastingContent` children based on the current step and cursor
+   position. Step-specific content:
+
+   - `SelectCaster`: one row per party member showing `name [SP cur/max]`
+   - `SelectSpell`: one row per castable spell showing `Lx Name — y SP`
+   - `SelectTarget`: one row per living party member showing `name [HP cur/max]`
+   - `ShowResult`: feedback message + "Press Enter or Esc to continue."
+     Selected row highlighted in yellow with a tinted background.
+
+3. **`handle_spell_casting_input`** — Handles `Escape` (cancel), `ArrowUp`/`W`
+   (cursor up), `ArrowDown`/`S` (cursor down), `Enter`/`Space` (confirm).
+   Confirm transitions through steps: `SelectCaster` → `SelectSpell` →
+   `SelectTarget` (only for `SingleCharacter` spells) → executes cast →
+   `ShowResult`. `ShowResult` confirm restores the previous mode.
+
+4. **`cleanup_spell_casting_ui`** — Despawns the overlay (and all its
+   descendant entities) when the mode is no longer `SpellCasting`.
+
+**`execute_exploration_cast`** helper (private):
+
+- Resolves `ExplorationTarget` from the spell's `SpellTarget` and the state's
+  `target_index`.
+- Calls `cast_exploration_spell` with the item DB from `GameContent` (falls
+  back to an empty `ItemDatabase` if content is not loaded).
+- Formats a human-readable result message and writes it to `GameLog` as
+  `LogCategory::Exploration`.
+- Calls `sc.show_result(message)` to advance to the result step.
+
+### Target Resolution Table
+
+| `SpellTarget`                                                   | Exploration behaviour                             |
+| --------------------------------------------------------------- | ------------------------------------------------- |
+| `Self_`                                                         | Applies to the caster only                        |
+| `SingleCharacter`                                               | UI prompts for party member (`SelectTarget` step) |
+| `AllCharacters`                                                 | Applied to all living party members               |
+| `SingleMonster / MonsterGroup / AllMonsters / SpecificMonsters` | `SpellError::CombatOnly` — rejected               |
+
+### Utility Spell World Effects
+
+Effects are applied by `cast_exploration_spell` via `apply_spell_effect`:
+
+| Spell type                          | World effect                                                                                   |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `Light` / `Lasting Light`           | `active_spells.light = duration` (existing light system reads this)                            |
+| `Walk on Water`                     | `active_spells.walk_on_water = duration`                                                       |
+| `Levitate` / `Fly`                  | `active_spells.levitate = duration`                                                            |
+| `Create Food`                       | `food_created` ration items added to party inventories via `add_food_to_party`                 |
+| `Teleport` / `Jump`                 | `UtilityType::Teleport` — result message logged; world-position change is a future enhancement |
+| `Location` / `Detect Magic`         | `UtilityType::Information` — logged as feedback message                                        |
+| Healing                             | `character.hp.current` raised up to `hp.base`                                                  |
+| Buff (Bless, Shield, etc.)          | `active_spells.<field> = duration`                                                             |
+| Cure (Paralysis, Poison, Blindness) | `character.remove_condition(id)` via `apply_cure_condition`                                    |
+
+### Tests Added
+
+**`exploration_casting.rs`** (28 tests):
+
+- `can_cast_exploration_spell`: anytime ✓, non-combat ✓, rejects combat-only,
+  rejects monster targets, rejects insufficient SP, rejects wrong class,
+  rejects silenced/unconscious characters.
+- `cast_exploration_spell`: SP consumption, healing, multi-target, combat-only
+  rejection, out-of-bounds caster/target, light buff updates `active_spells`,
+  `Create Food` adds food ration inventory slots, gem consumption, dead members
+  skipped in `AllCharacters` target.
+- `get_castable_exploration_spells`: excludes combat-only, excludes
+  insufficient SP, sorted by `(level, id)`.
+- `add_food_to_party`: empty DB returns 0, distributes across members when
+  one is full.
+- `ExplorationTarget::from_spell_target`: Self\_, AllCharacters, SingleCharacter
+  (None), monster targets (None).
+
+**`spell_casting_state.rs`** (13 tests): All constructors, step transitions,
+cursor navigation with wrapping and empty-list no-ops, `Default` impl.
+
+**`exploration_spells.rs`** (9 tests): Marker component smoke tests,
+`count_items_for_step` for all four steps, `collect_castable_spell_ids` without
+content, round-trip `enter`/`exit` spell casting, caster-select step assertion,
+`ExplorationTarget` from spell target variants.
+
+**`application/mod.rs`** (new doctests): `enter_spell_casting`,
+`enter_spell_casting_with_caster_select`, `exit_spell_casting`.
+
+### Quality Gates
+
+```text
+cargo fmt --all                                         → no output (clean)
+cargo check --all-targets --all-features               → Finished 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished 0 warnings
+cargo nextest run --all-features                       → 4200 passed, 0 failed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 exactly
+- [x] `SpellId`, `ItemId`, `CharacterId` type aliases used throughout
+- [x] `AttributePair` pattern respected — `hp.current` modified, `hp.base` preserved
+- [x] `ActiveSpells` fields set via `apply_buff_spell` dispatcher, never directly
+- [x] `GameMode::SpellCasting` follows `InventoryState` / `MenuState` box pattern
+- [x] `ControlsConfig.cast` uses `#[serde(default)]` — no RON data files broken
+- [x] RON format unchanged — no `.json` / `.yaml` data files created
+- [x] No test references `campaigns/tutorial` — all fixtures in `data/test_campaign`
+- [x] SPDX copyright/license headers on all new `.rs` files
+- [x] Markdown files use `lowercase_underscore.md` naming
+
+---
+
+## Compilation Error Fixes — SpellDatabase Type, Bevy ChildSpawner, and ControlsConfig (Complete)
+
+### Overview
+
+Fixed four categories of compilation errors that prevented the project from building:
+
+1. **`SpellDatabase` type mismatch** in `exploration_casting.rs` — the function
+   `get_castable_exploration_spells` accepted `&crate::domain::magic::database::SpellDatabase`
+   but all callers in the game layer pass `&crate::sdk::database::SpellDatabase` (from
+   `ContentDatabase`). The two types have different `all_spells()` signatures:
+   the domain version returns `Vec<&Spell>` while the SDK version returns `Vec<SpellId>`.
+
+2. **Wrong spawner type in Bevy 0.17** — helper functions `build_caster_rows`,
+   `build_spell_rows`, `build_target_rows`, `build_result_rows`, and `spawn_row` in
+   `exploration_spells.rs` declared their `list` parameter as `&mut ChildSpawner<'_>`
+   (= `RelatedSpawner<'_, ChildOf>`). However `commands.entity(e).with_children(|list| …)`
+   yields `&mut ChildSpawnerCommands<'_>` (= `RelatedSpawnerCommands<'_, ChildOf>`).
+   These are two distinct types in Bevy 0.17.
+
+3. **`children.iter().copied()` double-copy** — `Children::iter()` already yields
+   `Entity` values directly in Bevy 0.17 (not `&Entity`), so `.copied()` was illegal.
+
+4. **Missing `cast` field** in `ControlsConfig` struct literals — three test struct
+   literals in `keymap.rs` and `input.rs` were missing the newly added `cast` field,
+   causing `E0063` errors.
+
+### Files Changed
+
+| File                                      | Change                                                                                                                                                                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/magic/exploration_casting.rs` | Changed `spell_db` parameter type; updated implementation to use `all_spells() -> Vec<SpellId>` + `get_spell(id)`; updated doctest and three unit tests                                                             |
+| `src/game/systems/exploration_spells.rs`  | Removed `.copied()` from `children.iter()`; changed all five helper-function `list` parameters from `&mut ChildSpawner<'_>` to `&mut ChildSpawnerCommands<'_>`; replaced `drop(sc)` on `()` with a `matches!` guard |
+| `src/game/systems/input/keymap.rs`        | Added `cast: vec!["C".to_string()]` to two `ControlsConfig` struct literals                                                                                                                                         |
+| `src/game/systems/input.rs`               | Added `cast: vec!["C".to_string()]` to one `ControlsConfig` struct literal                                                                                                                                          |
+
+### Key Design Decisions
+
+- **`Vec<&'a Spell>` return type preserved** — by collecting IDs first with
+  `spell_db.all_spells()` and then using `filter_map(|id| spell_db.get_spell(id))`,
+  the lifetime `'a` still ties the returned references to the `spell_db` borrow. No
+  callers needed to change.
+
+- **`ChildSpawnerCommands<'_>` type alias used** — Bevy 0.17 exports
+  `bevy::ecs::hierarchy::ChildSpawnerCommands<'w>` as a type alias for
+  `RelatedSpawnerCommands<'w, ChildOf>` and includes it in `bevy::prelude`. Using the
+  alias keeps signatures readable and consistent with official Bevy examples.
+
+- **`drop(sc)` replaced with `matches!` guard** — the original intent was to verify
+  the current game mode before releasing the immutable borrow. Because `sc` was a `()`
+  unit value (Copy), `drop` was a no-op and triggered a clippy warning. The replacement
+  `if !matches!(global_state.0.mode, GameMode::SpellCasting(_)) { return; }` is
+  idiomatic and borrow-free.
+
+- **SDK `SpellDatabase` in doctests** — the doctest for `get_castable_exploration_spells`
+  now imports `antares::sdk::database::SpellDatabase` to match the updated parameter type,
+  keeping the example runnable.
+
+### Quality Gates
+
+```text
+cargo fmt --all                                    → no output (already formatted)
+cargo check --all-targets --all-features           → Finished 0 errors 0 warnings
+cargo clippy --all-targets --all-features -D warnings → Finished 0 warnings
+cargo nextest run --all-features                   → 4200 passed, 0 failed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 exactly
+- [x] No test references `campaigns/tutorial`
+- [x] Type aliases used consistently (`SpellId` etc.)
+- [x] No new files created — only targeted fixes to existing files
+- [x] RON format unchanged for data files
+
+## Domain Magic — `exploration_casting.rs` (Exploration-Mode Spell Casting) (Complete)
+
+### Overview
+
+Implements the domain logic for casting spells outside of combat. This module
+is Phase 3 of the spell system, providing a clean boundary between UI target
+resolution and the underlying `effect_dispatch` engine.
+
+Key responsibilities:
+
+- **`ExplorationTarget`** enum — resolves which party member(s) receive a spell
+- **`can_cast_exploration_spell`** — validates all casting prerequisites (class,
+  level, SP, gems, conditions, context) and rejects monster-targeting spells as
+  `CombatOnly`
+- **`cast_exploration_spell`** — consumes SP/gems, splits the `GameState` borrow,
+  applies effects via `apply_spell_effect`, and distributes food side effects via
+  `add_food_to_party`
+- **`get_castable_exploration_spells`** — filters a `SpellDatabase` to spells the
+  character can currently cast and returns them sorted by `(level, id)`
+- **`add_food_to_party`** / **`find_food_item_id`** — utility helpers that locate
+  the best food item in an `ItemDatabase` and distribute ration slots across party
+  member inventories
+
+### Files Changed
+
+| File                                      | Change                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------- |
+| `src/domain/magic/exploration_casting.rs` | **Created** — full implementation                                   |
+| `src/domain/magic/mod.rs`                 | Registered `pub mod exploration_casting` and re-exported public API |
+
+### Key Design Decisions
+
+- **Monster-targeting guard runs first** — `SpellTarget::SingleMonster`,
+  `MonsterGroup`, `AllMonsters`, and `SpecificMonsters` always return
+  `SpellError::CombatOnly` before any other validation, even for
+  `SpellContext::Anytime` spells.
+- **Split-borrow via destructuring** — `cast_exploration_spell` uses
+  `let GameState { ref mut active_spells, ref mut party, .. } = *game_state;`
+  so `apply_spell_effect` can hold `&mut ActiveSpells` and `&mut Character`
+  simultaneously without a double-borrow error.
+- **`AllCharacters` skips fatal conditions** — `member.conditions.is_fatal()`
+  (value ≥ 128, i.e. DEAD/STONE/ERADICATED) prevents dead characters from
+  receiving healing or buff effects during party-wide casts.
+- **Food distributed across inventories** — `add_food_to_party` fills each party
+  member's inventory in order, overflowing to the next member when one is full,
+  and returns the actual number of rations placed.
+- **`ExplorationTarget::from_spell_target`** returns `None` for
+  `SingleCharacter` (requires a UI prompt) and all monster targets, forcing the
+  caller to handle those cases explicitly.
+
+### Public API
+
+```antares/src/domain/magic/exploration_casting.rs#L47-52
+pub enum ExplorationTarget {
+    Self_,
+    Character(usize),
+    AllCharacters,
+}
+```
+
+```antares/src/domain/magic/exploration_casting.rs#L126-130
+pub fn can_cast_exploration_spell(
+    character: &crate::domain::character::Character,
+    spell: &Spell,
+    is_outdoor: bool,
+) -> Result<(), SpellError>
+```
+
+```antares/src/domain/magic/exploration_casting.rs#L215-222
+pub fn cast_exploration_spell<R: Rng>(
+    caster_index: usize,
+    spell: &Spell,
+    target: ExplorationTarget,
+    game_state: &mut GameState,
+    item_db: &ItemDatabase,
+    rng: &mut R,
+) -> Result<SpellEffectResult, SpellError>
+```
+
+```antares/src/domain/magic/exploration_casting.rs#L313-317
+pub fn get_castable_exploration_spells<'a>(
+    character: &crate::domain::character::Character,
+    spell_db: &'a crate::domain::magic::database::SpellDatabase,
+    is_outdoor: bool,
+) -> Vec<&'a Spell>
+```
+
+### Tests Added (28 total)
+
+| Test                                                            | Covers                                                |
+| --------------------------------------------------------------- | ----------------------------------------------------- |
+| `test_can_cast_exploration_anytime_spell_succeeds`              | Happy path for `Anytime` context                      |
+| `test_can_cast_exploration_noncombat_spell_succeeds`            | `NonCombatOnly` allowed outside combat                |
+| `test_can_cast_exploration_rejects_combat_only`                 | `CombatOnly` context rejected                         |
+| `test_can_cast_exploration_rejects_monster_targets`             | Monster-targeting `Anytime` spell rejected            |
+| `test_can_cast_exploration_rejects_insufficient_sp`             | `NotEnoughSP` error path                              |
+| `test_can_cast_exploration_rejects_wrong_class`                 | `WrongClass` error path                               |
+| `test_can_cast_exploration_rejects_silenced_character`          | `Silenced` condition blocks casting                   |
+| `test_can_cast_exploration_rejects_unconscious_character`       | `Unconscious` condition blocks casting                |
+| `test_cast_exploration_spell_self_target_consumes_sp`           | SP is deducted from caster                            |
+| `test_cast_exploration_spell_heals_target`                      | HP restored by 1d8 healing spell                      |
+| `test_cast_exploration_spell_heals_other_character`             | Caster heals a different party member                 |
+| `test_cast_exploration_spell_all_characters`                    | Party-wide effect populates `affected_targets`        |
+| `test_cast_exploration_spell_rejects_combat_only`               | Validation re-checked inside `cast_exploration_spell` |
+| `test_cast_exploration_spell_rejects_out_of_bounds_caster`      | `InvalidTarget` for bad caster index                  |
+| `test_cast_exploration_spell_rejects_out_of_bounds_target`      | `InvalidTarget` for bad target index                  |
+| `test_cast_exploration_spell_buff_light_updates_active_spells`  | `ActiveSpells::light` set to 60                       |
+| `test_cast_exploration_spell_create_food_adds_items`            | 6 ration slots added to inventory                     |
+| `test_cast_exploration_spell_consumes_gems`                     | Gem cost deducted from caster                         |
+| `test_cast_exploration_all_chars_skips_dead`                    | Dead member excluded from `AllCharacters`             |
+| `test_get_castable_exploration_spells_excludes_combat_only`     | Fireball filtered out                                 |
+| `test_get_castable_exploration_spells_excludes_insufficient_sp` | Zero-SP cleric gets empty list                        |
+| `test_get_castable_exploration_spells_sorted_by_level_id`       | Results sorted ascending by level then ID             |
+| `test_add_food_to_party_with_empty_db_returns_zero`             | Returns 0 when no food item exists                    |
+| `test_add_food_to_party_distributes_across_members`             | Overflows to next member when first is full           |
+| `test_exploration_target_from_self`                             | `Self_` maps correctly                                |
+| `test_exploration_target_from_all_characters`                   | `AllCharacters` maps correctly                        |
+| `test_exploration_target_from_single_character_returns_none`    | `SingleCharacter` returns `None`                      |
+| `test_exploration_target_from_monster_targets_returns_none`     | All monster variants return `None`                    |
+
+### Quality Gates
+
+```text
+cargo fmt --all         → clean
+cargo check             → 0 errors
+cargo clippy -D warnings → 0 warnings
+cargo nextest run       → 4188 passed, 0 failed (28 new tests all green)
+```
+
+### Architecture Compliance
+
+- [x] Data structures match `architecture.md` Section 4 (`AttributePair16`, `Condition`, `Party`)
+- [x] Type aliases used: `ItemId`, `SpellId`, `GameMode`
+- [x] Constants referenced: `Inventory::MAX_ITEMS`, `Condition::DEAD`
+- [x] No hardcoded magic numbers
+- [x] `RON` format unchanged; no new data files created
+- [x] No test references `campaigns/tutorial`
+- [x] SPDX headers on new `.rs` file
+
+---
+
+## Application Layer — `SpellCastingState` (Exploration Spell Casting Flow)
+
+### Overview
+
+Added `src/application/spell_casting_state.rs`, which introduces a multi-step
+UI flow state for casting spells outside of combat (exploration mode). The
+design mirrors `InventoryState` and the other application-layer state structs:
+the previous `GameMode` is boxed to break the recursive size dependency, and
+the struct is stored inside a new `GameMode::SpellCasting` variant.
+
+### Files Changed
+
+| File                                     | Change                                                                                              |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `src/application/spell_casting_state.rs` | **New** — full implementation                                                                       |
+| `src/application/mod.rs`                 | Registered `pub mod spell_casting_state`; added `GameMode::SpellCasting(SpellCastingState)` variant |
+
+### Flow Steps (`SpellCastingStep`)
+
+| Step           | Description                                                                                               |
+| -------------- | --------------------------------------------------------------------------------------------------------- |
+| `SelectCaster` | Player chooses which party member casts. Used when no character card is in focus.                         |
+| `SelectSpell`  | Player browses and selects from the caster's spell book. Default entry point when caster is pre-selected. |
+| `SelectTarget` | Player picks a target party member. Skipped for `Self_` and `AllCharacters` spells.                       |
+| `ShowResult`   | Cast result message is displayed until the player dismisses it.                                           |
+
+### Key Methods
+
+| Method                                            | Purpose                                                        |
+| ------------------------------------------------- | -------------------------------------------------------------- |
+| `SpellCastingState::new(mode, idx)`               | Creates state at `SelectSpell` with a pre-selected caster.     |
+| `SpellCastingState::new_with_caster_select(mode)` | Creates state at `SelectCaster` when no caster is pre-focused. |
+| `get_resume_mode()`                               | Returns the `GameMode` to restore on cancel or completion.     |
+| `select_spell(id)`                                | Stores the chosen `SpellId` and resets `selected_row`.         |
+| `select_target(idx)`                              | Records the target party-member index.                         |
+| `show_result(msg)`                                | Sets feedback message and advances step to `ShowResult`.       |
+| `cursor_up(n)` / `cursor_down(n)`                 | Keyboard navigation with wrapping; no-op when list is empty.   |
+
+### Tests
+
+13 unit tests cover all public methods, boundary conditions (wrap-at-zero,
+wrap-at-max, no-op on empty list), and the `Default` impl. All pass with
+`cargo nextest run --all-features -E 'test(spell_casting)'` (29 total,
+including pre-existing combat spell-casting tests).
+
+---
+
 ## Spell System — Phase 2.3/2.4: Spell Selection Panel UI and Improved Spell Cast Feedback (Complete)
 
 ### Overview

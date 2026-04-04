@@ -63,6 +63,7 @@
 pub mod casting;
 pub mod database;
 pub mod effect_dispatch;
+pub mod exploration_casting;
 pub mod spell_effects;
 pub mod types;
 
@@ -77,6 +78,10 @@ pub use effect_dispatch::{
     apply_buff_spell, apply_cure_condition, apply_healing_spell, apply_spell_effect,
     apply_utility_spell, BuffResult, CureConditionResult, HealResult, SpellEffectResult,
     UtilityResult,
+};
+pub use exploration_casting::{
+    add_food_to_party, can_cast_exploration_spell, cast_exploration_spell,
+    get_castable_exploration_spells, ExplorationTarget,
 };
 pub use spell_effects::{
     apply_condition_dot_effects, apply_spell_conditions_to_character,

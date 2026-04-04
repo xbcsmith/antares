@@ -125,6 +125,13 @@ pub fn handle_global_mode_toggles(
                     game_state.mode
                 );
             }
+            GameMode::SpellCasting(_) => {
+                game_state.exit_spell_casting();
+                bevy::prelude::info!(
+                    "Spell casting cancelled via menu key: new_mode = {:?}",
+                    game_state.mode
+                );
+            }
             _ => {
                 toggle_menu_state(game_state);
                 bevy::prelude::info!("Menu toggled: new_mode = {:?}", game_state.mode);
@@ -187,6 +194,19 @@ pub fn handle_global_mode_toggles(
         } else {
             bevy::prelude::info!(
                 "Rest key pressed but mode is {:?} — ignoring",
+                game_state.mode
+            );
+        }
+        return true;
+    }
+
+    if frame_input.cast {
+        if matches!(game_state.mode, GameMode::Exploration) {
+            bevy::prelude::info!("Cast key pressed: opening spell casting menu");
+            game_state.enter_spell_casting_with_caster_select();
+        } else {
+            bevy::prelude::info!(
+                "Cast key pressed but mode is {:?} — ignoring",
                 game_state.mode
             );
         }

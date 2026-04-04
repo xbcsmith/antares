@@ -19,6 +19,7 @@ pub mod merchant_inventory_state;
 pub mod quests;
 pub mod resources;
 pub mod save_game;
+pub mod spell_casting_state;
 
 use crate::application::menu::MenuState;
 use crate::domain::campaign::CampaignConfig;
@@ -100,6 +101,13 @@ pub enum GameMode {
     /// member.  The UI should display a "Game Over" screen with options to
     /// load a save or quit.
     GameOver,
+    /// Exploration-mode spell casting flow.
+    ///
+    /// Entered when a player opens the spell menu outside of combat (default
+    /// key `C`).  The multi-step flow is tracked by
+    /// [`crate::application::spell_casting_state::SpellCastingState`]:
+    /// caster selection → spell selection → optional target selection → result.
+    SpellCasting(crate::application::spell_casting_state::SpellCastingState),
 }
 
 // ===== Rest State =====
@@ -1629,6 +1637,86 @@ impl GameState {
     pub fn enter_menu(&mut self) {
         let prev = self.mode.clone();
         self.mode = GameMode::Menu(MenuState::new(prev));
+    }
+
+    /// Enters exploration-mode spell casting with a pre-selected caster.
+    ///
+    /// Stores the current mode so it can be restored when the player cancels
+    /// or finishes casting.  The UI starts at the spell-selection step because
+    /// the caster is already known.
+    ///
+    /// Use [`enter_spell_casting_with_caster_select`] when the player should
+    /// choose the caster first.
+    ///
+    /// # Arguments
+    ///
+    /// * `caster_index` — index into `party.members` of the character who casts.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_spell_casting(0);
+    /// assert!(matches!(state.mode, GameMode::SpellCasting(_)));
+    /// ```
+    ///
+    /// [`enter_spell_casting_with_caster_select`]: Self::enter_spell_casting_with_caster_select
+    pub fn enter_spell_casting(&mut self, caster_index: usize) {
+        let prev = self.mode.clone();
+        self.mode = GameMode::SpellCasting(
+            crate::application::spell_casting_state::SpellCastingState::new(prev, caster_index),
+        );
+    }
+
+    /// Enters exploration-mode spell casting with the caster-selection step first.
+    ///
+    /// Use this when no specific caster is pre-selected and the player must
+    /// choose which party member will cast before browsing spells.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    /// use antares::application::spell_casting_state::SpellCastingStep;
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_spell_casting_with_caster_select();
+    /// if let GameMode::SpellCasting(sc) = &state.mode {
+    ///     assert_eq!(sc.step, SpellCastingStep::SelectCaster);
+    /// } else {
+    ///     panic!("expected SpellCasting mode");
+    /// }
+    /// ```
+    pub fn enter_spell_casting_with_caster_select(&mut self) {
+        let prev = self.mode.clone();
+        self.mode = GameMode::SpellCasting(
+            crate::application::spell_casting_state::SpellCastingState::new_with_caster_select(
+                prev,
+            ),
+        );
+    }
+
+    /// Exits exploration-mode spell casting and restores the previous mode.
+    ///
+    /// If the current mode is not `SpellCasting` this is a no-op.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_spell_casting(0);
+    /// assert!(matches!(state.mode, GameMode::SpellCasting(_)));
+    /// state.exit_spell_casting();
+    /// assert!(matches!(state.mode, GameMode::Exploration));
+    /// ```
+    pub fn exit_spell_casting(&mut self) {
+        if let GameMode::SpellCasting(ref sc) = self.mode.clone() {
+            self.mode = sc.get_resume_mode();
+        }
     }
 
     /// Enters dialogue mode

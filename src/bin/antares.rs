@@ -282,6 +282,9 @@ impl Plugin for AntaresPlugin {
         // Rest orchestration system
         app.add_plugins(antares::game::systems::rest::RestPlugin);
 
+        // Exploration spell casting UI and logic
+        app.add_plugins(antares::game::systems::exploration_spells::ExplorationSpellPlugin);
+
         // Item world spawn / despawn systems
         app.add_plugins(antares::game::systems::item_world_events::ItemWorldPlugin);
 
