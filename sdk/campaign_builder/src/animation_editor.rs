@@ -156,11 +156,9 @@ impl AnimationEditorState {
                 self.create_buffer = AnimationCreateBuffer::default();
             }
 
-            if ui.button("➕ Add Keyframe").clicked() {
-                if self.selected_animation.is_some() {
-                    self.show_keyframe_editor = true;
-                    self.keyframe_buffer = KeyframeBuffer::new(self.playback_state.current_time, 0);
-                }
+            if ui.button("➕ Add Keyframe").clicked() && self.selected_animation.is_some() {
+                self.show_keyframe_editor = true;
+                self.keyframe_buffer = KeyframeBuffer::new(self.playback_state.current_time, 0);
             }
 
             ui.separator();
@@ -351,7 +349,7 @@ impl AnimationEditorState {
         // Draw time markers
         let duration = animation.duration;
         let pixels_per_second = self.timeline_zoom;
-        let timeline_width = duration * pixels_per_second;
+        let _timeline_width = duration * pixels_per_second;
 
         // Draw time grid
         let num_seconds = duration.ceil() as i32;
@@ -435,11 +433,9 @@ impl AnimationEditorState {
                 ui.separator();
 
                 ui.horizontal(|ui| {
-                    if ui.button("✓ Create").clicked() {
-                        if !self.create_buffer.name.is_empty() {
-                            result = Some(self.create_buffer.to_animation());
-                            close_dialog = true;
-                        }
+                    if ui.button("✓ Create").clicked() && !self.create_buffer.name.is_empty() {
+                        result = Some(self.create_buffer.to_animation());
+                        close_dialog = true;
                     }
 
                     if ui.button("✗ Cancel").clicked() {

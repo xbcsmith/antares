@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Auto-Save and Recovery System - Phase 5.6
+//! Auto-Save and Recovery System
 //!
 //! Provides automatic saving and crash recovery for creature editing.
 //! Supports:
@@ -294,12 +294,9 @@ impl AutoSaveManager {
 
         // Remove old backups beyond max_backups
         for backup in backups.iter().skip(self.config.max_backups) {
-            if let Err(e) = fs::remove_file(&backup.path) {
-                eprintln!(
-                    "Warning: Failed to remove old backup {}: {}",
-                    backup.path.display(),
-                    e
-                );
+            if let Err(_backup_removal_err) = fs::remove_file(&backup.path) {
+                // Non-critical: old backup removal failed (e.g., already deleted or
+                // permissions issue). Continue cleanup attempt for remaining backups.
             }
         }
 

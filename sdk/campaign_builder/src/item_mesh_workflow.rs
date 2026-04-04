@@ -57,18 +57,13 @@
 /// let mode = ItemMeshEditorMode::Registry;
 /// assert!(matches!(mode, ItemMeshEditorMode::Registry));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ItemMeshEditorMode {
     /// Browsing the registry of registered item mesh assets.
+    #[default]
     Registry,
     /// Editing a specific item mesh asset.
     Edit,
-}
-
-impl Default for ItemMeshEditorMode {
-    fn default() -> Self {
-        Self::Registry
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Keyboard Shortcuts System - Phase 5.3
+//! Keyboard Shortcuts System
 //!
 //! Provides keyboard shortcut management for the creature editor.
 //! Supports:

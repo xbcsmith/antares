@@ -4,8 +4,7 @@
 use crate::context_menu::ContextMenuManager;
 use crate::creature_id_manager::{CreatureCategory, CreatureIdManager};
 use crate::creature_undo_redo::CreatureUndoRedoManager;
-use crate::creatures_manager::CreaturesManager;
-use crate::creatures_workflow::{CreatureWorkflowState, WorkflowMode};
+use crate::creatures_workflow::CreatureWorkflowState;
 use crate::keyboard_shortcuts::ShortcutManager;
 use crate::mesh_validation;
 use crate::preview_features::PreviewState;
@@ -22,6 +21,38 @@ use antares::domain::visual::{
 };
 use eframe::egui;
 use std::path::PathBuf;
+
+mod mesh_ui;
+mod preview_panel;
+
+/// Errors produced by creature editor operations.
+#[derive(Debug, thiserror::Error)]
+pub enum CreatureEditorError {
+    #[error("preview renderer is not available")]
+    PreviewRendererUnavailable,
+    #[error("Save As requires an open campaign directory")]
+    NoCampaignDirectory,
+    #[error("Save As path cannot be empty")]
+    EmptySavePath,
+    #[error("Save As path must be under assets/creatures/ and use a .ron filename")]
+    InvalidSavePath,
+    #[error("Invalid Save As path")]
+    InvalidPathFormat,
+    #[error("Save As file must end with .ron")]
+    MissingRonExtension,
+    #[error("Save As filename cannot be empty")]
+    EmptyFilename,
+    #[error("Failed to create Save As directory '{0}': {1}")]
+    DirectoryCreationError(String, String),
+    #[error("Failed to serialize creature for Save As: {0}")]
+    SerializationError(String),
+    #[error("Failed to write Save As asset '{0}': {1}")]
+    WriteError(String, String),
+    #[error("Cannot revert: selected creature is no longer available")]
+    RevertCreatureUnavailable,
+    #[error("Cannot revert while in registry mode")]
+    RevertInListMode,
+}
 
 /// Sentinel string returned by the creatures editor `show()` method to signal
 /// that the Campaign Builder should open the Creature Template Browser dialog.
@@ -95,7 +126,7 @@ pub struct CreaturesEditorState {
     // Preview state
     pub preview_dirty: bool,
 
-    // Phase 1: Registry Management UI
+    // Registry Management UI
     pub category_filter: Option<CreatureCategory>,
     pub show_registry_stats: bool,
     pub id_manager: CreatureIdManager,
@@ -106,14 +137,14 @@ pub struct CreaturesEditorState {
     pub validation_warnings: Vec<String>,
     pub validation_info: Vec<String>,
     pub last_validated_mesh_index: Option<usize>,
-    /// Phase 3: Two-step delete confirmation flag for the registry preview panel.
+    /// Two-step delete confirmation flag for the registry preview panel.
     ///
     /// When `true` the Delete button shows "⚠ Confirm Delete"; a second click
     /// executes the deletion.  Resets whenever `selected_registry_entry` changes
     /// or `back_to_registry()` is called.
     pub registry_delete_confirm_pending: bool,
 
-    // Phase 4: Register Asset Dialog
+    // Register Asset Dialog
     /// When `true`, the "Register Creature Asset" dialog window is visible.
     pub show_register_asset_dialog: bool,
     /// Path buffer for the asset path text field (relative to campaign directory).
@@ -129,7 +160,7 @@ pub struct CreaturesEditorState {
     /// creature asset candidates cache should be refreshed.
     pub last_campaign_dir: Option<PathBuf>,
 
-    // Phase 2: Asset Editor UI
+    // Asset Editor UI
     pub show_primitive_dialog: bool,
     pub primitive_type: PrimitiveType,
     pub primitive_size: f32,
@@ -150,7 +181,7 @@ pub struct CreaturesEditorState {
     pub show_save_as_dialog: bool,
     pub save_as_path_buffer: String,
 
-    // Phase 5: Workflow Integration & Polish
+    // Workflow Integration
     /// Unified workflow state (undo/redo, shortcuts, context menus, auto-save, preview).
     pub workflow: CreatureWorkflowState,
     /// Dedicated undo/redo manager for creature editing operations.
@@ -265,7 +296,7 @@ impl Default for CreaturesEditorState {
 
             registry_delete_confirm_pending: false,
 
-            // Phase 4: Register Asset Dialog
+            // Register Asset Dialog
             show_register_asset_dialog: false,
             register_asset_path_buffer: String::new(),
             register_asset_validated_creature: None,
@@ -273,7 +304,7 @@ impl Default for CreaturesEditorState {
             available_creature_assets: Vec::new(),
             last_campaign_dir: None,
 
-            // Phase 5: Workflow Integration & Polish
+            // Workflow Integration
             workflow: CreatureWorkflowState::new(),
             undo_redo: CreatureUndoRedoManager::new(),
             shortcut_manager: ShortcutManager::new(),
@@ -319,7 +350,7 @@ impl CreaturesEditorState {
         ui: &mut egui::Ui,
         creatures: &mut Vec<CreatureDefinition>,
         campaign_dir: &Option<PathBuf>,
-        creatures_file: &str,
+        _creatures_file: &str,
         unsaved_changes: &mut bool,
     ) -> Option<String> {
         match self.mode {
@@ -332,7 +363,7 @@ impl CreaturesEditorState {
         }
     }
 
-    /// Show registry management mode (Phase 1)
+    /// Show registry management mode
     fn show_registry_mode(
         &mut self,
         ui: &mut egui::Ui,
@@ -491,7 +522,7 @@ impl CreaturesEditorState {
 
         ui.separator();
 
-        // ---- Phase 3: Two-column layout (list + preview) ----
+        // ---- Two-column layout (list + preview) ----
         //
         // Uses TwoColumnLayout (the project-standard helper) instead of a raw
         // SidePanel::right.  SidePanel is a layout reservation that egui
@@ -804,7 +835,7 @@ impl CreaturesEditorState {
             });
         }
 
-        // Phase 4: Register Asset Dialog window
+        // Register Asset Dialog window
         if self.show_register_asset_dialog {
             let ctx = ui.ctx().clone();
             let available_paths = self.available_creature_assets.clone();
@@ -1328,17 +1359,6 @@ impl CreaturesEditorState {
         (monsters, npcs, templates, variants, custom)
     }
 
-    #[allow(dead_code)]
-    #[deprecated(note = "Legacy list-mode path is retired; use show_registry_mode instead")]
-    fn show_list_mode(
-        &mut self,
-        _ui: &mut egui::Ui,
-        _creatures: &mut [CreatureDefinition],
-        _unsaved_changes: &mut bool,
-    ) -> Option<String> {
-        panic!("Deprecated show_list_mode() path should never be called")
-    }
-
     fn show_edit_mode(
         &mut self,
         ui: &mut egui::Ui,
@@ -1452,7 +1472,7 @@ impl CreaturesEditorState {
 
         ui.separator();
 
-        // Phase 2: Three-panel layout: Mesh List | 3D Preview | Mesh Properties
+        // Three-panel layout: Mesh List | 3D Preview | Mesh Properties
         egui::SidePanel::left("mesh_list_panel")
             .resizable(true)
             .default_width(250.0)
@@ -1523,7 +1543,7 @@ impl CreaturesEditorState {
         result_message
     }
 
-    /// Show mesh list panel (left, 250px) - Phase 2.1
+    /// Show mesh list panel (left, 250px)
     fn show_mesh_list_panel(&mut self, ui: &mut egui::Ui, unsaved_changes: &mut bool) {
         ui.heading("Meshes");
 
@@ -1539,31 +1559,28 @@ impl CreaturesEditorState {
             }
 
             if let Some(mesh_idx) = self.selected_mesh_index {
-                if ui.button("📋 Duplicate").clicked() {
-                    if mesh_idx < self.edit_buffer.meshes.len() {
-                        let mesh = self.edit_buffer.meshes[mesh_idx].clone();
-                        let transform = self.edit_buffer.mesh_transforms[mesh_idx];
-                        self.edit_buffer.meshes.push(mesh);
-                        self.edit_buffer.mesh_transforms.push(transform);
-                        self.mesh_visibility.push(true);
-                        *unsaved_changes = true;
-                        self.preview_dirty = true;
-                    }
+                if ui.button("📋 Duplicate").clicked() && mesh_idx < self.edit_buffer.meshes.len()
+                {
+                    let mesh = self.edit_buffer.meshes[mesh_idx].clone();
+                    let transform = self.edit_buffer.mesh_transforms[mesh_idx];
+                    self.edit_buffer.meshes.push(mesh);
+                    self.edit_buffer.mesh_transforms.push(transform);
+                    self.mesh_visibility.push(true);
+                    *unsaved_changes = true;
+                    self.preview_dirty = true;
                 }
 
-                if ui.button("🗑 Delete").clicked() {
-                    if mesh_idx < self.edit_buffer.meshes.len() {
-                        self.edit_buffer.meshes.remove(mesh_idx);
-                        self.edit_buffer.mesh_transforms.remove(mesh_idx);
-                        if mesh_idx < self.mesh_visibility.len() {
-                            self.mesh_visibility.remove(mesh_idx);
-                        }
-                        self.selected_mesh_index = None;
-                        self.mesh_edit_buffer = None;
-                        self.mesh_transform_buffer = None;
-                        *unsaved_changes = true;
-                        self.preview_dirty = true;
+                if ui.button("🗑 Delete").clicked() && mesh_idx < self.edit_buffer.meshes.len() {
+                    self.edit_buffer.meshes.remove(mesh_idx);
+                    self.edit_buffer.mesh_transforms.remove(mesh_idx);
+                    if mesh_idx < self.mesh_visibility.len() {
+                        self.mesh_visibility.remove(mesh_idx);
                     }
+                    self.selected_mesh_index = None;
+                    self.mesh_edit_buffer = None;
+                    self.mesh_transform_buffer = None;
+                    *unsaved_changes = true;
+                    self.preview_dirty = true;
                 }
             }
         });
@@ -1627,490 +1644,7 @@ impl CreaturesEditorState {
             });
     }
 
-    /// Show 3D preview panel (center, flex) - Phase 2.2
-    fn show_preview_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Preview");
-
-        // Preview controls overlay
-        ui.horizontal(|ui| {
-            if ui.checkbox(&mut self.show_grid, "Grid").changed() {
-                self.preview_dirty = true;
-                ui.ctx().request_repaint();
-            }
-            if ui.checkbox(&mut self.show_wireframe, "Wireframe").changed() {
-                self.preview_dirty = true;
-                ui.ctx().request_repaint();
-            }
-            if ui.checkbox(&mut self.show_normals, "Normals").changed() {
-                self.preview_dirty = true;
-                ui.ctx().request_repaint();
-            }
-            if ui.checkbox(&mut self.show_axes, "Axes").changed() {
-                self.preview_dirty = true;
-                ui.ctx().request_repaint();
-            }
-
-            if ui.button("🔄 Reset Camera").clicked() {
-                self.camera_distance = 5.0;
-                self.preview_state.reset_camera();
-                self.preview_dirty = true;
-                ui.ctx().request_repaint();
-            }
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Camera Distance:");
-            if ui
-                .add(
-                    egui::Slider::new(&mut self.camera_distance, 1.0..=10.0)
-                        .text("units")
-                        .show_value(true),
-                )
-                .changed()
-            {
-                self.preview_dirty = true;
-                ui.ctx().request_repaint();
-            }
-
-            ui.label("Background:");
-            if ui
-                .color_edit_button_rgba_unmultiplied(&mut self.background_color)
-                .changed()
-            {
-                self.preview_dirty = true;
-                ui.ctx().request_repaint();
-            }
-        });
-
-        ui.separator();
-
-        if self.preview_dirty {
-            if let Err(error) = self.sync_preview_renderer_from_edit_buffer() {
-                self.preview_error = Some(error);
-            }
-        }
-
-        if let Some(renderer) = self.preview_renderer.as_mut() {
-            renderer.options.resolution = (
-                ui.available_width().max(240.0) as u32,
-                ui.available_height().max(220.0) as u32,
-            );
-
-            let interacted = renderer.show(ui);
-            self.camera_distance = renderer.camera.distance;
-            self.preview_state.camera.position = renderer.camera.position();
-
-            if interacted {
-                self.preview_dirty = true;
-                ui.ctx().request_repaint();
-            }
-        } else {
-            self.show_preview_fallback(ui);
-        }
-
-        if let Some(error) = &self.preview_error {
-            ui.separator();
-            ui.colored_label(
-                egui::Color32::YELLOW,
-                format!("Preview fallback: {}", error),
-            );
-        }
-    }
-
-    fn show_preview_fallback(&mut self, ui: &mut egui::Ui) {
-        let (rect, _) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), ui.available_height().max(220.0)),
-            egui::Sense::hover(),
-        );
-
-        ui.painter().rect_filled(
-            rect,
-            4.0,
-            egui::Color32::from_rgba_premultiplied(
-                (self.background_color[0] * 255.0) as u8,
-                (self.background_color[1] * 255.0) as u8,
-                (self.background_color[2] * 255.0) as u8,
-                (self.background_color[3] * 255.0) as u8,
-            ),
-        );
-
-        let fallback = if self.preview_error.is_some() {
-            "3D preview renderer unavailable.\nDiagnostics mode is active."
-        } else {
-            "Preparing preview renderer..."
-        };
-
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            fallback,
-            egui::FontId::proportional(15.0),
-            egui::Color32::LIGHT_GRAY,
-        );
-    }
-
-    fn sync_preview_renderer_from_edit_buffer(&mut self) -> Result<(), String> {
-        let visible = self.current_mesh_visibility();
-        let preview_creature = self.edit_buffer.clone();
-        let selected_mesh_index = self.selected_mesh_index;
-
-        let renderer = self
-            .preview_renderer
-            .as_mut()
-            .ok_or_else(|| "preview renderer is not available".to_string())?;
-
-        renderer.options.show_grid = self.show_grid;
-        renderer.options.show_wireframe = self.show_wireframe;
-        renderer.options.show_normals = self.show_normals;
-        renderer.options.show_axes = self.show_axes;
-        renderer.options.background_color = self.background_color;
-        renderer.camera.distance = self.camera_distance;
-
-        renderer.set_mesh_visibility(visible.clone());
-        renderer.set_selected_mesh_index(selected_mesh_index);
-        renderer.update_creature(Some(preview_creature));
-
-        self.preview_state.options.show_grid = self.show_grid;
-        self.preview_state.options.show_wireframe = self.show_wireframe;
-        self.preview_state.options.show_normals = self.show_normals;
-        self.preview_state.options.show_axes = self.show_axes;
-        self.preview_state.options.background_color = self.background_color;
-
-        let stats = self.build_preview_statistics(&visible);
-        self.preview_state.update_statistics(stats);
-
-        self.preview_dirty = false;
-        Ok(())
-    }
-
-    fn current_mesh_visibility(&self) -> Vec<bool> {
-        self.edit_buffer
-            .meshes
-            .iter()
-            .enumerate()
-            .map(|(idx, _)| self.mesh_visibility.get(idx).copied().unwrap_or(true))
-            .collect()
-    }
-
-    fn build_preview_statistics(&self, visible: &[bool]) -> PreviewStatistics {
-        let mut stats = PreviewStatistics::new();
-        stats.mesh_count = self.edit_buffer.meshes.len();
-        stats.selected_meshes = usize::from(self.selected_mesh_index.is_some());
-
-        for (idx, mesh) in self.edit_buffer.meshes.iter().enumerate() {
-            if visible.get(idx).copied().unwrap_or(true) {
-                stats.vertex_count += mesh.vertices.len();
-                stats.triangle_count += mesh.indices.len() / 3;
-            }
-        }
-
-        stats
-    }
-
-    /// Show mesh properties panel (right, 350px) - Phase 2.3
-    fn show_mesh_properties_panel(
-        &mut self,
-        ui: &mut egui::Ui,
-        unsaved_changes: &mut bool,
-    ) -> Option<String> {
-        let mut result_message = None;
-        if let Some(mesh_idx) = self.selected_mesh_index {
-            if mesh_idx >= self.edit_buffer.meshes.len() {
-                ui.label("Invalid mesh selection");
-                return Some("Invalid mesh selection".to_string());
-            }
-
-            ui.heading(format!("Mesh {} Properties", mesh_idx));
-            ui.separator();
-
-            // Mesh Info Section
-            ui.collapsing("Mesh Info", |ui| {
-                egui::Grid::new("mesh_info_grid")
-                    .num_columns(2)
-                    .spacing([10.0, 8.0])
-                    .show(ui, |ui| {
-                        ui.label("Name:");
-                        let mut name = self.edit_buffer.meshes[mesh_idx]
-                            .name
-                            .clone()
-                            .unwrap_or_default();
-                        if ui.text_edit_singleline(&mut name).changed() {
-                            self.edit_buffer.meshes[mesh_idx].name =
-                                if name.is_empty() { None } else { Some(name) };
-                            if let Some(buffer) = &mut self.mesh_edit_buffer {
-                                buffer.name = self.edit_buffer.meshes[mesh_idx].name.clone();
-                            }
-                            *unsaved_changes = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Color:");
-                        if ui
-                            .color_edit_button_rgba_unmultiplied(
-                                &mut self.edit_buffer.meshes[mesh_idx].color,
-                            )
-                            .changed()
-                        {
-                            if let Some(buffer) = &mut self.mesh_edit_buffer {
-                                buffer.color = self.edit_buffer.meshes[mesh_idx].color;
-                            }
-                            *unsaved_changes = true;
-                            self.preview_dirty = true;
-                        }
-                        ui.end_row();
-
-                        ui.label("Vertices:");
-                        ui.label(format!(
-                            "{}",
-                            self.edit_buffer.meshes[mesh_idx].vertices.len()
-                        ));
-                        ui.end_row();
-
-                        ui.label("Triangles:");
-                        ui.label(format!(
-                            "{}",
-                            self.edit_buffer.meshes[mesh_idx].indices.len() / 3
-                        ));
-                        ui.end_row();
-                    });
-            });
-
-            // Transform Section
-            if let Some(transform) = self.mesh_transform_buffer.as_mut() {
-                ui.collapsing("Transform", |ui| {
-                    egui::Grid::new("mesh_transform_grid")
-                        .num_columns(2)
-                        .spacing([10.0, 8.0])
-                        .show(ui, |ui| {
-                            ui.label("Translation:");
-                            ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label("X:");
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut transform.translation[0])
-                                                .speed(0.01)
-                                                .range(-5.0..=5.0),
-                                        )
-                                        .changed()
-                                    {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                        *unsaved_changes = true;
-                                        self.preview_dirty = true;
-                                    }
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Y:");
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut transform.translation[1])
-                                                .speed(0.01)
-                                                .range(-5.0..=5.0),
-                                        )
-                                        .changed()
-                                    {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                        *unsaved_changes = true;
-                                        self.preview_dirty = true;
-                                    }
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Z:");
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut transform.translation[2])
-                                                .speed(0.01)
-                                                .range(-5.0..=5.0),
-                                        )
-                                        .changed()
-                                    {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                        *unsaved_changes = true;
-                                        self.preview_dirty = true;
-                                    }
-                                });
-                            });
-                            ui.end_row();
-
-                            ui.label("Rotation (deg):");
-                            ui.vertical(|ui| {
-                                let mut pitch_deg = transform.rotation[0].to_degrees();
-                                let mut yaw_deg = transform.rotation[1].to_degrees();
-                                let mut roll_deg = transform.rotation[2].to_degrees();
-
-                                ui.horizontal(|ui| {
-                                    ui.label("Pitch:");
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut pitch_deg)
-                                                .speed(1.0)
-                                                .range(0.0..=360.0),
-                                        )
-                                        .changed()
-                                    {
-                                        transform.rotation[0] = pitch_deg.to_radians();
-                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                        *unsaved_changes = true;
-                                        self.preview_dirty = true;
-                                    }
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Yaw:");
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut yaw_deg)
-                                                .speed(1.0)
-                                                .range(0.0..=360.0),
-                                        )
-                                        .changed()
-                                    {
-                                        transform.rotation[1] = yaw_deg.to_radians();
-                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                        *unsaved_changes = true;
-                                        self.preview_dirty = true;
-                                    }
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Roll:");
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut roll_deg)
-                                                .speed(1.0)
-                                                .range(0.0..=360.0),
-                                        )
-                                        .changed()
-                                    {
-                                        transform.rotation[2] = roll_deg.to_radians();
-                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                        *unsaved_changes = true;
-                                        self.preview_dirty = true;
-                                    }
-                                });
-                            });
-                            ui.end_row();
-
-                            ui.label("Scale:");
-                            ui.vertical(|ui| {
-                                ui.checkbox(&mut self.uniform_scale, "Uniform scaling");
-
-                                if self.uniform_scale {
-                                    let mut uniform = transform.scale[0];
-                                    ui.horizontal(|ui| {
-                                        ui.label("XYZ:");
-                                        if ui
-                                            .add(
-                                                egui::DragValue::new(&mut uniform)
-                                                    .speed(0.01)
-                                                    .range(0.01..=10.0),
-                                            )
-                                            .changed()
-                                        {
-                                            transform.scale = [uniform, uniform, uniform];
-                                            self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                            *unsaved_changes = true;
-                                            self.preview_dirty = true;
-                                        }
-                                    });
-                                } else {
-                                    ui.horizontal(|ui| {
-                                        ui.label("X:");
-                                        if ui
-                                            .add(
-                                                egui::DragValue::new(&mut transform.scale[0])
-                                                    .speed(0.01)
-                                                    .range(0.01..=10.0),
-                                            )
-                                            .changed()
-                                        {
-                                            self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                            *unsaved_changes = true;
-                                            self.preview_dirty = true;
-                                        }
-                                    });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Y:");
-                                        if ui
-                                            .add(
-                                                egui::DragValue::new(&mut transform.scale[1])
-                                                    .speed(0.01)
-                                                    .range(0.01..=10.0),
-                                            )
-                                            .changed()
-                                        {
-                                            self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                            *unsaved_changes = true;
-                                            self.preview_dirty = true;
-                                        }
-                                    });
-                                    ui.horizontal(|ui| {
-                                        ui.label("Z:");
-                                        if ui
-                                            .add(
-                                                egui::DragValue::new(&mut transform.scale[2])
-                                                    .speed(0.01)
-                                                    .range(0.01..=10.0),
-                                            )
-                                            .changed()
-                                        {
-                                            self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                            *unsaved_changes = true;
-                                            self.preview_dirty = true;
-                                        }
-                                    });
-                                }
-                            });
-                            ui.end_row();
-                        });
-                });
-            }
-
-            // Geometry Section
-            ui.collapsing("Geometry", |ui| {
-                let mesh = &self.edit_buffer.meshes[mesh_idx];
-                ui.label(format!("Vertices: {}", mesh.vertices.len()));
-                ui.label(format!("Triangles: {}", mesh.indices.len() / 3));
-                ui.label(format!(
-                    "Normals: {}",
-                    if mesh.normals.is_some() { "Yes" } else { "No" }
-                ));
-                ui.label(format!(
-                    "UVs: {}",
-                    if mesh.uvs.is_some() { "Yes" } else { "No" }
-                ));
-
-                // TODO: Add View/Edit Table buttons for vertices/indices/normals
-            });
-
-            // Action Buttons
-            ui.separator();
-            ui.horizontal(|ui| {
-                if ui.button("🔄 Replace with Primitive").clicked() {
-                    self.show_primitive_dialog = true;
-                    self.primitive_use_current_color = true;
-                    self.primitive_preserve_transform = true;
-                    self.primitive_keep_name = true;
-                }
-
-                if ui.button("🔍 Validate Mesh").clicked() {
-                    result_message = Some(self.validate_selected_mesh(mesh_idx));
-                    ui.ctx().request_repaint();
-                }
-
-                if ui.button("↺ Reset Transform").clicked() {
-                    self.edit_buffer.mesh_transforms[mesh_idx] = MeshTransform::identity();
-                    self.mesh_transform_buffer = Some(MeshTransform::identity());
-                    *unsaved_changes = true;
-                    self.preview_dirty = true;
-                }
-            });
-        } else {
-            ui.label("Select a mesh to edit its properties");
-        }
-
-        result_message
-    }
-
-    /// Show creature-level properties (bottom panel) - Phase 2.5
+    /// Show creature-level properties (bottom panel)
     fn show_creature_level_properties(
         &mut self,
         ui: &mut egui::Ui,
@@ -2258,7 +1792,7 @@ impl CreaturesEditorState {
                         result_message = Some(message);
                     }
                     Err(error) => {
-                        result_message = Some(error);
+                        result_message = Some(error.to_string());
                     }
                 }
             }
@@ -2357,7 +1891,7 @@ impl CreaturesEditorState {
     fn revert_edit_buffer_from_registry(
         &mut self,
         creatures: &[CreatureDefinition],
-    ) -> Result<String, String> {
+    ) -> Result<String, CreatureEditorError> {
         match self.mode {
             CreaturesEditorMode::Edit => {
                 if let Some(idx) = self.selected_creature {
@@ -2373,7 +1907,7 @@ impl CreaturesEditorState {
                         return Ok(format!("Reverted changes for '{}'", creature.name));
                     }
                 }
-                Err("Cannot revert: selected creature is no longer available".to_string())
+                Err(CreatureEditorError::RevertCreatureUnavailable)
             }
             CreaturesEditorMode::Add => {
                 self.edit_buffer = Self::default_creature();
@@ -2386,7 +1920,7 @@ impl CreaturesEditorState {
                 self.workflow.mark_clean();
                 Ok("Reverted new creature form to defaults".to_string())
             }
-            CreaturesEditorMode::List => Err("Cannot revert while in registry mode".to_string()),
+            CreaturesEditorMode::List => Err(CreatureEditorError::RevertInListMode),
         }
     }
 
@@ -2418,29 +1952,27 @@ impl CreaturesEditorState {
         relative_path: &str,
         campaign_dir: &Option<PathBuf>,
         unsaved_changes: &mut bool,
-    ) -> Result<String, String> {
+    ) -> Result<String, CreatureEditorError> {
         let mut normalized = Self::normalize_relative_creature_asset_path(relative_path);
         if normalized.is_empty() {
-            return Err("Save As path cannot be empty".to_string());
+            return Err(CreatureEditorError::EmptySavePath);
         }
         if !normalized.ends_with(".ron") {
             normalized.push_str(".ron");
         }
         if !normalized.starts_with("assets/creatures/") {
-            return Err(
-                "Save As path must be under assets/creatures/ and use a .ron filename".to_string(),
-            );
+            return Err(CreatureEditorError::InvalidSavePath);
         }
 
         let file_name = normalized
             .split('/')
             .next_back()
-            .ok_or_else(|| "Invalid Save As path".to_string())?;
+            .ok_or(CreatureEditorError::InvalidPathFormat)?;
         let stem = file_name
             .strip_suffix(".ron")
-            .ok_or_else(|| "Save As file must end with .ron".to_string())?;
+            .ok_or(CreatureEditorError::MissingRonExtension)?;
         if stem.is_empty() {
-            return Err("Save As filename cannot be empty".to_string());
+            return Err(CreatureEditorError::EmptyFilename);
         }
 
         let mut new_creature = self.edit_buffer.clone();
@@ -2474,18 +2006,17 @@ impl CreaturesEditorState {
         campaign_dir: &Option<PathBuf>,
         relative_path: &str,
         creature: &CreatureDefinition,
-    ) -> Result<(), String> {
+    ) -> Result<(), CreatureEditorError> {
         let base_dir = campaign_dir
             .as_ref()
-            .ok_or_else(|| "Save As requires an open campaign directory".to_string())?;
+            .ok_or(CreatureEditorError::NoCampaignDirectory)?;
         let absolute_path = base_dir.join(relative_path);
 
         if let Some(parent) = absolute_path.parent() {
             std::fs::create_dir_all(parent).map_err(|error| {
-                format!(
-                    "Failed to create Save As directory '{}': {}",
-                    parent.display(),
-                    error
+                CreatureEditorError::DirectoryCreationError(
+                    parent.display().to_string(),
+                    error.to_string(),
                 )
             })?;
         }
@@ -2495,14 +2026,10 @@ impl CreaturesEditorState {
             .enumerate_arrays(false)
             .depth_limit(3);
         let contents = ron::ser::to_string_pretty(creature, ron_config)
-            .map_err(|error| format!("Failed to serialize creature for Save As: {}", error))?;
+            .map_err(|error| CreatureEditorError::SerializationError(error.to_string()))?;
 
         std::fs::write(&absolute_path, contents).map_err(|error| {
-            format!(
-                "Failed to write Save As asset '{}': {}",
-                absolute_path.display(),
-                error
-            )
+            CreatureEditorError::WriteError(absolute_path.display().to_string(), error.to_string())
         })
     }
 
@@ -2539,7 +2066,7 @@ impl CreaturesEditorState {
                                 self.save_as_path_buffer.clear();
                             }
                             Err(error) => {
-                                result_message = Some(error);
+                                result_message = Some(error.to_string());
                             }
                         }
                         ui.ctx().request_repaint();
@@ -2557,7 +2084,7 @@ impl CreaturesEditorState {
         result_message
     }
 
-    /// Show primitive replacement dialog - Phase 2.4
+    /// Show primitive replacement dialog
     fn show_primitive_replacement_dialog(
         &mut self,
         ctx: &egui::Context,
@@ -2776,15 +2303,14 @@ impl CreaturesEditorState {
             }
 
             if let Some(mesh_idx) = self.selected_mesh_index {
-                if ui.button("➖ Remove Mesh").clicked() {
-                    if mesh_idx < self.edit_buffer.meshes.len() {
-                        self.edit_buffer.meshes.remove(mesh_idx);
-                        self.edit_buffer.mesh_transforms.remove(mesh_idx);
-                        self.selected_mesh_index = None;
-                        self.mesh_edit_buffer = None;
-                        self.mesh_transform_buffer = None;
-                        self.preview_dirty = true;
-                    }
+                if ui.button("➖ Remove Mesh").clicked() && mesh_idx < self.edit_buffer.meshes.len()
+                {
+                    self.edit_buffer.meshes.remove(mesh_idx);
+                    self.edit_buffer.mesh_transforms.remove(mesh_idx);
+                    self.selected_mesh_index = None;
+                    self.mesh_edit_buffer = None;
+                    self.mesh_transform_buffer = None;
+                    self.preview_dirty = true;
                 }
             }
         });
@@ -2993,7 +2519,7 @@ impl CreaturesEditorState {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 5: Workflow Integration helpers
+    // Workflow Integration helpers
     // -----------------------------------------------------------------------
 
     /// Enter asset-editor mode for the given creature.
@@ -3078,7 +2604,7 @@ impl CreaturesEditorState {
         self.workflow.return_to_registry();
     }
 
-    /// Returns the mode indicator string for the top bar (Phase 5.1).
+    /// Returns the mode indicator string for the top bar.
     ///
     /// Examples: `"Registry Mode"` or `"Asset Editor: goblin.ron"`.
     ///
@@ -3094,7 +2620,7 @@ impl CreaturesEditorState {
         self.workflow.mode_indicator()
     }
 
-    /// Returns the breadcrumb navigation string (Phase 5.1).
+    /// Returns the breadcrumb navigation string.
     ///
     /// Example: `"Creatures > Goblin > left_leg"`.
     ///
@@ -3152,7 +2678,7 @@ impl CreaturesEditorState {
         self.undo_redo.can_redo()
     }
 
-    /// Returns the keyboard shortcut string for an action (Phase 5.3).
+    /// Returns the keyboard shortcut string for an action.
     ///
     /// # Arguments
     ///
@@ -3239,10 +2765,10 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 4: Register Existing Creature Asset .ron File
+    // Register Existing Creature Asset .ron File
     // -----------------------------------------------------------------------
 
-    /// All Phase 4 dialog fields must default to empty / false / None.
+    /// All dialog fields must default to empty / false / None.
     #[test]
     fn test_register_asset_dialog_initial_state() {
         let state = CreaturesEditorState::new();
@@ -3606,12 +3132,11 @@ mod tests {
     /// positive.
     #[test]
     fn test_creature_scale_range_is_valid() {
+        let min = CREATURE_SCALE_MIN;
+        let max = CREATURE_SCALE_MAX;
+        assert!(min > 0.0, "CREATURE_SCALE_MIN must be positive");
         assert!(
-            CREATURE_SCALE_MIN > 0.0,
-            "CREATURE_SCALE_MIN must be positive"
-        );
-        assert!(
-            CREATURE_SCALE_MAX > CREATURE_SCALE_MIN,
+            max > min,
             "CREATURE_SCALE_MAX must be greater than CREATURE_SCALE_MIN"
         );
     }
@@ -3761,7 +3286,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Findings Remediation Phase 4: Preview integration lifecycle
+    // Preview integration lifecycle
     // -----------------------------------------------------------------------
 
     #[test]
@@ -3842,7 +3367,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 2 regression tests: Fix the Silent Data-Loss Bug in Edit Mode
+    // Regression tests: Fix the Silent Data-Loss Bug in Edit Mode
     // -----------------------------------------------------------------------
 
     /// Helper that constructs a named creature with a given id.
@@ -3989,7 +3514,7 @@ mod tests {
         );
 
         assert!(result.is_err());
-        let error = result.err().unwrap();
+        let error = result.err().unwrap().to_string();
         assert!(error.contains("requires an open campaign directory"));
         assert_eq!(
             creatures.len(),
@@ -4021,7 +3546,7 @@ mod tests {
         );
 
         assert!(result.is_err());
-        let error = result.err().unwrap();
+        let error = result.err().unwrap().to_string();
         assert!(error.contains("must be under assets/creatures/"));
         assert_eq!(creatures.len(), 1, "invalid path must not mutate registry");
         assert!(!unsaved_changes, "invalid path must not set unsaved flag");
@@ -4053,7 +3578,7 @@ mod tests {
         );
 
         assert!(result.is_err());
-        let error = result.err().unwrap();
+        let error = result.err().unwrap().to_string();
         assert!(error.contains("Failed to create Save As directory"));
         assert_eq!(creatures.len(), 1, "failed write must not mutate registry");
         assert!(!unsaved_changes, "failed write must not set unsaved flag");
@@ -4067,8 +3592,8 @@ mod tests {
         let result = state.revert_edit_buffer_from_registry(&creatures);
         assert!(result.is_err());
         assert_eq!(
-            result.err().unwrap(),
-            "Cannot revert while in registry mode".to_string()
+            result.err().unwrap().to_string(),
+            "Cannot revert while in registry mode"
         );
     }
 
@@ -4083,8 +3608,20 @@ mod tests {
         let result = state.revert_edit_buffer_from_registry(&creatures);
         assert!(result.is_err());
         assert_eq!(
-            result.err().unwrap(),
-            "Cannot revert: selected creature is no longer available".to_string()
+            result.err().unwrap().to_string(),
+            "Cannot revert: selected creature is no longer available"
+        );
+    }
+
+    #[test]
+    fn test_creature_editor_error_display() {
+        assert_eq!(
+            CreatureEditorError::NoCampaignDirectory.to_string(),
+            "Save As requires an open campaign directory"
+        );
+        assert_eq!(
+            CreatureEditorError::EmptySavePath.to_string(),
+            "Save As path cannot be empty"
         );
     }
 
@@ -4216,7 +3753,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 3: Preview Panel in Registry List Mode
+    // Preview Panel in Registry List Mode
     // -----------------------------------------------------------------------
 
     /// Confirm that when `selected_registry_entry` is `None` the preview panel

@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Creature Editor Unified Workflow - Phase 5.1
+//! Creature Editor Unified Workflow
 //!
 //! Provides the unified workflow state and logic for the creature editor,
-//! integrating all Phase 5 components:
+//! integrating all workflow subsystems:
 //! - Undo/redo history via `CreatureUndoRedoManager`
 //! - Keyboard shortcuts via `ShortcutManager`
 //! - Context menus via `ContextMenuManager`
@@ -59,9 +59,10 @@ use crate::preview_features::PreviewState;
 /// let mode = WorkflowMode::AssetEditor;
 /// assert_eq!(mode.display_name(), "Asset Editor");
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WorkflowMode {
     /// The registry list view – browse and manage creature entries.
+    #[default]
     Registry,
     /// The per-creature asset editor – edit meshes, transforms, and properties.
     AssetEditor,
@@ -97,12 +98,6 @@ impl WorkflowMode {
     /// ```
     pub fn is_asset_editor(&self) -> bool {
         *self == WorkflowMode::AssetEditor
-    }
-}
-
-impl Default for WorkflowMode {
-    fn default() -> Self {
-        WorkflowMode::Registry
     }
 }
 
@@ -173,9 +168,9 @@ impl EditorBreadcrumb {
 // CreatureWorkflowState
 // ---------------------------------------------------------------------------
 
-/// Integrated workflow state for the creature editor (Phase 5).
+/// Integrated workflow state for the creature editor.
 ///
-/// Owns all Phase 5 subsystems: undo/redo, shortcuts, context menus,
+/// Owns all subsystems: undo/redo, shortcuts, context menus,
 /// auto-save, and preview.  The creature editor embeds this struct and
 /// delegates to it for every operation that requires history, input
 /// handling, or persistence.
@@ -230,7 +225,7 @@ impl Default for CreatureWorkflowState {
 }
 
 impl CreatureWorkflowState {
-    /// Create a new workflow state with all Phase 5 subsystems initialised.
+    /// Create a new workflow state with all subsystems initialised.
     ///
     /// # Examples
     ///

@@ -7,23 +7,51 @@
 //! rendering via the `show()` method, following the standard editor pattern.
 //! Uses shared UI components for consistent layout.
 //!
-//! # Autocomplete Integration (Phase 2)
+//! # Autocomplete Integration
 //!
 //! - Starting weapon/armor selection uses `autocomplete_item_selector`
 //! - Proficiency selection uses multi-select autocomplete with quick-add buttons
 //! - Entity validation warnings display for missing item/proficiency references
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
-    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
-    ToolbarAction, TwoColumnLayout,
+    handle_toolbar_action, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
+    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::classes::{ClassDefinition, SpellSchool, SpellStat};
 use antares::domain::items::types::Item;
-use antares::domain::proficiency::{ProficiencyDatabase, ProficiencyId};
+use antares::domain::proficiency::ProficiencyId;
 use antares::domain::types::{DiceRoll, ItemId};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+/// Errors produced by class editor operations.
+#[derive(Debug, thiserror::Error)]
+pub enum ClassEditorError {
+    #[error("ID cannot be empty")]
+    EmptyId,
+    #[error("Name cannot be empty")]
+    EmptyName,
+    #[error("Invalid HP Die Count")]
+    InvalidHpDieCount,
+    #[error("Invalid HP Die Sides")]
+    InvalidHpDieSides,
+    #[error("Invalid HP Die Modifier")]
+    InvalidHpDieModifier,
+    #[error("Class ID already exists")]
+    DuplicateId,
+    #[error("Failed to read file: {0}")]
+    ReadError(String),
+    #[error("Failed to parse classes: {0}")]
+    ParseError(String),
+    #[error("Failed to create directory: {0}")]
+    DirectoryError(String),
+    #[error("Failed to serialize classes: {0}")]
+    SerializationError(String),
+    #[error("Failed to write file: {0}")]
+    WriteError(String),
+}
 
 /// Editor state for classes
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,32 +202,32 @@ impl ClassesEditorState {
         campaign_dir: Option<&PathBuf>,
         classes_file: &str,
         status_message: &mut String,
-    ) -> Result<(), String> {
+    ) -> Result<(), ClassEditorError> {
         let id = self.buffer.id.trim().to_string();
         if id.is_empty() {
-            return Err("ID cannot be empty".to_string());
+            return Err(ClassEditorError::EmptyId);
         }
 
         let name = self.buffer.name.trim().to_string();
         if name.is_empty() {
-            return Err("Name cannot be empty".to_string());
+            return Err(ClassEditorError::EmptyName);
         }
 
         let hp_count = self
             .buffer
             .hp_die_count
             .parse::<u8>()
-            .map_err(|_| "Invalid HP Die Count")?;
+            .map_err(|_| ClassEditorError::InvalidHpDieCount)?;
         let hp_sides = self
             .buffer
             .hp_die_sides
             .parse::<u8>()
-            .map_err(|_| "Invalid HP Die Sides")?;
+            .map_err(|_| ClassEditorError::InvalidHpDieSides)?;
         let hp_mod = self
             .buffer
             .hp_die_modifier
             .parse::<i8>()
-            .map_err(|_| "Invalid HP Die Modifier")?;
+            .map_err(|_| ClassEditorError::InvalidHpDieModifier)?;
 
         // Ensure strings are trimmed and filtered
         let abilities: Vec<String> = self
@@ -243,7 +271,7 @@ impl ClassesEditorState {
         } else {
             // Check for duplicate ID if creating new
             if self.classes.iter().any(|c| c.id == id) {
-                return Err("Class ID already exists".to_string());
+                return Err(ClassEditorError::DuplicateId);
             }
             let new_idx = self.classes.len();
             self.classes.push(class_def);
@@ -315,25 +343,25 @@ impl ClassesEditorState {
     }
 
     /// Loads classes from a file path
-    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), String> {
-        let content =
-            std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
+    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), ClassEditorError> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| ClassEditorError::ReadError(e.to_string()))?;
         let classes: Vec<ClassDefinition> =
-            ron::from_str(&content).map_err(|e| format!("Failed to parse classes: {}", e))?;
+            ron::from_str(&content).map_err(|e| ClassEditorError::ParseError(e.to_string()))?;
         self.classes = classes;
         self.has_unsaved_changes = false;
         Ok(())
     }
 
     /// Saves classes to a file path
-    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), ClassEditorError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+                .map_err(|e| ClassEditorError::DirectoryError(e.to_string()))?;
         }
         let content = ron::ser::to_string_pretty(&self.classes, Default::default())
-            .map_err(|e| format!("Failed to serialize classes: {}", e))?;
-        std::fs::write(path, content).map_err(|e| format!("Failed to write file: {}", e))?;
+            .map_err(|e| ClassEditorError::SerializationError(e.to_string()))?;
+        std::fs::write(path, content).map_err(|e| ClassEditorError::WriteError(e.to_string()))?;
         Ok(())
     }
 
@@ -343,130 +371,40 @@ impl ClassesEditorState {
     ///
     /// * `ui` - The egui UI context
     /// * `items` - Available items for starting equipment selection
-    /// * `campaign_dir` - Optional campaign directory path
-    /// * `classes_file` - Filename for classes data
-    /// * `unsaved_changes` - Mutable flag for tracking unsaved changes
-    /// * `status_message` - Mutable string for status messages
-    /// * `file_load_merge_mode` - Whether to merge or replace when loading files
-    #[allow(clippy::too_many_arguments)]
-    pub fn show(
-        &mut self,
-        ui: &mut egui::Ui,
-        items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        classes_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        file_load_merge_mode: &mut bool,
-    ) {
+    /// * `ctx` - Shared editor context (campaign dir, data file, unsaved flag, status, merge mode)
+    pub fn show(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
         ui.heading("🛡️ Classes Editor");
         ui.add_space(5.0);
 
         // Use shared EditorToolbar component
         let toolbar_action = EditorToolbar::new("Classes")
             .with_search(&mut self.search_filter)
-            .with_merge_mode(file_load_merge_mode)
+            .with_merge_mode(ctx.file_load_merge_mode)
             .with_total_count(self.classes.len())
             .with_id_salt("classes_toolbar")
             .show(ui);
 
-        // Handle toolbar actions
+        // Handle toolbar actions — New and Import are classes-specific;
+        // all other arms are handled by the shared generic dispatcher.
         match toolbar_action {
             ToolbarAction::New => {
                 self.start_new_class();
                 self.buffer.id = self.next_available_class_id();
-                *unsaved_changes = true;
-            }
-            ToolbarAction::Save => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(classes_file);
-                    match self.save_to_file(&path) {
-                        Ok(_) => {
-                            *status_message = format!("Saved {} classes", self.classes.len());
-                        }
-                        Err(e) => {
-                            *status_message = format!("Failed to save classes: {}", e);
-                        }
-                    }
-                }
-            }
-            ToolbarAction::Load => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("RON", &["ron"])
-                    .pick_file()
-                {
-                    let load_result = std::fs::read_to_string(&path).and_then(|contents| {
-                        ron::from_str::<Vec<ClassDefinition>>(&contents)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    });
-
-                    match load_result {
-                        Ok(loaded_classes) => {
-                            if *file_load_merge_mode {
-                                for class in loaded_classes {
-                                    if let Some(existing) =
-                                        self.classes.iter_mut().find(|c| c.id == class.id)
-                                    {
-                                        *existing = class;
-                                    } else {
-                                        self.classes.push(class);
-                                    }
-                                }
-                            } else {
-                                self.classes = loaded_classes;
-                            }
-                            *unsaved_changes = true;
-                            *status_message = format!("Loaded classes from: {}", path.display());
-                        }
-                        Err(e) => {
-                            *status_message = format!("Failed to load classes: {}", e);
-                        }
-                    }
-                }
+                *ctx.unsaved_changes = true;
             }
             ToolbarAction::Import => {
                 // Import not yet implemented for classes
-                *status_message = "Import not yet implemented for classes".to_string();
+                *ctx.status_message = "Import not yet implemented for classes".to_string();
             }
-            ToolbarAction::Export => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("classes.ron")
-                    .add_filter("RON", &["ron"])
-                    .save_file()
-                {
-                    match ron::ser::to_string_pretty(&self.classes, Default::default()) {
-                        Ok(contents) => match std::fs::write(&path, contents) {
-                            Ok(_) => {
-                                *status_message = format!("Saved classes to: {}", path.display());
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to save classes: {}", e);
-                            }
-                        },
-                        Err(e) => {
-                            *status_message = format!("Failed to serialize classes: {}", e);
-                        }
-                    }
-                }
-            }
-            ToolbarAction::Reload => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(classes_file);
-                    if path.exists() {
-                        match self.load_from_file(&path) {
-                            Ok(_) => {
-                                *status_message = format!("Loaded {} classes", self.classes.len());
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to load classes: {}", e);
-                            }
-                        }
-                    } else {
-                        *status_message = "Classes file does not exist".to_string();
-                    }
-                }
-            }
-            ToolbarAction::None => {}
+            other => handle_toolbar_action(
+                other,
+                &mut self.classes,
+                |c: &ClassDefinition| c.id.clone(),
+                &mut self.has_unsaved_changes,
+                ctx,
+                "classes.ron",
+                "classes",
+            ),
         }
 
         ui.separator();
@@ -720,7 +658,7 @@ impl ClassesEditorState {
                         }
                         ItemAction::Delete => {
                             self.delete_class(action_idx);
-                            *unsaved_changes = true;
+                            *ctx.unsaved_changes = true;
                         }
                         ItemAction::Duplicate => {
                             if let Some(class) = self.classes.get(action_idx).cloned() {
@@ -732,8 +670,8 @@ impl ClassesEditorState {
                                     suffix += 1;
                                 }
                                 self.classes.push(dup);
-                                *unsaved_changes = true;
-                                *status_message = "Class duplicated".to_string();
+                                *ctx.unsaved_changes = true;
+                                *ctx.status_message = "Class duplicated".to_string();
                             }
                         }
                         ItemAction::Export => {
@@ -741,10 +679,11 @@ impl ClassesEditorState {
                                 match ron::ser::to_string_pretty(class, Default::default()) {
                                     Ok(contents) => {
                                         ui.ctx().copy_text(contents);
-                                        *status_message = "Copied class to clipboard".to_string();
+                                        *ctx.status_message =
+                                            "Copied class to clipboard".to_string();
                                     }
                                     Err(e) => {
-                                        *status_message =
+                                        *ctx.status_message =
                                             format!("Failed to serialize class: {}", e);
                                     }
                                 }
@@ -755,28 +694,13 @@ impl ClassesEditorState {
                 }
             }
             ClassesEditorMode::Creating | ClassesEditorMode::Editing => {
-                self.show_class_form(
-                    ui,
-                    items,
-                    campaign_dir,
-                    classes_file,
-                    unsaved_changes,
-                    status_message,
-                );
+                self.show_class_form(ui, items, ctx);
             }
         }
     }
 
     /// Shows the class edit form
-    fn show_class_form(
-        &mut self,
-        ui: &mut egui::Ui,
-        items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        classes_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-    ) {
+    fn show_class_form(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
         // If requested, reset persistent autocomplete buffers so the form displays
         // values from the newly loaded buffer rather than stale typed text.
         if self.reset_autocomplete_buffers {
@@ -942,7 +866,7 @@ impl ClassesEditorState {
                     ui.label("Proficiencies");
 
                     // Load proficiency definitions with tri-stage fallback
-                    let prof_defs = crate::ui_helpers::load_proficiencies(campaign_dir, items);
+                    let prof_defs = crate::ui_helpers::load_proficiencies(ctx.campaign_dir, items);
 
                     if crate::ui_helpers::autocomplete_proficiency_list_selector(
                         ui,
@@ -1044,12 +968,12 @@ impl ClassesEditorState {
                     }
 
                     if ui.button("✅ Save").clicked() {
-                        if let Err(e) = self.save_class(campaign_dir, classes_file, status_message)
+                        if let Err(e) =
+                            self.save_class(ctx.campaign_dir, ctx.data_file, ctx.status_message)
                         {
-                            eprintln!("Error saving class: {}", e);
-                            *status_message = format!("Error saving class: {}", e);
+                            *ctx.status_message = format!("Error saving class: {}", e);
                         } else {
-                            *unsaved_changes = true;
+                            *ctx.unsaved_changes = true;
                         }
                     }
                     if ui.button("❌ Cancel").clicked() {
@@ -1064,7 +988,6 @@ impl ClassesEditorState {
 mod tests {
     use super::*;
     use antares::domain::classes::ClassDefinition;
-    use antares::domain::proficiency::ProficiencyId;
 
     #[test]
     fn test_class_special_abilities_and_proficiencies_roundtrip() {
@@ -1143,7 +1066,10 @@ mod tests {
 
         let result = state.save_class(None, "classes.ron", &mut String::new());
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("ID cannot be empty"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("ID cannot be empty"));
     }
 
     #[test]
@@ -1155,7 +1081,10 @@ mod tests {
 
         let result = state.save_class(None, "classes.ron", &mut String::new());
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Name cannot be empty"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Name cannot be empty"));
     }
 
     #[test]
@@ -1177,7 +1106,7 @@ mod tests {
 
         let result = state.save_class(None, "classes.ron", &mut String::new());
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("already exists"));
+        assert!(result.unwrap_err().to_string().contains("already exists"));
     }
 
     #[test]
@@ -1314,6 +1243,15 @@ mod tests {
         assert!(buffer.spell_school.is_none());
         assert!(!buffer.is_pure_caster);
         assert!(buffer.spell_stat.is_none());
+    }
+
+    #[test]
+    fn test_class_editor_error_display() {
+        assert_eq!(ClassEditorError::EmptyId.to_string(), "ID cannot be empty");
+        assert_eq!(
+            ClassEditorError::DuplicateId.to_string(),
+            "Class ID already exists"
+        );
     }
 
     #[test]

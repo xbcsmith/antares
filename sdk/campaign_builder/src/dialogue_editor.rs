@@ -46,10 +46,11 @@
 //! preserve SDK-managed merchant branches inside otherwise custom dialogue
 //! trees.
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
-    autocomplete_item_selector, autocomplete_quest_selector, show_standard_list_item,
-    ActionButtons, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
-    TwoColumnLayout,
+    autocomplete_quest_selector, dispatch_list_action, show_standard_list_item, ActionButtons,
+    DispatchActionState, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::dialogue::{
     DialogueAction, DialogueChoice, DialogueCondition, DialogueId, DialogueNode, DialogueTree,
@@ -61,7 +62,45 @@ use antares::domain::types::ItemId;
 use antares::domain::world::npc::NpcDefinition;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+
+/// Errors produced by dialogue editor operations.
+#[derive(Debug, thiserror::Error)]
+pub enum DialogueEditorError {
+    #[error("Invalid dialogue index")]
+    InvalidDialogueIndex,
+    #[error("Node not found")]
+    NodeNotFound,
+    #[error("Invalid node ID")]
+    InvalidNodeId,
+    #[error("Cannot delete root node")]
+    CannotDeleteRootNode,
+    #[error("Invalid choice index")]
+    InvalidChoiceIndex,
+    #[error("Invalid target node ID")]
+    InvalidTargetNodeId,
+    #[error("Target node does not exist")]
+    TargetNodeNotFound,
+    #[error("Invalid dialogue ID")]
+    InvalidDialogueId,
+    #[error("Invalid quest ID")]
+    InvalidQuestId,
+    #[error("No dialogue selected")]
+    NoDialogueSelected,
+    #[error("Node text cannot be empty")]
+    EmptyNodeText,
+    #[error("No node selected")]
+    NoNodeSelected,
+    #[error("Failed to read file: {0}")]
+    ReadError(String),
+    #[error("Failed to parse dialogues: {0}")]
+    ParseError(String),
+    #[error("Failed to create directory: {0}")]
+    DirectoryError(String),
+    #[error("Failed to serialize dialogues: {0}")]
+    SerializationError(String),
+    #[error("Failed to write file: {0}")]
+    WriteError(String),
+}
 
 /// Editor state for dialogue tree editing.
 ///
@@ -391,9 +430,13 @@ impl DialogueEditorState {
     }
 
     /// Edit an existing node
-    pub fn edit_node(&mut self, dialogue_idx: usize, node_id: NodeId) -> Result<(), String> {
+    pub fn edit_node(
+        &mut self,
+        dialogue_idx: usize,
+        node_id: NodeId,
+    ) -> Result<(), DialogueEditorError> {
         if dialogue_idx >= self.dialogues.len() {
-            return Err("Invalid dialogue index".to_string());
+            return Err(DialogueEditorError::InvalidDialogueIndex);
         }
 
         let dialogue = &self.dialogues[dialogue_idx];
@@ -408,21 +451,25 @@ impl DialogueEditorState {
             self.editing_node = true;
             Ok(())
         } else {
-            Err("Node not found".to_string())
+            Err(DialogueEditorError::NodeNotFound)
         }
     }
 
     /// Save edited node
-    pub fn save_node(&mut self, dialogue_idx: usize, node_id: NodeId) -> Result<(), String> {
+    pub fn save_node(
+        &mut self,
+        dialogue_idx: usize,
+        node_id: NodeId,
+    ) -> Result<(), DialogueEditorError> {
         if dialogue_idx >= self.dialogues.len() {
-            return Err("Invalid dialogue index".to_string());
+            return Err(DialogueEditorError::InvalidDialogueIndex);
         }
 
-        let node_id_parsed = self
+        let _node_id_parsed = self
             .node_buffer
             .id
             .parse::<NodeId>()
-            .map_err(|_| "Invalid node ID".to_string())?;
+            .map_err(|_| DialogueEditorError::InvalidNodeId)?;
 
         let dialogue = &mut self.dialogues[dialogue_idx];
         if let Some(node) = dialogue.nodes.get_mut(&node_id) {
@@ -440,21 +487,25 @@ impl DialogueEditorState {
             self.node_buffer = NodeEditBuffer::default();
             Ok(())
         } else {
-            Err("Node not found".to_string())
+            Err(DialogueEditorError::NodeNotFound)
         }
     }
 
     /// Delete a node from dialogue
-    pub fn delete_node(&mut self, dialogue_idx: usize, node_id: NodeId) -> Result<(), String> {
+    pub fn delete_node(
+        &mut self,
+        dialogue_idx: usize,
+        node_id: NodeId,
+    ) -> Result<(), DialogueEditorError> {
         if dialogue_idx >= self.dialogues.len() {
-            return Err("Invalid dialogue index".to_string());
+            return Err(DialogueEditorError::InvalidDialogueIndex);
         }
 
         let dialogue = &mut self.dialogues[dialogue_idx];
 
         // Don't allow deleting root node
         if node_id == dialogue.root_node {
-            return Err("Cannot delete root node".to_string());
+            return Err(DialogueEditorError::CannotDeleteRootNode);
         }
 
         dialogue.nodes.remove(&node_id);
@@ -473,15 +524,15 @@ impl DialogueEditorState {
         dialogue_idx: usize,
         node_id: NodeId,
         choice_idx: usize,
-    ) -> Result<(), String> {
+    ) -> Result<(), DialogueEditorError> {
         if dialogue_idx >= self.dialogues.len() {
-            return Err("Invalid dialogue index".to_string());
+            return Err(DialogueEditorError::InvalidDialogueIndex);
         }
 
         let dialogue = &self.dialogues[dialogue_idx];
         if let Some(node) = dialogue.nodes.get(&node_id) {
             if choice_idx >= node.choices.len() {
-                return Err("Invalid choice index".to_string());
+                return Err(DialogueEditorError::InvalidChoiceIndex);
             }
 
             let choice = &node.choices[choice_idx];
@@ -496,7 +547,7 @@ impl DialogueEditorState {
             self.selected_choice = Some(choice_idx);
             Ok(())
         } else {
-            Err("Node not found".to_string())
+            Err(DialogueEditorError::NodeNotFound)
         }
     }
 
@@ -506,15 +557,15 @@ impl DialogueEditorState {
         dialogue_idx: usize,
         node_id: NodeId,
         choice_idx: usize,
-    ) -> Result<(), String> {
+    ) -> Result<(), DialogueEditorError> {
         if dialogue_idx >= self.dialogues.len() {
-            return Err("Invalid dialogue index".to_string());
+            return Err(DialogueEditorError::InvalidDialogueIndex);
         }
 
         let dialogue = &mut self.dialogues[dialogue_idx];
         if let Some(node) = dialogue.nodes.get_mut(&node_id) {
             if choice_idx >= node.choices.len() {
-                return Err("Invalid choice index".to_string());
+                return Err(DialogueEditorError::InvalidChoiceIndex);
             }
 
             let target_node = if self.choice_buffer.target_node.is_empty() {
@@ -524,7 +575,7 @@ impl DialogueEditorState {
                     self.choice_buffer
                         .target_node
                         .parse::<NodeId>()
-                        .map_err(|_| "Invalid target node ID".to_string())?,
+                        .map_err(|_| DialogueEditorError::InvalidTargetNodeId)?,
                 )
             };
 
@@ -537,7 +588,7 @@ impl DialogueEditorState {
             self.selected_choice = None;
             Ok(())
         } else {
-            Err("Node not found".to_string())
+            Err(DialogueEditorError::NodeNotFound)
         }
     }
 
@@ -547,15 +598,15 @@ impl DialogueEditorState {
         dialogue_idx: usize,
         node_id: NodeId,
         choice_idx: usize,
-    ) -> Result<(), String> {
+    ) -> Result<(), DialogueEditorError> {
         if dialogue_idx >= self.dialogues.len() {
-            return Err("Invalid dialogue index".to_string());
+            return Err(DialogueEditorError::InvalidDialogueIndex);
         }
 
         let dialogue = &mut self.dialogues[dialogue_idx];
         if let Some(node) = dialogue.nodes.get_mut(&node_id) {
             if choice_idx >= node.choices.len() {
-                return Err("Invalid choice index".to_string());
+                return Err(DialogueEditorError::InvalidChoiceIndex);
             }
 
             node.choices.remove(choice_idx);
@@ -567,7 +618,7 @@ impl DialogueEditorState {
 
             Ok(())
         } else {
-            Err("Node not found".to_string())
+            Err(DialogueEditorError::NodeNotFound)
         }
     }
 
@@ -828,12 +879,12 @@ impl DialogueEditorState {
     }
 
     /// Save current dialogue being edited
-    pub fn save_dialogue(&mut self) -> Result<(), String> {
+    pub fn save_dialogue(&mut self) -> Result<(), DialogueEditorError> {
         let id = self
             .dialogue_buffer
             .id
             .parse::<DialogueId>()
-            .map_err(|_| "Invalid dialogue ID".to_string())?;
+            .map_err(|_| DialogueEditorError::InvalidDialogueId)?;
 
         let associated_quest = if self.dialogue_buffer.associated_quest.is_empty() {
             None
@@ -842,7 +893,7 @@ impl DialogueEditorState {
                 self.dialogue_buffer
                     .associated_quest
                     .parse::<QuestId>()
-                    .map_err(|_| "Invalid quest ID".to_string())?,
+                    .map_err(|_| DialogueEditorError::InvalidQuestId)?,
             )
         };
 
@@ -892,18 +943,18 @@ impl DialogueEditorState {
     }
 
     /// Add a new node to current dialogue
-    pub fn add_node(&mut self) -> Result<NodeId, String> {
+    pub fn add_node(&mut self) -> Result<NodeId, DialogueEditorError> {
         if self.selected_dialogue.is_none() {
-            return Err("No dialogue selected".to_string());
+            return Err(DialogueEditorError::NoDialogueSelected);
         }
 
         if self.node_buffer.text.trim().is_empty() {
-            return Err("Node text cannot be empty".to_string());
+            return Err(DialogueEditorError::EmptyNodeText);
         }
 
         let node_id = self
             .next_available_node_id()
-            .ok_or_else(|| "No dialogue selected".to_string())?;
+            .ok_or(DialogueEditorError::NoDialogueSelected)?;
 
         let mut node = DialogueNode::new(node_id, &self.node_buffer.text);
 
@@ -918,15 +969,15 @@ impl DialogueEditorState {
             self.node_buffer = NodeEditBuffer::default();
             Ok(node_id)
         } else {
-            Err("No dialogue selected".to_string())
+            Err(DialogueEditorError::NoDialogueSelected)
         }
     }
 
     /// Add a choice to current node
-    pub fn add_choice(&mut self) -> Result<(), String> {
+    pub fn add_choice(&mut self) -> Result<(), DialogueEditorError> {
         if let Some(dialogue_idx) = self.selected_dialogue {
             if dialogue_idx >= self.dialogues.len() {
-                return Err("Invalid dialogue index".to_string());
+                return Err(DialogueEditorError::InvalidDialogueIndex);
             }
 
             if let Some(node_id) = self.selected_node {
@@ -934,7 +985,7 @@ impl DialogueEditorState {
                     .choice_buffer
                     .target_node
                     .parse::<NodeId>()
-                    .map_err(|_| "Invalid target node ID".to_string())?;
+                    .map_err(|_| DialogueEditorError::InvalidTargetNodeId)?;
 
                 let mut choice = DialogueChoice::new(&self.choice_buffer.text, Some(target_node));
                 choice.ends_dialogue = self.choice_buffer.ends_dialogue;
@@ -944,7 +995,7 @@ impl DialogueEditorState {
                     .nodes
                     .contains_key(&target_node)
                 {
-                    return Err("Target node does not exist".to_string());
+                    return Err(DialogueEditorError::TargetNodeNotFound);
                 }
 
                 // Add choice to node (accessing nodes directly since no mutable getter)
@@ -956,12 +1007,12 @@ impl DialogueEditorState {
                     return Ok(());
                 }
 
-                Err("Node not found".to_string())
+                Err(DialogueEditorError::NodeNotFound)
             } else {
-                Err("No node selected".to_string())
+                Err(DialogueEditorError::NoNodeSelected)
             }
         } else {
-            Err("No dialogue selected".to_string())
+            Err(DialogueEditorError::NoDialogueSelected)
         }
     }
 
@@ -1337,25 +1388,26 @@ impl DialogueEditorState {
     }
 
     /// Load dialogues from a file path
-    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), String> {
-        let content =
-            std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
+    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), DialogueEditorError> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| DialogueEditorError::ReadError(e.to_string()))?;
         let dialogues: Vec<DialogueTree> =
-            ron::from_str(&content).map_err(|e| format!("Failed to parse dialogues: {}", e))?;
+            ron::from_str(&content).map_err(|e| DialogueEditorError::ParseError(e.to_string()))?;
         self.dialogues = dialogues;
         self.has_unsaved_changes = false;
         Ok(())
     }
 
     /// Save dialogues to a file path
-    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), DialogueEditorError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+                .map_err(|e| DialogueEditorError::DirectoryError(e.to_string()))?;
         }
         let content = ron::ser::to_string_pretty(&self.dialogues, Default::default())
-            .map_err(|e| format!("Failed to serialize dialogues: {}", e))?;
-        std::fs::write(path, content).map_err(|e| format!("Failed to write file: {}", e))?;
+            .map_err(|e| DialogueEditorError::SerializationError(e.to_string()))?;
+        std::fs::write(path, content)
+            .map_err(|e| DialogueEditorError::WriteError(e.to_string()))?;
         Ok(())
     }
 
@@ -1370,20 +1422,14 @@ impl DialogueEditorState {
     /// * `campaign_dir` - Optional campaign directory path
     /// * `dialogue_file` - Filename for dialogue data
     /// * `unsaved_changes` - Mutable flag for tracking unsaved changes
-    /// * `status_message` - Mutable string for status messages
-    /// * `file_load_merge_mode` - Whether to merge or replace when loading files
-    #[allow(clippy::too_many_arguments)]
+    /// * `ctx` - Shared editor context (campaign dir, data file, unsaved changes, status, merge mode)
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         dialogues: &mut Vec<DialogueTree>,
         quests: &[Quest],
         items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        dialogue_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        file_load_merge_mode: &mut bool,
+        ctx: &mut EditorContext<'_>,
     ) {
         // Only sync dialogues if they differ (prevents losing edits on every frame)
         if self.dialogues.len() != dialogues.len()
@@ -1404,7 +1450,7 @@ impl DialogueEditorState {
         // Use shared EditorToolbar component
         let toolbar_action = EditorToolbar::new("Dialogues")
             .with_search(&mut self.search_filter)
-            .with_merge_mode(file_load_merge_mode)
+            .with_merge_mode(ctx.file_load_merge_mode)
             .with_total_count(self.dialogues.len())
             .with_id_salt("dialogues_toolbar")
             .show(ui);
@@ -1416,15 +1462,16 @@ impl DialogueEditorState {
             }
             ToolbarAction::Save => {
                 // Save to campaign directory
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(dialogue_file);
+                if let Some(dir) = ctx.campaign_dir {
+                    let path = dir.join(ctx.data_file);
                     match self.save_to_file(&path) {
                         Ok(()) => {
                             *dialogues = self.dialogues.clone();
-                            *status_message = format!("Saved {} dialogues", self.dialogues.len());
+                            *ctx.status_message =
+                                format!("Saved {} dialogues", self.dialogues.len());
                         }
                         Err(e) => {
-                            *status_message = format!("Failed to save dialogues: {}", e);
+                            *ctx.status_message = format!("Failed to save dialogues: {}", e);
                         }
                     }
                 }
@@ -1437,10 +1484,11 @@ impl DialogueEditorState {
                     match self.load_from_file(&path) {
                         Ok(()) => {
                             *dialogues = self.dialogues.clone();
-                            *status_message = format!("Loaded {} dialogues", self.dialogues.len());
+                            *ctx.status_message =
+                                format!("Loaded {} dialogues", self.dialogues.len());
                         }
                         Err(e) => {
-                            *status_message = format!("Failed to load dialogues: {}", e);
+                            *ctx.status_message = format!("Failed to load dialogues: {}", e);
                         }
                     }
                 }
@@ -1453,29 +1501,29 @@ impl DialogueEditorState {
                 match ron::ser::to_string_pretty(&self.dialogues, Default::default()) {
                     Ok(ron_str) => {
                         ui.ctx().copy_text(ron_str.clone());
-                        *status_message = "Dialogues exported to clipboard".to_string();
+                        *ctx.status_message = "Dialogues exported to clipboard".to_string();
                     }
                     Err(e) => {
-                        *status_message = format!("Export failed: {:?}", e);
+                        *ctx.status_message = format!("Export failed: {:?}", e);
                     }
                 }
             }
             ToolbarAction::Reload => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(dialogue_file);
+                if let Some(dir) = ctx.campaign_dir {
+                    let path = dir.join(ctx.data_file);
                     if path.exists() {
                         match self.load_from_file(&path) {
                             Ok(()) => {
                                 *dialogues = self.dialogues.clone();
-                                *status_message =
+                                *ctx.status_message =
                                     format!("Reloaded {} dialogues", self.dialogues.len());
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to reload dialogues: {}", e);
+                                *ctx.status_message = format!("Failed to reload dialogues: {}", e);
                             }
                         }
                     } else {
-                        *status_message = "Dialogues file does not exist".to_string();
+                        *ctx.status_message = "Dialogues file does not exist".to_string();
                     }
                 }
             }
@@ -1490,15 +1538,15 @@ impl DialogueEditorState {
         ui.separator();
 
         // Import dialog
-        self.show_import_dialog_window(ui, dialogues, status_message);
+        self.show_import_dialog_window(ui, dialogues, ctx.status_message);
 
         // Main content area
         match self.mode {
             DialogueEditorMode::List => {
-                self.show_dialogue_list(ui, dialogues, unsaved_changes, status_message);
+                self.show_dialogue_list(ui, dialogues, ctx);
             }
             DialogueEditorMode::Creating | DialogueEditorMode::Editing => {
-                self.show_dialogue_form(ui, dialogues, status_message);
+                self.show_dialogue_form(ui, dialogues, ctx.status_message);
             }
         }
     }
@@ -1575,8 +1623,7 @@ impl DialogueEditorState {
         &mut self,
         ui: &mut egui::Ui,
         dialogues: &mut Vec<DialogueTree>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
+        ctx: &mut EditorContext<'_>,
     ) {
         // Clone data for closures
         let search_filter = self.search_filter.clone();
@@ -1809,17 +1856,32 @@ impl DialogueEditorState {
                 ItemAction::Delete => {
                     self.delete_dialogue(action_idx);
                     *dialogues = self.dialogues.clone();
-                    *unsaved_changes = true;
+                    *ctx.unsaved_changes = true;
                 }
                 ItemAction::Duplicate => {
-                    if let Some(dialogue) = self.dialogues.get(action_idx) {
-                        let mut new_dialogue = dialogue.clone();
-                        new_dialogue.id = self.next_available_dialogue_id();
-                        new_dialogue.name = format!("{} (Copy)", new_dialogue.name);
-                        self.dialogues.push(new_dialogue);
+                    let next_id = self.next_available_dialogue_id();
+                    let mut dummy_show = false;
+                    let mut dummy_buf = String::new();
+                    let mut dummy_msg = String::new();
+                    let mut dispatch_state = DispatchActionState {
+                        entity_label: "dialogue",
+                        import_export_buffer: &mut dummy_buf,
+                        show_import_dialog: &mut dummy_show,
+                        status_message: &mut dummy_msg,
+                    };
+                    if dispatch_list_action(
+                        ItemAction::Duplicate,
+                        &mut self.dialogues,
+                        &mut self.selected_dialogue,
+                        move |entry, _all| {
+                            entry.id = next_id;
+                            entry.name = format!("{} (Copy)", entry.name);
+                        },
+                        &mut dispatch_state,
+                    ) {
                         *dialogues = self.dialogues.clone();
-                        *unsaved_changes = true;
-                        *status_message = "Dialogue duplicated".to_string();
+                        *ctx.unsaved_changes = true;
+                        *ctx.status_message = "Dialogue duplicated".to_string();
                     }
                 }
                 ItemAction::Export => {
@@ -1827,10 +1889,11 @@ impl DialogueEditorState {
                         match ron::ser::to_string_pretty(dialogue, Default::default()) {
                             Ok(contents) => {
                                 ui.ctx().copy_text(contents);
-                                *status_message = "Copied dialogue to clipboard".to_string();
+                                *ctx.status_message = "Copied dialogue to clipboard".to_string();
                             }
                             Err(e) => {
-                                *status_message = format!("Failed to serialize dialogue: {}", e);
+                                *ctx.status_message =
+                                    format!("Failed to serialize dialogue: {}", e);
                             }
                         }
                     }
@@ -1942,7 +2005,7 @@ impl DialogueEditorState {
         }
     }
 
-    /// Show dialogue node tree editor with Phase 3 enhancements:
+    /// Show dialogue node tree editor with navigation and validation enhancements:
     /// - Visual node hierarchy with indented choices
     /// - Node navigation helpers (search, jump-to, show-root)
     /// - Inline validation feedback
@@ -2001,7 +2064,7 @@ impl DialogueEditorState {
             ui.separator();
         }
 
-        // Phase 3: Dialogue Header with Reachability Stats
+        // Dialogue Header with Reachability Stats
         let dialogue = self.dialogues[dialogue_idx].clone();
         let (total_nodes, reachable_nodes, unreachable_count) =
             self.get_reachability_stats(dialogue_idx);
@@ -2022,10 +2085,10 @@ impl DialogueEditorState {
             }
         });
 
-        // Phase 3: Navigation Controls
+        // Navigation Controls
         ui.horizontal(|ui| {
             ui.label("Find Node:");
-            let response = ui.text_edit_singleline(&mut self.node_search_filter);
+            let _response = ui.text_edit_singleline(&mut self.node_search_filter);
 
             if !self.node_search_filter.is_empty() {
                 let matches = self.search_nodes(dialogue_idx, &self.node_search_filter);
@@ -2055,7 +2118,7 @@ impl DialogueEditorState {
             }
         });
 
-        // Phase 3: Show Validation Errors
+        // Show Validation Errors
         if !self.dialogue_validation_errors.is_empty() {
             ui.separator();
             ui.colored_label(
@@ -2076,7 +2139,7 @@ impl DialogueEditorState {
         let mut edit_choice_id: Option<(NodeId, usize)> = None;
         let mut delete_choice_id: Option<(NodeId, usize)> = None;
 
-        // Phase 3: Display nodes with hierarchy and enhanced navigation
+        // Display nodes with hierarchy and enhanced navigation
         egui::ScrollArea::vertical()
             .auto_shrink([false, true])
             .show(ui, |ui| {
@@ -2085,9 +2148,9 @@ impl DialogueEditorState {
                 sorted_nodes.sort_by_key(|(node_id, _)| *node_id);
 
                 for (node_id, node) in sorted_nodes {
-                    // Phase 3: Highlight unreachable nodes
+                    // Highlight unreachable nodes
                     let is_unreachable = unreachable.contains(node_id);
-                    let bg_color = if is_unreachable {
+                    let _bg_color = if is_unreachable {
                         egui::Color32::from_rgba_unmultiplied(255, 165, 0, 20)
                     } else {
                         egui::Color32::TRANSPARENT
@@ -2156,7 +2219,7 @@ impl DialogueEditorState {
                             ui.label(format!("Speaker: {}", speaker));
                         }
 
-                        // Phase 3: Show choices with visual hierarchy and navigation
+                        // Show choices with visual hierarchy and navigation
                         if !node.choices.is_empty() {
                             ui.separator();
                             ui.label("Choices:");
@@ -2165,14 +2228,14 @@ impl DialogueEditorState {
                                     ui.label(format!("  {}. {}", choice_idx + 1, choice.text));
 
                                     if let Some(target) = choice.target_node {
-                                        // Phase 3: Check if target is valid and show error if not
+                                        // Check if target is valid and show error if not
                                         if !self.is_choice_target_valid(dialogue_idx, target) {
                                             ui.label(
                                                 egui::RichText::new(format!("❌ Node {}", target))
                                                     .color(egui::Color32::from_rgb(255, 0, 0)),
                                             );
                                         } else {
-                                            // Phase 3: Show target with preview and jump button
+                                            // Show target with preview and jump button
                                             let preview =
                                                 self.get_node_preview(dialogue_idx, target);
                                             ui.label(format!("→ Node {}: {}", target, preview));
@@ -2440,7 +2503,6 @@ impl DialogueEditorState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use antares::domain::world::npc::NpcDefinition;
 
     #[test]
     fn test_dialogue_editor_state_creation() {
@@ -2933,13 +2995,13 @@ mod tests {
         editor.node_buffer.text = "".to_string();
         let result = editor.add_node();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("cannot be empty"));
+        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
 
         // Try with only whitespace
         editor.node_buffer.text = "   ".to_string();
         let result = editor.add_node();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("cannot be empty"));
+        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
     }
 
     #[test]
@@ -3018,10 +3080,25 @@ mod tests {
         // Try to add node without selecting dialogue
         let result = editor.add_node();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("No dialogue selected"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No dialogue selected"));
     }
 
-    // ========== Phase 3 Tests: Node Navigation and Validation ==========
+    #[test]
+    fn test_dialogue_editor_error_display() {
+        assert_eq!(
+            DialogueEditorError::InvalidDialogueIndex.to_string(),
+            "Invalid dialogue index"
+        );
+        assert_eq!(
+            DialogueEditorError::EmptyNodeText.to_string(),
+            "Node text cannot be empty"
+        );
+    }
+
+    // ========== Node Navigation and Validation Tests ==========
 
     #[test]
     fn test_get_unreachable_nodes_for_dialogue() {

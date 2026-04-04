@@ -41,11 +41,8 @@ pub struct MeshIndexEditor {
     /// Currently selected triangle indices
     selected_triangles: HashSet<usize>,
 
-    /// Operation history for undo
-    history: Vec<IndexOperation>,
-
-    /// Current position in history (for undo/redo)
-    history_position: usize,
+    /// Operation history for undo/redo
+    history: crate::linear_history::LinearHistory<IndexOperation>,
 }
 
 /// Index operation for undo/redo
@@ -131,8 +128,7 @@ impl MeshIndexEditor {
         Self {
             mesh,
             selected_triangles: HashSet::new(),
-            history: Vec::new(),
-            history_position: 0,
+            history: crate::linear_history::LinearHistory::with_default_max(),
         }
     }
 
@@ -497,19 +493,7 @@ impl MeshIndexEditor {
 
     /// Adds an operation to the history
     fn add_to_history(&mut self, operation: IndexOperation) {
-        // Remove any operations after current position
-        self.history.truncate(self.history_position);
-
-        // Add new operation
         self.history.push(operation);
-        self.history_position = self.history.len();
-
-        // Limit history size
-        const MAX_HISTORY: usize = 100;
-        if self.history.len() > MAX_HISTORY {
-            self.history.remove(0);
-            self.history_position -= 1;
-        }
     }
 
     /// Undoes the last operation
@@ -518,15 +502,12 @@ impl MeshIndexEditor {
     ///
     /// `true` if an operation was undone, `false` if there's nothing to undo
     pub fn undo(&mut self) -> bool {
-        if self.history_position == 0 {
-            return false;
+        if let Some(operation) = self.history.undo() {
+            self.mesh.indices = operation.old_indices.clone();
+            true
+        } else {
+            false
         }
-
-        self.history_position -= 1;
-        let operation = &self.history[self.history_position];
-        self.mesh.indices = operation.old_indices.clone();
-
-        true
     }
 
     /// Redoes the last undone operation
@@ -535,31 +516,27 @@ impl MeshIndexEditor {
     ///
     /// `true` if an operation was redone, `false` if there's nothing to redo
     pub fn redo(&mut self) -> bool {
-        if self.history_position >= self.history.len() {
-            return false;
+        if let Some(operation) = self.history.redo() {
+            self.mesh.indices = operation.new_indices.clone();
+            true
+        } else {
+            false
         }
-
-        let operation = &self.history[self.history_position];
-        self.mesh.indices = operation.new_indices.clone();
-        self.history_position += 1;
-
-        true
     }
 
     /// Returns whether undo is available
     pub fn can_undo(&self) -> bool {
-        self.history_position > 0
+        self.history.can_undo()
     }
 
     /// Returns whether redo is available
     pub fn can_redo(&self) -> bool {
-        self.history_position < self.history.len()
+        self.history.can_redo()
     }
 
     /// Clears the operation history
     pub fn clear_history(&mut self) {
         self.history.clear();
-        self.history_position = 0;
     }
 }
 

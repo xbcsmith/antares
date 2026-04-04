@@ -3,7 +3,7 @@
 
 //! Integration tests to validate map data files.
 //!
-//! Ensures every map under `data/maps` and `campaigns/tutorial/data/maps` has
+//! Ensures every map under `data/maps` has
 //! non-empty `name` and `description` for all events and NPCs. This catches
 //! missing metadata that can harm editor UX.
 

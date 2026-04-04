@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Advanced Validation Features - Phase 15.4
+//! Advanced Validation Features
 //!
 //! Enhanced validation tools for campaign content:
 //! - Balance analyzer (party power vs monster difficulty)
@@ -10,75 +10,14 @@
 //! - Unreachable content detector
 //! - Difficulty curve analyzer
 
-use antares::domain::character::{AttributePair, AttributePair16};
 use antares::domain::combat::database::MonsterDefinition;
-use antares::domain::combat::monster::MonsterCondition;
 use antares::domain::items::types::Item;
 use antares::domain::quest::{Quest, QuestObjective};
 use antares::domain::world::Map;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-/// Validation severity levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum ValidationSeverity {
-    Info,
-    Warning,
-    Error,
-    Critical,
-}
-
-impl ValidationSeverity {
-    pub fn icon(&self) -> &str {
-        match self {
-            ValidationSeverity::Info => "ℹ️",
-            ValidationSeverity::Warning => "⚠️",
-            ValidationSeverity::Error => "❌",
-            ValidationSeverity::Critical => "🔥",
-        }
-    }
-
-    pub fn name(&self) -> &str {
-        match self {
-            ValidationSeverity::Info => "Info",
-            ValidationSeverity::Warning => "Warning",
-            ValidationSeverity::Error => "Error",
-            ValidationSeverity::Critical => "Critical",
-        }
-    }
-}
-
-/// Advanced validation result
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValidationResult {
-    pub severity: ValidationSeverity,
-    pub category: String,
-    pub message: String,
-    pub details: Option<String>,
-    pub suggestion: Option<String>,
-}
-
-impl ValidationResult {
-    pub fn new(severity: ValidationSeverity, category: &str, message: &str) -> Self {
-        Self {
-            severity,
-            category: category.to_string(),
-            message: message.to_string(),
-            details: None,
-            suggestion: None,
-        }
-    }
-
-    pub fn with_details(mut self, details: &str) -> Self {
-        self.details = Some(details.to_string());
-        self
-    }
-
-    pub fn with_suggestion(mut self, suggestion: &str) -> Self {
-        self.suggestion = Some(suggestion.to_string());
-        self
-    }
-}
+use crate::validation::{ValidationCategory, ValidationResult, ValidationSeverity};
 
 /// Balance statistics for campaign content
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -137,8 +76,8 @@ impl AdvancedValidator {
         if self.monsters.is_empty() {
             results.push(
                 ValidationResult::new(
+                    ValidationCategory::Balance,
                     ValidationSeverity::Warning,
-                    "Balance",
                     "No monsters defined in campaign",
                 )
                 .with_suggestion("Add monsters to provide combat encounters"),
@@ -158,11 +97,11 @@ impl AdvancedValidator {
                 if !levels.contains(&level) {
                     results.push(
                         ValidationResult::new(
+                            ValidationCategory::Balance,
                             ValidationSeverity::Warning,
-                            "Balance",
-                            &format!("No monsters at level {}", level),
+                            format!("No monsters at level {}", level),
                         )
-                        .with_details(&format!(
+                        .with_details(format!(
                             "Campaign has monsters from level {} to {}, but level {} is missing",
                             min_level, max_level, level
                         ))
@@ -180,11 +119,11 @@ impl AdvancedValidator {
             if monster_hp > avg_hp * 5.0 {
                 results.push(
                     ValidationResult::new(
+                        ValidationCategory::Balance,
                         ValidationSeverity::Info,
-                        "Balance",
-                        &format!("Monster '{}' has very high HP", monster.name),
+                        format!("Monster '{}' has very high HP", monster.name),
                     )
-                    .with_details(&format!("HP: {} (average: {:.0})", monster_hp, avg_hp))
+                    .with_details(format!("HP: {} (average: {:.0})", monster_hp, avg_hp))
                     .with_suggestion("This may be a boss monster - ensure players are prepared"),
                 );
             }
@@ -216,14 +155,11 @@ impl AdvancedValidator {
         if quest_exp > total_exp * 2 {
             results.push(
                 ValidationResult::new(
+                    ValidationCategory::Balance,
                     ValidationSeverity::Warning,
-                    "Balance",
                     "Quest rewards provide most experience",
                 )
-                .with_details(&format!(
-                    "Quest XP: {}, Combat XP: {}",
-                    quest_exp, total_exp
-                ))
+                .with_details(format!("Quest XP: {}, Combat XP: {}", quest_exp, total_exp))
                 .with_suggestion("Consider balancing XP between quests and combat"),
             );
         }
@@ -265,11 +201,11 @@ impl AdvancedValidator {
         if total_item_cost > 0 && total_gold_available < total_item_cost / 2 {
             results.push(
                 ValidationResult::new(
+                    ValidationCategory::Economy,
                     ValidationSeverity::Warning,
-                    "Economy",
                     "Players may not earn enough gold to buy items",
                 )
-                .with_details(&format!(
+                .with_details(format!(
                     "Total item value: {}, Available gold: {}",
                     total_item_cost, total_gold_available
                 ))
@@ -288,11 +224,11 @@ impl AdvancedValidator {
         if !zero_value_items.is_empty() && zero_value_items.len() > 3 {
             results.push(
                 ValidationResult::new(
+                    ValidationCategory::Economy,
                     ValidationSeverity::Info,
-                    "Economy",
-                    &format!("{} items have zero value", zero_value_items.len()),
+                    format!("{} items have zero value", zero_value_items.len()),
                 )
-                .with_details(&format!("Items: {}", zero_value_items.join(", ")))
+                .with_details(format!("Items: {}", zero_value_items.join(", ")))
                 .with_suggestion("Set appropriate values for sellable items"),
             );
         }
@@ -302,11 +238,11 @@ impl AdvancedValidator {
             if max_item.base_cost > total_gold_available {
                 results.push(
                     ValidationResult::new(
+                        ValidationCategory::Economy,
                         ValidationSeverity::Warning,
-                        "Economy",
-                        &format!("Item '{}' may be unobtainable", max_item.name),
+                        format!("Item '{}' may be unobtainable", max_item.name),
                     )
-                    .with_details(&format!(
+                    .with_details(format!(
                         "Cost: {}, Available gold: {}",
                         max_item.base_cost, total_gold_available
                     ))
@@ -351,11 +287,11 @@ impl AdvancedValidator {
             if let Some(quest) = self.quests.iter().find(|q| q.id == quest_id) {
                 results.push(
                     ValidationResult::new(
+                        ValidationCategory::QuestDependencies,
                         ValidationSeverity::Error,
-                        "Quest Dependencies",
-                        &format!("Quest '{}' references missing item", quest.name),
+                        format!("Quest '{}' references missing item", quest.name),
                     )
-                    .with_details(&format!("Item ID: {}", item_id))
+                    .with_details(format!("Item ID: {}", item_id))
                     .with_suggestion("Create the item or update quest objectives"),
                 );
             }
@@ -365,11 +301,11 @@ impl AdvancedValidator {
             if let Some(quest) = self.quests.iter().find(|q| q.id == quest_id) {
                 results.push(
                     ValidationResult::new(
+                        ValidationCategory::QuestDependencies,
                         ValidationSeverity::Error,
-                        "Quest Dependencies",
-                        &format!("Quest '{}' references missing monster", quest.name),
+                        format!("Quest '{}' references missing monster", quest.name),
                     )
-                    .with_details(&format!("Monster ID: {}", monster_id))
+                    .with_details(format!("Monster ID: {}", monster_id))
                     .with_suggestion("Create the monster or update quest objectives"),
                 );
             }
@@ -381,9 +317,9 @@ impl AdvancedValidator {
             if total_objectives == 0 {
                 results.push(
                     ValidationResult::new(
+                        ValidationCategory::QuestDependencies,
                         ValidationSeverity::Warning,
-                        "Quest Dependencies",
-                        &format!("Quest '{}' has no objectives", quest.name),
+                        format!("Quest '{}' has no objectives", quest.name),
                     )
                     .with_suggestion("Add objectives to make the quest completable"),
                 );
@@ -441,11 +377,11 @@ impl AdvancedValidator {
         if !unreferenced_items.is_empty() && unreferenced_items.len() > 5 {
             results.push(
                 ValidationResult::new(
+                    ValidationCategory::ContentReachability,
                     ValidationSeverity::Info,
-                    "Content Reachability",
-                    &format!("{} items are never referenced", unreferenced_items.len()),
+                    format!("{} items are never referenced", unreferenced_items.len()),
                 )
-                .with_details(&format!(
+                .with_details(format!(
                     "Items: {}",
                     unreferenced_items
                         .iter()
@@ -468,11 +404,11 @@ impl AdvancedValidator {
         if !unreferenced_monsters.is_empty() && unreferenced_monsters.len() > 3 {
             results.push(
                 ValidationResult::new(
+                    ValidationCategory::ContentReachability,
                     ValidationSeverity::Info,
-                    "Content Reachability",
-                    &format!("{} monsters are never used", unreferenced_monsters.len()),
+                    format!("{} monsters are never used", unreferenced_monsters.len()),
                 )
-                .with_details(&format!(
+                .with_details(format!(
                     "Monsters: {}",
                     unreferenced_monsters
                         .iter()
@@ -510,9 +446,9 @@ impl AdvancedValidator {
             if window[1] - window[0] > 5 {
                 results.push(
                     ValidationResult::new(
+                        ValidationCategory::DifficultyProgression,
                         ValidationSeverity::Warning,
-                        "Difficulty Curve",
-                        &format!(
+                        format!(
                             "Large level gap between quests: {} to {}",
                             window[0], window[1]
                         ),
@@ -532,8 +468,8 @@ impl AdvancedValidator {
         if starter_quests == 0 {
             results.push(
                 ValidationResult::new(
+                    ValidationCategory::DifficultyProgression,
                     ValidationSeverity::Warning,
-                    "Difficulty Curve",
                     "No level 1 quests available",
                 )
                 .with_suggestion("Add quests for starting characters"),
@@ -543,15 +479,16 @@ impl AdvancedValidator {
         // Check monster level distribution (using AC as difficulty metric)
         let monster_levels: Vec<u8> = self.monsters.iter().map(|m| m.ac.base).collect();
         if !monster_levels.is_empty() {
-            let _monster_min = *monster_levels.iter().min().unwrap();
-            let monster_max = *monster_levels.iter().max().unwrap();
+            // SAFETY: the enclosing `if !monster_levels.is_empty()` guarantees at least one element.
+            let _monster_min = *monster_levels.iter().min().unwrap_or(&0);
+            let monster_max = *monster_levels.iter().max().unwrap_or(&0);
 
             if monster_max > max_level + 3 {
                 results.push(
                     ValidationResult::new(
+                        ValidationCategory::DifficultyProgression,
                         ValidationSeverity::Warning,
-                        "Difficulty Curve",
-                        &format!(
+                        format!(
                             "Highest monster level ({}) exceeds quest requirements ({})",
                             monster_max, max_level
                         ),
@@ -698,7 +635,7 @@ impl AdvancedValidator {
                 if let Some(suggestion) = &result.suggestion {
                     report.push_str(&format!("   💡 {}\n", suggestion));
                 }
-                report.push_str("\n");
+                report.push('\n');
             }
         }
 
@@ -709,8 +646,8 @@ impl AdvancedValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use antares::domain::character::{AttributePair, Stats};
-    use antares::domain::combat::monster::{LootTable, MonsterResistances};
+    use antares::domain::character::{AttributePair, AttributePair16, Stats};
+    use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
     use antares::domain::combat::types::{Attack, AttackType};
     use antares::domain::items::types::{ItemType, WeaponClassification, WeaponData};
     use antares::domain::types::DiceRoll;
@@ -921,19 +858,25 @@ mod tests {
 
     #[test]
     fn test_validation_severity_ordering() {
-        assert!(ValidationSeverity::Critical > ValidationSeverity::Error);
-        assert!(ValidationSeverity::Error > ValidationSeverity::Warning);
-        assert!(ValidationSeverity::Warning > ValidationSeverity::Info);
+        // With the unified ValidationSeverity enum, ordering is:
+        // Critical < Error < Warning < Info < Passed (Critical is most severe, numerically smallest)
+        assert!(ValidationSeverity::Critical < ValidationSeverity::Error);
+        assert!(ValidationSeverity::Error < ValidationSeverity::Warning);
+        assert!(ValidationSeverity::Warning < ValidationSeverity::Info);
     }
 
     #[test]
     fn test_validation_result_builder() {
-        let result = ValidationResult::new(ValidationSeverity::Warning, "Test", "Test message")
-            .with_details("Additional details")
-            .with_suggestion("Do this");
+        let result = ValidationResult::new(
+            ValidationCategory::Balance,
+            ValidationSeverity::Warning,
+            "Test message",
+        )
+        .with_details("Additional details")
+        .with_suggestion("Do this");
 
         assert_eq!(result.severity, ValidationSeverity::Warning);
-        assert_eq!(result.category, "Test");
+        assert_eq!(result.category, ValidationCategory::Balance);
         assert_eq!(result.message, "Test message");
         assert_eq!(result.details, Some("Additional details".to_string()));
         assert_eq!(result.suggestion, Some("Do this".to_string()));

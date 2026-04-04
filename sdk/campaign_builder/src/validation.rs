@@ -55,6 +55,16 @@ pub enum ValidationCategory {
     Proficiencies,
     /// Asset files (images, sounds, etc.)
     Assets,
+    /// Balance analysis between party power and monster difficulty
+    Balance,
+    /// Economy analysis (gold and item distribution)
+    Economy,
+    /// Quest dependency validation (missing references, broken links)
+    QuestDependencies,
+    /// Content reachability analysis (unreferenced items/monsters)
+    ContentReachability,
+    /// Difficulty progression analysis (curve smoothness, level gaps)
+    DifficultyProgression,
 }
 
 impl fmt::Display for ValidationCategory {
@@ -92,6 +102,11 @@ impl ValidationCategory {
             ValidationCategory::Characters => "Characters",
             ValidationCategory::Proficiencies => "Proficiencies",
             ValidationCategory::Assets => "Assets",
+            ValidationCategory::Balance => "Balance",
+            ValidationCategory::Economy => "Economy",
+            ValidationCategory::QuestDependencies => "Quest Dependencies",
+            ValidationCategory::ContentReachability => "Content Reachability",
+            ValidationCategory::DifficultyProgression => "Difficulty Progression",
         }
     }
 
@@ -117,6 +132,11 @@ impl ValidationCategory {
             ValidationCategory::Characters,
             ValidationCategory::Proficiencies,
             ValidationCategory::Assets,
+            ValidationCategory::Balance,
+            ValidationCategory::Economy,
+            ValidationCategory::QuestDependencies,
+            ValidationCategory::ContentReachability,
+            ValidationCategory::DifficultyProgression,
         ]
     }
 
@@ -139,6 +159,11 @@ impl ValidationCategory {
             ValidationCategory::Characters => "🧑",
             ValidationCategory::Proficiencies => "📚",
             ValidationCategory::Assets => "📦",
+            ValidationCategory::Balance => "⚖️",
+            ValidationCategory::Economy => "💰",
+            ValidationCategory::QuestDependencies => "🔗",
+            ValidationCategory::ContentReachability => "🔍",
+            ValidationCategory::DifficultyProgression => "📈",
         }
     }
 }
@@ -147,9 +172,11 @@ impl ValidationCategory {
 ///
 /// Severity determines how the result is displayed and whether it blocks
 /// certain operations (e.g., test play requires no errors).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ValidationSeverity {
-    /// Critical error that must be fixed
+    /// Critical error that must be fixed immediately (most severe, numerically smallest)
+    Critical,
+    /// Error that must be fixed
     Error,
     /// Warning that should be addressed but doesn't block operations
     Warning,
@@ -173,6 +200,7 @@ impl ValidationSeverity {
     /// ```
     pub fn icon(&self) -> &'static str {
         match self {
+            ValidationSeverity::Critical => "🔥",
             ValidationSeverity::Error => "❌",
             ValidationSeverity::Warning => "⚠️",
             ValidationSeverity::Info => "ℹ️",
@@ -185,6 +213,7 @@ impl ValidationSeverity {
     /// Returns an `egui::Color32` appropriate for the severity level.
     pub fn color(&self) -> eframe::egui::Color32 {
         match self {
+            ValidationSeverity::Critical => eframe::egui::Color32::from_rgb(255, 50, 50),
             ValidationSeverity::Error => eframe::egui::Color32::from_rgb(255, 80, 80),
             ValidationSeverity::Warning => eframe::egui::Color32::from_rgb(255, 180, 0),
             ValidationSeverity::Info => eframe::egui::Color32::from_rgb(100, 180, 255),
@@ -195,6 +224,7 @@ impl ValidationSeverity {
     /// Returns the display name for the severity.
     pub fn display_name(&self) -> &'static str {
         match self {
+            ValidationSeverity::Critical => "Critical",
             ValidationSeverity::Error => "Error",
             ValidationSeverity::Warning => "Warning",
             ValidationSeverity::Info => "Info",
@@ -217,6 +247,10 @@ pub struct ValidationResult {
     pub message: String,
     /// Optional file path associated with the result
     pub file_path: Option<PathBuf>,
+    /// Optional additional details about the issue
+    pub details: Option<String>,
+    /// Optional suggestion for how to fix the issue
+    pub suggestion: Option<String>,
 }
 
 impl ValidationResult {
@@ -252,6 +286,8 @@ impl ValidationResult {
             severity,
             message: message.into(),
             file_path: None,
+            details: None,
+            suggestion: None,
         }
     }
 
@@ -295,6 +331,16 @@ impl ValidationResult {
         Self::new(category, ValidationSeverity::Passed, message)
     }
 
+    /// Creates a critical result.
+    ///
+    /// # Arguments
+    ///
+    /// * `category` - The category for grouping
+    /// * `message` - Human-readable description
+    pub fn critical(category: ValidationCategory, message: impl Into<String>) -> Self {
+        Self::new(category, ValidationSeverity::Critical, message)
+    }
+
     /// Adds a file path to the result.
     ///
     /// # Arguments
@@ -302,6 +348,26 @@ impl ValidationResult {
     /// * `path` - The file path associated with this result
     pub fn with_file_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.file_path = Some(path.into());
+        self
+    }
+
+    /// Adds additional details to the result.
+    ///
+    /// # Arguments
+    ///
+    /// * `details` - Additional context or detail about the issue
+    pub fn with_details(mut self, details: impl Into<String>) -> Self {
+        self.details = Some(details.into());
+        self
+    }
+
+    /// Adds a suggestion for fixing the issue.
+    ///
+    /// # Arguments
+    ///
+    /// * `suggestion` - A suggestion for how to fix the issue
+    pub fn with_suggestion(mut self, suggestion: impl Into<String>) -> Self {
+        self.suggestion = Some(suggestion.into());
         self
     }
 
@@ -319,11 +385,18 @@ impl ValidationResult {
     pub fn is_passed(&self) -> bool {
         self.severity == ValidationSeverity::Passed
     }
+
+    /// Returns true if this is a critical error.
+    pub fn is_critical(&self) -> bool {
+        self.severity == ValidationSeverity::Critical
+    }
 }
 
 /// Summary statistics for validation results.
 #[derive(Debug, Clone, Default)]
 pub struct ValidationSummary {
+    /// Number of critical errors (most severe)
+    pub critical_count: usize,
     /// Number of errors
     pub error_count: usize,
     /// Number of warnings
@@ -363,6 +436,7 @@ impl ValidationSummary {
         let mut summary = Self::default();
         for result in results {
             match result.severity {
+                ValidationSeverity::Critical => summary.critical_count += 1,
                 ValidationSeverity::Error => summary.error_count += 1,
                 ValidationSeverity::Warning => summary.warning_count += 1,
                 ValidationSeverity::Info => summary.info_count += 1,
@@ -374,12 +448,16 @@ impl ValidationSummary {
 
     /// Returns total number of results.
     pub fn total(&self) -> usize {
-        self.error_count + self.warning_count + self.info_count + self.passed_count
+        self.critical_count
+            + self.error_count
+            + self.warning_count
+            + self.info_count
+            + self.passed_count
     }
 
     /// Returns true if there are no errors.
     pub fn has_no_errors(&self) -> bool {
-        self.error_count == 0
+        self.error_count == 0 && self.critical_count == 0
     }
 
     /// Returns true if all checks passed with no errors or warnings.
@@ -941,6 +1019,23 @@ pub fn validate_armor_classification(
     ))
 }
 
+/// Errors returned by NPC reference validation helpers.
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum NpcReferenceError {
+    /// The NPC ID string is empty.
+    #[error("NPC ID cannot be empty")]
+    EmptyId,
+    /// The NPC ID is not in the known-IDs set.
+    #[error("NPC placement references unknown NPC ID: '{0}'")]
+    UnknownNpcId(String),
+    /// The dialogue ID is not in the known-IDs set.
+    #[error("NPC references unknown dialogue ID: {0}")]
+    UnknownDialogueId(u16),
+    /// One of the quest IDs is not in the known-IDs set.
+    #[error("NPC references unknown quest ID: {0}")]
+    UnknownQuestId(u32),
+}
+
 #[cfg(test)]
 /// Validates NPC placement references
 ///
@@ -957,16 +1052,13 @@ pub fn validate_armor_classification(
 pub fn validate_npc_placement_reference(
     npc_id: &str,
     available_npc_ids: &std::collections::HashSet<String>,
-) -> Result<(), String> {
+) -> Result<(), NpcReferenceError> {
     if npc_id.is_empty() {
-        return Err("NPC ID cannot be empty".to_string());
+        return Err(NpcReferenceError::EmptyId);
     }
 
     if !available_npc_ids.contains(npc_id) {
-        return Err(format!(
-            "NPC placement references unknown NPC ID: '{}'",
-            npc_id
-        ));
+        return Err(NpcReferenceError::UnknownNpcId(npc_id.to_string()));
     }
 
     Ok(())
@@ -987,10 +1079,10 @@ pub fn validate_npc_placement_reference(
 pub fn validate_npc_dialogue_reference(
     dialogue_id: Option<u16>,
     available_dialogue_ids: &std::collections::HashSet<u16>,
-) -> Result<(), String> {
+) -> Result<(), NpcReferenceError> {
     if let Some(id) = dialogue_id {
         if !available_dialogue_ids.contains(&id) {
-            return Err(format!("NPC references unknown dialogue ID: {}", id));
+            return Err(NpcReferenceError::UnknownDialogueId(id));
         }
     }
     Ok(())
@@ -1011,10 +1103,10 @@ pub fn validate_npc_dialogue_reference(
 pub fn validate_npc_quest_references(
     quest_ids: &[u32],
     available_quest_ids: &std::collections::HashSet<u32>,
-) -> Result<(), String> {
+) -> Result<(), NpcReferenceError> {
     for quest_id in quest_ids {
         if !available_quest_ids.contains(quest_id) {
-            return Err(format!("NPC references unknown quest ID: {}", quest_id));
+            return Err(NpcReferenceError::UnknownQuestId(*quest_id));
         }
     }
     Ok(())
@@ -1056,7 +1148,7 @@ pub fn validate_recruitable_character_references(
     let mut results = Vec::new();
 
     for map in maps {
-        for (position, event) in &map.events {
+        for event in map.events.values() {
             if let antares::domain::world::MapEvent::RecruitableCharacter {
                 name,
                 character_id,
@@ -1100,6 +1192,7 @@ pub fn validate_recruitable_character_references(
     results
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1351,6 +1444,20 @@ mod tests {
         assert_eq!(ValidationCategory::Metadata.display_name(), "Metadata");
         assert_eq!(ValidationCategory::Items.display_name(), "Items");
         assert_eq!(ValidationCategory::FilePaths.display_name(), "File Paths");
+        assert_eq!(ValidationCategory::Balance.display_name(), "Balance");
+        assert_eq!(ValidationCategory::Economy.display_name(), "Economy");
+        assert_eq!(
+            ValidationCategory::QuestDependencies.display_name(),
+            "Quest Dependencies"
+        );
+        assert_eq!(
+            ValidationCategory::ContentReachability.display_name(),
+            "Content Reachability"
+        );
+        assert_eq!(
+            ValidationCategory::DifficultyProgression.display_name(),
+            "Difficulty Progression"
+        );
     }
 
     #[test]
@@ -1360,6 +1467,11 @@ mod tests {
         assert!(all.contains(&ValidationCategory::Metadata));
         assert!(all.contains(&ValidationCategory::Items));
         assert!(all.contains(&ValidationCategory::Assets));
+        assert!(all.contains(&ValidationCategory::Balance));
+        assert!(all.contains(&ValidationCategory::Economy));
+        assert!(all.contains(&ValidationCategory::QuestDependencies));
+        assert!(all.contains(&ValidationCategory::ContentReachability));
+        assert!(all.contains(&ValidationCategory::DifficultyProgression));
     }
 
     #[test]
@@ -1371,6 +1483,7 @@ mod tests {
 
     #[test]
     fn test_validation_severity_icon() {
+        assert_eq!(ValidationSeverity::Critical.icon(), "🔥");
         assert_eq!(ValidationSeverity::Error.icon(), "❌");
         assert_eq!(ValidationSeverity::Warning.icon(), "⚠️");
         assert_eq!(ValidationSeverity::Info.icon(), "ℹ️");
@@ -1379,9 +1492,26 @@ mod tests {
 
     #[test]
     fn test_validation_severity_display_name() {
+        assert_eq!(ValidationSeverity::Critical.display_name(), "Critical");
         assert_eq!(ValidationSeverity::Error.display_name(), "Error");
         assert_eq!(ValidationSeverity::Warning.display_name(), "Warning");
         assert_eq!(ValidationSeverity::Passed.display_name(), "Passed");
+    }
+
+    #[test]
+    fn test_validation_severity_critical() {
+        // Critical is most severe: numerically smallest (Critical < Error < Warning < Info < Passed)
+        assert!(ValidationSeverity::Critical < ValidationSeverity::Error);
+        assert!(ValidationSeverity::Error < ValidationSeverity::Warning);
+        assert!(ValidationSeverity::Warning < ValidationSeverity::Info);
+        assert!(ValidationSeverity::Info < ValidationSeverity::Passed);
+
+        let result = ValidationResult::critical(ValidationCategory::Metadata, "Critical issue");
+        assert!(result.is_critical());
+        assert!(!result.is_error());
+        assert_eq!(result.severity, ValidationSeverity::Critical);
+        assert_eq!(result.severity.icon(), "🔥");
+        assert_eq!(result.severity.display_name(), "Critical");
     }
 
     #[test]
@@ -1396,6 +1526,25 @@ mod tests {
         assert_eq!(result.severity, ValidationSeverity::Error);
         assert_eq!(result.message, "Test error message");
         assert!(result.file_path.is_none());
+        assert!(result.details.is_none());
+        assert!(result.suggestion.is_none());
+    }
+
+    #[test]
+    fn test_validation_result_with_details_and_suggestion() {
+        let result = ValidationResult::error(ValidationCategory::Items, "Item validation failed")
+            .with_details("Item ID 42 is duplicated across two definitions")
+            .with_suggestion("Assign a unique ID to each item");
+
+        assert!(result.is_error());
+        assert_eq!(
+            result.details,
+            Some("Item ID 42 is duplicated across two definitions".to_string())
+        );
+        assert_eq!(
+            result.suggestion,
+            Some("Assign a unique ID to each item".to_string())
+        );
     }
 
     #[test]
@@ -1447,11 +1596,37 @@ mod tests {
 
         let summary = ValidationSummary::from_results(&results);
 
+        assert_eq!(summary.critical_count, 0);
         assert_eq!(summary.error_count, 2);
         assert_eq!(summary.warning_count, 1);
         assert_eq!(summary.info_count, 1);
         assert_eq!(summary.passed_count, 1);
         assert_eq!(summary.total(), 5);
+    }
+
+    #[test]
+    fn test_validation_summary_critical_count() {
+        let results = vec![
+            ValidationResult::critical(ValidationCategory::Balance, "Critical balance issue"),
+            ValidationResult::critical(ValidationCategory::Economy, "Critical economy issue"),
+            ValidationResult::error(ValidationCategory::Metadata, "Regular error"),
+            ValidationResult::warning(ValidationCategory::Items, "Warning"),
+        ];
+
+        let summary = ValidationSummary::from_results(&results);
+        assert_eq!(summary.critical_count, 2);
+        assert_eq!(summary.error_count, 1);
+        assert_eq!(summary.total(), 4);
+
+        // has_no_errors must also require no criticals
+        assert!(!summary.has_no_errors());
+
+        let no_error_results = vec![ValidationResult::warning(
+            ValidationCategory::Metadata,
+            "Just a warning",
+        )];
+        let clean_summary = ValidationSummary::from_results(&no_error_results);
+        assert!(clean_summary.has_no_errors());
     }
 
     #[test]
@@ -1577,7 +1752,7 @@ mod tests {
 
         let result = validate_npc_placement_reference("unknown_npc", &available);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unknown NPC ID"));
+        assert!(result.unwrap_err().to_string().contains("unknown NPC ID"));
     }
 
     #[test]
@@ -1585,7 +1760,7 @@ mod tests {
         let available = std::collections::HashSet::new();
         let result = validate_npc_placement_reference("", &available);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("cannot be empty"));
+        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
     }
 
     #[test]
@@ -1605,7 +1780,10 @@ mod tests {
 
         let result = validate_npc_dialogue_reference(Some(99), &available);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unknown dialogue ID"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("unknown dialogue ID"));
     }
 
     #[test]
@@ -1627,7 +1805,10 @@ mod tests {
 
         let result = validate_npc_quest_references(&[1, 99], &available);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unknown quest ID: 99"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("unknown quest ID: 99"));
     }
 
     #[test]
@@ -1638,7 +1819,7 @@ mod tests {
         // Should fail on first invalid quest
         let result = validate_npc_quest_references(&[99, 100], &available);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unknown quest ID"));
+        assert!(result.unwrap_err().to_string().contains("unknown quest ID"));
     }
 
     #[test]

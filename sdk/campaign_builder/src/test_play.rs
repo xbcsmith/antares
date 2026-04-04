@@ -3,7 +3,6 @@
 //! This module provides functionality for launching the Antares game engine
 //! with the current campaign for testing purposes.
 
-use crate::{CampaignBuilderApp, CampaignError};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 
@@ -209,77 +208,6 @@ impl Default for TestPlayConfig {
             validate_first: true,
             max_log_lines: 1000,
         }
-    }
-}
-
-impl CampaignBuilderApp {
-    /// Launches test play session
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Test play configuration
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(TestPlaySession)` if launched successfully
-    ///
-    /// # Errors
-    ///
-    /// Returns error if validation fails, save fails, or game fails to launch
-    pub fn launch_test_play(
-        &mut self,
-        config: &TestPlayConfig,
-    ) -> Result<TestPlaySession, CampaignError> {
-        // Auto-save if enabled
-        if config.auto_save {
-            self.save_campaign()?;
-        }
-
-        // Validate if enabled
-        if config.validate_first {
-            self.validate_campaign();
-            let has_errors = self.validation_errors.iter().any(|e| e.is_error());
-
-            if has_errors {
-                return Err(CampaignError::Io(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Campaign has validation errors",
-                )));
-            }
-        }
-
-        // Check game executable exists
-        if !config.game_executable.exists() {
-            return Err(CampaignError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!(
-                    "Game executable not found: {}",
-                    config.game_executable.display()
-                ),
-            )));
-        }
-
-        // Create and launch session
-        let mut session = TestPlaySession::new(self.campaign.id.clone());
-        session
-            .launch(&config.game_executable, config.debug_mode)
-            .map_err(CampaignError::Io)?;
-
-        self.status_message = format!("Test play launched: {}", self.campaign.name);
-        Ok(session)
-    }
-
-    /// Checks if test play is available (game executable exists)
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Test play configuration to check
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if test play can be launched
-    pub fn can_launch_test_play(&self, config: &TestPlayConfig) -> bool {
-        config.game_executable.exists()
     }
 }
 

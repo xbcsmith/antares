@@ -7,20 +7,37 @@
 //! rendering via the `show()` method, following the standard editor pattern.
 //! Uses shared UI components for consistent layout.
 
+use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     autocomplete_ability_list_selector, autocomplete_proficiency_list_selector,
-    autocomplete_tag_list_selector, extract_item_tag_candidates, extract_proficiency_candidates,
-    extract_special_ability_candidates, show_standard_list_item, EditorToolbar, ItemAction,
-    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    autocomplete_tag_list_selector, extract_item_tag_candidates,
+    extract_special_ability_candidates, handle_toolbar_action, show_standard_list_item,
+    EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
+    TwoColumnLayout,
 };
 use antares::domain::items::types::Item;
-use antares::domain::proficiency::{ProficiencyDatabase, ProficiencyDefinition, ProficiencyId};
+use antares::domain::proficiency::ProficiencyId;
 use antares::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
-use std::collections::HashSet;
-use std::path::PathBuf;
+
+/// Errors that can occur in the Races Editor.
+#[derive(Debug, thiserror::Error)]
+pub enum RaceEditorError {
+    /// OS-level I/O failure.
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    /// The file could not be parsed as RON.
+    #[error("Parse error: {0}")]
+    Parse(String),
+    /// The data could not be serialised to RON.
+    #[error("Serialisation error: {0}")]
+    Serialization(String),
+    /// A field failed validation.
+    #[error("{0}")]
+    Validation(String),
+}
 
 /// Editor state for races
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,15 +199,19 @@ impl RacesEditorState {
     }
 
     /// Saves the current race from the edit buffer
-    pub fn save_race(&mut self) -> Result<(), String> {
+    pub fn save_race(&mut self) -> Result<(), RaceEditorError> {
         let id = self.buffer.id.trim().to_string();
         if id.is_empty() {
-            return Err("ID cannot be empty".to_string());
+            return Err(RaceEditorError::Validation(
+                "ID cannot be empty".to_string(),
+            ));
         }
 
         let name = self.buffer.name.trim().to_string();
         if name.is_empty() {
-            return Err("Name cannot be empty".to_string());
+            return Err(RaceEditorError::Validation(
+                "Name cannot be empty".to_string(),
+            ));
         }
 
         // Parse stat modifiers
@@ -198,79 +219,74 @@ impl RacesEditorState {
             .buffer
             .might
             .parse::<i8>()
-            .map_err(|_| "Invalid Might value")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Might value".to_string()))?;
         let intellect = self
             .buffer
             .intellect
             .parse::<i8>()
-            .map_err(|_| "Invalid Intellect value")?;
-        let personality = self
-            .buffer
-            .personality
-            .parse::<i8>()
-            .map_err(|_| "Invalid Personality value")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Intellect value".to_string()))?;
+        let personality =
+            self.buffer.personality.parse::<i8>().map_err(|_| {
+                RaceEditorError::Validation("Invalid Personality value".to_string())
+            })?;
         let endurance = self
             .buffer
             .endurance
             .parse::<i8>()
-            .map_err(|_| "Invalid Endurance value")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Endurance value".to_string()))?;
         let speed = self
             .buffer
             .speed
             .parse::<i8>()
-            .map_err(|_| "Invalid Speed value")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Speed value".to_string()))?;
         let accuracy = self
             .buffer
             .accuracy
             .parse::<i8>()
-            .map_err(|_| "Invalid Accuracy value")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Accuracy value".to_string()))?;
         let luck = self
             .buffer
             .luck
             .parse::<i8>()
-            .map_err(|_| "Invalid Luck value")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Luck value".to_string()))?;
 
         // Parse resistances
         let magic_resist = self
             .buffer
             .magic_resist
             .parse::<u8>()
-            .map_err(|_| "Invalid Magic resistance")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Magic resistance".to_string()))?;
         let fire_resist = self
             .buffer
             .fire_resist
             .parse::<u8>()
-            .map_err(|_| "Invalid Fire resistance")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Fire resistance".to_string()))?;
         let cold_resist = self
             .buffer
             .cold_resist
             .parse::<u8>()
-            .map_err(|_| "Invalid Cold resistance")?;
-        let electricity_resist = self
-            .buffer
-            .electricity_resist
-            .parse::<u8>()
-            .map_err(|_| "Invalid Electricity resistance")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Cold resistance".to_string()))?;
+        let electricity_resist = self.buffer.electricity_resist.parse::<u8>().map_err(|_| {
+            RaceEditorError::Validation("Invalid Electricity resistance".to_string())
+        })?;
         let acid_resist = self
             .buffer
             .acid_resist
             .parse::<u8>()
-            .map_err(|_| "Invalid Acid resistance")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Acid resistance".to_string()))?;
         let fear_resist = self
             .buffer
             .fear_resist
             .parse::<u8>()
-            .map_err(|_| "Invalid Fear resistance")?;
-        let poison_resist = self
-            .buffer
-            .poison_resist
-            .parse::<u8>()
-            .map_err(|_| "Invalid Poison resistance")?;
-        let psychic_resist = self
-            .buffer
-            .psychic_resist
-            .parse::<u8>()
-            .map_err(|_| "Invalid Psychic resistance")?;
+            .map_err(|_| RaceEditorError::Validation("Invalid Fear resistance".to_string()))?;
+        let poison_resist =
+            self.buffer.poison_resist.parse::<u8>().map_err(|_| {
+                RaceEditorError::Validation("Invalid Poison resistance".to_string())
+            })?;
+        let psychic_resist =
+            self.buffer.psychic_resist.parse::<u8>().map_err(|_| {
+                RaceEditorError::Validation("Invalid Psychic resistance".to_string())
+            })?;
 
         let special_abilities: Vec<String> = self
             .buffer
@@ -330,7 +346,9 @@ impl RacesEditorState {
         } else {
             // Check for duplicate ID if creating new
             if self.races.iter().any(|r| r.id == id) {
-                return Err("Race ID already exists".to_string());
+                return Err(RaceEditorError::Validation(
+                    "Race ID already exists".to_string(),
+                ));
             }
             self.races.push(race_def);
         }
@@ -388,11 +406,10 @@ impl RacesEditorState {
     }
 
     /// Loads races from a file path
-    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), String> {
-        let content =
-            std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
+    pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), RaceEditorError> {
+        let content = std::fs::read_to_string(path)?;
         let races: Vec<RaceDefinition> =
-            ron::from_str(&content).map_err(|e| format!("Failed to parse races: {}", e))?;
+            ron::from_str(&content).map_err(|e| RaceEditorError::Parse(e.to_string()))?;
         self.races = races;
         self.has_unsaved_changes = false;
         // Do not auto-select a race on load; wait for the user to select one
@@ -403,14 +420,13 @@ impl RacesEditorState {
     }
 
     /// Saves races to a file path
-    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), String> {
+    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), RaceEditorError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+            std::fs::create_dir_all(parent)?;
         }
         let content = ron::ser::to_string_pretty(&self.races, Default::default())
-            .map_err(|e| format!("Failed to serialize races: {}", e))?;
-        std::fs::write(path, content).map_err(|e| format!("Failed to write file: {}", e))?;
+            .map_err(|e| RaceEditorError::Serialization(e.to_string()))?;
+        std::fs::write(path, content)?;
         Ok(())
     }
 
@@ -419,143 +435,48 @@ impl RacesEditorState {
     /// # Arguments
     ///
     /// * `ui` - The egui UI context
-    /// * `campaign_dir` - Optional campaign directory path
-    /// * `races_file` - Filename for races data
-    /// * `unsaved_changes` - Mutable flag for tracking unsaved changes
-    /// * `status_message` - Mutable string for status messages
-    /// * `file_load_merge_mode` - Whether to merge or replace when loading files
-    #[allow(clippy::too_many_arguments)]
-    pub fn show(
-        &mut self,
-        ui: &mut egui::Ui,
-        items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        races_file: &str,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        file_load_merge_mode: &mut bool,
-    ) {
+    /// * `items` - Available items for starting equipment selection
+    /// * `ctx` - Shared editor context (campaign dir, data file, unsaved flag, status, merge mode)
+    pub fn show(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
         ui.heading("🧬 Races Editor");
         ui.add_space(5.0);
 
         // Use shared EditorToolbar component
         let toolbar_action = EditorToolbar::new("Races")
             .with_search(&mut self.search_filter)
-            .with_merge_mode(file_load_merge_mode)
+            .with_merge_mode(ctx.file_load_merge_mode)
             .with_total_count(self.races.len())
             .with_id_salt("races_toolbar")
             .show(ui);
 
-        // Handle toolbar actions
+        // Handle toolbar actions — New and Import are races-specific;
+        // all other arms are handled by the shared generic dispatcher.
         match toolbar_action {
             ToolbarAction::New => {
                 self.start_new_race();
                 self.buffer.id = self.next_available_race_id();
-                *unsaved_changes = true;
-            }
-            ToolbarAction::Save => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(races_file);
-                    match self.save_to_file(&path) {
-                        Ok(_) => {
-                            *status_message = format!("Saved {} races", self.races.len());
-                        }
-                        Err(e) => {
-                            *status_message = format!("Failed to save races: {}", e);
-                        }
-                    }
-                }
-            }
-            ToolbarAction::Load => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("RON", &["ron"])
-                    .pick_file()
-                {
-                    let load_result = std::fs::read_to_string(&path).and_then(|contents| {
-                        ron::from_str::<Vec<RaceDefinition>>(&contents)
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    });
-
-                    match load_result {
-                        Ok(loaded_races) => {
-                            if *file_load_merge_mode {
-                                for race in loaded_races {
-                                    if let Some(existing) =
-                                        self.races.iter_mut().find(|r| r.id == race.id)
-                                    {
-                                        *existing = race;
-                                    } else {
-                                        self.races.push(race);
-                                    }
-                                }
-                            } else {
-                                self.races = loaded_races;
-                            }
-                            *unsaved_changes = true;
-                            *status_message = format!("Loaded races from: {}", path.display());
-                        }
-                        Err(e) => {
-                            *status_message = format!("Failed to load races: {}", e);
-                        }
-                    }
-                }
+                *ctx.unsaved_changes = true;
             }
             ToolbarAction::Import => {
                 self.show_import_dialog = true;
                 self.import_export_buffer.clear();
             }
-            ToolbarAction::Export => {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("races.ron")
-                    .add_filter("RON", &["ron"])
-                    .save_file()
-                {
-                    match ron::ser::to_string_pretty(&self.races, Default::default()) {
-                        Ok(contents) => match std::fs::write(&path, contents) {
-                            Ok(_) => {
-                                *status_message = format!("Saved races to: {}", path.display());
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to save races: {}", e);
-                            }
-                        },
-                        Err(e) => {
-                            *status_message = format!("Failed to serialize races: {}", e);
-                        }
-                    }
-                }
-            }
-            ToolbarAction::Reload => {
-                if let Some(dir) = campaign_dir {
-                    let path = dir.join(races_file);
-                    if path.exists() {
-                        match self.load_from_file(&path) {
-                            Ok(_) => {
-                                *status_message = format!("Loaded {} races", self.races.len());
-                            }
-                            Err(e) => {
-                                *status_message = format!("Failed to load races: {}", e);
-                            }
-                        }
-                    } else {
-                        *status_message = "Races file does not exist".to_string();
-                    }
-                }
-            }
-            ToolbarAction::None => {}
+            other => handle_toolbar_action(
+                other,
+                &mut self.races,
+                |r: &RaceDefinition| r.id.clone(),
+                &mut self.has_unsaved_changes,
+                ctx,
+                "races.ron",
+                "races",
+            ),
         }
 
         ui.separator();
 
         // Show import/export dialog if requested
         if self.show_import_dialog {
-            self.show_import_dialog(
-                ui.ctx(),
-                unsaved_changes,
-                status_message,
-                campaign_dir,
-                races_file,
-            );
+            self.show_import_dialog(ui.ctx(), ctx);
         }
 
         // Main content - use TwoColumnLayout for list mode
@@ -784,7 +705,7 @@ impl RacesEditorState {
                         }
                         ItemAction::Delete => {
                             self.delete_race(idx);
-                            *unsaved_changes = true;
+                            *ctx.unsaved_changes = true;
                         }
                         ItemAction::Duplicate => {
                             if idx < self.races.len() {
@@ -792,7 +713,7 @@ impl RacesEditorState {
                                 new_race.id = format!("{}_copy", new_race.id);
                                 new_race.name = format!("{} (Copy)", new_race.name);
                                 self.races.push(new_race);
-                                *unsaved_changes = true;
+                                *ctx.unsaved_changes = true;
                             }
                         }
                         ItemAction::Export => {
@@ -804,11 +725,11 @@ impl RacesEditorState {
                                     Ok(ron_str) => {
                                         self.import_export_buffer = ron_str;
                                         self.show_import_dialog = true;
-                                        *status_message =
+                                        *ctx.status_message =
                                             "Race exported to clipboard dialog".to_string();
                                     }
                                     Err(e) => {
-                                        *status_message =
+                                        *ctx.status_message =
                                             format!("Failed to serialize race: {}", e);
                                     }
                                 }
@@ -819,21 +740,13 @@ impl RacesEditorState {
                 }
             }
             RacesEditorMode::Creating | RacesEditorMode::Editing => {
-                self.show_race_form(ui, items, campaign_dir, unsaved_changes, status_message);
+                self.show_race_form(ui, items, ctx);
             }
         }
     }
 
     /// Shows the race editing form
-    #[allow(clippy::ptr_arg)]
-    fn show_race_form(
-        &mut self,
-        ui: &mut egui::Ui,
-        items: &[Item],
-        campaign_dir: Option<&PathBuf>,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-    ) {
+    fn show_race_form(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
         let title = if self.mode == RacesEditorMode::Creating {
             "Create New Race"
         } else {
@@ -1014,7 +927,7 @@ impl RacesEditorState {
                 ui.add_space(10.0);
                 ui.heading("Proficiencies");
                 // Load proficiency definitions with tri-stage fallback
-                let prof_defs = crate::ui_helpers::load_proficiencies(campaign_dir, items);
+                let prof_defs = crate::ui_helpers::load_proficiencies(ctx.campaign_dir, items);
 
 
                 if autocomplete_proficiency_list_selector(
@@ -1168,11 +1081,11 @@ impl RacesEditorState {
                     if ui.button("💾 Save").clicked() {
                         match self.save_race() {
                             Ok(_) => {
-                                *unsaved_changes = true;
+                                *ctx.unsaved_changes = true;
                                 self.mode = RacesEditorMode::List;
                             }
                             Err(e) => {
-                                ui.label(egui::RichText::new(e).color(egui::Color32::RED));
+                                ui.label(egui::RichText::new(e.to_string()).color(egui::Color32::RED));
                             }
                         }
                     }
@@ -1184,22 +1097,14 @@ impl RacesEditorState {
     }
 
     /// Shows the import/export dialog for individual races
-    #[allow(clippy::ptr_arg)]
-    fn show_import_dialog(
-        &mut self,
-        ctx: &egui::Context,
-        unsaved_changes: &mut bool,
-        status_message: &mut String,
-        campaign_dir: Option<&PathBuf>,
-        races_file: &str,
-    ) {
+    fn show_import_dialog(&mut self, egui_ctx: &egui::Context, ctx: &mut EditorContext<'_>) {
         let mut open = self.show_import_dialog;
 
         egui::Window::new("Import/Export Race")
             .open(&mut open)
             .resizable(true)
             .default_width(500.0)
-            .show(ctx, |ui| {
+            .show(egui_ctx, |ui| {
                 ui.heading("Race RON Data");
                 ui.separator();
 
@@ -1219,37 +1124,37 @@ impl RacesEditorState {
                                 if self.races.iter().any(|r| r.id == race.id) {
                                     let original_id = race.id.clone();
                                     race.id = self.next_available_race_id();
-                                    *status_message = format!(
+                                    *ctx.status_message = format!(
                                         "Race imported with new ID '{}' (original: '{}')",
                                         race.id, original_id
                                     );
                                 } else {
-                                    *status_message = "Race imported successfully".to_string();
+                                    *ctx.status_message = "Race imported successfully".to_string();
                                 }
 
                                 self.races.push(race);
 
                                 // Auto-save to file
-                                if let Some(dir) = campaign_dir {
-                                    let path = dir.join(races_file);
+                                if let Some(dir) = ctx.campaign_dir {
+                                    let path = dir.join(ctx.data_file);
                                     if let Err(e) = self.save_to_file(&path) {
-                                        *status_message =
+                                        *ctx.status_message =
                                             format!("Import succeeded but save failed: {}", e);
                                     }
                                 }
 
-                                *unsaved_changes = true;
+                                *ctx.unsaved_changes = true;
                                 self.show_import_dialog = false;
                             }
                             Err(e) => {
-                                *status_message = format!("Import failed: {}", e);
+                                *ctx.status_message = format!("Import failed: {}", e);
                             }
                         }
                     }
 
                     if ui.button("📋 Copy to Clipboard").clicked() {
                         ui.ctx().copy_text(self.import_export_buffer.clone());
-                        *status_message = "Copied to clipboard".to_string();
+                        *ctx.status_message = "Copied to clipboard".to_string();
                     }
 
                     if ui.button("❌ Close").clicked() {
@@ -1301,7 +1206,10 @@ mod tests {
 
         let result = state.save_race();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("ID cannot be empty"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("ID cannot be empty"));
     }
 
     #[test]
@@ -1312,7 +1220,10 @@ mod tests {
 
         let result = state.save_race();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Name cannot be empty"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Name cannot be empty"));
     }
 
     #[test]
@@ -1332,7 +1243,7 @@ mod tests {
 
         let result = state.save_race();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("already exists"));
+        assert!(result.unwrap_err().to_string().contains("already exists"));
     }
 
     #[test]
