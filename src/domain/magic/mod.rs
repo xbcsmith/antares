@@ -62,6 +62,7 @@
 
 pub mod casting;
 pub mod database;
+pub mod effect_dispatch;
 pub mod spell_effects;
 pub mod types;
 
@@ -72,8 +73,16 @@ pub use casting::{
     get_required_level_for_spell_by_id,
 };
 pub use database::{SpellDatabase, SpellDatabaseError};
+pub use effect_dispatch::{
+    apply_buff_spell, apply_cure_condition, apply_healing_spell, apply_spell_effect,
+    apply_utility_spell, BuffResult, CureConditionResult, HealResult, SpellEffectResult,
+    UtilityResult,
+};
 pub use spell_effects::{
     apply_condition_dot_effects, apply_spell_conditions_to_character,
     apply_spell_conditions_to_monster,
 };
-pub use types::{Spell, SpellContext, SpellError, SpellResult, SpellSchool, SpellTarget};
+pub use types::{
+    BuffField, Spell, SpellContext, SpellEffectType, SpellError, SpellResult, SpellSchool,
+    SpellTarget, UtilityType,
+};

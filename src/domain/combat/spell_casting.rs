@@ -14,12 +14,14 @@
 //! See `docs/reference/architecture.md` Section 5.3 and the Combat System plan
 //! for spell casting behavior and restrictions.
 
+use crate::application::ActiveSpells;
 use crate::domain::combat::engine::{
     apply_condition_to_character_by_id, apply_condition_to_monster_by_id, CombatState,
 };
 use crate::domain::combat::types::CombatantId;
 use crate::domain::magic::casting as magic_casting;
-use crate::domain::magic::types::{Spell, SpellError, SpellResult, SpellTarget};
+use crate::domain::magic::effect_dispatch as spell_dispatch;
+use crate::domain::magic::types::{Spell, SpellEffectType, SpellError, SpellResult, SpellTarget};
 use crate::domain::types::SpellId;
 use crate::sdk::database::ContentDatabase;
 use rand::Rng;
@@ -186,6 +188,7 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
     caster: CombatantId,
     spell: &Spell,
     target: CombatantId,
+    active_spells: &mut ActiveSpells,
     content: &ContentDatabase,
     rng: &mut R,
 ) -> Result<SpellResult, SpellCastError> {
@@ -414,6 +417,133 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
         result = result.with_damage(total_damage, affected.clone());
     }
 
+    // ── NEW: Healing dispatch ───────────────────────────────────────────────
+    // Healing spells have no damage dice; the effect_type drives routing.
+    if let SpellEffectType::Healing { amount } = spell.effective_effect_type() {
+        use crate::domain::combat::engine::Combatant;
+        let mut total_healed = 0i32;
+        let mut healed_targets: Vec<usize> = Vec::new();
+
+        match spell.target {
+            SpellTarget::SingleCharacter | SpellTarget::Self_ => {
+                if let CombatantId::Player(idx) = target {
+                    if let Some(Combatant::Player(pc)) = combat_state.get_combatant_mut(&target) {
+                        let heal = spell_dispatch::apply_healing_spell(amount, pc.as_mut(), rng);
+                        total_healed += heal.hp_restored as i32;
+                        healed_targets.push(idx);
+                    } else {
+                        return Err(SpellCastError::InvalidTarget);
+                    }
+                } else {
+                    return Err(SpellCastError::InvalidTarget);
+                }
+            }
+            SpellTarget::AllCharacters => {
+                for (i, participant) in combat_state.participants.iter_mut().enumerate() {
+                    if let Combatant::Player(pc) = participant {
+                        let heal = spell_dispatch::apply_healing_spell(amount, pc.as_mut(), rng);
+                        total_healed += heal.hp_restored as i32;
+                        healed_targets.push(i);
+                    }
+                }
+            }
+            _ => {} // Non-character targets are invalid for healing spells
+        }
+
+        if total_healed > 0 {
+            result = result.with_healing(total_healed, healed_targets);
+        }
+    }
+
+    // ── NEW: Buff dispatch ──────────────────────────────────────────────────
+    // Buff spells write a duration into the party's ActiveSpells tracker.
+    if let SpellEffectType::Buff {
+        buff_field,
+        duration,
+    } = spell.effective_effect_type()
+    {
+        spell_dispatch::apply_buff_spell(buff_field, duration, active_spells);
+        // The mutation is visible in active_spells; no extra SpellResult field needed.
+    }
+
+    // ── NEW: Cure condition dispatch ────────────────────────────────────────
+    // Cure spells remove a named condition from the targeted party member.
+    if let SpellEffectType::CureCondition { condition_id } = spell.effective_effect_type() {
+        use crate::domain::combat::engine::Combatant;
+        if let CombatantId::Player(idx) = target {
+            if let Some(Combatant::Player(pc)) = combat_state.get_combatant_mut(&target) {
+                spell_dispatch::apply_cure_condition(&condition_id, pc.as_mut());
+                if affected.is_empty() {
+                    affected.push(idx);
+                }
+            } else {
+                return Err(SpellCastError::InvalidTarget);
+            }
+        }
+    }
+
+    // ── NEW: Utility dispatch ───────────────────────────────────────────────
+    // Utility spells return a UtilityResult describing the effect; the
+    // application / exploration layer is responsible for applying the
+    // side-effects (e.g. adding food items to inventories in Phase 3).
+    if let SpellEffectType::Utility { utility_type } = spell.effective_effect_type() {
+        let _util = spell_dispatch::apply_utility_spell(utility_type);
+        // Food creation and teleport are handled by the exploration layer.
+    }
+
+    // ── NEW: Composite dispatch ─────────────────────────────────────────────
+    // Composite spells apply multiple sub-effects in two passes:
+    //   Pass 1 — non-character effects (buffs, utility)
+    //   Pass 2 — character effects (healing, cure condition)
+    if let SpellEffectType::Composite(sub_effects) = spell.effective_effect_type() {
+        use crate::domain::combat::engine::Combatant;
+
+        // Pass 1: effects that don't need a mutable character reference
+        for sub in &sub_effects {
+            match sub {
+                SpellEffectType::Buff {
+                    buff_field,
+                    duration,
+                } => {
+                    spell_dispatch::apply_buff_spell(*buff_field, *duration, active_spells);
+                }
+                SpellEffectType::Utility { utility_type } => {
+                    let _ = spell_dispatch::apply_utility_spell(*utility_type);
+                }
+                _ => {}
+            }
+        }
+
+        // Pass 2: effects that mutate a single character target
+        if let CombatantId::Player(char_idx) = target {
+            if let Some(Combatant::Player(pc)) = combat_state.get_combatant_mut(&target) {
+                let mut total_healed = 0i32;
+                let mut healed = false;
+
+                for sub in &sub_effects {
+                    match sub {
+                        SpellEffectType::Healing { amount } => {
+                            let hr = spell_dispatch::apply_healing_spell(*amount, pc.as_mut(), rng);
+                            total_healed += hr.hp_restored as i32;
+                            healed = true;
+                        }
+                        SpellEffectType::CureCondition { condition_id } => {
+                            spell_dispatch::apply_cure_condition(condition_id, pc.as_mut());
+                            if affected.is_empty() {
+                                affected.push(char_idx);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                if healed && total_healed > 0 {
+                    result = result.with_healing(total_healed, vec![char_idx]);
+                }
+            }
+        }
+    }
+
     // Resurrection spell handling.
     // When `spell.resurrect_hp` is `Some(hp)` the spell targets a single dead
     // party member and revives them to `hp` HP.  Permadeath validation is the
@@ -457,6 +587,7 @@ pub fn execute_spell_cast_by_id<R: Rng>(
     caster: CombatantId,
     spell_id: SpellId,
     target: CombatantId,
+    active_spells: &mut ActiveSpells,
     content: &ContentDatabase,
     rng: &mut R,
 ) -> Result<SpellResult, SpellCastError> {
@@ -464,12 +595,21 @@ pub fn execute_spell_cast_by_id<R: Rng>(
         .spells
         .get_spell(spell_id)
         .ok_or(SpellCastError::SpellNotFound(spell_id))?;
-    execute_spell_cast_with_spell(combat_state, caster, spell, target, content, rng)
+    execute_spell_cast_with_spell(
+        combat_state,
+        caster,
+        spell,
+        target,
+        active_spells,
+        content,
+        rng,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::ActiveSpells;
     use crate::domain::character::{Alignment, Character, Sex};
     use crate::domain::combat::engine::Combatant;
     use crate::domain::combat::monster::Monster;
@@ -623,6 +763,7 @@ mod tests {
             CombatantId::Player(0),
             &fire_self,
             CombatantId::Player(0),
+            &mut ActiveSpells::new(),
             &ContentDatabase::new(),
             &mut rng,
         )
@@ -680,6 +821,7 @@ mod tests {
             CombatantId::Player(0),
             &spell,
             CombatantId::Player(0),
+            &mut ActiveSpells::new(),
             &content,
             &mut rng,
         );
@@ -725,6 +867,7 @@ mod tests {
             CombatantId::Player(0),
             &spell,
             CombatantId::Monster(1),
+            &mut ActiveSpells::new(),
             &ContentDatabase::new(),
             &mut rng,
         )
@@ -798,6 +941,7 @@ mod tests {
             CombatantId::Player(0),
             &resurrect,
             CombatantId::Player(1),
+            &mut ActiveSpells::new(),
             &content,
             &mut rng,
         )
@@ -876,6 +1020,7 @@ mod tests {
             CombatantId::Player(0),
             &resurrect,
             CombatantId::Player(1),
+            &mut ActiveSpells::new(),
             &content,
             &mut rng,
         )
@@ -895,5 +1040,355 @@ mod tests {
             res.healing.is_none(),
             "SpellResult must not report healing when Resurrect is a no-op"
         );
+    }
+
+    // ── Phase 1: Healing dispatch in combat ───────────────────────────────────
+
+    /// A healing spell targeting a single party member restores HP via the
+    /// effect dispatcher and reports the healing in the returned SpellResult.
+    #[test]
+    fn test_healing_spell_restores_single_target_hp_in_combat() {
+        use crate::domain::magic::types::SpellEffectType;
+        let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
+
+        // Caster: level-3 cleric with enough SP
+        let caster = create_test_paladin(3, 10);
+        cs.add_player(caster);
+
+        // Target: wounded party member
+        let mut wounded = Character::new(
+            "Wounded".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        wounded.hp.base = 20;
+        wounded.hp.current = 5;
+        cs.add_player(wounded);
+
+        // Build a healing spell
+        let mut heal_spell = Spell::new(
+            0x0101,
+            "Cure Wounds",
+            SpellSchool::Cleric,
+            1,
+            2,
+            0,
+            SpellContext::Anytime,
+            crate::domain::magic::types::SpellTarget::SingleCharacter,
+            "Heals the target",
+            None,
+            0,
+            false,
+        );
+        heal_spell.effect_type = Some(SpellEffectType::Healing {
+            amount: DiceRoll::new(2, 4, 0),
+        });
+
+        let mut active = ActiveSpells::new();
+        let mut rng = rand::rng();
+
+        let res = execute_spell_cast_with_spell(
+            &mut cs,
+            CombatantId::Player(0),
+            &heal_spell,
+            CombatantId::Player(1),
+            &mut active,
+            &ContentDatabase::new(),
+            &mut rng,
+        )
+        .expect("healing spell must succeed");
+
+        // Target HP must have increased
+        if let Some(Combatant::Player(target)) = cs.get_combatant(&CombatantId::Player(1)) {
+            assert!(
+                target.hp.current > 5,
+                "HP must increase after healing spell"
+            );
+            assert!(target.hp.current <= 20, "HP must not exceed base maximum");
+        } else {
+            panic!("Target not found after healing spell");
+        }
+
+        assert!(
+            res.healing.is_some(),
+            "SpellResult must report healing amount"
+        );
+        assert!(res.healing.unwrap() > 0);
+    }
+
+    /// A party-wide healing spell (AllCharacters) heals every player combatant.
+    #[test]
+    fn test_healing_spell_party_wide_heals_all_players() {
+        use crate::domain::magic::types::SpellEffectType;
+        let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
+
+        let caster = create_test_paladin(3, 20);
+        cs.add_player(caster);
+
+        for i in 0..3 {
+            let mut member = Character::new(
+                format!("Member{i}"),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            member.hp.base = 20;
+            member.hp.current = 3;
+            cs.add_player(member);
+        }
+
+        let mut heal_all = Spell::new(
+            0x0202,
+            "Mass Cure",
+            SpellSchool::Cleric,
+            1,
+            2,
+            0,
+            SpellContext::Anytime,
+            crate::domain::magic::types::SpellTarget::AllCharacters,
+            "Heals the whole party",
+            None,
+            0,
+            false,
+        );
+        heal_all.effect_type = Some(SpellEffectType::Healing {
+            amount: DiceRoll::new(1, 6, 0),
+        });
+
+        let mut active = ActiveSpells::new();
+        let mut rng = rand::rng();
+
+        let res = execute_spell_cast_with_spell(
+            &mut cs,
+            CombatantId::Player(0),
+            &heal_all,
+            CombatantId::Player(0), // target ignored for AllCharacters
+            &mut active,
+            &ContentDatabase::new(),
+            &mut rng,
+        )
+        .expect("party heal must succeed");
+
+        // Every non-caster member should have more HP
+        for idx in 1..=3 {
+            if let Some(Combatant::Player(m)) = cs.get_combatant(&CombatantId::Player(idx)) {
+                assert!(m.hp.current > 3, "Member {idx} should be healed");
+            }
+        }
+        assert!(res.healing.is_some(), "SpellResult must report healing");
+    }
+
+    // ── Phase 1: Buff dispatch in combat ──────────────────────────────────────
+
+    /// A buff spell writes the correct duration into active_spells.
+    #[test]
+    fn test_buff_spell_writes_to_active_spells() {
+        use crate::domain::magic::types::{BuffField, SpellEffectType};
+        let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
+        cs.add_player(create_test_paladin(3, 10));
+
+        let mut bless = Spell::new(
+            0x0103,
+            "Bless",
+            SpellSchool::Cleric,
+            2,
+            3,
+            0,
+            SpellContext::Anytime,
+            crate::domain::magic::types::SpellTarget::AllCharacters,
+            "Grants combat bonus",
+            None,
+            30,
+            false,
+        );
+        bless.effect_type = Some(SpellEffectType::Buff {
+            buff_field: BuffField::Bless,
+            duration: 30,
+        });
+
+        let mut active = ActiveSpells::new();
+        assert_eq!(active.bless, 0);
+
+        let mut rng = rand::rng();
+        execute_spell_cast_with_spell(
+            &mut cs,
+            CombatantId::Player(0),
+            &bless,
+            CombatantId::Player(0),
+            &mut active,
+            &ContentDatabase::new(),
+            &mut rng,
+        )
+        .expect("Bless spell must succeed");
+
+        assert_eq!(
+            active.bless, 30,
+            "Bless should set active_spells.bless = 30"
+        );
+    }
+
+    // ── Phase 1: Cure condition dispatch in combat ────────────────────────────
+
+    /// A cure condition spell removes the named condition from the target character.
+    #[test]
+    fn test_cure_condition_spell_removes_condition_in_combat() {
+        use crate::domain::character::Condition;
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+        use crate::domain::magic::types::SpellEffectType;
+
+        let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
+
+        // Caster: paladin with SP
+        let caster = create_test_paladin(5, 15);
+        cs.add_player(caster);
+
+        // Target: paralyzed party member
+        let mut paralyzed = Character::new(
+            "Frozen".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        paralyzed.hp.base = 20;
+        paralyzed.hp.current = 20;
+        paralyzed.conditions.add(Condition::PARALYZED);
+        paralyzed.add_condition(ActiveCondition::new(
+            "paralyzed".to_string(),
+            ConditionDuration::Rounds(5),
+        ));
+        cs.add_player(paralyzed);
+
+        let mut cure = Spell::new(
+            0x0104,
+            "Cure Paralysis",
+            SpellSchool::Cleric,
+            2,
+            3,
+            0,
+            SpellContext::Anytime,
+            crate::domain::magic::types::SpellTarget::SingleCharacter,
+            "Cures paralysis",
+            None,
+            0,
+            false,
+        );
+        cure.effect_type = Some(SpellEffectType::CureCondition {
+            condition_id: "paralyzed".to_string(),
+        });
+
+        let mut active = ActiveSpells::new();
+        let mut rng = rand::rng();
+
+        execute_spell_cast_with_spell(
+            &mut cs,
+            CombatantId::Player(0),
+            &cure,
+            CombatantId::Player(1),
+            &mut active,
+            &ContentDatabase::new(),
+            &mut rng,
+        )
+        .expect("Cure Paralysis must succeed");
+
+        if let Some(Combatant::Player(target)) = cs.get_combatant(&CombatantId::Player(1)) {
+            assert!(
+                !target.conditions.has(Condition::PARALYZED),
+                "PARALYZED bitflag must be cleared after cure spell"
+            );
+            assert!(
+                target.active_conditions.is_empty(),
+                "active_conditions must be empty after cure spell"
+            );
+        } else {
+            panic!("Target not found after cure spell");
+        }
+    }
+
+    // ── Phase 1: Composite dispatch in combat ─────────────────────────────────
+
+    /// A composite spell applies both a heal and a condition cure in one cast.
+    #[test]
+    fn test_composite_spell_heals_and_cures_in_combat() {
+        use crate::domain::character::Condition;
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+        use crate::domain::magic::types::SpellEffectType;
+
+        let mut cs = CombatState::new(crate::domain::combat::types::Handicap::Even);
+
+        let caster = create_test_paladin(5, 20);
+        cs.add_player(caster);
+
+        let mut victim = Character::new(
+            "Victim".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        victim.hp.base = 20;
+        victim.hp.current = 5;
+        victim.conditions.add(Condition::POISONED);
+        victim.add_condition(ActiveCondition::new(
+            "poisoned".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        cs.add_player(victim);
+
+        let mut combo = Spell::new(
+            0x0105,
+            "Cure Wounds + Antidote",
+            SpellSchool::Cleric,
+            3,
+            5,
+            0,
+            SpellContext::Anytime,
+            crate::domain::magic::types::SpellTarget::SingleCharacter,
+            "Heals and cures poison",
+            None,
+            0,
+            false,
+        );
+        combo.effect_type = Some(SpellEffectType::Composite(vec![
+            SpellEffectType::Healing {
+                amount: DiceRoll::new(2, 4, 0),
+            },
+            SpellEffectType::CureCondition {
+                condition_id: "poisoned".to_string(),
+            },
+        ]));
+
+        let mut active = ActiveSpells::new();
+        let mut rng = rand::rng();
+
+        let res = execute_spell_cast_with_spell(
+            &mut cs,
+            CombatantId::Player(0),
+            &combo,
+            CombatantId::Player(1),
+            &mut active,
+            &ContentDatabase::new(),
+            &mut rng,
+        )
+        .expect("composite spell must succeed");
+
+        if let Some(Combatant::Player(target)) = cs.get_combatant(&CombatantId::Player(1)) {
+            assert!(
+                target.hp.current > 5,
+                "HP should increase from composite heal"
+            );
+            assert!(
+                !target.conditions.has(Condition::POISONED),
+                "POISONED must be cleared by composite cure"
+            );
+            assert!(target.active_conditions.is_empty());
+        } else {
+            panic!("Target not found after composite spell");
+        }
+
+        assert!(res.healing.is_some(), "SpellResult must report healing");
     }
 }

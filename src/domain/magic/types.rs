@@ -146,6 +146,183 @@ pub enum SpellTarget {
     SpecificMonsters,
 }
 
+// ===== Buff Field =====
+
+/// Identifies which [`ActiveSpells`] field a buff spell writes to.
+///
+/// Used by [`SpellEffectType::Buff`] and the effect dispatcher in
+/// `effect_dispatch.rs` to route buff spells to the correct field on the
+/// party-wide [`ActiveSpells`] tracker.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::magic::types::BuffField;
+///
+/// let field = BuffField::Bless;
+/// ```
+///
+/// [`ActiveSpells`]: crate::application::ActiveSpells
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BuffField {
+    /// Resistance to fear effects
+    FearProtection,
+    /// Cold damage reduction
+    ColdProtection,
+    /// Fire damage reduction
+    FireProtection,
+    /// Poison resistance
+    PoisonProtection,
+    /// Acid damage reduction
+    AcidProtection,
+    /// Lightning resistance
+    ElectricityProtection,
+    /// Magic damage reduction
+    MagicProtection,
+    /// Illumination (light radius)
+    Light,
+    /// Leather Skin AC bonus
+    LeatherSkin,
+    /// Avoid ground traps
+    Levitate,
+    /// Water traversal
+    WalkOnWater,
+    /// Alert for ambushes
+    GuardDog,
+    /// Mental attack resistance
+    PsychicProtection,
+    /// Combat effectiveness bonus
+    Bless,
+    /// Avoid random encounters
+    Invisibility,
+    /// Armor Class bonus
+    Shield,
+    /// Greater Armor Class bonus
+    PowerShield,
+    /// Negative magical effect
+    Cursed,
+}
+
+// ===== Utility Type =====
+
+/// Sub-type for utility spells used by the effect dispatcher.
+///
+/// Classifies utility spells into distinct operation categories so
+/// [`SpellEffectType::Utility`] can route to the correct handler.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::magic::types::UtilityType;
+///
+/// let food = UtilityType::CreateFood { amount: 5 };
+/// let portal = UtilityType::Teleport;
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UtilityType {
+    /// Creates food rations for the party
+    CreateFood {
+        /// Number of ration units to produce
+        amount: u32,
+    },
+    /// Teleport the party (Town Portal, Surface, Jump)
+    Teleport,
+    /// Information spell — no state change (Location, Detect Magic, Identify)
+    Information,
+}
+
+// ===== Spell Effect Type =====
+
+/// Classifies how a spell produces its effect for the effect dispatcher.
+///
+/// The dispatcher in `effect_dispatch.rs` matches on this enum to route
+/// a spell to the correct mutation function.  When a [`Spell`] carries an
+/// explicit [`Spell::effect_type`], that value takes precedence; otherwise
+/// [`Spell::infer_effect_type`] is called as a fallback based on the spell's
+/// other fields.
+///
+/// # Variant Summary
+///
+/// | Variant | State mutation |
+/// |---------|----------------|
+/// | `Damage` | `target.hp.modify(-damage)` via damage dice |
+/// | `Healing` | `target.hp.modify(+amount)` clamped to base |
+/// | `CureCondition` | `target.remove_condition(condition_id)` |
+/// | `Buff` | `active_spells.{buff_field} = duration` |
+/// | `Utility` | create food, teleport, or information |
+/// | `Debuff` | applies `spell.applied_conditions` to targets |
+/// | `Resurrection` | `revive_from_dead(target, resurrect_hp)` |
+/// | `Composite` | applies each sub-effect in order |
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::magic::types::{SpellEffectType, BuffField, UtilityType};
+/// use antares::domain::types::DiceRoll;
+///
+/// // A pure healing effect
+/// let heal = SpellEffectType::Healing { amount: DiceRoll::new(2, 4, 0) };
+///
+/// // A party-wide bless buff lasting 30 rounds
+/// let bless = SpellEffectType::Buff { buff_field: BuffField::Bless, duration: 30 };
+///
+/// // Cure paralysis
+/// let cure = SpellEffectType::CureCondition { condition_id: "paralyzed".to_string() };
+///
+/// // Create food utility
+/// let food = SpellEffectType::Utility {
+///     utility_type: UtilityType::CreateFood { amount: 5 },
+/// };
+///
+/// // Composite: heal AND cure
+/// let combo = SpellEffectType::Composite(vec![
+///     SpellEffectType::Healing { amount: DiceRoll::new(1, 6, 0) },
+///     SpellEffectType::CureCondition { condition_id: "poisoned".to_string() },
+/// ]);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SpellEffectType {
+    /// Direct damage to target(s) — uses `spell.damage` DiceRoll
+    Damage,
+
+    /// Restore HP to one or more targets
+    Healing {
+        /// Dice to roll for the healing amount
+        amount: crate::domain::types::DiceRoll,
+    },
+
+    /// Remove a named active condition from the target
+    CureCondition {
+        /// Condition ID string to remove (e.g. `"paralyzed"`, `"poisoned"`)
+        condition_id: String,
+    },
+
+    /// Write a buff duration into a named [`ActiveSpells`] field
+    ///
+    /// [`ActiveSpells`]: crate::application::ActiveSpells
+    Buff {
+        /// Which `ActiveSpells` field to write
+        buff_field: BuffField,
+        /// Duration to set (rounds for combat, minutes for exploration)
+        duration: u8,
+    },
+
+    /// Utility spell with a specific sub-type
+    Utility {
+        /// Sub-type of utility effect
+        utility_type: UtilityType,
+    },
+
+    /// Debuff — applies `spell.applied_conditions` to targets via condition system
+    Debuff,
+
+    /// Resurrection — uses `spell.resurrect_hp` to revive dead characters
+    Resurrection,
+
+    /// Composite of multiple effects applied in sequence
+    Composite(Vec<SpellEffectType>),
+}
+
 // ===== Spell Definition =====
 
 /// Complete spell definition
@@ -223,6 +400,18 @@ pub struct Spell {
     /// [`revive_from_dead`]: crate::domain::resources::revive_from_dead
     #[serde(default)]
     pub resurrect_hp: Option<u16>,
+
+    /// Effect type for dispatcher routing.
+    ///
+    /// When `None`, the effect type is inferred from other spell fields via
+    /// [`Spell::infer_effect_type`].  Set this explicitly in RON data for
+    /// healing, buff, cure-condition, utility, and composite spells so the
+    /// dispatcher in `effect_dispatch.rs` routes correctly.
+    ///
+    /// Existing RON data without this field continues to load because of
+    /// `#[serde(default)]`, which defaults to `None`.
+    #[serde(default)]
+    pub effect_type: Option<SpellEffectType>,
 }
 
 impl Spell {
@@ -282,6 +471,7 @@ impl Spell {
             saving_throw,
             applied_conditions: Vec::new(),
             resurrect_hp: None,
+            effect_type: None,
         }
     }
 
@@ -347,6 +537,101 @@ impl Spell {
     /// Returns true if the spell has a gem cost
     pub fn requires_gems(&self) -> bool {
         self.gem_cost > 0
+    }
+
+    /// Infers the spell's [`SpellEffectType`] from its other fields.
+    ///
+    /// Used as a fallback when [`Spell::effect_type`] is `None`.
+    /// The inference order is:
+    ///
+    /// 1. `Resurrection` — if `resurrect_hp` is `Some`
+    /// 2. `Damage` — if `damage` is `Some`
+    /// 3. `Debuff` — if `applied_conditions` is non-empty
+    /// 4. `Utility(Information)` — otherwise (no detectable state change)
+    ///
+    /// Healing, buff, cure-condition, and composite spells **cannot** be
+    /// inferred and must have `effect_type` set explicitly.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::magic::types::{Spell, SpellSchool, SpellContext, SpellTarget, SpellEffectType};
+    /// use antares::domain::types::DiceRoll;
+    ///
+    /// let fireball = Spell::new(
+    ///     0x0201, "Fireball", SpellSchool::Sorcerer, 3, 5, 0,
+    ///     SpellContext::CombatOnly, SpellTarget::AllMonsters,
+    ///     "3d6 fire damage",
+    ///     Some(DiceRoll::new(3, 6, 0)), 0, true,
+    /// );
+    /// assert_eq!(fireball.infer_effect_type(), SpellEffectType::Damage);
+    ///
+    /// let resurrect = {
+    ///     let mut s = Spell::new(
+    ///         0x0105, "Resurrect", SpellSchool::Cleric, 5, 15, 5,
+    ///         SpellContext::Anytime, SpellTarget::SingleCharacter,
+    ///         "Revive dead", None, 0, false,
+    ///     );
+    ///     s.resurrect_hp = Some(1);
+    ///     s
+    /// };
+    /// assert_eq!(resurrect.infer_effect_type(), SpellEffectType::Resurrection);
+    /// ```
+    pub fn infer_effect_type(&self) -> SpellEffectType {
+        if self.resurrect_hp.is_some() {
+            return SpellEffectType::Resurrection;
+        }
+        if self.damage.is_some() {
+            return SpellEffectType::Damage;
+        }
+        if !self.applied_conditions.is_empty() {
+            return SpellEffectType::Debuff;
+        }
+        SpellEffectType::Utility {
+            utility_type: UtilityType::Information,
+        }
+    }
+
+    /// Returns the effective [`SpellEffectType`] for this spell.
+    ///
+    /// If [`Spell::effect_type`] is `Some`, that value is returned directly.
+    /// Otherwise [`Spell::infer_effect_type`] is called as a fallback.
+    ///
+    /// This is the method the effect dispatcher calls to determine how to
+    /// apply a spell's effects.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::magic::types::{
+    ///     Spell, SpellSchool, SpellContext, SpellTarget, SpellEffectType, BuffField,
+    /// };
+    ///
+    /// // Explicitly typed spell
+    /// let mut bless = Spell::new(
+    ///     0x0102, "Bless", SpellSchool::Cleric, 2, 3, 0,
+    ///     SpellContext::Anytime, SpellTarget::AllCharacters,
+    ///     "Party combat bonus", None, 30, false,
+    /// );
+    /// bless.effect_type = Some(SpellEffectType::Buff {
+    ///     buff_field: BuffField::Bless,
+    ///     duration: 30,
+    /// });
+    /// assert!(matches!(bless.effective_effect_type(), SpellEffectType::Buff { .. }));
+    ///
+    /// // Inferred spell (no effect_type set)
+    /// let fireball = Spell::new(
+    ///     0x0201, "Fireball", SpellSchool::Sorcerer, 3, 5, 0,
+    ///     SpellContext::CombatOnly, SpellTarget::AllMonsters,
+    ///     "3d6 fire damage",
+    ///     Some(antares::domain::types::DiceRoll::new(3, 6, 0)), 0, true,
+    /// );
+    /// assert_eq!(fireball.effective_effect_type(), SpellEffectType::Damage);
+    /// ```
+    pub fn effective_effect_type(&self) -> SpellEffectType {
+        self.effect_type
+            .clone()
+            .unwrap_or_else(|| self.infer_effect_type())
     }
 }
 

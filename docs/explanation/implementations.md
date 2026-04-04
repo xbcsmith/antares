@@ -1,5 +1,197 @@
 # Implementations
 
+## Spell System — Phase 1: Spell Effect Resolution Engine (Complete)
+
+### Overview
+
+Implemented Phase 1 of the Spell System Updates Implementation Plan: the
+foundational spell effect dispatch layer. Every spell category — damage,
+healing, buff, debuff, condition-cure, utility, resurrection, and composite —
+now resolves through a single, well-tested pipeline. Both the combat casting
+system and the upcoming exploration casting system (Phase 3) delegate to the
+new dispatcher.
+
+### 1.1 — New Enums in `src/domain/magic/types.rs`
+
+Three new public enums classify spell effects for the dispatcher:
+
+#### `BuffField`
+
+Maps spell buff effects to their corresponding [`ActiveSpells`] fields:
+
+```antares/src/domain/magic/types.rs#L148-168
+pub enum BuffField {
+    FearProtection,
+    ColdProtection,
+    FireProtection,
+    PoisonProtection,
+    AcidProtection,
+    ElectricityProtection,
+    MagicProtection,
+    Light,
+    LeatherSkin,
+    Levitate,
+    WalkOnWater,
+    GuardDog,
+    PsychicProtection,
+    Bless,
+    Invisibility,
+    Shield,
+    PowerShield,
+    Cursed,
+}
+```
+
+#### `UtilityType`
+
+Classifies utility spell sub-types:
+
+- `CreateFood { amount: u32 }` — food ration creation
+- `Teleport` — Town Portal / Surface / Jump
+- `Information` — Location / Detect Magic / Identify
+
+#### `SpellEffectType`
+
+The central routing enum with eight variants:
+
+| Variant                           | State Mutation                                          |
+| --------------------------------- | ------------------------------------------------------- |
+| `Damage`                          | damage dice + caster bonus → `target.hp`                |
+| `Healing { amount: DiceRoll }`    | `target.hp.current += roll` (clamped to base)           |
+| `CureCondition { condition_id }`  | `target.remove_condition(id)` + bitfield clear          |
+| `Buff { buff_field, duration }`   | `active_spells.{field} = duration`                      |
+| `Utility { utility_type }`        | food creation, teleport, or info                        |
+| `Debuff`                          | applies `spell.applied_conditions` via condition system |
+| `Resurrection`                    | `revive_from_dead(target, resurrect_hp)`                |
+| `Composite(Vec<SpellEffectType>)` | applies each sub-effect in order                        |
+
+### 1.2 — `effect_type` Field on `Spell`
+
+Added `pub effect_type: Option<SpellEffectType>` with `#[serde(default)]` to
+the `Spell` struct. All existing RON data files continue to load unchanged —
+the field defaults to `None`, which triggers inference.
+
+Two new methods:
+
+- `Spell::infer_effect_type()` — infers from existing fields:
+  `resurrect_hp` → `Resurrection`, `damage` → `Damage`,
+  `applied_conditions` → `Debuff`, otherwise `Utility(Information)`
+- `Spell::effective_effect_type()` — returns the explicit type if set,
+  otherwise delegates to `infer_effect_type()`
+
+### 1.3 — New Module `src/domain/magic/effect_dispatch.rs`
+
+The central dispatch module with four focused helpers and one top-level router:
+
+#### Result Types
+
+| Type                  | Carries                                         |
+| --------------------- | ----------------------------------------------- |
+| `HealResult`          | `hp_restored: u16`, `already_at_max: bool`      |
+| `BuffResult`          | `buff_field: BuffField`, `duration_set: u8`     |
+| `CureConditionResult` | `condition_id: String`, `was_present: bool`     |
+| `UtilityResult`       | `utility_type`, `food_created: u32`, `message`  |
+| `SpellEffectResult`   | aggregate of all mutations + `affected_targets` |
+
+#### Helper Functions
+
+**`apply_healing_spell(amount, target, rng) -> HealResult`**
+Rolls `amount` dice and adds to `target.hp.current`, clamping at `hp.base`.
+
+**`apply_buff_spell(buff_field, duration, active_spells) -> BuffResult`**
+Writes `duration` directly into the matching `ActiveSpells` field.
+
+**`apply_cure_condition(condition_id, target) -> CureConditionResult`**
+Removes the condition from `active_conditions` AND clears the matching
+`Condition` bitfield flag (e.g. `PARALYZED`, `POISONED`, `SILENCED`).
+
+**`apply_utility_spell(utility_type) -> UtilityResult`**
+Returns a description of the effect; the application layer applies side-effects
+(food item creation deferred to Phase 3 exploration casting).
+
+**`apply_spell_effect(spell, target, active_spells, rng) -> SpellEffectResult`**
+Top-level dispatcher. Calls `spell.effective_effect_type()` and routes to the
+appropriate helper. `Composite` spells use a two-pass approach — non-character
+effects (Buff, Utility) in pass 1; character effects (Healing, CureCondition)
+in pass 2 — to avoid mutable-borrow conflicts.
+
+### 1.4 — `execute_spell_cast_with_spell` Refactored
+
+Added `active_spells: &mut ActiveSpells` parameter to both
+`execute_spell_cast_with_spell` and `execute_spell_cast_by_id` in
+`src/domain/combat/spell_casting.rs`.
+
+New dispatch paths added after the existing damage path:
+
+- **Healing** — iterates `SingleCharacter`, `Self_`, or `AllCharacters` targets
+  and calls `spell_dispatch::apply_healing_spell`; populates `SpellResult::healing`.
+- **Buff** — calls `spell_dispatch::apply_buff_spell` on `active_spells`.
+- **CureCondition** — calls `spell_dispatch::apply_cure_condition` on the
+  target player character.
+- **Utility** — calls `spell_dispatch::apply_utility_spell`; defers side-effects
+  to the application layer.
+- **Composite** — two-pass dispatch: buff/utility in pass 1, healing/cure in
+  pass 2 targeting the single `CombatantId::Player` target.
+
+Existing damage and resurrection paths are unchanged.
+
+### 1.5 — `src/game/systems/combat.rs` Updated
+
+`perform_cast_action_with_rng` now passes `&mut global_state.0.active_spells`
+to `execute_spell_cast_by_id` so buff spells correctly write to the party's
+active spell tracker during combat.
+
+### 1.6 — `src/domain/magic/mod.rs` Updated
+
+`pub mod effect_dispatch;` added. All new public types re-exported:
+`apply_buff_spell`, `apply_cure_condition`, `apply_healing_spell`,
+`apply_spell_effect`, `apply_utility_spell`, `BuffField`, `BuffResult`,
+`CureConditionResult`, `HealResult`, `SpellEffectResult`, `SpellEffectType`,
+`UtilityResult`, `UtilityType`.
+
+### Files Changed
+
+| File                                  | Change                                                                                                                                      |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/magic/types.rs`           | Added `BuffField`, `UtilityType`, `SpellEffectType`; added `effect_type` field and `infer_effect_type` / `effective_effect_type` to `Spell` |
+| `src/domain/magic/effect_dispatch.rs` | **New** — dispatcher module with helpers and 34 unit tests                                                                                  |
+| `src/domain/magic/mod.rs`             | Export `effect_dispatch` and new types                                                                                                      |
+| `src/domain/magic/database.rs`        | Added `effect_type: None` to test spell constructor                                                                                         |
+| `src/domain/combat/spell_casting.rs`  | Added `active_spells` parameter; new healing/buff/cure/utility/composite dispatch paths; 5 new integration tests                            |
+| `src/game/systems/combat.rs`          | Pass `active_spells` to `execute_spell_cast_by_id`                                                                                          |
+
+### Deliverables Checklist
+
+- [x] `src/domain/magic/effect_dispatch.rs` — spell effect dispatcher module
+- [x] `SpellEffectType` enum in `src/domain/magic/types.rs`
+- [x] `BuffField` and `UtilityType` enums in `src/domain/magic/types.rs`
+- [x] `Spell::infer_effect_type()` fallback method
+- [x] `Spell::effective_effect_type()` accessor
+- [x] `effect_type: Option<SpellEffectType>` field on `Spell` (serde-defaulted)
+- [x] Refactored `execute_spell_cast_with_spell` using dispatcher
+- [x] Unit tests with >80% coverage for all effect categories (34 in dispatcher, 5 in combat)
+- [x] Updated `src/domain/magic/mod.rs` to export new module
+
+### Quality Gates
+
+```
+cargo fmt         → ✅ No output
+cargo check       → ✅ Finished — 0 errors, 0 warnings
+cargo clippy      → ✅ Finished — 0 warnings
+cargo nextest run → ✅ 4130 passed, 0 failed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] Data structures match `architecture.md` Section 4 (`ActiveSpells`, `Spell`, `SpellTarget`)
+- [x] `SpellEffectType` fields use `crate::domain::types::DiceRoll` (existing type alias pattern)
+- [x] `BuffField` mirrors all 18 fields of `ActiveSpells` exactly
+- [x] No RON format changed — `#[serde(default)]` preserves backward load compatibility
+- [x] No test references `campaigns/tutorial` — all test data is in-code or `data/test_campaign`
+- [x] SPDX headers on new file (`2026 Brett Smith`)
+- [x] `///` doc comments on every public type and function in `effect_dispatch.rs`
+- [x] Runnable `///` examples on all public functions
+
 ## SDK Codebase Cleanup — Phase 9: Final Structural Cleanup (Complete)
 
 ### Overview

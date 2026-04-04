@@ -3123,6 +3123,7 @@ pub fn perform_cast_action_with_rng(
         action.caster,
         action.spell_id,
         action.target,
+        &mut global_state.0.active_spells,
         content.db(),
         rng,
     );
