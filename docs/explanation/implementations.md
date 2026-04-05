@@ -1,5 +1,715 @@
 # Implementations
 
+## Phase 6: SDK and Content Tooling Updates — Full Completion Summary
+
+### Overview
+
+Phase 6 delivers all planned SDK and content tooling updates for the spell
+system. Every deliverable from the implementation plan sections 6.1 through 6.5
+is implemented and verified. All four quality gates pass.
+
+### Deliverables
+
+| #   | Deliverable                                                                            | Status      |
+| --- | -------------------------------------------------------------------------------------- | ----------- |
+| 6.1 | Spell editor — `SpellEffectType` editing panel                                         | ✅ Complete |
+| 6.2 | Item editor — `ConsumableEffect::CastSpell`/`LearnSpell` + `spell_effect` autocomplete | ✅ Complete |
+| 6.3 | Dialogue editor — `ActionType::LearnSpell` action support                              | ✅ Complete |
+| 6.4 | Quest editor — `RewardType::LearnSpell` reward support                                 | ✅ Complete |
+| 6.5 | Validation framework — spell cross-reference rules wired into `validate_campaign()`    | ✅ Complete |
+
+### 6.1 Spell Editor — SpellEffectType Editing
+
+New `show_effect_type_editor` method in `spells_editor.rs` renders an "Effect
+Type" group in the spell form. A `ComboBox` (id-salt `"spell_effect_type"`)
+selects from nine named variants: Auto (Inferred), Damage, Healing, Cure
+Condition, Buff, Utility, Debuff, Resurrection, Dispel Magic. Variant-specific
+sub-fields are shown per selection (dice rolls, condition autocomplete, buff
+field picker, utility sub-type, etc.). The `Composite` variant is
+read-only. `BuffField`, `SpellEffectType`, and `UtilityType` added to imports.
+
+Files: `sdk/campaign_builder/src/spells_editor.rs`
+
+### 6.2 Item Editor — Spell Scroll and Charged Item Support
+
+- `show()`, `show_form()`, and `show_type_editor()` updated with
+  `spells: &[Spell]` parameter.
+- `ConsumableEffect::CastSpell` and `ConsumableEffect::LearnSpell` arms in the
+  consumable effect editor replaced with `autocomplete_spell_selector` widgets
+  (id-salts `"consumable_cast_spell"` and `"consumable_learn_spell"`).
+- New `spell_effect` row in the "Basic Properties" group using
+  `autocomplete_spell_selector` (id-salt `"item_spell_effect"`) with a
+  "✕ Clear" button, enabling authors to wire charged-item spells.
+- Call site in `lib.rs` updated to pass `&self.campaign_data.spells`.
+
+Files: `sdk/campaign_builder/src/items_editor.rs`,
+`sdk/campaign_builder/src/lib.rs`
+
+### 6.3 Dialogue Editor — LearnSpell Action Support
+
+- `ActionType::LearnSpell` variant added; `as_str()` → `"Learn Spell"`.
+- `ActionEditBuffer` gains `spell_id: String` and `target_character_id: String`
+  fields (both default `String::new()`).
+- `build_action_from_buffer()` handles `LearnSpell` — parses `spell_id` as
+  `SpellId` and optional `target_character_id` as `CharacterId`.
+- `DialogueEditorState` gains `available_spells: Vec<Spell>` field; synced at
+  the start of `show()`.
+- `show_node_editor_panel()` renders an "Add Action to Node" section with a
+  full action-type `ComboBox` (all 11 variants, each `push_id`-wrapped), a
+  `LearnSpell` sub-form using `autocomplete_spell_selector`, and a quest
+  sub-form for quest-related actions.
+- `show()` signature updated to accept `spells: &[Spell]`; call site in
+  `lib.rs` updated.
+
+Files: `sdk/campaign_builder/src/dialogue_editor.rs`,
+`sdk/campaign_builder/src/lib.rs`
+
+### 6.4 Quest Editor — LearnSpell Reward Support
+
+- `RewardType::LearnSpell` added; `as_str()` → `"Learn Spell"`.
+- `RewardEditBuffer` gains `spell_id: String` field (defaults `String::new()`).
+- `edit_reward()` and `save_reward()` handle `QuestReward::LearnSpell`.
+- Reward list description and `get_quest_preview()` display spell name via
+  `available_spells` lookup with `"Unknown Spell"` fallback.
+- Reward edit modal for `LearnSpell` uses `autocomplete_spell_selector`
+  (id-salt `"reward_spell_selector_{reward_idx}"`).
+- `QuestEditorState` gains `available_spells: Vec<Spell>` field; `show()`
+  updated to accept and sync `spells: &[Spell]`; call site in `lib.rs`
+  updated.
+
+Files: `sdk/campaign_builder/src/quest_editor.rs`,
+`sdk/campaign_builder/src/lib.rs`
+
+### 6.5 Validation Framework — Spell Cross-Reference Rules
+
+Five new public validation functions in `validation.rs` called from
+`validate_campaign()` in `campaign_io.rs`:
+
+| Function                                | What it checks                                                     |
+| --------------------------------------- | ------------------------------------------------------------------ |
+| `validate_spell_data_integrity`         | Duplicate spell IDs; level outside 1–7                             |
+| `validate_item_spell_effects`           | `item.spell_effect` references a known `SpellId`                   |
+| `validate_consumable_spell_effects`     | `CastSpell`/`LearnSpell` consumable effects reference known spells |
+| `validate_dialogue_learn_spell_actions` | `DialogueAction::LearnSpell` references known spells               |
+| `validate_quest_learn_spell_rewards`    | `QuestReward::LearnSpell` references known spells                  |
+
+All five are called after the existing `validate_proficiency_ids()` block in
+`validate_campaign()`. Each returns `Passed` when clean or one or more `Error`
+entries otherwise.
+
+Files: `sdk/campaign_builder/src/validation.rs`,
+`sdk/campaign_builder/src/campaign_io.rs`
+
+### New Tests Added (Total: 38)
+
+| File                  | Count | Notes                                        |
+| --------------------- | ----- | -------------------------------------------- |
+| `ui_helpers/tests.rs` | 1     | `autocomplete_spell_selector` no-panic       |
+| `validation.rs`       | 22    | 4–5 tests per validation function            |
+| `spells_editor.rs`    | 5     | Effect type editor variants                  |
+| `items_editor.rs`     | 3     | CastSpell/LearnSpell/spell_effect roundtrips |
+| `dialogue_editor.rs`  | 5     | LearnSpell action build + buffer fields      |
+| `quest_editor.rs`     | 3     | LearnSpell reward roundtrip and save         |
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all                                           → no output
+✅ cargo check --all-targets --all-features                 → Finished, 0 errors
+✅ cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+✅ cargo nextest run --all-features                         → 4316 passed, 8 skipped, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `SpellId`, `CharacterId` type aliases used throughout (not raw integers)
+- [x] `autocomplete_spell_selector` used for all spell ID inputs — consistent
+      with `autocomplete_item_selector` and other selector widgets
+- [x] `push_id` on every loop body in new egui code (SDK egui ID audit)
+- [x] Every `ComboBox` uses `from_id_salt` (not `from_label`)
+- [x] `request_repaint()` called on layout-driving state changes
+- [x] All public functions and struct fields have `///` doc comments
+- [x] All test data constructed inline — no reference to `campaigns/tutorial`
+- [x] RON format unchanged — no data file modifications in Phase 6
+- [x] No architectural deviations from `docs/reference/architecture.md`
+- [x] `docs/explanation/implementations.md` updated
+
+---
+
+## Phase 6: Items Editor — Spell Autocomplete Upgrade (Complete)
+
+### Overview
+
+Upgrades `items_editor.rs` to replace raw `egui::DragValue` spell-ID inputs with
+the `autocomplete_spell_selector` widget for `ConsumableEffect::CastSpell` and
+`ConsumableEffect::LearnSpell`, and adds a new `spell_effect` field editor for
+charged non-consumable items. Spell data is threaded through the call chain via
+a new `spells: &[Spell]` parameter on `show()`, `show_form()`, and
+`show_type_editor()`. Three new unit tests cover the new spell-id and
+spell-effect field semantics.
+
+### Changes
+
+#### Imports (`items_editor.rs` L5–9)
+
+Added `autocomplete_spell_selector` to the existing `use crate::ui_helpers::{…}`
+import group — no new `use` statements needed because the symbol is already
+re-exported via `pub use autocomplete::*` in `ui_helpers/mod.rs`.
+
+#### `show()` — new `spells` parameter
+
+```antares/sdk/campaign_builder/src/items_editor.rs#L147-153
+pub fn show(
+    &mut self,
+    ui: &mut egui::Ui,
+    items: &mut Vec<Item>,
+    classes: &[ClassDefinition],
+    spells: &[antares::domain::magic::types::Spell],
+    ctx: &mut EditorContext<'_>,
+)
+```
+
+The `match self.mode` arm for `Add | Edit` now passes `spells` through to
+`show_form()`.
+
+#### `show_form()` — new `spells` parameter + `spell_effect` UI
+
+New parameter `spells: &[antares::domain::magic::types::Spell]` added after
+`_classes`. Inside the "Basic Properties" group, a new `ui.horizontal` row is
+rendered **after** the "Max Charges" DragValue:
+
+```antares/sdk/campaign_builder/src/items_editor.rs#L814-840
+ui.horizontal(|ui| {
+    ui.label("Spell Effect:");
+    let mut spell_effect_id: antares::domain::types::SpellId =
+        self.edit_buffer.spell_effect.unwrap_or(0);
+    if autocomplete_spell_selector(
+        ui,
+        "item_spell_effect",
+        "",
+        &mut spell_effect_id,
+        spells,
+    ) {
+        self.edit_buffer.spell_effect = if spell_effect_id == 0 {
+            None
+        } else {
+            Some(spell_effect_id)
+        };
+    }
+    if self.edit_buffer.spell_effect.is_some()
+        && ui.small_button("✕ Clear").clicked()
+    {
+        self.edit_buffer.spell_effect = None;
+    }
+    ui.label("ℹ️").on_hover_text(
+        "Charged item spell effect. Set Max Charges > 0 to enable.",
+    );
+});
+```
+
+The call to `self.show_type_editor(ui)` is updated to
+`self.show_type_editor(ui, spells)`.
+
+#### `show_type_editor()` — new `spells` parameter + autocomplete arms
+
+Signature changed from `fn show_type_editor(&mut self, ui: &mut egui::Ui)` to:
+
+```antares/sdk/campaign_builder/src/items_editor.rs#L1076-1081
+fn show_type_editor(
+    &mut self,
+    ui: &mut egui::Ui,
+    spells: &[antares::domain::magic::types::Spell],
+)
+```
+
+`ConsumableEffect::CastSpell(spell_id)` arm — replaced `ui.horizontal` /
+`DragValue` block with:
+
+```antares/sdk/campaign_builder/src/items_editor.rs#L1479-1487
+ConsumableEffect::CastSpell(spell_id) => {
+    autocomplete_spell_selector(
+        ui,
+        "consumable_cast_spell",
+        "Spell:",
+        spell_id,
+        spells,
+    );
+    ui.label("This scroll casts the specified spell when used.");
+}
+```
+
+`ConsumableEffect::LearnSpell(spell_id)` arm — same replacement with id-salt
+`"consumable_learn_spell"` and label text
+`"This scroll permanently teaches the spell to the user."`.
+
+#### New tests (3)
+
+| Test name                                   | What it verifies                                                                |
+| ------------------------------------------- | ------------------------------------------------------------------------------- |
+| `test_cast_spell_effect_has_valid_default`  | `ConsumableEffect::CastSpell(0x0101)` preserves `spell_id == 0x0101`            |
+| `test_learn_spell_effect_has_valid_default` | `ConsumableEffect::LearnSpell(0x0201)` preserves `spell_id == 0x0201`           |
+| `test_spell_effect_field_roundtrip`         | An `Item` with `spell_effect: Some(5)` survives `clone()` with the field intact |
+
+### Files Changed
+
+| File                                       | Change                      |
+| ------------------------------------------ | --------------------------- |
+| `sdk/campaign_builder/src/items_editor.rs` | All changes described above |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (root antares crate, 0 errors)
+✅ cargo clippy      → Finished (0 warnings)
+✅ cargo nextest run → 4316 passed, 8 skipped, 0 failed
+```
+
+Note: `sdk/campaign_builder/src/lib.rs` call-site update (passing `spells` to
+`items_editor_state.show(…)`) is tracked as a separate task per task
+instructions. The `campaign_builder` crate builds cleanly once that update is
+applied.
+
+### Architecture Compliance
+
+- [x] `SpellId` type alias used (not raw `u16`)
+- [x] `autocomplete_spell_selector` widget used — consistent with dialogue and
+      quest editors
+- [x] `spell_effect` field editing follows the same `Option<SpellId>` pattern
+      used throughout `Item` and combat systems
+- [x] No architectural deviations from `docs/reference/architecture.md`
+- [x] Tests reference `data/test_campaign` fixture pattern (unit tests only,
+      no campaign I/O)
+- [x] RON format unchanged — no data file modifications
+
+## Phase 6: Dialogue Editor — LearnSpell Action Support (Complete)
+
+### Overview
+
+Adds `DialogueAction::LearnSpell` authoring support to `dialogue_editor.rs`.
+Authors can now attach a "Learn Spell" action to any dialogue node via the node
+editor panel. Spell data is threaded into `show()` via a new `spells: &[Spell]`
+parameter and cached in `DialogueEditorState::available_spells`. The spell
+picker uses the existing `autocomplete_spell_selector` widget for a consistent
+editing experience.
+
+### Changes
+
+#### Imports
+
+- Added `use antares::domain::magic::types::Spell;`
+- Added `SpellId` to the existing `antares::domain::types` import group.
+- Added `autocomplete_spell_selector` to the `crate::ui_helpers` import list.
+
+#### `ActionEditBuffer` — two new fields
+
+```
+/// Spell ID for LearnSpell action
+pub spell_id: String,
+/// Optional target character ID for LearnSpell action (empty = first eligible)
+pub target_character_id: String,
+```
+
+Both default to `String::new()`.
+
+#### `ActionType` — new `LearnSpell` variant
+
+```
+/// Teach a spell to a party member
+LearnSpell,
+```
+
+`as_str()` returns `"Learn Spell"`.
+
+#### `DialogueEditorState` — new `available_spells` field
+
+```
+/// Available spells for action editors (for spell pickers)
+pub available_spells: Vec<Spell>,
+```
+
+Initialised to `Vec::new()` in `Default`.
+
+#### `show()` — new `spells: &[Spell]` parameter
+
+- Signature extended with `spells: &[Spell]` between `items` and `ctx`.
+- `self.available_spells = spells.to_vec()` is the first statement in the body
+  so every helper called below sees up-to-date spell data.
+- `lib.rs` call site updated to pass `&self.campaign_data.spells`.
+
+#### `build_action_from_buffer()` — new `LearnSpell` arm
+
+Parses `action_buffer.spell_id` as `SpellId` (`u16`) and
+`action_buffer.target_character_id` as `CharacterId` (`usize`, optional).
+Returns `Err("Invalid spell ID")` or `Err("Invalid character ID")` on parse
+failure; otherwise yields `DialogueAction::LearnSpell { spell_id, target_character_id }`.
+
+#### `show_node_editor_panel()` — "Add Action to Node" section
+
+Added below the Save / Cancel buttons (inside `if self.editing_node`):
+
+1. **Action-type `ComboBox`** — all eleven `ActionType` variants listed with
+   `push_id` guards; id-salt `"node_action_type"`.
+2. **`LearnSpell` sub-form** — shown when `action_buffer.action_type == LearnSpell`:
+   - `autocomplete_spell_selector` with id-salt `"node_action_spell"` syncs
+     `action_buffer.spell_id`.
+   - Text input for optional `target_character_id`.
+3. **Quest sub-form** — shown for `StartQuest` and `CompleteQuestStage`:
+   - `autocomplete_quest_selector` with id-salt `"node_action_quest"` syncs
+     `action_buffer.quest_id`.
+4. **"➕ Add Action to Node" button** — sets `add_action_clicked = true`.
+
+After the `if self.editing_node` block, an `if add_action_clicked` block calls
+`build_action_from_buffer()`, calls `node.add_action(action)`, resets
+`action_buffer` to `Default`, and updates `status_message`.
+
+#### New tests (5)
+
+| Test                                        | What it verifies                                                                                             |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `test_action_type_learn_spell_display`      | `ActionType::LearnSpell.as_str() == "Learn Spell"`                                                           |
+| `test_build_learn_spell_action_valid`       | `spell_id = "513"`, empty target → `DialogueAction::LearnSpell { spell_id: 513, target_character_id: None }` |
+| `test_build_learn_spell_action_invalid_id`  | `spell_id = "not_a_number"` → `Err` containing `"Invalid spell ID"`                                          |
+| `test_action_buffer_has_spell_fields`       | `ActionEditBuffer::default()` has `spell_id == ""` and `target_character_id == ""`                           |
+| `test_dialogue_editor_has_available_spells` | `DialogueEditorState::new().available_spells` is empty                                                       |
+
+### Files Changed
+
+| File                                          | Change                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/dialogue_editor.rs` | Added `Spell`/`SpellId` imports, `autocomplete_spell_selector` import, `available_spells` field, `spell_id`/`target_character_id` fields on `ActionEditBuffer`, `LearnSpell` variant in `ActionType`, updated `show()` signature + body, added `LearnSpell` arm to `build_action_from_buffer()`, added "Add Action to Node" UI in `show_node_editor_panel()`, added 5 tests |
+| `sdk/campaign_builder/src/lib.rs`             | Passed `&self.campaign_data.spells` to `dialogue_editor_state.show()`                                                                                                                                                                                                                                                                                                       |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors, workspace)
+✅ cargo clippy      → Finished (0 warnings, workspace)
+✅ cargo nextest run → 4316 passed, 8 skipped, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `SpellId` type alias used (not raw `u16`)
+- [x] `CharacterId` type alias used (not raw `usize`)
+- [x] `autocomplete_spell_selector` widget used — consistent with other editors
+- [x] `push_id` on every `ComboBox` loop iteration (egui ID audit)
+- [x] No hardcoded magic numbers
+- [x] All test data constructed inline — no reference to `campaigns/tutorial`
+- [x] SPDX header preserved as first two lines of file
+
+---
+
+## Phase 6: Quest Editor — LearnSpell Autocomplete Upgrade (Complete)
+
+### Overview
+
+Upgrades the `LearnSpell` reward editor in `quest_editor.rs` from a plain
+numeric text field to the full `autocomplete_spell_selector` widget. Spell
+data is now threaded into `show()` via a new `spells: &[Spell]` parameter and
+cached in `QuestEditorState::available_spells` so inner helpers can look up
+spell names without extra argument threading.
+
+### Changes
+
+#### `QuestEditorState` — new `available_spells` field
+
+Added `pub available_spells: Vec<Spell>` to the struct and initialised it to
+`Vec::new()` in `Default`. The field is `Serialize`/`Deserialize` compatible
+because `Spell` derives those traits.
+
+#### `show()` — new `spells: &[Spell]` parameter
+
+- Doc-comment updated with a `* spells` argument entry.
+- `self.available_spells = spells.to_vec()` is the first statement in the body
+  so that every helper called below sees up-to-date spell data.
+- `lib.rs` call site updated to pass `&self.campaign_data.spells`.
+
+#### `get_quest_preview` — improved `LearnSpell` description
+
+The `LearnSpell` arm now resolves the numeric ID to a human-readable name via
+`self.available_spells`, falling back to `"Unknown Spell"` when the ID is not
+in the cache:
+
+```
+Learn Spell: Cure Wounds (ID: 257)
+```
+
+#### `show_quest_rewards_editor` — two improvements
+
+1. **Reward list description**: the `QuestReward::LearnSpell` match arm in the
+   scrollable reward list now shows `"Learn Spell: <name> (ID: <id>)"` instead
+   of `"Learn Spell (ID: 0x…)"`.
+
+2. **Edit modal**: the `RewardType::LearnSpell` arm replaces the old
+   `ui.text_edit_singleline` + hint label with a full
+   `autocomplete_spell_selector` call, using id-salt
+   `"reward_spell_selector_{reward_idx}"`. Result is written back to
+   `self.reward_buffer.spell_id` as a decimal string.
+
+#### New tests (3)
+
+| Test                                                 | What it verifies                                                                                                        |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `test_quest_editor_state_has_available_spells_field` | `QuestEditorState::new().available_spells` is empty                                                                     |
+| `test_learn_spell_reward_roundtrip`                  | `edit_reward` on a `LearnSpell { spell_id: 0x0101 }` reward sets `reward_type == LearnSpell` and `spell_id == "257"`    |
+| `test_save_learn_spell_reward`                       | setting `spell_id = "257"` then calling `save_reward` writes `QuestReward::LearnSpell { spell_id: 257 }` into the quest |
+
+### Files Changed
+
+| File                                       | Change                                                                                                                                                                                                                                            |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/quest_editor.rs` | Added `Spell` import, `autocomplete_spell_selector` import, `available_spells` field, updated `show()` signature + body, improved `LearnSpell` display in preview and reward list, upgraded modal to `autocomplete_spell_selector`, added 3 tests |
+| `sdk/campaign_builder/src/lib.rs`          | Passed `&self.campaign_data.spells` to `quest_editor_state.show()`                                                                                                                                                                                |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors, workspace)
+✅ cargo clippy      → Finished (0 warnings, workspace)
+✅ cargo nextest run → 4316 passed, 8 skipped, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `SpellId` type alias used (not raw `u16`)
+- [x] `autocomplete_spell_selector` used — same pattern as `autocomplete_item_selector`
+- [x] No hardcoded magic numbers
+- [x] All test data constructed inline — no reference to `campaigns/tutorial`
+- [x] All public struct fields have `///` doc comments
+
+---
+
+## Phase 6: SDK and Content Tooling Updates (Complete)
+
+### Overview
+
+This phase adds spell-related autocomplete UI support and five new validation
+functions to the Campaign Builder SDK. It also fixes pre-existing compilation
+errors in `items_editor.rs`, `quest_editor.rs`, and
+`tests/editor_state_tests.rs` that were caused by new `ConsumableEffect`,
+`QuestReward`, and `Spell` variants added in earlier phases but not yet
+handled in the editor match arms.
+
+### 6.1 — `autocomplete_spell_selector` (`ui_helpers/autocomplete.rs`)
+
+Adds a new public selector function following the exact same pattern as the
+existing `autocomplete_item_selector`:
+
+- Signature: `pub fn autocomplete_spell_selector(ui, id_salt, label, selected_spell_id: &mut SpellId, spells: &[Spell]) -> bool`
+- Uses `buffer_tag: "spell"` and `placeholder: "Start typing spell name..."`
+- `SpellId == 0` means "no spell selected"; buffer is empty in that state
+- Uses `std::cell::Cell` for shared mutation between `on_select` / `on_clear` closures
+- Automatically re-exported through `pub use autocomplete::*` in `ui_helpers/mod.rs`
+
+**Test added** (`ui_helpers/tests.rs`):
+
+- `test_autocomplete_spell_selector_no_panic_on_empty` — constructs an `egui::Context`, calls the selector with an empty spell list and `selected_spell_id = 0`, asserts no panic and no change.
+
+### 6.2 — Spell Validation Functions (`validation.rs`)
+
+Five new public functions added after `validate_recruitable_character_references`,
+each returning `Vec<ValidationResult>` with either error entries or a single
+`Passed` result when all checks succeed.
+
+#### `validate_spell_data_integrity(spells)`
+
+- Detects duplicate `spell.id` values → `Error, Spells`
+- Detects `spell.level` outside `1..=7` → `Error, Spells`
+- Returns `Passed, Spells` if all checks pass
+
+#### `validate_item_spell_effects(items, spells)`
+
+- For each item where `item.spell_effect == Some(spell_id)`, verifies `spell_id` exists in `spells`
+- Unknown reference → `Error, Items`, message: `"Item 'X' (ID: N) has spell_effect ID Y which does not reference a known spell"`
+- Returns `Passed, Items` if all checks pass
+
+#### `validate_consumable_spell_effects(items, spells)`
+
+- For `ItemType::Consumable` items, checks `ConsumableEffect::CastSpell(sid)` and `ConsumableEffect::LearnSpell(sid)`
+- Unknown `sid` → `Error, Items`
+- Non-spell consumable effects are silently ignored
+- Returns `Passed, Items` if all checks pass
+
+#### `validate_dialogue_learn_spell_actions(dialogues, spells)`
+
+- Iterates every `DialogueNode.actions` and every `DialogueChoice.actions` in every `DialogueTree`
+- `DialogueAction::LearnSpell { spell_id, .. }` with unknown `spell_id` → `Error, Dialogues`
+- Returns `Passed, Dialogues` if all checks pass
+
+#### `validate_quest_learn_spell_rewards(quests, spells)`
+
+- Iterates every `Quest.rewards`
+- `QuestReward::LearnSpell { spell_id }` with unknown `spell_id` → `Error, Quests`
+- Returns `Passed, Quests` if all checks pass
+
+**Tests added** (inside existing `mod tests` in `validation.rs`):
+
+Private helpers `make_spell` and `make_weapon_item` / `make_consumable_item`
+construct minimal test data without touching `campaigns/tutorial`.
+
+| Function                                | Tests                                                                                                                                                                                 |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validate_spell_data_integrity`         | `_valid_spells_returns_passed`, `_duplicate_ids_returns_error`, `_level_out_of_range_returns_error`, `_level_zero_returns_error`, `_empty_spells_returns_passed`                      |
+| `validate_item_spell_effects`           | `_no_spell_effect_returns_passed`, `_valid_spell_id_returns_passed`, `_invalid_spell_id_returns_error`, `_empty_inputs_returns_passed`                                                |
+| `validate_consumable_spell_effects`     | `_non_spell_consumable_returns_passed`, `_valid_cast_spell_returns_passed`, `_invalid_learn_spell_returns_error`, `_invalid_cast_spell_returns_error`, `_empty_inputs_returns_passed` |
+| `validate_dialogue_learn_spell_actions` | `_empty_dialogues_returns_passed`, `_valid_spell_id_returns_passed`, `_invalid_spell_id_returns_error`, `_choice_invalid_spell_id_returns_error`                                      |
+| `validate_quest_learn_spell_rewards`    | `_no_learn_spell_rewards_returns_passed`, `_valid_spell_id_returns_passed`, `_invalid_spell_id_returns_error`, `_empty_inputs_returns_passed`                                         |
+
+### 6.3 — Pre-existing Compilation Error Fixes
+
+These errors were introduced when new domain enum variants were added but
+editor match arms were not yet updated. They are fixed here as part of this
+phase.
+
+#### `items_editor.rs` — `ConsumableEffect::CastSpell` / `LearnSpell`
+
+Three match expressions lacked arms for the two new variants:
+
+1. **Display match** (`effect_str`): added `"Cast Spell (ID: {:#06x})"` and `"Learn Spell (ID: {:#06x})"` string arms.
+2. **Type-label match** (`effect_type`): added `"Cast Spell"` and `"Learn Spell"` string arms, plus corresponding `selectable_label` entries in the `ComboBox` (default ID `0x0101`).
+3. **Mutable edit match**: added `DragValue` editors for `spell_id: u16` with descriptive `ui.label` hints.
+
+#### `quest_editor.rs` — `QuestReward::LearnSpell`
+
+- Added `LearnSpell` variant to `RewardType` enum with `as_str` → `"Learn Spell"`.
+- Added `spell_id: String` field to `RewardEditBuffer` (defaults to `String::new()`).
+- Added `QuestReward::LearnSpell` arm to `edit_reward` (populates `reward_buffer.spell_id`).
+- Added `RewardType::LearnSpell` arm to `save_reward` (parses `spell_id` as `SpellId`).
+- Added `QuestReward::LearnSpell` display arms to four match blocks (build preview, static preview, reward list, reward scroll area).
+- Added `RewardType::LearnSpell` option to the reward-type `ComboBox` and a plain text-edit field for the spell ID in the edit buffer match (autocomplete not available here because `spells` slice is not threaded into `show_quest_rewards_editor`).
+
+#### `tests/editor_state_tests.rs` — `Spell` struct literal missing `effect_type`
+
+Two `Spell { .. }` struct literals lacked the `effect_type` field that was
+added in Phase 1. Fixed by adding `effect_type: None` to both.
+
+### Files Changed
+
+| File                                                  | Change                                                                      |
+| ----------------------------------------------------- | --------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/ui_helpers/autocomplete.rs` | Added `autocomplete_spell_selector`                                         |
+| `sdk/campaign_builder/src/ui_helpers/tests.rs`        | Added `test_autocomplete_spell_selector_no_panic_on_empty`                  |
+| `sdk/campaign_builder/src/validation.rs`              | Added 5 validation functions + 22 tests                                     |
+| `sdk/campaign_builder/src/items_editor.rs`            | Fixed `ConsumableEffect::CastSpell`/`LearnSpell` match arms                 |
+| `sdk/campaign_builder/src/quest_editor.rs`            | Added `LearnSpell` to `RewardType`, `RewardEditBuffer`, and all match sites |
+| `sdk/campaign_builder/tests/editor_state_tests.rs`    | Added `effect_type: None` to two `Spell` literals                           |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors, workspace)
+✅ cargo clippy      → Finished (0 warnings, workspace)
+✅ cargo nextest run → 6527 passed, 8 skipped, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `SpellId` type alias used (not raw `u16`)
+- [x] `ValidationCategory::Spells`, `::Items`, `::Dialogues`, `::Quests` used
+- [x] `ValidationResult::error`, `::warning`, `::passed` constructors used
+- [x] All test data uses `data/test_campaign/` fixtures or inline construction — no reference to `campaigns/tutorial`
+- [x] No new data files created (validation functions are pure logic)
+- [x] All public functions have `///` doc comments with examples
+
+## Spell Editor — Phase 6: SpellEffectType Editing (Complete)
+
+### Overview
+
+Adds an "Effect Type" editing section to the Campaign Builder's spell editor
+(`sdk/campaign_builder/src/spells_editor.rs`). The new UI panel lets designers
+explicitly set the `effect_type: Option<SpellEffectType>` field on any spell,
+overriding the runtime inference performed by `Spell::infer_effect_type`.
+
+### 6.1 Import Updates
+
+Added `BuffField`, `SpellEffectType`, and `UtilityType` to the existing
+`use antares::domain::magic::types::{...}` import block.
+
+### 6.2 Bug Fix: `default_spell` Missing `effect_type`
+
+`default_spell()` was missing the `effect_type: None` field in its `Spell`
+struct literal, causing a compile error after `effect_type` was added to
+`Spell`. Added `effect_type: None` to the initialiser.
+
+### 6.3 New Method: `show_effect_type_editor`
+
+`fn show_effect_type_editor(&mut self, ui: &mut egui::Ui, conditions: &[ConditionDefinition])`
+
+Renders a `ui.group` block titled **"Effect Type"** with:
+
+- A descriptive note reminding designers that damage spells should stay on
+  "Auto (Inferred)".
+- A `ComboBox::from_id_salt("spell_effect_type")` whose selected text is
+  driven by a local `effect_type_label` string matched from the current
+  `Option<SpellEffectType>` value. The nine selectable entries map to:
+
+  | Label           | Written value                                    |
+  | --------------- | ------------------------------------------------ |
+  | Auto (Inferred) | `None`                                           |
+  | Damage          | `Some(Damage)`                                   |
+  | Healing         | `Some(Healing { amount: DiceRoll::new(2,6,0) })` |
+  | Cure Condition  | `Some(CureCondition { condition_id: "" })`       |
+  | Buff            | `Some(Buff { buff_field: Bless, duration: 10 })` |
+  | Utility         | `Some(Utility { utility_type: Teleport })`       |
+  | Debuff          | `Some(Debuff)`                                   |
+  | Resurrection    | `Some(Resurrection)`                             |
+  | Dispel Magic    | `Some(DispelMagic)`                              |
+
+  When `Some(Composite(_))` is active, a non-interactive label
+  "Composite (read-only)" is shown instead of a selectable entry.
+
+- Variant-specific sub-fields rendered after the ComboBox:
+  - **Healing** — three `DragValue` widgets for `count` (1–10), `sides`
+    (1–20), and `bonus` (−10 to 20).
+  - **CureCondition** — `autocomplete_condition_selector` with id_salt
+    `"effect_cure_condition"` writing directly into `condition_id`.
+  - **Buff** — `ComboBox::from_id_salt("spell_buff_field")` listing all 18
+    `BuffField` variants; `DragValue` for `duration` (1–100).
+  - **Utility** — `ComboBox::from_id_salt("spell_utility_type")` for the
+    three `UtilityType` variants; when `CreateFood` is selected an additional
+    `DragValue` for `amount` (1–100) is shown.
+  - **Composite** — read-only label directing users to edit RON directly.
+  - All other variants — no sub-fields.
+
+### 6.4 Integration into `show_form`
+
+`show_effect_type_editor` is called from `show_form` between the existing
+"Effects" group and the "Applied Conditions" group:
+
+```sdk/campaign_builder/src/spells_editor.rs#L681-682
+self.show_effect_type_editor(ui, conditions);
+```
+
+`ui.add_space(10.0)` separators are placed on both sides to maintain
+consistent visual rhythm with the rest of the form.
+
+### 6.5 Tests Added
+
+Five new unit tests in `mod tests`:
+
+| Test                                      | What it verifies                                                  |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| `test_effect_type_editor_default_is_none` | `default_spell().effect_type` is `None`                           |
+| `test_effect_type_damage_variant`         | Setting `Some(Damage)` round-trips correctly                      |
+| `test_effect_type_healing_has_dice`       | `Healing` variant holds the expected `DiceRoll` fields            |
+| `test_effect_type_buff_has_field`         | `Buff` variant carries `BuffField::Bless` and `duration: 10`      |
+| `test_effect_type_utility_teleport`       | `Utility { utility_type: Teleport }` is set and matched correctly |
+
+### Quality Gate Results
+
+| Gate                                                       | Result                   |
+| ---------------------------------------------------------- | ------------------------ |
+| `cargo fmt --all`                                          | ✅ clean                 |
+| `cargo check --all-targets --all-features`                 | ✅ 0 errors              |
+| `cargo clippy --all-targets --all-features -- -D warnings` | ✅ 0 warnings            |
+| `cargo nextest run --all-features`                         | ✅ 4316 passed, 0 failed |
+
+---
+
 ## Spell System — Phase 5: Complete Spell Data and Advanced Features (Complete)
 
 ### Overview

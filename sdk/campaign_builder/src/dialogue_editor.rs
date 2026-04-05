@@ -48,17 +48,18 @@
 
 use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
-    autocomplete_quest_selector, dispatch_list_action, show_standard_list_item, ActionButtons,
-    DispatchActionState, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
-    ToolbarAction, TwoColumnLayout,
+    autocomplete_quest_selector, autocomplete_spell_selector, dispatch_list_action,
+    show_standard_list_item, ActionButtons, DispatchActionState, EditorToolbar, ItemAction,
+    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::dialogue::{
     DialogueAction, DialogueChoice, DialogueCondition, DialogueId, DialogueNode, DialogueTree,
     NodeId,
 };
 use antares::domain::items::types::Item;
+use antares::domain::magic::types::Spell;
 use antares::domain::quest::{Quest, QuestId};
-use antares::domain::types::ItemId;
+use antares::domain::types::{ItemId, SpellId};
 use antares::domain::world::npc::NpcDefinition;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
@@ -184,6 +185,9 @@ pub struct DialogueEditorState {
 
     /// Target node for jump-to navigation
     pub jump_to_node: Option<NodeId>,
+
+    /// Available spells for action editors (for spell pickers)
+    pub available_spells: Vec<Spell>,
 }
 
 /// Dialogue editor mode
@@ -337,6 +341,10 @@ pub struct ActionEditBuffer {
     pub reputation_change: String,
     pub event_name: String,
     pub experience_amount: String,
+    /// Spell ID for LearnSpell action
+    pub spell_id: String,
+    /// Optional target character ID for LearnSpell action (empty = first eligible)
+    pub target_character_id: String,
 }
 
 /// Action type selector
@@ -352,6 +360,8 @@ pub enum ActionType {
     ChangeReputation,
     TriggerEvent,
     GrantExperience,
+    /// Teach a spell to a party member
+    LearnSpell,
 }
 
 impl ActionType {
@@ -367,6 +377,7 @@ impl ActionType {
             ActionType::ChangeReputation => "Change Reputation",
             ActionType::TriggerEvent => "Trigger Event",
             ActionType::GrantExperience => "Grant Experience",
+            ActionType::LearnSpell => "Learn Spell",
         }
     }
 }
@@ -387,6 +398,8 @@ impl Default for ActionEditBuffer {
             reputation_change: "0".to_string(),
             event_name: String::new(),
             experience_amount: "100".to_string(),
+            spell_id: String::new(),
+            target_character_id: String::new(),
         }
     }
 }
@@ -419,6 +432,7 @@ impl Default for DialogueEditorState {
             dialogue_validation_errors: Vec::new(),
             navigation_path: Vec::new(),
             jump_to_node: None,
+            available_spells: Vec::new(),
         }
     }
 }
@@ -1180,6 +1194,27 @@ impl DialogueEditorState {
                     .parse::<u32>()
                     .map_err(|_| "Invalid experience amount".to_string())?,
             },
+            ActionType::LearnSpell => {
+                let spell_id = self
+                    .action_buffer
+                    .spell_id
+                    .parse::<SpellId>()
+                    .map_err(|_| "Invalid spell ID".to_string())?;
+                let target_character_id = if self.action_buffer.target_character_id.is_empty() {
+                    None
+                } else {
+                    Some(
+                        self.action_buffer
+                            .target_character_id
+                            .parse::<antares::domain::types::CharacterId>()
+                            .map_err(|_| "Invalid character ID".to_string())?,
+                    )
+                };
+                DialogueAction::LearnSpell {
+                    spell_id,
+                    target_character_id,
+                }
+            }
         })
     }
 
@@ -1429,8 +1464,12 @@ impl DialogueEditorState {
         dialogues: &mut Vec<DialogueTree>,
         quests: &[Quest],
         items: &[Item],
+        spells: &[Spell],
         ctx: &mut EditorContext<'_>,
     ) {
+        // Sync available spells cache
+        self.available_spells = spells.to_vec();
+
         // Only sync dialogues if they differ (prevents losing edits on every frame)
         if self.dialogues.len() != dialogues.len()
             || self
@@ -2359,6 +2398,7 @@ impl DialogueEditorState {
     ) {
         let mut save_node_clicked = false;
         let mut cancel_node_clicked = false;
+        let mut add_action_clicked = false;
 
         if self.editing_node {
             if let Some(selected_node_id) = self.selected_node {
@@ -2393,6 +2433,76 @@ impl DialogueEditorState {
                         cancel_node_clicked = true;
                     }
                 });
+
+                ui.add_space(5.0);
+                ui.separator();
+                ui.label("Add Action to Node:");
+
+                ui.horizontal(|ui| {
+                    ui.label("Action Type:");
+                    egui::ComboBox::from_id_salt("node_action_type")
+                        .selected_text(self.action_buffer.action_type.as_str())
+                        .show_ui(ui, |ui| {
+                            for action_type in [
+                                ActionType::StartQuest,
+                                ActionType::CompleteQuestStage,
+                                ActionType::GiveItems,
+                                ActionType::TakeItems,
+                                ActionType::GiveGold,
+                                ActionType::TakeGold,
+                                ActionType::SetFlag,
+                                ActionType::ChangeReputation,
+                                ActionType::TriggerEvent,
+                                ActionType::GrantExperience,
+                                ActionType::LearnSpell,
+                            ] {
+                                ui.push_id(action_type.as_str(), |ui| {
+                                    ui.selectable_value(
+                                        &mut self.action_buffer.action_type,
+                                        action_type,
+                                        action_type.as_str(),
+                                    );
+                                });
+                            }
+                        });
+                });
+
+                // Show spell picker for LearnSpell
+                if self.action_buffer.action_type == ActionType::LearnSpell {
+                    let spells = self.available_spells.clone();
+                    let mut spell_id: SpellId = self.action_buffer.spell_id.parse().unwrap_or(0);
+                    autocomplete_spell_selector(
+                        ui,
+                        "node_action_spell",
+                        "Spell:",
+                        &mut spell_id,
+                        &spells,
+                    );
+                    self.action_buffer.spell_id = spell_id.to_string();
+                    ui.horizontal(|ui| {
+                        ui.label("Target Character ID (optional, empty = first eligible):");
+                        ui.text_edit_singleline(&mut self.action_buffer.target_character_id);
+                    });
+                }
+
+                // Show quest selector for quest-related actions
+                if matches!(
+                    self.action_buffer.action_type,
+                    ActionType::StartQuest | ActionType::CompleteQuestStage
+                ) {
+                    let quests = self.quests.clone();
+                    autocomplete_quest_selector(
+                        ui,
+                        "node_action_quest",
+                        "Quest:",
+                        &mut self.action_buffer.quest_id,
+                        &quests,
+                    );
+                }
+
+                if ui.button("➕ Add Action to Node").clicked() {
+                    add_action_clicked = true;
+                }
             }
         }
 
@@ -2415,6 +2525,25 @@ impl DialogueEditorState {
             self.editing_node = false;
             self.node_buffer = NodeEditBuffer::default();
             *status_message = "Node editing cancelled".to_string();
+        }
+
+        if add_action_clicked {
+            if let Some(node_id) = self.selected_node {
+                match self.build_action_from_buffer() {
+                    Ok(action) => {
+                        if let Some(dialogue) = self.dialogues.get_mut(dialogue_idx) {
+                            if let Some(node) = dialogue.nodes.get_mut(&node_id) {
+                                node.add_action(action);
+                                self.action_buffer = ActionEditBuffer::default();
+                                *status_message = format!("Action added to node {}", node_id);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        *status_message = format!("Failed to build action: {}", e);
+                    }
+                }
+            }
         }
     }
 
@@ -3575,5 +3704,54 @@ mod tests {
         assert!(editor.save_dialogue().is_ok());
         assert_eq!(editor.dialogues.len(), 2);
         assert_eq!(editor.dialogues[1].id, 2);
+    }
+
+    #[test]
+    fn test_action_type_learn_spell_display() {
+        assert_eq!(ActionType::LearnSpell.as_str(), "Learn Spell");
+    }
+
+    #[test]
+    fn test_build_learn_spell_action_valid() {
+        let mut editor = DialogueEditorState::new();
+        editor.action_buffer.action_type = ActionType::LearnSpell;
+        editor.action_buffer.spell_id = "513".to_string();
+        editor.action_buffer.target_character_id = String::new();
+
+        let result = editor.build_action_from_buffer();
+        assert!(result.is_ok());
+        let action = result.unwrap();
+        assert!(matches!(
+            action,
+            DialogueAction::LearnSpell {
+                spell_id: 513,
+                target_character_id: None
+            }
+        ));
+    }
+
+    #[test]
+    fn test_build_learn_spell_action_invalid_id() {
+        let mut editor = DialogueEditorState::new();
+        editor.action_buffer.action_type = ActionType::LearnSpell;
+        editor.action_buffer.spell_id = "not_a_number".to_string();
+        editor.action_buffer.target_character_id = String::new();
+
+        let result = editor.build_action_from_buffer();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid spell ID"));
+    }
+
+    #[test]
+    fn test_action_buffer_has_spell_fields() {
+        let buffer = ActionEditBuffer::default();
+        assert_eq!(buffer.spell_id, "");
+        assert_eq!(buffer.target_character_id, "");
+    }
+
+    #[test]
+    fn test_dialogue_editor_has_available_spells() {
+        let editor = DialogueEditorState::new();
+        assert!(editor.available_spells.is_empty());
     }
 }

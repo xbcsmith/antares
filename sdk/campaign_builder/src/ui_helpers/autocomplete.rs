@@ -2642,3 +2642,85 @@ impl AutocompleteCandidateCache {
         candidates
     }
 }
+
+// =============================================================================
+// Spell Selector
+// =============================================================================
+
+/// Shows an autocomplete input for selecting a spell by name.
+///
+/// Returns `true` if the selection changed (user selected a spell from suggestions).
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI context
+/// * `id_salt` - Unique ID salt for this widget instance
+/// * `label` - Label to display before the input field
+/// * `selected_spell_id` - Mutable reference to the currently selected [`SpellId`]
+///   (value `0` means no spell selected)
+/// * `spells` - Slice of available spells to autocomplete against
+///
+/// # Returns
+///
+/// `true` if the user selected a different spell (or cleared the selection),
+/// `false` if nothing changed this frame.
+///
+/// # Examples
+///
+/// ```no_run
+/// use eframe::egui;
+/// use antares::domain::magic::types::Spell;
+/// use antares::domain::types::SpellId;
+/// use campaign_builder::ui_helpers::autocomplete_spell_selector;
+///
+/// fn show_spell_picker(ui: &mut egui::Ui, selected: &mut SpellId, spells: &[Spell]) {
+///     if autocomplete_spell_selector(ui, "spell_picker", "Spell:", selected, spells) {
+///         // User changed the selected spell
+///     }
+/// }
+/// ```
+pub fn autocomplete_spell_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_spell_id: &mut antares::domain::types::SpellId,
+    spells: &[antares::domain::magic::types::Spell],
+) -> bool {
+    let candidates: Vec<String> = spells.iter().map(|s| s.name.clone()).collect();
+    let current_name = if *selected_spell_id == 0 {
+        String::new()
+    } else {
+        spells
+            .iter()
+            .find(|s| s.id == *selected_spell_id)
+            .map(|s| s.name.clone())
+            .unwrap_or_default()
+    };
+    // Use Cell so both on_select and on_clear can share mutation without conflicting borrows.
+    let cell = std::cell::Cell::new(*selected_spell_id);
+    let is_selected = *selected_spell_id != 0;
+    let cfg = AutocompleteSelectorConfig {
+        id_salt,
+        buffer_tag: "spell",
+        label,
+        placeholder: "Start typing spell name...",
+    };
+    let changed = autocomplete_entity_selector_generic(
+        ui,
+        &cfg,
+        candidates,
+        current_name,
+        is_selected,
+        |text| {
+            if let Some(spell) = spells.iter().find(|s| s.name == text) {
+                cell.set(spell.id);
+                true
+            } else {
+                false
+            }
+        },
+        || cell.set(0),
+    );
+    *selected_spell_id = cell.get();
+    changed
+}
