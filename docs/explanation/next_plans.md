@@ -157,14 +157,24 @@ Items moved to [Game Feature Completion Plan](./game_feature_completion_plan.md)
 
 Month Year Date in Game Engine View looks horrible.
 
-Trees are still horrible. Grass sucks as well. Is tree bark textures being applied? The trees on Map 1 look no different than before.
-You can not tell one tree from the next. Oak, Pine, Palm, Dead all look the same.
-Foliage particularly Bushes clip tree trunks. And seems like editing them in the SDK does nothing to change their appearance.
+Trees are still horrible. Grass sucks as well. Is tree bark textures being applied? You can not tell one tree from the next. Oak, Pine, Palm, Dead all look the same.Foliage particularly Bushes clip tree trunks. And seems like editing them in the SDK does nothing to change their appearance.
 
 All the doors are facing the wrong way
 
 Show/Hide Tray ICON SDK is not working
 
-Recruitable Characters mesh does not disappear until they are walked over. It should disappear immediately on recruitment.
+When interaction with Recruitable Character is initiated from an adjacent tile, after the recruit dialog is finished and the player joins the party the Recruitable Characters mesh does not disappear until they are walked over. It should disappear immediately on recruitment. It looks remove_event` is called at the party's position instead of the adjacent tile where the event actually is, the event stays on the map, so the visual persists. The party then has to walk to that adjacent tile, triggering `check_for_events` again, which finds the `RecruitableCharacter` event but logs that it's not...
 
 Game log is not part of a Game Save. Loading a save game from the main menu on restart does not restore the game log. The game log should be saved and loaded with the rest of the game state.
+
+Combat should be able to be initiatiated using the E key or Mouse when standing on an adjacent tile to an encounter trigger, not just by stepping on the encounter trigger tile. This is important for accessibility and also for allowing players to choose when to engage in combat rather than being forced into it by stepping on a tile.
+
+Campaign Builder --> Maps --> Edit Map --> Click on NPC options are Edit NPC (goes straight to the NPC editor) and Remove NPC. Need a way to edit the Event so I can control what direction the NPC is facing. Currently there is no way to edit the NPC's facing direction, so all NPCs face the same direction which looks bad. We should add an Edit Event option that allows you to edit the event's facing direction as well as other properties of the event like the dialogue it triggers, the quests it gives, etc.
+
+Campaign Builder --> Maps --> Edit Map --> Add Event --> Container can contain items but there is no way to add Gold or Gems to the container in the SDK. We should add the ability to add Gold and Gems to the container in the SDK as well as in the game engine when looting a container.
+
+Campaign Builder --> Maps --> Edit Map --> Edit Event in the right column the Event Editor should be placed right under the Event Details instead of at the bottom of the column.
+
+Campaign Builder --> Furniture --> Edit Furniture does no have a Back to List button that is required to get back to the list of furniture. We should add a Back to List button to the Edit Furniture screen that takes you back to the list of furniture.
+
+Campaign Builder --> Stock Templates --> Edit Stock Template does not load the description of the Stock Template in the editor. We should load the description of the Stock Template in the editor so that it can be edited as well.

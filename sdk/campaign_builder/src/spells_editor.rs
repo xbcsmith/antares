@@ -9,7 +9,8 @@ use crate::ui_helpers::{
 };
 use antares::domain::conditions::ConditionDefinition;
 use antares::domain::magic::types::{
-    BuffField, Spell, SpellContext, SpellEffectType, SpellSchool, SpellTarget, UtilityType,
+    BuffField, Spell, SpellContext, SpellEffectType, SpellSchool, SpellTarget, TeleportDestination,
+    UtilityType,
 };
 use antares::domain::types::DiceRoll;
 use eframe::egui;
@@ -845,7 +846,9 @@ impl SpellsEditorState {
                         duration: 10,
                     }),
                     "Utility" => Some(SpellEffectType::Utility {
-                        utility_type: UtilityType::Teleport,
+                        utility_type: UtilityType::Teleport {
+                            destination: TeleportDestination::Surface,
+                        },
                     }),
                     "Debuff" => Some(SpellEffectType::Debuff),
                     "Resurrection" => Some(SpellEffectType::Resurrection),
@@ -966,7 +969,7 @@ impl SpellsEditorState {
                 Some(SpellEffectType::Utility { utility_type }) => {
                     let ut_label = match &*utility_type {
                         UtilityType::CreateFood { .. } => "Create Food",
-                        UtilityType::Teleport => "Teleport",
+                        UtilityType::Teleport { .. } => "Teleport",
                         UtilityType::Information => "Information",
                     };
                     let mut selected_ut = ut_label.to_string();
@@ -995,7 +998,9 @@ impl SpellsEditorState {
                     if selected_ut.as_str() != ut_label {
                         *utility_type = match selected_ut.as_str() {
                             "Create Food" => UtilityType::CreateFood { amount: 5 },
-                            "Teleport" => UtilityType::Teleport,
+                            "Teleport" => UtilityType::Teleport {
+                                destination: TeleportDestination::Surface,
+                            },
                             "Information" => UtilityType::Information,
                             _ => *utility_type,
                         };
@@ -1004,6 +1009,34 @@ impl SpellsEditorState {
                         ui.horizontal(|ui| {
                             ui.label("Amount:");
                             ui.add(egui::DragValue::new(amount).range(1..=100));
+                        });
+                    }
+                    if let UtilityType::Teleport { destination } = utility_type {
+                        ui.horizontal(|ui| {
+                            ui.label("Destination:");
+                            egui::ComboBox::from_id_salt("spell_teleport_destination")
+                                .selected_text(match destination {
+                                    TeleportDestination::Surface => "Surface",
+                                    TeleportDestination::TownPortal => "Town Portal",
+                                    TeleportDestination::Jump => "Jump",
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        destination,
+                                        TeleportDestination::Surface,
+                                        "Surface",
+                                    );
+                                    ui.selectable_value(
+                                        destination,
+                                        TeleportDestination::TownPortal,
+                                        "Town Portal",
+                                    );
+                                    ui.selectable_value(
+                                        destination,
+                                        TeleportDestination::Jump,
+                                        "Jump",
+                                    );
+                                });
                         });
                     }
                 }

@@ -16,6 +16,7 @@
             "awake",
         ],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 258,
@@ -34,6 +35,7 @@
             "bless",
         ],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 259,
@@ -52,6 +54,7 @@
             "blind",
         ],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 260,
@@ -68,6 +71,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 261,
@@ -84,6 +88,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 262,
@@ -100,6 +105,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 263,
@@ -116,6 +122,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 513,
@@ -132,6 +139,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 514,
@@ -150,6 +158,7 @@
             "heroism",
         ],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 515,
@@ -166,6 +175,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 516,
@@ -184,6 +194,7 @@
             "cold_resistance",
         ],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 517,
@@ -202,6 +213,7 @@
             "fire_resistance",
         ],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 518,
@@ -220,6 +232,7 @@
             "poison_resistance",
         ],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 519,
@@ -238,6 +251,7 @@
             "silenced",
         ],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 769,
@@ -254,6 +268,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 770,
@@ -270,6 +285,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 771,
@@ -286,6 +302,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 772,
@@ -302,6 +319,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 773,
@@ -318,6 +336,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 774,
@@ -334,6 +353,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 775,
@@ -350,6 +370,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 776,
@@ -366,6 +387,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: Some(1),
+        effect_type: None,
     ),
     (
         id: 1025,
@@ -384,6 +406,7 @@
             "awake",
         ],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1026,
@@ -400,6 +423,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1027,
@@ -416,6 +440,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1028,
@@ -432,6 +457,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1029,
@@ -448,6 +474,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1030,
@@ -464,6 +491,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1031,
@@ -482,6 +510,7 @@
             "sleep",
         ],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1281,
@@ -498,6 +527,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1282,
@@ -514,6 +544,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1283,
@@ -530,6 +561,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1284,
@@ -546,7 +578,11 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
-        effect_type: Some(Utility(utility_type: Teleport(destination: Jump))),
+        effect_type: Some(Utility(
+            utility_type: Teleport(
+                destination: Jump,
+            ),
+        )),
     ),
     (
         id: 1285,
@@ -563,6 +599,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1286,
@@ -581,6 +618,7 @@
             "giants_strength",
         ],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1287,
@@ -599,6 +637,7 @@
             "haste",
         ],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1537,
@@ -615,6 +654,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1538,
@@ -631,6 +671,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1539,
@@ -647,6 +688,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1540,
@@ -663,6 +705,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1541,
@@ -679,6 +722,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1542,
@@ -697,6 +741,7 @@
             "invisibility",
         ],
         resurrect_hp: None,
+        effect_type: None,
     ),
     (
         id: 1543,
@@ -713,5 +758,6 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: None,
     ),
 ]

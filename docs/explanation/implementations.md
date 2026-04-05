@@ -1,5 +1,282 @@
 # Implementations
 
+## Feature: Encounter Interaction from Adjacent Tile + Immediate Monster Mesh Despawn on Victory
+
+### Overview
+
+Two related gameplay improvements delivered together:
+
+1. **Encounter interaction from adjacent tile** — Players can now initiate combat
+   by pressing `E` or clicking the centre of the screen while standing on any
+   tile adjacent to an encounter trigger, instead of being forced into combat by
+   stepping onto the encounter tile.
+
+2. **Immediate monster mesh despawn on victory** — When the party wins combat the
+   monster's world-map mesh disappears in the same frame the combat ends. When
+   the party flees the mesh stays, matching player expectations and mirroring the
+   pattern already used for recruitable-character visuals.
+
+---
+
+### Feature 1 — Encounter Interaction Requires Explicit Player Input
+
+#### Problem
+
+`check_for_events` unconditionally fired `MapEventTriggered` for
+`MapEvent::Encounter` the moment the party stepped onto the encounter tile.
+Players had no agency: walking toward a visible monster automatically started
+combat the instant they entered its tile.
+
+#### Change
+
+`MapEvent::Encounter { .. }` was added to the "requires interact" list in
+`check_for_events` alongside `RecruitableCharacter`, `Sign`, `Teleport`,
+`Container`, and `LockedDoor`/`LockedContainer`. The arm logs an info message
+and returns without emitting `MapEventTriggered`.
+
+The adjacent-tile and current-tile E key / mouse paths were **already
+implemented** inside `try_interact_adjacent_world_events`
+(`src/game/systems/input/exploration_interact.rs`): both the current-position
+`Encounter` guard and the `MapEvent::Encounter` arm in the adjacent-tile loop
+route through `handle_exploration_interact` → `try_interact_adjacent_world_events`
+→ `MapEventTriggered` → `handle_events` → `start_encounter`. No changes were
+needed to those paths.
+
+#### Files Changed
+
+| File                         | Change                                                                                                                                                                                                                                                                                                               |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/events.rs` | Add `MapEvent::Encounter { .. }` arm to `check_for_events` "requires interact" match; update block comment; rename and update `test_encounter_auto_triggers_when_stepping_on_tile` → `test_encounter_does_not_auto_trigger_when_stepping_on_tile`; add `test_encounter_triggered_from_current_position_via_interact` |
+
+#### New / Updated Tests
+
+| Test                                                          | What it verifies                                                                                  |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `test_encounter_does_not_auto_trigger_when_stepping_on_tile`  | Stepping on an encounter tile emits no `MapEventTriggered`                                        |
+| `test_encounter_triggered_from_current_position_via_interact` | Explicitly writing `MapEventTriggered` (the interact path) delivers the encounter event correctly |
+
+---
+
+### Feature 2 — Immediate Monster Mesh Despawn on Victory (`DespawnEncounterVisual`)
+
+#### Problem
+
+The existing `cleanup_encounter_visuals` passive polling system (in `map.rs`)
+despawns `EncounterVisualMarker` entities when their backing `MapEvent::Encounter`
+is absent from the map. Because Bevy system ordering between `CombatPlugin` and
+`MapManagerPlugin` is non-deterministic, `cleanup_encounter_visuals` could run
+_before_ `handle_combat_victory` removes the event in the same frame, leaving
+the monster mesh visible for one extra frame (or longer if ordering was
+consistently wrong). There was also no explicit, guaranteed despawn path
+analogous to `DespawnRecruitableVisual`.
+
+When the party **fled**, no event was removed and no despawn happened — which is
+the correct behaviour — but it was only accidentally so.
+
+#### Solution
+
+Mirror the `DespawnRecruitableVisual` pattern:
+
+1. Add `DespawnEncounterVisual { map_id, position }` message to `map.rs`.
+2. Add `handle_despawn_encounter_visual` system to `MapManagerPlugin` that
+   immediately despawns any `EncounterVisualMarker` entity matching the
+   `map_id` + `position` pair.
+3. In `handle_combat_victory` (`combat.rs`), emit `DespawnEncounterVisual`
+   immediately after `map.remove_event(pos)`, so the mesh disappears in the
+   same frame the encounter ends in victory.
+4. `cleanup_encounter_visuals` is **kept** as a passive safety net.
+5. Flee path: `perform_flee_action` does not remove the encounter event and
+   does not emit `DespawnEncounterVisual`, so the monster mesh remains on the
+   map — intentional and correct.
+
+#### Files Changed
+
+| File                         | Change                                                                                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/map.rs`    | Add `DespawnEncounterVisual` message; add `handle_despawn_encounter_visual` system; register both in `MapManagerPlugin`                   |
+| `src/game/systems/combat.rs` | Add `Option<MessageWriter<DespawnEncounterVisual>>` parameter to `handle_combat_victory`; emit message after event removal; add two tests |
+
+#### New Tests
+
+| Test                                                    | File        | What it verifies                                                                                   |
+| ------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------- |
+| `test_despawn_encounter_visual_message_removes_entity`  | `map.rs`    | Message at matching tile despawns that entity; non-matching tile entity survives                   |
+| `test_despawn_encounter_visual_wrong_map_id_is_ignored` | `map.rs`    | Message with wrong `map_id` leaves all entities untouched                                          |
+| `test_despawn_encounter_visual_emitted_on_victory`      | `combat.rs` | `CombatVictory` causes `DespawnEncounterVisual` to be written with correct `map_id` and `position` |
+| `test_despawn_encounter_visual_not_emitted_on_flee`     | `combat.rs` | `FleeAction` does **not** emit `DespawnEncounterVisual`                                            |
+
+---
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all                                           → no output
+✅ cargo check --all-targets --all-features                 → Finished, 0 errors
+✅ cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+✅ cargo nextest run --all-features                         → 4338 passed, 8 skipped, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `MapId` and `Position` type aliases used in `DespawnEncounterVisual` (not raw `u32`/`usize`)
+- [x] `Option<MessageWriter<…>>` pattern used in `handle_combat_victory` so the system remains usable in test apps that do not register `MapManagerPlugin`
+- [x] Passive `cleanup_encounter_visuals` retained as safety net — no regression for edge-case spawning paths
+- [x] Flee path leaves encounter event and visual intact — player can return and retry
+- [x] Pattern is consistent with `DespawnRecruitableVisual` already in production
+
+---
+
+## Bugfix: Recruitable Character Mesh Persists After Adjacent-Tile Recruitment
+
+### Problem
+
+When a `RecruitableCharacter` event was interacted with from an **adjacent tile**
+(the party stands one tile away and presses the interact key), the character's
+3-D mesh remained visible on the map after the recruit dialog completed and the
+character joined the party. The mesh would only disappear once the party
+physically walked onto the tile the recruitable character was standing on.
+
+### Root Cause
+
+In `src/game/systems/events.rs`, inside `handle_events`, the
+`MapEvent::RecruitableCharacter` arm contained this line:
+
+```src/game/systems/events.rs#L631
+let current_pos = global_state.0.world.party_position;
+```
+
+`current_pos` was then used for three purposes:
+
+1. Looking up the NPC speaker entity (`coord.0.x == current_pos.x …`)
+2. Populating `RecruitmentContext::event_position`
+3. Setting `StartDialogue::fallback_position`
+
+When the interaction came from an adjacent tile, `trigger.position` (the tile
+where the event actually lives) differed from `global_state.0.world.party_position`
+(the tile the party stands on). The `PendingRecruitmentContext` set correctly
+by `try_interact_npc_or_recruitable` (in `exploration_interact.rs`) was then
+**overwritten** by `handle_events` using the wrong party position.
+
+Downstream, `execute_recruit_to_party` called `remove_event(event_position)`
+on the party's tile instead of the event's tile. The removal found nothing,
+`DespawnRecruitableVisual` was never emitted, and the mesh persisted.
+
+### Fix
+
+Replace the three uses of `current_pos` (the party position) in the
+`RecruitableCharacter` arm with `trigger.position` (the event's actual map
+tile), which is always correct regardless of whether the party is standing on
+the event or one tile away:
+
+```src/game/systems/events.rs#L631
+let event_pos = trigger.position;
+```
+
+`trigger.position` is the canonical source of truth: it is the position encoded
+in the `MapEventTriggered` message, set correctly by both
+`try_interact_npc_or_recruitable` (adjacent-tile path) and any direct
+programmatic trigger (same-tile path).
+
+### Files Changed
+
+| File                         | Change                                                                                                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/events.rs` | Replace `global_state.0.world.party_position` with `trigger.position` in the `RecruitableCharacter` arm of `handle_events`; add regression test |
+
+### New Test Added
+
+`test_recruitable_character_adjacent_tile_uses_event_position_not_party_position`
+in `src/game/systems/events.rs`:
+
+- Places the party at `(7, 14)` and the `RecruitableCharacter` event at `(7, 15)`.
+- Fires `MapEventTriggered { position: (7, 15) }` (the adjacent tile).
+- Asserts `DialogueState::recruitment_context.event_position == (7, 15)` after
+  two update ticks.
+- Asserts `event_position != (7, 14)` (party position must not leak in).
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all                                           → no output
+✅ cargo check --all-targets --all-features                 → Finished, 0 errors
+✅ cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+✅ cargo nextest run --all-features -E 'test(recruitable)'  → 18 passed, 0 failed
+```
+
+---
+
+## Feature: `DespawnEncounterVisual` — Immediate Encounter Mesh Despawn on Combat Victory
+
+### Problem
+
+When the party defeated all monsters in a combat encounter, the monster's 3-D
+mesh remained visible on the map tile until the next frame where
+`cleanup_encounter_visuals` ran its passive sweep. In practice this meant a
+one-frame flicker where a defeated monster mesh was still present as the game
+transitioned back to exploration mode, and any future changes that deferred
+`cleanup_encounter_visuals` (e.g. frame-ordering adjustments) could widen that
+window further.
+
+There was no explicit, same-frame despawn path for encounter visuals analogous
+to the `DespawnRecruitableVisual` message used for recruitable-character meshes.
+
+### Solution
+
+Mirror the recruitable-visual immediate-despawn pattern for encounter visuals:
+
+1. **`DespawnEncounterVisual` message struct** — a new `#[derive(Message)]` type
+   carrying `map_id` and `position`, emitted by `handle_combat_victory` the
+   moment all monsters are defeated. The message is intentionally _not_ emitted
+   on flee, so the monster mesh stays on the map for a potential second
+   encounter.
+
+2. **`handle_despawn_encounter_visual` system** — queries all
+   `EncounterVisualMarker` entities and despawns any whose `(map_id, position)`
+   matches an incoming `DespawnEncounterVisual` message. Runs in the same
+   `Update` schedule as the other map-management systems.
+
+3. **`cleanup_encounter_visuals` retained** — the existing passive sweep remains
+   as a safety net for any encounter visual spawned outside the normal map-load
+   path, or in case the explicit message is missed for any reason.
+
+### Files Changed
+
+| File                      | Change                                                                                                                                          |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/map.rs` | Added `DespawnEncounterVisual` struct; registered it in `MapManagerPlugin`; added `handle_despawn_encounter_visual` system; added two new tests |
+
+### New Tests Added
+
+Both tests live in `src/game/systems/map.rs` → `mod tests`:
+
+| Test                                                    | What it verifies                                                                                                                             |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_despawn_encounter_visual_message_removes_entity`  | A `DespawnEncounterVisual` with `map_id: 1, position: (5,5)` despawns only the entity at that tile; a second entity at `(3,3)` is untouched. |
+| `test_despawn_encounter_visual_wrong_map_id_is_ignored` | A message targeting `map_id: 99` (no entities on that map) is a no-op; both entities on map 1 survive.                                       |
+
+### Design Notes
+
+- **Flee vs. victory**: The message is only emitted on victory. On flee the
+  encounter event is still present on the map, so `cleanup_encounter_visuals`
+  correctly keeps the mesh alive.
+- **`EncounterVisualMarker` carries coordinates directly**: unlike
+  `RecruitableVisualMarker`, which relies on `MapEntity` + `TileCoord`
+  components, `EncounterVisualMarker` stores `map_id` and `position` inline.
+  `handle_despawn_encounter_visual` therefore queries only
+  `(Entity, &EncounterVisualMarker)` — no extra component join needed.
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all                                                        → no output
+✅ cargo check --all-targets --all-features                               → Finished, 0 errors
+✅ cargo clippy --all-targets --all-features -- -D warnings               → Finished, 0 warnings
+✅ cargo nextest run --all-features -E 'test(despawn_encounter_visual)'   → 2 passed, 0 failed
+✅ cargo nextest run --all-features                                       → 4336 passed, 0 failed
+```
+
+---
+
 ## Phase 6: SDK and Content Tooling Updates — Full Completion Summary
 
 ### Overview

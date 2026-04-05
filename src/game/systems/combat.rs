@@ -5320,6 +5320,7 @@ pub fn process_combat_victory_with_rng(
 /// System: Handle CombatVictory messages and apply rewards.
 ///
 /// This runs as a system wrapper and spawns a simple victory summary UI.
+#[allow(clippy::too_many_arguments)]
 fn handle_combat_victory(
     mut reader: MessageReader<CombatVictory>,
     mut combat_res: ResMut<CombatResource>,
@@ -5328,6 +5329,9 @@ fn handle_combat_victory(
     mut commands: Commands,
     mut music_writer: Option<MessageWriter<crate::game::systems::audio::PlayMusic>>,
     mut sfx_writer: Option<MessageWriter<crate::game::systems::audio::PlaySfx>>,
+    mut despawn_encounter_writer: Option<
+        MessageWriter<crate::game::systems::map::DespawnEncounterVisual>,
+    >,
 ) {
     let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
 
@@ -5342,6 +5346,19 @@ fn handle_combat_victory(
             if let Some(map) = global_state.0.world.get_map_mut(map_id) {
                 map.remove_event(pos);
                 info!("Removed encounter event at {:?} on map {}", pos, map_id);
+            }
+            // Emit an explicit despawn so the monster mesh disappears in the same frame
+            // that the combat ends. cleanup_encounter_visuals remains as a passive safety net
+            // for any edge cases this message cannot cover.
+            if let Some(ref mut writer) = despawn_encounter_writer {
+                writer.write(crate::game::systems::map::DespawnEncounterVisual {
+                    map_id,
+                    position: pos,
+                });
+                info!(
+                    "Emitted DespawnEncounterVisual for position {:?} on map {}",
+                    pos, map_id
+                );
             }
         }
         // Clear stored position so it doesn't accidentally affect a later combat.
@@ -10516,6 +10533,198 @@ mod tests {
         assert!(
             cr.encounter_map_id.is_none(),
             "encounter_map_id must be None after victory"
+        );
+    }
+
+    /// T4-EV3: `handle_combat_victory` emits a `DespawnEncounterVisual` message
+    /// for the encounter tile when the party wins.
+    #[test]
+    fn test_despawn_encounter_visual_emitted_on_victory() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::combat::engine::CombatState;
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+        app.add_message::<crate::game::systems::map::DespawnEncounterVisual>();
+
+        // Build a game state with a live party member.
+        let mut gs = crate::application::GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        // Place an encounter event on a map.
+        let map_id: crate::domain::types::MapId = 1;
+        let encounter_pos = Position::new(5, 5);
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            encounter_pos,
+            MapEvent::Encounter {
+                name: "Goblins".to_string(),
+                description: "A band of goblins".to_string(),
+                monster_group: vec![1],
+                time_condition: None,
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
+                combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
+            },
+        );
+        gs.world.add_map(map);
+        gs.world.set_current_map(map_id);
+
+        // Enter combat so exit_combat() has a valid state to exit.
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+            cr.encounter_position = Some(encounter_pos);
+            cr.encounter_map_id = Some(map_id);
+        }
+
+        // Send the CombatVictory message.
+        {
+            let mut writer = app.world_mut().resource_mut::<Messages<CombatVictory>>();
+            writer.write(CombatVictory {});
+        }
+        app.update();
+
+        // A DespawnEncounterVisual message must have been emitted for the
+        // correct map_id and position.
+        let messages = app
+            .world()
+            .resource::<Messages<crate::game::systems::map::DespawnEncounterVisual>>();
+        let mut cursor = messages.get_cursor();
+        let emitted: Vec<_> = cursor.read(messages).collect();
+        assert!(
+            emitted
+                .iter()
+                .any(|m| m.map_id == map_id && m.position == encounter_pos),
+            "Expected a DespawnEncounterVisual with map_id={} position={:?} but got: {:?}",
+            map_id,
+            encounter_pos,
+            emitted
+                .iter()
+                .map(|m| (m.map_id, m.position))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// T4-EV4: Fleeing combat does NOT emit a `DespawnEncounterVisual` message —
+    /// the encounter tile visual must remain because the monsters are still there.
+    #[test]
+    fn test_despawn_encounter_visual_not_emitted_on_flee() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::combat::engine::CombatState;
+        use crate::domain::combat::monster::Monster;
+        use crate::domain::types::{DiceRoll, Position};
+        use crate::domain::world::{Map, MapEvent};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+        app.add_message::<crate::game::systems::map::DespawnEncounterVisual>();
+
+        // Build a game state with a live party member.
+        let mut gs = crate::application::GameState::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Give the hero a speed advantage to make flee succeed reliably.
+        hero.stats.speed.current = 200;
+        gs.party.add_member(hero.clone()).unwrap();
+
+        // Place an encounter event on a map.
+        let map_id: crate::domain::types::MapId = 1;
+        let encounter_pos = Position::new(3, 3);
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            encounter_pos,
+            MapEvent::Encounter {
+                name: "Goblins".to_string(),
+                description: "A band of goblins".to_string(),
+                monster_group: vec![1],
+                time_condition: None,
+                facing: None,
+                proximity_facing: false,
+                rotation_speed: None,
+                combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
+            },
+        );
+        gs.world.add_map(map);
+        gs.world.set_current_map(map_id);
+
+        // Build a minimal combat state with one monster.
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        let monster = Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(8, 8, 8, 8, 8, 8, 8),
+            5,
+            5,
+            vec![crate::domain::combat::types::Attack::physical(
+                DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        cs.add_monster(monster);
+        cs.turn_order = vec![
+            crate::domain::combat::types::CombatantId::Player(0),
+            crate::domain::combat::types::CombatantId::Monster(1),
+        ];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+            cr.encounter_position = Some(encounter_pos);
+            cr.encounter_map_id = Some(map_id);
+        }
+
+        // Trigger a flee — do NOT write CombatVictory.
+        {
+            let mut writer = app.world_mut().resource_mut::<Messages<FleeAction>>();
+            writer.write(FleeAction {});
+        }
+        app.update();
+        app.update();
+
+        // No DespawnEncounterVisual should have been emitted.
+        let messages = app
+            .world()
+            .resource::<Messages<crate::game::systems::map::DespawnEncounterVisual>>();
+        let mut cursor = messages.get_cursor();
+        let emitted: Vec<_> = cursor.read(messages).collect();
+        assert!(
+            emitted.is_empty(),
+            "Expected no DespawnEncounterVisual on flee, but got: {:?}",
+            emitted
+                .iter()
+                .map(|m| (m.map_id, m.position))
+                .collect::<Vec<_>>()
         );
     }
 
