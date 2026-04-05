@@ -335,6 +335,12 @@ pub struct Monster {
     /// Has acted this turn (for turn order tracking) - runtime state, defaults to false
     #[serde(default)]
     pub has_acted: bool,
+    /// Optional list of spell IDs this monster can cast (empty = no spell casting)
+    #[serde(default)]
+    pub spells: Vec<crate::domain::types::SpellId>,
+    /// Rounds remaining before monster can cast another spell (0 = can cast now)
+    #[serde(default)]
+    pub spell_cooldown: u8,
 }
 
 impl Monster {
@@ -369,6 +375,8 @@ impl Monster {
             conditions: MonsterCondition::Normal,
             active_conditions: Vec::new(),
             has_acted: false,
+            spells: Vec::new(),
+            spell_cooldown: 0,
         }
     }
 
@@ -527,6 +535,58 @@ impl Monster {
         }
         false
     }
+
+    /// Returns `true` if this monster has spells and its spell cooldown has expired.
+    ///
+    /// A monster can cast when:
+    /// - Its spell list is non-empty
+    /// - `spell_cooldown` is zero
+    /// - Its condition permits action
+    /// - It is not `Silenced`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::combat::monster::{Monster, LootTable};
+    /// use antares::domain::character::Stats;
+    ///
+    /// let mut monster = Monster::new(
+    ///     1, "Mage".to_string(),
+    ///     Stats::new(8, 14, 8, 10, 10, 8, 10), 30, 8, vec![], LootTable::none(),
+    /// );
+    /// monster.spells = vec![1025]; // Energy Blast
+    ///
+    /// // Cooldown is 0, so monster can cast
+    /// assert!(monster.can_cast_spell());
+    ///
+    /// // Set cooldown
+    /// monster.spell_cooldown = 2;
+    /// assert!(!monster.can_cast_spell());
+    /// ```
+    pub fn can_cast_spell(&self) -> bool {
+        !self.spells.is_empty()
+            && self.spell_cooldown == 0
+            && self.conditions.can_act()
+            && !matches!(self.conditions, MonsterCondition::Silenced)
+    }
+
+    /// Ticks the spell cooldown down by 1 (called each round).
+    ///
+    /// Uses saturating subtraction so the cooldown never wraps below zero.
+    pub fn tick_spell_cooldown(&mut self) {
+        self.spell_cooldown = self.spell_cooldown.saturating_sub(1);
+    }
+
+    /// Sets the spell cooldown after casting a spell.
+    ///
+    /// Default cooldown is 2 rounds so monsters don't spam spells every turn.
+    ///
+    /// # Arguments
+    ///
+    /// * `rounds` - Number of rounds before the monster can cast again.
+    pub fn set_spell_cooldown(&mut self, rounds: u8) {
+        self.spell_cooldown = rounds;
+    }
 }
 
 #[cfg(test)]
@@ -674,6 +734,75 @@ mod tests {
 
         monster.regenerate(5);
         assert_eq!(monster.hp.current, 25);
+    }
+
+    #[test]
+    fn test_monster_can_cast_spell_with_spells_and_zero_cooldown() {
+        let stats = Stats::new(8, 14, 8, 10, 10, 8, 10);
+        let loot = LootTable::none();
+        let mut monster = Monster::new(1, "Mage".to_string(), stats, 30, 8, vec![], loot);
+        monster.spells = vec![1025];
+
+        assert!(monster.can_cast_spell());
+    }
+
+    #[test]
+    fn test_monster_cannot_cast_spell_with_no_spells() {
+        let stats = Stats::new(8, 14, 8, 10, 10, 8, 10);
+        let loot = LootTable::none();
+
+        let monster = Monster::new(1, "Warrior".to_string(), stats, 30, 8, vec![], loot);
+
+        assert!(!monster.can_cast_spell());
+    }
+
+    #[test]
+    fn test_monster_cannot_cast_spell_with_cooldown() {
+        let stats = Stats::new(8, 14, 8, 10, 10, 8, 10);
+        let loot = LootTable::none();
+
+        let mut monster = Monster::new(1, "Mage".to_string(), stats, 30, 8, vec![], loot);
+        monster.spells = vec![1025];
+        monster.spell_cooldown = 2;
+
+        assert!(!monster.can_cast_spell());
+    }
+
+    #[test]
+    fn test_monster_cannot_cast_spell_when_silenced() {
+        let stats = Stats::new(8, 14, 8, 10, 10, 8, 10);
+        let loot = LootTable::none();
+
+        let mut monster = Monster::new(1, "Mage".to_string(), stats, 30, 8, vec![], loot);
+        monster.spells = vec![1025];
+        monster.conditions = MonsterCondition::Silenced;
+
+        assert!(!monster.can_cast_spell());
+    }
+
+    #[test]
+    fn test_monster_tick_spell_cooldown() {
+        let stats = Stats::new(8, 14, 8, 10, 10, 8, 10);
+        let loot = LootTable::none();
+
+        let mut monster = Monster::new(1, "Mage".to_string(), stats, 30, 8, vec![], loot);
+        monster.spells = vec![1025];
+        monster.spell_cooldown = 2;
+
+        assert!(!monster.can_cast_spell());
+
+        monster.tick_spell_cooldown();
+        assert_eq!(monster.spell_cooldown, 1);
+        assert!(!monster.can_cast_spell());
+
+        monster.tick_spell_cooldown();
+        assert_eq!(monster.spell_cooldown, 0);
+        assert!(monster.can_cast_spell());
+
+        // Ensure it doesn't underflow past zero
+        monster.tick_spell_cooldown();
+        assert_eq!(monster.spell_cooldown, 0);
+        assert!(monster.can_cast_spell());
     }
 
     #[test]

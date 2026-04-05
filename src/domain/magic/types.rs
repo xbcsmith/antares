@@ -252,6 +252,7 @@ pub enum UtilityType {
 /// | `Utility` | create food, teleport, or information |
 /// | `Debuff` | applies `spell.applied_conditions` to targets |
 /// | `Resurrection` | `revive_from_dead(target, resurrect_hp)` |
+/// | `DispelMagic` | `active_spells.reset()` — clears all party buff durations |
 /// | `Composite` | applies each sub-effect in order |
 ///
 /// # Examples
@@ -318,6 +319,15 @@ pub enum SpellEffectType {
 
     /// Resurrection — uses `spell.resurrect_hp` to revive dead characters
     Resurrection,
+
+    /// Clears all active spell buffs from the party — resets every field of
+    /// [`ActiveSpells`] to 0 and removes active buff conditions from targets.
+    ///
+    /// If cast by a player, dispels player party buffs (and monster buffs if any).
+    /// If cast by a monster, dispels player party buffs.
+    ///
+    /// [`ActiveSpells`]: crate::application::ActiveSpells
+    DispelMagic,
 
     /// Composite of multiple effects applied in sequence
     Composite(Vec<SpellEffectType>),

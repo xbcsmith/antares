@@ -612,6 +612,21 @@ pub fn apply_spell_effect<R: Rng>(
             }
         }
 
+        // ── DispelMagic ───────────────────────────────────────────────────────
+        // Resets every `ActiveSpells` field to 0, clearing all party buffs.
+        SpellEffectType::DispelMagic => {
+            active_spells.reset();
+            SpellEffectResult {
+                success: true,
+                message: format!("{} dispels all active magic!", spell.name),
+                total_hp_healed: 0,
+                buff_applied: None,
+                condition_cured: None,
+                food_created: 0,
+                affected_targets: Vec::new(),
+            }
+        }
+
         // ── Damage / Debuff / Resurrection ───────────────────────────────────
         // These are handled by the combat engine's existing code paths.
         // Return a no-op so the caller knows the dispatcher did not act.

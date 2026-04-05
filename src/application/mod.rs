@@ -554,6 +554,24 @@ impl ActiveSpells {
         self.power_shield = self.power_shield.saturating_sub(1);
         self.cursed = self.cursed.saturating_sub(1);
     }
+
+    /// Resets all active spell effects to zero (e.g. when Dispel Magic is cast).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::ActiveSpells;
+    ///
+    /// let mut spells = ActiveSpells::new();
+    /// spells.fire_protection = 30;
+    /// spells.bless = 10;
+    /// spells.reset();
+    /// assert_eq!(spells.fire_protection, 0);
+    /// assert_eq!(spells.bless, 0);
+    /// ```
+    pub fn reset(&mut self) {
+        *self = Self::new();
+    }
 }
 
 // ===== Quest Log =====
@@ -2285,6 +2303,53 @@ mod tests {
         }
         assert_eq!(spells.light, 4);
         assert_eq!(spells.bless, 0);
+    }
+
+    #[test]
+    fn test_active_spells_reset_clears_all_fields() {
+        let mut spells = ActiveSpells::new();
+
+        // Set every field to a non-zero value
+        spells.fear_protection = 5;
+        spells.cold_protection = 10;
+        spells.fire_protection = 15;
+        spells.poison_protection = 20;
+        spells.acid_protection = 8;
+        spells.electricity_protection = 12;
+        spells.magic_protection = 7;
+        spells.light = 30;
+        spells.leather_skin = 6;
+        spells.levitate = 9;
+        spells.walk_on_water = 11;
+        spells.guard_dog = 4;
+        spells.psychic_protection = 3;
+        spells.bless = 25;
+        spells.invisibility = 14;
+        spells.shield = 18;
+        spells.power_shield = 2;
+        spells.cursed = 1;
+
+        spells.reset();
+
+        // Every field must be zeroed after reset
+        assert_eq!(spells.fear_protection, 0);
+        assert_eq!(spells.cold_protection, 0);
+        assert_eq!(spells.fire_protection, 0);
+        assert_eq!(spells.poison_protection, 0);
+        assert_eq!(spells.acid_protection, 0);
+        assert_eq!(spells.electricity_protection, 0);
+        assert_eq!(spells.magic_protection, 0);
+        assert_eq!(spells.light, 0);
+        assert_eq!(spells.leather_skin, 0);
+        assert_eq!(spells.levitate, 0);
+        assert_eq!(spells.walk_on_water, 0);
+        assert_eq!(spells.guard_dog, 0);
+        assert_eq!(spells.psychic_protection, 0);
+        assert_eq!(spells.bless, 0);
+        assert_eq!(spells.invisibility, 0);
+        assert_eq!(spells.shield, 0);
+        assert_eq!(spells.power_shield, 0);
+        assert_eq!(spells.cursed, 0);
     }
 
     #[test]

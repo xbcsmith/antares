@@ -64,6 +64,7 @@ pub mod casting;
 pub mod database;
 pub mod effect_dispatch;
 pub mod exploration_casting;
+pub mod fizzle;
 pub mod learning;
 pub mod spell_effects;
 pub mod types;
@@ -84,6 +85,7 @@ pub use exploration_casting::{
     add_food_to_party, can_cast_exploration_spell, cast_exploration_spell,
     get_castable_exploration_spells, ExplorationTarget,
 };
+pub use fizzle::{calculate_fizzle_chance, roll_fizzle};
 pub use learning::{
     can_learn_spell, get_learnable_spells, grant_level_up_spells, learn_spell, SpellLearnError,
 };

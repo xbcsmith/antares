@@ -690,4 +690,549 @@
         saving_throw: false,
         applied_conditions: [],
     ),
+
+    // ===== Cleric Spells - Level 4 =====
+
+    (
+        id: 1793, // 0x0701
+        name: "Cure Disease",
+        school: Cleric,
+        level: 4,
+        sp_cost: 20,
+        gem_cost: 0,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Cures the disease condition from a single character",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(CureCondition(condition_id: "diseased")),
+    ),
+
+    (
+        id: 1794, // 0x0702
+        name: "Protection from Acid",
+        school: Cleric,
+        level: 4,
+        sp_cost: 18,
+        gem_cost: 0,
+        context: Anytime,
+        target: AllCharacters,
+        description: "Protects the party from acid damage",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Buff(buff_field: AcidProtection, duration: 15)),
+    ),
+
+    (
+        id: 1795, // 0x0703
+        name: "Protection from Electricity",
+        school: Cleric,
+        level: 4,
+        sp_cost: 18,
+        gem_cost: 0,
+        context: Anytime,
+        target: AllCharacters,
+        description: "Protects the party from electricity damage",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Buff(buff_field: ElectricityProtection, duration: 15)),
+    ),
+
+    (
+        id: 1796, // 0x0704
+        name: "Holy Word",
+        school: Cleric,
+        level: 4,
+        sp_cost: 25,
+        gem_cost: 2,
+        context: CombatOnly,
+        target: AllMonsters,
+        description: "Deals 4d6 holy damage to all enemies",
+        damage: Some((count: 4, sides: 6, bonus: 0)),
+        duration: 0,
+        saving_throw: true,
+        applied_conditions: [],
+        effect_type: Some(Damage),
+    ),
+
+    (
+        id: 1797, // 0x0705
+        name: "Mass Cure",
+        school: Cleric,
+        level: 4,
+        sp_cost: 30,
+        gem_cost: 0,
+        context: Anytime,
+        target: AllCharacters,
+        description: "Heals 2d6+5 hit points to all party members",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Healing(amount: (count: 2, sides: 6, bonus: 5))),
+    ),
+
+    // ===== Cleric Spells - Level 5 =====
+
+    (
+        id: 2049, // 0x0801
+        name: "Dispel Magic",
+        school: Cleric,
+        level: 5,
+        sp_cost: 20,
+        gem_cost: 0,
+        context: Anytime,
+        target: AllCharacters,
+        description: "Dispels all active magical effects on the party",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(DispelMagic),
+    ),
+
+    (
+        id: 2050, // 0x0802
+        name: "Mass Cure Wounds",
+        school: Cleric,
+        level: 5,
+        sp_cost: 35,
+        gem_cost: 0,
+        context: Anytime,
+        target: AllCharacters,
+        description: "Heals 3d8 hit points to all party members",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Healing(amount: (count: 3, sides: 8, bonus: 0))),
+    ),
+
+    (
+        id: 2051, // 0x0803
+        name: "Raise Dead",
+        school: Cleric,
+        level: 5,
+        sp_cost: 30,
+        gem_cost: 3,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Resurrects a dead character with 5 hit points",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        resurrect_hp: Some(5),
+        effect_type: Some(Resurrection),
+    ),
+
+    (
+        id: 2052, // 0x0804
+        name: "Prayer",
+        school: Cleric,
+        level: 5,
+        sp_cost: 25,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: AllCharacters,
+        description: "Blesses the party, increasing combat effectiveness",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Buff(buff_field: Bless, duration: 20)),
+    ),
+
+    // ===== Cleric Spells - Level 6 =====
+
+    (
+        id: 2305, // 0x0901
+        name: "Stone to Flesh",
+        school: Cleric,
+        level: 6,
+        sp_cost: 40,
+        gem_cost: 2,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Cures petrification, restoring a stoned character to flesh",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(CureCondition(condition_id: "petrified")),
+    ),
+
+    (
+        id: 2306, // 0x0902
+        name: "Word of Recall",
+        school: Cleric,
+        level: 6,
+        sp_cost: 50,
+        gem_cost: 0,
+        context: NonCombatOnly,
+        target: Self_,
+        description: "Teleports the party to a safe location",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Utility(utility_type: Teleport)),
+    ),
+
+    (
+        id: 2307, // 0x0903
+        name: "Restoration",
+        school: Cleric,
+        level: 6,
+        sp_cost: 45,
+        gem_cost: 0,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Heals 5d8+10 hit points and removes minor conditions",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Healing(amount: (count: 5, sides: 8, bonus: 10))),
+    ),
+
+    (
+        id: 2308, // 0x0904
+        name: "Protection from Magic",
+        school: Cleric,
+        level: 6,
+        sp_cost: 40,
+        gem_cost: 0,
+        context: Anytime,
+        target: AllCharacters,
+        description: "Protects the party from magical attacks",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Buff(buff_field: MagicProtection, duration: 20)),
+    ),
+
+    // ===== Cleric Spells - Level 7 =====
+
+    (
+        id: 2561, // 0x0A01
+        name: "Holy Word",
+        school: Cleric,
+        level: 7,
+        sp_cost: 60,
+        gem_cost: 4,
+        context: CombatOnly,
+        target: AllMonsters,
+        description: "Deals 8d8 holy damage to all enemies",
+        damage: Some((count: 8, sides: 8, bonus: 0)),
+        duration: 0,
+        saving_throw: true,
+        applied_conditions: [],
+        effect_type: Some(Damage),
+    ),
+
+    (
+        id: 2562, // 0x0A02
+        name: "Resurrection",
+        school: Cleric,
+        level: 7,
+        sp_cost: 50,
+        gem_cost: 5,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Fully resurrects a dead character with 50 hit points",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        resurrect_hp: Some(50),
+        effect_type: Some(Resurrection),
+    ),
+
+    (
+        id: 2563, // 0x0A03
+        name: "Divine Intervention",
+        school: Cleric,
+        level: 7,
+        sp_cost: 80,
+        gem_cost: 8,
+        context: Anytime,
+        target: AllCharacters,
+        description: "Calls upon divine power to heal 8d8+20 hit points to all party members",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Healing(amount: (count: 8, sides: 8, bonus: 20))),
+    ),
+
+    // ===== Sorcerer Spells - Level 4 =====
+
+    (
+        id: 2817, // 0x0B01
+        name: "Guard Dog",
+        school: Sorcerer,
+        level: 4,
+        sp_cost: 20,
+        gem_cost: 0,
+        context: NonCombatOnly,
+        target: Self_,
+        description: "Summons a spectral guard dog to watch for threats",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Buff(buff_field: GuardDog, duration: 15)),
+    ),
+
+    (
+        id: 2818, // 0x0B02
+        name: "Power Shield",
+        school: Sorcerer,
+        level: 4,
+        sp_cost: 25,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: Self_,
+        description: "Creates a powerful magical shield protecting the caster",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Buff(buff_field: PowerShield, duration: 10)),
+    ),
+
+    (
+        id: 2819, // 0x0B03
+        name: "Slow",
+        school: Sorcerer,
+        level: 4,
+        sp_cost: 20,
+        gem_cost: 0,
+        context: CombatOnly,
+        target: MonsterGroup,
+        description: "Slows a group of enemies, reducing their speed",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: ["slow"],
+        effect_type: Some(Debuff),
+    ),
+
+    (
+        id: 2820, // 0x0B04
+        name: "Web",
+        school: Sorcerer,
+        level: 4,
+        sp_cost: 25,
+        gem_cost: 1,
+        context: CombatOnly,
+        target: AllMonsters,
+        description: "Entangles all enemies in magical webs",
+        damage: None,
+        duration: 0,
+        saving_throw: true,
+        applied_conditions: ["webbed"],
+        effect_type: Some(Debuff),
+    ),
+
+    // ===== Sorcerer Spells - Level 5 =====
+
+    (
+        id: 3073, // 0x0C01
+        name: "Finger of Death",
+        school: Sorcerer,
+        level: 5,
+        sp_cost: 40,
+        gem_cost: 3,
+        context: CombatOnly,
+        target: SingleMonster,
+        description: "Deals 10d6 death energy damage to a single enemy",
+        damage: Some((count: 10, sides: 6, bonus: 0)),
+        duration: 0,
+        saving_throw: true,
+        applied_conditions: [],
+        effect_type: Some(Damage),
+    ),
+
+    (
+        id: 3074, // 0x0C02
+        name: "Shelter",
+        school: Sorcerer,
+        level: 5,
+        sp_cost: 30,
+        gem_cost: 0,
+        context: NonCombatOnly,
+        target: Self_,
+        description: "Creates a magical shelter protecting the party",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Buff(buff_field: Shield, duration: 30)),
+    ),
+
+    (
+        id: 3075, // 0x0C03
+        name: "Teleport",
+        school: Sorcerer,
+        level: 5,
+        sp_cost: 50,
+        gem_cost: 2,
+        context: NonCombatOnly,
+        target: Self_,
+        description: "Teleports the party to a specified location",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Utility(utility_type: Teleport)),
+    ),
+
+    (
+        id: 3076, // 0x0C04
+        name: "Disintegrate",
+        school: Sorcerer,
+        level: 5,
+        sp_cost: 50,
+        gem_cost: 4,
+        context: CombatOnly,
+        target: SingleMonster,
+        description: "Attempts to disintegrate a single enemy for 12d6 damage",
+        damage: Some((count: 12, sides: 6, bonus: 0)),
+        duration: 0,
+        saving_throw: true,
+        applied_conditions: [],
+        effect_type: Some(Damage),
+    ),
+
+    // ===== Sorcerer Spells - Level 6 =====
+
+    (
+        id: 3329, // 0x0D01
+        name: "Recharge Item",
+        school: Sorcerer,
+        level: 6,
+        sp_cost: 40,
+        gem_cost: 3,
+        context: NonCombatOnly,
+        target: Self_,
+        description: "Recharges the magical charges of an item",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Utility(utility_type: Information)),
+    ),
+
+    (
+        id: 3330, // 0x0D02
+        name: "Stone to Flesh",
+        school: Sorcerer,
+        level: 6,
+        sp_cost: 40,
+        gem_cost: 2,
+        context: Anytime,
+        target: SingleCharacter,
+        description: "Cures petrification, restoring a stoned character to flesh",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(CureCondition(condition_id: "petrified")),
+    ),
+
+    (
+        id: 3331, // 0x0D03
+        name: "Prismatic Spray",
+        school: Sorcerer,
+        level: 6,
+        sp_cost: 55,
+        gem_cost: 3,
+        context: CombatOnly,
+        target: AllMonsters,
+        description: "Deals 8d6 prismatic damage to all enemies",
+        damage: Some((count: 8, sides: 6, bonus: 0)),
+        duration: 0,
+        saving_throw: true,
+        applied_conditions: [],
+        effect_type: Some(Damage),
+    ),
+
+    (
+        id: 3332, // 0x0D04
+        name: "Levitate",
+        school: Sorcerer,
+        level: 6,
+        sp_cost: 35,
+        gem_cost: 0,
+        context: NonCombatOnly,
+        target: AllCharacters,
+        description: "Causes the party to levitate, crossing pits and chasms",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Buff(buff_field: Levitate, duration: 20)),
+    ),
+
+    // ===== Sorcerer Spells - Level 7 =====
+
+    (
+        id: 3585, // 0x0E01
+        name: "Implosion",
+        school: Sorcerer,
+        level: 7,
+        sp_cost: 70,
+        gem_cost: 5,
+        context: CombatOnly,
+        target: AllMonsters,
+        description: "Causes all enemies to implode for 10d8 damage",
+        damage: Some((count: 10, sides: 8, bonus: 0)),
+        duration: 0,
+        saving_throw: true,
+        applied_conditions: [],
+        effect_type: Some(Damage),
+    ),
+
+    (
+        id: 3586, // 0x0E02
+        name: "Meteor Shower",
+        school: Sorcerer,
+        level: 7,
+        sp_cost: 80,
+        gem_cost: 6,
+        context: CombatOnly,
+        target: AllMonsters,
+        description: "Rains meteors on all enemies for 12d8 damage",
+        damage: Some((count: 12, sides: 8, bonus: 0)),
+        duration: 0,
+        saving_throw: true,
+        applied_conditions: [],
+        effect_type: Some(Damage),
+    ),
+
+    (
+        id: 3587, // 0x0E03
+        name: "Prismatic Sphere",
+        school: Sorcerer,
+        level: 7,
+        sp_cost: 60,
+        gem_cost: 4,
+        context: CombatOnly,
+        target: AllCharacters,
+        description: "Surrounds the party in a prismatic sphere of magical protection",
+        damage: None,
+        duration: 0,
+        saving_throw: false,
+        applied_conditions: [],
+        effect_type: Some(Buff(buff_field: MagicProtection, duration: 30)),
+    ),
 ]

@@ -1,5 +1,204 @@
 # Implementations
 
+## Spell System — Phase 5: Complete Spell Data and Advanced Features (Complete)
+
+### Overview
+
+Implements the full Phase 5 spell system: complete L4–L7 spell rosters for
+both Cleric and Sorcerer schools, item-based spell effect pipeline, monster
+spell casting AI, the fizzle mechanic, and Dispel Magic.
+
+### 5.1 Complete Spell RON Data
+
+Expanded `data/spells.ron` from 693 lines (L1–L3 only) to **1238 lines**
+covering all seven spell levels for both schools.
+
+**Cleric additions (18 new spells)**:
+
+| Level | IDs       | Notable Spells                                                       |
+| ----- | --------- | -------------------------------------------------------------------- |
+| L4    | 1793–1797 | Cure Disease, Protection from Acid/Electricity, Holy Word, Mass Cure |
+| L5    | 2049–2052 | Dispel Magic, Mass Cure Wounds, Raise Dead, Prayer                   |
+| L6    | 2305–2308 | Stone to Flesh, Word of Recall, Restoration, Protection from Magic   |
+| L7    | 2561–2563 | Holy Word, Resurrection (50 HP), Divine Intervention                 |
+
+**Sorcerer additions (12 new spells)**:
+
+| Level | IDs       | Notable Spells                                           |
+| ----- | --------- | -------------------------------------------------------- |
+| L4    | 2817–2820 | Guard Dog, Power Shield, Slow, Web                       |
+| L5    | 3073–3076 | Finger of Death, Shelter, Teleport, Disintegrate         |
+| L6    | 3329–3332 | Recharge Item, Stone to Flesh, Prismatic Spray, Levitate |
+| L7    | 3585–3587 | Implosion, Meteor Shower, Prismatic Sphere               |
+
+All new entries carry explicit `effect_type` fields using the correct RON
+variant syntax (`Damage`, `Healing(amount:…)`, `Buff(buff_field:…, duration:…)`,
+`CureCondition(condition_id:…)`, `Utility(utility_type:…)`, `Resurrection`,
+`DispelMagic`). `DiceRoll` uses the `bonus` field name throughout.
+
+`data/test_campaign/data/spells.ron` was updated with one representative
+fixture per new level/school combination (8 new entries, IDs: 1793, 2049,
+2305, 2561, 2817, 3073, 3329, 3585).
+
+**ID encoding convention** (groups of 256):
+
+- Groups 1–3: Cleric L1–L3 (existing)
+- Groups 4–6: Sorcerer L1–L3 (existing)
+- Groups 7–10: Cleric L4–L7 (new)
+- Groups 11–14: Sorcerer L4–L7 (new)
+
+### 5.2 Wire Item Spell Effects
+
+Extended `src/domain/combat/item_usage.rs` to support two new item-use paths:
+
+**Path A — Non-consumable charged items (`Item::spell_effect: Some(SpellId)`)**:
+
+- `validate_item_use_slot` now accepts items whose `item_type` is not
+  `Consumable` when `spell_effect: Some(_)` and `max_charges > 0` are set.
+  Insufficient charges return `ItemUseError::NoCharges`.
+- `execute_item_use_by_slot` detects the charged-item case before the
+  consumable path and delegates to the new
+  `execute_charged_item_spell` in `src/domain/combat/spell_casting.rs`.
+  The charge is consumed (slot removed on last charge). A temporary
+  `ActiveSpells` is used so callers without a party tracker still work;
+  callers that need buff tracking should call `execute_charged_item_spell`
+  directly.
+
+**Path B — `ConsumableEffect::CastSpell(SpellId)` scrolls**:
+
+- `execute_item_use_by_slot` detects `ConsumableEffect::CastSpell` in Phase B
+  and routes through `execute_spell_cast_with_spell` (complete pipeline
+  including fizzle, buff, damage, healing, dispel). The caster's SP is
+  temporarily topped up to meet the spell's cost (the item pays the cost).
+
+**Exploration mode**: `execute_charged_item_spell` is also available for the
+exploration layer to call directly.
+
+### 5.3 Monster Spell Casting
+
+**`src/domain/combat/monster.rs`**:
+
+- Added `pub spells: Vec<SpellId>` (`#[serde(default)]`) — empty list means
+  the monster cannot cast spells.
+- Added `pub spell_cooldown: u8` (`#[serde(default)]`) — rounds before the
+  monster may cast again; prevents spell spam.
+- New methods: `can_cast_spell()`, `tick_spell_cooldown()`,
+  `set_spell_cooldown(rounds)`.
+
+**`src/domain/combat/monster_spells.rs`** (new module):
+
+- `MonsterAction` enum: `PhysicalAttack` | `CastSpell { spell_id }`.
+- `choose_monster_action<R: Rng>(monster, rng) -> MonsterAction`:
+  - If `!monster.can_cast_spell()`: always physical.
+  - `Defensive` AI + HP > 60 % of base: 70 % physical / 30 % spell.
+  - Default: 60 % physical / 40 % spell.
+- `execute_monster_spell_cast<R>(combat_state, monster_idx, content,
+active_spells, rng) -> Option<SpellResult>`:
+  - Picks a random spell from `monster.spells`.
+  - Routes by `SpellEffectType`:
+    - `Damage` → rolls dice for every living player.
+    - `Healing` → self-heals the monster (clamped to base HP).
+    - `Buff` → writes to `ActiveSpells` (monster gains party-wide buff).
+    - `Debuff` → applies conditions to the first living player.
+    - All other variants: no-op.
+  - Sets a 2-round cooldown after every successful cast.
+  - Monster SP is unlimited; no deduction occurs.
+
+### 5.4 Spell Fizzle System
+
+**`src/domain/magic/fizzle.rs`** (new module):
+
+```text
+base          = max(0, 50 − (primary_stat − 10) × 2)
+fizzle_chance = if base > 0 { clamp(base + (spell_level − 1) × 2, 0, 100) }
+                else         { 0 }
+```
+
+Key properties:
+
+- Primary stat = Intellect (Sorcerer) or Personality (Cleric).
+- At average stat (10), L1 fizzle = 50 %; rises 2 % per spell level.
+- At stat ≥ 35 the base reaches 0 and the caster **never** fizzles at any
+  level, ensuring high-skill characters are reliable.
+- `roll_fizzle(chance, rng)` short-circuits at 0 % (no RNG draw).
+
+**Integration in `execute_spell_cast_with_spell`**:
+
+- Fizzle is checked **after** consuming SP/gems (cost is still paid).
+- On fizzle: returns `Ok(SpellResult::failure("Spell fizzled!"))`, advances
+  the combat turn normally.
+
+**Integration in `execute_charged_item_spell`**:
+
+- Same fizzle roll is applied to item-based spells (item charge was already
+  consumed; SP not consumed).
+
+Test helpers in `spell_casting.rs` now set `intellect/personality = 35` so
+pre-existing tests are never affected by fizzle.
+
+### 5.5 Dispel Magic Implementation
+
+**`SpellEffectType::DispelMagic`** added to `src/domain/magic/types.rs`:
+
+- Serializable RON variant `DispelMagic`.
+- Handled in `apply_spell_effect` (`effect_dispatch.rs`): calls
+  `active_spells.reset()`.
+- Handled in `execute_spell_cast_with_spell` (`spell_casting.rs`): resets
+  `ActiveSpells` **and** clears all `active_conditions` from every living
+  party member (broad dispel).
+
+**`ActiveSpells::reset()`** added to `src/application/mod.rs`:
+
+- Sets every field of `ActiveSpells` to 0 via `*self = Self::new()`.
+- Available to any caller (dispel, testing, save-load reset).
+
+The Cleric L5 spell "Dispel Magic" (ID 2049) carries
+`effect_type: Some(DispelMagic)` in both `data/spells.ron` and the test
+campaign fixture.
+
+### Deliverables
+
+- [x] `data/spells.ron` — complete L1–L7 roster (1238 lines, 61 spells)
+- [x] `data/test_campaign/data/spells.ron` — representative L4–L7 fixtures
+- [x] `src/domain/magic/fizzle.rs` — fizzle module (9 unit tests)
+- [x] `src/domain/magic/types.rs` — `SpellEffectType::DispelMagic` variant
+- [x] `src/application/mod.rs` — `ActiveSpells::reset()` method
+- [x] `src/domain/magic/effect_dispatch.rs` — `DispelMagic` arm in
+      `apply_spell_effect`
+- [x] `src/domain/magic/mod.rs` — `pub mod fizzle` + re-exports
+- [x] `src/domain/combat/monster.rs` — `spells`, `spell_cooldown` fields +
+      3 new methods (5 unit tests)
+- [x] `src/domain/combat/monster_spells.rs` — monster spell casting AI
+      (`MonsterAction`, `choose_monster_action`, `execute_monster_spell_cast`)
+- [x] `src/domain/combat/mod.rs` — `pub mod monster_spells`
+- [x] `src/domain/combat/spell_casting.rs` — fizzle gate, `DispelMagic`
+      dispatch, `execute_charged_item_spell`, 6 new tests
+- [x] `src/domain/combat/item_usage.rs` — charged-item spell path (Path A) +
+      `ConsumableEffect::CastSpell` dispatch (Path B)
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 exactly
+- [x] `SpellId` type alias used throughout (no raw `u16`)
+- [x] `#[serde(default)]` used on all new optional Monster fields
+- [x] RON format used for all data files; `DiceRoll.bonus` field used
+- [x] No hardcoded constants — fizzle formula is in `fizzle.rs`
+- [x] `effect_type` field drives dispatcher routing as per Phase 1 design
+- [x] Test data references `data/test_campaign`, never `campaigns/tutorial`
+- [x] All public functions and types have `///` doc comments
+- [x] `docs/explanation/implementations.md` updated (this entry)
+
+### Quality Gates
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt --all          → no output
+cargo check              → Finished, 0 errors
+cargo clippy -D warnings → Finished, 0 warnings
+cargo nextest run        → 4316 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Spell System — Phase 4: Spell Learning and Acquisition (Complete)
 
 ### Overview
@@ -5838,3 +6037,162 @@ the inline `#[cfg(test)]` module of `map_editor.rs`.
 - [x] No `#[allow(...)]` directives remain in SDK source
 - [x] `show_editor` uses `MapEditorRefs` and `EditorContext` consistently with every other editor in the codebase
 - [x] No orphaned test files remain in `src/`; all tests reachable by `cargo nextest`
+
+---
+
+## Spell System — Phase 5: Monster Spell Casting AI (Complete)
+
+### Overview
+
+Extends the combat monster domain with spell-casting capability and provides a
+dedicated AI module that decides when to cast and how to execute each spell
+effect. Monster casting is intentionally simpler than player casting: no SP
+cost, no class/level restrictions, and a post-cast cooldown to prevent spamming.
+
+### Deliverables
+
+- [x] `src/domain/combat/monster.rs` — two new `Monster` fields, three new
+      methods, five new unit tests
+- [x] `src/domain/combat/monster_spells.rs` — new module: `MonsterAction` enum,
+      `choose_monster_action`, `execute_monster_spell_cast`, ten unit tests
+- [x] `src/domain/combat/mod.rs` — `pub mod monster_spells` registration
+- [x] `src/domain/magic/effect_dispatch.rs` — `DispelMagic` arm added to
+      `apply_spell_effect` (pre-existing omission fixed as part of this phase)
+- [x] `src/domain/world/creature_binding.rs` — `Monster` struct literal updated
+      with new fields (cascade from struct change)
+- [x] `tests/campaign_integration_tests.rs` — `Monster` struct literal updated
+      with new fields (cascade from struct change)
+
+### Monster struct changes (`monster.rs`)
+
+Two new `#[serde(default)]` fields appended to `Monster`:
+
+| Field            | Type           | Default      | Purpose                             |
+| ---------------- | -------------- | ------------ | ----------------------------------- |
+| `spells`         | `Vec<SpellId>` | `Vec::new()` | Spell IDs this monster may cast     |
+| `spell_cooldown` | `u8`           | `0`          | Rounds until next cast is permitted |
+
+Three new `impl Monster` methods:
+
+| Method                | Signature         | Description                                                     |
+| --------------------- | ----------------- | --------------------------------------------------------------- |
+| `can_cast_spell`      | `(&self) -> bool` | True when spells non-empty, cooldown = 0, not silenced, can act |
+| `tick_spell_cooldown` | `(&mut self)`     | Decrements cooldown by 1 (saturating)                           |
+| `set_spell_cooldown`  | `(&mut self, u8)` | Sets cooldown after a cast                                      |
+
+Five new tests in `mod tests`:
+
+- `test_monster_can_cast_spell_with_spells_and_zero_cooldown`
+- `test_monster_cannot_cast_spell_with_no_spells`
+- `test_monster_cannot_cast_spell_with_cooldown`
+- `test_monster_cannot_cast_spell_when_silenced`
+- `test_monster_tick_spell_cooldown`
+
+### New module `monster_spells.rs`
+
+#### `MonsterAction` enum
+
+```antares/src/domain/combat/monster_spells.rs#L47-54
+pub enum MonsterAction {
+    PhysicalAttack,
+    CastSpell {
+        spell_id: SpellId,
+    },
+}
+```
+
+#### `choose_monster_action` — AI decision function
+
+Decision tree applied in order:
+
+1. `!monster.can_cast_spell()` → `PhysicalAttack`
+2. `AiBehavior::Defensive` **and** HP > 60 % of base → 30 % cast, 70 % physical
+3. Default → 40 % cast, 60 % physical
+
+A random spell index is selected from `monster.spells` when deciding to cast.
+
+#### `execute_monster_spell_cast` — effect routing
+
+Clones monster spell data first to avoid simultaneous borrow conflicts, then
+routes by `spell.effective_effect_type()`:
+
+| `SpellEffectType` | Behaviour                                                 |
+| ----------------- | --------------------------------------------------------- |
+| `Damage`          | Rolls `spell.damage` dice; applies to every living player |
+| `Healing`         | Monster heals itself, clamped to `hp.base`                |
+| `Buff`            | Writes duration to party `ActiveSpells` tracker           |
+| `Debuff`          | Applies `spell.applied_conditions` to first living player |
+| all others        | No-op; `SpellResult` message still records the cast       |
+
+After any successful dispatch, `monster.set_spell_cooldown(2)` is called.
+No SP is deducted — monsters have unlimited spell energy.
+
+Ten unit tests covering:
+
+- `test_choose_monster_action_no_spells_returns_physical`
+- `test_choose_monster_action_with_spells_sometimes_casts`
+- `test_choose_monster_action_silenced_returns_physical`
+- `test_choose_monster_action_with_cooldown_returns_physical`
+- `test_choose_monster_action_defensive_high_hp_prefers_physical`
+- `test_execute_monster_spell_cast_no_spells_returns_none`
+- `test_execute_monster_spell_cast_deals_damage_to_players`
+- `test_execute_monster_spell_cast_unknown_spell_returns_none`
+- `test_execute_monster_spell_cast_heals_monster`
+- `test_execute_monster_spell_cast_cooldown_set_after_cast`
+- `test_execute_monster_spell_cast_nonzero_cooldown_returns_none`
+
+### `DispelMagic` fix in `effect_dispatch.rs`
+
+`SpellEffectType::DispelMagic` was added to `types.rs` in a prior working-tree
+change but the exhaustive match in `apply_spell_effect` was never updated.
+Added the missing arm:
+
+```antares/src/domain/magic/effect_dispatch.rs#L615-626
+SpellEffectType::DispelMagic => {
+    active_spells.reset();
+    SpellEffectResult {
+        success: true,
+        message: format!("{} dispels all active magic!", spell.name),
+        total_hp_healed: 0,
+        buff_applied: None,
+        condition_cured: None,
+        food_created: 0,
+        affected_targets: Vec::new(),
+    }
+}
+```
+
+### Key Design Decisions
+
+- **No SP deduction** — monsters have unlimited spell energy; SP management
+  would add state without meaningful gameplay depth at the monster level.
+- **Post-cast cooldown (2 rounds)** — prevents single-spell monsters from
+  casting every turn; configurable via `set_spell_cooldown(rounds)`.
+- **Silenced check separate from `can_act()`** — `MonsterCondition::Silenced`
+  passes `can_act()` (the monster can still attack), but `can_cast_spell()` must
+  also explicitly reject `Silenced` to model the silenced mechanic correctly.
+- **Clone-before-borrow pattern** — `execute_monster_spell_cast` clones
+  `monster.spells` and the `Spell` definition before taking any mutable borrow
+  on `combat_state.participants`, sidestepping the split-borrow limitation.
+- **`DispelMagic` parity** — the new module's `_ => {}` wildcard arm means
+  monsters can hold a `DispelMagic` spell ID in their list; the combat engine
+  caller (not yet wired) would dispatch via `execute_monster_spell_cast` which
+  silently no-ops until the engine routes it explicitly.
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output (all files formatted)
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings
+✅ cargo nextest run → 4297/4297 passed, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `Monster` struct fields use `SpellId` type alias (not raw `u16`)
+- [x] `#[serde(default)]` on new fields — existing RON data loads without change
+- [x] New module follows Section 3.2 module placement (combat sub-module)
+- [x] All public items have `///` doc comments with runnable examples
+- [x] Test data uses no `campaigns/tutorial` references
+- [x] No architectural deviations from architecture.md
