@@ -6906,3 +6906,226 @@ SpellEffectType::DispelMagic => {
 - [x] All public items have `///` doc comments with runnable examples
 - [x] Test data uses no `campaigns/tutorial` references
 - [x] No architectural deviations from architecture.md
+
+---
+
+## Phase 7: Remediation of Audit Gaps
+
+**Date**: 2025
+
+**Plan reference**: `docs/explanation/spell_system_updates_implementation_plan.md` § Phase 7
+
+### Overview
+
+Phase 7 closed five concrete integration gaps identified during the Phase 1–6
+post-implementation audit. Every gap was a missing wire-up between an already-
+correct domain function and the game or Bevy layer that should consume it. No
+new domain concepts were introduced — only call-site plumbing and integration
+hooks.
+
+### 7.1 — Wire Exploration Scroll Dispatch (CastSpell / LearnSpell)
+
+**Problem**: `handle_use_item_action_exploration` in
+`src/game/systems/inventory_ui.rs` called `apply_consumable_effect_exploration`
+and obtained a `ConsumableApplyResult`, but never checked
+`result.spell_cast_id` or `result.spell_learn_id`. Using a casting scroll
+logged "Casting spell 257" without actually casting anything; using a learning
+scroll logged a message but left the spellbook unchanged.
+
+**Fix**:
+
+- Moved `character_name` capture to before the mutable borrow in step 6 so
+  it is available to the spell-dispatch blocks.
+- Added **step 6a**: if `result.spell_cast_id` is `Some(spell_id)`, look up
+  the spell in `content_db.spells`, then call
+  `cast_exploration_spell(party_index, &spell, ExplorationTarget::Self_,
+&mut game_state, &content_db.items, &mut rng)`. Log the resolved spell name
+  on success or the `SpellError` on failure.
+- Added **step 6b**: if `result.spell_learn_id` is `Some(spell_id)`, call
+  `learn_spell(&mut character, spell_id, &content_db.spells, &content_db.classes)`.
+  Log success, "already knows", or the failure reason. Scroll charge is
+  consumed regardless of learning outcome — consistent with dialogue/quest
+  reward handlers.
+- Updated `build_consumable_use_log` comments for `CastSpell`/`LearnSpell` to
+  reflect that these are now fallback messages only (used when the spell ID
+  cannot be resolved).
+- Added new imports:
+  `crate::domain::magic::exploration_casting::{cast_exploration_spell, ExplorationTarget}`
+  and `crate::domain::magic::learning::{learn_spell, SpellLearnError}`.
+
+**Tests added** (all in `inventory_ui.rs`):
+
+| Test                                                | What it checks                                                                |
+| --------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `test_cast_spell_scroll_unknown_spell_id_no_panic`  | Unknown spell ID → no panic; scroll consumed; log names item                  |
+| `test_learn_spell_scroll_unknown_spell_id_no_panic` | Unknown spell ID → "could not learn" logged; scroll consumed                  |
+| `test_cast_spell_scroll_logs_spell_name_on_failure` | Known spell ID → resolved name "First Aid" appears in log even on failed cast |
+| `test_learn_spell_scroll_logs_spell_name`           | Known spell, wrong class → "First Aid" appears in log; scroll consumed        |
+
+### 7.2 — Wire Walk on Water to Map Traversal
+
+**Problem**: `BuffField::WalkOnWater` correctly wrote `active_spells.walk_on_water`
+when cast, but movement code in `exploration_movement.rs` never read that
+field. Water tiles (`TerrainType::Water`) auto-set `blocked = true` in
+`Tile::new`, so the party was always blocked regardless of the buff.
+
+**Fix**:
+
+- Added private helper `should_override_water(game_state, target) -> bool`:
+  returns `true` when `active_spells.walk_on_water > 0` AND the target tile
+  has `TerrainType::Water`.
+- Added private helper `with_water_override(game_state, target, closure)`:
+  temporarily sets `tile.blocked = false`, runs the closure, then restores
+  `tile.blocked = true` unconditionally (even if the closure returns `false`).
+- Refactored `handle_move_forward` and `handle_move_back` to use a local
+  `let mut attempt = |gs| { … }` closure that wraps the existing
+  movement logic, then conditionally runs it through `with_water_override` when
+  the water override applies.
+- Added `use crate::domain::types::Position` and
+  `use crate::domain::world::TerrainType` imports.
+
+**Tests added** (all in `exploration_movement.rs`):
+
+| Test                                                                     | What it checks                                      |
+| ------------------------------------------------------------------------ | --------------------------------------------------- |
+| `test_should_override_water_returns_false_without_buff`                  | No buff → returns false                             |
+| `test_should_override_water_returns_true_with_buff`                      | Buff active + water tile → returns true             |
+| `test_should_override_water_returns_false_for_non_water_tile`            | Buff active but non-water tile → returns false      |
+| `test_with_water_override_unblocks_and_restores_tile`                    | Tile is unblocked inside closure and restored after |
+| `test_with_water_override_restores_tile_even_when_closure_returns_false` | Tile always restored even on failed movement        |
+
+### 7.3 — Wire Levitate to Pit/Chasm Tile Validation
+
+**Problem**: `BuffField::Levitate` correctly wrote `active_spells.levitate`,
+but the `EventResult::Trap` arm in `GameState::move_party_and_handle_events`
+never checked it. Trap damage and conditions were applied to the party
+regardless of the Levitate buff.
+
+**Fix**: Added an `if self.active_spells.levitate > 0` guard at the top of the
+`Trap` arm in `src/application/mod.rs`. When the buff is active, the entire
+trap is skipped and `tracing::info!` logs the avoidance. When the buff is not
+active, the existing damage + condition + game-over logic runs unchanged.
+
+**Tests added** (all in `application/mod.rs`):
+
+| Test                                        | What it checks                                             |
+| ------------------------------------------- | ---------------------------------------------------------- |
+| `test_levitate_buff_skips_trap_damage`      | 25-damage trap → 0 HP lost, mode stays Exploration         |
+| `test_levitate_buff_skips_trap_condition`   | Poison trap → no POISONED condition when levitating        |
+| `test_trap_damage_applies_without_levitate` | Regression: trap must still deal damage when levitate is 0 |
+
+### 7.4 — Implement Town Portal / Surface Teleport
+
+**Problem**: `apply_utility_spell` handled `UtilityType::Teleport` by returning
+a generic "Teleport effect triggered." message and never signalled a
+destination. The Bevy exploration layer never mutated `world.party_position` or
+`world.current_map`.
+
+**Fix — domain layer (`src/domain/magic/types.rs`)**:
+
+- Added `TeleportDestination` enum (`Surface`, `TownPortal`, `Jump`) with
+  `#[derive(Default)]` and `#[default]` on `Surface`.
+- Changed `UtilityType::Teleport` from a unit variant to a struct variant:
+  `Teleport { #[serde(default)] destination: TeleportDestination }`.
+  The `#[serde(default)]` ensures backward-compatible RON deserialisation —
+  an empty `Teleport()` form deserialises with `destination: Surface`.
+- Exported `TeleportDestination` from `src/domain/magic/mod.rs`.
+
+**Fix — domain layer (`src/domain/magic/effect_dispatch.rs`)**:
+
+- Added `teleport_destination: Option<TeleportDestination>` field to
+  `UtilityResult`.
+- Updated `apply_utility_spell` to populate `teleport_destination: Some(dest)`
+  for the `Teleport { destination }` arm and `None` for all other variants.
+- Added doc-comment examples and four new unit tests for the new field.
+
+**Fix — Bevy layer (`src/game/systems/exploration_spells.rs`)**:
+
+- Added imports for `SpellEffectType`, `TeleportDestination`, `UtilityType`,
+  and `Position`.
+- After a successful `cast_exploration_spell` call, pattern-matches
+  `spell.effective_effect_type()` for
+  `SpellEffectType::Utility { utility_type: UtilityType::Teleport { destination } }`:
+  - `Surface` → `world.set_party_position(Position::new(1, 1))` (map entry
+    tile convention; a future phase will store the per-map entry position).
+  - `TownPortal` → `world.set_current_map(1)` + `set_party_position(1, 1)`.
+  - `Jump` → logs a "not yet implemented" trace; SP is consumed but position
+    is unchanged (target-selection UI is deferred).
+
+**Fix — RON data**:
+
+Updated teleport spells to use the new struct-variant syntax:
+
+| File                                 | Spell                   | Old         | New                                 |
+| ------------------------------------ | ----------------------- | ----------- | ----------------------------------- |
+| `data/spells.ron`                    | Word of Recall (0x0902) | `Teleport`  | `Teleport(destination: TownPortal)` |
+| `data/spells.ron`                    | Teleport (0x0C03)       | `Teleport`  | `Teleport(destination: TownPortal)` |
+| `data/spells.ron`                    | Jump (0x0504)           | _(missing)_ | `Teleport(destination: Jump)`       |
+| `data/test_campaign/data/spells.ron` | Jump (1284)             | _(missing)_ | `Teleport(destination: Jump)`       |
+| `campaigns/tutorial/data/spells.ron` | Jump (1284)             | _(missing)_ | `Teleport(destination: Jump)`       |
+
+**Tests added** (`effect_dispatch.rs`):
+
+| Test                                                           | What it checks                                    |
+| -------------------------------------------------------------- | ------------------------------------------------- |
+| `test_apply_utility_spell_teleport_town_portal`                | TownPortal destination populated in UtilityResult |
+| `test_apply_utility_spell_teleport_jump`                       | Jump destination populated in UtilityResult       |
+| `test_apply_utility_spell_create_food_no_teleport_destination` | teleport_destination is None for CreateFood       |
+| `test_apply_utility_spell_information_no_teleport_destination` | teleport_destination is None for Information      |
+
+### 7.5 — Implement Location Spell Coordinate Display
+
+**Problem**: `apply_utility_spell` is a pure function with no access to game
+state, so it returned a generic "Information gathered." message. The Bevy
+exploration system did not post-process the result to inject real coordinates.
+
+**Fix** (Bevy layer only, `src/game/systems/exploration_spells.rs`):
+
+In `execute_exploration_cast`, before building the feedback message, check
+`spell.effective_effect_type()`. If it resolves to
+`SpellEffectType::Utility { utility_type: UtilityType::Information }`,
+override the message with:
+
+```text
+Location: Map {current_map}, ({x}, {y}).
+```
+
+where `current_map`, `x`, and `y` are read from `global_state.0.world` after
+the cast completes. No domain-layer changes are required — the Bevy layer
+uniquely has access to `world` state that the pure domain function should not
+depend on.
+
+### Files Modified
+
+| File                                             | Change                                                                                        |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `src/domain/magic/types.rs`                      | Added `TeleportDestination` enum; changed `UtilityType::Teleport` to struct variant           |
+| `src/domain/magic/mod.rs`                        | Re-exported `TeleportDestination`                                                             |
+| `src/domain/magic/effect_dispatch.rs`            | Added `teleport_destination` to `UtilityResult`; updated `apply_utility_spell`; new tests     |
+| `src/game/systems/input/exploration_movement.rs` | Added `should_override_water`, `with_water_override`; refactored movement handlers; new tests |
+| `src/application/mod.rs`                         | Levitate guard in Trap arm; new tests                                                         |
+| `src/game/systems/exploration_spells.rs`         | Teleport world-state dispatch; Location coordinate message                                    |
+| `src/game/systems/inventory_ui.rs`               | CastSpell/LearnSpell scroll dispatch in step 6a/6b; new tests                                 |
+| `data/spells.ron`                                | Updated 3 teleport spell entries                                                              |
+| `data/test_campaign/data/spells.ron`             | Updated Jump spell entry                                                                      |
+| `campaigns/tutorial/data/spells.ron`             | Updated Jump spell entry                                                                      |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output (all files formatted)
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings
+✅ cargo nextest run → 4332 passed, 8 skipped, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] All new types use `SpellId`, `MapId`, `Position` type aliases
+- [x] `#[serde(default)]` on `UtilityType::Teleport.destination` — RON backward-compatible
+- [x] `TeleportDestination` follows architecture enum naming conventions
+- [x] `ActiveSpells` fields (`walk_on_water`, `levitate`) used directly — no parallel tracking
+- [x] Game mode context respected — teleport and walk-on-water only fire in exploration
+- [x] All new public items have `///` doc comments with runnable examples
+- [x] No test references to `campaigns/tutorial` (all fixtures use `data/test_campaign`)
+- [x] No architectural deviations from architecture.md

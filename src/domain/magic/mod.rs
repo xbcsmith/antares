@@ -95,5 +95,5 @@ pub use spell_effects::{
 };
 pub use types::{
     BuffField, Spell, SpellContext, SpellEffectType, SpellError, SpellResult, SpellSchool,
-    SpellTarget, UtilityType,
+    SpellTarget, TeleportDestination, UtilityType,
 };

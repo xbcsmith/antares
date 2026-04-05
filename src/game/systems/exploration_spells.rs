@@ -36,7 +36,8 @@ use crate::domain::items::ItemDatabase;
 use crate::domain::magic::exploration_casting::{
     cast_exploration_spell, get_castable_exploration_spells, ExplorationTarget,
 };
-use crate::domain::magic::types::SpellTarget;
+use crate::domain::magic::types::{SpellEffectType, SpellTarget, TeleportDestination, UtilityType};
+use crate::domain::types::Position;
 use crate::game::resources::GlobalState;
 use crate::game::systems::ui::{GameLog, LogCategory};
 use crate::game::systems::ui_helpers::{BODY_FONT_SIZE, LABEL_FONT_SIZE};
@@ -577,7 +578,23 @@ fn execute_exploration_cast(
 
     let message = match result {
         Ok(ref r) => {
-            if r.total_hp_healed > 0 {
+            // Location (Information) spell: override message with actual map
+            // coordinates.  The pure domain dispatcher cannot access world state,
+            // so the Bevy layer injects the real position here.
+            let is_information = matches!(
+                spell.effective_effect_type(),
+                SpellEffectType::Utility {
+                    utility_type: UtilityType::Information,
+                }
+            );
+            if is_information {
+                format!(
+                    "Location: Map {}, ({}, {}).",
+                    global_state.0.world.current_map,
+                    global_state.0.world.party_position.x,
+                    global_state.0.world.party_position.y,
+                )
+            } else if r.total_hp_healed > 0 {
                 format!("{} restores {} HP.", spell.name, r.total_hp_healed)
             } else if r.food_created > 0 {
                 format!("{} creates {} food rations.", spell.name, r.food_created)
@@ -591,6 +608,41 @@ fn execute_exploration_cast(
         }
         Err(ref e) => format!("{} failed: {e}.", spell.name),
     };
+
+    // Handle teleport world-state changes for successful Teleport spells.
+    // The domain dispatcher cannot mutate world state directly, so the Bevy
+    // layer applies the position / map change after a successful cast.
+    if result.is_ok() {
+        if let SpellEffectType::Utility {
+            utility_type: UtilityType::Teleport { destination },
+        } = spell.effective_effect_type()
+        {
+            match destination {
+                TeleportDestination::Surface => {
+                    // Return to the current map's conventional entry tile.
+                    // Using (1, 1) as the entry point matches tutorial layout
+                    // conventions; a richer implementation could store the
+                    // per-map entry position when the map is first entered.
+                    global_state.0.world.set_party_position(Position::new(1, 1));
+                    tracing::info!("Surface teleport: party returned to map entry.");
+                }
+                TeleportDestination::TownPortal => {
+                    // Return to home town: map 1, tile (1, 1).
+                    // Future enhancement: read a stored `home_map_id` and
+                    // `home_position` from `GameState` when available.
+                    global_state.0.world.set_current_map(1);
+                    global_state.0.world.set_party_position(Position::new(1, 1));
+                    tracing::info!("Town Portal: party teleported to town.");
+                }
+                TeleportDestination::Jump => {
+                    // Full Jump targeting requires a target-selection UI step
+                    // (deferred to a future phase).  The SP has been consumed;
+                    // log the limitation so authors are aware.
+                    tracing::info!("Jump spell cast — target-selection UI is not yet implemented.");
+                }
+            }
+        }
+    }
 
     // Log the cast result.
     if let Some(ref mut log) = game_log {

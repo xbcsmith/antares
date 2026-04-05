@@ -213,10 +213,10 @@ pub enum BuffField {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::magic::types::UtilityType;
+/// use antares::domain::magic::types::{UtilityType, TeleportDestination};
 ///
 /// let food = UtilityType::CreateFood { amount: 5 };
-/// let portal = UtilityType::Teleport;
+/// let portal = UtilityType::Teleport { destination: TeleportDestination::TownPortal };
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UtilityType {
@@ -226,9 +226,53 @@ pub enum UtilityType {
         amount: u32,
     },
     /// Teleport the party (Town Portal, Surface, Jump)
-    Teleport,
+    Teleport {
+        /// Where to teleport the party.
+        ///
+        /// Defaults to [`TeleportDestination::Surface`] so that RON spell data
+        /// written without an explicit `destination` field continues to
+        /// deserialise correctly.
+        #[serde(default)]
+        destination: TeleportDestination,
+    },
     /// Information spell — no state change (Location, Detect Magic, Identify)
     Information,
+}
+
+// ===== Teleport Destination =====
+
+/// Destination for teleportation spells.
+///
+/// Used by [`UtilityType::Teleport`] to distinguish between the different
+/// teleport destinations so the game layer can apply the correct world-state
+/// change when a teleport spell is cast in exploration mode.
+///
+/// The default variant is [`TeleportDestination::Surface`] so that RON entries
+/// written as `Teleport()` (empty struct) deserialise correctly without
+/// specifying an explicit destination.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::magic::types::TeleportDestination;
+///
+/// let dest = TeleportDestination::TownPortal;
+/// assert!(matches!(dest, TeleportDestination::TownPortal));
+///
+/// let default_dest = TeleportDestination::default();
+/// assert!(matches!(default_dest, TeleportDestination::Surface));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum TeleportDestination {
+    /// Return party to the map's designated entry point (the position stored
+    /// when the map was entered).  This is the default for legacy RON entries
+    /// that omit the `destination` field.
+    #[default]
+    Surface,
+    /// Return party to the registered home inn or town (map 1, tile (1, 1)).
+    TownPortal,
+    /// Direct forward jump (Jump spell — target-selection UI is deferred).
+    Jump,
 }
 
 // ===== Spell Effect Type =====

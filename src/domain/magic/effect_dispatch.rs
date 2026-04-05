@@ -30,7 +30,9 @@
 
 use crate::application::ActiveSpells;
 use crate::domain::character::Character;
-use crate::domain::magic::types::{BuffField, Spell, SpellEffectType, UtilityType};
+use crate::domain::magic::types::{
+    BuffField, Spell, SpellEffectType, TeleportDestination, UtilityType,
+};
 use crate::domain::types::DiceRoll;
 use rand::Rng;
 
@@ -107,8 +109,10 @@ pub struct CureConditionResult {
 ///     utility_type: UtilityType::CreateFood { amount: 5 },
 ///     food_created: 5,
 ///     message: "Create Food produces 5 food rations.".to_string(),
+///     teleport_destination: None,
 /// };
 /// assert_eq!(result.food_created, 5);
+/// assert!(result.teleport_destination.is_none());
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UtilityResult {
@@ -118,6 +122,12 @@ pub struct UtilityResult {
     pub food_created: u32,
     /// Human-readable description of the effect
     pub message: String,
+    /// Teleport destination if this was a [`UtilityType::Teleport`] spell.
+    ///
+    /// The exploration layer reads this field and applies the corresponding
+    /// world-state change (party position / current map).  `None` for all
+    /// non-teleport utility spells.
+    pub teleport_destination: Option<TeleportDestination>,
 }
 
 /// Aggregate result returned by [`apply_spell_effect`].
@@ -385,9 +395,17 @@ pub fn apply_cure_condition(condition_id: &str, target: &mut Character) -> CureC
 ///
 /// let result = apply_utility_spell(UtilityType::CreateFood { amount: 6 });
 /// assert_eq!(result.food_created, 6);
+/// assert!(result.teleport_destination.is_none());
+///
+/// use antares::domain::magic::types::TeleportDestination;
+/// let portal = apply_utility_spell(UtilityType::Teleport {
+///     destination: TeleportDestination::TownPortal,
+/// });
+/// assert_eq!(portal.teleport_destination, Some(TeleportDestination::TownPortal));
 ///
 /// let info = apply_utility_spell(UtilityType::Information);
 /// assert_eq!(info.food_created, 0);
+/// assert!(info.teleport_destination.is_none());
 /// ```
 pub fn apply_utility_spell(utility_type: UtilityType) -> UtilityResult {
     match utility_type {
@@ -395,16 +413,23 @@ pub fn apply_utility_spell(utility_type: UtilityType) -> UtilityResult {
             utility_type,
             food_created: amount,
             message: format!("Create Food produces {amount} food rations."),
+            teleport_destination: None,
         },
-        UtilityType::Teleport => UtilityResult {
-            utility_type,
+        UtilityType::Teleport { destination } => UtilityResult {
+            utility_type: UtilityType::Teleport { destination },
             food_created: 0,
-            message: "Teleport effect triggered.".to_string(),
+            message: match destination {
+                TeleportDestination::Surface => "Returning to the surface...".to_string(),
+                TeleportDestination::TownPortal => "Teleporting to town...".to_string(),
+                TeleportDestination::Jump => "Jumping forward...".to_string(),
+            },
+            teleport_destination: Some(destination),
         },
         UtilityType::Information => UtilityResult {
             utility_type,
             food_created: 0,
             message: "Information gathered.".to_string(),
+            teleport_destination: None,
         },
     }
 }
@@ -645,7 +670,8 @@ mod tests {
     use crate::domain::character::{Alignment, Character, Condition, Sex};
     use crate::domain::conditions::{ActiveCondition, ConditionDuration};
     use crate::domain::magic::types::{
-        BuffField, Spell, SpellContext, SpellEffectType, SpellSchool, SpellTarget, UtilityType,
+        BuffField, Spell, SpellContext, SpellEffectType, SpellSchool, SpellTarget,
+        TeleportDestination, UtilityType,
     };
     use crate::domain::types::DiceRoll;
 
@@ -994,10 +1020,50 @@ mod tests {
     /// Teleport utility returns zero food and a non-empty message.
     #[test]
     fn test_apply_utility_spell_teleport() {
-        let result = apply_utility_spell(UtilityType::Teleport);
+        let result = apply_utility_spell(UtilityType::Teleport {
+            destination: TeleportDestination::Surface,
+        });
 
         assert_eq!(result.food_created, 0);
         assert!(!result.message.is_empty());
+        assert_eq!(
+            result.teleport_destination,
+            Some(TeleportDestination::Surface)
+        );
+    }
+
+    #[test]
+    fn test_apply_utility_spell_teleport_town_portal() {
+        let result = apply_utility_spell(UtilityType::Teleport {
+            destination: TeleportDestination::TownPortal,
+        });
+
+        assert_eq!(
+            result.teleport_destination,
+            Some(TeleportDestination::TownPortal)
+        );
+        assert!(!result.message.is_empty());
+    }
+
+    #[test]
+    fn test_apply_utility_spell_teleport_jump() {
+        let result = apply_utility_spell(UtilityType::Teleport {
+            destination: TeleportDestination::Jump,
+        });
+
+        assert_eq!(result.teleport_destination, Some(TeleportDestination::Jump));
+    }
+
+    #[test]
+    fn test_apply_utility_spell_create_food_no_teleport_destination() {
+        let result = apply_utility_spell(UtilityType::CreateFood { amount: 3 });
+        assert!(result.teleport_destination.is_none());
+    }
+
+    #[test]
+    fn test_apply_utility_spell_information_no_teleport_destination() {
+        let result = apply_utility_spell(UtilityType::Information);
+        assert!(result.teleport_destination.is_none());
     }
 
     /// Information utility returns zero food and a non-empty message.

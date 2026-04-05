@@ -1516,33 +1516,39 @@ impl GameState {
             }
 
             crate::domain::world::EventResult::Trap { damage, effect } => {
-                // Apply trap damage to all living party members.
-                for member in &mut self.party.members {
-                    if member.is_alive() {
-                        member.hp.modify(-(damage as i32));
-                        if member.hp.current == 0 {
-                            member
-                                .conditions
-                                .add(crate::domain::character::Condition::DEAD);
-                        }
-                    }
-                }
-
-                // Apply status effect if present.
-                if let Some(ref effect_name) = effect {
-                    let flag = map_effect_to_condition(effect_name);
-                    if flag != crate::domain::character::Condition::FINE {
-                        for member in &mut self.party.members {
-                            if member.is_alive() {
-                                member.conditions.add(flag);
+                // Levitate buff negates all trap effects — the party floats over
+                // pit traps and ground-based hazards entirely.
+                if self.active_spells.levitate > 0 {
+                    tracing::info!("Trap avoided — party is levitating.");
+                } else {
+                    // Apply trap damage to all living party members.
+                    for member in &mut self.party.members {
+                        if member.is_alive() {
+                            member.hp.modify(-(damage as i32));
+                            if member.hp.current == 0 {
+                                member
+                                    .conditions
+                                    .add(crate::domain::character::Condition::DEAD);
                             }
                         }
                     }
-                }
 
-                // Check for party wipe.
-                if self.party.living_count() == 0 {
-                    self.mode = GameMode::GameOver;
+                    // Apply status effect if present.
+                    if let Some(ref effect_name) = effect {
+                        let flag = map_effect_to_condition(effect_name);
+                        if flag != crate::domain::character::Condition::FINE {
+                            for member in &mut self.party.members {
+                                if member.is_alive() {
+                                    member.conditions.add(flag);
+                                }
+                            }
+                        }
+                    }
+
+                    // Check for party wipe.
+                    if self.party.living_count() == 0 {
+                        self.mode = GameMode::GameOver;
+                    }
                 }
             }
 
@@ -5308,6 +5314,144 @@ mod tests {
         assert_eq!(state.party.members[0].hp.current, 40);
         // Dead member unchanged
         assert_eq!(state.party.members[1].hp.current, 0);
+    }
+
+    #[test]
+    fn test_levitate_buff_skips_trap_damage() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let mut hero = Character::new(
+            "Floater".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        hero.hp = crate::domain::character::AttributePair16::new(50);
+        state.party.add_member(hero).unwrap();
+
+        // Activate the Levitate buff.
+        state.active_spells.levitate = 20;
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let trap_pos = Position::new(1, 0);
+        map.add_event(
+            trap_pos,
+            MapEvent::Trap {
+                name: "Pit Trap".to_string(),
+                description: "A nasty pit".to_string(),
+                damage: 25,
+                effect: None,
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let result =
+            state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        assert!(result.is_ok());
+
+        // No damage: levitate buff must have negated the trap.
+        assert_eq!(
+            state.party.members[0].hp.current, 50,
+            "party should take no trap damage while levitating"
+        );
+        // Mode must remain Exploration (no game over).
+        assert!(
+            matches!(state.mode, crate::application::GameMode::Exploration),
+            "game mode must remain Exploration"
+        );
+    }
+
+    #[test]
+    fn test_levitate_buff_skips_trap_condition() {
+        use crate::domain::character::{Alignment, Character, Condition, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let mut hero = Character::new(
+            "Floater".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        hero.hp = crate::domain::character::AttributePair16::new(50);
+        state.party.add_member(hero).unwrap();
+
+        state.active_spells.levitate = 10;
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            Position::new(1, 0),
+            MapEvent::Trap {
+                name: "Poison Pit".to_string(),
+                description: "".to_string(),
+                damage: 15,
+                effect: Some("poison".to_string()),
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        // HP unchanged and poison condition not applied.
+        assert_eq!(state.party.members[0].hp.current, 50);
+        assert!(
+            !state.party.members[0].conditions.has(Condition::POISONED),
+            "poisoned condition must not be applied when levitating"
+        );
+    }
+
+    #[test]
+    fn test_trap_damage_applies_without_levitate() {
+        // Regression: trap must still deal damage when levitate is NOT active.
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let mut hero = Character::new(
+            "Grounded".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp = crate::domain::character::AttributePair16::new(50);
+        state.party.add_member(hero).unwrap();
+        state.active_spells.levitate = 0; // explicitly no buff
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            Position::new(1, 0),
+            MapEvent::Trap {
+                name: "Pit".to_string(),
+                description: "".to_string(),
+                damage: 10,
+                effect: None,
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        assert_eq!(
+            state.party.members[0].hp.current, 40,
+            "trap must deal 10 damage when levitate is not active"
+        );
     }
 
     #[test]

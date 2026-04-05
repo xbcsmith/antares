@@ -546,6 +546,7 @@
         saving_throw: false,
         applied_conditions: [],
         resurrect_hp: None,
+        effect_type: Some(Utility(utility_type: Teleport(destination: Jump))),
     ),
     (
         id: 1285,

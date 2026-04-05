@@ -39,6 +39,8 @@ use crate::domain::items::consumable_usage::{
 };
 use crate::domain::items::equipment_validation::EquipError;
 use crate::domain::items::types::{normalize_duration, ConsumableData, ConsumableEffect, ItemType};
+use crate::domain::magic::exploration_casting::{cast_exploration_spell, ExplorationTarget};
+use crate::domain::magic::learning::{learn_spell, SpellLearnError};
 use crate::domain::transactions::{drop_item, equip_item, unequip_item, TransactionError};
 use crate::game::resources::GlobalState;
 use crate::game::systems::item_world_events::ItemDroppedEvent;
@@ -2535,12 +2537,16 @@ fn build_consumable_use_log(
             }
         }
         ConsumableEffect::CastSpell(spell_id) => {
+            // The actual cast is dispatched in handle_use_item_action_exploration
+            // and a more informative message is built there.  This fallback is
+            // used when the spell ID cannot be resolved.
             format!("{item_name} used. Casting spell {}.", spell_id)
         }
         ConsumableEffect::LearnSpell(spell_id) => {
+            // The actual learn call is dispatched in handle_use_item_action_exploration.
             format!(
-                "{item_name} used. {character_name} learned spell {}.",
-                spell_id
+                "{item_name} used. {} attempts to learn spell {}.",
+                character_name, spell_id
             )
         }
     }
@@ -2697,6 +2703,15 @@ fn handle_use_item_action_exploration(
             }
         }
 
+        // Capture character name before any mutable borrows in steps 6a/6b.
+        let character_name = global_state
+            .0
+            .party
+            .members
+            .get(party_index)
+            .map(|ch| ch.name.clone())
+            .unwrap_or_else(|| "Unknown".to_string());
+
         // Step 6: apply the effect to the owning character via the exploration
         // helper. Split borrows: get active_spells separately from the character
         // so the borrow checker sees them as disjoint fields.
@@ -2706,17 +2721,85 @@ fn handle_use_item_action_exploration(
             apply_consumable_effect_exploration(character, &mut gs.active_spells, &consumable_data)
         };
 
-        // Step 7: write a success GameLog message.
-        let character_name = global_state
-            .0
-            .party
-            .members
-            .get(party_index)
-            .map(|ch| ch.name.clone())
-            .unwrap_or_else(|| "Unknown".to_string());
+        // Step 6a: dispatch ConsumableEffect::CastSpell.
+        //
+        // `apply_consumable_effect_exploration` signals the spell ID via
+        // `result.spell_cast_id` without casting anything itself.  Here we
+        // perform the actual cast through the exploration pipeline so that SP
+        // is consumed, buffs are applied, and healing takes effect.
+        let cast_spell_log: Option<String> = if let Some(spell_id) = result.spell_cast_id {
+            if let Some(spell_def) = content_db.spells.get_spell(spell_id).cloned() {
+                let spell_name = spell_def.name.clone();
+                let mut rng = rand::rng();
+                match cast_exploration_spell(
+                    party_index,
+                    &spell_def,
+                    ExplorationTarget::Self_,
+                    &mut global_state.0,
+                    &content_db.items,
+                    &mut rng,
+                ) {
+                    Ok(_) => Some(format!(
+                        "{item_name} used. {character_name} casts {spell_name}."
+                    )),
+                    Err(e) => Some(format!(
+                        "{item_name} used. Failed to cast {spell_name}: {e}."
+                    )),
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
-        let log_msg =
-            build_consumable_use_log(&consumable_data, &result, &item_name, &character_name);
+        // Step 6b: dispatch ConsumableEffect::LearnSpell.
+        //
+        // `apply_consumable_effect_exploration` signals the spell ID via
+        // `result.spell_learn_id` without modifying the spellbook.  Here we
+        // call `learn_spell` directly to perform the actual acquisition.  On
+        // failure (wrong class, already known, etc.) the error is logged and
+        // the item charge is NOT refunded — the scroll was consumed regardless.
+        let learn_spell_log: Option<String> = if let Some(spell_id) = result.spell_learn_id {
+            let spell_name = content_db
+                .spells
+                .get_spell(spell_id)
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| spell_id.to_string());
+            match learn_spell(
+                &mut global_state.0.party.members[party_index],
+                spell_id,
+                &content_db.spells,
+                &content_db.classes,
+            ) {
+                Ok(()) => Some(format!(
+                    "{item_name} used. {character_name} learned {spell_name}."
+                )),
+                Err(SpellLearnError::AlreadyKnown(_)) => Some(format!(
+                    "{item_name} used. {character_name} already knows {spell_name}."
+                )),
+                Err(e) => {
+                    tracing::warn!(
+                        "LearnSpell scroll: could not teach {} to {} — {}",
+                        spell_name,
+                        character_name,
+                        e
+                    );
+                    Some(format!(
+                        "{item_name} used. {character_name} could not learn {spell_name}."
+                    ))
+                }
+            }
+        } else {
+            None
+        };
+
+        // Step 7: write a success GameLog message.  Spell-dispatch outcomes
+        // (CastSpell / LearnSpell) override the generic consumable message so
+        // the player sees the resolved spell name rather than a raw spell ID.
+        let log_msg = cast_spell_log.or(learn_spell_log).unwrap_or_else(|| {
+            build_consumable_use_log(&consumable_data, &result, &item_name, &character_name)
+        });
 
         if let Some(ref mut writer) = game_log_writer {
             writer.write(GameLogEvent {
@@ -5683,5 +5766,383 @@ mod tests {
             });
         });
         // No panic = the equipped item name was rendered in the strip
+    }
+
+    // ── 7.1  Exploration scroll dispatch (CastSpell / LearnSpell) ───────────
+
+    fn make_cast_spell_scroll_db() -> crate::sdk::database::ContentDatabase {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::domain::magic::types::{
+            Spell, SpellContext, SpellEffectType, SpellSchool, SpellTarget,
+        };
+        use crate::domain::types::DiceRoll;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+
+        // CastSpell scroll — casts spell 0x0101 (First Aid).
+        let scroll = Item {
+            id: 1,
+            name: "Healing Scroll".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::CastSpell(0x0101),
+                is_combat_usable: false,
+                duration_minutes: None,
+            }),
+            base_cost: 50,
+            sell_cost: 25,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        db.items.add_item(scroll).unwrap();
+
+        // The spell that the scroll casts.
+        let mut spell = Spell::new(
+            0x0101,
+            "First Aid",
+            SpellSchool::Cleric,
+            1,
+            2,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::Self_,
+            "Minor healing",
+            None,
+            0,
+            false,
+        );
+        spell.effect_type = Some(SpellEffectType::Healing {
+            amount: DiceRoll::new(1, 6, 0),
+        });
+        db.spells.add_spell(spell).unwrap();
+
+        db
+    }
+
+    fn make_learn_spell_scroll_db() -> crate::sdk::database::ContentDatabase {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+
+        // LearnSpell scroll — permanently teaches spell 0x0101.
+        let scroll = Item {
+            id: 2,
+            name: "Learning Scroll".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::LearnSpell(0x0101),
+                is_combat_usable: false,
+                duration_minutes: None,
+            }),
+            base_cost: 100,
+            sell_cost: 50,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        db.items.add_item(scroll).unwrap();
+
+        let spell = Spell::new(
+            0x0101,
+            "First Aid",
+            SpellSchool::Cleric,
+            1,
+            2,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::Self_,
+            "Minor healing",
+            None,
+            0,
+            false,
+        );
+        db.spells.add_spell(spell).unwrap();
+
+        db
+    }
+
+    /// Using a `CastSpell` scroll whose spell ID is NOT in the database does
+    /// not panic and writes a log entry containing the item name.
+    #[test]
+    fn test_cast_spell_scroll_unknown_spell_id_no_panic() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+        let scroll = Item {
+            id: 1,
+            name: "Mystery Scroll".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::CastSpell(9999), // not in DB
+                is_combat_usable: false,
+                duration_minutes: None,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        db.items.add_item(scroll).unwrap();
+
+        let mut gs = GameState::new();
+        let mut hero = Character::new(
+            "Mage".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        hero.inventory.items.push(InventorySlot {
+            item_id: 1,
+            charges: 1,
+        });
+        gs.party.add_member(hero).unwrap();
+        gs.enter_inventory();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
+        app.add_message::<UseItemExplorationAction>();
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(GlobalState(gs));
+        app.init_resource::<InventoryNavigationState>();
+        app.add_systems(Update, handle_use_item_action_exploration);
+
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+        app.update();
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.entries()
+                .iter()
+                .any(|e| e.text.contains("Mystery Scroll")),
+            "log must mention the scroll name even when spell ID is unknown"
+        );
+        // Item must be consumed (slot removed)
+        let gs_after = app.world().resource::<GlobalState>();
+        assert!(
+            gs_after.0.party.members[0].inventory.items.is_empty(),
+            "scroll slot must be consumed even when spell is unknown"
+        );
+    }
+
+    /// Using a `LearnSpell` scroll whose spell ID is NOT in the database does
+    /// not panic and writes a log entry containing "could not learn".
+    #[test]
+    fn test_learn_spell_scroll_unknown_spell_id_no_panic() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+        let scroll = Item {
+            id: 1,
+            name: "Cryptic Scroll".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::LearnSpell(9999), // not in DB
+                is_combat_usable: false,
+                duration_minutes: None,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        db.items.add_item(scroll).unwrap();
+
+        let mut gs = GameState::new();
+        let mut hero = Character::new(
+            "Scholar".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.inventory.items.push(InventorySlot {
+            item_id: 1,
+            charges: 1,
+        });
+        gs.party.add_member(hero).unwrap();
+        gs.enter_inventory();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
+        app.add_message::<UseItemExplorationAction>();
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(GlobalState(gs));
+        app.init_resource::<InventoryNavigationState>();
+        app.add_systems(Update, handle_use_item_action_exploration);
+
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+        app.update();
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.entries()
+                .iter()
+                .any(|e| e.text.contains("could not learn")),
+            "log must report failure to learn when spell ID is unknown"
+        );
+        // Scroll is consumed regardless of failure.
+        let gs_after = app.world().resource::<GlobalState>();
+        assert!(
+            gs_after.0.party.members[0].inventory.items.is_empty(),
+            "scroll slot must be consumed even when learning fails"
+        );
+    }
+
+    /// Using a `CastSpell` scroll whose spell IS in the database writes the
+    /// resolved spell NAME to the GameLog (not just the raw numeric ID).
+    #[test]
+    fn test_cast_spell_scroll_logs_spell_name_on_failure() {
+        // Character has 0 SP so the cast fails, but the log must still name
+        // the spell rather than showing "Casting spell 257".
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let db = make_cast_spell_scroll_db();
+
+        let mut gs = GameState::new();
+        let mut hero = Character::new(
+            "Caster".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        hero.hp.base = 30;
+        hero.hp.current = 10;
+        hero.sp.base = 10;
+        hero.sp.current = 0; // not enough SP — cast will fail
+        hero.level = 3;
+        hero.inventory.items.push(InventorySlot {
+            item_id: 1,
+            charges: 1,
+        });
+        gs.party.add_member(hero).unwrap();
+        gs.enter_inventory();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
+        app.add_message::<UseItemExplorationAction>();
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(GlobalState(gs));
+        app.init_resource::<InventoryNavigationState>();
+        app.add_systems(Update, handle_use_item_action_exploration);
+
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+        app.update();
+
+        let log = app.world().resource::<GameLog>();
+        let has_spell_name = log.entries().iter().any(|e| e.text.contains("First Aid"));
+        assert!(
+            has_spell_name,
+            "GameLog must contain the resolved spell name 'First Aid'; entries: {:?}",
+            log.entries().iter().map(|e| &e.text).collect::<Vec<_>>()
+        );
+    }
+
+    /// Using a `LearnSpell` scroll with a spell in the database writes the
+    /// resolved spell NAME to the GameLog (not the raw numeric ID).
+    #[test]
+    fn test_learn_spell_scroll_logs_spell_name() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let db = make_learn_spell_scroll_db();
+
+        let mut gs = GameState::new();
+        let mut hero = Character::new(
+            "Bookworm".to_string(),
+            "human".to_string(),
+            "knight".to_string(), // wrong class — will fail but logs spell name
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.inventory.items.push(InventorySlot {
+            item_id: 2,
+            charges: 1,
+        });
+        gs.party.add_member(hero).unwrap();
+        gs.enter_inventory();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::game::systems::ui::UiPlugin);
+        app.add_message::<UseItemExplorationAction>();
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(GlobalState(gs));
+        app.init_resource::<InventoryNavigationState>();
+        app.add_systems(Update, handle_use_item_action_exploration);
+
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+        app.update();
+
+        let log = app.world().resource::<GameLog>();
+        let has_spell_name = log.entries().iter().any(|e| e.text.contains("First Aid"));
+        assert!(
+            has_spell_name,
+            "GameLog must contain the resolved spell name 'First Aid'; entries: {:?}",
+            log.entries().iter().map(|e| &e.text).collect::<Vec<_>>()
+        );
+        // Scroll consumed regardless.
+        let gs_after = app.world().resource::<GlobalState>();
+        assert!(
+            gs_after.0.party.members[0].inventory.items.is_empty(),
+            "scroll must be consumed even when learning fails"
+        );
     }
 }

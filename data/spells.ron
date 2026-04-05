@@ -527,6 +527,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        effect_type: Some(Utility(utility_type: Teleport(destination: Jump))),
     ),
 
     (
@@ -882,7 +883,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
-        effect_type: Some(Utility(utility_type: Teleport)),
+        effect_type: Some(Utility(utility_type: Teleport(destination: TownPortal))),
     ),
 
     (
@@ -1093,7 +1094,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
-        effect_type: Some(Utility(utility_type: Teleport)),
+        effect_type: Some(Utility(utility_type: Teleport(destination: TownPortal))),
     ),
 
     (
