@@ -11,7 +11,7 @@
 //!
 //! See `docs/explanation/sdk_and_campaign_architecture.md` for quest specifications.
 
-use crate::domain::types::{ItemId, MapId, MonsterId, Position};
+use crate::domain::types::{ItemId, MapId, MonsterId, Position, SpellId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -380,6 +380,16 @@ pub enum QuestReward {
         faction: String,
         /// Reputation change (can be negative)
         change: i16,
+    },
+
+    /// Teach a spell to the first eligible party member
+    ///
+    /// The quest system calls `learn_spell` for the first party member whose
+    /// class is compatible and whose level meets the spell's requirement.
+    /// If no eligible member exists, the reward is silently skipped and logged.
+    LearnSpell {
+        /// Spell identifier to teach
+        spell_id: SpellId,
     },
 }
 

@@ -2534,6 +2534,15 @@ fn build_consumable_use_log(
                 )
             }
         }
+        ConsumableEffect::CastSpell(spell_id) => {
+            format!("{item_name} used. Casting spell {}.", spell_id)
+        }
+        ConsumableEffect::LearnSpell(spell_id) => {
+            format!(
+                "{item_name} used. {character_name} learned spell {}.",
+                spell_id
+            )
+        }
     }
 }
 

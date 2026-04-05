@@ -12,7 +12,7 @@
 //! See `docs/explanation/sdk_and_campaign_architecture.md` for dialogue specifications.
 
 use crate::domain::quest::QuestId;
-use crate::domain::types::ItemId;
+use crate::domain::types::{CharacterId, ItemId, SpellId};
 use crate::domain::validation::ValidationError;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -942,7 +942,19 @@ pub enum DialogueAction {
         /// Identifier of the service to consume (e.g. "heal_all", "resurrect")
         service_id: String,
         /// Characters to apply the service to (empty = apply to whole party)
-        target_character_ids: Vec<crate::domain::types::CharacterId>,
+        target_character_ids: Vec<CharacterId>,
+    },
+
+    /// Teach a spell to a party member through dialogue (e.g., a sage or wizard NPC)
+    ///
+    /// If `target_character_id` is `None`, the spell is given to the first eligible
+    /// party member whose class is compatible and whose level meets the requirement.
+    /// If no eligible member is found, the action is logged and silently skipped.
+    LearnSpell {
+        /// Spell identifier to teach
+        spell_id: SpellId,
+        /// Index into `party.members` for an explicit target (None = first eligible)
+        target_character_id: Option<CharacterId>,
     },
 }
 
@@ -1039,6 +1051,13 @@ impl DialogueAction {
                     )
                 }
             }
+            DialogueAction::LearnSpell {
+                spell_id,
+                target_character_id,
+            } => match target_character_id {
+                Some(cid) => format!("Teach spell {} to character {}", spell_id, cid),
+                None => format!("Teach spell {} to first eligible party member", spell_id),
+            },
         }
     }
 }
@@ -1340,6 +1359,28 @@ mod tests {
 
         let cond3 = DialogueCondition::HasGold { amount: 100 };
         assert!(cond3.description().contains("100 gold"));
+    }
+
+    #[test]
+    fn test_dialogue_action_learn_spell_description_no_target() {
+        let action = DialogueAction::LearnSpell {
+            spell_id: 0x0101,
+            target_character_id: None,
+        };
+        let desc = action.description();
+        assert!(desc.contains("257")); // 0x0101 = 257
+        assert!(desc.contains("first eligible"));
+    }
+
+    #[test]
+    fn test_dialogue_action_learn_spell_description_with_target() {
+        let action = DialogueAction::LearnSpell {
+            spell_id: 0x0201,
+            target_character_id: Some(2),
+        };
+        let desc = action.description();
+        assert!(desc.contains("513")); // 0x0201 = 513
+        assert!(desc.contains('2'));
     }
 
     #[test]

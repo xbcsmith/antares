@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
 //! Character progression system - Experience, leveling, and stat growth
@@ -20,7 +20,8 @@
 
 use crate::domain::character::Character;
 use crate::domain::classes::{ClassDatabase, ClassError};
-use crate::domain::types::DiceRoll;
+use crate::domain::types::{DiceRoll, SpellId};
+use crate::sdk::database::SpellDatabase;
 use rand::Rng;
 use thiserror::Error;
 
@@ -377,9 +378,101 @@ pub fn level_up_from_db(
     Ok(hp_gain)
 }
 
-/// Calculates the experience required for a given level
+/// Levels up a character and auto-grants all newly accessible spells
 ///
-/// Uses an exponential curve: BASE_XP * (level - 1) ^ XP_MULTIPLIER
+/// This is the full level-up pipeline combining [`level_up_from_db`] with
+/// [`crate::domain::magic::learning::grant_level_up_spells`]. After HP and SP
+/// are updated, every spell that first becomes accessible at the new level is
+/// automatically added to the character's spellbook via
+/// [`crate::domain::magic::learning::learn_spell`].
+///
+/// Non-caster classes (Knight, Robber) receive no spells; the returned
+/// `Vec<SpellId>` will be empty.
+///
+/// # Arguments
+///
+/// * `character` - The character to level up (will be modified)
+/// * `class_db`  - Reference to the class database (for HP dice and spell school)
+/// * `spell_db`  - Reference to the spell database (for spell-level lookup)
+/// * `rng`       - Random number generator for HP rolls
+///
+/// # Returns
+///
+/// Returns `Ok((hp_gained, granted_spells))` on success, where `hp_gained` is
+/// the HP rolled this level and `granted_spells` is the list of spell IDs added
+/// to the character's spellbook. Returns a [`ProgressionError`] if the
+/// character cannot level up.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::{Character, Sex, Alignment};
+/// use antares::domain::classes::ClassDatabase;
+/// use antares::domain::magic::database::SpellDatabase;
+/// use antares::domain::progression::{award_experience, level_up_and_grant_spells};
+/// use rand::rng;
+///
+/// let mut cleric = Character::new(
+///     "Theodora".to_string(),
+///     "human".to_string(),
+///     "cleric".to_string(),
+///     Sex::Female,
+///     Alignment::Good,
+/// );
+/// award_experience(&mut cleric, 10000).unwrap();
+///
+/// let class_db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+/// let spell_db = SpellDatabase::load_from_file("data/spells.ron").unwrap_or_default();
+/// let mut rng = rng();
+/// let (hp_gained, new_spells) = level_up_and_grant_spells(&mut cleric, &class_db, &spell_db, &mut rng).unwrap();
+///
+/// assert_eq!(cleric.level, 2);
+/// assert!(hp_gained > 0);
+/// // new_spells contains any spells that first became accessible at level 2
+/// let _ = new_spells;
+/// ```
+pub fn level_up_and_grant_spells(
+    character: &mut Character,
+    class_db: &ClassDatabase,
+    spell_db: &SpellDatabase,
+    rng: &mut impl Rng,
+) -> Result<(u16, Vec<SpellId>), ProgressionError> {
+    // Perform standard level-up (HP roll, SP update)
+    let hp_gained = level_up_from_db(character, class_db, rng)?;
+
+    // Determine which spells first become accessible at the new level
+    let new_level = character.level;
+    let newly_accessible = crate::domain::magic::learning::grant_level_up_spells(
+        character, new_level, spell_db, class_db,
+    );
+
+    // Auto-grant: teach every newly accessible spell; silently skip errors
+    // (AlreadyKnown can arise if a scroll was used before training)
+    let mut granted: Vec<SpellId> = Vec::new();
+    for spell_id in newly_accessible {
+        match crate::domain::magic::learning::learn_spell(character, spell_id, spell_db, class_db) {
+            Ok(()) => {
+                granted.push(spell_id);
+            }
+            Err(crate::domain::magic::learning::SpellLearnError::AlreadyKnown(_)) => {
+                // Character already learned this via scroll; not an error
+            }
+            Err(e) => {
+                // Log unexpected errors but do not abort the level-up
+                tracing::warn!(
+                    "level_up_and_grant_spells: could not grant spell {} to {}: {}",
+                    spell_id,
+                    character.name,
+                    e
+                );
+            }
+        }
+    }
+
+    Ok((hp_gained, granted))
+}
+
+/// Calculates the experience required for a given level
 ///
 /// # Examples
 ///
@@ -402,11 +495,68 @@ pub fn experience_for_level(level: u32) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+    use crate::sdk::database::SpellDatabase;
     use crate::test_helpers::factories::test_character_with_class;
     use rand::rng;
 
     fn create_test_character(class_id: &str) -> Character {
         test_character_with_class("Test", class_id)
+    }
+
+    fn make_class_db() -> crate::domain::classes::ClassDatabase {
+        crate::domain::classes::ClassDatabase::load_from_file("data/classes.ron")
+            .expect("data/classes.ron must exist")
+    }
+
+    fn make_spell_db_with_level1_cleric_and_sorcerer() -> SpellDatabase {
+        let mut db = SpellDatabase::new();
+        db.add_spell(Spell::new(
+            0x0101,
+            "Cure Wounds",
+            SpellSchool::Cleric,
+            1,
+            2,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Heals",
+            None,
+            0,
+            false,
+        ))
+        .unwrap();
+        db.add_spell(Spell::new(
+            0x0201,
+            "Holy Bolt",
+            SpellSchool::Cleric,
+            2,
+            4,
+            0,
+            SpellContext::CombatOnly,
+            SpellTarget::SingleMonster,
+            "Damages",
+            None,
+            0,
+            false,
+        ))
+        .unwrap();
+        db.add_spell(Spell::new(
+            0x0501,
+            "Magic Arrow",
+            SpellSchool::Sorcerer,
+            1,
+            2,
+            0,
+            SpellContext::CombatOnly,
+            SpellTarget::SingleMonster,
+            "Damages",
+            None,
+            0,
+            false,
+        ))
+        .unwrap();
+        db
     }
 
     #[test]
@@ -686,5 +836,180 @@ mod tests {
             assert!((1..=10).contains(&id_hp));
             assert!((1..=10).contains(&db_hp));
         }
+    }
+
+    // ===== level_up_and_grant_spells tests =====
+
+    #[test]
+    fn test_level_up_and_grant_spells_cleric_level_1_grants_level_1_spells() {
+        let class_db = make_class_db();
+        let spell_db = make_spell_db_with_level1_cleric_and_sorcerer();
+        let mut cleric = create_test_character("cleric");
+        cleric.experience = experience_for_level(2);
+
+        let mut rng = rng();
+        let (hp_gained, granted) =
+            level_up_and_grant_spells(&mut cleric, &class_db, &spell_db, &mut rng).unwrap();
+
+        assert_eq!(cleric.level, 2);
+        assert!(hp_gained > 0);
+        // Level 2 for a cleric does not unlock new spell levels (spell level 2 needs char level 3)
+        assert!(granted.is_empty());
+    }
+
+    #[test]
+    fn test_level_up_and_grant_spells_cleric_level_3_grants_spell_level_2() {
+        let class_db = make_class_db();
+        let spell_db = make_spell_db_with_level1_cleric_and_sorcerer();
+
+        let mut cleric = create_test_character("cleric");
+        // Bring character to level 2 first, then level 3
+        cleric.level = 2;
+        cleric.experience = experience_for_level(3);
+
+        let mut rng = rng();
+        let (hp_gained, granted) =
+            level_up_and_grant_spells(&mut cleric, &class_db, &spell_db, &mut rng).unwrap();
+
+        assert_eq!(cleric.level, 3);
+        assert!(hp_gained > 0);
+        // Spell level 2 spell (0x0201) becomes accessible at character level 3
+        assert!(granted.contains(&0x0201));
+        // Level 1 spells were already accessible at level 1 — not granted again
+        assert!(!granted.contains(&0x0101));
+        // Spell appears in spellbook
+        assert!(cleric.spells.cleric_spells[1].contains(&0x0201));
+    }
+
+    #[test]
+    fn test_level_up_and_grant_spells_sorcerer_level_1_grants_sorcerer_level_1_spells() {
+        let class_db = make_class_db();
+        let spell_db = make_spell_db_with_level1_cleric_and_sorcerer();
+
+        let mut sorc = create_test_character("sorcerer");
+        // Start at level 0 equivalent — manually set to level 1 position
+        sorc.level = 0;
+        sorc.experience = experience_for_level(1);
+
+        let mut rng = rng();
+        let (hp_gained, granted) =
+            level_up_and_grant_spells(&mut sorc, &class_db, &spell_db, &mut rng).unwrap();
+
+        assert_eq!(sorc.level, 1);
+        assert!(hp_gained > 0);
+        // Sorcerer level 1 spell becomes accessible at character level 1
+        assert!(granted.contains(&0x0501));
+        assert!(sorc.spells.sorcerer_spells[0].contains(&0x0501));
+        // Cleric spells must not appear for sorcerer
+        assert!(!granted.contains(&0x0101));
+    }
+
+    #[test]
+    fn test_level_up_and_grant_spells_knight_never_grants_spells() {
+        let class_db = make_class_db();
+        let spell_db = make_spell_db_with_level1_cleric_and_sorcerer();
+
+        let mut knight = create_test_character("knight");
+        knight.experience = experience_for_level(2);
+
+        let mut rng = rng();
+        let (_hp_gained, granted) =
+            level_up_and_grant_spells(&mut knight, &class_db, &spell_db, &mut rng).unwrap();
+
+        assert!(granted.is_empty());
+    }
+
+    #[test]
+    fn test_level_up_and_grant_spells_paladin_no_spells_at_level_2() {
+        let class_db = make_class_db();
+        let spell_db = make_spell_db_with_level1_cleric_and_sorcerer();
+
+        let mut paladin = create_test_character("paladin");
+        paladin.experience = experience_for_level(2);
+
+        let mut rng = rng();
+        let (_hp_gained, granted) =
+            level_up_and_grant_spells(&mut paladin, &class_db, &spell_db, &mut rng).unwrap();
+
+        assert_eq!(paladin.level, 2);
+        // Paladin has no spell access at levels 1-2
+        assert!(granted.is_empty());
+    }
+
+    #[test]
+    fn test_level_up_and_grant_spells_paladin_gains_at_level_3() {
+        let class_db = make_class_db();
+        let spell_db = make_spell_db_with_level1_cleric_and_sorcerer();
+
+        let mut paladin = create_test_character("paladin");
+        paladin.level = 2;
+        paladin.experience = experience_for_level(3);
+
+        let mut rng = rng();
+        let (_hp_gained, granted) =
+            level_up_and_grant_spells(&mut paladin, &class_db, &spell_db, &mut rng).unwrap();
+
+        assert_eq!(paladin.level, 3);
+        // Level 1 cleric spell first becomes accessible to paladin at level 3
+        assert!(granted.contains(&0x0101));
+        assert!(paladin.spells.cleric_spells[0].contains(&0x0101));
+    }
+
+    #[test]
+    fn test_level_up_and_grant_spells_already_known_not_duplicated() {
+        let class_db = make_class_db();
+        let spell_db = make_spell_db_with_level1_cleric_and_sorcerer();
+
+        let mut cleric = create_test_character("cleric");
+        // Pre-populate the spell as if learned via scroll before training
+        cleric.spells.cleric_spells[1].push(0x0201);
+        cleric.level = 2;
+        cleric.experience = experience_for_level(3);
+
+        let mut rng = rng();
+        let (_hp_gained, granted) =
+            level_up_and_grant_spells(&mut cleric, &class_db, &spell_db, &mut rng).unwrap();
+
+        assert_eq!(cleric.level, 3);
+        // AlreadyKnown is silently skipped — spell must not be duplicated
+        assert!(!granted.contains(&0x0201));
+        assert_eq!(
+            cleric.spells.cleric_spells[1]
+                .iter()
+                .filter(|&&id| id == 0x0201)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_level_up_and_grant_spells_returns_error_when_max_level() {
+        let class_db = make_class_db();
+        let spell_db = make_spell_db_with_level1_cleric_and_sorcerer();
+
+        let mut cleric = create_test_character("cleric");
+        cleric.level = MAX_LEVEL;
+        cleric.experience = u64::MAX;
+
+        let mut rng = rng();
+        let result = level_up_and_grant_spells(&mut cleric, &class_db, &spell_db, &mut rng);
+        assert!(matches!(result, Err(ProgressionError::MaxLevelReached)));
+    }
+
+    #[test]
+    fn test_level_up_and_grant_spells_hp_gain_is_positive() {
+        let class_db = make_class_db();
+        let spell_db = make_spell_db_with_level1_cleric_and_sorcerer();
+
+        let mut cleric = create_test_character("cleric");
+        cleric.experience = experience_for_level(2);
+
+        let hp_before = cleric.hp.base;
+        let mut rng = rng();
+        let (hp_gained, _) =
+            level_up_and_grant_spells(&mut cleric, &class_db, &spell_db, &mut rng).unwrap();
+
+        assert!(hp_gained > 0);
+        assert_eq!(cleric.hp.base, hp_before + hp_gained);
     }
 }

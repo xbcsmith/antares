@@ -1,5 +1,178 @@
 # Implementations
 
+## Spell System — Phase 4: Spell Learning and Acquisition (Complete)
+
+### Overview
+
+Implements the full spell acquisition pipeline. Characters can now learn spells
+through four distinct channels:
+
+1. **Level-Up Auto-Grant** — when a character levels up via
+   `level_up_and_grant_spells`, every spell that first becomes accessible at
+   the new level is automatically added to the spellbook.
+2. **Dialogue** — `DialogueAction::LearnSpell` teaches a spell to the first
+   eligible party member (or an explicitly named target) via NPC interaction.
+3. **Quest Reward** — `QuestReward::LearnSpell` teaches a spell to the first
+   eligible party member upon quest completion.
+4. **Scroll** — `ConsumableEffect::CastSpell(SpellId)` and
+   `ConsumableEffect::LearnSpell(SpellId)` mark a consumable item as a spell
+   scroll; the game-system layer reads `ConsumableApplyResult::spell_cast_id` /
+   `spell_learn_id` to dispatch the appropriate action.
+
+Class and level restrictions are enforced uniformly through the single
+authoritative `learn_spell` function in `src/domain/magic/learning.rs`.
+
+### Deliverables
+
+- [x] `src/domain/magic/learning.rs` — four public domain functions +
+      `SpellLearnError` enum (57 unit tests)
+- [x] `src/domain/magic/mod.rs` — `pub mod learning` + re-exports
+- [x] `DialogueAction::LearnSpell` variant + `description()` arm in
+      `src/domain/dialogue.rs`
+- [x] `execute_action` handler for `DialogueAction::LearnSpell` in
+      `src/game/systems/dialogue.rs` (7 integration tests)
+- [x] `QuestReward::LearnSpell` variant in `src/domain/quest.rs`
+- [x] `apply_rewards` handler for `QuestReward::LearnSpell` in
+      `src/application/quests.rs` (5 integration tests)
+- [x] `ConsumableEffect::CastSpell(SpellId)` and
+      `ConsumableEffect::LearnSpell(SpellId)` variants in
+      `src/domain/items/types.rs`
+- [x] `ConsumableApplyResult::spell_cast_id` and `spell_learn_id` fields;
+      pass-through handling in `src/domain/items/consumable_usage.rs` (7 tests)
+- [x] `level_up_and_grant_spells` in `src/domain/progression.rs` (9 tests)
+- [x] Color entries for new scroll variants in `src/domain/visual/item_mesh.rs`
+- [x] Log-message entries for new scroll variants in
+      `src/game/systems/inventory_ui.rs`
+
+### Architecture
+
+#### `src/domain/magic/learning.rs` — Domain Layer
+
+Four public functions form the spell-learning API:
+
+| Function                                                     | Purpose                                                 |
+| ------------------------------------------------------------ | ------------------------------------------------------- |
+| `can_learn_spell(char, spell_id, spell_db, class_db)`        | Pure validation — returns `Ok(())` or `SpellLearnError` |
+| `learn_spell(char, spell_id, spell_db, class_db)`            | Validates then mutates the spellbook                    |
+| `get_learnable_spells(char, spell_db, class_db)`             | Returns all eligible-but-unlearned spell IDs            |
+| `grant_level_up_spells(char, new_level, spell_db, class_db)` | Returns spell IDs first accessible at `new_level`       |
+
+`SpellLearnError` variants: `SpellNotFound`, `WrongClass`, `LevelTooLow`,
+`AlreadyKnown`, `SpellBookFull`.
+
+All functions use `sdk::database::SpellDatabase` (consistent with
+`exploration_casting.rs`) and `ClassDatabase` for data-driven school and
+level lookups via `can_class_cast_school_by_id` /
+`get_required_level_for_spell_by_id`.
+
+**Spell-level unlock schedule** (full casters — Cleric, Sorcerer):
+
+| Character level | First spell level unlocked |
+| --------------- | -------------------------- |
+| 1               | Spell level 1              |
+| 3               | Spell level 2              |
+| 5               | Spell level 3              |
+| 7               | Spell level 4              |
+| 9               | Spell level 5              |
+| 11              | Spell level 6              |
+| 13              | Spell level 7              |
+
+Paladin (Cleric school, non-pure caster) follows the same table but starts
+at character level 3. Archer has `spell_school: None` in `data/classes.ron`
+and is therefore treated as a non-caster by the data-driven path.
+
+#### `src/domain/progression.rs` — Level-Up Integration
+
+`level_up_and_grant_spells(character, class_db, spell_db, rng)` wraps
+`level_up_from_db` and auto-teaches every spell returned by
+`grant_level_up_spells`. `AlreadyKnown` (e.g. a scroll was used before
+visiting the trainer) is silently skipped; other errors are logged but do
+not abort the level-up. Returns `(hp_gained, Vec<SpellId>)`.
+
+#### `src/domain/dialogue.rs` — DialogueAction::LearnSpell
+
+```
+LearnSpell {
+    spell_id: SpellId,
+    target_character_id: Option<CharacterId>,
+}
+```
+
+- `target_character_id: None` → iterate party members in order, stop at
+  first success.
+- `target_character_id: Some(idx)` → attempt only that member; surface error
+  to game log if ineligible.
+
+#### `src/domain/quest.rs` — QuestReward::LearnSpell
+
+```
+LearnSpell { spell_id: SpellId }
+```
+
+`apply_rewards` in `src/application/quests.rs` iterates party members and
+calls `learn_spell` for the first eligible member. `AlreadyKnown` continues
+to the next member; other errors (wrong class, level too low) are logged and
+skipped.
+
+#### `src/domain/items/types.rs` — Scroll ConsumableEffects
+
+```
+CastSpell(SpellId)   // single-use cast scroll
+LearnSpell(SpellId)  // permanent knowledge scroll
+```
+
+`apply_consumable_effect` and `apply_consumable_effect_exploration` are
+**pass-through**: they set `ConsumableApplyResult::spell_cast_id` or
+`spell_learn_id` and return without mutating the character. The game-system
+layer reads these fields and dispatches to the casting or learning pipeline.
+This is consistent with how `IsFood` is handled (rest system owns the
+actual consumption).
+
+### Data Note — Archer Class
+
+The architecture document describes Archer as having delayed sorcerer-school
+access starting at level 3. However, `data/classes.ron` currently has
+`spell_school: None` for the archer class. The data-driven learning path
+therefore returns `WrongClass` for archers. The hardcoded
+`can_class_cast_school` helper still recognises archer for the combat
+casting path. To enable archer spell learning, set `spell_school: Some(Sorcerer)`
+in the archer class definition.
+
+### Tests Added
+
+| Module                            | New Tests                                                                                                                                       |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `domain::magic::learning`         | 57 unit tests covering all four functions, all `SpellLearnError` variants, paladin delayed access, archer as non-caster, multi-level boundaries |
+| `game::systems::dialogue`         | 7 tests for `execute_action` + `DialogueAction::LearnSpell`                                                                                     |
+| `application::quests`             | 5 tests for `apply_rewards` + `QuestReward::LearnSpell`                                                                                         |
+| `domain::items::consumable_usage` | 7 tests for `CastSpell` / `LearnSpell` pass-through                                                                                             |
+| `domain::progression`             | 9 tests for `level_up_and_grant_spells`                                                                                                         |
+| `domain::dialogue`                | 2 tests for `LearnSpell::description()`                                                                                                         |
+
+**Total new tests: 87**
+
+### Quality Gates
+
+```
+cargo fmt --all         → no output (all files formatted)
+cargo check             → Finished with 0 errors
+cargo clippy            → Finished with 0 warnings
+cargo nextest run       → 4280/4280 passed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 (`SpellBook`, `SpellId`, `CharacterId`)
+- [x] Module placement: `domain/magic/learning.rs`, `domain/dialogue.rs`, `domain/quest.rs`, `domain/items/types.rs`, `domain/progression.rs`
+- [x] Type aliases used consistently (`SpellId = u16`, `CharacterId = usize`)
+- [x] `sdk::database::SpellDatabase` used (consistent with `exploration_casting.rs`)
+- [x] `ClassDatabase` used for data-driven school and level lookups
+- [x] No architectural deviations — `AlreadyKnown` handled gracefully at all layers
+- [x] No test references `campaigns/tutorial` — all test data from `data/classes.ron` and `data/races.ron`
+- [x] SPDX headers on all new `.rs` files
+
+---
+
 ## Phase 3: Exploration-Mode Spell Casting (Complete)
 
 ### Overview
