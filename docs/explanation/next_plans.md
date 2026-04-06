@@ -176,11 +176,19 @@ Campaign Builder --> Maps --> Edit Map --> Add Event --> Container can contain i
 
 Campaign Builder --> Maps --> Edit Map --> Edit Event in the right column the Event Editor should be placed right under the Event Details instead of at the bottom of the column.
 
+Campaign Builder --> Maps --> Edit Map --> Place Event --> Container or Furniture does not update the map RON file on save. I can place a furniture or container on the map and it shows up in the editor but when I save the map and look at the map RON file, the container or furniture is not listed in the map RON file. We should update the map RON file when a container or furniture is placed on the map so that it is saved properly.
+
 Campaign Builder --> Furniture --> Edit Furniture does not have a Back to List button that is required to get back to the list of furniture. We should add a Back to List button to the Edit Furniture screen that takes you back to the list of furniture.
 
 Campaign Builder --> Stock Templates --> Edit Stock Template does not load the description of the Stock Template in the editor. We should load the description of the Stock Template in the editor so that it can be edited as well.
 
+Campaign Builder --> Stock Templates --> Display does not show the Description. We should show the Description of the Stock Template in the Display screen.
+
+Campaign Builder --> NPC --> NPC Editor when you designate an NPC as a Merchant and clickthe Create Merchant Dialog button no dialog is created for the merchant. We should create a default dialog for the merchant when the Create Merchant Dialog button is clicked in the NPC Editor.
+
 Campaign Builder --> Characters --> Display does not have starting spells listed in the character details. We should add starting spells to the character details.
+
+Campaign Builder --> Characters --> Edit Character Starting Spells Auto Complete always uses Cleric Spells for Sorcerers when there are identical spells in both disciplines. So Awaken is always set to the Cleric spell instead of the Sorcerer spell. We should fix the Auto Complete to check the character's class and only show spells that are available to that class.
 
 Write a plan with a phased approach to implementing the SDK fixes in the game engine. THINK HARD and follow the rules in @PLAN.md
 

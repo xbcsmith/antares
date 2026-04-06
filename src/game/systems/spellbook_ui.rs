@@ -63,7 +63,7 @@ use crate::domain::types::SpellId;
 use crate::game::resources::GlobalState;
 use crate::game::systems::ui_helpers::{BODY_FONT_SIZE, LABEL_FONT_SIZE};
 use bevy::prelude::*;
-use bevy_egui::egui;
+use bevy_egui::{egui, EguiContexts};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -203,9 +203,11 @@ pub struct SpellBookDetailPane;
 
 /// Bevy plugin that provides the in-game Spell Book management screen.
 ///
-/// Registers the four systems that drive the Spell Book overlay:
-/// spawning, updating, input handling, and cleanup — chained so that
-/// setup always runs before update and cleanup runs last each frame.
+/// Registers the two-system chain
+/// `(spellbook_input_system, spellbook_ui_system)` — matching the pattern
+/// used by every other egui management screen (inn, inventory, temple, lock).
+/// Input runs first; the egui renderer follows so it sees the updated state
+/// in the same frame.
 ///
 /// # Examples
 ///
@@ -224,13 +226,7 @@ impl Plugin for SpellBookPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (
-                setup_spellbook_ui,
-                update_spellbook_ui,
-                handle_spellbook_input,
-                cleanup_spellbook_ui,
-            )
-                .chain(),
+            (spellbook_input_system, spellbook_ui_system).chain(),
         );
     }
 }
@@ -488,7 +484,7 @@ pub fn update_spellbook_ui(
 /// - **Enter / Space** — confirm selection (updates `selected_spell_id`).
 /// - **C** — exit SpellBook and enter spell-casting flow for current character.
 /// - **Esc** — exit SpellBook and restore previous mode.
-pub fn handle_spellbook_input(
+pub fn spellbook_input_system(
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
     mut global_state: ResMut<GlobalState>,
     content: Option<Res<GameContent>>,
@@ -567,6 +563,101 @@ pub fn handle_spellbook_input(
     }
 }
 
+/// Renders the Spell Book management screen using egui while in `SpellBook` mode.
+///
+/// Displays a three-column [`egui::CentralPanel`]:
+///
+/// - **Left column** (~150 px): character-tab list via [`render_char_tabs`].
+/// - **Centre column** (fills remaining space): scrollable spell list via
+///   [`render_spell_list`].
+/// - **Right column** (~200 px): scrollable spell detail panel via
+///   [`render_detail_panel`].
+///
+/// The system is chained after [`spellbook_input_system`] so that input-state
+/// changes are visible to the renderer in the same frame.
+///
+/// Returns early without rendering if the game is not in `SpellBook` mode or
+/// if no egui context is available.
+fn spellbook_ui_system(
+    mut contexts: EguiContexts,
+    global_state: Res<GlobalState>,
+    content: Option<Res<GameContent>>,
+) {
+    // Only render in SpellBook mode.  Clone the state so we are not holding a
+    // borrow into global_state.0.mode while also passing &global_state to the
+    // column render helpers.
+    let sb = match &global_state.0.mode {
+        GameMode::SpellBook(sb) => sb.clone(),
+        _ => return,
+    };
+
+    let ctx = match contexts.ctx_mut() {
+        Ok(ctx) => ctx,
+        Err(_) => return,
+    };
+
+    let spell_ids = collect_spell_ids_from_state(&global_state.0, content.as_deref());
+
+    egui::CentralPanel::default().show(ctx, |ui| {
+        // ── Title bar ─────────────────────────────────────────────────────────
+        ui.horizontal(|ui| {
+            ui.heading("\u{1F4DA} Spell Book"); // 📚
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(egui::RichText::new("[ESC] Close").color(SPELLBOOK_HINT_COLOR_EG));
+            });
+        });
+
+        ui.separator();
+
+        // ── Three-column body ─────────────────────────────────────────────────
+        ui.horizontal(|ui| {
+            // Left column — character tabs
+            ui.vertical(|ui| {
+                ui.set_min_width(140.0);
+                ui.set_max_width(160.0);
+                render_char_tabs(ui, &sb, &global_state);
+            });
+
+            ui.separator();
+
+            // Center column — spell list (scrollable)
+            ui.vertical(|ui| {
+                ui.set_min_width(200.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("spellbook_spell_list")
+                    .show(ui, |ui| {
+                        render_spell_list(ui, &sb, &global_state, content.as_deref(), &spell_ids);
+                    });
+            });
+
+            ui.separator();
+
+            // Right column — spell detail panel (scrollable)
+            ui.vertical(|ui| {
+                ui.set_min_width(180.0);
+                ui.set_max_width(215.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("spellbook_detail_pane")
+                    .show(ui, |ui| {
+                        render_detail_panel(ui, &sb, content.as_deref());
+                    });
+            });
+        });
+
+        ui.separator();
+
+        // ── Bottom hint bar ────────────────────────────────────────────────────
+        ui.horizontal_centered(|ui| {
+            ui.label(
+                egui::RichText::new(
+                    "[C] Cast Spell   [Tab] Switch Character   [\u{2191}\u{2193}] Select Spell",
+                )
+                .color(SPELLBOOK_HINT_COLOR_EG),
+            );
+        });
+    });
+}
+
 // ── Public helper ─────────────────────────────────────────────────────────────
 
 /// Collects the flat ordered list of [`SpellId`]s known by the currently
@@ -574,7 +665,7 @@ pub fn handle_spellbook_input(
 ///
 /// Iterates spell book levels 0–6 (game levels 1–7) and returns IDs in level
 /// order.  This list drives both the `selected_row` navigation bounds in
-/// [`handle_spellbook_input`] and the row construction in
+/// [`spellbook_input_system`] and the row construction in
 /// [`update_spellbook_ui`].
 ///
 /// Returns an empty `Vec` if the mode is not `SpellBook`, if the current
@@ -1040,7 +1131,6 @@ fn build_detail_panel(
 /// * `ui`           — mutable reference to the current egui [`egui::Ui`].
 /// * `sb`           — current [`SpellBookState`] (character index, selected row).
 /// * `global_state` — read-only access to party members and their spell data.
-#[allow(dead_code)]
 fn render_char_tabs(ui: &mut egui::Ui, sb: &SpellBookState, global_state: &GlobalState) {
     // Column header
     ui.label(egui::RichText::new("Characters").color(SPELLBOOK_TITLE_COLOR_EG));
@@ -1092,7 +1182,6 @@ fn render_char_tabs(ui: &mut egui::Ui, sb: &SpellBookState, global_state: &Globa
 /// * `content`      — optional loaded content database (spells, classes, items).
 /// * `spell_ids`    — flat ordered list of [`SpellId`]s known by the current
 ///   character, pre-computed by [`collect_spell_ids_from_state`].
-#[allow(dead_code)]
 fn render_spell_list(
     ui: &mut egui::Ui,
     sb: &SpellBookState,
@@ -1258,7 +1347,6 @@ fn render_spell_list(
 /// * `ui`      — mutable reference to the current egui [`egui::Ui`].
 /// * `sb`      — current [`SpellBookState`] (provides `selected_spell_id`).
 /// * `content` — optional loaded content database (spell definitions).
-#[allow(dead_code)]
 fn render_detail_panel(ui: &mut egui::Ui, sb: &SpellBookState, content: Option<&GameContent>) {
     // Column header
     ui.label(egui::RichText::new("Detail").color(SPELLBOOK_TITLE_COLOR_EG));

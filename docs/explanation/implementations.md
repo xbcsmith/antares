@@ -1,5 +1,130 @@
 # Implementations
 
+## Spell Book egui Conversion — Phase 2: Add the egui System and Simplify the Plugin (Complete)
+
+### Overview
+
+Phase 2 activates the egui Spell Book screen. `handle_spellbook_input` is
+renamed to `spellbook_input_system`, a new `spellbook_ui_system` renders the
+three-column egui layout, and `SpellBookPlugin` is updated to the two-system
+chain `(spellbook_input_system, spellbook_ui_system)` — matching every other
+egui management screen (inn, inventory, merchant, container, temple, lock).
+
+The old Bevy entity-lifecycle systems (`setup_spellbook_ui`,
+`update_spellbook_ui`, `cleanup_spellbook_ui`) remain in the file temporarily
+but are no longer registered in the plugin. They will be deleted in Phase 3.
+
+### Problem Solved
+
+The four-system Bevy lifecycle chain (spawn-on-enter, rebuild-every-frame,
+despawn-on-exit) is replaced with a single egui render call per frame. egui
+redraws all three columns from scratch each frame automatically, eliminating
+the `despawn_children` / re-spawn pattern and the seven marker components that
+existed solely to support it.
+
+### Files Changed
+
+| File                               | Change                                                                                                                                                                                                           |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/spellbook_ui.rs` | Added `EguiContexts` to import; renamed `handle_spellbook_input` → `spellbook_input_system`; added `spellbook_ui_system`; updated `SpellBookPlugin`; removed `#[allow(dead_code)]` from the three render helpers |
+
+### 2.1 — `use bevy_egui::{egui, EguiContexts};`
+
+`EguiContexts` added to the existing `bevy_egui` import. `contexts.ctx_mut()`
+is used inside `spellbook_ui_system`; an `Err(_)` result causes early return.
+
+### 2.2 — `handle_spellbook_input` → `spellbook_input_system`
+
+In-place rename only. Signature, body, and all logic are unchanged.
+`pub fn` visibility preserved. The doc comment updated to match the new name.
+The `collect_spell_ids_from_state` doc comment updated to reference
+`spellbook_input_system` instead of `handle_spellbook_input`.
+
+### 2.3 — `spellbook_ui_system`
+
+New private `fn` inserted between `spellbook_input_system` and
+`collect_spell_ids_from_state`. Structure:
+
+1. Guard: match `GameMode::SpellBook(sb)` — clone `sb` to avoid holding a borrow
+   into `global_state.0.mode` while passing `&global_state` to the render
+   helpers.
+2. `contexts.ctx_mut()` — early return on `Err`.
+3. `collect_spell_ids_from_state` — pre-compute spell ID list.
+4. `egui::CentralPanel::default().show(ctx, |ui| { … })` containing:
+   - **Title bar**: `ui.horizontal` with `ui.heading("📚 Spell Book")` and
+     `ui.with_layout(right_to_left, ...)` for the `[ESC] Close` hint.
+   - `ui.separator()`
+   - **Three-column body**: `ui.horizontal` containing three `ui.vertical`
+     sub-panels separated by `ui.separator()`:
+     - Left (140–160 px): `render_char_tabs`
+     - Centre (min 200 px, fills remaining): `ScrollArea::vertical()` with
+       `id_salt("spellbook_spell_list")` wrapping `render_spell_list`
+     - Right (180–215 px): `ScrollArea::vertical()` with
+       `id_salt("spellbook_detail_pane")` wrapping `render_detail_panel`
+   - `ui.separator()`
+   - **Bottom hint bar**: `ui.horizontal_centered` with the key-hint label.
+
+Both `ScrollArea` instances carry unique `id_salt` values, satisfying the
+egui ID audit rules from `sdk/AGENTS.md`.
+
+### 2.4 — `SpellBookPlugin` updated
+
+```text
+Before:
+  (setup_spellbook_ui, update_spellbook_ui,
+   handle_spellbook_input, cleanup_spellbook_ui).chain()
+
+After:
+  (spellbook_input_system, spellbook_ui_system).chain()
+```
+
+Plugin doc comment updated to describe the two-system chain.
+
+### 2.5 — `#[allow(dead_code)]` removed from render helpers
+
+`render_char_tabs`, `render_spell_list`, and `render_detail_panel` are now
+called by `spellbook_ui_system` and no longer need the suppression attribute.
+
+### Design Decisions
+
+- **Clone `SpellBookState` early** — cloning at the top of `spellbook_ui_system`
+  avoids a complex double-borrow of `global_state` (once for `sb`, again for
+  `&global_state` passed to render helpers). `SpellBookState` is small
+  (two `usize`, one `Option<SpellId>`, one boxed `GameMode`) so the clone is
+  negligible.
+- **`egui::CentralPanel`** — consistent with inn, inventory, temple, and lock
+  screens. Each mode is exclusive so only one `CentralPanel` is ever shown
+  per frame.
+- **Title bar pattern** — `ui.heading` + `ui.with_layout(right_to_left, ...)`
+  matches `container_inventory_ui`, `inventory_ui`, and `merchant_inventory_ui`.
+- **Four Bevy integration tests remain passing** — `setup_spellbook_ui` and
+  `cleanup_spellbook_ui` still exist in the file; the tests that build their
+  own `App` and register those functions directly still compile and pass.
+  They will be deleted in Phase 3.
+
+### Quality Gates
+
+```text
+cargo fmt --all                                    → clean
+cargo check --all-targets --all-features           → 0 errors
+cargo clippy --all-targets --all-features          → 0 warnings
+cargo nextest run --all-features                   → 4407 passed, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `use bevy_egui::{egui, EguiContexts};` — `EguiContexts` now used
+- [x] `handle_spellbook_input` renamed to `spellbook_input_system`
+- [x] `spellbook_ui_system` added with full three-column egui layout
+- [x] Both `ScrollArea` instances have unique `id_salt` values
+- [x] `SpellBookPlugin::build()` uses `(spellbook_input_system, spellbook_ui_system).chain()`
+- [x] Old Bevy systems present but no longer registered (deferred to Phase 3)
+- [x] `#[allow(dead_code)]` removed from all three render helpers
+- [x] No existing tests broken (4407/4407 pass)
+- [x] No test data references `campaigns/tutorial`
+
+---
+
 ## Spell Book egui Conversion — Phase 1: Port Rendering Helpers to egui (Complete)
 
 ### Overview
