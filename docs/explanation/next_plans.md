@@ -194,7 +194,7 @@ Campaign Builder --> Characters --> Edit Character Starting Spells area is very 
 
 Campaign Builder --> Validation --> NPC Stock Templates are flagged as unknown stock templates. The stock templates exist and are listed in the Stock Template section of the Campaign Builder but they are flagged as unknown in the Validation section. We should fix the validation to recognize the NPC Stock Templates so that they are not flagged as unknown.
 
-Campaign Builder --> Config Editor --> Key Bindings is missing the bindign for the Spellbook.
+Campaign Builder --> Config Editor --> Key Bindings is missing the key binding for the Spellbook [B].
 
 Write a plan with a phased approach to implementing the SDK fixes in the game engine. THINK HARD and follow the rules in @PLAN.md
 

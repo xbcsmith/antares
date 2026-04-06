@@ -1,5 +1,103 @@
 # Implementations
 
+## Spell Book egui Conversion — Phase 4: Test Rewrite and Documentation (Complete)
+
+### Overview
+
+Phase 4 completes the Spell Book egui conversion by deleting the now-invalid
+Bevy App integration tests, confirming all pure-logic tests are unmodified, and
+adding three focused egui render-helper smoke tests. The conversion is
+summarised below for future reference.
+
+### What Changed
+
+| Symbol / group              | Before (Bevy entity lifecycle)                                                                                                                              | After (egui)                                                                                                |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Plugin systems              | `setup_spellbook_ui`, `handle_spellbook_input`, `update_spellbook_ui`, `cleanup_spellbook_ui` (4 systems)                                                   | `spellbook_input_system`, `spellbook_ui_system` (2 systems)                                                 |
+| Marker components           | `SpellBookOverlay`, `SpellBookContent`, `SpellBookCharTab`, `SpellBookSpellRow`, `SpellBookCharList`, `SpellBookSpellList`, `SpellBookDetailPane` (7 types) | None — egui owns layout                                                                                     |
+| Color constants             | 10 `bevy::prelude::Color` constants                                                                                                                         | 10 `egui::Color32` constants with canonical names (no `_EG` suffix)                                         |
+| Rendering                   | Entity spawn / update / despawn lifecycle                                                                                                                   | `egui::CentralPanel` + three-column `horizontal` layout with `ScrollArea` for spell list and detail columns |
+| `ScrollArea` id_salt values | N/A                                                                                                                                                         | `"spellbook_spell_list"`, `"spellbook_detail_pane"`                                                         |
+| Loop ID isolation           | N/A                                                                                                                                                         | `ui.push_id(i, …)` for character tabs; `ui.push_id(spell_id, …)` for spell rows                             |
+
+### What Did Not Change
+
+The following symbols are **untouched** across all four phases:
+
+- `SpellBookState` — `src/application/spell_book_state.rs`
+- `GameMode::SpellBook`, `enter_spellbook()`, `exit_spellbook()` — `src/application/mod.rs`
+- `collect_spell_ids_from_state` — logic unchanged, only the doc comment updated
+- `spellbook_input_system` logic — in-place rename from `handle_spellbook_input`, zero behaviour change
+- Spell Book toggle guard — `src/game/input/global_toggles.rs`
+
+### 4.1 — Bevy App Integration Tests Deleted (Phase 3)
+
+Eight tests referencing deleted symbols were removed during Phase 3 (per
+the plan those deletions are reported here for completeness):
+
+| Test                                                   | Reason                         |
+| ------------------------------------------------------ | ------------------------------ |
+| `test_spell_book_overlay_is_marker_component`          | `SpellBookOverlay` deleted     |
+| `test_spell_book_content_is_marker_component`          | `SpellBookContent` deleted     |
+| `test_spell_book_char_tab_stores_party_index`          | `SpellBookCharTab` deleted     |
+| `test_spell_book_spell_row_stores_spell_id`            | `SpellBookSpellRow` deleted    |
+| `test_setup_spellbook_ui_spawns_overlay`               | `setup_spellbook_ui` deleted   |
+| `test_cleanup_spellbook_ui_despawns_overlays`          | `cleanup_spellbook_ui` deleted |
+| `test_setup_spellbook_ui_is_idempotent`                | `setup_spellbook_ui` deleted   |
+| `test_setup_spellbook_ui_no_spawn_in_exploration_mode` | `setup_spellbook_ui` deleted   |
+
+### 4.2 — Pure-Logic Tests Verified Unchanged
+
+All fifteen pure-logic tests continue to pass without modification:
+
+| Group                          | Tests                                                                                          |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `collect_spell_ids_from_state` | `not_in_spellbook_mode_returns_empty`, `empty_party_returns_empty`, `no_content_returns_empty` |
+| Tab navigation                 | `tab_forward_increments`, `tab_forward_wraps`, `tab_back_decrements`, `tab_back_wraps`         |
+| SP affordability               | `spell_row_disabled_when_sp_insufficient`, `spell_row_enabled_when_sp_sufficient`              |
+| Mode transitions               | `enter_and_exit_spellbook_roundtrip`, `exit_spellbook_noop_when_not_spellbook_mode`            |
+| Key simulation                 | `esc_triggers_exit_spellbook`, `c_key_transitions_to_spell_casting`                            |
+
+### 4.3 — egui Render Helper Smoke Tests Added
+
+Three new tests added to `mod tests` in `spellbook_ui.rs`:
+
+| Test                                                 | Helper exercised      | Boundary condition                                                         |
+| ---------------------------------------------------- | --------------------- | -------------------------------------------------------------------------- |
+| `test_render_char_tabs_empty_party_no_panic`         | `render_char_tabs`    | `party.members` is empty → "No party." placeholder                         |
+| `test_render_spell_list_no_spells_shows_placeholder` | `render_spell_list`   | `spell_ids = &[]`, `content = None` → "No character selected." placeholder |
+| `test_render_detail_panel_no_selection_no_panic`     | `render_detail_panel` | `selected_spell_id = None` → "Select a spell to view details." placeholder |
+
+All three use the `egui::Context::default()` + `ctx.run(egui::RawInput::default(), …)` +
+`egui::CentralPanel::default().show(…)` pattern established in `inventory_ui.rs`.
+
+### Files Changed
+
+| File                                  | Change                                                                                                            |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/spellbook_ui.rs`    | Added `use crate::game::resources::GlobalState` import to `mod tests`; added three egui render-helper smoke tests |
+| `docs/explanation/implementations.md` | Added Phase 4 summary (this section)                                                                              |
+
+### Line-Count Delta (All Four Phases)
+
+- **Deleted**: ~470 lines (4 Bevy systems, 7 marker components, 3 entity-builder helpers, 10 Bevy Color constants, 8 obsolete tests, dead imports)
+- **Added**: ~350 lines (egui constants, `spellbook_ui_system`, 3 render helpers, 3 smoke tests, module doc)
+- **Net reduction**: approximately **−120 lines** from the original file
+
+### Architecture Compliance
+
+- [x] `SpellBookPlugin::build()` registers exactly two systems
+- [x] Zero `#[derive(Component)]` structs remain in the file
+- [x] Both `ScrollArea` instances carry unique `id_salt` values
+- [x] Every character-tab loop uses `ui.push_id(i, …)`
+- [x] Every spell-row loop uses `ui.push_id(spell_id, …)`
+- [x] All `pub const SPELLBOOK_*` constants are `egui::Color32`
+- [x] `spellbook_ui_system` guards on `GameMode::SpellBook` and returns early otherwise
+- [x] No test references any deleted marker component or deleted system
+- [x] `docs/explanation/implementations.md` updated
+
+---
+
 ## Spell Book egui Conversion — Phase 3: Delete All Bevy-Native Dead Code (Complete)
 
 ### Overview

@@ -650,6 +650,7 @@ mod tests {
     use crate::application::spell_book_state::SpellBookState;
     use crate::application::GameState;
     use crate::domain::character::{Alignment, Character, Sex};
+    use crate::game::resources::GlobalState;
 
     // ── collect_spell_ids_from_state ─────────────────────────────────────────
 
@@ -830,5 +831,60 @@ mod tests {
                 "must use character index from SpellBook"
             );
         }
+    }
+
+    // ── egui render helper smoke tests ───────────────────────────────────────
+
+    /// `render_char_tabs` must not panic when the party is completely empty.
+    ///
+    /// When `party.members` is empty the helper should emit the
+    /// "No party." placeholder label and return without iterating.
+    #[test]
+    fn test_render_char_tabs_empty_party_no_panic() {
+        let sb = SpellBookState::new(0, GameMode::Exploration);
+        let global_state = GlobalState(GameState::new()); // empty party
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_char_tabs(ui, &sb, &global_state);
+            });
+        });
+    }
+
+    /// `render_spell_list` must not panic when `spell_ids` is empty and
+    /// `content` is `None`.
+    ///
+    /// With an empty party, `party.members.get(0)` returns `None` so the
+    /// helper emits the "No character selected." placeholder and returns early.
+    #[test]
+    fn test_render_spell_list_no_spells_shows_placeholder() {
+        let sb = SpellBookState::new(0, GameMode::Exploration);
+        let global_state = GlobalState(GameState::new()); // empty party → index 0 out of range
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_spell_list(ui, &sb, &global_state, None, &[]);
+            });
+        });
+    }
+
+    /// `render_detail_panel` must not panic when `selected_spell_id` is `None`.
+    ///
+    /// `SpellBookState::new` initialises `selected_spell_id` to `None`, so the
+    /// helper should emit the "Select a spell to view details." placeholder and
+    /// return without accessing any content database.
+    #[test]
+    fn test_render_detail_panel_no_selection_no_panic() {
+        // selected_spell_id defaults to None
+        let sb = SpellBookState::new(0, GameMode::Exploration);
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_detail_panel(ui, &sb, None);
+            });
+        });
     }
 }
