@@ -180,6 +180,8 @@ Campaign Builder --> Furniture --> Edit Furniture does not have a Back to List b
 
 Campaign Builder --> Stock Templates --> Edit Stock Template does not load the description of the Stock Template in the editor. We should load the description of the Stock Template in the editor so that it can be edited as well.
 
+Campaign Builder --> Characters --> Display does not have starting spells listed in the character details. We should add starting spells to the character details.
+
 Write a plan with a phased approach to implementing the SDK fixes in the game engine. THINK HARD and follow the rules in @PLAN.md
 
 ✅ PLAN WRITTEN - [SDK Fixes Implementation Plan](./sdk_fixes_implementation_plan.md)

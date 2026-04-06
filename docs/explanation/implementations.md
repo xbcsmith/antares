@@ -1,5 +1,134 @@
 # Implementations
 
+## Spell Book egui Conversion — Phase 1: Port Rendering Helpers to egui (Complete)
+
+### Overview
+
+`src/game/systems/spellbook_ui.rs` is the only exploration-mode management
+screen that still uses Bevy's native entity/component UI. Phase 1 is the
+first of four phases that migrate it to `bevy_egui`, matching every other
+management screen (inn, inventory, merchant, container, temple, lock).
+
+This phase adds three private egui render helpers alongside the existing
+Bevy entity-builder code. Nothing is wired up or deleted yet; the sole
+purpose is to confirm the egui logic compiles and lints clean before Phase 2
+cuts over to the new helpers.
+
+### Problem Solved
+
+The existing `build_char_tabs`, `build_spell_list`, and `build_detail_panel`
+functions accept `&mut ChildSpawnerCommands<'_>` and spawn Bevy text entities.
+They cannot be called from an egui context. Phase 1 provides direct
+translations that accept `&mut egui::Ui` instead, eliminating all
+`ChildSpawnerCommands` usage in the render path.
+
+### Files Changed
+
+| File                               | Change                                                                                                                         |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `src/game/systems/spellbook_ui.rs` | Added `use bevy_egui::egui;` import, 10 `SPELLBOOK_*_EG` `egui::Color32` constants, and three `render_*` egui helper functions |
+
+### 1.1 — `use bevy_egui::egui;` Import
+
+Added directly below `use bevy::prelude::*;`. `EguiContexts` is intentionally
+deferred to Phase 2 where it is first used by `spellbook_ui_system`.
+
+### 1.2 — Ten `egui::Color32` Constants
+
+Ten `pub const SPELLBOOK_*_EG: egui::Color32` constants added immediately
+after the existing ten `bevy::prelude::Color` constants. The `_EG` suffix
+avoids a name collision during the transition period; Phase 3 will delete the
+old Bevy constants and rename these.
+
+| Constant                               | Value                                      |
+| -------------------------------------- | ------------------------------------------ |
+| `SPELLBOOK_OVERLAY_BG_EG`              | `from_rgba_premultiplied(0, 0, 26, 224)`   |
+| `SPELLBOOK_PANEL_BG_EG`                | `from_rgba_premultiplied(15, 15, 46, 247)` |
+| `SPELLBOOK_SELECTED_ROW_BG_EG`         | `from_rgba_premultiplied(51, 51, 13, 230)` |
+| `SPELLBOOK_NORMAL_ROW_COLOR_EG`        | `egui::Color32::WHITE`                     |
+| `SPELLBOOK_DISABLED_SPELL_COLOR_EG`    | `from_rgb(115, 115, 115)`                  |
+| `SPELLBOOK_LEVEL_HEADER_COLOR_EG`      | `from_rgb(179, 204, 255)`                  |
+| `SPELLBOOK_CHAR_TAB_ACTIVE_COLOR_EG`   | `from_rgb(255, 230, 51)`                   |
+| `SPELLBOOK_CHAR_TAB_INACTIVE_COLOR_EG` | `from_rgb(153, 153, 179)`                  |
+| `SPELLBOOK_HINT_COLOR_EG`              | `from_rgb(140, 140, 166)`                  |
+| `SPELLBOOK_TITLE_COLOR_EG`             | `from_rgb(204, 217, 255)`                  |
+
+All ten constants are `const fn`-constructible at compile time.
+
+### 1.3 — `render_char_tabs(ui, sb, global_state)`
+
+Direct egui translation of `build_char_tabs`. Key differences from the Bevy
+version:
+
+- Column header: `ui.label(egui::RichText::new("Characters").color(...))`
+- Empty-party guard: `ui.label(...)` instead of a child spawn
+- Per-member loop wrapped in `ui.push_id(i, |ui| { … })` (required egui ID
+  uniqueness rule)
+- Active-tab highlight: `egui::Frame::new().fill(SPELLBOOK_SELECTED_ROW_BG_EG).show(ui, |ui| { … })`
+- Inactive tabs: transparent fill (`egui::Color32::TRANSPARENT`), plain label
+
+`#[allow(dead_code)]` applied because the function is not yet called (Phase 2
+wires it up). `egui::Frame::new()` used in place of the deprecated
+`egui::Frame::none()`.
+
+### 1.4 — `render_spell_list(ui, sb, global_state, content, spell_ids)`
+
+Direct egui translation of `build_spell_list`. Formatting logic (label
+strings, SP affordability, gem cost, context tag, level headers) is identical
+to the Bevy version; only the output calls changed.
+
+- Level headers: `ui.label(egui::RichText::new(...).color(SPELLBOOK_LEVEL_HEADER_COLOR_EG))`
+- Per-spell rows: `ui.push_id(spell_id, |ui| { … })` for egui ID uniqueness
+- Selected rows: `egui::Frame::new().fill(SPELLBOOK_SELECTED_ROW_BG_EG).show(...)`
+- Learnable Scrolls section preserved verbatim in logic
+
+### 1.5 — `render_detail_panel(ui, sb, content)`
+
+Direct egui translation of `build_detail_panel`.
+
+- Spell name rendered with `.size(BODY_FONT_SIZE + 2.0)` (matching the
+  `BODY_FONT_SIZE + 2.0` font size used in the Bevy version)
+- Detail lines (school, level, SP cost, gem cost, context) via
+  `ui.label(egui::RichText::new(line).color(SPELLBOOK_NORMAL_ROW_COLOR_EG))`
+- Description via `ui.label(egui::RichText::new(...).color(SPELLBOOK_HINT_COLOR_EG))`
+- `ui.add_space(4.0)` replaces the blank-text entity used as a separator
+
+### Design Decisions
+
+- **`egui::Frame::new()` not `egui::Frame::none()`** — `Frame::none()` is
+  deprecated in egui ≥ 0.29. `Frame::new()` provides identical behaviour
+  (zero inner margin, no stroke, configurable fill) without the deprecation
+  warning that would fail `-D warnings`.
+- **`EguiContexts` deferred to Phase 2** — importing it in Phase 1 would
+  trigger an unused-import clippy error. It is added when
+  `spellbook_ui_system` is introduced.
+- **`#[allow(dead_code)]` on each helper** — the three functions are private
+  and not yet called. The attribute is removed in Phase 2 once they are
+  called from `spellbook_ui_system`.
+
+### Quality Gates
+
+```text
+cargo fmt --all                                    → clean
+cargo check --all-targets --all-features           → 0 errors
+cargo clippy --all-targets --all-features          → 0 warnings
+cargo nextest run --all-features                   → 4407 passed, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `use bevy_egui::egui;` import added
+- [x] Ten `SPELLBOOK_*_EG` `egui::Color32` constants added
+- [x] `render_char_tabs()` added — compiles, lints clean
+- [x] `render_spell_list()` added — compiles, lints clean
+- [x] `render_detail_panel()` added — compiles, lints clean
+- [x] No existing tests broken (4407/4407 pass)
+- [x] No architectural deviations from Phase 1 spec
+- [x] SPDX headers unchanged
+- [x] No test data references `campaigns/tutorial`
+
+---
+
 ## Phase 4: Validation Integration and Documentation (Complete)
 
 ### Overview

@@ -63,6 +63,7 @@ use crate::domain::types::SpellId;
 use crate::game::resources::GlobalState;
 use crate::game::systems::ui_helpers::{BODY_FONT_SIZE, LABEL_FONT_SIZE};
 use bevy::prelude::*;
+use bevy_egui::egui;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -86,6 +87,34 @@ pub const SPELLBOOK_CHAR_TAB_INACTIVE_COLOR: Color = Color::srgb(0.6, 0.6, 0.7);
 pub const SPELLBOOK_HINT_COLOR: Color = Color::srgb(0.55, 0.55, 0.65);
 /// Text color for the main "Spell Book" title and column headers.
 pub const SPELLBOOK_TITLE_COLOR: Color = Color::srgb(0.8, 0.85, 1.0);
+
+// ── egui Color32 constants (Phase 1 — temporary `_EG` suffix until Phase 3
+//    renames these once the old Bevy Color constants are deleted) ───────────────
+
+/// Semi-transparent full-screen backdrop for the Spell Book overlay (egui).
+pub const SPELLBOOK_OVERLAY_BG_EG: egui::Color32 =
+    egui::Color32::from_rgba_premultiplied(0, 0, 26, 224);
+/// Background color of the inner panel (egui).
+pub const SPELLBOOK_PANEL_BG_EG: egui::Color32 =
+    egui::Color32::from_rgba_premultiplied(15, 15, 46, 247);
+/// Highlight color for the currently selected spell row (egui).
+pub const SPELLBOOK_SELECTED_ROW_BG_EG: egui::Color32 =
+    egui::Color32::from_rgba_premultiplied(51, 51, 13, 230);
+/// Default text color for spell name entries (egui).
+pub const SPELLBOOK_NORMAL_ROW_COLOR_EG: egui::Color32 = egui::Color32::WHITE;
+/// Text color when the character has insufficient SP to cast the spell (egui).
+pub const SPELLBOOK_DISABLED_SPELL_COLOR_EG: egui::Color32 = egui::Color32::from_rgb(115, 115, 115);
+/// Text color for "Level N" group header rows (egui).
+pub const SPELLBOOK_LEVEL_HEADER_COLOR_EG: egui::Color32 = egui::Color32::from_rgb(179, 204, 255);
+/// Text / background highlight for the active character tab (egui).
+pub const SPELLBOOK_CHAR_TAB_ACTIVE_COLOR_EG: egui::Color32 = egui::Color32::from_rgb(255, 230, 51);
+/// Text color for inactive character tabs (egui).
+pub const SPELLBOOK_CHAR_TAB_INACTIVE_COLOR_EG: egui::Color32 =
+    egui::Color32::from_rgb(153, 153, 179);
+/// Text color for hint / secondary text at the bottom and in the detail panel (egui).
+pub const SPELLBOOK_HINT_COLOR_EG: egui::Color32 = egui::Color32::from_rgb(140, 140, 166);
+/// Text color for the main "Spell Book" title and column headers (egui).
+pub const SPELLBOOK_TITLE_COLOR_EG: egui::Color32 = egui::Color32::from_rgb(204, 217, 255);
 
 // ── Components ─────────────────────────────────────────────────────────────────
 
@@ -996,6 +1025,305 @@ fn build_detail_panel(
             },
             TextColor(SPELLBOOK_HINT_COLOR),
         ));
+    }
+}
+
+// ── egui render helpers ───────────────────────────────────────────────────────
+
+/// Renders the character-tab rows in the left column using egui.
+///
+/// Direct egui translation of [`build_char_tabs`].  Called from
+/// `spellbook_ui_system` once it is wired up (Phase 2).
+///
+/// # Arguments
+///
+/// * `ui`           — mutable reference to the current egui [`egui::Ui`].
+/// * `sb`           — current [`SpellBookState`] (character index, selected row).
+/// * `global_state` — read-only access to party members and their spell data.
+#[allow(dead_code)]
+fn render_char_tabs(ui: &mut egui::Ui, sb: &SpellBookState, global_state: &GlobalState) {
+    // Column header
+    ui.label(egui::RichText::new("Characters").color(SPELLBOOK_TITLE_COLOR_EG));
+
+    let members = &global_state.0.party.members;
+    if members.is_empty() {
+        ui.label(egui::RichText::new("No party.").color(SPELLBOOK_DISABLED_SPELL_COLOR_EG));
+        return;
+    }
+
+    for (i, member) in members.iter().enumerate() {
+        let active = i == sb.character_index;
+        let text_color = if active {
+            SPELLBOOK_CHAR_TAB_ACTIVE_COLOR_EG
+        } else {
+            SPELLBOOK_CHAR_TAB_INACTIVE_COLOR_EG
+        };
+
+        // Show "✓" if the character has any known spells.
+        let has_spells = member.spells.cleric_spells.iter().any(|v| !v.is_empty())
+            || member.spells.sorcerer_spells.iter().any(|v| !v.is_empty());
+        let check = if has_spells { " \u{2713}" } else { "" };
+        let cursor = if active { "[*]" } else { "[ ]" };
+        let label = format!("{cursor} {}{}", member.name, check);
+
+        ui.push_id(i, |ui| {
+            let bg = if active {
+                SPELLBOOK_SELECTED_ROW_BG_EG
+            } else {
+                egui::Color32::TRANSPARENT
+            };
+            egui::Frame::new().fill(bg).show(ui, |ui| {
+                ui.label(egui::RichText::new(label).color(text_color));
+            });
+        });
+    }
+}
+
+/// Renders the spell-list rows and learnable-scrolls section using egui.
+///
+/// Direct egui translation of [`build_spell_list`].  Called from
+/// `spellbook_ui_system` once it is wired up (Phase 2).
+///
+/// # Arguments
+///
+/// * `ui`           — mutable reference to the current egui [`egui::Ui`].
+/// * `sb`           — current [`SpellBookState`] (character index, selected row).
+/// * `global_state` — read-only access to the party and per-character stats.
+/// * `content`      — optional loaded content database (spells, classes, items).
+/// * `spell_ids`    — flat ordered list of [`SpellId`]s known by the current
+///   character, pre-computed by [`collect_spell_ids_from_state`].
+#[allow(dead_code)]
+fn render_spell_list(
+    ui: &mut egui::Ui,
+    sb: &SpellBookState,
+    global_state: &GlobalState,
+    content: Option<&GameContent>,
+    spell_ids: &[SpellId],
+) {
+    // Column header
+    ui.label(egui::RichText::new("Known Spells").color(SPELLBOOK_TITLE_COLOR_EG));
+
+    let Some(character) = global_state.0.party.members.get(sb.character_index) else {
+        ui.label(
+            egui::RichText::new("No character selected.").color(SPELLBOOK_DISABLED_SPELL_COLOR_EG),
+        );
+        return;
+    };
+
+    let Some(content_ref) = content else {
+        ui.label(
+            egui::RichText::new("Content not available.").color(SPELLBOOK_DISABLED_SPELL_COLOR_EG),
+        );
+        return;
+    };
+
+    let class_db = &content_ref.db().classes;
+    let spell_db = &content_ref.db().spells;
+    let item_db = &content_ref.db().items;
+    let spell_list = character
+        .spells
+        .get_spell_list_by_id(&character.class_id, class_db);
+
+    if spell_ids.is_empty() {
+        ui.label(egui::RichText::new("No spells known.").color(SPELLBOOK_DISABLED_SPELL_COLOR_EG));
+    } else {
+        // Flat row index that matches sb.selected_row.
+        let mut row_idx: usize = 0;
+
+        for (level_idx, level_spells) in spell_list.iter().enumerate() {
+            if level_spells.is_empty() {
+                continue;
+            }
+
+            // ── Level header ──────────────────────────────────────────────────
+            ui.label(
+                egui::RichText::new(format!("-- Level {} --", level_idx + 1))
+                    .color(SPELLBOOK_LEVEL_HEADER_COLOR_EG),
+            );
+
+            for &spell_id in level_spells {
+                let selected = row_idx == sb.selected_row;
+
+                // Determine affordability (true = can cast right now).
+                let can_afford = spell_db
+                    .get_spell(spell_id)
+                    .map(|s| u32::from(character.sp.current) >= u32::from(s.sp_cost))
+                    .unwrap_or(true);
+
+                let text_color = if !can_afford {
+                    SPELLBOOK_DISABLED_SPELL_COLOR_EG
+                } else if selected {
+                    SPELLBOOK_CHAR_TAB_ACTIVE_COLOR_EG
+                } else {
+                    SPELLBOOK_NORMAL_ROW_COLOR_EG
+                };
+
+                let label = if let Some(spell_def) = spell_db.get_spell(spell_id) {
+                    let context_tag = match spell_def.context {
+                        SpellContext::CombatOnly => " \u{2694}",     // ⚔
+                        SpellContext::NonCombatOnly => " \u{1F30D}", // 🌍
+                        SpellContext::OutdoorOnly
+                        | SpellContext::IndoorOnly
+                        | SpellContext::OutdoorCombat => " \u{1F30D}",
+                        SpellContext::Anytime => "",
+                    };
+                    if spell_def.gem_cost > 0 {
+                        format!(
+                            "{} \u{2014} {} SP \u{1F48E}{}{}", // — …SP 💎N context
+                            spell_def.name, spell_def.sp_cost, spell_def.gem_cost, context_tag,
+                        )
+                    } else {
+                        format!(
+                            "{} \u{2014} {} SP{}",
+                            spell_def.name, spell_def.sp_cost, context_tag
+                        )
+                    }
+                } else {
+                    format!("Spell {spell_id:#06x}")
+                };
+
+                ui.push_id(spell_id, |ui| {
+                    if selected {
+                        egui::Frame::new()
+                            .fill(SPELLBOOK_SELECTED_ROW_BG_EG)
+                            .show(ui, |ui| {
+                                ui.label(egui::RichText::new(label).color(text_color));
+                            });
+                    } else {
+                        ui.label(egui::RichText::new(label).color(text_color));
+                    }
+                });
+
+                row_idx += 1;
+            }
+        }
+    }
+
+    // ── Learnable Scrolls section ─────────────────────────────────────────────
+
+    let scroll_entries: Vec<(String, SpellId, bool)> = character
+        .inventory
+        .items
+        .iter()
+        .filter_map(|slot| {
+            let item_def = item_db.get_item(slot.item_id)?;
+            if let ItemType::Consumable(ref consumable) = item_def.item_type {
+                if let ConsumableEffect::LearnSpell(spell_id) = consumable.effect {
+                    let eligible = can_learn_spell(character, spell_id, spell_db, class_db).is_ok();
+                    return Some((item_def.name.clone(), spell_id, eligible));
+                }
+            }
+            None
+        })
+        .collect();
+
+    if !scroll_entries.is_empty() {
+        ui.label(
+            egui::RichText::new("-- Learnable Scrolls --").color(SPELLBOOK_LEVEL_HEADER_COLOR_EG),
+        );
+
+        for (scroll_name, spell_id, eligible) in scroll_entries {
+            let spell_name = spell_db
+                .get_spell(spell_id)
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| format!("{spell_id:#06x}"));
+            let eligibility = if eligible {
+                " [eligible]"
+            } else {
+                " [not eligible]"
+            };
+            let color = if eligible {
+                SPELLBOOK_NORMAL_ROW_COLOR_EG
+            } else {
+                SPELLBOOK_DISABLED_SPELL_COLOR_EG
+            };
+
+            ui.label(
+                egui::RichText::new(format!("{scroll_name} \u{2192} {spell_name}{eligibility}"))
+                    .color(color),
+            );
+        }
+    }
+}
+
+/// Renders the spell-detail panel using egui.
+///
+/// Direct egui translation of [`build_detail_panel`].  Shows full spell info
+/// (name, school, level, SP cost, gem cost, context, description) when
+/// `sb.selected_spell_id` is `Some`, otherwise shows a placeholder message.
+/// Called from `spellbook_ui_system` once it is wired up (Phase 2).
+///
+/// # Arguments
+///
+/// * `ui`      — mutable reference to the current egui [`egui::Ui`].
+/// * `sb`      — current [`SpellBookState`] (provides `selected_spell_id`).
+/// * `content` — optional loaded content database (spell definitions).
+#[allow(dead_code)]
+fn render_detail_panel(ui: &mut egui::Ui, sb: &SpellBookState, content: Option<&GameContent>) {
+    // Column header
+    ui.label(egui::RichText::new("Detail").color(SPELLBOOK_TITLE_COLOR_EG));
+
+    let Some(spell_id) = sb.selected_spell_id else {
+        ui.label(
+            egui::RichText::new("Select a spell to view details.").color(SPELLBOOK_HINT_COLOR_EG),
+        );
+        return;
+    };
+
+    let Some(content_ref) = content else {
+        ui.label(
+            egui::RichText::new("Content not loaded.").color(SPELLBOOK_DISABLED_SPELL_COLOR_EG),
+        );
+        return;
+    };
+
+    let Some(spell) = content_ref.db().spells.get_spell(spell_id) else {
+        ui.label(
+            egui::RichText::new(format!("Unknown spell\n{spell_id:#06x}"))
+                .color(SPELLBOOK_DISABLED_SPELL_COLOR_EG),
+        );
+        return;
+    };
+
+    // Spell name — displayed larger
+    ui.label(
+        egui::RichText::new(spell.name.clone())
+            .color(SPELLBOOK_TITLE_COLOR_EG)
+            .size(BODY_FONT_SIZE + 2.0),
+    );
+
+    let context_label = match spell.context {
+        SpellContext::Anytime => "Any".to_string(),
+        SpellContext::CombatOnly => "Combat \u{2694}".to_string(),
+        SpellContext::NonCombatOnly => "Non-Combat \u{1F30D}".to_string(),
+        SpellContext::OutdoorOnly => "Outdoor".to_string(),
+        SpellContext::IndoorOnly => "Indoor".to_string(),
+        SpellContext::OutdoorCombat => "Outdoor Combat".to_string(),
+    };
+    let gem_label = if spell.gem_cost > 0 {
+        spell.gem_cost.to_string()
+    } else {
+        "\u{2014}".to_string() // —
+    };
+
+    let detail_lines = [
+        format!("School: {:?}", spell.school),
+        format!("Level:  {}", spell.level),
+        format!("SP Cost: {}", spell.sp_cost),
+        format!("Gem Cost: {gem_label}"),
+        format!("Context: {context_label}"),
+    ];
+
+    for line in &detail_lines {
+        ui.label(egui::RichText::new(line.clone()).color(SPELLBOOK_NORMAL_ROW_COLOR_EG));
+    }
+
+    // Space before description
+    ui.add_space(4.0);
+
+    // Description text
+    if !spell.description.is_empty() {
+        ui.label(egui::RichText::new(spell.description.clone()).color(SPELLBOOK_HINT_COLOR_EG));
     }
 }
 
