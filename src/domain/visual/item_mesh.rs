@@ -788,6 +788,10 @@ impl ItemMeshDescriptor {
             // Resurrection scrolls use a radiant gold/amber to signal their
             // life-restoring power and distinguish them from ordinary potions.
             ConsumableEffect::Resurrect(_) => [1.0, 0.84, 0.0, 1.0],
+            // Spell scrolls (cast-once) use a pale violet to evoke arcane energy
+            ConsumableEffect::CastSpell(_) => [0.7, 0.5, 1.0, 1.0],
+            // Learning scrolls use a deep indigo to signal permanent knowledge gain
+            ConsumableEffect::LearnSpell(_) => [0.3, 0.2, 0.8, 1.0],
         };
 
         Self {

@@ -53,6 +53,46 @@ type ConditionTextQuery<'w, 's> = Query<
     Without<HpTextOverlay>,
 >;
 
+/// Query for SP bar text overlay entities.
+type SpBarTextQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static SpBarTextOverlay,
+        &'static mut Text,
+        &'static mut TextColor,
+    ),
+    (Without<HpTextOverlay>, Without<ConditionText>),
+>;
+
+/// Query for SP bar background visibility (show/hide per caster status).
+type SpBarBgQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static SpBarBackground, &'static mut Node),
+    (
+        Without<CharacterCard>,
+        Without<HpBarFill>,
+        Without<SpBarFill>,
+    ),
+>;
+
+/// Query for SP bar fill width and color.
+type SpBarFillQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static SpBarFill,
+        &'static mut Node,
+        &'static mut BackgroundColor,
+    ),
+    (
+        Without<CharacterCard>,
+        Without<HpBarFill>,
+        Without<SpBarBackground>,
+    ),
+>;
+
 /// Query for the clock time text entity, excluding the date text entity.
 type ClockTimeQuery<'w, 's> = Query<
     'w,
@@ -85,6 +125,17 @@ pub const CONDITION_BUFFED_COLOR: Color = Color::srgb(0.78, 0.71, 0.39);
 // HP thresholds
 pub const HP_HEALTHY_THRESHOLD: f32 = 0.75;
 pub const HP_CRITICAL_THRESHOLD: f32 = 0.25;
+
+// SP bar colors
+pub const SP_HEALTHY_COLOR: Color = Color::srgb(0.2, 0.4, 0.9);
+pub const SP_LOW_COLOR: Color = Color::srgb(0.4, 0.6, 0.8);
+pub const SP_EMPTY_COLOR: Color = Color::srgb(0.31, 0.31, 0.31);
+// SP bar geometry
+pub const SP_BAR_HEIGHT: Val = Val::Px(8.0);
+// SP bar threshold
+pub const SP_HEALTHY_THRESHOLD: f32 = 0.5;
+// SP text overlay color
+pub const SP_TEXT_COLOR: Color = Color::srgba(0.80, 0.90, 1.0, 1.0);
 
 // Layout constants
 pub const HUD_PANEL_HEIGHT: Val = Val::Px(70.0);
@@ -219,6 +270,24 @@ pub struct ConditionText {
 /// Marker component for HP text overlay on the bar
 #[derive(Component)]
 pub struct HpTextOverlay {
+    pub party_index: usize,
+}
+
+/// Marker component for SP bar background container
+#[derive(Component)]
+pub struct SpBarBackground {
+    pub party_index: usize,
+}
+
+/// Marker component for SP bar fill (the colored portion)
+#[derive(Component)]
+pub struct SpBarFill {
+    pub party_index: usize,
+}
+
+/// Marker component for SP text overlay on the SP bar
+#[derive(Component)]
+pub struct SpBarTextOverlay {
     pub party_index: usize,
 }
 
@@ -535,6 +604,51 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                             ));
                         });
 
+                        // SP bar container (hidden by default; shown only for spellcasters)
+                        card.spawn((
+                            Node {
+                                width: Val::Percent(100.0),
+                                height: SP_BAR_HEIGHT,
+                                position_type: PositionType::Relative,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.3, 0.3, 0.3, 1.0)),
+                            SpBarBackground { party_index },
+                        ))
+                        .with_children(|bar| {
+                            // SP bar fill (the colored part)
+                            bar.spawn((
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    height: Val::Percent(100.0),
+                                    ..default()
+                                },
+                                BackgroundColor(SP_HEALTHY_COLOR),
+                                SpBarFill { party_index },
+                            ));
+
+                            // SP text overlay on the bar
+                            bar.spawn((
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: HP_TEXT_OVERLAY_PADDING_LEFT,
+                                    top: Val::Px(0.0),
+                                    width: Val::Percent(100.0),
+                                    height: Val::Percent(100.0),
+                                    align_items: AlignItems::Center,
+                                    ..default()
+                                },
+                                ZIndex(1),
+                                Text::new(""),
+                                TextFont {
+                                    font_size: 8.0,
+                                    ..default()
+                                },
+                                TextColor(SP_TEXT_COLOR),
+                                SpBarTextOverlay { party_index },
+                            ));
+                        });
+
                         // Condition text
                         card.spawn((
                             Text::new(""),
@@ -658,7 +772,7 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
 /// Updates HUD elements based on current party state
 ///
 /// This system runs every frame to sync UI with game state.
-/// Updates HP bars, HP overlay text color, condition text, and character card visibility.
+/// Updates HP bars, HP overlay text color, condition text, SP bars, and character card visibility.
 ///
 /// # Arguments
 /// * `global_state` - Game state containing party data
@@ -666,12 +780,19 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
 /// * `hp_bar_query` - Query for HP bar fill entities
 /// * `hp_overlay_query` - Query for HP text overlay entities
 /// * `condition_text_query` - Query for condition text entities
+/// * `sp_bar_bg_query` - Query for SP bar background visibility
+/// * `sp_bar_fill_query` - Query for SP bar fill entities
+/// * `sp_text_query` - Query for SP text overlay entities
+#[allow(clippy::too_many_arguments)]
 fn update_hud(
     global_state: Res<GlobalState>,
     mut card_query: Query<(&CharacterCard, &mut Node), Without<HpBarFill>>,
     mut hp_bar_query: Query<(&HpBarFill, &mut Node, &mut BackgroundColor)>,
     mut hp_overlay_query: HpOverlayQuery,
     mut condition_text_query: ConditionTextQuery,
+    mut sp_bar_bg_query: SpBarBgQuery,
+    mut sp_bar_fill_query: SpBarFillQuery,
+    mut sp_text_query: SpBarTextQuery,
 ) {
     let party = &global_state.0.party;
 
@@ -735,6 +856,56 @@ fn update_hud(
 
             **text = display_text;
             *text_color = TextColor(color);
+        } else {
+            **text = String::new();
+        }
+    }
+
+    // Update SP bar backgrounds (show/hide for casters vs non-casters)
+    for (sp_bg, mut node) in sp_bar_bg_query.iter_mut() {
+        if let Some(character) = party.members.get(sp_bg.party_index) {
+            // Non-casters (Knights, Robbers) have sp.base == 0 — hide their bar
+            node.display = if character.sp.base == 0 {
+                Display::None
+            } else {
+                Display::Flex
+            };
+        } else {
+            node.display = Display::None;
+        }
+    }
+
+    // Update SP bar fills and colors
+    for (sp_bar, mut node, mut bg_color) in sp_bar_fill_query.iter_mut() {
+        if let Some(character) = party.members.get(sp_bar.party_index) {
+            if character.sp.base == 0 {
+                node.width = Val::Px(0.0);
+            } else {
+                let sp_percent =
+                    (character.sp.current as f32 / character.sp.base as f32).clamp(0.0, 1.0);
+                node.width = Val::Percent(sp_percent * 100.0);
+                *bg_color = BackgroundColor(sp_bar_color(sp_percent));
+            }
+        } else {
+            node.width = Val::Px(0.0);
+        }
+    }
+
+    // Update SP text overlays
+    for (sp_text, mut text, mut text_color) in sp_text_query.iter_mut() {
+        if let Some(character) = party.members.get(sp_text.party_index) {
+            if character.sp.base == 0 {
+                **text = String::new();
+            } else {
+                **text = format_sp_display(character.sp.current, character.sp.base);
+                let sp_percent =
+                    (character.sp.current as f32 / character.sp.base as f32).clamp(0.0, 1.0);
+                *text_color = TextColor(if sp_percent >= SP_HEALTHY_THRESHOLD {
+                    SP_TEXT_COLOR
+                } else {
+                    Color::srgba(0.7, 0.8, 1.0, 1.0)
+                });
+            }
         } else {
             **text = String::new();
         }
@@ -2003,6 +2174,59 @@ pub fn format_hp_display(current: u16, max: u16) -> String {
     format!("HP: {}/{}", current, max)
 }
 
+/// Returns the appropriate color for the SP bar based on current SP percentage.
+///
+/// Color thresholds:
+/// - Blue (`SP_HEALTHY_COLOR`) when SP is at or above `SP_HEALTHY_THRESHOLD` (50%)
+/// - Light blue (`SP_LOW_COLOR`) when SP is between 0% (exclusive) and 50%
+/// - Grey (`SP_EMPTY_COLOR`) when SP is 0%
+///
+/// # Arguments
+/// * `sp_percent` - Current SP as a ratio (0.0 to 1.0)
+///
+/// # Returns
+/// Bevy `Color` for the SP bar fill
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::hud::sp_bar_color;
+/// use bevy::prelude::Color;
+///
+/// let color = sp_bar_color(0.75);
+/// // Returns SP_HEALTHY_COLOR (blue)
+/// ```
+pub fn sp_bar_color(sp_percent: f32) -> Color {
+    if sp_percent >= SP_HEALTHY_THRESHOLD {
+        SP_HEALTHY_COLOR
+    } else if sp_percent > 0.0 {
+        SP_LOW_COLOR
+    } else {
+        SP_EMPTY_COLOR
+    }
+}
+
+/// Formats SP display as "SP: current/max"
+///
+/// # Arguments
+/// * `current` - Current SP value
+/// * `max` - Maximum SP value
+///
+/// # Returns
+/// Formatted string like "SP: 15/30"
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::hud::format_sp_display;
+///
+/// let display = format_sp_display(15, 30);
+/// assert_eq!(display, "SP: 15/30");
+/// ```
+pub fn format_sp_display(current: u16, max: u16) -> String {
+    format!("SP: {}/{}", current, max)
+}
+
 /// Returns the appropriate text color for HP overlay based on health percentage
 ///
 /// Uses contrast-aware colors that are darker/lighter than the bar background:
@@ -2586,6 +2810,57 @@ mod tests {
     }
 
     #[test]
+    fn test_sp_bar_color_healthy() {
+        let color = sp_bar_color(1.0);
+        assert_eq!(color, SP_HEALTHY_COLOR);
+    }
+
+    #[test]
+    fn test_sp_bar_color_at_threshold() {
+        let color = sp_bar_color(SP_HEALTHY_THRESHOLD);
+        assert_eq!(color, SP_HEALTHY_COLOR);
+    }
+
+    #[test]
+    fn test_sp_bar_color_low() {
+        let color = sp_bar_color(0.25);
+        assert_eq!(color, SP_LOW_COLOR);
+    }
+
+    #[test]
+    fn test_sp_bar_color_empty() {
+        let color = sp_bar_color(0.0);
+        assert_eq!(color, SP_EMPTY_COLOR);
+    }
+
+    #[test]
+    fn test_sp_bar_color_just_above_threshold() {
+        let color = sp_bar_color(SP_HEALTHY_THRESHOLD + 0.01);
+        assert_eq!(color, SP_HEALTHY_COLOR);
+    }
+
+    #[test]
+    fn test_sp_bar_color_just_below_threshold() {
+        let color = sp_bar_color(SP_HEALTHY_THRESHOLD - 0.01);
+        assert_eq!(color, SP_LOW_COLOR);
+    }
+
+    #[test]
+    fn test_format_sp_display() {
+        assert_eq!(format_sp_display(15, 30), "SP: 15/30");
+    }
+
+    #[test]
+    fn test_format_sp_display_full() {
+        assert_eq!(format_sp_display(30, 30), "SP: 30/30");
+    }
+
+    #[test]
+    fn test_format_sp_display_zero() {
+        assert_eq!(format_sp_display(0, 30), "SP: 0/30");
+    }
+
+    #[test]
     fn test_get_priority_condition_dead() {
         let mut conditions = Condition::new();
         conditions.add(Condition::DEAD);
@@ -2830,6 +3105,121 @@ mod tests {
                 }
             }
             assert!(found, "HP bar not found for slot 0");
+        }
+    }
+
+    #[test]
+    fn test_update_hud_sp_bar_hidden_for_non_caster() {
+        use super::{GlobalState, HudPlugin, SpBarBackground};
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, AttributePair16, Character, Sex};
+        use bevy::prelude::*;
+
+        // Knight with sp.base == 0 (non-caster)
+        let mut state = GameState::new();
+        let mut ch = Character::new(
+            "Sir Knight".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.hp = AttributePair16 {
+            base: 50,
+            current: 50,
+        };
+        ch.sp = AttributePair16 {
+            base: 0,
+            current: 0,
+        };
+        state.party.add_member(ch).unwrap();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(state));
+
+        app.update();
+        app.update();
+
+        let world = app.world_mut();
+        let mut q = world.query::<(&SpBarBackground, &Node)>();
+        for (bg, node) in q.iter(world) {
+            if bg.party_index == 0 {
+                assert_eq!(
+                    node.display,
+                    Display::None,
+                    "SP bar should be hidden for non-caster Knight"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_update_hud_sp_bar_visible_for_caster() {
+        use super::{GlobalState, HudPlugin, SpBarBackground, SpBarFill};
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, AttributePair16, Character, Sex};
+        use bevy::prelude::*;
+
+        // Sorcerer with sp.base > 0 (caster)
+        let mut state = GameState::new();
+        let mut ch = Character::new(
+            "Gandalf".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.hp = AttributePair16 {
+            base: 20,
+            current: 20,
+        };
+        ch.sp = AttributePair16 {
+            base: 30,
+            current: 20,
+        };
+        state.party.add_member(ch).unwrap();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(state));
+
+        app.update();
+        app.update();
+
+        let world = app.world_mut();
+        // Check SpBarBackground is visible
+        {
+            let mut q = world.query::<(&SpBarBackground, &Node)>();
+            let mut found = false;
+            for (bg, node) in q.iter(world) {
+                if bg.party_index == 0 {
+                    assert_eq!(
+                        node.display,
+                        Display::Flex,
+                        "SP bar should be visible for sorcerer"
+                    );
+                    found = true;
+                }
+            }
+            assert!(found, "SpBarBackground not found for slot 0");
+        }
+
+        // Check SpBarFill width is 2/3 ≈ 66.67%
+        {
+            let mut q = world.query::<(&SpBarFill, &Node)>();
+            for (fill, node) in q.iter(world) {
+                if fill.party_index == 0 {
+                    // 20/30 = 0.6667 → ~66.67%
+                    assert!(
+                        matches!(node.width, Val::Percent(p) if (p - 66.67).abs() < 0.5),
+                        "SP bar width unexpected: {:?}",
+                        node.width
+                    );
+                }
+            }
         }
     }
 

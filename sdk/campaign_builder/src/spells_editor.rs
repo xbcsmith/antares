@@ -8,7 +8,10 @@ use crate::ui_helpers::{
     ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::conditions::ConditionDefinition;
-use antares::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+use antares::domain::magic::types::{
+    BuffField, Spell, SpellContext, SpellEffectType, SpellSchool, SpellTarget, TeleportDestination,
+    UtilityType,
+};
 use antares::domain::types::DiceRoll;
 use eframe::egui;
 use std::path::PathBuf;
@@ -77,6 +80,7 @@ impl SpellsEditorState {
             description: String::new(),
             applied_conditions: Vec::new(),
             resurrect_hp: None,
+            effect_type: None,
         }
     }
 
@@ -675,6 +679,10 @@ impl SpellsEditorState {
 
                 ui.add_space(10.0);
 
+                self.show_effect_type_editor(ui, conditions);
+
+                ui.add_space(10.0);
+
                 ui.group(|ui| {
                     ui.heading("Applied Conditions");
 
@@ -764,6 +772,280 @@ impl SpellsEditorState {
                     }
                 });
             });
+    }
+
+    /// Shows the Effect Type editing section for a spell.
+    ///
+    /// Allows the user to explicitly set the [`SpellEffectType`] for the spell
+    /// being edited. When left as "Auto (Inferred)", the effect type is
+    /// determined by [`antares::domain::magic::types::Spell::infer_effect_type`]
+    /// at runtime.
+    ///
+    /// # Arguments
+    ///
+    /// * `ui` - The egui UI context to draw into
+    /// * `conditions` - Available conditions for the `CureCondition` variant's autocomplete
+    fn show_effect_type_editor(&mut self, ui: &mut egui::Ui, conditions: &[ConditionDefinition]) {
+        ui.group(|ui| {
+            ui.heading("Effect Type");
+            ui.label(
+                "When set, overrides inferred effect dispatch. Leave as 'Auto (Inferred)' for damage spells.",
+            );
+            ui.add_space(4.0);
+
+            let effect_type_label = match &self.edit_buffer.effect_type {
+                None => "Auto (Inferred)",
+                Some(SpellEffectType::Damage) => "Damage",
+                Some(SpellEffectType::Healing { .. }) => "Healing",
+                Some(SpellEffectType::CureCondition { .. }) => "Cure Condition",
+                Some(SpellEffectType::Buff { .. }) => "Buff",
+                Some(SpellEffectType::Utility { .. }) => "Utility",
+                Some(SpellEffectType::Debuff) => "Debuff",
+                Some(SpellEffectType::Resurrection) => "Resurrection",
+                Some(SpellEffectType::DispelMagic) => "Dispel Magic",
+                Some(SpellEffectType::Composite(_)) => "Composite (read-only)",
+            };
+
+            let mut selected_label = effect_type_label.to_string();
+            egui::ComboBox::from_id_salt("spell_effect_type")
+                .selected_text(effect_type_label)
+                .show_ui(ui, |ui| {
+                    for label in [
+                        "Auto (Inferred)",
+                        "Damage",
+                        "Healing",
+                        "Cure Condition",
+                        "Buff",
+                        "Utility",
+                        "Debuff",
+                        "Resurrection",
+                        "Dispel Magic",
+                    ] {
+                        ui.selectable_value(&mut selected_label, label.to_string(), label);
+                    }
+                    if matches!(
+                        &self.edit_buffer.effect_type,
+                        Some(SpellEffectType::Composite(_))
+                    ) {
+                        ui.label("Composite (read-only)");
+                    }
+                });
+
+            if selected_label.as_str() != effect_type_label {
+                let new_effect_type = match selected_label.as_str() {
+                    "Auto (Inferred)" => None,
+                    "Damage" => Some(SpellEffectType::Damage),
+                    "Healing" => Some(SpellEffectType::Healing {
+                        amount: DiceRoll::new(2, 6, 0),
+                    }),
+                    "Cure Condition" => Some(SpellEffectType::CureCondition {
+                        condition_id: String::new(),
+                    }),
+                    "Buff" => Some(SpellEffectType::Buff {
+                        buff_field: BuffField::Bless,
+                        duration: 10,
+                    }),
+                    "Utility" => Some(SpellEffectType::Utility {
+                        utility_type: UtilityType::Teleport {
+                            destination: TeleportDestination::Surface,
+                        },
+                    }),
+                    "Debuff" => Some(SpellEffectType::Debuff),
+                    "Resurrection" => Some(SpellEffectType::Resurrection),
+                    "Dispel Magic" => Some(SpellEffectType::DispelMagic),
+                    _ => self.edit_buffer.effect_type.clone(),
+                };
+                self.edit_buffer.effect_type = new_effect_type;
+            }
+
+            // Show variant-specific sub-fields
+            match &mut self.edit_buffer.effect_type {
+                Some(SpellEffectType::Healing { amount }) => {
+                    ui.horizontal(|ui| {
+                        ui.label("Healing Dice:");
+                        ui.add(egui::DragValue::new(&mut amount.count).range(1..=10));
+                        ui.label("d");
+                        ui.add(egui::DragValue::new(&mut amount.sides).range(1..=20));
+                        ui.label("+");
+                        ui.add(egui::DragValue::new(&mut amount.bonus).range(-10..=20));
+                    });
+                }
+                Some(SpellEffectType::CureCondition { condition_id }) => {
+                    autocomplete_condition_selector(
+                        ui,
+                        "effect_cure_condition",
+                        "Condition:",
+                        condition_id,
+                        conditions,
+                    );
+                }
+                Some(SpellEffectType::Buff { buff_field, duration }) => {
+                    ui.horizontal(|ui| {
+                        ui.label("Buff Field:");
+                        egui::ComboBox::from_id_salt("spell_buff_field")
+                            .selected_text(format!("{:?}", buff_field))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    buff_field,
+                                    BuffField::FearProtection,
+                                    "Fear Protection",
+                                );
+                                ui.selectable_value(
+                                    buff_field,
+                                    BuffField::ColdProtection,
+                                    "Cold Protection",
+                                );
+                                ui.selectable_value(
+                                    buff_field,
+                                    BuffField::FireProtection,
+                                    "Fire Protection",
+                                );
+                                ui.selectable_value(
+                                    buff_field,
+                                    BuffField::PoisonProtection,
+                                    "Poison Protection",
+                                );
+                                ui.selectable_value(
+                                    buff_field,
+                                    BuffField::AcidProtection,
+                                    "Acid Protection",
+                                );
+                                ui.selectable_value(
+                                    buff_field,
+                                    BuffField::ElectricityProtection,
+                                    "Electricity Protection",
+                                );
+                                ui.selectable_value(
+                                    buff_field,
+                                    BuffField::MagicProtection,
+                                    "Magic Protection",
+                                );
+                                ui.selectable_value(buff_field, BuffField::Light, "Light");
+                                ui.selectable_value(
+                                    buff_field,
+                                    BuffField::LeatherSkin,
+                                    "Leather Skin",
+                                );
+                                ui.selectable_value(
+                                    buff_field,
+                                    BuffField::Levitate,
+                                    "Levitate",
+                                );
+                                ui.selectable_value(
+                                    buff_field,
+                                    BuffField::WalkOnWater,
+                                    "Walk On Water",
+                                );
+                                ui.selectable_value(
+                                    buff_field,
+                                    BuffField::GuardDog,
+                                    "Guard Dog",
+                                );
+                                ui.selectable_value(
+                                    buff_field,
+                                    BuffField::PsychicProtection,
+                                    "Psychic Protection",
+                                );
+                                ui.selectable_value(buff_field, BuffField::Bless, "Bless");
+                                ui.selectable_value(
+                                    buff_field,
+                                    BuffField::Invisibility,
+                                    "Invisibility",
+                                );
+                                ui.selectable_value(buff_field, BuffField::Shield, "Shield");
+                                ui.selectable_value(
+                                    buff_field,
+                                    BuffField::PowerShield,
+                                    "Power Shield",
+                                );
+                                ui.selectable_value(buff_field, BuffField::Cursed, "Cursed");
+                            });
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Duration:");
+                        ui.add(egui::DragValue::new(duration).range(1..=100));
+                    });
+                }
+                Some(SpellEffectType::Utility { utility_type }) => {
+                    let ut_label = match &*utility_type {
+                        UtilityType::CreateFood { .. } => "Create Food",
+                        UtilityType::Teleport { .. } => "Teleport",
+                        UtilityType::Information => "Information",
+                    };
+                    let mut selected_ut = ut_label.to_string();
+                    ui.horizontal(|ui| {
+                        ui.label("Utility Type:");
+                        egui::ComboBox::from_id_salt("spell_utility_type")
+                            .selected_text(ut_label)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut selected_ut,
+                                    "Create Food".to_string(),
+                                    "Create Food",
+                                );
+                                ui.selectable_value(
+                                    &mut selected_ut,
+                                    "Teleport".to_string(),
+                                    "Teleport",
+                                );
+                                ui.selectable_value(
+                                    &mut selected_ut,
+                                    "Information".to_string(),
+                                    "Information",
+                                );
+                            });
+                    });
+                    if selected_ut.as_str() != ut_label {
+                        *utility_type = match selected_ut.as_str() {
+                            "Create Food" => UtilityType::CreateFood { amount: 5 },
+                            "Teleport" => UtilityType::Teleport {
+                                destination: TeleportDestination::Surface,
+                            },
+                            "Information" => UtilityType::Information,
+                            _ => *utility_type,
+                        };
+                    }
+                    if let UtilityType::CreateFood { amount } = utility_type {
+                        ui.horizontal(|ui| {
+                            ui.label("Amount:");
+                            ui.add(egui::DragValue::new(amount).range(1..=100));
+                        });
+                    }
+                    if let UtilityType::Teleport { destination } = utility_type {
+                        ui.horizontal(|ui| {
+                            ui.label("Destination:");
+                            egui::ComboBox::from_id_salt("spell_teleport_destination")
+                                .selected_text(match destination {
+                                    TeleportDestination::Surface => "Surface",
+                                    TeleportDestination::TownPortal => "Town Portal",
+                                    TeleportDestination::Jump => "Jump",
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        destination,
+                                        TeleportDestination::Surface,
+                                        "Surface",
+                                    );
+                                    ui.selectable_value(
+                                        destination,
+                                        TeleportDestination::TownPortal,
+                                        "Town Portal",
+                                    );
+                                    ui.selectable_value(
+                                        destination,
+                                        TeleportDestination::Jump,
+                                        "Jump",
+                                    );
+                                });
+                        });
+                    }
+                }
+                Some(SpellEffectType::Composite(_)) => {
+                    ui.label("Composite effects cannot be edited here; use RON directly.");
+                }
+                _ => {}
+            }
+        });
     }
 
     fn show_import_dialog(
@@ -1039,5 +1321,67 @@ mod tests {
 
         state.show_preview = false;
         assert!(!state.show_preview);
+    }
+
+    // =========================================================================
+    // SpellEffectType Editor Tests
+    // =========================================================================
+
+    #[test]
+    fn test_effect_type_editor_default_is_none() {
+        let spell = SpellsEditorState::default_spell();
+        assert!(spell.effect_type.is_none());
+    }
+
+    #[test]
+    fn test_effect_type_damage_variant() {
+        let mut state = SpellsEditorState::new();
+        state.edit_buffer.effect_type = Some(SpellEffectType::Damage);
+        assert_eq!(state.edit_buffer.effect_type, Some(SpellEffectType::Damage));
+    }
+
+    #[test]
+    fn test_effect_type_healing_has_dice() {
+        let mut state = SpellsEditorState::new();
+        state.edit_buffer.effect_type = Some(SpellEffectType::Healing {
+            amount: DiceRoll::new(2, 6, 0),
+        });
+        if let Some(SpellEffectType::Healing { amount }) = &state.edit_buffer.effect_type {
+            assert_eq!(amount.count, 2);
+            assert_eq!(amount.sides, 6);
+            assert_eq!(amount.bonus, 0);
+        } else {
+            panic!("Expected Healing variant with DiceRoll");
+        }
+    }
+
+    #[test]
+    fn test_effect_type_buff_has_field() {
+        let mut state = SpellsEditorState::new();
+        state.edit_buffer.effect_type = Some(SpellEffectType::Buff {
+            buff_field: BuffField::Bless,
+            duration: 10,
+        });
+        assert!(matches!(
+            state.edit_buffer.effect_type,
+            Some(SpellEffectType::Buff {
+                buff_field: BuffField::Bless,
+                duration: 10,
+            })
+        ));
+    }
+
+    #[test]
+    fn test_effect_type_utility_teleport() {
+        let mut state = SpellsEditorState::new();
+        state.edit_buffer.effect_type = Some(SpellEffectType::Utility {
+            utility_type: UtilityType::Teleport,
+        });
+        assert!(matches!(
+            state.edit_buffer.effect_type,
+            Some(SpellEffectType::Utility {
+                utility_type: UtilityType::Teleport,
+            })
+        ));
     }
 }

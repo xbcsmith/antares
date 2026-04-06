@@ -259,7 +259,7 @@ impl QuestSystem {
                             progress.complete();
 
                             // Apply rewards
-                            self.apply_rewards(domain_quest, game_state);
+                            self.apply_rewards(domain_quest, game_state, content_db);
 
                             // Move quest from active -> completed in game_state.quests
                             let qid_str = qid.to_string();
@@ -291,8 +291,14 @@ impl QuestSystem {
     /// - `Experience` → added to first living party member's experience
     /// - `Gold` → added to party gold
     /// - `Items` → added to the first party member's inventory (single slot with charges)
+    /// - `LearnSpell` → taught to the first eligible party member via `learn_spell`
     /// - `SetFlag`/`Reputation`/`UnlockQuest` are handled conservatively
-    fn apply_rewards(&self, quest: &DomainQuest, game_state: &mut crate::application::GameState) {
+    fn apply_rewards(
+        &self,
+        quest: &DomainQuest,
+        game_state: &mut crate::application::GameState,
+        content_db: &ContentDatabase,
+    ) {
         for reward in &quest.rewards {
             match reward {
                 QuestReward::Experience(amount) => {
@@ -340,6 +346,53 @@ impl QuestSystem {
                         faction,
                         change
                     );
+                }
+                QuestReward::LearnSpell { spell_id } => {
+                    // Try to teach the spell to the first eligible party member
+                    let spell_db = &content_db.spells;
+                    let class_db = &content_db.classes;
+                    let mut taught = false;
+                    for character in &mut game_state.party.members {
+                        match crate::domain::magic::learning::learn_spell(
+                            character, *spell_id, spell_db, class_db,
+                        ) {
+                            Ok(()) => {
+                                let spell_name = spell_db
+                                    .get_spell(*spell_id)
+                                    .map(|s| s.name.clone())
+                                    .unwrap_or_else(|| spell_id.to_string());
+                                tracing::info!(
+                                    "Quest reward: {} learned spell '{}'",
+                                    character.name,
+                                    spell_name
+                                );
+                                taught = true;
+                                break;
+                            }
+                            Err(crate::domain::magic::learning::SpellLearnError::AlreadyKnown(
+                                _,
+                            )) => {
+                                // Already knows this spell; try next member
+                                continue;
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Quest reward: cannot teach spell {} to {}: {}",
+                                    spell_id,
+                                    character.name,
+                                    e
+                                );
+                                // Keep trying other party members for class/level mismatches
+                                continue;
+                            }
+                        }
+                    }
+                    if !taught {
+                        tracing::warn!(
+                            "Quest reward: spell {} could not be taught to any party member",
+                            spell_id
+                        );
+                    }
                 }
             }
         }
@@ -634,5 +687,237 @@ mod tests {
         assert!(gs.quests.is_quest_available(20));
         assert!(gs.quests.is_quest_available(30));
         assert!(!gs.quests.is_quest_available(40));
+    }
+
+    // ===== QuestReward::LearnSpell tests =====
+
+    fn build_db_with_spells() -> ContentDatabase {
+        let mut db = ContentDatabase::new();
+        let classes = crate::domain::classes::ClassDatabase::load_from_file("data/classes.ron")
+            .expect("data/classes.ron must exist");
+        db.classes = classes;
+        use crate::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+        db.spells
+            .add_spell(Spell::new(
+                0x0101,
+                "Cure Wounds",
+                SpellSchool::Cleric,
+                1,
+                2,
+                0,
+                SpellContext::Anytime,
+                SpellTarget::SingleCharacter,
+                "Heals 8 HP",
+                None,
+                0,
+                false,
+            ))
+            .unwrap();
+        db.spells
+            .add_spell(Spell::new(
+                0x0501,
+                "Magic Arrow",
+                SpellSchool::Sorcerer,
+                1,
+                2,
+                0,
+                SpellContext::CombatOnly,
+                SpellTarget::SingleMonster,
+                "Deals magic damage",
+                None,
+                0,
+                false,
+            ))
+            .unwrap();
+        db
+    }
+
+    fn make_learn_spell_quest(quest_id: u16, spell_id: u16) -> Quest {
+        let mut q = Quest::new(quest_id, "Spell Quest", "Learn a spell as reward");
+        let mut stage = QuestStage::new(1, "Complete task");
+        stage.add_objective(QuestObjective::KillMonsters {
+            monster_id: 1,
+            quantity: 1,
+        });
+        q.add_stage(stage);
+        q.add_reward(QuestReward::LearnSpell { spell_id });
+        q
+    }
+
+    #[test]
+    fn test_quest_reward_learn_spell_teaches_cleric_spell() {
+        let mut db = build_db_with_spells();
+        db.quests.add_quest(make_learn_spell_quest(40, 0x0101));
+
+        let mut gs = crate::application::GameState::new();
+        let cleric = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        gs.party.add_member(cleric).unwrap();
+
+        let mut qs = QuestSystem::new();
+        qs.start_quest(40, &mut gs, &db)
+            .expect("start_quest failed");
+        qs.process_event(
+            &QuestProgressEvent::MonsterKilled {
+                monster_id: 1,
+                count: 1,
+            },
+            &mut gs,
+            &db,
+        );
+
+        // Cleric's spellbook should contain the learned spell at level index 0
+        assert!(gs.party.members[0].spells.cleric_spells[0].contains(&0x0101));
+    }
+
+    #[test]
+    fn test_quest_reward_learn_spell_skips_wrong_class_tries_next_member() {
+        let mut db = build_db_with_spells();
+        db.quests.add_quest(make_learn_spell_quest(41, 0x0101));
+
+        let mut gs = crate::application::GameState::new();
+        // First member is a knight (cannot learn cleric spells)
+        let knight = Character::new(
+            "Tank".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Second member is a cleric (can learn cleric spells)
+        let cleric = Character::new(
+            "Healer".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        gs.party.add_member(knight).unwrap();
+        gs.party.add_member(cleric).unwrap();
+
+        let mut qs = QuestSystem::new();
+        qs.start_quest(41, &mut gs, &db)
+            .expect("start_quest failed");
+        qs.process_event(
+            &QuestProgressEvent::MonsterKilled {
+                monster_id: 1,
+                count: 1,
+            },
+            &mut gs,
+            &db,
+        );
+
+        // Knight's spellbook must remain empty
+        assert!(gs.party.members[0].spells.cleric_spells[0].is_empty());
+        // Cleric should have the spell
+        assert!(gs.party.members[1].spells.cleric_spells[0].contains(&0x0101));
+    }
+
+    #[test]
+    fn test_quest_reward_learn_spell_no_eligible_member_is_silent() {
+        let mut db = build_db_with_spells();
+        // Quest rewards a cleric spell, but party is all knights
+        db.quests.add_quest(make_learn_spell_quest(42, 0x0101));
+
+        let mut gs = crate::application::GameState::new();
+        let knight = Character::new(
+            "Sir Iron".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(knight).unwrap();
+
+        let mut qs = QuestSystem::new();
+        qs.start_quest(42, &mut gs, &db)
+            .expect("start_quest failed");
+        // Should not panic even when no eligible member exists
+        qs.process_event(
+            &QuestProgressEvent::MonsterKilled {
+                monster_id: 1,
+                count: 1,
+            },
+            &mut gs,
+            &db,
+        );
+
+        // No spells should have been added
+        assert!(gs.party.members[0].spells.cleric_spells[0].is_empty());
+        assert!(gs.party.members[0].spells.sorcerer_spells[0].is_empty());
+    }
+
+    #[test]
+    fn test_quest_reward_learn_spell_already_known_skips_gracefully() {
+        let mut db = build_db_with_spells();
+        db.quests.add_quest(make_learn_spell_quest(43, 0x0101));
+
+        let mut gs = crate::application::GameState::new();
+        let mut cleric = Character::new(
+            "OldSage".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        // Pre-fill the spell so it's already known
+        cleric.spells.cleric_spells[0].push(0x0101);
+        gs.party.add_member(cleric).unwrap();
+
+        let mut qs = QuestSystem::new();
+        qs.start_quest(43, &mut gs, &db)
+            .expect("start_quest failed");
+        qs.process_event(
+            &QuestProgressEvent::MonsterKilled {
+                monster_id: 1,
+                count: 1,
+            },
+            &mut gs,
+            &db,
+        );
+
+        // Spell should still appear exactly once — no duplicate
+        assert_eq!(
+            gs.party.members[0].spells.cleric_spells[0]
+                .iter()
+                .filter(|&&id| id == 0x0101)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_quest_reward_learn_sorcerer_spell_for_sorcerer() {
+        let mut db = build_db_with_spells();
+        db.quests.add_quest(make_learn_spell_quest(44, 0x0501));
+
+        let mut gs = crate::application::GameState::new();
+        let sorc = Character::new(
+            "Mage".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        gs.party.add_member(sorc).unwrap();
+
+        let mut qs = QuestSystem::new();
+        qs.start_quest(44, &mut gs, &db)
+            .expect("start_quest failed");
+        qs.process_event(
+            &QuestProgressEvent::MonsterKilled {
+                monster_id: 1,
+                count: 1,
+            },
+            &mut gs,
+            &db,
+        );
+
+        assert!(gs.party.members[0].spells.sorcerer_spells[0].contains(&0x0501));
     }
 }

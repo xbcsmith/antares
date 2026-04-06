@@ -454,6 +454,7 @@ mod tests {
             rest: vec!["R".to_string()],
             automap: vec!["M".to_string()],
             game_log: vec!["G".to_string()],
+            cast: vec!["C".to_string()],
             movement_cooldown: -0.1,
         };
 

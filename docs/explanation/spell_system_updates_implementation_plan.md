@@ -653,6 +653,234 @@ Extend `src/sdk/validation/` to validate spell-related cross-references:
 
 ---
 
+### Phase 7: Remediation of Audit Gaps
+
+**Goal**: Close the five concrete gaps identified during the Phase 1–6 audit.
+Every gap is a missing integration between an already-implemented domain
+function and the game or Bevy layer that should consume it. No new domain
+types are introduced; only call-site wiring and integration hooks are added.
+
+**Dependencies**: Phases 1–6 complete. All five tasks in this phase are
+independent of each other and may be implemented in any order.
+
+#### 7.1 Wire Exploration Scroll Dispatch (CastSpell / LearnSpell)
+
+**Root cause**: `handle_use_item_action_exploration` in
+`src/game/systems/inventory_ui.rs` calls `apply_consumable_effect_exploration`
+and obtains a `ConsumableApplyResult`, but never checks the
+`result.spell_cast_id` or `result.spell_learn_id` signal fields. The domain
+layer already sets these correctly; the Bevy handler just ignores them.
+
+**Fix**: After the existing Step 6 in `handle_use_item_action_exploration`,
+add two dispatch blocks:
+
+- **`spell_cast_id`**: If `Some(spell_id)`, look up the spell in
+  `content_db.spells`. Call `cast_exploration_spell(party_index, &spell,
+ExplorationTarget::Self_, game_state, &mut rng)`. Log success or the
+  `SpellError` returned. Use a seeded `SmallRng` from `rand::rng()` in
+  contexts where a resource RNG is unavailable, consistent with the pattern
+  used in `exploration_spells.rs`.
+
+- **`spell_learn_id`**: If `Some(spell_id)`, call
+  `crate::domain::magic::learning::learn_spell(&mut character, spell_id,
+spell_db, class_db)`. Log the outcome: spell name on success, the
+  `SpellLearnError` variant (wrong class, already known, etc.) on failure.
+  Do **not** panic on failure — scroll use is silently skipped for ineligible
+  characters, matching the dialogue and quest reward handlers.
+
+Update `build_consumable_use_log` to produce more informative messages when
+`spell_cast_id` or `spell_learn_id` is present (e.g., include the resolved
+spell name rather than the raw numeric ID).
+
+#### 7.2 Wire Walk on Water to Map Traversal
+
+**Root cause**: `BuffField::WalkOnWater` correctly writes
+`active_spells.walk_on_water` when the spell is cast, but the movement
+validation code in `src/game/systems/input/exploration_movement.rs` (and any
+companion map-tile helper) never reads that field. Water tiles are therefore
+impassable regardless of buff state.
+
+**Fix**:
+
+- Locate the tile-type check that blocks movement onto water tiles in
+  `exploration_movement.rs` (or the relevant movement validation helper).
+- Before returning the "blocked" result, read
+  `global_state.0.active_spells.walk_on_water`. If `> 0`, allow traversal.
+- Add a named constant `ACTIVE_SPELL_DURATION_THRESHOLD: u8 = 1` (or reuse
+  an existing `> 0` guard pattern) so the intent is explicit and consistent
+  with the levitate check added in 7.3.
+- Do not modify `ActiveSpells` here — duration ticking is already handled by
+  `ActiveSpells::tick()`.
+
+#### 7.3 Wire Levitate / Fly to Pit and Chasm Tile Validation
+
+**Root cause**: `BuffField::Levitate` correctly writes
+`active_spells.levitate`, but the pit/chasm tile validation in
+`exploration_movement.rs` (or the map tile helper) never consults it.
+Characters fall into pits regardless of the Levitate buff.
+
+**Fix**:
+
+- Locate the tile-type check that triggers pit or chasm effects in the
+  movement validation path.
+- Before applying the pit effect, read `global_state.0.active_spells.levitate`.
+  If `> 0`, skip the pit effect and allow traversal as if it were a normal
+  floor tile.
+- Follow the same guard pattern as the Walk on Water fix above for
+  consistency.
+
+#### 7.4 Implement Town Portal / Surface Teleport
+
+**Root cause**: `apply_utility_spell` handles `UtilityType::Teleport` by
+returning a `UtilityResult` with a generic message and `food_created: 0`, but
+never signals _where_ to teleport and never touches `game_state.world_state`.
+The Bevy layer (`exploration_spells.rs`) does not follow up on the result.
+
+**Fix — domain layer (`src/domain/magic/types.rs`)**:
+
+- Extend `UtilityType::Teleport` to carry destination intent:
+
+  ```rust
+  Teleport { destination: TeleportDestination },
+  ```
+
+- Add `TeleportDestination` enum in `types.rs`:
+
+  ```rust
+  pub enum TeleportDestination {
+      /// Return party to the map's designated entry point
+      Surface,
+      /// Return party to the registered home inn / town
+      TownPortal,
+      /// Direct jump to explicit coordinates (Jump spell)
+      Jump,
+  }
+  ```
+
+- Update `apply_utility_spell` to populate a new `teleport_destination:
+Option<TeleportDestination>` field on `UtilityResult` instead of only
+  returning a string. Add `#[serde(default)]` to the new field.
+
+**Fix — Bevy layer (`src/game/systems/exploration_spells.rs`)**:
+
+- After `cast_exploration_spell` returns, inspect
+  `result.utility_result.teleport_destination`:
+  - `Surface` → set `game_state.world_state.party_position` to the current
+    map's entry tile (the position stored when the map was entered).
+  - `TownPortal` → set `party_position` and `current_map` to the party's
+    registered home town (stored in `GameState` or `Party`; fall back to
+    map 1 / position (0,0) if not yet set).
+  - `Jump` → leave position unchanged for now (full Jump targeting requires
+    a separate target-selection UI and is deferred as a stretch goal).
+- Write a `GameLogEvent` describing the teleport destination.
+
+**Fix — RON data**:
+
+Update the `Town Portal`, `Surface`, and `Jump` spell entries in
+`data/spells.ron`, `data/test_campaign/data/spells.ron`, and
+`campaigns/tutorial/data/spells.ron` to use the new
+`UtilityType::Teleport { destination: TownPortal }` /
+`UtilityType::Teleport { destination: Surface }` form. Add `#[serde(default)]`
+so existing entries that omit `destination` deserialize without error,
+defaulting to `TeleportDestination::Surface`.
+
+#### 7.5 Implement Location Spell Coordinate Display
+
+**Root cause**: `apply_utility_spell` is a pure domain function with no access
+to game state, so it cannot embed real map coordinates. The Bevy system does
+not post-process the result to inject coordinates.
+
+**Fix — Bevy layer only (`src/game/systems/exploration_spells.rs`)**:
+
+- After `cast_exploration_spell` returns successfully, check
+  `spell.effective_effect_type()`. If it resolves to
+  `SpellEffectType::Utility { utility_type: UtilityType::Information }`:
+  - Read `game_state.world_state.party_position` (x, y) and
+    `game_state.world_state.current_map_id`.
+  - Overwrite the feedback message with a formatted string such as:
+    `"Location: Map {map_id}, ({x}, {y})."`.
+- No domain-layer changes are required; the Bevy layer has access to the
+  world state that the pure domain function intentionally does not.
+
+#### 7.6 Testing Requirements
+
+- **7.1 — Scroll dispatch**:
+
+  - Test `ConsumableEffect::CastSpell` scroll use in exploration actually casts
+    the spell (SP decremented on caster, effect applied to target character).
+  - Test `ConsumableEffect::LearnSpell` scroll use adds the spell to the
+    correct character's `SpellBook`.
+  - Test that using a `LearnSpell` scroll for a wrong-class character logs a
+    warning and does not panic.
+  - Test that using a `LearnSpell` scroll for an already-known spell does not
+    duplicate the entry.
+  - All test data from `data/test_campaign/`.
+
+- **7.2 — Walk on Water**:
+
+  - Test that a character without the buff cannot move onto a water tile.
+  - Test that a character with `active_spells.walk_on_water > 0` can move onto
+    a water tile.
+
+- **7.3 — Levitate**:
+
+  - Test that a character without the buff triggers pit effects.
+  - Test that a character with `active_spells.levitate > 0` passes over a pit
+    without triggering the effect.
+
+- **7.4 — Teleport**:
+
+  - Test that casting a `TownPortal` spell updates `party_position` and
+    `current_map` to the registered home location.
+  - Test that casting a `Surface` spell updates `party_position` to the map's
+    entry point.
+  - Test that existing RON spell data (without explicit `destination`) still
+    deserializes without error (serde default).
+
+- **7.5 — Location**:
+  - Test that the Location spell feedback message contains the current map ID
+    and party coordinates rather than a generic string.
+  - All test data from `data/test_campaign/`.
+
+#### 7.7 Deliverables
+
+- [ ] `src/game/systems/inventory_ui.rs` — dispatch `spell_cast_id` and
+      `spell_learn_id` after exploration consumable use
+- [ ] `src/game/systems/input/exploration_movement.rs` — check
+      `active_spells.walk_on_water` before blocking water tile movement
+- [ ] `src/game/systems/input/exploration_movement.rs` — check
+      `active_spells.levitate` before triggering pit/chasm effects
+- [ ] `src/domain/magic/types.rs` — `TeleportDestination` enum and extended
+      `UtilityType::Teleport { destination }` variant
+- [ ] `src/domain/magic/effect_dispatch.rs` — `UtilityResult` carries
+      `teleport_destination: Option<TeleportDestination>`
+- [ ] `src/game/systems/exploration_spells.rs` — apply teleport destination
+      to `game_state.world_state` and format Location spell message with
+      real coordinates
+- [ ] Updated `data/spells.ron`, `data/test_campaign/data/spells.ron`, and
+      `campaigns/tutorial/data/spells.ron` with `destination` field on teleport
+      spells
+- [ ] Unit and integration tests for all five gap areas
+- [ ] `docs/explanation/implementations.md` updated
+
+#### 7.8 Success Criteria
+
+- Using a `CastSpell` scroll in exploration actually casts the spell through
+  the exploration pipeline
+- Using a `LearnSpell` scroll in exploration actually adds the spell to the
+  character's `SpellBook`
+- Characters with Walk on Water buff can traverse water tiles; without it,
+  water tiles remain impassable
+- Characters with Levitate buff float over pit tiles; without it, pit effects
+  apply as normal
+- Casting Town Portal or Surface teleports the party to the correct world
+  position and updates `game_state.world_state`
+- Casting the Location spell displays the party's actual map ID and
+  coordinates in the feedback message
+- All four quality gates pass with zero warnings
+
+---
+
 ## Architecture Compliance Checklist
 
 - [ ] All new types use architecture-defined type aliases (`SpellId`, `CharacterId`, etc.)

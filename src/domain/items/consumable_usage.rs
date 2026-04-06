@@ -135,6 +135,17 @@ pub struct ConsumableApplyResult {
     pub attribute_boost_is_timed: bool,
     /// True when a `BoostResistance` was handled by the caller's timed layer
     pub resistance_boost_is_timed: bool,
+    /// Spell ID to cast on behalf of the user (`ConsumableEffect::CastSpell`).
+    ///
+    /// The caller is responsible for dispatching the actual spell cast via the
+    /// combat or exploration casting pipeline. `apply_consumable_effect` itself
+    /// does **not** deduct SP or mutate any spell state.
+    pub spell_cast_id: Option<crate::domain::types::SpellId>,
+    /// Spell ID to permanently add to the user's spellbook (`ConsumableEffect::LearnSpell`).
+    ///
+    /// The caller is responsible for calling `learn_spell` on the appropriate
+    /// character. `apply_consumable_effect` itself does **not** mutate the spellbook.
+    pub spell_learn_id: Option<crate::domain::types::SpellId>,
 }
 
 /// Apply a single [`ConsumableEffect`] variant to `character` and return a
@@ -221,6 +232,8 @@ pub fn apply_consumable_effect(
     character: &mut Character,
     data: &ConsumableData,
 ) -> ConsumableApplyResult {
+    // Forward to the shared implementation that handles all variants including
+    // the new CastSpell / LearnSpell scroll variants.
     use crate::domain::items::types::normalize_duration;
 
     let mut result = ConsumableApplyResult::default();
@@ -294,6 +307,20 @@ pub fn apply_consumable_effect(
                 crate::domain::resources::revive_from_dead(character, hp);
                 result.healing = hp as i32;
             }
+        }
+
+        ConsumableEffect::CastSpell(spell_id) => {
+            // Signal to the caller that a spell cast should be dispatched.
+            // This function intentionally does not consume SP or alter any
+            // spell state — the combat/exploration system handles that.
+            result.spell_cast_id = Some(spell_id);
+        }
+
+        ConsumableEffect::LearnSpell(spell_id) => {
+            // Signal to the caller that `learn_spell` should be invoked.
+            // The actual spellbook mutation requires spell_db + class_db which
+            // are not available at this domain layer.
+            result.spell_learn_id = Some(spell_id);
         }
     }
 
@@ -390,6 +417,17 @@ fn apply_resistance_to_character(character: &mut Character, res_type: Resistance
 /// assert_eq!(hero.resistances.fire.current, fire_before);
 /// assert!(result.resistance_boost_is_timed);
 /// ```
+/// Applies a consumable effect in the exploration context.
+///
+/// Identical to [`apply_consumable_effect`] for every effect except timed
+/// `BoostResistance`: when `ConsumableData::duration_minutes` is `Some(n > 0)`,
+/// the resistance boost is written to the corresponding field in
+/// [`crate::application::ActiveSpells`] instead of directly mutating
+/// `character.resistances`.
+///
+/// `CastSpell` and `LearnSpell` follow the same pass-through semantics as in
+/// the combat path — the caller inspects `spell_cast_id` / `spell_learn_id`
+/// on the returned [`ConsumableApplyResult`] and dispatches accordingly.
 pub fn apply_consumable_effect_exploration(
     character: &mut Character,
     active_spells: &mut crate::application::ActiveSpells,
@@ -1148,5 +1186,161 @@ mod tests {
             result.healing, 0,
             "result.healing must be 0 for ERADICATED no-op"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // CastSpell
+    // -----------------------------------------------------------------------
+
+    /// `ConsumableEffect::CastSpell` must signal the spell ID via
+    /// `result.spell_cast_id` without mutating the character at all.
+    #[test]
+    fn test_cast_spell_sets_spell_cast_id_in_result() {
+        use crate::domain::items::types::ConsumableData;
+
+        let mut ch = make_character(30, 30, 20, 20);
+        let data = ConsumableData {
+            effect: ConsumableEffect::CastSpell(0x0301),
+            is_combat_usable: true,
+            duration_minutes: None,
+        };
+        let result = apply_consumable_effect(&mut ch, &data);
+
+        assert_eq!(
+            result.spell_cast_id,
+            Some(0x0301),
+            "spell_cast_id must be populated with the spell ID"
+        );
+        // All other fields must be zeroed / default
+        assert_eq!(result.healing, 0);
+        assert_eq!(result.sp_restored, 0);
+        assert_eq!(result.conditions_cleared, 0);
+        assert_eq!(result.attribute_delta, 0);
+        assert_eq!(result.resistance_delta, 0);
+        assert!(!result.attribute_boost_is_timed);
+        assert!(!result.resistance_boost_is_timed);
+        assert_eq!(result.spell_learn_id, None);
+    }
+
+    /// `ConsumableEffect::CastSpell` must not modify HP, SP, or any character field.
+    #[test]
+    fn test_cast_spell_does_not_mutate_character() {
+        use crate::domain::items::types::ConsumableData;
+
+        let mut ch = make_character(50, 30, 40, 15);
+        let hp_before = ch.hp.current;
+        let sp_before = ch.sp.current;
+        let data = ConsumableData {
+            effect: ConsumableEffect::CastSpell(0x0201),
+            is_combat_usable: true,
+            duration_minutes: None,
+        };
+        apply_consumable_effect(&mut ch, &data);
+
+        assert_eq!(ch.hp.current, hp_before, "HP must not change for CastSpell");
+        assert_eq!(ch.sp.current, sp_before, "SP must not change for CastSpell");
+    }
+
+    /// `ConsumableEffect::CastSpell` via the exploration path must behave identically.
+    #[test]
+    fn test_cast_spell_exploration_path_sets_spell_cast_id() {
+        use crate::domain::items::types::ConsumableData;
+
+        let mut ch = make_character(30, 30, 20, 20);
+        let mut active_spells = ActiveSpells::new();
+        let data = ConsumableData {
+            effect: ConsumableEffect::CastSpell(0x0501),
+            is_combat_usable: false,
+            duration_minutes: None,
+        };
+        let result = apply_consumable_effect_exploration(&mut ch, &mut active_spells, &data);
+
+        assert_eq!(result.spell_cast_id, Some(0x0501));
+        assert_eq!(result.spell_learn_id, None);
+    }
+
+    // -----------------------------------------------------------------------
+    // LearnSpell
+    // -----------------------------------------------------------------------
+
+    /// `ConsumableEffect::LearnSpell` must signal the spell ID via
+    /// `result.spell_learn_id` without mutating the character's spellbook.
+    #[test]
+    fn test_learn_spell_sets_spell_learn_id_in_result() {
+        use crate::domain::items::types::ConsumableData;
+
+        let mut ch = make_character(30, 30, 20, 20);
+        let data = ConsumableData {
+            effect: ConsumableEffect::LearnSpell(0x0101),
+            is_combat_usable: false,
+            duration_minutes: None,
+        };
+        let result = apply_consumable_effect(&mut ch, &data);
+
+        assert_eq!(
+            result.spell_learn_id,
+            Some(0x0101),
+            "spell_learn_id must be populated with the spell ID"
+        );
+        // All other fields must be zeroed / default
+        assert_eq!(result.healing, 0);
+        assert_eq!(result.sp_restored, 0);
+        assert_eq!(result.conditions_cleared, 0);
+        assert_eq!(result.attribute_delta, 0);
+        assert_eq!(result.resistance_delta, 0);
+        assert!(!result.attribute_boost_is_timed);
+        assert!(!result.resistance_boost_is_timed);
+        assert_eq!(result.spell_cast_id, None);
+    }
+
+    /// `ConsumableEffect::LearnSpell` must not mutate the character's spellbook.
+    #[test]
+    fn test_learn_spell_does_not_mutate_spellbook() {
+        use crate::domain::items::types::ConsumableData;
+
+        let mut ch = make_character(30, 30, 20, 20);
+        let data = ConsumableData {
+            effect: ConsumableEffect::LearnSpell(0x0201),
+            is_combat_usable: false,
+            duration_minutes: None,
+        };
+        apply_consumable_effect(&mut ch, &data);
+
+        // Spellbook must remain completely empty — learning is caller's responsibility
+        for level_list in &ch.spells.cleric_spells {
+            assert!(level_list.is_empty(), "cleric spellbook must be untouched");
+        }
+        for level_list in &ch.spells.sorcerer_spells {
+            assert!(
+                level_list.is_empty(),
+                "sorcerer spellbook must be untouched"
+            );
+        }
+    }
+
+    /// `ConsumableEffect::LearnSpell` via the exploration path must behave identically.
+    #[test]
+    fn test_learn_spell_exploration_path_sets_spell_learn_id() {
+        use crate::domain::items::types::ConsumableData;
+
+        let mut ch = make_character(30, 30, 20, 20);
+        let mut active_spells = ActiveSpells::new();
+        let data = ConsumableData {
+            effect: ConsumableEffect::LearnSpell(0x0601),
+            is_combat_usable: false,
+            duration_minutes: None,
+        };
+        let result = apply_consumable_effect_exploration(&mut ch, &mut active_spells, &data);
+
+        assert_eq!(result.spell_learn_id, Some(0x0601));
+        assert_eq!(result.spell_cast_id, None);
+    }
+
+    /// Verify that `ConsumableApplyResult::default()` leaves the new fields as `None`.
+    #[test]
+    fn test_consumable_apply_result_default_spell_fields_are_none() {
+        let result = ConsumableApplyResult::default();
+        assert_eq!(result.spell_cast_id, None);
+        assert_eq!(result.spell_learn_id, None);
     }
 }

@@ -3,9 +3,10 @@
 
 use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
-    autocomplete_tag_list_selector, dispatch_list_action, extract_item_tag_candidates,
-    handle_reload, show_standard_list_item, DispatchActionState, EditorToolbar, ItemAction,
-    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    autocomplete_spell_selector, autocomplete_tag_list_selector, dispatch_list_action,
+    extract_item_tag_candidates, handle_reload, show_standard_list_item, DispatchActionState,
+    EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig, ToolbarAction,
+    TwoColumnLayout,
 };
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::{
@@ -148,6 +149,7 @@ impl ItemsEditorState {
         ui: &mut egui::Ui,
         items: &mut Vec<Item>,
         classes: &[ClassDefinition],
+        spells: &[antares::domain::magic::types::Spell],
         ctx: &mut EditorContext<'_>,
     ) {
         ui.heading("⚔️ Items Editor");
@@ -318,7 +320,9 @@ impl ItemsEditorState {
 
         match self.mode {
             ItemsEditorMode::List => self.show_list(ui, items, classes, ctx),
-            ItemsEditorMode::Add | ItemsEditorMode::Edit => self.show_form(ui, items, classes, ctx),
+            ItemsEditorMode::Add | ItemsEditorMode::Edit => {
+                self.show_form(ui, items, classes, spells, ctx);
+            }
         }
 
         if self.show_import_dialog {
@@ -620,6 +624,12 @@ impl ItemsEditorState {
                                 ConsumableEffect::Resurrect(hp) => {
                                     format!("Resurrect ({} HP)", hp)
                                 }
+                                ConsumableEffect::CastSpell(spell_id) => {
+                                    format!("Cast Spell (ID: {:#06x})", spell_id)
+                                }
+                                ConsumableEffect::LearnSpell(spell_id) => {
+                                    format!("Learn Spell (ID: {:#06x})", spell_id)
+                                }
                             };
                             ui.label(format!("  Effect: {}", effect_str));
                             ui.label(format!("  Combat Use: {}", data.is_combat_usable));
@@ -760,6 +770,7 @@ impl ItemsEditorState {
         ui: &mut egui::Ui,
         items: &mut Vec<Item>,
         _classes: &[ClassDefinition],
+        spells: &[antares::domain::magic::types::Spell],
         ctx: &mut EditorContext<'_>,
     ) {
         let is_add = self.mode == ItemsEditorMode::Add;
@@ -800,6 +811,33 @@ impl ItemsEditorState {
                     ui.horizontal(|ui| {
                         ui.label("Max Charges:");
                         ui.add(egui::DragValue::new(&mut self.edit_buffer.max_charges).speed(1.0));
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Spell Effect:");
+                        let mut spell_effect_id: antares::domain::types::SpellId =
+                            self.edit_buffer.spell_effect.unwrap_or(0);
+                        if autocomplete_spell_selector(
+                            ui,
+                            "item_spell_effect",
+                            "",
+                            &mut spell_effect_id,
+                            spells,
+                        ) {
+                            self.edit_buffer.spell_effect = if spell_effect_id == 0 {
+                                None
+                            } else {
+                                Some(spell_effect_id)
+                            };
+                        }
+                        if self.edit_buffer.spell_effect.is_some()
+                            && ui.small_button("✕ Clear").clicked()
+                        {
+                            self.edit_buffer.spell_effect = None;
+                        }
+                        ui.label("ℹ️").on_hover_text(
+                            "Charged item spell effect. Set Max Charges > 0 to enable.",
+                        );
                     });
                 });
 
@@ -870,7 +908,7 @@ impl ItemsEditorState {
                     });
 
                     ui.separator();
-                    self.show_type_editor(ui);
+                    self.show_type_editor(ui, spells);
                 });
 
                 ui.add_space(10.0);
@@ -1038,7 +1076,11 @@ impl ItemsEditorState {
             });
     }
 
-    fn show_type_editor(&mut self, ui: &mut egui::Ui) {
+    fn show_type_editor(
+        &mut self,
+        ui: &mut egui::Ui,
+        spells: &[antares::domain::magic::types::Spell],
+    ) {
         match &mut self.edit_buffer.item_type {
             ItemType::Weapon(data) => {
                 ui.label("Weapon Properties:");
@@ -1247,6 +1289,8 @@ impl ItemsEditorState {
                         ConsumableEffect::BoostResistance(_, _) => "Boost Resistance",
                         ConsumableEffect::IsFood(_) => "Food (Rations)",
                         ConsumableEffect::Resurrect(_) => "Resurrect",
+                        ConsumableEffect::CastSpell(_) => "Cast Spell",
+                        ConsumableEffect::LearnSpell(_) => "Learn Spell",
                     };
                     egui::ComboBox::from_id_salt("consumable_effect")
                         .selected_text(effect_type)
@@ -1300,6 +1344,18 @@ impl ItemsEditorState {
                                 .clicked()
                             {
                                 data.effect = ConsumableEffect::Resurrect(1);
+                            }
+                            if ui
+                                .selectable_label(effect_type == "Cast Spell", "Cast Spell")
+                                .clicked()
+                            {
+                                data.effect = ConsumableEffect::CastSpell(0x0101);
+                            }
+                            if ui
+                                .selectable_label(effect_type == "Learn Spell", "Learn Spell")
+                                .clicked()
+                            {
+                                data.effect = ConsumableEffect::LearnSpell(0x0101);
                             }
                         });
                     ui.label("ℹ️").on_hover_text(concat!(
@@ -1421,6 +1477,26 @@ impl ItemsEditorState {
                             ui.add(egui::DragValue::new(hp).range(1..=999));
                         });
                         ui.label("Restores a dead character to life with the specified HP.");
+                    }
+                    ConsumableEffect::CastSpell(spell_id) => {
+                        autocomplete_spell_selector(
+                            ui,
+                            "consumable_cast_spell",
+                            "Spell:",
+                            spell_id,
+                            spells,
+                        );
+                        ui.label("This scroll casts the specified spell when used.");
+                    }
+                    ConsumableEffect::LearnSpell(spell_id) => {
+                        autocomplete_spell_selector(
+                            ui,
+                            "consumable_learn_spell",
+                            "Spell:",
+                            spell_id,
+                            spells,
+                        );
+                        ui.label("This scroll permanently teaches the spell to the user.");
                     }
                 }
             }
@@ -2104,5 +2180,64 @@ mod tests {
         } else {
             panic!("expected BoostAttribute effect");
         }
+    }
+
+    // =========================================================================
+    // CastSpell / LearnSpell / spell_effect Tests
+    // =========================================================================
+
+    /// A consumable with `CastSpell(0x0101)` must preserve the spell id as 0x0101.
+    #[test]
+    fn test_cast_spell_effect_has_valid_default() {
+        let effect = ConsumableEffect::CastSpell(0x0101);
+        if let ConsumableEffect::CastSpell(spell_id) = effect {
+            assert_eq!(spell_id, 0x0101, "CastSpell spell_id must equal 0x0101");
+        } else {
+            panic!("expected ConsumableEffect::CastSpell");
+        }
+    }
+
+    /// A consumable with `LearnSpell(0x0201)` must preserve the spell id as 0x0201.
+    #[test]
+    fn test_learn_spell_effect_has_valid_default() {
+        let effect = ConsumableEffect::LearnSpell(0x0201);
+        if let ConsumableEffect::LearnSpell(spell_id) = effect {
+            assert_eq!(spell_id, 0x0201, "LearnSpell spell_id must equal 0x0201");
+        } else {
+            panic!("expected ConsumableEffect::LearnSpell");
+        }
+    }
+
+    /// An item with `spell_effect: Some(5)` must survive a clone with the field intact.
+    #[test]
+    fn test_spell_effect_field_roundtrip() {
+        let item = Item {
+            id: 99,
+            name: "Charged Ring".to_string(),
+            item_type: ItemType::Accessory(AccessoryData {
+                slot: AccessorySlot::Ring,
+                classification: None,
+            }),
+            base_cost: 500,
+            sell_cost: 250,
+            is_cursed: false,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: Some(5),
+            max_charges: 3,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+
+        let cloned = item.clone();
+        assert_eq!(
+            cloned.spell_effect,
+            Some(5),
+            "spell_effect must be preserved through clone"
+        );
+        assert_eq!(cloned.max_charges, 3);
     }
 }

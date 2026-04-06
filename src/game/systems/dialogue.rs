@@ -1615,6 +1615,95 @@ fn execute_action(
                 }
             }
         }
+
+        DialogueAction::LearnSpell {
+            spell_id,
+            target_character_id,
+        } => {
+            let spell_db = &db.spells;
+            let class_db = &db.classes;
+
+            // Build the list of party indices to attempt in order.
+            // An explicit target_character_id means try only that member;
+            // None means iterate the whole party and stop at the first success.
+            let targets: Vec<usize> = if let Some(cid) = target_character_id {
+                vec![*cid]
+            } else {
+                (0..game_state.party.members.len()).collect()
+            };
+
+            let mut learned = false;
+            'teach: for idx in targets {
+                if idx >= game_state.party.members.len() {
+                    warn!(
+                        "Dialogue LearnSpell: character index {} out of range (party size {})",
+                        idx,
+                        game_state.party.members.len()
+                    );
+                    continue;
+                }
+
+                // Snapshot name before the mutable borrow consumed by learn_spell
+                let char_name = game_state.party.members[idx].name.clone();
+
+                let learn_result = crate::domain::magic::learning::learn_spell(
+                    &mut game_state.party.members[idx],
+                    *spell_id,
+                    spell_db,
+                    class_db,
+                );
+
+                match learn_result {
+                    Ok(()) => {
+                        let spell_name = spell_db
+                            .get_spell(*spell_id)
+                            .map(|s| s.name.clone())
+                            .unwrap_or_else(|| spell_id.to_string());
+                        info!(
+                            "Dialogue LearnSpell: '{}' learned '{}'",
+                            char_name, spell_name
+                        );
+                        if let Some(log) = game_log.as_mut() {
+                            log.add_dialogue(format!("{} learned {}!", char_name, spell_name));
+                        }
+                        learned = true;
+                        break 'teach;
+                    }
+                    Err(crate::domain::magic::learning::SpellLearnError::AlreadyKnown(_)) => {
+                        if target_character_id.is_some() {
+                            // Explicit target already knows the spell — treat as success
+                            if let Some(log) = game_log.as_mut() {
+                                log.add_system(format!("{} already knows that spell.", char_name));
+                            }
+                            learned = true;
+                        }
+                        // For first-eligible mode, skip this member and keep trying
+                        break 'teach;
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Dialogue LearnSpell: cannot teach spell {} to '{}' (index {}): {}",
+                            spell_id, char_name, idx, e
+                        );
+                        if target_character_id.is_some() {
+                            // Explicit target — surface the error to the player
+                            if let Some(log) = game_log.as_mut() {
+                                log.add_system(format!("Cannot learn spell: {}", e));
+                            }
+                            break 'teach;
+                        }
+                        // First-eligible mode — move on to the next party member
+                    }
+                }
+            }
+
+            if !learned {
+                warn!(
+                    "Dialogue LearnSpell: no eligible party member found for spell {}",
+                    spell_id
+                );
+            }
+        }
     }
 }
 
@@ -3805,5 +3894,174 @@ mod tests {
             !current_map.events.contains_key(&event_pos),
             "RecruitableCharacter event must be removed after RecruitToInn with recruitment_context"
         );
+    }
+
+    // ===== DialogueAction::LearnSpell tests =====
+
+    fn make_cleric_party_state() -> (
+        crate::application::GameState,
+        crate::sdk::database::ContentDatabase,
+    ) {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+
+        let mut gs = crate::application::GameState::new();
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        // Load real class definitions so spell school lookups work correctly
+        db.classes = crate::domain::classes::ClassDatabase::load_from_file("data/classes.ron")
+            .expect("data/classes.ron must exist for dialogue tests");
+
+        // Load real race definitions
+        db.races = crate::domain::races::RaceDatabase::load_from_file("data/races.ron")
+            .expect("data/races.ron must exist for dialogue tests");
+
+        // Add a level-1 cleric spell
+        db.spells
+            .add_spell(Spell::new(
+                0x0101,
+                "Cure Wounds",
+                SpellSchool::Cleric,
+                1,
+                2,
+                0,
+                SpellContext::Anytime,
+                SpellTarget::SingleCharacter,
+                "Heals 8 HP",
+                None,
+                0,
+                false,
+            ))
+            .unwrap();
+
+        // Add a cleric party member
+        let mut cleric = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        cleric.level = 5;
+        gs.party.add_member(cleric).unwrap();
+
+        (gs, db)
+    }
+
+    fn run_learn_spell_action(
+        spell_id: crate::domain::types::SpellId,
+        target_character_id: Option<crate::domain::types::CharacterId>,
+        game_state: &mut crate::application::GameState,
+        db: &crate::sdk::database::ContentDatabase,
+    ) {
+        let action = DialogueAction::LearnSpell {
+            spell_id,
+            target_character_id,
+        };
+        execute_action(&action, game_state, db, None, None, None, None, &mut None);
+    }
+
+    #[test]
+    fn test_dialogue_learn_spell_action_adds_spell_to_cleric_spellbook() {
+        let (mut gs, db) = make_cleric_party_state();
+        assert!(gs.party.members[0].spells.cleric_spells[0].is_empty());
+
+        run_learn_spell_action(0x0101, None, &mut gs, &db);
+
+        assert!(gs.party.members[0].spells.cleric_spells[0].contains(&0x0101));
+    }
+
+    #[test]
+    fn test_dialogue_learn_spell_action_with_explicit_target() {
+        let (mut gs, db) = make_cleric_party_state();
+
+        run_learn_spell_action(0x0101, Some(0), &mut gs, &db);
+
+        assert!(gs.party.members[0].spells.cleric_spells[0].contains(&0x0101));
+    }
+
+    #[test]
+    fn test_dialogue_learn_spell_action_wrong_class_logs_and_does_not_panic() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let (mut gs, db) = make_cleric_party_state();
+        // Replace cleric with a knight
+        gs.party.members.clear();
+        let knight = Character::new(
+            "Tank".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.members.push(knight);
+
+        // Should not panic — knight cannot learn cleric spells
+        run_learn_spell_action(0x0101, None, &mut gs, &db);
+
+        // Spellbook must remain empty
+        assert!(gs.party.members[0].spells.cleric_spells[0].is_empty());
+    }
+
+    #[test]
+    fn test_dialogue_learn_spell_action_already_known_does_not_duplicate() {
+        let (mut gs, db) = make_cleric_party_state();
+        // Pre-populate the spell
+        gs.party.members[0].spells.cleric_spells[0].push(0x0101);
+
+        run_learn_spell_action(0x0101, Some(0), &mut gs, &db);
+
+        // Must still appear exactly once
+        assert_eq!(
+            gs.party.members[0].spells.cleric_spells[0]
+                .iter()
+                .filter(|&&id| id == 0x0101)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_dialogue_learn_spell_action_first_eligible_skips_wrong_class() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let (mut gs, db) = make_cleric_party_state();
+        // Prepend a knight (ineligible) before the existing cleric
+        let knight = Character::new(
+            "Tank".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.members.insert(0, knight);
+
+        // Without an explicit target, should skip knight and teach cleric at index 1
+        run_learn_spell_action(0x0101, None, &mut gs, &db);
+
+        assert!(gs.party.members[0].spells.cleric_spells[0].is_empty()); // knight unchanged
+        assert!(gs.party.members[1].spells.cleric_spells[0].contains(&0x0101));
+    }
+
+    #[test]
+    fn test_dialogue_learn_spell_action_out_of_range_target_does_not_panic() {
+        let (mut gs, db) = make_cleric_party_state();
+
+        // Index 99 is out of range — should log a warning and not panic
+        run_learn_spell_action(0x0101, Some(99), &mut gs, &db);
+
+        // Spellbook unchanged
+        assert!(gs.party.members[0].spells.cleric_spells[0].is_empty());
+    }
+
+    #[test]
+    fn test_dialogue_learn_spell_unknown_spell_id_does_not_panic() {
+        let (mut gs, db) = make_cleric_party_state();
+
+        // Spell 9999 does not exist in the database — should not panic
+        run_learn_spell_action(9999, None, &mut gs, &db);
+
+        // Spellbook unchanged
+        assert!(gs.party.members[0].spells.cleric_spells[0].is_empty());
     }
 }

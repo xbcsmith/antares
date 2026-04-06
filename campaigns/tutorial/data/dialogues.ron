@@ -15,6 +15,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Farewell.",
@@ -22,11 +25,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -36,11 +45,17 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: Some("Arcturus"),
         repeatable: true,
         associated_quest: Some(0),
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
     (
         id: 2,
@@ -58,6 +73,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "We do not have time. Maybe later",
@@ -65,11 +83,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -79,6 +103,9 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             3: (
                 id: 3,
@@ -88,11 +115,17 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: Some("Arcturus Brother"),
         repeatable: false,
         associated_quest: Some(1),
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
     (
         id: 3,
@@ -110,6 +143,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Do you have any work for us?",
@@ -117,6 +153,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Farewell, elder.",
@@ -124,11 +163,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -141,6 +186,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "I see. Tell me something else.",
@@ -148,11 +196,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             3: (
                 id: 3,
@@ -165,6 +219,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Perhaps another time.",
@@ -172,11 +229,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             4: (
                 id: 4,
@@ -189,11 +252,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             5: (
                 id: 5,
@@ -203,11 +272,17 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: Some("Village Elder"),
         repeatable: true,
         associated_quest: Some(4),
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
     (
         id: 4,
@@ -225,6 +300,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Any interesting news?",
@@ -232,6 +310,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "I\'d like to manage my party.",
@@ -239,6 +320,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "I\'ll be going now.",
@@ -246,11 +330,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -263,6 +353,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Tell me something else.",
@@ -270,11 +363,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             3: (
                 id: 3,
@@ -287,11 +386,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             4: (
                 id: 4,
@@ -304,11 +409,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             6: (
                 id: 6,
@@ -322,11 +433,17 @@
                     ),
                 ],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: Some("Innkeeper"),
         repeatable: true,
         associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
     (
         id: 5,
@@ -344,6 +461,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Where do you travel?",
@@ -351,6 +471,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "I\'d like to browse your wares.",
@@ -358,6 +481,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Not interested.",
@@ -365,11 +491,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -382,6 +514,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Tell me something else.",
@@ -389,11 +524,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             3: (
                 id: 3,
@@ -406,6 +547,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "What else can you tell me?",
@@ -413,11 +557,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             4: (
                 id: 4,
@@ -430,11 +580,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             5: (
                 id: 5,
@@ -447,11 +603,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             6: (
                 id: 6,
@@ -465,11 +627,17 @@
                     ),
                 ],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: Some("Merchant"),
         repeatable: true,
         associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
     (
         id: 6,
@@ -487,6 +655,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "What guidance can you offer?",
@@ -494,6 +665,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Blessings to you as well.",
@@ -501,11 +675,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -518,6 +698,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Tell me more.",
@@ -525,11 +708,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             3: (
                 id: 3,
@@ -542,6 +731,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "What else can you tell me?",
@@ -549,11 +741,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             4: (
                 id: 4,
@@ -566,11 +764,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             5: (
                 id: 5,
@@ -580,11 +784,17 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: Some("High Priestess"),
         repeatable: true,
         associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
     (
         id: 7,
@@ -602,6 +812,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "We\'ll help you recover it.",
@@ -609,6 +822,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "That\'s unfortunate. Good luck.",
@@ -616,11 +832,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -633,6 +855,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "I can\'t help you.",
@@ -640,11 +865,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             3: (
                 id: 3,
@@ -654,6 +885,9 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             4: (
                 id: 4,
@@ -663,11 +897,17 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: Some("Lost Ranger"),
         repeatable: false,
         associated_quest: Some(6),
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
     (
         id: 8,
@@ -685,6 +925,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "We\'re ready to help.",
@@ -692,6 +935,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "This sounds too dangerous.",
@@ -699,11 +945,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -716,6 +968,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "We accept this quest.",
@@ -723,11 +978,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             3: (
                 id: 3,
@@ -740,11 +1001,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             4: (
                 id: 4,
@@ -757,6 +1024,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "This is beyond us.",
@@ -764,11 +1034,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             5: (
                 id: 5,
@@ -778,6 +1054,9 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             6: (
                 id: 6,
@@ -787,11 +1066,17 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: Some("Village Elder"),
         repeatable: false,
         associated_quest: Some(5),
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
     (
         id: 9,
@@ -809,6 +1094,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Tell me about the mountain pass.",
@@ -816,6 +1104,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "I\'d like to manage my party.",
@@ -823,6 +1114,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Thanks for the welcome.",
@@ -830,11 +1124,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -847,6 +1147,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Tell me something else.",
@@ -854,11 +1157,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             3: (
                 id: 3,
@@ -871,11 +1180,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             4: (
                 id: 4,
@@ -888,6 +1203,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Stay strong, friend.",
@@ -895,11 +1213,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             5: (
                 id: 5,
@@ -909,6 +1233,9 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             6: (
                 id: 6,
@@ -922,11 +1249,17 @@
                     ),
                 ],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: Some("Innkeeper"),
         repeatable: true,
         associated_quest: Some(3),
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
     (
         id: 10,
@@ -944,6 +1277,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "What kind of artifacts?",
@@ -951,6 +1287,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "I\'d like to buy something.",
@@ -958,6 +1297,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Just browsing.",
@@ -965,11 +1307,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -982,6 +1330,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Tell me about something else.",
@@ -989,11 +1340,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             3: (
                 id: 3,
@@ -1006,11 +1363,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             4: (
                 id: 4,
@@ -1023,11 +1386,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             5: (
                 id: 5,
@@ -1041,11 +1410,17 @@
                     ),
                 ],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: Some("Merchant"),
         repeatable: true,
         associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
     (
         id: 11,
@@ -1063,6 +1438,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "How does the temple help?",
@@ -1070,6 +1448,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Blessings, priest.",
@@ -1077,11 +1458,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -1094,6 +1481,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Tell me more.",
@@ -1101,11 +1491,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             3: (
                 id: 3,
@@ -1118,11 +1514,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             4: (
                 id: 4,
@@ -1135,6 +1537,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Tell me something else.",
@@ -1142,11 +1547,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             5: (
                 id: 5,
@@ -1159,11 +1570,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             6: (
                 id: 6,
@@ -1173,11 +1590,17 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: Some("High Priest"),
         repeatable: true,
         associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
     (
         id: 100,
@@ -1199,6 +1622,9 @@
                             ),
                         ],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Meet me at the Inn.",
@@ -1210,6 +1636,9 @@
                             ),
                         ],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Not at this time.",
@@ -1217,11 +1646,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -1231,6 +1666,9 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             3: (
                 id: 3,
@@ -1240,11 +1678,17 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: None,
         repeatable: false,
         associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
     (
         id: 101,
@@ -1266,6 +1710,9 @@
                             ),
                         ],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Meet me at the Inn.",
@@ -1277,6 +1724,9 @@
                             ),
                         ],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Not at this time.",
@@ -1284,11 +1734,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -1298,6 +1754,9 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             3: (
                 id: 3,
@@ -1307,11 +1766,17 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: Some("Apprentice Zara"),
         repeatable: false,
         associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
     (
         id: 102,
@@ -1333,6 +1798,9 @@
                             ),
                         ],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Meet me at the Inn.",
@@ -1344,6 +1812,9 @@
                             ),
                         ],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Not at this time.",
@@ -1351,11 +1822,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -1365,6 +1842,9 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             3: (
                 id: 3,
@@ -1374,11 +1854,17 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: Some("Whisper"),
         repeatable: false,
         associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
     (
         id: 103,
@@ -1396,6 +1882,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "How can I help?",
@@ -1403,6 +1892,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "I\'m sorry, there\'s nothing I can do.",
@@ -1410,11 +1902,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -1427,6 +1925,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Can I help you?",
@@ -1434,11 +1935,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             3: (
                 id: 3,
@@ -1451,6 +1958,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "I can\'t help with that.",
@@ -1458,11 +1968,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             4: (
                 id: 4,
@@ -1475,6 +1991,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Rest now.",
@@ -1482,11 +2001,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             5: (
                 id: 5,
@@ -1496,6 +2021,9 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             6: (
                 id: 6,
@@ -1505,11 +2033,17 @@
                 conditions: [],
                 actions: [],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: Some("Dying Goblin"),
         repeatable: false,
         associated_quest: Some(3),
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
     (
         id: 999,
@@ -1527,6 +2061,9 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                     (
                         text: "Nothing right now. Farewell.",
@@ -1534,11 +2071,17 @@
                         conditions: [],
                         actions: [],
                         ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
                     ),
                 ],
                 conditions: [],
                 actions: [],
                 is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
             2: (
                 id: 2,
@@ -1552,10 +2095,16 @@
                     ),
                 ],
                 is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
             ),
         },
         speaker_name: Some("Innkeeper"),
         repeatable: true,
         associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
     ),
 ]

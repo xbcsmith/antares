@@ -62,6 +62,10 @@
 
 pub mod casting;
 pub mod database;
+pub mod effect_dispatch;
+pub mod exploration_casting;
+pub mod fizzle;
+pub mod learning;
 pub mod spell_effects;
 pub mod types;
 
@@ -72,8 +76,24 @@ pub use casting::{
     get_required_level_for_spell_by_id,
 };
 pub use database::{SpellDatabase, SpellDatabaseError};
+pub use effect_dispatch::{
+    apply_buff_spell, apply_cure_condition, apply_healing_spell, apply_spell_effect,
+    apply_utility_spell, BuffResult, CureConditionResult, HealResult, SpellEffectResult,
+    UtilityResult,
+};
+pub use exploration_casting::{
+    add_food_to_party, can_cast_exploration_spell, cast_exploration_spell,
+    get_castable_exploration_spells, ExplorationTarget,
+};
+pub use fizzle::{calculate_fizzle_chance, roll_fizzle};
+pub use learning::{
+    can_learn_spell, get_learnable_spells, grant_level_up_spells, learn_spell, SpellLearnError,
+};
 pub use spell_effects::{
     apply_condition_dot_effects, apply_spell_conditions_to_character,
     apply_spell_conditions_to_monster,
 };
-pub use types::{Spell, SpellContext, SpellError, SpellResult, SpellSchool, SpellTarget};
+pub use types::{
+    BuffField, Spell, SpellContext, SpellEffectType, SpellError, SpellResult, SpellSchool,
+    SpellTarget, TeleportDestination, UtilityType,
+};

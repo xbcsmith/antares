@@ -190,7 +190,7 @@
         item_type: Weapon((
             damage: (
                 count: 1,
-                sides: 6,
+                sides: 8,
                 bonus: 0,
             ),
             bonus: 0,
@@ -219,7 +219,7 @@
         item_type: Weapon((
             damage: (
                 count: 1,
-                sides: 4,
+                sides: 6,
                 bonus: 0,
             ),
             bonus: 0,
@@ -1071,5 +1071,33 @@
         tags: [],
         mesh_descriptor_override: None,
         mesh_id: None,
+    ),
+    (
+        id: 203,
+        name: "Short Bow  +1",
+        item_type: Weapon((
+            damage: (
+                count: 1,
+                sides: 6,
+                bonus: 1,
+            ),
+            bonus: 1,
+            hands_required: 2,
+            classification: MartialRanged,
+        )),
+        base_cost: 15,
+        sell_cost: 7,
+        alignment_restriction: None,
+        constant_bonus: None,
+        temporary_bonus: None,
+        spell_effect: None,
+        max_charges: 0,
+        is_cursed: false,
+        icon_path: None,
+        tags: [
+            "two_handed",
+        ],
+        mesh_descriptor_override: None,
+        mesh_id: Some(9008),
     ),
 ]
