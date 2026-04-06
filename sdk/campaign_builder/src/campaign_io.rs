@@ -1946,6 +1946,12 @@ impl CampaignBuilderApp {
                 &self.campaign_data.spells,
             ),
         );
+        self.validation_state.validation_errors.extend(
+            validation::validate_character_starting_spells(
+                &self.campaign_data.characters,
+                &self.campaign_data.spells,
+            ),
+        );
 
         // Add category status checks (passed or no data info)
         self.validation_state

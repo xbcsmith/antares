@@ -1,5 +1,132 @@
 # Implementations
 
+## Phase 4: Validation Integration and Documentation (Complete)
+
+### Overview
+
+Phase 4 closes the SDK validation gap for `starting_spells` references in
+character definitions. It adds a new validation rule, wires it into the
+campaign-wide validation pipeline, and verifies the `data/test_campaign/`
+fixtures already supply the required spell entries so all new code paths have
+integration coverage.
+
+### Problem Solved
+
+Before Phase 4, a campaign author could set `starting_spells` on a
+`CharacterDefinition` to point at a `SpellId` that does not exist in the
+campaign's spell database. The error would only surface at runtime — inside
+`CharacterDefinition::instantiate()` — rather than being caught during the
+save/validate workflow in the SDK.
+
+### Files Changed
+
+| File                                              | Change                                                                      |
+| ------------------------------------------------- | --------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/validation.rs`          | Added `validate_character_starting_spells()` + 8 unit tests                 |
+| `sdk/campaign_builder/src/campaign_io.rs`         | Wired `validate_character_starting_spells()` inside `validate_campaign()`   |
+| `sdk/campaign_builder/tests/campaign_io_tests.rs` | Added 4 integration tests that exercise the full `validate_campaign()` path |
+| `docs/explanation/implementations.md`             | This entry                                                                  |
+
+### 4.1 — `validate_character_starting_spells()` (`validation.rs`)
+
+```sdk/campaign_builder/src/validation.rs
+pub fn validate_character_starting_spells(
+    characters: &[antares::domain::character_definition::CharacterDefinition],
+    spells: &[antares::domain::magic::types::Spell],
+) -> Vec<ValidationResult>
+```
+
+- Builds a `HashSet<SpellId>` from the provided `spells` slice for O(1) lookups.
+- Iterates every `CharacterDefinition`; for each `SpellId` in `starting_spells`
+  that is **not** in the set, pushes a `ValidationResult::error` with
+  `ValidationCategory::Characters` whose message includes both the character's
+  display name (`character.name`) and its definition ID (`character.id`), plus
+  the unknown `spell_id`.
+- When no errors are found, pushes a single `Passed` result confirming that all
+  character `starting_spells` references are valid (consistent with every other
+  spell-cross-reference rule in the file).
+
+### 4.2 — Wired into `validate_campaign()` (`campaign_io.rs`)
+
+The new rule is called immediately after `validate_quest_learn_spell_rewards`,
+keeping all spell-cross-reference rules together in one logical block:
+
+```sdk/campaign_builder/src/campaign_io.rs
+self.validation_state.validation_errors.extend(
+    validation::validate_character_starting_spells(
+        &self.campaign_data.characters,
+        &self.campaign_data.spells,
+    ),
+);
+```
+
+### 4.3 — `data/test_campaign/` Fixtures
+
+No fixture changes were required. `data/test_campaign/data/characters.ron`
+already contains two premade characters with `starting_spells` populated:
+
+- `tutorial_elf_sorcerer` (Sirius) — `starting_spells: [1029, 1025]`
+- `tutorial_human_cleric` (Mira) — `starting_spells: [260, 257]`
+
+All four spell IDs (257, 260, 1025, 1029) are present in
+`data/test_campaign/data/spells.ron`, so the integration path
+(`CharacterDefinition` with `starting_spells` → `validate_campaign()` →
+`validate_character_starting_spells()`) is covered without any fixture
+modifications.
+
+### Tests Added
+
+#### `sdk/campaign_builder/src/validation.rs` (8 unit tests)
+
+| Test                                                                                      | What it verifies                                                    |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `test_validate_character_starting_spells_empty_characters_returns_passed`                 | Empty character slice → single `Passed` result                      |
+| `test_validate_character_starting_spells_no_starting_spells_returns_passed`               | Character with `starting_spells: []` → `Passed`                     |
+| `test_validate_character_starting_spells_valid_spell_ids_returns_passed`                  | All IDs resolve → `Passed`                                          |
+| `test_validate_character_starting_spells_invalid_spell_id_returns_error`                  | Unknown ID → error with character name, ID, and spell ID in message |
+| `test_validate_character_starting_spells_error_contains_spell_id`                         | Error message contains the numeric value of the bad `SpellId`       |
+| `test_validate_character_starting_spells_multiple_characters_one_invalid`                 | Only the character with the bad reference produces an error         |
+| `test_validate_character_starting_spells_multiple_invalid_spell_ids_in_one_character`     | Two bad IDs on one character → two errors                           |
+| `test_validate_character_starting_spells_empty_spell_list_with_references_returns_errors` | Reference against empty spell list → error                          |
+| `test_validate_character_starting_spells_uses_characters_category`                        | All produced errors use `ValidationCategory::Characters`            |
+
+#### `sdk/campaign_builder/tests/campaign_io_tests.rs` (4 integration tests)
+
+| Test                                                                     | What it verifies                                                                        |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `test_validate_campaign_character_invalid_starting_spell_produces_error` | `validate_campaign()` surfaces error for unresolvable `starting_spells` entry           |
+| `test_validate_campaign_character_valid_starting_spell_no_error`         | `validate_campaign()` produces no `starting_spells` error when all IDs resolve          |
+| `test_validate_campaign_character_empty_starting_spells_no_error`        | `validate_campaign()` produces no error for characters with empty `starting_spells`     |
+| `test_validate_campaign_multiple_characters_one_invalid_starting_spell`  | Only the character with the bad reference produces an error; correct character is named |
+
+### Architecture Compliance
+
+- [x] `SpellId` type alias used throughout — no raw `u16`/`u32`
+- [x] `ValidationCategory::Characters` used for all errors (matches the domain
+      boundary — this is a character-definition cross-reference, not a spell-data
+      integrity issue)
+- [x] `#[serde(default)]` + `#[serde(skip_serializing_if = "Vec::is_empty")]`
+      on `starting_spells` already in place from Phase 1 — no RON backward-
+      compatibility regression
+- [x] All test fixtures reference `data/test_campaign`, never `campaigns/tutorial`
+- [x] All four quality gates pass with zero warnings (4 407 tests, 0 failures)
+
+---
+
+## Spell Management — All Four Phases (Summary)
+
+The following table summarises every phase of the spell management implementation
+plan and its current status.
+
+| Phase   | Scope                                                                                    | Status      |
+| ------- | ---------------------------------------------------------------------------------------- | ----------- |
+| Phase 1 | `starting_spells` field in `CharacterDefinition`; `instantiate()` populates `SpellBook`  | ✅ Complete |
+| Phase 2 | In-game Spell Book Management UI (`GameMode::SpellBook`, `SpellBookPlugin`, key binding) | ✅ Complete |
+| Phase 3 | SDK Character Editor — Starting Spells section in `characters_editor.rs`                 | ✅ Complete |
+| Phase 4 | `validate_character_starting_spells()` rule wired into `validate_campaign()`             | ✅ Complete |
+
+---
+
 ## Phase 1: `starting_spells` in `CharacterDefinition` (Complete)
 
 ### Overview
