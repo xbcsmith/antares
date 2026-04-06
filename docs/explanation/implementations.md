@@ -1,5 +1,116 @@
 # Implementations
 
+## Phase 1: `starting_spells` in `CharacterDefinition` (Complete)
+
+### Overview
+
+`CharacterDefinition` now carries a `starting_spells: Vec<SpellId>` field that
+allows RON character templates to declare which spells a character begins with.
+When `instantiate()` is called, each `SpellId` is resolved against a
+`SpellDatabase` to determine school and level, then placed in the correct slot
+of the character's `SpellBook`. This is the foundational domain change that
+Phases 2–4 of the spell management plan build upon.
+
+### Problem Solved
+
+Pre-made and NPC-recruitable characters could not be authored with pre-populated
+spell books. Every character instantiated from a `CharacterDefinition` began
+with an empty `SpellBook` regardless of class, level, or backstory. A tutorial
+Cleric could not ship already knowing First Aid; a pre-made Sorcerer could not
+start with Light.
+
+### Files Changed
+
+| File                                     | Change                                                                                                 |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `src/domain/character_definition.rs`     | `starting_spells` field, `InvalidSpellId` error, updated `instantiate()` signature and body, new tests |
+| `src/application/mod.rs`                 | Updated two `instantiate()` call sites to pass `&content_db.spells`                                    |
+| `src/game/systems/dialogue.rs`           | Updated one `instantiate()` call site to pass `&db.spells`                                             |
+| `data/test_campaign/data/characters.ron` | Added `starting_spells` to Mira (cleric) and Sirius (sorcerer)                                         |
+
+### New `CharacterDefinitionError` Variant
+
+```antares/src/domain/character_definition.rs#L145-153
+    /// A spell ID in `starting_spells` does not exist in the `SpellDatabase`
+    #[error(
+        "Invalid spell_id {spell_id} in character '{character_id}': not found in spell database"
+    )]
+    InvalidSpellId {
+        character_id: String,
+        spell_id: SpellId,
+    },
+```
+
+### Updated `instantiate()` Signature
+
+```antares/src/domain/character_definition.rs#L791-797
+    pub fn instantiate(
+        &self,
+        races: &RaceDatabase,
+        classes: &ClassDatabase,
+        items: &ItemDatabase,
+        spell_db: &SpellDatabase,
+    ) -> Result<Character, CharacterDefinitionError> {
+```
+
+### Spell Population Logic
+
+After equipment is processed, `instantiate()` iterates `self.starting_spells`.
+For each `SpellId`:
+
+1. Looks up the spell in `spell_db`; returns `Err(InvalidSpellId)` if not found.
+2. Computes the zero-based level index: `(spell.level.saturating_sub(1) as usize).min(6)`.
+3. Routes to `cleric_spells` or `sorcerer_spells` based on `SpellSchool`.
+4. Pushes the ID only if not already present (deduplication).
+
+Class restrictions are intentionally **not** enforced here — `CharacterDefinition`
+is the authoritative source for a premade character's starting state. The SDK
+validation pass (Phase 4) will warn on mismatches.
+
+### `starting_spells` RON Field
+
+The field uses `#[serde(default)]` and `#[serde(skip_serializing_if = "Vec::is_empty")]`
+so all existing RON files without the field continue to deserialize without
+changes, and newly serialized files only emit the field when non-empty.
+
+Example RON usage:
+
+```antares/data/test_campaign/data/characters.ron#L188-190
+        is_premade: true,
+        starts_in_party: true,
+        starting_spells: [260, 257],
+```
+
+### Tests Added (9 new tests)
+
+| Test                                                                       | What it verifies                                                    |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `test_instantiate_cleric_starting_spell_in_cleric_spells`                  | Cleric spell lands in `cleric_spells[level-1]`                      |
+| `test_instantiate_sorcerer_starting_spell_in_sorcerer_spells`              | Sorcerer spell lands in `sorcerer_spells[level-1]`                  |
+| `test_instantiate_unknown_spell_id_returns_err_invalid_spell_id`           | Unknown `SpellId` returns `Err(InvalidSpellId)`                     |
+| `test_instantiate_invalid_spell_id_error_display_contains_ids`             | Error display contains both character ID and spell ID               |
+| `test_instantiate_empty_starting_spells_leaves_spell_book_empty`           | Empty `starting_spells` → empty `SpellBook`                         |
+| `test_instantiate_duplicate_starting_spell_ids_no_duplicate_in_spell_book` | Duplicate IDs collapsed to one entry                                |
+| `test_instantiate_starting_spell_level2_goes_to_correct_slot`              | Level-2 spell lands in slot index 1, not 0                          |
+| `test_instantiate_no_starting_spells_serde_backward_compat`                | RON without `starting_spells` deserializes cleanly                  |
+| `build_spell_db_for_tests`                                                 | Helper producing a minimal in-memory `SpellDatabase` for unit tests |
+
+All 20 existing `instantiate()` call sites in the test module were updated to
+pass `&SpellDatabase::new()` (or the loaded test-campaign spell DB where
+characters with `starting_spells` are instantiated).
+
+### Architecture Compliance
+
+- `SpellId` type alias used throughout (no raw `u16`).
+- `crate::sdk::database::SpellDatabase` used — consistent with every other
+  domain module that needs spell lookup (`learning.rs`, `exploration_casting.rs`,
+  `progression.rs`).
+- Serde `default` + `skip_serializing_if` maintain full backward compatibility.
+- All four quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy -D warnings`,
+  `cargo nextest run` (4349 tests, 0 failures).
+- Test data fixtures placed in `data/test_campaign/`; no reference to
+  `campaigns/tutorial`.
+
 ## Combat UI: Spell Selection Panel Moved to Upper-Left Corner (Complete)
 
 ### Overview

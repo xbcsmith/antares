@@ -1054,8 +1054,12 @@ impl GameState {
         let mut starting_party_count = 0;
 
         for def in content_db.characters.premade_characters() {
-            let character =
-                def.instantiate(&content_db.races, &content_db.classes, &content_db.items)?;
+            let character = def.instantiate(
+                &content_db.races,
+                &content_db.classes,
+                &content_db.items,
+                &content_db.spells,
+            )?;
 
             // Determine initial location
             let location = if def.starts_in_party {
@@ -1381,8 +1385,12 @@ impl GameState {
             .ok_or_else(|| RecruitmentError::CharacterNotFound(character_id.to_string()))?;
 
         // Instantiate character from definition
-        let character =
-            char_def.instantiate(&content_db.races, &content_db.classes, &content_db.items)?;
+        let character = char_def.instantiate(
+            &content_db.races,
+            &content_db.classes,
+            &content_db.items,
+            &content_db.spells,
+        )?;
 
         // Mark as encountered to prevent re-recruitment
         self.encountered_characters.insert(character_id.to_string());
