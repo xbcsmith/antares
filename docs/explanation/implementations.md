@@ -111,6 +111,106 @@ characters with `starting_spells` are instantiated).
 - Test data fixtures placed in `data/test_campaign/`; no reference to
   `campaigns/tutorial`.
 
+## Phase 3: Starting Spells Editor in Campaign Builder Characters Editor (Complete)
+
+### Overview
+
+The Campaign Builder's Characters Editor now exposes a **Starting Spells**
+editor panel inside the character edit form. Authors can assign any set of
+`SpellId` values to a character's `starting_spells` list directly from the UI,
+with autocomplete-driven spell lookup, deduplication enforcement, and a
+scrollable slot table with per-entry removal. The fix also resolves the Phase 1
+compile error (`missing field 'starting_spells'` in `save_character()`).
+
+### Problem Solved
+
+Phase 1 added `starting_spells: Vec<SpellId>` to `CharacterDefinition` but did
+not update `save_character()` in the SDK editor, leaving a compile error in
+`sdk/campaign_builder`. Additionally, the editor had no way for campaign authors
+to set starting spells — they had to hand-edit RON files. Phase 3 closes both
+gaps.
+
+### Files Changed
+
+| File                                            | Change                                                                                                                                    |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/characters_editor.rs` | New fields, updated `default()`, `start_edit_character()`, `save_character()`, `show()`, `show_character_form()`, new method, 9 new tests |
+| `sdk/campaign_builder/src/lib.rs`               | Pass `&self.campaign_data.spells` to `characters_editor_state.show()`                                                                     |
+| `sdk/campaign_builder/src/asset_manager.rs`     | Added `starting_spells: vec![]` to four `CharacterDefinition` struct literals in tests                                                    |
+
+### `CharacterEditBuffer` Changes
+
+Two new fields added:
+
+```sdk/campaign_builder/src/characters_editor.rs#L236-244
+    /// Starting spells (by SpellId) defined for this character.
+    /// Populated from `CharacterDefinition::starting_spells` on edit,
+    /// and written back on save.
+    pub starting_spells: Vec<SpellId>,
+    /// Staging SpellId for the "Add Spell" autocomplete widget.
+    /// Set to the selected spell on pick, immediately pushed to
+    /// `starting_spells` (dedup-checked), then reset to 0.
+    pub starting_spell_add_id: SpellId,
+```
+
+### `show_starting_spells_editor()` Method
+
+A new private method renders a collapsible `"📚 Starting Spells"` section:
+
+1. **Non-caster warning** — if the character's class has `spell_school: None`
+   and the spell list is non-empty, a yellow `⚠` label explains the spells are
+   stored but have no runtime effect.
+2. **Autocomplete add picker** — uses `autocomplete_spell_selector` with a
+   staging buffer (`starting_spell_add_id`). On selection the staging ID is
+   pushed to `starting_spells` (dedup-checked) and immediately reset to `0` so
+   the picker is ready for the next entry.
+3. **Scrollable grid** — `ScrollArea` (id_salt `starting_spells_scroll`) wraps
+   a `Grid` (id `starting_spells_grid`, 5 columns: slot#, name, school, level,
+   remove). Every data row is wrapped in `ui.push_id(idx, ...)` per SDK rule.
+4. **Removal** — the `remove_idx` sentinel is resolved _outside_ all closures to
+   avoid double-mutable-borrow issues.
+
+### SDK AGENTS.md Compliance
+
+- Every loop row uses `ui.push_id(idx, |ui| { ... })` ✓
+- `ScrollArea` has distinct `id_salt("starting_spells_scroll")` ✓
+- `Grid` has unique `id_salt("starting_spells_grid")` ✓
+- `CollapsingHeader` uses `id_salt("starting_spells_header")` ✓
+- No double-mutable-borrow issues in closures (clone + sentinel pattern) ✓
+- `reset_autocomplete_buffers` block clears `autocomplete:spell:starting_spells_add` ✓
+
+### Tests Added (9 new tests in `characters_editor.rs`)
+
+| Test                                                           | What it verifies                                                            |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `test_character_edit_buffer_default_has_empty_starting_spells` | `default()` yields empty `starting_spells` and `starting_spell_add_id == 0` |
+| `test_start_edit_character_loads_starting_spells`              | Buffer populated from `CharacterDefinition::starting_spells`                |
+| `test_start_edit_character_empty_starting_spells`              | Empty definition leaves buffer empty                                        |
+| `test_save_character_persists_starting_spells`                 | `save_character()` writes spells to the definition                          |
+| `test_starting_spells_no_duplicate`                            | Dedup logic prevents duplicate SpellId entries                              |
+| `test_starting_spells_remove_entry`                            | Removal by index preserves remaining entries                                |
+| `test_non_caster_warning_detection`                            | Knight class (`spell_school: None`) flagged as non-caster                   |
+| `test_caster_class_not_flagged_as_non_caster`                  | Cleric class (`spell_school: Some(Cleric)`) not flagged                     |
+| `test_starting_spells_edit_save_roundtrip`                     | Full load-modify-save round-trip preserves spell lists                      |
+
+### Note on `SpellId` Type
+
+`SpellId` is a type alias for `u16` (high byte = school, low byte = spell
+number), not `u32` as stated in the Phase 3 plan. All test literals use `u16`
+suffixes or rely on inference from the `Vec<SpellId>` context.
+
+### Architecture Compliance
+
+- `SpellId` type alias used throughout; no raw `u16` literals in production code.
+- `autocomplete_spell_selector` from `crate::ui_helpers` reused — consistent
+  with `items_editor.rs`, `dialogue_editor.rs`, and `quest_editor.rs`.
+- RON data files unchanged; the `#[serde(default)]` on `starting_spells` in
+  `CharacterDefinition` ensures backward compatibility.
+- All four quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy -D warnings`,
+  `cargo nextest run` (4407 tests, 0 failures).
+- Pre-existing compile errors in `spells_editor.rs` (`UtilityType::Teleport`)
+  are unrelated to Phase 3 and unchanged.
+
 ## Combat UI: Spell Selection Panel Moved to Upper-Left Corner (Complete)
 
 ### Overview
