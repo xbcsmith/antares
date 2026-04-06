@@ -7727,3 +7727,263 @@ depend on.
 - [x] All new public items have `///` doc comments with runnable examples
 - [x] No test references to `campaigns/tutorial` (all fixtures use `data/test_campaign`)
 - [x] No architectural deviations from architecture.md
+
+---
+
+## Phase 2: In-Game Spell Book Management UI (Game Engine) (Complete)
+
+### Overview
+
+A dedicated read-only in-game Spell Book screen reachable from exploration mode
+allows players to browse each caster's known spells, view SP status, read spell
+descriptions, and inspect learnable scrolls in inventory — entirely separate
+from the active spell-casting flow. Opening is triggered by the `B` key
+(default), from which players can Tab through party members, navigate spells
+with arrow keys, and press `C` to jump directly into casting. `Esc` restores
+the previous mode.
+
+### Problem Solved
+
+Players had no way to review a party member's spell book without entering the
+multi-step casting flow. There was no read-only spell reference screen: to
+check which spells a character knew, their SP costs, gem costs, or descriptions,
+the player had to open the casting menu, which could accidentally trigger a
+cast. The new Spell Book screen provides a safe, information-rich browse mode.
+
+### Files Changed
+
+| File                                       | Change                                                                                                                                                                                                    |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/application/spell_book_state.rs`      | New file — `SpellBookState` struct, constructors, navigation helpers, tests                                                                                                                               |
+| `src/application/mod.rs`                   | `pub mod spell_book_state`, `GameMode::SpellBook` variant, `enter_spellbook()`, `enter_spellbook_with_caster_select()`, `exit_spellbook()`, tests                                                         |
+| `src/game/systems/spellbook_ui.rs`         | New file — `SpellBookPlugin`, 3-column UI layout, `setup_spellbook_ui`, `update_spellbook_ui`, `handle_spellbook_input`, `cleanup_spellbook_ui`, `collect_spell_ids_from_state`, marker components, tests |
+| `src/game/systems/mod.rs`                  | `pub mod spellbook_ui;`                                                                                                                                                                                   |
+| `src/bin/antares.rs`                       | `app.add_plugins(SpellBookPlugin)` registered alongside `ExplorationSpellPlugin`                                                                                                                          |
+| `src/game/systems/input/keymap.rs`         | `GameAction::OpenSpellBook` variant, `insert_action_bindings` for `spell_book`, tests                                                                                                                     |
+| `src/sdk/game_config.rs`                   | `spell_book: Vec<String>` field with `#[serde(default)]`, `default_spell_book_keys()`, Default impl                                                                                                       |
+| `src/game/systems/input/frame_input.rs`    | `spell_book_toggle: bool` in `FrameInputIntent`, decoded in `decode_frame_input`                                                                                                                          |
+| `src/game/systems/input/global_toggles.rs` | `spell_book_toggle` branch in `handle_global_mode_toggles`, tests                                                                                                                                         |
+| `data/test_campaign/config.ron`            | `spell_book: ["B"]` added to `ControlsConfig`                                                                                                                                                             |
+| `campaigns/tutorial/config.ron`            | `spell_book: ["B"]` added to `ControlsConfig`                                                                                                                                                             |
+
+### Architecture
+
+#### `SpellBookState`
+
+```rust
+pub struct SpellBookState {
+    pub character_index: usize,
+    pub selected_spell_id: Option<SpellId>,
+    pub selected_row: usize,
+    pub previous_mode: Box<GameMode>,
+}
+```
+
+Uses `Box<GameMode>` for `previous_mode` to break the recursive size
+dependency, matching the pattern of `SpellCastingState` and `InventoryState`.
+
+#### `GameMode::SpellBook` Variant
+
+```rust
+SpellBook(crate::application::spell_book_state::SpellBookState),
+```
+
+#### `GameState` Methods
+
+| Method                                 | Description                                                 |
+| -------------------------------------- | ----------------------------------------------------------- |
+| `enter_spellbook(character_index)`     | Stores current mode, creates `SpellBookState`, sets mode    |
+| `enter_spellbook_with_caster_select()` | Calls `enter_spellbook(0)`                                  |
+| `exit_spellbook()`                     | Restores `previous_mode` if in `SpellBook`; otherwise no-op |
+
+#### Three-Column UI Layout
+
+```text
+┌────────────────────────────────────────────────────────┐
+│  📚 Spell Book                             [ESC] Close  │
+├─────────────┬──────────────────────┬───────────────────┤
+│ Characters  │ Known Spells         │ Detail            │
+│ ──────────  │ ─────────────        │ ──────            │
+│ [*Aria  ✓] │ -- Level 1 --        │ First Aid         │
+│ [ Korbin  ] │  First Aid — 5 SP   │ School: Cleric    │
+│ [ Sylva ✓] │  Cure Poison — 8 SP │ Level: 1          │
+│             │ -- Level 2 --        │ SP Cost: 5        │
+│             │  Bless — 12 SP ⚔   │ Gem Cost: —       │
+│             │ -- Learnable Scrolls │ Context: Any      │
+│             │  Scroll -> Light     │ Restores 1d6+1 HP │
+├─────────────┴──────────────────────┴───────────────────┤
+│  [C] Cast Spell   [Tab] Switch Char   [↑↓] Select Spell│
+└────────────────────────────────────────────────────────┘
+```
+
+#### Input Handling (in `handle_spellbook_input`)
+
+| Key             | Action                                                   |
+| --------------- | -------------------------------------------------------- |
+| `Tab`           | Advance to next party member (`next_character`)          |
+| `Shift+Tab`     | Return to previous party member (`prev_character`)       |
+| `↑ / W`         | Move spell cursor up with wrapping                       |
+| `↓ / S`         | Move spell cursor down with wrapping                     |
+| `Enter / Space` | Confirm selection — updates `selected_spell_id`          |
+| `C`             | Exit SpellBook, enter SpellCasting for current character |
+| `Esc`           | Exit SpellBook, restore previous mode                    |
+
+#### Spell List Construction
+
+- Uses `SpellBook::get_spell_list_by_id(&character.class_id, &class_db)` for
+  data-driven school routing.
+- Iterates levels 0–6 (game levels 1–7); emits a level-header row before each
+  non-empty level's spells.
+- Spells the character cannot currently afford (SP too low) are rendered in
+  `SPELLBOOK_DISABLED_SPELL_COLOR`.
+- Context tags `⚔` (combat-only) and `🌍` (non-combat) appended inline.
+- Gem cost displayed as `💎N` when `gem_cost > 0`.
+
+#### Learnable Scrolls Section
+
+Scans `character.inventory.items` for `ConsumableEffect::LearnSpell(spell_id)`
+items. For each scroll: shows scroll name → spell name, and whether the
+character passes `can_learn_spell` eligibility (read-only — actual learning
+occurs via the Inventory screen).
+
+#### Detail Panel
+
+When `selected_spell_id` is `Some(id)`, shows: spell name (larger), school,
+level, SP cost, gem cost, context label, and full `description` string from
+`SpellDatabase`. When `None`, shows "Select a spell to view details."
+
+### UI Constants
+
+| Constant                            | Purpose                                         |
+| ----------------------------------- | ----------------------------------------------- |
+| `SPELLBOOK_OVERLAY_BG`              | Full-screen semi-transparent backdrop           |
+| `SPELLBOOK_PANEL_BG`                | Inner panel background                          |
+| `SPELLBOOK_SELECTED_ROW_BG`         | Background highlight for the focused spell row  |
+| `SPELLBOOK_NORMAL_ROW_COLOR`        | Default spell name text color                   |
+| `SPELLBOOK_DISABLED_SPELL_COLOR`    | Color when SP is insufficient to cast           |
+| `SPELLBOOK_LEVEL_HEADER_COLOR`      | "Level N" group header text color               |
+| `SPELLBOOK_CHAR_TAB_ACTIVE_COLOR`   | Active character tab highlight                  |
+| `SPELLBOOK_CHAR_TAB_INACTIVE_COLOR` | Inactive character tab text color               |
+| `SPELLBOOK_HINT_COLOR`              | Bottom hint and detail secondary text color     |
+| `SPELLBOOK_TITLE_COLOR`             | "Spell Book" title and column header text color |
+
+### Marker Components
+
+| Component             | Description                                             |
+| --------------------- | ------------------------------------------------------- |
+| `SpellBookOverlay`    | Root full-screen node (spawned/despawned by UI systems) |
+| `SpellBookContent`    | Inner main panel (three-column layout container)        |
+| `SpellBookCharTab`    | One per party member tab; `party_index` field           |
+| `SpellBookSpellRow`   | One per spell entry row; `spell_id` field               |
+| `SpellBookCharList`   | Left-column children container                          |
+| `SpellBookSpellList`  | Center-column children container                        |
+| `SpellBookDetailPane` | Right-column children container                         |
+
+### Tests Added
+
+#### `src/application/spell_book_state.rs` (24 tests)
+
+| Test                                           | What it verifies                               |
+| ---------------------------------------------- | ---------------------------------------------- |
+| `test_new_sets_character_index`                | `new()` stores `character_index`               |
+| `test_new_captures_previous_mode`              | `new()` boxes the previous mode                |
+| `test_new_selected_spell_id_is_none`           | Initial `selected_spell_id` is `None`          |
+| `test_new_selected_row_is_zero`                | Initial `selected_row` is 0                    |
+| `test_get_resume_mode_returns_exploration`     | Correctly restores `Exploration`               |
+| `test_get_resume_mode_returns_automap`         | Correctly restores `Automap`                   |
+| `test_get_resume_mode_clone_is_independent`    | Two calls return equal values without aliasing |
+| `test_next_character_increments_index`         | Tab forward advances index                     |
+| `test_next_character_wraps_at_party_size`      | Tab forward wraps to 0 at end                  |
+| `test_next_character_resets_row_and_selection` | Tab resets cursor and selection                |
+| `test_next_character_noop_on_empty_party`      | Safe with empty party                          |
+| `test_prev_character_decrements_index`         | Shift+Tab decrements index                     |
+| `test_prev_character_wraps_to_end_at_zero`     | Shift+Tab wraps to end at 0                    |
+| `test_prev_character_resets_row_and_selection` | Shift+Tab resets cursor and selection          |
+| `test_prev_character_noop_on_empty_party`      | Safe with empty party                          |
+| `test_cursor_up_decrements_row`                | Up arrow decrements `selected_row`             |
+| `test_cursor_up_wraps_at_zero`                 | Up arrow wraps to end                          |
+| `test_cursor_up_noop_on_empty_list`            | Safe with no spells                            |
+| `test_cursor_down_increments_row`              | Down arrow increments `selected_row`           |
+| `test_cursor_down_wraps_at_end`                | Down arrow wraps to 0 at end                   |
+| `test_cursor_down_noop_on_empty_list`          | Safe with no spells                            |
+| `test_default_matches_new_zero_exploration`    | Default gives index 0, Exploration mode        |
+
+#### `src/application/mod.rs` (6 new tests)
+
+| Test                                                      | What it verifies                                  |
+| --------------------------------------------------------- | ------------------------------------------------- |
+| `test_enter_spellbook_sets_mode`                          | `enter_spellbook` → `GameMode::SpellBook`         |
+| `test_enter_spellbook_character_index`                    | `enter_spellbook(2)` → `character_index == 2`     |
+| `test_enter_spellbook_stores_previous_mode`               | Previous mode is captured correctly               |
+| `test_enter_spellbook_with_caster_select_starts_at_zero`  | Opens at index 0                                  |
+| `test_exit_spellbook_restores_previous_mode`              | `exit_spellbook` restores `Exploration`           |
+| `test_exit_spellbook_noop_when_not_in_spellbook_mode`     | No-op when not in `SpellBook`                     |
+| `test_enter_spellbook_from_automap_mode_restores_automap` | Correctly restores non-Exploration previous modes |
+
+#### `src/game/systems/input/global_toggles.rs` (6 new tests)
+
+| Test                                                                   | What it verifies                       |
+| ---------------------------------------------------------------------- | -------------------------------------- |
+| `test_handle_global_mode_toggles_spell_book_opens_from_exploration`    | `B` key in Exploration opens SpellBook |
+| `test_handle_global_mode_toggles_spell_book_ignored_in_menu_mode`      | Ignored outside Exploration            |
+| `test_handle_global_mode_toggles_spell_book_ignored_in_inventory_mode` | Ignored in Inventory                   |
+| `test_handle_global_mode_toggles_spell_book_ignored_in_combat_mode`    | Ignored in Combat                      |
+| `test_handle_global_mode_toggles_spell_book_stores_previous_mode`      | Captures Exploration as previous mode  |
+| `test_handle_global_mode_toggles_spell_book_character_index_is_zero`   | Opens at character index 0             |
+
+#### `src/game/systems/input/keymap.rs` (2 new tests)
+
+| Test                                      | What it verifies                              |
+| ----------------------------------------- | --------------------------------------------- |
+| `test_open_spell_book_action_default_key` | Default `B` key → `GameAction::OpenSpellBook` |
+| `test_custom_spell_book_key`              | Custom key binding is respected               |
+
+#### `src/game/systems/spellbook_ui.rs` (20 tests)
+
+| Test                                                         | What it verifies                                          |
+| ------------------------------------------------------------ | --------------------------------------------------------- |
+| `test_spell_book_overlay_is_marker_component`                | Zero-size marker                                          |
+| `test_spell_book_content_is_marker_component`                | Zero-size marker                                          |
+| `test_spell_book_char_tab_stores_party_index`                | `party_index` field preserved                             |
+| `test_spell_book_spell_row_stores_spell_id`                  | `spell_id` field preserved                                |
+| `test_collect_spell_ids_not_in_spellbook_mode_returns_empty` | Returns empty outside SpellBook mode                      |
+| `test_collect_spell_ids_empty_party_returns_empty`           | Safe with empty party                                     |
+| `test_collect_spell_ids_no_content_returns_empty`            | Returns empty without content DB                          |
+| `test_tab_forward_increments_character_index`                | Tab increments index                                      |
+| `test_tab_forward_wraps_at_party_size`                       | Tab wraps at end                                          |
+| `test_tab_back_decrements_character_index`                   | Shift+Tab decrements                                      |
+| `test_tab_back_wraps_to_end_at_zero`                         | Shift+Tab wraps                                           |
+| `test_spell_row_disabled_when_sp_insufficient`               | `SPELLBOOK_DISABLED_SPELL_COLOR` chosen for low SP        |
+| `test_spell_row_enabled_when_sp_sufficient`                  | `SPELLBOOK_NORMAL_ROW_COLOR` chosen for sufficient SP     |
+| `test_enter_and_exit_spellbook_roundtrip`                    | enter + exit restores previous mode                       |
+| `test_exit_spellbook_noop_when_not_spellbook_mode`           | No-op when not in SpellBook mode                          |
+| `test_setup_spellbook_ui_spawns_overlay`                     | Bevy integration: spawns `SpellBookOverlay` entity        |
+| `test_cleanup_spellbook_ui_despawns_overlays`                | Bevy integration: despawns overlay on mode exit           |
+| `test_setup_spellbook_ui_is_idempotent`                      | Second `update()` does not spawn a second overlay         |
+| `test_setup_spellbook_ui_no_spawn_in_exploration_mode`       | No spawn outside SpellBook mode                           |
+| `test_esc_triggers_exit_spellbook`                           | Esc restores previous mode                                |
+| `test_c_key_transitions_to_spell_casting`                    | C exits SpellBook and enters SpellCasting with same index |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output (all files formatted)
+✅ cargo check       → Finished with 0 errors, 0 warnings
+✅ cargo clippy      → Finished with 0 warnings
+✅ cargo nextest run → 4407 passed, 8 skipped, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `SpellId` type alias used throughout — no raw `u16`
+- [x] `Box<GameMode>` pattern for `previous_mode` matches `SpellCastingState` and `InventoryState`
+- [x] `SpellBook::get_spell_list_by_id` used — data-driven school routing
+- [x] Constants extracted for all UI colors — no magic values
+- [x] `GameMode::SpellBook` variant follows established naming convention
+- [x] `enter_spellbook` / `exit_spellbook` follow `enter_spell_casting` / `exit_spell_casting` naming
+- [x] `SpellBookPlugin` follows `ExplorationSpellPlugin` structure (chained systems: setup → update → input → cleanup)
+- [x] `GameAction::OpenSpellBook` added to `ControlsConfig` with `#[serde(default)]` — backward-compatible
+- [x] Both `data/test_campaign/config.ron` and `campaigns/tutorial/config.ron` updated
+- [x] All four quality gates pass with zero warnings
+- [x] No test references to `campaigns/tutorial` — all fixtures use `data/test_campaign`
+- [x] No architectural deviations from architecture.md

@@ -40,6 +40,8 @@ pub enum GameAction {
     GameLog,
     /// Open the exploration spell-casting menu.
     Cast,
+    /// Open the in-game Spell Book management screen.
+    OpenSpellBook,
 }
 
 /// Key mapping structure for efficient input lookups.
@@ -102,6 +104,7 @@ impl KeyMap {
         insert_action_bindings(&mut bindings, &config.automap, GameAction::Automap);
         insert_action_bindings(&mut bindings, &config.game_log, GameAction::GameLog);
         insert_action_bindings(&mut bindings, &config.cast, GameAction::Cast);
+        insert_action_bindings(&mut bindings, &config.spell_book, GameAction::OpenSpellBook);
 
         Self { bindings }
     }
@@ -404,6 +407,33 @@ mod tests {
     }
 
     #[test]
+    fn test_open_spell_book_action_default_key() {
+        let config = ControlsConfig::default();
+        let key_map = KeyMap::from_controls_config(&config);
+
+        assert_eq!(
+            key_map.get_action(KeyCode::KeyB),
+            Some(GameAction::OpenSpellBook),
+            "KeyCode::KeyB must map to GameAction::OpenSpellBook with default config"
+        );
+    }
+
+    #[test]
+    fn test_custom_spell_book_key() {
+        let config = ControlsConfig {
+            spell_book: vec!["F4".to_string()],
+            ..Default::default()
+        };
+        let key_map = KeyMap::from_controls_config(&config);
+
+        assert_eq!(
+            key_map.get_action(KeyCode::F4),
+            Some(GameAction::OpenSpellBook),
+            "F4 must map to GameAction::OpenSpellBook when configured as spell_book key"
+        );
+    }
+
+    #[test]
     fn test_key_map_from_default_config() {
         let config = ControlsConfig::default();
         let key_map = KeyMap::from_controls_config(&config);
@@ -463,6 +493,7 @@ mod tests {
             inventory: vec!["F".to_string()],
             rest: vec!["G".to_string()],
             automap: vec!["M".to_string()],
+            spell_book: vec!["F2".to_string()],
             game_log: vec!["H".to_string()],
             cast: vec!["C".to_string()],
             movement_cooldown: 0.1,
@@ -510,6 +541,7 @@ mod tests {
             automap: vec!["M".to_string()],
             game_log: vec!["G".to_string()],
             cast: vec!["C".to_string()],
+            spell_book: vec!["B".to_string()],
             movement_cooldown: 0.2,
         };
 

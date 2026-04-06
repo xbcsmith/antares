@@ -23,6 +23,7 @@ GameConfig(
         menu: ["Escape"],
         inventory: ["I"],
         automap: ["M"],
+        spell_book: ["B"],
         movement_cooldown: 0.2,
     ),
     camera: CameraConfig(

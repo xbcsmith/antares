@@ -285,6 +285,9 @@ impl Plugin for AntaresPlugin {
         // Exploration spell casting UI and logic
         app.add_plugins(antares::game::systems::exploration_spells::ExplorationSpellPlugin);
 
+        // In-game Spell Book management screen
+        app.add_plugins(antares::game::systems::spellbook_ui::SpellBookPlugin);
+
         // Item world spawn / despawn systems
         app.add_plugins(antares::game::systems::item_world_events::ItemWorldPlugin);
 
