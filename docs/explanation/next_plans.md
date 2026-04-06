@@ -190,6 +190,12 @@ Campaign Builder --> Characters --> Display does not have starting spells listed
 
 Campaign Builder --> Characters --> Edit Character Starting Spells Auto Complete always uses Cleric Spells for Sorcerers when there are identical spells in both disciplines. So Awaken is always set to the Cleric spell instead of the Sorcerer spell. We should fix the Auto Complete to check the character's class and only show spells that are available to that class.
 
+Campaign Builder --> Characters --> Edit Character Starting Spells area is very small so you can only see 2 spells before you have to scroll. We should make the Edit Character Starting Spells area larger so that 5 spells can be seen at once without scrolling.
+
+Campaign Builder --> Validation --> NPC Stock Templates are flagged as unknown stock templates. The stock templates exist and are listed in the Stock Template section of the Campaign Builder but they are flagged as unknown in the Validation section. We should fix the validation to recognize the NPC Stock Templates so that they are not flagged as unknown.
+
+Campaign Builder --> Config Editor --> Key Bindings is missing the bindign for the Spellbook.
+
 Write a plan with a phased approach to implementing the SDK fixes in the game engine. THINK HARD and follow the rules in @PLAN.md
 
 ✅ PLAN WRITTEN - [SDK Fixes Implementation Plan](./sdk_fixes_implementation_plan.md)
@@ -219,3 +225,6 @@ Show/Hide Tray ICON SDK is not working
 Game log is not part of a Game Save. Loading a save game from the main menu on restart does not restore the game log. The game log should be saved and loaded with the rest of the game state.
 
 Players can't pickup dropped items. There is a dropped sword in Map 1 and the game logs when I walk over it but the item does not get added to my inventory. The player should be able to pickup a dropped item from an adjacent tile by pressing the E key or clicking on it with the mouse. The item should then be added to the player's inventory and removed from the ground.
+
+
+Conditions should have a duration of until the next rest, until the end of combat, or until a certain number of turns have passed. This would allow for more strategic use of conditions and would also allow for conditions that are meant to last for a certain amount of time rather than being permanent until removed. The SDK should be updated to support setting the duration of conditions as well as the game engine. The game engine should then handle the expiration of conditions based on their duration.

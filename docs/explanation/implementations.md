@@ -1,5 +1,129 @@
 # Implementations
 
+## Spell Book egui Conversion — Phase 3: Delete All Bevy-Native Dead Code (Complete)
+
+### Overview
+
+Phase 3 removes every symbol that existed solely to support the Bevy entity
+lifecycle: four systems, seven marker components, three entity-builder helpers,
+one internal helper function, and the ten old `bevy::prelude::Color` constants.
+The ten `SPELLBOOK_*_EG` egui constants are renamed to canonical names
+(dropping the `_EG` suffix). Eight tests that referenced deleted symbols are
+also removed. The file is now a clean, egui-only implementation.
+
+### Problem Solved
+
+Before Phase 3, `spellbook_ui.rs` carried ~1 000 lines of dead Bevy entity
+code alongside the new egui code. Clippy could not flag it as dead because the
+functions were `pub` and the marker components were used by tests. Phase 3
+completes the cut-over by deleting everything that `spellbook_ui_system` and
+`spellbook_input_system` do not need.
+
+### Files Changed
+
+| File                               | Change                                                                                                                                                                                                   |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/spellbook_ui.rs` | Deleted 4 Bevy systems, 7 marker components, 3 entity-builder helpers, 1 internal helper, 10 Bevy Color constants; renamed 10 egui constants; removed `LABEL_FONT_SIZE` import; deleted 8 obsolete tests |
+
+### 3.1 — Bevy Systems Deleted
+
+| Function               | Lines removed (approx.) |
+| ---------------------- | ----------------------- |
+| `setup_spellbook_ui`   | ~160                    |
+| `cleanup_spellbook_ui` | ~15                     |
+| `update_spellbook_ui`  | ~50                     |
+| `despawn_children`     | ~10                     |
+
+### 3.2 — Marker Components Deleted
+
+`SpellBookOverlay`, `SpellBookContent`, `SpellBookCharTab`, `SpellBookSpellRow`,
+`SpellBookCharList`, `SpellBookSpellList`, `SpellBookDetailPane` — all seven
+`#[derive(Component)]` structs removed along with their doc comments and
+doctest examples.
+
+### 3.3 — Entity-Builder Helpers Deleted
+
+`build_char_tabs`, `build_spell_list`, `build_detail_panel` — all three
+private `ChildSpawnerCommands`-based helpers removed. They are fully
+superseded by `render_char_tabs`, `render_spell_list`, `render_detail_panel`.
+
+### 3.4 — Bevy Color Constants Deleted; egui Constants Renamed
+
+The ten `pub const SPELLBOOK_*: bevy::prelude::Color` constants were deleted.
+The ten `pub const SPELLBOOK_*_EG: egui::Color32` constants were renamed by
+dropping the `_EG` suffix, restoring canonical names. All internal references
+(`spellbook_ui_system`, `render_char_tabs`, `render_spell_list`,
+`render_detail_panel`) updated accordingly.
+
+### 3.5 — Unused Import Removed
+
+`use crate::game::systems::ui_helpers::{BODY_FONT_SIZE, LABEL_FONT_SIZE};`
+→ `use crate::game::systems::ui_helpers::BODY_FONT_SIZE;`
+
+`LABEL_FONT_SIZE` was only referenced by the deleted Bevy text-spawn code.
+`BODY_FONT_SIZE` is still used by `render_detail_panel` for the enlarged spell
+name (`.size(BODY_FONT_SIZE + 2.0)`).
+
+### 3.6 — Module Doc Comment Updated
+
+The `//!` module-level doc comment was updated to reflect the two-system
+egui approach, removing references to `setup_spellbook_ui`,
+`handle_spellbook_input`, `update_spellbook_ui`, and `cleanup_spellbook_ui`.
+
+### 3.7 — Eight Obsolete Tests Deleted
+
+| Test                                                   | Reason for deletion            |
+| ------------------------------------------------------ | ------------------------------ |
+| `test_spell_book_overlay_is_marker_component`          | `SpellBookOverlay` deleted     |
+| `test_spell_book_content_is_marker_component`          | `SpellBookContent` deleted     |
+| `test_spell_book_char_tab_stores_party_index`          | `SpellBookCharTab` deleted     |
+| `test_spell_book_spell_row_stores_spell_id`            | `SpellBookSpellRow` deleted    |
+| `test_setup_spellbook_ui_spawns_overlay`               | `setup_spellbook_ui` deleted   |
+| `test_cleanup_spellbook_ui_despawns_overlays`          | `cleanup_spellbook_ui` deleted |
+| `test_setup_spellbook_ui_is_idempotent`                | `setup_spellbook_ui` deleted   |
+| `test_setup_spellbook_ui_no_spawn_in_exploration_mode` | `setup_spellbook_ui` deleted   |
+
+13 pure-logic tests survive unchanged (or with minor comment updates).
+
+### Design Decisions
+
+- **`use bevy::prelude::*;` retained** — `spellbook_input_system` and
+  `SpellBookPlugin` still need `Res`, `ResMut`, `ButtonInput`, `KeyCode`,
+  `Plugin`, `App`, `Update`. The wildcard import is the established pattern
+  for Bevy system files and does not generate unused-import warnings.
+- **`SPELLBOOK_OVERLAY_BG` and `SPELLBOOK_PANEL_BG` retained** — these
+  constants are `pub`, so they are assumed to be potentially useful to
+  external callers (e.g. SDK overlays) and do not generate dead-code warnings.
+- **`collect_spell_ids_from_state` doc comment updated** — the old reference
+  to the deleted `update_spellbook_ui` was replaced with `render_spell_list`.
+- **Test count drops by 8** — from 4407 to 4399 (all 4399 pass).
+
+### Quality Gates
+
+```text
+cargo fmt --all                                    → clean
+cargo check --all-targets --all-features           → 0 errors
+cargo clippy --all-targets --all-features          → 0 warnings
+cargo nextest run --all-features                   → 4399 passed, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `setup_spellbook_ui`, `update_spellbook_ui`, `cleanup_spellbook_ui`,
+      `despawn_children` deleted
+- [x] Seven marker components deleted
+- [x] `build_char_tabs`, `build_spell_list`, `build_detail_panel` deleted
+- [x] Ten old `bevy::prelude::Color` constants deleted
+- [x] Ten egui constants renamed (canonical names, no `_EG` suffix)
+- [x] `LABEL_FONT_SIZE` removed from imports
+- [x] `bevy::prelude::Node`, `BackgroundColor`, `ChildSpawnerCommands` no
+      longer referenced in the file
+- [x] 8 obsolete tests deleted; 13 pure-logic tests survive
+- [x] `cargo check` and `cargo clippy` pass with zero issues
+- [x] No test data references `campaigns/tutorial`
+
+---
+
 ## Spell Book egui Conversion — Phase 2: Add the egui System and Simplify the Plugin (Complete)
 
 ### Overview

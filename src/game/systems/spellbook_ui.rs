@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! In-game Spell Book management screen Bevy plugin.
+//! In-game Spell Book management screen.
 //!
-//! This module implements the full UI overlay and input handling for browsing
-//! the party's spell books during exploration.  When the player presses the
-//! Spell Book key (`B` by default), the game enters
+//! Implements input handling and egui rendering for browsing the party's spell
+//! books during exploration.  When the player presses the Spell Book key
+//! (`B` by default), the game enters
 //! [`GameMode::SpellBook`](crate::application::GameMode::SpellBook) and this
 //! plugin takes over input until the screen is closed.
 //!
@@ -36,18 +36,14 @@
 //!
 //! 1. `B` key → `GameState::enter_spellbook_with_caster_select()` (in
 //!    `input/global_toggles.rs`).
-//! 2. [`setup_spellbook_ui`] detects the new mode and spawns the overlay.
-//! 3. [`handle_spellbook_input`] drives navigation:
+//! 2. [`spellbook_input_system`] drives navigation:
 //!    - **Tab** / **Shift+Tab** — cycle through party members.
 //!    - **↑↓ / W/S**           — navigate spell list rows.
 //!    - **Enter / Space**       — select (highlight) the focused spell.
 //!    - **C**                   — exit SpellBook and enter SpellCasting for
 //!      the currently browsed character.
 //!    - **Esc**                 — exit SpellBook and restore previous mode.
-//! 4. [`update_spellbook_ui`] rebuilds all three columns every frame to
-//!    reflect the current character and selected spell.
-//! 5. [`cleanup_spellbook_ui`] despawns the overlay when the mode leaves
-//!    `SpellBook`.
+//! 3. [`spellbook_ui_system`] renders the three-column egui panel every frame.
 //!
 //! # Architecture Reference
 //!
@@ -61,143 +57,35 @@ use crate::domain::magic::learning::can_learn_spell;
 use crate::domain::magic::types::SpellContext;
 use crate::domain::types::SpellId;
 use crate::game::resources::GlobalState;
-use crate::game::systems::ui_helpers::{BODY_FONT_SIZE, LABEL_FONT_SIZE};
+use crate::game::systems::ui_helpers::BODY_FONT_SIZE;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /// Semi-transparent full-screen backdrop for the Spell Book overlay.
-pub const SPELLBOOK_OVERLAY_BG: Color = Color::srgba(0.0, 0.0, 0.1, 0.88);
-/// Background color of the inner panel.
-pub const SPELLBOOK_PANEL_BG: Color = Color::srgba(0.06, 0.06, 0.18, 0.97);
-/// Highlight color for the currently selected spell row.
-pub const SPELLBOOK_SELECTED_ROW_BG: Color = Color::srgba(0.2, 0.2, 0.05, 0.9);
-/// Default text color for spell name entries.
-pub const SPELLBOOK_NORMAL_ROW_COLOR: Color = Color::WHITE;
-/// Text color when the character has insufficient SP to cast the spell.
-pub const SPELLBOOK_DISABLED_SPELL_COLOR: Color = Color::srgb(0.45, 0.45, 0.45);
-/// Text color for "Level N" group header rows.
-pub const SPELLBOOK_LEVEL_HEADER_COLOR: Color = Color::srgb(0.7, 0.8, 1.0);
-/// Text / background highlight for the active character tab.
-pub const SPELLBOOK_CHAR_TAB_ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.2);
-/// Text color for inactive character tabs.
-pub const SPELLBOOK_CHAR_TAB_INACTIVE_COLOR: Color = Color::srgb(0.6, 0.6, 0.7);
-/// Text color for hint / secondary text at the bottom and in the detail panel.
-pub const SPELLBOOK_HINT_COLOR: Color = Color::srgb(0.55, 0.55, 0.65);
-/// Text color for the main "Spell Book" title and column headers.
-pub const SPELLBOOK_TITLE_COLOR: Color = Color::srgb(0.8, 0.85, 1.0);
-
-// ── egui Color32 constants (Phase 1 — temporary `_EG` suffix until Phase 3
-//    renames these once the old Bevy Color constants are deleted) ───────────────
-
-/// Semi-transparent full-screen backdrop for the Spell Book overlay (egui).
-pub const SPELLBOOK_OVERLAY_BG_EG: egui::Color32 =
+pub const SPELLBOOK_OVERLAY_BG: egui::Color32 =
     egui::Color32::from_rgba_premultiplied(0, 0, 26, 224);
-/// Background color of the inner panel (egui).
-pub const SPELLBOOK_PANEL_BG_EG: egui::Color32 =
+/// Background color of the inner panel.
+pub const SPELLBOOK_PANEL_BG: egui::Color32 =
     egui::Color32::from_rgba_premultiplied(15, 15, 46, 247);
-/// Highlight color for the currently selected spell row (egui).
-pub const SPELLBOOK_SELECTED_ROW_BG_EG: egui::Color32 =
+/// Highlight color for the currently selected spell row.
+pub const SPELLBOOK_SELECTED_ROW_BG: egui::Color32 =
     egui::Color32::from_rgba_premultiplied(51, 51, 13, 230);
-/// Default text color for spell name entries (egui).
-pub const SPELLBOOK_NORMAL_ROW_COLOR_EG: egui::Color32 = egui::Color32::WHITE;
-/// Text color when the character has insufficient SP to cast the spell (egui).
-pub const SPELLBOOK_DISABLED_SPELL_COLOR_EG: egui::Color32 = egui::Color32::from_rgb(115, 115, 115);
-/// Text color for "Level N" group header rows (egui).
-pub const SPELLBOOK_LEVEL_HEADER_COLOR_EG: egui::Color32 = egui::Color32::from_rgb(179, 204, 255);
-/// Text / background highlight for the active character tab (egui).
-pub const SPELLBOOK_CHAR_TAB_ACTIVE_COLOR_EG: egui::Color32 = egui::Color32::from_rgb(255, 230, 51);
-/// Text color for inactive character tabs (egui).
-pub const SPELLBOOK_CHAR_TAB_INACTIVE_COLOR_EG: egui::Color32 =
-    egui::Color32::from_rgb(153, 153, 179);
-/// Text color for hint / secondary text at the bottom and in the detail panel (egui).
-pub const SPELLBOOK_HINT_COLOR_EG: egui::Color32 = egui::Color32::from_rgb(140, 140, 166);
-/// Text color for the main "Spell Book" title and column headers (egui).
-pub const SPELLBOOK_TITLE_COLOR_EG: egui::Color32 = egui::Color32::from_rgb(204, 217, 255);
-
-// ── Components ─────────────────────────────────────────────────────────────────
-
-/// Marker component for the root full-screen Spell Book overlay node.
-///
-/// Spawned by [`setup_spellbook_ui`] and despawned by [`cleanup_spellbook_ui`].
-///
-/// # Examples
-///
-/// ```
-/// use antares::game::systems::spellbook_ui::SpellBookOverlay;
-///
-/// let _: SpellBookOverlay = SpellBookOverlay;
-/// ```
-#[derive(Component, Debug, Clone, Copy)]
-pub struct SpellBookOverlay;
-
-/// Marker component for the inner three-column layout panel.
-///
-/// Child of [`SpellBookOverlay`].  Contains the character tab column, the
-/// spell list column, and the detail panel column.
-///
-/// # Examples
-///
-/// ```
-/// use antares::game::systems::spellbook_ui::SpellBookContent;
-///
-/// let _: SpellBookContent = SpellBookContent;
-/// ```
-#[derive(Component, Debug, Clone, Copy)]
-pub struct SpellBookContent;
-
-/// Marker component for a single character tab in the left column.
-///
-/// One entity is spawned per party member.  `party_index` maps to
-/// `party.members[party_index]`.
-///
-/// # Examples
-///
-/// ```
-/// use antares::game::systems::spellbook_ui::SpellBookCharTab;
-///
-/// let tab = SpellBookCharTab { party_index: 2 };
-/// assert_eq!(tab.party_index, 2);
-/// ```
-#[derive(Component, Debug, Clone, Copy)]
-pub struct SpellBookCharTab {
-    /// Index into `party.members` that this tab represents.
-    pub party_index: usize,
-}
-
-/// Marker component for a single spell entry row in the center column.
-///
-/// One entity is spawned per known spell displayed in the list.  `spell_id`
-/// corresponds to the entry in [`SpellDatabase`](crate::domain::magic::database::SpellDatabase).
-///
-/// # Examples
-///
-/// ```
-/// use antares::game::systems::spellbook_ui::SpellBookSpellRow;
-///
-/// let row = SpellBookSpellRow { spell_id: 0x0101 };
-/// assert_eq!(row.spell_id, 0x0101);
-/// ```
-#[derive(Component, Debug, Clone, Copy)]
-pub struct SpellBookSpellRow {
-    /// Spell identifier for this row entry.
-    pub spell_id: SpellId,
-}
-
-// Internal marker components for the three rebuildable content areas.
-
-/// Marker for the character-tab list column (left column children container).
-#[derive(Component, Debug, Clone, Copy)]
-pub struct SpellBookCharList;
-
-/// Marker for the spell-list column (center column children container).
-#[derive(Component, Debug, Clone, Copy)]
-pub struct SpellBookSpellList;
-
-/// Marker for the spell-detail panel (right column children container).
-#[derive(Component, Debug, Clone, Copy)]
-pub struct SpellBookDetailPane;
+/// Default text color for spell name entries.
+pub const SPELLBOOK_NORMAL_ROW_COLOR: egui::Color32 = egui::Color32::WHITE;
+/// Text color when the character has insufficient SP to cast the spell.
+pub const SPELLBOOK_DISABLED_SPELL_COLOR: egui::Color32 = egui::Color32::from_rgb(115, 115, 115);
+/// Text color for "Level N" group header rows.
+pub const SPELLBOOK_LEVEL_HEADER_COLOR: egui::Color32 = egui::Color32::from_rgb(179, 204, 255);
+/// Text / background highlight for the active character tab.
+pub const SPELLBOOK_CHAR_TAB_ACTIVE_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 230, 51);
+/// Text color for inactive character tabs.
+pub const SPELLBOOK_CHAR_TAB_INACTIVE_COLOR: egui::Color32 = egui::Color32::from_rgb(153, 153, 179);
+/// Text color for hint / secondary text at the bottom and in the detail panel.
+pub const SPELLBOOK_HINT_COLOR: egui::Color32 = egui::Color32::from_rgb(140, 140, 166);
+/// Text color for the main "Spell Book" title and column headers.
+pub const SPELLBOOK_TITLE_COLOR: egui::Color32 = egui::Color32::from_rgb(204, 217, 255);
 
 // ── Plugin ─────────────────────────────────────────────────────────────────────
 
@@ -232,248 +120,6 @@ impl Plugin for SpellBookPlugin {
 }
 
 // ── Systems ───────────────────────────────────────────────────────────────────
-
-/// Spawns the Spell Book overlay hierarchy when the game enters `SpellBook` mode.
-///
-/// Idempotent: if the overlay already exists the system returns immediately.
-/// If the mode is not `SpellBook` the system also returns immediately.
-///
-/// The spawned hierarchy consists of:
-/// - [`SpellBookOverlay`] — full-screen backdrop
-///   - [`SpellBookContent`] — main panel (FlexDirection::Column)
-///     - Title bar row (title + close hint)
-///     - Three-column row (char list | spell list | detail pane)
-///     - Bottom hint bar
-pub fn setup_spellbook_ui(
-    mut commands: Commands,
-    global_state: Res<GlobalState>,
-    existing: Query<Entity, With<SpellBookOverlay>>,
-) {
-    // Only active in SpellBook mode.
-    if !matches!(global_state.0.mode, GameMode::SpellBook(_)) {
-        return;
-    }
-
-    // Only spawn once.
-    if !existing.is_empty() {
-        return;
-    }
-
-    commands
-        .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(0.0),
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                display: Display::Flex,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(SPELLBOOK_OVERLAY_BG),
-            SpellBookOverlay,
-        ))
-        .with_children(|root| {
-            // ── Main panel ───────────────────────────────────────────────────
-            root.spawn((
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    width: Val::Percent(88.0),
-                    max_width: Val::Px(920.0),
-                    height: Val::Percent(80.0),
-                    max_height: Val::Px(620.0),
-                    padding: UiRect::all(Val::Px(12.0)),
-                    row_gap: Val::Px(8.0),
-                    ..default()
-                },
-                BackgroundColor(SPELLBOOK_PANEL_BG),
-                BorderRadius::all(Val::Px(10.0)),
-                SpellBookContent,
-            ))
-            .with_children(|panel| {
-                // ── Title bar ────────────────────────────────────────────────
-                panel
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        justify_content: JustifyContent::SpaceBetween,
-                        align_items: AlignItems::Center,
-                        width: Val::Percent(100.0),
-                        ..default()
-                    })
-                    .with_children(|title_row| {
-                        title_row.spawn((
-                            Text::new("\u{1F4DA} Spell Book"),
-                            TextFont {
-                                font_size: BODY_FONT_SIZE + 2.0,
-                                ..default()
-                            },
-                            TextColor(SPELLBOOK_TITLE_COLOR),
-                        ));
-                        title_row.spawn((
-                            Text::new("[ESC] Close"),
-                            TextFont {
-                                font_size: LABEL_FONT_SIZE,
-                                ..default()
-                            },
-                            TextColor(SPELLBOOK_HINT_COLOR),
-                        ));
-                    });
-
-                // ── Three-column content row ──────────────────────────────────
-                panel
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        width: Val::Percent(100.0),
-                        flex_grow: 1.0,
-                        column_gap: Val::Px(8.0),
-                        ..default()
-                    })
-                    .with_children(|cols| {
-                        // Left column — character tabs
-                        cols.spawn((
-                            Node {
-                                flex_direction: FlexDirection::Column,
-                                width: Val::Px(160.0),
-                                min_width: Val::Px(140.0),
-                                row_gap: Val::Px(4.0),
-                                padding: UiRect::all(Val::Px(6.0)),
-                                overflow: Overflow::scroll_y(),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgba(0.03, 0.03, 0.12, 0.5)),
-                            BorderRadius::all(Val::Px(6.0)),
-                            SpellBookCharList,
-                        ));
-
-                        // Center column — spell list
-                        cols.spawn((
-                            Node {
-                                flex_direction: FlexDirection::Column,
-                                flex_grow: 1.0,
-                                row_gap: Val::Px(3.0),
-                                padding: UiRect::all(Val::Px(6.0)),
-                                overflow: Overflow::scroll_y(),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgba(0.03, 0.03, 0.12, 0.5)),
-                            BorderRadius::all(Val::Px(6.0)),
-                            SpellBookSpellList,
-                        ));
-
-                        // Right column — detail panel
-                        cols.spawn((
-                            Node {
-                                flex_direction: FlexDirection::Column,
-                                width: Val::Px(215.0),
-                                min_width: Val::Px(180.0),
-                                row_gap: Val::Px(4.0),
-                                padding: UiRect::all(Val::Px(6.0)),
-                                overflow: Overflow::scroll_y(),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgba(0.03, 0.03, 0.12, 0.5)),
-                            BorderRadius::all(Val::Px(6.0)),
-                            SpellBookDetailPane,
-                        ));
-                    });
-
-                // ── Bottom hint bar ───────────────────────────────────────────
-                panel
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        width: Val::Percent(100.0),
-                        ..default()
-                    })
-                    .with_children(|hint_row| {
-                        hint_row.spawn((
-                            Text::new(
-                                "[C] Cast Spell    [Tab] Switch Character    [\u{2191}\u{2193}] Select Spell",
-                            ),
-                            TextFont {
-                                font_size: LABEL_FONT_SIZE,
-                                ..default()
-                            },
-                            TextColor(SPELLBOOK_HINT_COLOR),
-                        ));
-                    });
-            });
-        });
-}
-
-/// Despawns the Spell Book overlay when the game leaves `SpellBook` mode.
-pub fn cleanup_spellbook_ui(
-    mut commands: Commands,
-    global_state: Res<GlobalState>,
-    existing: Query<Entity, With<SpellBookOverlay>>,
-) {
-    if matches!(global_state.0.mode, GameMode::SpellBook(_)) {
-        return;
-    }
-    for entity in existing.iter() {
-        commands.entity(entity).despawn();
-    }
-}
-
-/// Updates all three columns every frame while in `SpellBook` mode.
-///
-/// Rebuilds the children of [`SpellBookCharList`], [`SpellBookSpellList`], and
-/// [`SpellBookDetailPane`] on every frame.  This is intentionally simple: the
-/// lists are short and per-frame rebuilds are cheap.
-#[allow(clippy::too_many_arguments)]
-pub fn update_spellbook_ui(
-    mut commands: Commands,
-    global_state: Res<GlobalState>,
-    content: Option<Res<GameContent>>,
-    char_list_query: Query<Entity, With<SpellBookCharList>>,
-    spell_list_query: Query<Entity, With<SpellBookSpellList>>,
-    detail_pane_query: Query<Entity, With<SpellBookDetailPane>>,
-    children_query: Query<&Children>,
-) {
-    let sb = match &global_state.0.mode {
-        GameMode::SpellBook(sb) => sb,
-        _ => return,
-    };
-
-    // Collect the flat ordered spell ID list once for reuse across columns.
-    let spell_ids = collect_spell_ids_from_state(&global_state.0, content.as_deref());
-
-    // ── Rebuild character tab column ─────────────────────────────────────────
-    if let Ok(char_entity) = char_list_query.single() {
-        despawn_children(&mut commands, char_entity, &children_query);
-        let sb_clone = sb.clone();
-        commands.entity(char_entity).with_children(|list| {
-            build_char_tabs(list, &sb_clone, &global_state);
-        });
-    }
-
-    // ── Rebuild spell list column ────────────────────────────────────────────
-    if let Ok(spell_entity) = spell_list_query.single() {
-        despawn_children(&mut commands, spell_entity, &children_query);
-        let sb_clone = sb.clone();
-        commands.entity(spell_entity).with_children(|list| {
-            build_spell_list(
-                list,
-                &sb_clone,
-                &global_state,
-                content.as_deref(),
-                &spell_ids,
-            );
-        });
-    }
-
-    // ── Rebuild detail panel column ──────────────────────────────────────────
-    if let Ok(detail_entity) = detail_pane_query.single() {
-        despawn_children(&mut commands, detail_entity, &children_query);
-        let sb_clone = sb.clone();
-        commands.entity(detail_entity).with_children(|pane| {
-            build_detail_panel(pane, &sb_clone, content.as_deref());
-        });
-    }
-}
 
 /// Handles keyboard input while in `SpellBook` mode.
 ///
@@ -603,7 +249,7 @@ fn spellbook_ui_system(
         ui.horizontal(|ui| {
             ui.heading("\u{1F4DA} Spell Book"); // 📚
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new("[ESC] Close").color(SPELLBOOK_HINT_COLOR_EG));
+                ui.label(egui::RichText::new("[ESC] Close").color(SPELLBOOK_HINT_COLOR));
             });
         });
 
@@ -652,7 +298,7 @@ fn spellbook_ui_system(
                 egui::RichText::new(
                     "[C] Cast Spell   [Tab] Switch Character   [\u{2191}\u{2193}] Select Spell",
                 )
-                .color(SPELLBOOK_HINT_COLOR_EG),
+                .color(SPELLBOOK_HINT_COLOR),
             );
         });
     });
@@ -665,8 +311,7 @@ fn spellbook_ui_system(
 ///
 /// Iterates spell book levels 0–6 (game levels 1–7) and returns IDs in level
 /// order.  This list drives both the `selected_row` navigation bounds in
-/// [`spellbook_input_system`] and the row construction in
-/// [`update_spellbook_ui`].
+/// [`spellbook_input_system`] and the row construction in [`render_spell_list`].
 ///
 /// Returns an empty `Vec` if the mode is not `SpellBook`, if the current
 /// character index is out of range, or if the content database is absent.
@@ -706,44 +351,24 @@ pub fn collect_spell_ids_from_state(
     result
 }
 
-// ── Private helpers ───────────────────────────────────────────────────────────
+// ── egui render helpers ───────────────────────────────────────────────────────
 
-/// Despawns all direct children of `parent`.
-fn despawn_children(commands: &mut Commands, parent: Entity, children_query: &Query<&Children>) {
-    if let Ok(children) = children_query.get(parent) {
-        let child_entities: Vec<Entity> = children.iter().collect();
-        for child in child_entities {
-            commands.entity(child).despawn();
-        }
-    }
-}
-
-/// Builds the character-tab rows in the left column.
-fn build_char_tabs(
-    list: &mut ChildSpawnerCommands<'_>,
-    sb: &SpellBookState,
-    global_state: &GlobalState,
-) {
+/// Renders the character-tab rows in the left column using egui.
+///
+/// Called from [`spellbook_ui_system`].
+///
+/// # Arguments
+///
+/// * `ui`           — mutable reference to the current egui [`egui::Ui`].
+/// * `sb`           — current [`SpellBookState`] (character index, selected row).
+/// * `global_state` — read-only access to party members and their spell data.
+fn render_char_tabs(ui: &mut egui::Ui, sb: &SpellBookState, global_state: &GlobalState) {
     // Column header
-    list.spawn((
-        Text::new("Characters"),
-        TextFont {
-            font_size: LABEL_FONT_SIZE,
-            ..default()
-        },
-        TextColor(SPELLBOOK_TITLE_COLOR),
-    ));
+    ui.label(egui::RichText::new("Characters").color(SPELLBOOK_TITLE_COLOR));
 
     let members = &global_state.0.party.members;
     if members.is_empty() {
-        list.spawn((
-            Text::new("No party."),
-            TextFont {
-                font_size: LABEL_FONT_SIZE,
-                ..default()
-            },
-            TextColor(SPELLBOOK_DISABLED_SPELL_COLOR),
-        ));
+        ui.label(egui::RichText::new("No party.").color(SPELLBOOK_DISABLED_SPELL_COLOR));
         return;
     }
 
@@ -760,405 +385,11 @@ fn build_char_tabs(
             || member.spells.sorcerer_spells.iter().any(|v| !v.is_empty());
         let check = if has_spells { " \u{2713}" } else { "" };
         let cursor = if active { "[*]" } else { "[ ]" };
-
-        let label = format!("{cursor} {}{}", member.name, check);
-
-        list.spawn((
-            Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::axes(Val::Px(4.0), Val::Px(3.0)),
-                ..default()
-            },
-            BackgroundColor(if active {
-                Color::srgba(0.2, 0.2, 0.05, 0.7)
-            } else {
-                Color::NONE
-            }),
-            BorderRadius::all(Val::Px(3.0)),
-            SpellBookCharTab { party_index: i },
-        ))
-        .with_children(|row| {
-            row.spawn((
-                Text::new(label),
-                TextFont {
-                    font_size: LABEL_FONT_SIZE,
-                    ..default()
-                },
-                TextColor(text_color),
-            ));
-        });
-    }
-}
-
-/// Builds the spell-list rows and learnable-scrolls section in the center
-/// column.
-fn build_spell_list(
-    list: &mut ChildSpawnerCommands<'_>,
-    sb: &SpellBookState,
-    global_state: &GlobalState,
-    content: Option<&GameContent>,
-    spell_ids: &[SpellId],
-) {
-    // Column header
-    list.spawn((
-        Text::new("Known Spells"),
-        TextFont {
-            font_size: LABEL_FONT_SIZE,
-            ..default()
-        },
-        TextColor(SPELLBOOK_TITLE_COLOR),
-    ));
-
-    let Some(character) = global_state.0.party.members.get(sb.character_index) else {
-        list.spawn((
-            Text::new("No character selected."),
-            TextFont {
-                font_size: BODY_FONT_SIZE,
-                ..default()
-            },
-            TextColor(SPELLBOOK_DISABLED_SPELL_COLOR),
-        ));
-        return;
-    };
-
-    let Some(content_ref) = content else {
-        list.spawn((
-            Text::new("Content not available."),
-            TextFont {
-                font_size: BODY_FONT_SIZE,
-                ..default()
-            },
-            TextColor(SPELLBOOK_DISABLED_SPELL_COLOR),
-        ));
-        return;
-    };
-
-    let class_db = &content_ref.db().classes;
-    let spell_db = &content_ref.db().spells;
-    let item_db = &content_ref.db().items;
-    let spell_list = character
-        .spells
-        .get_spell_list_by_id(&character.class_id, class_db);
-
-    if spell_ids.is_empty() {
-        list.spawn((
-            Text::new("No spells known."),
-            TextFont {
-                font_size: BODY_FONT_SIZE,
-                ..default()
-            },
-            TextColor(SPELLBOOK_DISABLED_SPELL_COLOR),
-        ));
-    } else {
-        // Flat row index that matches sb.selected_row.
-        let mut row_idx: usize = 0;
-
-        for (level_idx, level_spells) in spell_list.iter().enumerate() {
-            if level_spells.is_empty() {
-                continue;
-            }
-
-            // ── Level header ─────────────────────────────────────────────────
-            list.spawn((
-                Text::new(format!("-- Level {} --", level_idx + 1)),
-                TextFont {
-                    font_size: LABEL_FONT_SIZE,
-                    ..default()
-                },
-                TextColor(SPELLBOOK_LEVEL_HEADER_COLOR),
-            ));
-
-            for &spell_id in level_spells {
-                let selected = row_idx == sb.selected_row;
-
-                // Determine affordability (true = can cast right now).
-                let can_afford = spell_db
-                    .get_spell(spell_id)
-                    .map(|s| u32::from(character.sp.current) >= u32::from(s.sp_cost))
-                    .unwrap_or(true);
-
-                let text_color = if !can_afford {
-                    SPELLBOOK_DISABLED_SPELL_COLOR
-                } else if selected {
-                    Color::srgb(1.0, 0.9, 0.2)
-                } else {
-                    SPELLBOOK_NORMAL_ROW_COLOR
-                };
-
-                let bg = if selected {
-                    SPELLBOOK_SELECTED_ROW_BG
-                } else {
-                    Color::NONE
-                };
-
-                let label = if let Some(spell_def) = spell_db.get_spell(spell_id) {
-                    let context_tag = match spell_def.context {
-                        SpellContext::CombatOnly => " \u{2694}",     // ⚔
-                        SpellContext::NonCombatOnly => " \u{1F30D}", // 🌍
-                        SpellContext::OutdoorOnly
-                        | SpellContext::IndoorOnly
-                        | SpellContext::OutdoorCombat => " \u{1F30D}",
-                        SpellContext::Anytime => "",
-                    };
-                    if spell_def.gem_cost > 0 {
-                        format!(
-                            "{} \u{2014} {} SP \u{1F48E}{}{}", // — …SP 💎N context
-                            spell_def.name, spell_def.sp_cost, spell_def.gem_cost, context_tag,
-                        )
-                    } else {
-                        format!(
-                            "{} \u{2014} {} SP{}",
-                            spell_def.name, spell_def.sp_cost, context_tag
-                        )
-                    }
-                } else {
-                    format!("Spell {spell_id:#06x}")
-                };
-
-                list.spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
-                        ..default()
-                    },
-                    BackgroundColor(bg),
-                    BorderRadius::all(Val::Px(4.0)),
-                    SpellBookSpellRow { spell_id },
-                ))
-                .with_children(|row| {
-                    row.spawn((
-                        Text::new(label),
-                        TextFont {
-                            font_size: BODY_FONT_SIZE,
-                            ..default()
-                        },
-                        TextColor(text_color),
-                    ));
-                });
-
-                row_idx += 1;
-            }
-        }
-    }
-
-    // ── Learnable Scrolls section ────────────────────────────────────────────
-
-    let scroll_entries: Vec<(String, SpellId, bool)> = character
-        .inventory
-        .items
-        .iter()
-        .filter_map(|slot| {
-            let item_def = item_db.get_item(slot.item_id)?;
-            if let ItemType::Consumable(ref consumable) = item_def.item_type {
-                if let ConsumableEffect::LearnSpell(spell_id) = consumable.effect {
-                    let eligible = can_learn_spell(character, spell_id, spell_db, class_db).is_ok();
-                    return Some((item_def.name.clone(), spell_id, eligible));
-                }
-            }
-            None
-        })
-        .collect();
-
-    if !scroll_entries.is_empty() {
-        list.spawn((
-            Text::new("-- Learnable Scrolls --"),
-            TextFont {
-                font_size: LABEL_FONT_SIZE,
-                ..default()
-            },
-            TextColor(SPELLBOOK_LEVEL_HEADER_COLOR),
-        ));
-
-        for (scroll_name, spell_id, eligible) in scroll_entries {
-            let spell_name = spell_db
-                .get_spell(spell_id)
-                .map(|s| s.name.clone())
-                .unwrap_or_else(|| format!("{spell_id:#06x}"));
-            let eligibility = if eligible {
-                " [eligible]"
-            } else {
-                " [not eligible]"
-            };
-            let color = if eligible {
-                SPELLBOOK_NORMAL_ROW_COLOR
-            } else {
-                SPELLBOOK_DISABLED_SPELL_COLOR
-            };
-
-            list.spawn((
-                Text::new(format!("{scroll_name} \u{2192} {spell_name}{eligibility}")),
-                TextFont {
-                    font_size: LABEL_FONT_SIZE,
-                    ..default()
-                },
-                TextColor(color),
-            ));
-        }
-    }
-}
-
-/// Builds the spell-detail rows in the right column.
-///
-/// Shows the full spell info (name, school, level, SP cost, gem cost, context,
-/// description) when `sb.selected_spell_id` is `Some`, otherwise shows a
-/// placeholder message.
-fn build_detail_panel(
-    pane: &mut ChildSpawnerCommands<'_>,
-    sb: &SpellBookState,
-    content: Option<&GameContent>,
-) {
-    // Column header
-    pane.spawn((
-        Text::new("Detail"),
-        TextFont {
-            font_size: LABEL_FONT_SIZE,
-            ..default()
-        },
-        TextColor(SPELLBOOK_TITLE_COLOR),
-    ));
-
-    let Some(spell_id) = sb.selected_spell_id else {
-        pane.spawn((
-            Text::new("Select a spell to\nview details."),
-            TextFont {
-                font_size: BODY_FONT_SIZE,
-                ..default()
-            },
-            TextColor(SPELLBOOK_HINT_COLOR),
-        ));
-        return;
-    };
-
-    let Some(content_ref) = content else {
-        pane.spawn((
-            Text::new("Content not loaded."),
-            TextFont {
-                font_size: BODY_FONT_SIZE,
-                ..default()
-            },
-            TextColor(SPELLBOOK_DISABLED_SPELL_COLOR),
-        ));
-        return;
-    };
-
-    let Some(spell) = content_ref.db().spells.get_spell(spell_id) else {
-        pane.spawn((
-            Text::new(format!("Unknown spell\n{spell_id:#06x}")),
-            TextFont {
-                font_size: BODY_FONT_SIZE,
-                ..default()
-            },
-            TextColor(SPELLBOOK_DISABLED_SPELL_COLOR),
-        ));
-        return;
-    };
-
-    // Spell name — displayed larger
-    pane.spawn((
-        Text::new(spell.name.clone()),
-        TextFont {
-            font_size: BODY_FONT_SIZE + 2.0,
-            ..default()
-        },
-        TextColor(SPELLBOOK_TITLE_COLOR),
-    ));
-
-    let context_label = match spell.context {
-        SpellContext::Anytime => "Any".to_string(),
-        SpellContext::CombatOnly => "Combat \u{2694}".to_string(),
-        SpellContext::NonCombatOnly => "Non-Combat \u{1F30D}".to_string(),
-        SpellContext::OutdoorOnly => "Outdoor".to_string(),
-        SpellContext::IndoorOnly => "Indoor".to_string(),
-        SpellContext::OutdoorCombat => "Outdoor Combat".to_string(),
-    };
-    let gem_label = if spell.gem_cost > 0 {
-        spell.gem_cost.to_string()
-    } else {
-        "\u{2014}".to_string() // —
-    };
-
-    let detail_lines = [
-        format!("School: {:?}", spell.school),
-        format!("Level:  {}", spell.level),
-        format!("SP Cost: {}", spell.sp_cost),
-        format!("Gem Cost: {gem_label}"),
-        format!("Context: {context_label}"),
-    ];
-
-    for line in &detail_lines {
-        pane.spawn((
-            Text::new(line.clone()),
-            TextFont {
-                font_size: LABEL_FONT_SIZE,
-                ..default()
-            },
-            TextColor(SPELLBOOK_NORMAL_ROW_COLOR),
-        ));
-    }
-
-    // Blank line separator before description
-    pane.spawn((
-        Text::new(String::new()),
-        TextFont {
-            font_size: LABEL_FONT_SIZE,
-            ..default()
-        },
-        TextColor(SPELLBOOK_NORMAL_ROW_COLOR),
-    ));
-
-    // Description text
-    if !spell.description.is_empty() {
-        pane.spawn((
-            Text::new(spell.description.clone()),
-            TextFont {
-                font_size: LABEL_FONT_SIZE,
-                ..default()
-            },
-            TextColor(SPELLBOOK_HINT_COLOR),
-        ));
-    }
-}
-
-// ── egui render helpers ───────────────────────────────────────────────────────
-
-/// Renders the character-tab rows in the left column using egui.
-///
-/// Direct egui translation of [`build_char_tabs`].  Called from
-/// `spellbook_ui_system` once it is wired up (Phase 2).
-///
-/// # Arguments
-///
-/// * `ui`           — mutable reference to the current egui [`egui::Ui`].
-/// * `sb`           — current [`SpellBookState`] (character index, selected row).
-/// * `global_state` — read-only access to party members and their spell data.
-fn render_char_tabs(ui: &mut egui::Ui, sb: &SpellBookState, global_state: &GlobalState) {
-    // Column header
-    ui.label(egui::RichText::new("Characters").color(SPELLBOOK_TITLE_COLOR_EG));
-
-    let members = &global_state.0.party.members;
-    if members.is_empty() {
-        ui.label(egui::RichText::new("No party.").color(SPELLBOOK_DISABLED_SPELL_COLOR_EG));
-        return;
-    }
-
-    for (i, member) in members.iter().enumerate() {
-        let active = i == sb.character_index;
-        let text_color = if active {
-            SPELLBOOK_CHAR_TAB_ACTIVE_COLOR_EG
-        } else {
-            SPELLBOOK_CHAR_TAB_INACTIVE_COLOR_EG
-        };
-
-        // Show "✓" if the character has any known spells.
-        let has_spells = member.spells.cleric_spells.iter().any(|v| !v.is_empty())
-            || member.spells.sorcerer_spells.iter().any(|v| !v.is_empty());
-        let check = if has_spells { " \u{2713}" } else { "" };
-        let cursor = if active { "[*]" } else { "[ ]" };
         let label = format!("{cursor} {}{}", member.name, check);
 
         ui.push_id(i, |ui| {
             let bg = if active {
-                SPELLBOOK_SELECTED_ROW_BG_EG
+                SPELLBOOK_SELECTED_ROW_BG
             } else {
                 egui::Color32::TRANSPARENT
             };
@@ -1171,8 +402,7 @@ fn render_char_tabs(ui: &mut egui::Ui, sb: &SpellBookState, global_state: &Globa
 
 /// Renders the spell-list rows and learnable-scrolls section using egui.
 ///
-/// Direct egui translation of [`build_spell_list`].  Called from
-/// `spellbook_ui_system` once it is wired up (Phase 2).
+/// Called from [`spellbook_ui_system`].
 ///
 /// # Arguments
 ///
@@ -1190,18 +420,18 @@ fn render_spell_list(
     spell_ids: &[SpellId],
 ) {
     // Column header
-    ui.label(egui::RichText::new("Known Spells").color(SPELLBOOK_TITLE_COLOR_EG));
+    ui.label(egui::RichText::new("Known Spells").color(SPELLBOOK_TITLE_COLOR));
 
     let Some(character) = global_state.0.party.members.get(sb.character_index) else {
         ui.label(
-            egui::RichText::new("No character selected.").color(SPELLBOOK_DISABLED_SPELL_COLOR_EG),
+            egui::RichText::new("No character selected.").color(SPELLBOOK_DISABLED_SPELL_COLOR),
         );
         return;
     };
 
     let Some(content_ref) = content else {
         ui.label(
-            egui::RichText::new("Content not available.").color(SPELLBOOK_DISABLED_SPELL_COLOR_EG),
+            egui::RichText::new("Content not available.").color(SPELLBOOK_DISABLED_SPELL_COLOR),
         );
         return;
     };
@@ -1214,7 +444,7 @@ fn render_spell_list(
         .get_spell_list_by_id(&character.class_id, class_db);
 
     if spell_ids.is_empty() {
-        ui.label(egui::RichText::new("No spells known.").color(SPELLBOOK_DISABLED_SPELL_COLOR_EG));
+        ui.label(egui::RichText::new("No spells known.").color(SPELLBOOK_DISABLED_SPELL_COLOR));
     } else {
         // Flat row index that matches sb.selected_row.
         let mut row_idx: usize = 0;
@@ -1227,7 +457,7 @@ fn render_spell_list(
             // ── Level header ──────────────────────────────────────────────────
             ui.label(
                 egui::RichText::new(format!("-- Level {} --", level_idx + 1))
-                    .color(SPELLBOOK_LEVEL_HEADER_COLOR_EG),
+                    .color(SPELLBOOK_LEVEL_HEADER_COLOR),
             );
 
             for &spell_id in level_spells {
@@ -1240,11 +470,11 @@ fn render_spell_list(
                     .unwrap_or(true);
 
                 let text_color = if !can_afford {
-                    SPELLBOOK_DISABLED_SPELL_COLOR_EG
+                    SPELLBOOK_DISABLED_SPELL_COLOR
                 } else if selected {
-                    SPELLBOOK_CHAR_TAB_ACTIVE_COLOR_EG
+                    SPELLBOOK_CHAR_TAB_ACTIVE_COLOR
                 } else {
-                    SPELLBOOK_NORMAL_ROW_COLOR_EG
+                    SPELLBOOK_NORMAL_ROW_COLOR
                 };
 
                 let label = if let Some(spell_def) = spell_db.get_spell(spell_id) {
@@ -1274,7 +504,7 @@ fn render_spell_list(
                 ui.push_id(spell_id, |ui| {
                     if selected {
                         egui::Frame::new()
-                            .fill(SPELLBOOK_SELECTED_ROW_BG_EG)
+                            .fill(SPELLBOOK_SELECTED_ROW_BG)
                             .show(ui, |ui| {
                                 ui.label(egui::RichText::new(label).color(text_color));
                             });
@@ -1308,7 +538,7 @@ fn render_spell_list(
 
     if !scroll_entries.is_empty() {
         ui.label(
-            egui::RichText::new("-- Learnable Scrolls --").color(SPELLBOOK_LEVEL_HEADER_COLOR_EG),
+            egui::RichText::new("-- Learnable Scrolls --").color(SPELLBOOK_LEVEL_HEADER_COLOR),
         );
 
         for (scroll_name, spell_id, eligible) in scroll_entries {
@@ -1322,9 +552,9 @@ fn render_spell_list(
                 " [not eligible]"
             };
             let color = if eligible {
-                SPELLBOOK_NORMAL_ROW_COLOR_EG
+                SPELLBOOK_NORMAL_ROW_COLOR
             } else {
-                SPELLBOOK_DISABLED_SPELL_COLOR_EG
+                SPELLBOOK_DISABLED_SPELL_COLOR
             };
 
             ui.label(
@@ -1337,10 +567,9 @@ fn render_spell_list(
 
 /// Renders the spell-detail panel using egui.
 ///
-/// Direct egui translation of [`build_detail_panel`].  Shows full spell info
-/// (name, school, level, SP cost, gem cost, context, description) when
-/// `sb.selected_spell_id` is `Some`, otherwise shows a placeholder message.
-/// Called from `spellbook_ui_system` once it is wired up (Phase 2).
+/// Shows full spell info (name, school, level, SP cost, gem cost, context,
+/// description) when `sb.selected_spell_id` is `Some`, otherwise shows a
+/// placeholder message.  Called from [`spellbook_ui_system`].
 ///
 /// # Arguments
 ///
@@ -1349,26 +578,24 @@ fn render_spell_list(
 /// * `content` — optional loaded content database (spell definitions).
 fn render_detail_panel(ui: &mut egui::Ui, sb: &SpellBookState, content: Option<&GameContent>) {
     // Column header
-    ui.label(egui::RichText::new("Detail").color(SPELLBOOK_TITLE_COLOR_EG));
+    ui.label(egui::RichText::new("Detail").color(SPELLBOOK_TITLE_COLOR));
 
     let Some(spell_id) = sb.selected_spell_id else {
         ui.label(
-            egui::RichText::new("Select a spell to view details.").color(SPELLBOOK_HINT_COLOR_EG),
+            egui::RichText::new("Select a spell to view details.").color(SPELLBOOK_HINT_COLOR),
         );
         return;
     };
 
     let Some(content_ref) = content else {
-        ui.label(
-            egui::RichText::new("Content not loaded.").color(SPELLBOOK_DISABLED_SPELL_COLOR_EG),
-        );
+        ui.label(egui::RichText::new("Content not loaded.").color(SPELLBOOK_DISABLED_SPELL_COLOR));
         return;
     };
 
     let Some(spell) = content_ref.db().spells.get_spell(spell_id) else {
         ui.label(
             egui::RichText::new(format!("Unknown spell\n{spell_id:#06x}"))
-                .color(SPELLBOOK_DISABLED_SPELL_COLOR_EG),
+                .color(SPELLBOOK_DISABLED_SPELL_COLOR),
         );
         return;
     };
@@ -1376,7 +603,7 @@ fn render_detail_panel(ui: &mut egui::Ui, sb: &SpellBookState, content: Option<&
     // Spell name — displayed larger
     ui.label(
         egui::RichText::new(spell.name.clone())
-            .color(SPELLBOOK_TITLE_COLOR_EG)
+            .color(SPELLBOOK_TITLE_COLOR)
             .size(BODY_FONT_SIZE + 2.0),
     );
 
@@ -1403,7 +630,7 @@ fn render_detail_panel(ui: &mut egui::Ui, sb: &SpellBookState, content: Option<&
     ];
 
     for line in &detail_lines {
-        ui.label(egui::RichText::new(line.clone()).color(SPELLBOOK_NORMAL_ROW_COLOR_EG));
+        ui.label(egui::RichText::new(line.clone()).color(SPELLBOOK_NORMAL_ROW_COLOR));
     }
 
     // Space before description
@@ -1411,7 +638,7 @@ fn render_detail_panel(ui: &mut egui::Ui, sb: &SpellBookState, content: Option<&
 
     // Description text
     if !spell.description.is_empty() {
-        ui.label(egui::RichText::new(spell.description.clone()).color(SPELLBOOK_HINT_COLOR_EG));
+        ui.label(egui::RichText::new(spell.description.clone()).color(SPELLBOOK_HINT_COLOR));
     }
 }
 
@@ -1423,36 +650,6 @@ mod tests {
     use crate::application::spell_book_state::SpellBookState;
     use crate::application::GameState;
     use crate::domain::character::{Alignment, Character, Sex};
-
-    // ── Marker component sanity checks ───────────────────────────────────────
-
-    /// `SpellBookOverlay` is a zero-size marker component.
-    #[test]
-    fn test_spell_book_overlay_is_marker_component() {
-        let _: SpellBookOverlay = SpellBookOverlay;
-        assert_eq!(std::mem::size_of::<SpellBookOverlay>(), 0);
-    }
-
-    /// `SpellBookContent` is a zero-size marker component.
-    #[test]
-    fn test_spell_book_content_is_marker_component() {
-        let _: SpellBookContent = SpellBookContent;
-        assert_eq!(std::mem::size_of::<SpellBookContent>(), 0);
-    }
-
-    /// `SpellBookCharTab` stores the party index correctly.
-    #[test]
-    fn test_spell_book_char_tab_stores_party_index() {
-        let tab = SpellBookCharTab { party_index: 3 };
-        assert_eq!(tab.party_index, 3);
-    }
-
-    /// `SpellBookSpellRow` stores the spell ID correctly.
-    #[test]
-    fn test_spell_book_spell_row_stores_spell_id() {
-        let row = SpellBookSpellRow { spell_id: 0x0201 };
-        assert_eq!(row.spell_id, 0x0201);
-    }
 
     // ── collect_spell_ids_from_state ─────────────────────────────────────────
 
@@ -1530,7 +727,7 @@ mod tests {
     // ── SP affordability logic ───────────────────────────────────────────────
 
     /// A spell is disabled when its `sp_cost` exceeds the character's current
-    /// SP.  The UI must use `SPELLBOOK_DISABLED_SPELL_COLOR` for such rows.
+    /// SP.  The UI uses `SPELLBOOK_DISABLED_SPELL_COLOR` for such rows.
     #[test]
     fn test_spell_row_disabled_when_sp_insufficient() {
         // sp_cost = 10, character.sp.current = 5 → disabled
@@ -1542,7 +739,7 @@ mod tests {
             "character with 5 SP cannot afford a 10-SP spell"
         );
 
-        // Verify the color selection logic mirrors build_spell_list
+        // Verify the color selection logic mirrors render_spell_list.
         let text_color = if !can_afford {
             SPELLBOOK_DISABLED_SPELL_COLOR
         } else {
@@ -1591,104 +788,7 @@ mod tests {
         assert!(matches!(state.mode, GameMode::Exploration));
     }
 
-    // ── Bevy app integration tests ───────────────────────────────────────────
-
-    /// `setup_spellbook_ui` spawns at least one `SpellBookOverlay` entity when
-    /// the game mode is `SpellBook`.
-    #[test]
-    fn test_setup_spellbook_ui_spawns_overlay() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-
-        let mut gs = GameState::new();
-        gs.enter_spellbook(0);
-        app.insert_resource(GlobalState(gs));
-        app.add_systems(Update, setup_spellbook_ui);
-
-        app.update();
-
-        let world = app.world_mut();
-        let mut q = world.query_filtered::<Entity, With<SpellBookOverlay>>();
-        let count = q.iter(world).count();
-        assert!(
-            count >= 1,
-            "setup_spellbook_ui must spawn at least one SpellBookOverlay entity"
-        );
-    }
-
-    /// `cleanup_spellbook_ui` despawns all `SpellBookOverlay` entities when
-    /// the game mode is no longer `SpellBook`.
-    #[test]
-    fn test_cleanup_spellbook_ui_despawns_overlays() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-
-        // Phase 1: Enter SpellBook mode, spawn the overlay.
-        let mut gs = GameState::new();
-        gs.enter_spellbook(0);
-        app.insert_resource(GlobalState(gs));
-        app.add_systems(Update, (setup_spellbook_ui, cleanup_spellbook_ui).chain());
-        app.update(); // spawns overlay
-
-        // Phase 2: Exit SpellBook mode, run cleanup.
-        app.world_mut()
-            .resource_mut::<GlobalState>()
-            .0
-            .exit_spellbook();
-        app.update(); // cleanup should despawn overlay
-
-        let world = app.world_mut();
-        let mut q = world.query_filtered::<Entity, With<SpellBookOverlay>>();
-        let count = q.iter(world).count();
-        assert_eq!(
-            count, 0,
-            "cleanup_spellbook_ui must despawn all SpellBookOverlay entities"
-        );
-    }
-
-    /// `setup_spellbook_ui` is idempotent: running twice does not spawn a
-    /// second overlay.
-    #[test]
-    fn test_setup_spellbook_ui_is_idempotent() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-
-        let mut gs = GameState::new();
-        gs.enter_spellbook(0);
-        app.insert_resource(GlobalState(gs));
-        app.add_systems(Update, setup_spellbook_ui);
-
-        app.update();
-        app.update(); // second update — must not spawn a second overlay
-
-        let world = app.world_mut();
-        let mut q = world.query_filtered::<Entity, With<SpellBookOverlay>>();
-        let count = q.iter(world).count();
-        assert_eq!(count, 1, "only one SpellBookOverlay entity must exist");
-    }
-
-    /// `setup_spellbook_ui` does not spawn when mode is not `SpellBook`.
-    #[test]
-    fn test_setup_spellbook_ui_no_spawn_in_exploration_mode() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-
-        let gs = GameState::new(); // Exploration mode
-        app.insert_resource(GlobalState(gs));
-        app.add_systems(Update, setup_spellbook_ui);
-
-        app.update();
-
-        let world = app.world_mut();
-        let mut q = world.query_filtered::<Entity, With<SpellBookOverlay>>();
-        let count = q.iter(world).count();
-        assert_eq!(
-            count, 0,
-            "setup_spellbook_ui must not spawn when mode is not SpellBook"
-        );
-    }
-
-    // ── Esc key closes the spell book ────────────────────────────────────────
+    // ── Esc / C key transitions ──────────────────────────────────────────────
 
     /// Pressing Esc in SpellBook mode calls exit_spellbook and restores the
     /// previous mode.  Verified via pure state mutation (no Bevy input needed).
@@ -1697,7 +797,7 @@ mod tests {
         let mut state = GameState::new();
         state.enter_spellbook(0);
         assert!(matches!(state.mode, GameMode::SpellBook(_)));
-        // Simulate what handle_spellbook_input does on Esc:
+        // Simulate what spellbook_input_system does on Esc:
         state.exit_spellbook();
         assert!(
             matches!(state.mode, GameMode::Exploration),
@@ -1716,7 +816,7 @@ mod tests {
             panic!("expected SpellBook mode");
         };
 
-        // Simulate what handle_spellbook_input does on C key:
+        // Simulate what spellbook_input_system does on C key:
         state.exit_spellbook();
         state.enter_spell_casting(char_index);
 

@@ -167,6 +167,18 @@
                             managed_content: [],
                         ),
                     ),
+                    (
+                        text: "Show me your wares.",
+                        target_node: Some(6),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [
+                                MerchantChoice,
+                            ],
+                        ),
+                    ),
                 ],
                 conditions: [],
                 actions: [],
@@ -276,12 +288,32 @@
                     managed_content: [],
                 ),
             ),
+            6: (
+                id: 6,
+                text: "Of course. Here is what Village Elder Town Square is offering.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [
+                    OpenMerchant(
+                        npc_id: "tutorial_elder_village",
+                    ),
+                ],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [
+                        MerchantOpenNode,
+                    ],
+                ),
+            ),
         },
         speaker_name: Some("Village Elder"),
         repeatable: true,
         associated_quest: Some(4),
         sdk_metadata: (
-            managed_content: [],
+            managed_content: [
+                MerchantBranchInsertion,
+            ],
         ),
     ),
     (
@@ -679,6 +711,18 @@
                             managed_content: [],
                         ),
                     ),
+                    (
+                        text: "Show me your wares.",
+                        target_node: Some(6),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [
+                                MerchantChoice,
+                            ],
+                        ),
+                    ),
                 ],
                 conditions: [],
                 actions: [],
@@ -788,12 +832,32 @@
                     managed_content: [],
                 ),
             ),
+            6: (
+                id: 6,
+                text: "Of course. Here is what High Priestess Town Square is offering.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [
+                    OpenMerchant(
+                        npc_id: "tutorial_priestess_town",
+                    ),
+                ],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [
+                        MerchantOpenNode,
+                    ],
+                ),
+            ),
         },
         speaker_name: Some("High Priestess"),
         repeatable: true,
         associated_quest: None,
         sdk_metadata: (
-            managed_content: [],
+            managed_content: [
+                MerchantBranchInsertion,
+            ],
         ),
     ),
     (
@@ -949,6 +1013,18 @@
                             managed_content: [],
                         ),
                     ),
+                    (
+                        text: "Show me your wares.",
+                        target_node: Some(7),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [
+                                MerchantChoice,
+                            ],
+                        ),
+                    ),
                 ],
                 conditions: [],
                 actions: [],
@@ -1070,12 +1146,32 @@
                     managed_content: [],
                 ),
             ),
+            7: (
+                id: 7,
+                text: "Of course. Here is what Village Elder Mountain Pass is offering.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [
+                    OpenMerchant(
+                        npc_id: "tutorial_elder_village2",
+                    ),
+                ],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [
+                        MerchantOpenNode,
+                    ],
+                ),
+            ),
         },
         speaker_name: Some("Village Elder"),
         repeatable: false,
         associated_quest: Some(5),
         sdk_metadata: (
-            managed_content: [],
+            managed_content: [
+                MerchantBranchInsertion,
+            ],
         ),
     ),
     (
@@ -1462,6 +1558,18 @@
                             managed_content: [],
                         ),
                     ),
+                    (
+                        text: "Show me your wares.",
+                        target_node: Some(7),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [
+                                MerchantChoice,
+                            ],
+                        ),
+                    ),
                 ],
                 conditions: [],
                 actions: [],
@@ -1594,12 +1702,32 @@
                     managed_content: [],
                 ),
             ),
+            7: (
+                id: 7,
+                text: "Of course. Here is what High Priest Mountain Pass is offering.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [
+                    OpenMerchant(
+                        npc_id: "tutorial_priest_town2",
+                    ),
+                ],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [
+                        MerchantOpenNode,
+                    ],
+                ),
+            ),
         },
         speaker_name: Some("High Priest"),
         repeatable: true,
         associated_quest: None,
         sdk_metadata: (
-            managed_content: [],
+            managed_content: [
+                MerchantBranchInsertion,
+            ],
         ),
     ),
     (
