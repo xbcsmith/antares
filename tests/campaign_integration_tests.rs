@@ -305,6 +305,8 @@ fn test_fallback_mechanism_for_monster_missing_creature_id() {
         conditions: MonsterCondition::Normal,
         active_conditions: Vec::new(),
         has_acted: false,
+        spells: Vec::new(),
+        spell_cooldown: 0,
     };
 
     // Assert: Monster exists but has no creature_id

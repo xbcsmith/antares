@@ -1,5 +1,2553 @@
 # Implementations
 
+## Combat UI: Spell Selection Panel Moved to Upper-Left Corner (Complete)
+
+### Overview
+
+During combat, pressing the **Cast** action button opens a spell selection
+panel. The panel was previously anchored at `left: 16px, bottom: 110px`,
+placing it in the lower-left area of the screen where it was partially or fully
+covered by the grey action-menu / enemy-panel boxes. When a character had no
+castable spells or no SP remaining, the **Cancel** button on the panel was
+unreachable, trapping the player.
+
+The panel is now anchored to the **upper-left corner** (`left: 12px,
+top: 12px`), matching the 12 px inset used by the combat-log bubble in the
+upper-right corner. The two panels now occupy opposite top corners and never
+overlap each other or the bottom UI boxes.
+
+### Files Changed
+
+| File                         | Change                                    |
+| ---------------------------- | ----------------------------------------- |
+| `src/game/systems/combat.rs` | Add constants; update panel anchor; tests |
+
+### Constants Added
+
+```rust
+/// Distance from the left edge of the screen to the left edge of the spell
+/// selection panel.  The panel is pinned to the upper-left corner so it is
+/// never obscured by the action-menu / enemy-panel grey boxes at the bottom.
+pub const SPELL_PANEL_LEFT: Val = Val::Px(12.0);
+
+/// Distance from the top of the screen to the top edge of the spell selection
+/// panel.  Matches the 12 px gap used by the combat-log bubble in the
+/// upper-right corner, giving the UI a consistent inset all around.
+pub const SPELL_PANEL_TOP: Val = Val::Px(12.0);
+```
+
+### Layout Change
+
+| Property | Before           | After                                |
+| -------- | ---------------- | ------------------------------------ |
+| `left`   | `Val::Px(16.0)`  | `SPELL_PANEL_LEFT` (`Val::Px(12.0)`) |
+| `bottom` | `Val::Px(110.0)` | _(removed)_                          |
+| `top`    | _(absent)_       | `SPELL_PANEL_TOP` (`Val::Px(12.0)`)  |
+
+### Screen Layout (1280 × 720 example)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ ┌──────────────┐                         ┌───────────────────┐  │
+│ │ Spell Panel  │                         │  Combat Log       │  │
+│ │ (upper-left) │                         │  (upper-right)    │  │
+│ │  300 px wide │                         │   360 px wide     │  │
+│ └──────────────┘                         └───────────────────┘  │
+│                                                                   │
+│                  [3-D world view]                                 │
+│                                                                   │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  Enemy panel (monsters + HP bars)                          │  │
+│  ├────────────────────────────────────────────────────────────┤  │
+│  │  Turn order strip                                          │  │
+│  ├────────────────────────────────────────────────────────────┤  │
+│  │  Action menu  [Attack] [Defend] [Cast] [Item] [Flee]       │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Tests Added (3 new tests)
+
+| Test                                                  | What it verifies                                                                                                   |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `test_spell_panel_anchored_upper_left`                | `SPELL_PANEL_LEFT` and `SPELL_PANEL_TOP` are both small positive insets (0–32 px), confirming upper-left anchoring |
+| `test_spell_panel_does_not_overlap_combat_log_bubble` | Spell panel right edge (left + 300 px) ≤ log bubble left edge in a 1280 px viewport                                |
+| `test_spell_panel_top_is_above_action_menu`           | `SPELL_PANEL_TOP + ACTION_MENU_BOTTOM` < 600 px minimum viewport height — the two panels cannot overlap vertically |
+
+### Architecture Compliance
+
+- [x] Constants extracted — no magic numbers in `update_spell_selection_panel`
+- [x] Consistent 12 px inset matches `CombatLogBubbleRoot` (`right: 12, top: 12`)
+- [x] `cargo fmt`, `cargo check`, `cargo clippy -- -D warnings` all pass with 0 errors/warnings
+- [x] 3 new tests pass; no existing tests broken
+
+---
+
+## SDK Map Editor: NPC Edit Placement + Edit/Add NPC Event Buttons (Complete)
+
+### Overview
+
+When a content author clicks on a tile that contains an NPC placement in the
+Campaign Builder's Map Editor, the Inspector panel previously offered only two
+actions: **Edit NPC** (navigate to the NPC editor) and **Remove NPC** (delete
+the placement). There was no way to change the NPC's facing direction, position,
+or dialogue override after initial placement, and no shortcut to open or create
+the dialogue event that controls facing, proximity-turn behaviour, and the
+dialogue tree. All NPCs consequently defaulted to the same facing direction.
+
+Two new capabilities were added:
+
+1. **"📐 Edit Placement"** — opens the NPC placement editor pre-filled with the
+   existing placement's data (NPC ID, position, facing direction, dialogue
+   override) so the author can update any field and click **"💾 Update
+   Placement"** to save in-place with full undo/redo support.
+
+2. **"🎭 Edit NPC Event" / "➕ Add NPC Event"** — if a `MapEvent::NpcDialogue`
+   (or any other event) already exists on the tile, opens the event editor
+   pre-loaded with that event; otherwise creates a new `NpcDialogue` event
+   pre-populated with the NPC's ID so the author only needs to set the facing
+   direction, proximity-facing toggle, rotation speed, and dialogue ID.
+
+### Files Changed
+
+| File                                     | Change            |
+| ---------------------------------------- | ----------------- |
+| `sdk/campaign_builder/src/map_editor.rs` | All changes below |
+
+### Data-Structure Changes
+
+#### `EditorAction::NpcPlacementReplaced` (new variant)
+
+```rust
+NpcPlacementReplaced {
+    index: usize,
+    old_placement: NpcPlacement,
+    new_placement: NpcPlacement,
+}
+```
+
+Enables undo (`old_placement` restored) and redo (`new_placement` re-applied)
+for in-place placement edits, consistent with the existing
+`NpcPlacementRemoved` pattern.
+
+#### `NpcPlacementEditorState::editing_index: Option<usize>` (new field)
+
+`None` = creating a new placement (existing behaviour); `Some(i)` = editing the
+placement at index `i` in `map.npc_placements`. `clear()` resets it to `None`.
+
+### New Methods
+
+#### `NpcPlacementEditorState::from_placement(index, placement)`
+
+Pre-fills all editor fields from an existing `NpcPlacement` and sets
+`editing_index = Some(index)`. Facing directions are serialised with
+`format!("{:?}", dir)` so they round-trip through the existing combo-box
+strings (`"North"`, `"South"`, `"East"`, `"West"`).
+
+#### `MapEditorState::replace_npc_placement(index, new_placement)`
+
+Replaces `map.npc_placements[index]` in-place, pushes
+`EditorAction::NpcPlacementReplaced` onto the undo stack, and sets
+`has_changes = true`. Out-of-range indices are a no-op.
+
+### UI Changes
+
+#### Inspector panel — NPC section
+
+- `ui.horizontal` → `ui.horizontal_wrapped` (accommodates three buttons).
+- **"📐 Edit Placement"** button added between "✏️ Edit NPC" and "🗑️ Remove
+  NPC". While editing, it renders as **"📐 Editing Placement..."** with a blue
+  fill (matching the existing "✏️ Editing..." style used by events).
+- New **"🎭 Edit NPC Event"** / **"➕ Add NPC Event"** button block below the
+  main row:
+  - If an event exists at the position → loads it into `EventEditorState` via
+    `from_map_event` and switches to `PlaceEvent` tool.
+  - If no event exists → creates a fresh `EventEditorState` with
+    `event_type = NpcDialogue` and `npc_id` / `npc_id_input_buffer` pre-filled
+    with the placement's NPC ID, then switches to `PlaceEvent` tool.
+  - While the event editor is already open for this tile → renders as
+    **"🎭 Editing Event..."** with a blue fill and is non-interactive.
+
+#### NPC placement editor panel heading
+
+Changes from `"Place NPC"` to `"Edit NPC Placement"` when `editing_index` is
+`Some`, giving the author clear visual confirmation of which mode is active.
+
+#### `show_npc_placement_editor` save/cancel logic
+
+- Save button label: **"💾 Update Placement"** (edit mode) vs **"➕ Place NPC"**
+  (new-placement mode).
+- In edit mode, save calls `replace_npc_placement(idx, placement)`, clears the
+  editor, and returns to `Select` tool.
+- **"❌ Cancel"** now also resets `current_tool` to `Select` in both modes.
+
+### Tests Added (12 new tests in `map_editor.rs`)
+
+| Test                                                            | What it verifies                                                                                         |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `test_npc_placement_editor_state_from_placement`                | All fields populated correctly, `editing_index = Some(3)`                                                |
+| `test_npc_placement_editor_state_from_placement_no_facing`      | `facing = None` when placement has no facing                                                             |
+| `test_npc_placement_editor_state_from_placement_all_directions` | All four `Direction` variants round-trip                                                                 |
+| `test_npc_placement_editor_clear_resets_editing_index`          | `clear()` resets `editing_index` to `None`                                                               |
+| `test_npc_editor_state_default_editing_index_is_none`           | Default state is new-placement mode                                                                      |
+| `test_replace_npc_placement_updates_facing`                     | In-place replacement updates the facing field                                                            |
+| `test_replace_npc_placement_undo_restores_original`             | Undo restores the original placement                                                                     |
+| `test_replace_npc_placement_redo_reapplies_update`              | Redo re-applies the updated placement                                                                    |
+| `test_replace_npc_placement_out_of_range_noop`                  | Out-of-range index is a no-op                                                                            |
+| `test_replace_npc_placement_marks_has_changes`                  | `has_changes` is set to `true`                                                                           |
+| `test_add_npc_event_pre_populates_npc_id`                       | `EventEditorState` pre-population fills `npc_id` and `npc_id_input_buffer`, `event_facing` starts `None` |
+| `test_npc_placement_editor_save_label_logic`                    | `editing_index` drives the button-label selection                                                        |
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 (NpcPlacement, MapEvent::NpcDialogue)
+- [x] Module placement: all changes in `sdk/campaign_builder/src/map_editor.rs`
+- [x] `EditorAction` undo/redo pattern extended consistently with existing variants
+- [x] `egui` ID rules: new buttons use unique IDs, no loops without `push_id`
+- [x] No architectural deviations — new UI builds on existing `EventEditorState`
+      and `NpcPlacementEditorState` patterns
+- [x] `cargo fmt`, `cargo check`, `cargo clippy -- -D warnings` all pass with 0 errors/warnings
+
+---
+
+## Feature: Encounter Interaction from Adjacent Tile + Immediate Monster Mesh Despawn on Victory
+
+### Overview
+
+Two related gameplay improvements delivered together:
+
+1. **Encounter interaction from adjacent tile** — Players can now initiate combat
+   by pressing `E` or clicking the centre of the screen while standing on any
+   tile adjacent to an encounter trigger, instead of being forced into combat by
+   stepping onto the encounter tile.
+
+2. **Immediate monster mesh despawn on victory** — When the party wins combat the
+   monster's world-map mesh disappears in the same frame the combat ends. When
+   the party flees the mesh stays, matching player expectations and mirroring the
+   pattern already used for recruitable-character visuals.
+
+---
+
+### Feature 1 — Encounter Interaction Requires Explicit Player Input
+
+#### Problem
+
+`check_for_events` unconditionally fired `MapEventTriggered` for
+`MapEvent::Encounter` the moment the party stepped onto the encounter tile.
+Players had no agency: walking toward a visible monster automatically started
+combat the instant they entered its tile.
+
+#### Change
+
+`MapEvent::Encounter { .. }` was added to the "requires interact" list in
+`check_for_events` alongside `RecruitableCharacter`, `Sign`, `Teleport`,
+`Container`, and `LockedDoor`/`LockedContainer`. The arm logs an info message
+and returns without emitting `MapEventTriggered`.
+
+The adjacent-tile and current-tile E key / mouse paths were **already
+implemented** inside `try_interact_adjacent_world_events`
+(`src/game/systems/input/exploration_interact.rs`): both the current-position
+`Encounter` guard and the `MapEvent::Encounter` arm in the adjacent-tile loop
+route through `handle_exploration_interact` → `try_interact_adjacent_world_events`
+→ `MapEventTriggered` → `handle_events` → `start_encounter`. No changes were
+needed to those paths.
+
+#### Files Changed
+
+| File                         | Change                                                                                                                                                                                                                                                                                                               |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/events.rs` | Add `MapEvent::Encounter { .. }` arm to `check_for_events` "requires interact" match; update block comment; rename and update `test_encounter_auto_triggers_when_stepping_on_tile` → `test_encounter_does_not_auto_trigger_when_stepping_on_tile`; add `test_encounter_triggered_from_current_position_via_interact` |
+
+#### New / Updated Tests
+
+| Test                                                          | What it verifies                                                                                  |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `test_encounter_does_not_auto_trigger_when_stepping_on_tile`  | Stepping on an encounter tile emits no `MapEventTriggered`                                        |
+| `test_encounter_triggered_from_current_position_via_interact` | Explicitly writing `MapEventTriggered` (the interact path) delivers the encounter event correctly |
+
+---
+
+### Feature 2 — Immediate Monster Mesh Despawn on Victory (`DespawnEncounterVisual`)
+
+#### Problem
+
+The existing `cleanup_encounter_visuals` passive polling system (in `map.rs`)
+despawns `EncounterVisualMarker` entities when their backing `MapEvent::Encounter`
+is absent from the map. Because Bevy system ordering between `CombatPlugin` and
+`MapManagerPlugin` is non-deterministic, `cleanup_encounter_visuals` could run
+_before_ `handle_combat_victory` removes the event in the same frame, leaving
+the monster mesh visible for one extra frame (or longer if ordering was
+consistently wrong). There was also no explicit, guaranteed despawn path
+analogous to `DespawnRecruitableVisual`.
+
+When the party **fled**, no event was removed and no despawn happened — which is
+the correct behaviour — but it was only accidentally so.
+
+#### Solution
+
+Mirror the `DespawnRecruitableVisual` pattern:
+
+1. Add `DespawnEncounterVisual { map_id, position }` message to `map.rs`.
+2. Add `handle_despawn_encounter_visual` system to `MapManagerPlugin` that
+   immediately despawns any `EncounterVisualMarker` entity matching the
+   `map_id` + `position` pair.
+3. In `handle_combat_victory` (`combat.rs`), emit `DespawnEncounterVisual`
+   immediately after `map.remove_event(pos)`, so the mesh disappears in the
+   same frame the encounter ends in victory.
+4. `cleanup_encounter_visuals` is **kept** as a passive safety net.
+5. Flee path: `perform_flee_action` does not remove the encounter event and
+   does not emit `DespawnEncounterVisual`, so the monster mesh remains on the
+   map — intentional and correct.
+
+#### Files Changed
+
+| File                         | Change                                                                                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/map.rs`    | Add `DespawnEncounterVisual` message; add `handle_despawn_encounter_visual` system; register both in `MapManagerPlugin`                   |
+| `src/game/systems/combat.rs` | Add `Option<MessageWriter<DespawnEncounterVisual>>` parameter to `handle_combat_victory`; emit message after event removal; add two tests |
+
+#### New Tests
+
+| Test                                                    | File        | What it verifies                                                                                   |
+| ------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------- |
+| `test_despawn_encounter_visual_message_removes_entity`  | `map.rs`    | Message at matching tile despawns that entity; non-matching tile entity survives                   |
+| `test_despawn_encounter_visual_wrong_map_id_is_ignored` | `map.rs`    | Message with wrong `map_id` leaves all entities untouched                                          |
+| `test_despawn_encounter_visual_emitted_on_victory`      | `combat.rs` | `CombatVictory` causes `DespawnEncounterVisual` to be written with correct `map_id` and `position` |
+| `test_despawn_encounter_visual_not_emitted_on_flee`     | `combat.rs` | `FleeAction` does **not** emit `DespawnEncounterVisual`                                            |
+
+---
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all                                           → no output
+✅ cargo check --all-targets --all-features                 → Finished, 0 errors
+✅ cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+✅ cargo nextest run --all-features                         → 4338 passed, 8 skipped, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `MapId` and `Position` type aliases used in `DespawnEncounterVisual` (not raw `u32`/`usize`)
+- [x] `Option<MessageWriter<…>>` pattern used in `handle_combat_victory` so the system remains usable in test apps that do not register `MapManagerPlugin`
+- [x] Passive `cleanup_encounter_visuals` retained as safety net — no regression for edge-case spawning paths
+- [x] Flee path leaves encounter event and visual intact — player can return and retry
+- [x] Pattern is consistent with `DespawnRecruitableVisual` already in production
+
+---
+
+## Bugfix: Recruitable Character Mesh Persists After Adjacent-Tile Recruitment
+
+### Problem
+
+When a `RecruitableCharacter` event was interacted with from an **adjacent tile**
+(the party stands one tile away and presses the interact key), the character's
+3-D mesh remained visible on the map after the recruit dialog completed and the
+character joined the party. The mesh would only disappear once the party
+physically walked onto the tile the recruitable character was standing on.
+
+### Root Cause
+
+In `src/game/systems/events.rs`, inside `handle_events`, the
+`MapEvent::RecruitableCharacter` arm contained this line:
+
+```src/game/systems/events.rs#L631
+let current_pos = global_state.0.world.party_position;
+```
+
+`current_pos` was then used for three purposes:
+
+1. Looking up the NPC speaker entity (`coord.0.x == current_pos.x …`)
+2. Populating `RecruitmentContext::event_position`
+3. Setting `StartDialogue::fallback_position`
+
+When the interaction came from an adjacent tile, `trigger.position` (the tile
+where the event actually lives) differed from `global_state.0.world.party_position`
+(the tile the party stands on). The `PendingRecruitmentContext` set correctly
+by `try_interact_npc_or_recruitable` (in `exploration_interact.rs`) was then
+**overwritten** by `handle_events` using the wrong party position.
+
+Downstream, `execute_recruit_to_party` called `remove_event(event_position)`
+on the party's tile instead of the event's tile. The removal found nothing,
+`DespawnRecruitableVisual` was never emitted, and the mesh persisted.
+
+### Fix
+
+Replace the three uses of `current_pos` (the party position) in the
+`RecruitableCharacter` arm with `trigger.position` (the event's actual map
+tile), which is always correct regardless of whether the party is standing on
+the event or one tile away:
+
+```src/game/systems/events.rs#L631
+let event_pos = trigger.position;
+```
+
+`trigger.position` is the canonical source of truth: it is the position encoded
+in the `MapEventTriggered` message, set correctly by both
+`try_interact_npc_or_recruitable` (adjacent-tile path) and any direct
+programmatic trigger (same-tile path).
+
+### Files Changed
+
+| File                         | Change                                                                                                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/events.rs` | Replace `global_state.0.world.party_position` with `trigger.position` in the `RecruitableCharacter` arm of `handle_events`; add regression test |
+
+### New Test Added
+
+`test_recruitable_character_adjacent_tile_uses_event_position_not_party_position`
+in `src/game/systems/events.rs`:
+
+- Places the party at `(7, 14)` and the `RecruitableCharacter` event at `(7, 15)`.
+- Fires `MapEventTriggered { position: (7, 15) }` (the adjacent tile).
+- Asserts `DialogueState::recruitment_context.event_position == (7, 15)` after
+  two update ticks.
+- Asserts `event_position != (7, 14)` (party position must not leak in).
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all                                           → no output
+✅ cargo check --all-targets --all-features                 → Finished, 0 errors
+✅ cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+✅ cargo nextest run --all-features -E 'test(recruitable)'  → 18 passed, 0 failed
+```
+
+---
+
+## Feature: `DespawnEncounterVisual` — Immediate Encounter Mesh Despawn on Combat Victory
+
+### Problem
+
+When the party defeated all monsters in a combat encounter, the monster's 3-D
+mesh remained visible on the map tile until the next frame where
+`cleanup_encounter_visuals` ran its passive sweep. In practice this meant a
+one-frame flicker where a defeated monster mesh was still present as the game
+transitioned back to exploration mode, and any future changes that deferred
+`cleanup_encounter_visuals` (e.g. frame-ordering adjustments) could widen that
+window further.
+
+There was no explicit, same-frame despawn path for encounter visuals analogous
+to the `DespawnRecruitableVisual` message used for recruitable-character meshes.
+
+### Solution
+
+Mirror the recruitable-visual immediate-despawn pattern for encounter visuals:
+
+1. **`DespawnEncounterVisual` message struct** — a new `#[derive(Message)]` type
+   carrying `map_id` and `position`, emitted by `handle_combat_victory` the
+   moment all monsters are defeated. The message is intentionally _not_ emitted
+   on flee, so the monster mesh stays on the map for a potential second
+   encounter.
+
+2. **`handle_despawn_encounter_visual` system** — queries all
+   `EncounterVisualMarker` entities and despawns any whose `(map_id, position)`
+   matches an incoming `DespawnEncounterVisual` message. Runs in the same
+   `Update` schedule as the other map-management systems.
+
+3. **`cleanup_encounter_visuals` retained** — the existing passive sweep remains
+   as a safety net for any encounter visual spawned outside the normal map-load
+   path, or in case the explicit message is missed for any reason.
+
+### Files Changed
+
+| File                      | Change                                                                                                                                          |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/game/systems/map.rs` | Added `DespawnEncounterVisual` struct; registered it in `MapManagerPlugin`; added `handle_despawn_encounter_visual` system; added two new tests |
+
+### New Tests Added
+
+Both tests live in `src/game/systems/map.rs` → `mod tests`:
+
+| Test                                                    | What it verifies                                                                                                                             |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_despawn_encounter_visual_message_removes_entity`  | A `DespawnEncounterVisual` with `map_id: 1, position: (5,5)` despawns only the entity at that tile; a second entity at `(3,3)` is untouched. |
+| `test_despawn_encounter_visual_wrong_map_id_is_ignored` | A message targeting `map_id: 99` (no entities on that map) is a no-op; both entities on map 1 survive.                                       |
+
+### Design Notes
+
+- **Flee vs. victory**: The message is only emitted on victory. On flee the
+  encounter event is still present on the map, so `cleanup_encounter_visuals`
+  correctly keeps the mesh alive.
+- **`EncounterVisualMarker` carries coordinates directly**: unlike
+  `RecruitableVisualMarker`, which relies on `MapEntity` + `TileCoord`
+  components, `EncounterVisualMarker` stores `map_id` and `position` inline.
+  `handle_despawn_encounter_visual` therefore queries only
+  `(Entity, &EncounterVisualMarker)` — no extra component join needed.
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all                                                        → no output
+✅ cargo check --all-targets --all-features                               → Finished, 0 errors
+✅ cargo clippy --all-targets --all-features -- -D warnings               → Finished, 0 warnings
+✅ cargo nextest run --all-features -E 'test(despawn_encounter_visual)'   → 2 passed, 0 failed
+✅ cargo nextest run --all-features                                       → 4336 passed, 0 failed
+```
+
+---
+
+## Phase 6: SDK and Content Tooling Updates — Full Completion Summary
+
+### Overview
+
+Phase 6 delivers all planned SDK and content tooling updates for the spell
+system. Every deliverable from the implementation plan sections 6.1 through 6.5
+is implemented and verified. All four quality gates pass.
+
+### Deliverables
+
+| #   | Deliverable                                                                            | Status      |
+| --- | -------------------------------------------------------------------------------------- | ----------- |
+| 6.1 | Spell editor — `SpellEffectType` editing panel                                         | ✅ Complete |
+| 6.2 | Item editor — `ConsumableEffect::CastSpell`/`LearnSpell` + `spell_effect` autocomplete | ✅ Complete |
+| 6.3 | Dialogue editor — `ActionType::LearnSpell` action support                              | ✅ Complete |
+| 6.4 | Quest editor — `RewardType::LearnSpell` reward support                                 | ✅ Complete |
+| 6.5 | Validation framework — spell cross-reference rules wired into `validate_campaign()`    | ✅ Complete |
+
+### 6.1 Spell Editor — SpellEffectType Editing
+
+New `show_effect_type_editor` method in `spells_editor.rs` renders an "Effect
+Type" group in the spell form. A `ComboBox` (id-salt `"spell_effect_type"`)
+selects from nine named variants: Auto (Inferred), Damage, Healing, Cure
+Condition, Buff, Utility, Debuff, Resurrection, Dispel Magic. Variant-specific
+sub-fields are shown per selection (dice rolls, condition autocomplete, buff
+field picker, utility sub-type, etc.). The `Composite` variant is
+read-only. `BuffField`, `SpellEffectType`, and `UtilityType` added to imports.
+
+Files: `sdk/campaign_builder/src/spells_editor.rs`
+
+### 6.2 Item Editor — Spell Scroll and Charged Item Support
+
+- `show()`, `show_form()`, and `show_type_editor()` updated with
+  `spells: &[Spell]` parameter.
+- `ConsumableEffect::CastSpell` and `ConsumableEffect::LearnSpell` arms in the
+  consumable effect editor replaced with `autocomplete_spell_selector` widgets
+  (id-salts `"consumable_cast_spell"` and `"consumable_learn_spell"`).
+- New `spell_effect` row in the "Basic Properties" group using
+  `autocomplete_spell_selector` (id-salt `"item_spell_effect"`) with a
+  "✕ Clear" button, enabling authors to wire charged-item spells.
+- Call site in `lib.rs` updated to pass `&self.campaign_data.spells`.
+
+Files: `sdk/campaign_builder/src/items_editor.rs`,
+`sdk/campaign_builder/src/lib.rs`
+
+### 6.3 Dialogue Editor — LearnSpell Action Support
+
+- `ActionType::LearnSpell` variant added; `as_str()` → `"Learn Spell"`.
+- `ActionEditBuffer` gains `spell_id: String` and `target_character_id: String`
+  fields (both default `String::new()`).
+- `build_action_from_buffer()` handles `LearnSpell` — parses `spell_id` as
+  `SpellId` and optional `target_character_id` as `CharacterId`.
+- `DialogueEditorState` gains `available_spells: Vec<Spell>` field; synced at
+  the start of `show()`.
+- `show_node_editor_panel()` renders an "Add Action to Node" section with a
+  full action-type `ComboBox` (all 11 variants, each `push_id`-wrapped), a
+  `LearnSpell` sub-form using `autocomplete_spell_selector`, and a quest
+  sub-form for quest-related actions.
+- `show()` signature updated to accept `spells: &[Spell]`; call site in
+  `lib.rs` updated.
+
+Files: `sdk/campaign_builder/src/dialogue_editor.rs`,
+`sdk/campaign_builder/src/lib.rs`
+
+### 6.4 Quest Editor — LearnSpell Reward Support
+
+- `RewardType::LearnSpell` added; `as_str()` → `"Learn Spell"`.
+- `RewardEditBuffer` gains `spell_id: String` field (defaults `String::new()`).
+- `edit_reward()` and `save_reward()` handle `QuestReward::LearnSpell`.
+- Reward list description and `get_quest_preview()` display spell name via
+  `available_spells` lookup with `"Unknown Spell"` fallback.
+- Reward edit modal for `LearnSpell` uses `autocomplete_spell_selector`
+  (id-salt `"reward_spell_selector_{reward_idx}"`).
+- `QuestEditorState` gains `available_spells: Vec<Spell>` field; `show()`
+  updated to accept and sync `spells: &[Spell]`; call site in `lib.rs`
+  updated.
+
+Files: `sdk/campaign_builder/src/quest_editor.rs`,
+`sdk/campaign_builder/src/lib.rs`
+
+### 6.5 Validation Framework — Spell Cross-Reference Rules
+
+Five new public validation functions in `validation.rs` called from
+`validate_campaign()` in `campaign_io.rs`:
+
+| Function                                | What it checks                                                     |
+| --------------------------------------- | ------------------------------------------------------------------ |
+| `validate_spell_data_integrity`         | Duplicate spell IDs; level outside 1–7                             |
+| `validate_item_spell_effects`           | `item.spell_effect` references a known `SpellId`                   |
+| `validate_consumable_spell_effects`     | `CastSpell`/`LearnSpell` consumable effects reference known spells |
+| `validate_dialogue_learn_spell_actions` | `DialogueAction::LearnSpell` references known spells               |
+| `validate_quest_learn_spell_rewards`    | `QuestReward::LearnSpell` references known spells                  |
+
+All five are called after the existing `validate_proficiency_ids()` block in
+`validate_campaign()`. Each returns `Passed` when clean or one or more `Error`
+entries otherwise.
+
+Files: `sdk/campaign_builder/src/validation.rs`,
+`sdk/campaign_builder/src/campaign_io.rs`
+
+### New Tests Added (Total: 38)
+
+| File                  | Count | Notes                                        |
+| --------------------- | ----- | -------------------------------------------- |
+| `ui_helpers/tests.rs` | 1     | `autocomplete_spell_selector` no-panic       |
+| `validation.rs`       | 22    | 4–5 tests per validation function            |
+| `spells_editor.rs`    | 5     | Effect type editor variants                  |
+| `items_editor.rs`     | 3     | CastSpell/LearnSpell/spell_effect roundtrips |
+| `dialogue_editor.rs`  | 5     | LearnSpell action build + buffer fields      |
+| `quest_editor.rs`     | 3     | LearnSpell reward roundtrip and save         |
+
+### Quality Gates
+
+```text
+✅ cargo fmt --all                                           → no output
+✅ cargo check --all-targets --all-features                 → Finished, 0 errors
+✅ cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+✅ cargo nextest run --all-features                         → 4316 passed, 8 skipped, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `SpellId`, `CharacterId` type aliases used throughout (not raw integers)
+- [x] `autocomplete_spell_selector` used for all spell ID inputs — consistent
+      with `autocomplete_item_selector` and other selector widgets
+- [x] `push_id` on every loop body in new egui code (SDK egui ID audit)
+- [x] Every `ComboBox` uses `from_id_salt` (not `from_label`)
+- [x] `request_repaint()` called on layout-driving state changes
+- [x] All public functions and struct fields have `///` doc comments
+- [x] All test data constructed inline — no reference to `campaigns/tutorial`
+- [x] RON format unchanged — no data file modifications in Phase 6
+- [x] No architectural deviations from `docs/reference/architecture.md`
+- [x] `docs/explanation/implementations.md` updated
+
+---
+
+## Phase 6: Items Editor — Spell Autocomplete Upgrade (Complete)
+
+### Overview
+
+Upgrades `items_editor.rs` to replace raw `egui::DragValue` spell-ID inputs with
+the `autocomplete_spell_selector` widget for `ConsumableEffect::CastSpell` and
+`ConsumableEffect::LearnSpell`, and adds a new `spell_effect` field editor for
+charged non-consumable items. Spell data is threaded through the call chain via
+a new `spells: &[Spell]` parameter on `show()`, `show_form()`, and
+`show_type_editor()`. Three new unit tests cover the new spell-id and
+spell-effect field semantics.
+
+### Changes
+
+#### Imports (`items_editor.rs` L5–9)
+
+Added `autocomplete_spell_selector` to the existing `use crate::ui_helpers::{…}`
+import group — no new `use` statements needed because the symbol is already
+re-exported via `pub use autocomplete::*` in `ui_helpers/mod.rs`.
+
+#### `show()` — new `spells` parameter
+
+```antares/sdk/campaign_builder/src/items_editor.rs#L147-153
+pub fn show(
+    &mut self,
+    ui: &mut egui::Ui,
+    items: &mut Vec<Item>,
+    classes: &[ClassDefinition],
+    spells: &[antares::domain::magic::types::Spell],
+    ctx: &mut EditorContext<'_>,
+)
+```
+
+The `match self.mode` arm for `Add | Edit` now passes `spells` through to
+`show_form()`.
+
+#### `show_form()` — new `spells` parameter + `spell_effect` UI
+
+New parameter `spells: &[antares::domain::magic::types::Spell]` added after
+`_classes`. Inside the "Basic Properties" group, a new `ui.horizontal` row is
+rendered **after** the "Max Charges" DragValue:
+
+```antares/sdk/campaign_builder/src/items_editor.rs#L814-840
+ui.horizontal(|ui| {
+    ui.label("Spell Effect:");
+    let mut spell_effect_id: antares::domain::types::SpellId =
+        self.edit_buffer.spell_effect.unwrap_or(0);
+    if autocomplete_spell_selector(
+        ui,
+        "item_spell_effect",
+        "",
+        &mut spell_effect_id,
+        spells,
+    ) {
+        self.edit_buffer.spell_effect = if spell_effect_id == 0 {
+            None
+        } else {
+            Some(spell_effect_id)
+        };
+    }
+    if self.edit_buffer.spell_effect.is_some()
+        && ui.small_button("✕ Clear").clicked()
+    {
+        self.edit_buffer.spell_effect = None;
+    }
+    ui.label("ℹ️").on_hover_text(
+        "Charged item spell effect. Set Max Charges > 0 to enable.",
+    );
+});
+```
+
+The call to `self.show_type_editor(ui)` is updated to
+`self.show_type_editor(ui, spells)`.
+
+#### `show_type_editor()` — new `spells` parameter + autocomplete arms
+
+Signature changed from `fn show_type_editor(&mut self, ui: &mut egui::Ui)` to:
+
+```antares/sdk/campaign_builder/src/items_editor.rs#L1076-1081
+fn show_type_editor(
+    &mut self,
+    ui: &mut egui::Ui,
+    spells: &[antares::domain::magic::types::Spell],
+)
+```
+
+`ConsumableEffect::CastSpell(spell_id)` arm — replaced `ui.horizontal` /
+`DragValue` block with:
+
+```antares/sdk/campaign_builder/src/items_editor.rs#L1479-1487
+ConsumableEffect::CastSpell(spell_id) => {
+    autocomplete_spell_selector(
+        ui,
+        "consumable_cast_spell",
+        "Spell:",
+        spell_id,
+        spells,
+    );
+    ui.label("This scroll casts the specified spell when used.");
+}
+```
+
+`ConsumableEffect::LearnSpell(spell_id)` arm — same replacement with id-salt
+`"consumable_learn_spell"` and label text
+`"This scroll permanently teaches the spell to the user."`.
+
+#### New tests (3)
+
+| Test name                                   | What it verifies                                                                |
+| ------------------------------------------- | ------------------------------------------------------------------------------- |
+| `test_cast_spell_effect_has_valid_default`  | `ConsumableEffect::CastSpell(0x0101)` preserves `spell_id == 0x0101`            |
+| `test_learn_spell_effect_has_valid_default` | `ConsumableEffect::LearnSpell(0x0201)` preserves `spell_id == 0x0201`           |
+| `test_spell_effect_field_roundtrip`         | An `Item` with `spell_effect: Some(5)` survives `clone()` with the field intact |
+
+### Files Changed
+
+| File                                       | Change                      |
+| ------------------------------------------ | --------------------------- |
+| `sdk/campaign_builder/src/items_editor.rs` | All changes described above |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (root antares crate, 0 errors)
+✅ cargo clippy      → Finished (0 warnings)
+✅ cargo nextest run → 4316 passed, 8 skipped, 0 failed
+```
+
+Note: `sdk/campaign_builder/src/lib.rs` call-site update (passing `spells` to
+`items_editor_state.show(…)`) is tracked as a separate task per task
+instructions. The `campaign_builder` crate builds cleanly once that update is
+applied.
+
+### Architecture Compliance
+
+- [x] `SpellId` type alias used (not raw `u16`)
+- [x] `autocomplete_spell_selector` widget used — consistent with dialogue and
+      quest editors
+- [x] `spell_effect` field editing follows the same `Option<SpellId>` pattern
+      used throughout `Item` and combat systems
+- [x] No architectural deviations from `docs/reference/architecture.md`
+- [x] Tests reference `data/test_campaign` fixture pattern (unit tests only,
+      no campaign I/O)
+- [x] RON format unchanged — no data file modifications
+
+## Phase 6: Dialogue Editor — LearnSpell Action Support (Complete)
+
+### Overview
+
+Adds `DialogueAction::LearnSpell` authoring support to `dialogue_editor.rs`.
+Authors can now attach a "Learn Spell" action to any dialogue node via the node
+editor panel. Spell data is threaded into `show()` via a new `spells: &[Spell]`
+parameter and cached in `DialogueEditorState::available_spells`. The spell
+picker uses the existing `autocomplete_spell_selector` widget for a consistent
+editing experience.
+
+### Changes
+
+#### Imports
+
+- Added `use antares::domain::magic::types::Spell;`
+- Added `SpellId` to the existing `antares::domain::types` import group.
+- Added `autocomplete_spell_selector` to the `crate::ui_helpers` import list.
+
+#### `ActionEditBuffer` — two new fields
+
+```
+/// Spell ID for LearnSpell action
+pub spell_id: String,
+/// Optional target character ID for LearnSpell action (empty = first eligible)
+pub target_character_id: String,
+```
+
+Both default to `String::new()`.
+
+#### `ActionType` — new `LearnSpell` variant
+
+```
+/// Teach a spell to a party member
+LearnSpell,
+```
+
+`as_str()` returns `"Learn Spell"`.
+
+#### `DialogueEditorState` — new `available_spells` field
+
+```
+/// Available spells for action editors (for spell pickers)
+pub available_spells: Vec<Spell>,
+```
+
+Initialised to `Vec::new()` in `Default`.
+
+#### `show()` — new `spells: &[Spell]` parameter
+
+- Signature extended with `spells: &[Spell]` between `items` and `ctx`.
+- `self.available_spells = spells.to_vec()` is the first statement in the body
+  so every helper called below sees up-to-date spell data.
+- `lib.rs` call site updated to pass `&self.campaign_data.spells`.
+
+#### `build_action_from_buffer()` — new `LearnSpell` arm
+
+Parses `action_buffer.spell_id` as `SpellId` (`u16`) and
+`action_buffer.target_character_id` as `CharacterId` (`usize`, optional).
+Returns `Err("Invalid spell ID")` or `Err("Invalid character ID")` on parse
+failure; otherwise yields `DialogueAction::LearnSpell { spell_id, target_character_id }`.
+
+#### `show_node_editor_panel()` — "Add Action to Node" section
+
+Added below the Save / Cancel buttons (inside `if self.editing_node`):
+
+1. **Action-type `ComboBox`** — all eleven `ActionType` variants listed with
+   `push_id` guards; id-salt `"node_action_type"`.
+2. **`LearnSpell` sub-form** — shown when `action_buffer.action_type == LearnSpell`:
+   - `autocomplete_spell_selector` with id-salt `"node_action_spell"` syncs
+     `action_buffer.spell_id`.
+   - Text input for optional `target_character_id`.
+3. **Quest sub-form** — shown for `StartQuest` and `CompleteQuestStage`:
+   - `autocomplete_quest_selector` with id-salt `"node_action_quest"` syncs
+     `action_buffer.quest_id`.
+4. **"➕ Add Action to Node" button** — sets `add_action_clicked = true`.
+
+After the `if self.editing_node` block, an `if add_action_clicked` block calls
+`build_action_from_buffer()`, calls `node.add_action(action)`, resets
+`action_buffer` to `Default`, and updates `status_message`.
+
+#### New tests (5)
+
+| Test                                        | What it verifies                                                                                             |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `test_action_type_learn_spell_display`      | `ActionType::LearnSpell.as_str() == "Learn Spell"`                                                           |
+| `test_build_learn_spell_action_valid`       | `spell_id = "513"`, empty target → `DialogueAction::LearnSpell { spell_id: 513, target_character_id: None }` |
+| `test_build_learn_spell_action_invalid_id`  | `spell_id = "not_a_number"` → `Err` containing `"Invalid spell ID"`                                          |
+| `test_action_buffer_has_spell_fields`       | `ActionEditBuffer::default()` has `spell_id == ""` and `target_character_id == ""`                           |
+| `test_dialogue_editor_has_available_spells` | `DialogueEditorState::new().available_spells` is empty                                                       |
+
+### Files Changed
+
+| File                                          | Change                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/dialogue_editor.rs` | Added `Spell`/`SpellId` imports, `autocomplete_spell_selector` import, `available_spells` field, `spell_id`/`target_character_id` fields on `ActionEditBuffer`, `LearnSpell` variant in `ActionType`, updated `show()` signature + body, added `LearnSpell` arm to `build_action_from_buffer()`, added "Add Action to Node" UI in `show_node_editor_panel()`, added 5 tests |
+| `sdk/campaign_builder/src/lib.rs`             | Passed `&self.campaign_data.spells` to `dialogue_editor_state.show()`                                                                                                                                                                                                                                                                                                       |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors, workspace)
+✅ cargo clippy      → Finished (0 warnings, workspace)
+✅ cargo nextest run → 4316 passed, 8 skipped, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `SpellId` type alias used (not raw `u16`)
+- [x] `CharacterId` type alias used (not raw `usize`)
+- [x] `autocomplete_spell_selector` widget used — consistent with other editors
+- [x] `push_id` on every `ComboBox` loop iteration (egui ID audit)
+- [x] No hardcoded magic numbers
+- [x] All test data constructed inline — no reference to `campaigns/tutorial`
+- [x] SPDX header preserved as first two lines of file
+
+---
+
+## Phase 6: Quest Editor — LearnSpell Autocomplete Upgrade (Complete)
+
+### Overview
+
+Upgrades the `LearnSpell` reward editor in `quest_editor.rs` from a plain
+numeric text field to the full `autocomplete_spell_selector` widget. Spell
+data is now threaded into `show()` via a new `spells: &[Spell]` parameter and
+cached in `QuestEditorState::available_spells` so inner helpers can look up
+spell names without extra argument threading.
+
+### Changes
+
+#### `QuestEditorState` — new `available_spells` field
+
+Added `pub available_spells: Vec<Spell>` to the struct and initialised it to
+`Vec::new()` in `Default`. The field is `Serialize`/`Deserialize` compatible
+because `Spell` derives those traits.
+
+#### `show()` — new `spells: &[Spell]` parameter
+
+- Doc-comment updated with a `* spells` argument entry.
+- `self.available_spells = spells.to_vec()` is the first statement in the body
+  so that every helper called below sees up-to-date spell data.
+- `lib.rs` call site updated to pass `&self.campaign_data.spells`.
+
+#### `get_quest_preview` — improved `LearnSpell` description
+
+The `LearnSpell` arm now resolves the numeric ID to a human-readable name via
+`self.available_spells`, falling back to `"Unknown Spell"` when the ID is not
+in the cache:
+
+```
+Learn Spell: Cure Wounds (ID: 257)
+```
+
+#### `show_quest_rewards_editor` — two improvements
+
+1. **Reward list description**: the `QuestReward::LearnSpell` match arm in the
+   scrollable reward list now shows `"Learn Spell: <name> (ID: <id>)"` instead
+   of `"Learn Spell (ID: 0x…)"`.
+
+2. **Edit modal**: the `RewardType::LearnSpell` arm replaces the old
+   `ui.text_edit_singleline` + hint label with a full
+   `autocomplete_spell_selector` call, using id-salt
+   `"reward_spell_selector_{reward_idx}"`. Result is written back to
+   `self.reward_buffer.spell_id` as a decimal string.
+
+#### New tests (3)
+
+| Test                                                 | What it verifies                                                                                                        |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `test_quest_editor_state_has_available_spells_field` | `QuestEditorState::new().available_spells` is empty                                                                     |
+| `test_learn_spell_reward_roundtrip`                  | `edit_reward` on a `LearnSpell { spell_id: 0x0101 }` reward sets `reward_type == LearnSpell` and `spell_id == "257"`    |
+| `test_save_learn_spell_reward`                       | setting `spell_id = "257"` then calling `save_reward` writes `QuestReward::LearnSpell { spell_id: 257 }` into the quest |
+
+### Files Changed
+
+| File                                       | Change                                                                                                                                                                                                                                            |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/quest_editor.rs` | Added `Spell` import, `autocomplete_spell_selector` import, `available_spells` field, updated `show()` signature + body, improved `LearnSpell` display in preview and reward list, upgraded modal to `autocomplete_spell_selector`, added 3 tests |
+| `sdk/campaign_builder/src/lib.rs`          | Passed `&self.campaign_data.spells` to `quest_editor_state.show()`                                                                                                                                                                                |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors, workspace)
+✅ cargo clippy      → Finished (0 warnings, workspace)
+✅ cargo nextest run → 4316 passed, 8 skipped, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `SpellId` type alias used (not raw `u16`)
+- [x] `autocomplete_spell_selector` used — same pattern as `autocomplete_item_selector`
+- [x] No hardcoded magic numbers
+- [x] All test data constructed inline — no reference to `campaigns/tutorial`
+- [x] All public struct fields have `///` doc comments
+
+---
+
+## Phase 6: SDK and Content Tooling Updates (Complete)
+
+### Overview
+
+This phase adds spell-related autocomplete UI support and five new validation
+functions to the Campaign Builder SDK. It also fixes pre-existing compilation
+errors in `items_editor.rs`, `quest_editor.rs`, and
+`tests/editor_state_tests.rs` that were caused by new `ConsumableEffect`,
+`QuestReward`, and `Spell` variants added in earlier phases but not yet
+handled in the editor match arms.
+
+### 6.1 — `autocomplete_spell_selector` (`ui_helpers/autocomplete.rs`)
+
+Adds a new public selector function following the exact same pattern as the
+existing `autocomplete_item_selector`:
+
+- Signature: `pub fn autocomplete_spell_selector(ui, id_salt, label, selected_spell_id: &mut SpellId, spells: &[Spell]) -> bool`
+- Uses `buffer_tag: "spell"` and `placeholder: "Start typing spell name..."`
+- `SpellId == 0` means "no spell selected"; buffer is empty in that state
+- Uses `std::cell::Cell` for shared mutation between `on_select` / `on_clear` closures
+- Automatically re-exported through `pub use autocomplete::*` in `ui_helpers/mod.rs`
+
+**Test added** (`ui_helpers/tests.rs`):
+
+- `test_autocomplete_spell_selector_no_panic_on_empty` — constructs an `egui::Context`, calls the selector with an empty spell list and `selected_spell_id = 0`, asserts no panic and no change.
+
+### 6.2 — Spell Validation Functions (`validation.rs`)
+
+Five new public functions added after `validate_recruitable_character_references`,
+each returning `Vec<ValidationResult>` with either error entries or a single
+`Passed` result when all checks succeed.
+
+#### `validate_spell_data_integrity(spells)`
+
+- Detects duplicate `spell.id` values → `Error, Spells`
+- Detects `spell.level` outside `1..=7` → `Error, Spells`
+- Returns `Passed, Spells` if all checks pass
+
+#### `validate_item_spell_effects(items, spells)`
+
+- For each item where `item.spell_effect == Some(spell_id)`, verifies `spell_id` exists in `spells`
+- Unknown reference → `Error, Items`, message: `"Item 'X' (ID: N) has spell_effect ID Y which does not reference a known spell"`
+- Returns `Passed, Items` if all checks pass
+
+#### `validate_consumable_spell_effects(items, spells)`
+
+- For `ItemType::Consumable` items, checks `ConsumableEffect::CastSpell(sid)` and `ConsumableEffect::LearnSpell(sid)`
+- Unknown `sid` → `Error, Items`
+- Non-spell consumable effects are silently ignored
+- Returns `Passed, Items` if all checks pass
+
+#### `validate_dialogue_learn_spell_actions(dialogues, spells)`
+
+- Iterates every `DialogueNode.actions` and every `DialogueChoice.actions` in every `DialogueTree`
+- `DialogueAction::LearnSpell { spell_id, .. }` with unknown `spell_id` → `Error, Dialogues`
+- Returns `Passed, Dialogues` if all checks pass
+
+#### `validate_quest_learn_spell_rewards(quests, spells)`
+
+- Iterates every `Quest.rewards`
+- `QuestReward::LearnSpell { spell_id }` with unknown `spell_id` → `Error, Quests`
+- Returns `Passed, Quests` if all checks pass
+
+**Tests added** (inside existing `mod tests` in `validation.rs`):
+
+Private helpers `make_spell` and `make_weapon_item` / `make_consumable_item`
+construct minimal test data without touching `campaigns/tutorial`.
+
+| Function                                | Tests                                                                                                                                                                                 |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validate_spell_data_integrity`         | `_valid_spells_returns_passed`, `_duplicate_ids_returns_error`, `_level_out_of_range_returns_error`, `_level_zero_returns_error`, `_empty_spells_returns_passed`                      |
+| `validate_item_spell_effects`           | `_no_spell_effect_returns_passed`, `_valid_spell_id_returns_passed`, `_invalid_spell_id_returns_error`, `_empty_inputs_returns_passed`                                                |
+| `validate_consumable_spell_effects`     | `_non_spell_consumable_returns_passed`, `_valid_cast_spell_returns_passed`, `_invalid_learn_spell_returns_error`, `_invalid_cast_spell_returns_error`, `_empty_inputs_returns_passed` |
+| `validate_dialogue_learn_spell_actions` | `_empty_dialogues_returns_passed`, `_valid_spell_id_returns_passed`, `_invalid_spell_id_returns_error`, `_choice_invalid_spell_id_returns_error`                                      |
+| `validate_quest_learn_spell_rewards`    | `_no_learn_spell_rewards_returns_passed`, `_valid_spell_id_returns_passed`, `_invalid_spell_id_returns_error`, `_empty_inputs_returns_passed`                                         |
+
+### 6.3 — Pre-existing Compilation Error Fixes
+
+These errors were introduced when new domain enum variants were added but
+editor match arms were not yet updated. They are fixed here as part of this
+phase.
+
+#### `items_editor.rs` — `ConsumableEffect::CastSpell` / `LearnSpell`
+
+Three match expressions lacked arms for the two new variants:
+
+1. **Display match** (`effect_str`): added `"Cast Spell (ID: {:#06x})"` and `"Learn Spell (ID: {:#06x})"` string arms.
+2. **Type-label match** (`effect_type`): added `"Cast Spell"` and `"Learn Spell"` string arms, plus corresponding `selectable_label` entries in the `ComboBox` (default ID `0x0101`).
+3. **Mutable edit match**: added `DragValue` editors for `spell_id: u16` with descriptive `ui.label` hints.
+
+#### `quest_editor.rs` — `QuestReward::LearnSpell`
+
+- Added `LearnSpell` variant to `RewardType` enum with `as_str` → `"Learn Spell"`.
+- Added `spell_id: String` field to `RewardEditBuffer` (defaults to `String::new()`).
+- Added `QuestReward::LearnSpell` arm to `edit_reward` (populates `reward_buffer.spell_id`).
+- Added `RewardType::LearnSpell` arm to `save_reward` (parses `spell_id` as `SpellId`).
+- Added `QuestReward::LearnSpell` display arms to four match blocks (build preview, static preview, reward list, reward scroll area).
+- Added `RewardType::LearnSpell` option to the reward-type `ComboBox` and a plain text-edit field for the spell ID in the edit buffer match (autocomplete not available here because `spells` slice is not threaded into `show_quest_rewards_editor`).
+
+#### `tests/editor_state_tests.rs` — `Spell` struct literal missing `effect_type`
+
+Two `Spell { .. }` struct literals lacked the `effect_type` field that was
+added in Phase 1. Fixed by adding `effect_type: None` to both.
+
+### Files Changed
+
+| File                                                  | Change                                                                      |
+| ----------------------------------------------------- | --------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/ui_helpers/autocomplete.rs` | Added `autocomplete_spell_selector`                                         |
+| `sdk/campaign_builder/src/ui_helpers/tests.rs`        | Added `test_autocomplete_spell_selector_no_panic_on_empty`                  |
+| `sdk/campaign_builder/src/validation.rs`              | Added 5 validation functions + 22 tests                                     |
+| `sdk/campaign_builder/src/items_editor.rs`            | Fixed `ConsumableEffect::CastSpell`/`LearnSpell` match arms                 |
+| `sdk/campaign_builder/src/quest_editor.rs`            | Added `LearnSpell` to `RewardType`, `RewardEditBuffer`, and all match sites |
+| `sdk/campaign_builder/tests/editor_state_tests.rs`    | Added `effect_type: None` to two `Spell` literals                           |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors, workspace)
+✅ cargo clippy      → Finished (0 warnings, workspace)
+✅ cargo nextest run → 6527 passed, 8 skipped, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `SpellId` type alias used (not raw `u16`)
+- [x] `ValidationCategory::Spells`, `::Items`, `::Dialogues`, `::Quests` used
+- [x] `ValidationResult::error`, `::warning`, `::passed` constructors used
+- [x] All test data uses `data/test_campaign/` fixtures or inline construction — no reference to `campaigns/tutorial`
+- [x] No new data files created (validation functions are pure logic)
+- [x] All public functions have `///` doc comments with examples
+
+## Spell Editor — Phase 6: SpellEffectType Editing (Complete)
+
+### Overview
+
+Adds an "Effect Type" editing section to the Campaign Builder's spell editor
+(`sdk/campaign_builder/src/spells_editor.rs`). The new UI panel lets designers
+explicitly set the `effect_type: Option<SpellEffectType>` field on any spell,
+overriding the runtime inference performed by `Spell::infer_effect_type`.
+
+### 6.1 Import Updates
+
+Added `BuffField`, `SpellEffectType`, and `UtilityType` to the existing
+`use antares::domain::magic::types::{...}` import block.
+
+### 6.2 Bug Fix: `default_spell` Missing `effect_type`
+
+`default_spell()` was missing the `effect_type: None` field in its `Spell`
+struct literal, causing a compile error after `effect_type` was added to
+`Spell`. Added `effect_type: None` to the initialiser.
+
+### 6.3 New Method: `show_effect_type_editor`
+
+`fn show_effect_type_editor(&mut self, ui: &mut egui::Ui, conditions: &[ConditionDefinition])`
+
+Renders a `ui.group` block titled **"Effect Type"** with:
+
+- A descriptive note reminding designers that damage spells should stay on
+  "Auto (Inferred)".
+- A `ComboBox::from_id_salt("spell_effect_type")` whose selected text is
+  driven by a local `effect_type_label` string matched from the current
+  `Option<SpellEffectType>` value. The nine selectable entries map to:
+
+  | Label           | Written value                                    |
+  | --------------- | ------------------------------------------------ |
+  | Auto (Inferred) | `None`                                           |
+  | Damage          | `Some(Damage)`                                   |
+  | Healing         | `Some(Healing { amount: DiceRoll::new(2,6,0) })` |
+  | Cure Condition  | `Some(CureCondition { condition_id: "" })`       |
+  | Buff            | `Some(Buff { buff_field: Bless, duration: 10 })` |
+  | Utility         | `Some(Utility { utility_type: Teleport })`       |
+  | Debuff          | `Some(Debuff)`                                   |
+  | Resurrection    | `Some(Resurrection)`                             |
+  | Dispel Magic    | `Some(DispelMagic)`                              |
+
+  When `Some(Composite(_))` is active, a non-interactive label
+  "Composite (read-only)" is shown instead of a selectable entry.
+
+- Variant-specific sub-fields rendered after the ComboBox:
+  - **Healing** — three `DragValue` widgets for `count` (1–10), `sides`
+    (1–20), and `bonus` (−10 to 20).
+  - **CureCondition** — `autocomplete_condition_selector` with id_salt
+    `"effect_cure_condition"` writing directly into `condition_id`.
+  - **Buff** — `ComboBox::from_id_salt("spell_buff_field")` listing all 18
+    `BuffField` variants; `DragValue` for `duration` (1–100).
+  - **Utility** — `ComboBox::from_id_salt("spell_utility_type")` for the
+    three `UtilityType` variants; when `CreateFood` is selected an additional
+    `DragValue` for `amount` (1–100) is shown.
+  - **Composite** — read-only label directing users to edit RON directly.
+  - All other variants — no sub-fields.
+
+### 6.4 Integration into `show_form`
+
+`show_effect_type_editor` is called from `show_form` between the existing
+"Effects" group and the "Applied Conditions" group:
+
+```sdk/campaign_builder/src/spells_editor.rs#L681-682
+self.show_effect_type_editor(ui, conditions);
+```
+
+`ui.add_space(10.0)` separators are placed on both sides to maintain
+consistent visual rhythm with the rest of the form.
+
+### 6.5 Tests Added
+
+Five new unit tests in `mod tests`:
+
+| Test                                      | What it verifies                                                  |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| `test_effect_type_editor_default_is_none` | `default_spell().effect_type` is `None`                           |
+| `test_effect_type_damage_variant`         | Setting `Some(Damage)` round-trips correctly                      |
+| `test_effect_type_healing_has_dice`       | `Healing` variant holds the expected `DiceRoll` fields            |
+| `test_effect_type_buff_has_field`         | `Buff` variant carries `BuffField::Bless` and `duration: 10`      |
+| `test_effect_type_utility_teleport`       | `Utility { utility_type: Teleport }` is set and matched correctly |
+
+### Quality Gate Results
+
+| Gate                                                       | Result                   |
+| ---------------------------------------------------------- | ------------------------ |
+| `cargo fmt --all`                                          | ✅ clean                 |
+| `cargo check --all-targets --all-features`                 | ✅ 0 errors              |
+| `cargo clippy --all-targets --all-features -- -D warnings` | ✅ 0 warnings            |
+| `cargo nextest run --all-features`                         | ✅ 4316 passed, 0 failed |
+
+---
+
+## Spell System — Phase 5: Complete Spell Data and Advanced Features (Complete)
+
+### Overview
+
+Implements the full Phase 5 spell system: complete L4–L7 spell rosters for
+both Cleric and Sorcerer schools, item-based spell effect pipeline, monster
+spell casting AI, the fizzle mechanic, and Dispel Magic.
+
+### 5.1 Complete Spell RON Data
+
+Expanded `data/spells.ron` from 693 lines (L1–L3 only) to **1238 lines**
+covering all seven spell levels for both schools.
+
+**Cleric additions (18 new spells)**:
+
+| Level | IDs       | Notable Spells                                                       |
+| ----- | --------- | -------------------------------------------------------------------- |
+| L4    | 1793–1797 | Cure Disease, Protection from Acid/Electricity, Holy Word, Mass Cure |
+| L5    | 2049–2052 | Dispel Magic, Mass Cure Wounds, Raise Dead, Prayer                   |
+| L6    | 2305–2308 | Stone to Flesh, Word of Recall, Restoration, Protection from Magic   |
+| L7    | 2561–2563 | Holy Word, Resurrection (50 HP), Divine Intervention                 |
+
+**Sorcerer additions (12 new spells)**:
+
+| Level | IDs       | Notable Spells                                           |
+| ----- | --------- | -------------------------------------------------------- |
+| L4    | 2817–2820 | Guard Dog, Power Shield, Slow, Web                       |
+| L5    | 3073–3076 | Finger of Death, Shelter, Teleport, Disintegrate         |
+| L6    | 3329–3332 | Recharge Item, Stone to Flesh, Prismatic Spray, Levitate |
+| L7    | 3585–3587 | Implosion, Meteor Shower, Prismatic Sphere               |
+
+All new entries carry explicit `effect_type` fields using the correct RON
+variant syntax (`Damage`, `Healing(amount:…)`, `Buff(buff_field:…, duration:…)`,
+`CureCondition(condition_id:…)`, `Utility(utility_type:…)`, `Resurrection`,
+`DispelMagic`). `DiceRoll` uses the `bonus` field name throughout.
+
+`data/test_campaign/data/spells.ron` was updated with one representative
+fixture per new level/school combination (8 new entries, IDs: 1793, 2049,
+2305, 2561, 2817, 3073, 3329, 3585).
+
+**ID encoding convention** (groups of 256):
+
+- Groups 1–3: Cleric L1–L3 (existing)
+- Groups 4–6: Sorcerer L1–L3 (existing)
+- Groups 7–10: Cleric L4–L7 (new)
+- Groups 11–14: Sorcerer L4–L7 (new)
+
+### 5.2 Wire Item Spell Effects
+
+Extended `src/domain/combat/item_usage.rs` to support two new item-use paths:
+
+**Path A — Non-consumable charged items (`Item::spell_effect: Some(SpellId)`)**:
+
+- `validate_item_use_slot` now accepts items whose `item_type` is not
+  `Consumable` when `spell_effect: Some(_)` and `max_charges > 0` are set.
+  Insufficient charges return `ItemUseError::NoCharges`.
+- `execute_item_use_by_slot` detects the charged-item case before the
+  consumable path and delegates to the new
+  `execute_charged_item_spell` in `src/domain/combat/spell_casting.rs`.
+  The charge is consumed (slot removed on last charge). A temporary
+  `ActiveSpells` is used so callers without a party tracker still work;
+  callers that need buff tracking should call `execute_charged_item_spell`
+  directly.
+
+**Path B — `ConsumableEffect::CastSpell(SpellId)` scrolls**:
+
+- `execute_item_use_by_slot` detects `ConsumableEffect::CastSpell` in Phase B
+  and routes through `execute_spell_cast_with_spell` (complete pipeline
+  including fizzle, buff, damage, healing, dispel). The caster's SP is
+  temporarily topped up to meet the spell's cost (the item pays the cost).
+
+**Exploration mode**: `execute_charged_item_spell` is also available for the
+exploration layer to call directly.
+
+### 5.3 Monster Spell Casting
+
+**`src/domain/combat/monster.rs`**:
+
+- Added `pub spells: Vec<SpellId>` (`#[serde(default)]`) — empty list means
+  the monster cannot cast spells.
+- Added `pub spell_cooldown: u8` (`#[serde(default)]`) — rounds before the
+  monster may cast again; prevents spell spam.
+- New methods: `can_cast_spell()`, `tick_spell_cooldown()`,
+  `set_spell_cooldown(rounds)`.
+
+**`src/domain/combat/monster_spells.rs`** (new module):
+
+- `MonsterAction` enum: `PhysicalAttack` | `CastSpell { spell_id }`.
+- `choose_monster_action<R: Rng>(monster, rng) -> MonsterAction`:
+  - If `!monster.can_cast_spell()`: always physical.
+  - `Defensive` AI + HP > 60 % of base: 70 % physical / 30 % spell.
+  - Default: 60 % physical / 40 % spell.
+- `execute_monster_spell_cast<R>(combat_state, monster_idx, content,
+active_spells, rng) -> Option<SpellResult>`:
+  - Picks a random spell from `monster.spells`.
+  - Routes by `SpellEffectType`:
+    - `Damage` → rolls dice for every living player.
+    - `Healing` → self-heals the monster (clamped to base HP).
+    - `Buff` → writes to `ActiveSpells` (monster gains party-wide buff).
+    - `Debuff` → applies conditions to the first living player.
+    - All other variants: no-op.
+  - Sets a 2-round cooldown after every successful cast.
+  - Monster SP is unlimited; no deduction occurs.
+
+### 5.4 Spell Fizzle System
+
+**`src/domain/magic/fizzle.rs`** (new module):
+
+```text
+base          = max(0, 50 − (primary_stat − 10) × 2)
+fizzle_chance = if base > 0 { clamp(base + (spell_level − 1) × 2, 0, 100) }
+                else         { 0 }
+```
+
+Key properties:
+
+- Primary stat = Intellect (Sorcerer) or Personality (Cleric).
+- At average stat (10), L1 fizzle = 50 %; rises 2 % per spell level.
+- At stat ≥ 35 the base reaches 0 and the caster **never** fizzles at any
+  level, ensuring high-skill characters are reliable.
+- `roll_fizzle(chance, rng)` short-circuits at 0 % (no RNG draw).
+
+**Integration in `execute_spell_cast_with_spell`**:
+
+- Fizzle is checked **after** consuming SP/gems (cost is still paid).
+- On fizzle: returns `Ok(SpellResult::failure("Spell fizzled!"))`, advances
+  the combat turn normally.
+
+**Integration in `execute_charged_item_spell`**:
+
+- Same fizzle roll is applied to item-based spells (item charge was already
+  consumed; SP not consumed).
+
+Test helpers in `spell_casting.rs` now set `intellect/personality = 35` so
+pre-existing tests are never affected by fizzle.
+
+### 5.5 Dispel Magic Implementation
+
+**`SpellEffectType::DispelMagic`** added to `src/domain/magic/types.rs`:
+
+- Serializable RON variant `DispelMagic`.
+- Handled in `apply_spell_effect` (`effect_dispatch.rs`): calls
+  `active_spells.reset()`.
+- Handled in `execute_spell_cast_with_spell` (`spell_casting.rs`): resets
+  `ActiveSpells` **and** clears all `active_conditions` from every living
+  party member (broad dispel).
+
+**`ActiveSpells::reset()`** added to `src/application/mod.rs`:
+
+- Sets every field of `ActiveSpells` to 0 via `*self = Self::new()`.
+- Available to any caller (dispel, testing, save-load reset).
+
+The Cleric L5 spell "Dispel Magic" (ID 2049) carries
+`effect_type: Some(DispelMagic)` in both `data/spells.ron` and the test
+campaign fixture.
+
+### Deliverables
+
+- [x] `data/spells.ron` — complete L1–L7 roster (1238 lines, 61 spells)
+- [x] `data/test_campaign/data/spells.ron` — representative L4–L7 fixtures
+- [x] `src/domain/magic/fizzle.rs` — fizzle module (9 unit tests)
+- [x] `src/domain/magic/types.rs` — `SpellEffectType::DispelMagic` variant
+- [x] `src/application/mod.rs` — `ActiveSpells::reset()` method
+- [x] `src/domain/magic/effect_dispatch.rs` — `DispelMagic` arm in
+      `apply_spell_effect`
+- [x] `src/domain/magic/mod.rs` — `pub mod fizzle` + re-exports
+- [x] `src/domain/combat/monster.rs` — `spells`, `spell_cooldown` fields +
+      3 new methods (5 unit tests)
+- [x] `src/domain/combat/monster_spells.rs` — monster spell casting AI
+      (`MonsterAction`, `choose_monster_action`, `execute_monster_spell_cast`)
+- [x] `src/domain/combat/mod.rs` — `pub mod monster_spells`
+- [x] `src/domain/combat/spell_casting.rs` — fizzle gate, `DispelMagic`
+      dispatch, `execute_charged_item_spell`, 6 new tests
+- [x] `src/domain/combat/item_usage.rs` — charged-item spell path (Path A) +
+      `ConsumableEffect::CastSpell` dispatch (Path B)
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 exactly
+- [x] `SpellId` type alias used throughout (no raw `u16`)
+- [x] `#[serde(default)]` used on all new optional Monster fields
+- [x] RON format used for all data files; `DiceRoll.bonus` field used
+- [x] No hardcoded constants — fizzle formula is in `fizzle.rs`
+- [x] `effect_type` field drives dispatcher routing as per Phase 1 design
+- [x] Test data references `data/test_campaign`, never `campaigns/tutorial`
+- [x] All public functions and types have `///` doc comments
+- [x] `docs/explanation/implementations.md` updated (this entry)
+
+### Quality Gates
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt --all          → no output
+cargo check              → Finished, 0 errors
+cargo clippy -D warnings → Finished, 0 warnings
+cargo nextest run        → 4316 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Spell System — Phase 4: Spell Learning and Acquisition (Complete)
+
+### Overview
+
+Implements the full spell acquisition pipeline. Characters can now learn spells
+through four distinct channels:
+
+1. **Level-Up Auto-Grant** — when a character levels up via
+   `level_up_and_grant_spells`, every spell that first becomes accessible at
+   the new level is automatically added to the spellbook.
+2. **Dialogue** — `DialogueAction::LearnSpell` teaches a spell to the first
+   eligible party member (or an explicitly named target) via NPC interaction.
+3. **Quest Reward** — `QuestReward::LearnSpell` teaches a spell to the first
+   eligible party member upon quest completion.
+4. **Scroll** — `ConsumableEffect::CastSpell(SpellId)` and
+   `ConsumableEffect::LearnSpell(SpellId)` mark a consumable item as a spell
+   scroll; the game-system layer reads `ConsumableApplyResult::spell_cast_id` /
+   `spell_learn_id` to dispatch the appropriate action.
+
+Class and level restrictions are enforced uniformly through the single
+authoritative `learn_spell` function in `src/domain/magic/learning.rs`.
+
+### Deliverables
+
+- [x] `src/domain/magic/learning.rs` — four public domain functions +
+      `SpellLearnError` enum (57 unit tests)
+- [x] `src/domain/magic/mod.rs` — `pub mod learning` + re-exports
+- [x] `DialogueAction::LearnSpell` variant + `description()` arm in
+      `src/domain/dialogue.rs`
+- [x] `execute_action` handler for `DialogueAction::LearnSpell` in
+      `src/game/systems/dialogue.rs` (7 integration tests)
+- [x] `QuestReward::LearnSpell` variant in `src/domain/quest.rs`
+- [x] `apply_rewards` handler for `QuestReward::LearnSpell` in
+      `src/application/quests.rs` (5 integration tests)
+- [x] `ConsumableEffect::CastSpell(SpellId)` and
+      `ConsumableEffect::LearnSpell(SpellId)` variants in
+      `src/domain/items/types.rs`
+- [x] `ConsumableApplyResult::spell_cast_id` and `spell_learn_id` fields;
+      pass-through handling in `src/domain/items/consumable_usage.rs` (7 tests)
+- [x] `level_up_and_grant_spells` in `src/domain/progression.rs` (9 tests)
+- [x] Color entries for new scroll variants in `src/domain/visual/item_mesh.rs`
+- [x] Log-message entries for new scroll variants in
+      `src/game/systems/inventory_ui.rs`
+
+### Architecture
+
+#### `src/domain/magic/learning.rs` — Domain Layer
+
+Four public functions form the spell-learning API:
+
+| Function                                                     | Purpose                                                 |
+| ------------------------------------------------------------ | ------------------------------------------------------- |
+| `can_learn_spell(char, spell_id, spell_db, class_db)`        | Pure validation — returns `Ok(())` or `SpellLearnError` |
+| `learn_spell(char, spell_id, spell_db, class_db)`            | Validates then mutates the spellbook                    |
+| `get_learnable_spells(char, spell_db, class_db)`             | Returns all eligible-but-unlearned spell IDs            |
+| `grant_level_up_spells(char, new_level, spell_db, class_db)` | Returns spell IDs first accessible at `new_level`       |
+
+`SpellLearnError` variants: `SpellNotFound`, `WrongClass`, `LevelTooLow`,
+`AlreadyKnown`, `SpellBookFull`.
+
+All functions use `sdk::database::SpellDatabase` (consistent with
+`exploration_casting.rs`) and `ClassDatabase` for data-driven school and
+level lookups via `can_class_cast_school_by_id` /
+`get_required_level_for_spell_by_id`.
+
+**Spell-level unlock schedule** (full casters — Cleric, Sorcerer):
+
+| Character level | First spell level unlocked |
+| --------------- | -------------------------- |
+| 1               | Spell level 1              |
+| 3               | Spell level 2              |
+| 5               | Spell level 3              |
+| 7               | Spell level 4              |
+| 9               | Spell level 5              |
+| 11              | Spell level 6              |
+| 13              | Spell level 7              |
+
+Paladin (Cleric school, non-pure caster) follows the same table but starts
+at character level 3. Archer has `spell_school: None` in `data/classes.ron`
+and is therefore treated as a non-caster by the data-driven path.
+
+#### `src/domain/progression.rs` — Level-Up Integration
+
+`level_up_and_grant_spells(character, class_db, spell_db, rng)` wraps
+`level_up_from_db` and auto-teaches every spell returned by
+`grant_level_up_spells`. `AlreadyKnown` (e.g. a scroll was used before
+visiting the trainer) is silently skipped; other errors are logged but do
+not abort the level-up. Returns `(hp_gained, Vec<SpellId>)`.
+
+#### `src/domain/dialogue.rs` — DialogueAction::LearnSpell
+
+```
+LearnSpell {
+    spell_id: SpellId,
+    target_character_id: Option<CharacterId>,
+}
+```
+
+- `target_character_id: None` → iterate party members in order, stop at
+  first success.
+- `target_character_id: Some(idx)` → attempt only that member; surface error
+  to game log if ineligible.
+
+#### `src/domain/quest.rs` — QuestReward::LearnSpell
+
+```
+LearnSpell { spell_id: SpellId }
+```
+
+`apply_rewards` in `src/application/quests.rs` iterates party members and
+calls `learn_spell` for the first eligible member. `AlreadyKnown` continues
+to the next member; other errors (wrong class, level too low) are logged and
+skipped.
+
+#### `src/domain/items/types.rs` — Scroll ConsumableEffects
+
+```
+CastSpell(SpellId)   // single-use cast scroll
+LearnSpell(SpellId)  // permanent knowledge scroll
+```
+
+`apply_consumable_effect` and `apply_consumable_effect_exploration` are
+**pass-through**: they set `ConsumableApplyResult::spell_cast_id` or
+`spell_learn_id` and return without mutating the character. The game-system
+layer reads these fields and dispatches to the casting or learning pipeline.
+This is consistent with how `IsFood` is handled (rest system owns the
+actual consumption).
+
+### Data Note — Archer Class
+
+The architecture document describes Archer as having delayed sorcerer-school
+access starting at level 3. However, `data/classes.ron` currently has
+`spell_school: None` for the archer class. The data-driven learning path
+therefore returns `WrongClass` for archers. The hardcoded
+`can_class_cast_school` helper still recognises archer for the combat
+casting path. To enable archer spell learning, set `spell_school: Some(Sorcerer)`
+in the archer class definition.
+
+### Tests Added
+
+| Module                            | New Tests                                                                                                                                       |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `domain::magic::learning`         | 57 unit tests covering all four functions, all `SpellLearnError` variants, paladin delayed access, archer as non-caster, multi-level boundaries |
+| `game::systems::dialogue`         | 7 tests for `execute_action` + `DialogueAction::LearnSpell`                                                                                     |
+| `application::quests`             | 5 tests for `apply_rewards` + `QuestReward::LearnSpell`                                                                                         |
+| `domain::items::consumable_usage` | 7 tests for `CastSpell` / `LearnSpell` pass-through                                                                                             |
+| `domain::progression`             | 9 tests for `level_up_and_grant_spells`                                                                                                         |
+| `domain::dialogue`                | 2 tests for `LearnSpell::description()`                                                                                                         |
+
+**Total new tests: 87**
+
+### Quality Gates
+
+```
+cargo fmt --all         → no output (all files formatted)
+cargo check             → Finished with 0 errors
+cargo clippy            → Finished with 0 warnings
+cargo nextest run       → 4280/4280 passed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 (`SpellBook`, `SpellId`, `CharacterId`)
+- [x] Module placement: `domain/magic/learning.rs`, `domain/dialogue.rs`, `domain/quest.rs`, `domain/items/types.rs`, `domain/progression.rs`
+- [x] Type aliases used consistently (`SpellId = u16`, `CharacterId = usize`)
+- [x] `sdk::database::SpellDatabase` used (consistent with `exploration_casting.rs`)
+- [x] `ClassDatabase` used for data-driven school and level lookups
+- [x] No architectural deviations — `AlreadyKnown` handled gracefully at all layers
+- [x] No test references `campaigns/tutorial` — all test data from `data/classes.ron` and `data/races.ron`
+- [x] SPDX headers on all new `.rs` files
+
+---
+
+## Phase 3: Exploration-Mode Spell Casting (Complete)
+
+### Overview
+
+Implements the full exploration-mode spell casting system — allowing characters
+to cast healing, buff, utility, and cure spells outside of combat. Covers the
+domain logic, application state, Bevy ECS plugin (UI + input), input key
+binding, and world-effect integration (food creation, light, levitation, etc.).
+
+This phase depends on Phase 1 (spell effect dispatcher) and Phase 2 (SP bar in
+the HUD). The Phase 2 SP bar automatically reflects SP changes from exploration
+casts because `update_hud` runs every frame in all non-combat modes.
+
+### Deliverables
+
+| Deliverable                                                 | File                                                 | Status |
+| ----------------------------------------------------------- | ---------------------------------------------------- | ------ |
+| Exploration casting domain module                           | `src/domain/magic/exploration_casting.rs`            | ✅     |
+| Application spell-casting state                             | `src/application/spell_casting_state.rs`             | ✅     |
+| `GameMode::SpellCasting` variant                            | `src/application/mod.rs`                             | ✅     |
+| `enter_spell_casting` / `exit_spell_casting` on `GameState` | `src/application/mod.rs`                             | ✅     |
+| Bevy exploration spell plugin                               | `src/game/systems/exploration_spells.rs`             | ✅     |
+| `cast` key in `ControlsConfig`                              | `src/sdk/game_config.rs`                             | ✅     |
+| `GameAction::Cast` in key map                               | `src/game/systems/input/keymap.rs`                   | ✅     |
+| `FrameInputIntent.cast` field                               | `src/game/systems/input/frame_input.rs`              | ✅     |
+| `SpellCasting` blocks movement                              | `src/game/systems/input/mode_guards.rs`              | ✅     |
+| Global toggle: `C` opens / `Esc` closes                     | `src/game/systems/input/global_toggles.rs`           | ✅     |
+| Plugin registered in binary                                 | `src/bin/antares.rs`                                 | ✅     |
+| Module exports updated                                      | `src/domain/magic/mod.rs`, `src/game/systems/mod.rs` | ✅     |
+
+### Architecture
+
+#### Domain Layer — `exploration_casting.rs`
+
+Pure domain functions with no Bevy dependency:
+
+- **`can_cast_exploration_spell(character, spell, is_outdoor) -> Result<(), SpellError>`**
+  Validates that a spell can be cast in exploration context. Rejects
+  `CombatOnly` spells and all monster-targeting spells with
+  `SpellError::CombatOnly`. Delegates remaining checks (class, level,
+  SP/gems, conditions) to the existing `can_cast_spell` function.
+
+- **`cast_exploration_spell(caster_index, spell, target, game_state, item_db, rng) -> Result<SpellEffectResult, SpellError>`**
+  Validates, consumes SP/gems, applies effects via `apply_spell_effect`,
+  and wires `food_created` directly into party inventories via
+  `add_food_to_party`. Uses Rust field-splitting (`let GameState { ref mut
+active_spells, ref mut party, .. } = *game_state`) to hold two
+  simultaneous mutable borrows without `unsafe`.
+
+- **`get_castable_exploration_spells<'a>(character, spell_db, is_outdoor) -> Vec<&'a Spell>`**
+  Returns all spells the character can currently cast during exploration,
+  sorted by `(level, id)` for deterministic display order. Uses
+  `crate::sdk::database::SpellDatabase` (the SDK type stored in
+  `ContentDatabase`).
+
+- **`add_food_to_party(party, item_db, amount) -> u32`**
+  Finds the lowest-ID `IsFood(1)` item in the database (same algorithm as
+  `grant_starting_food`) and adds that many inventory slots to party
+  members in order, respecting `Inventory::MAX_ITEMS`.
+
+- **`ExplorationTarget` enum**: `Self_`, `Character(usize)`,
+  `AllCharacters`. Static factory `ExplorationTarget::from_spell_target`
+  maps `SpellTarget` to exploration target; returns `None` for
+  `SingleCharacter` (UI prompt required) and all monster targets.
+
+#### Application Layer — `spell_casting_state.rs`
+
+- **`SpellCastingStep`**: `SelectCaster`, `SelectSpell`, `SelectTarget`,
+  `ShowResult`.
+
+- **`SpellCastingState`**: Stores step, caster index, selected spell ID,
+  target index, `selected_row` (cursor), feedback message, and
+  `Box<GameMode>` (previous mode — boxed to break recursive type
+  dependency, matching the `InventoryState` / `MenuState` pattern).
+
+- **Methods**: `new(prev, caster_index)` starts at `SelectSpell`;
+  `new_with_caster_select(prev)` starts at `SelectCaster`;
+  `get_resume_mode()`, `select_spell()`, `select_target()`,
+  `show_result()`, `cursor_up()`, `cursor_down()`.
+
+**`application/mod.rs` additions**:
+
+- `GameMode::SpellCasting(SpellCastingState)` variant
+- `GameState::enter_spell_casting(caster_index)` — starts at `SelectSpell`
+- `GameState::enter_spell_casting_with_caster_select()` — starts at `SelectCaster`
+- `GameState::exit_spell_casting()` — restores previous mode
+
+#### Input Layer
+
+- **`ControlsConfig.cast: Vec<String>`** — defaults to `["C"]`. Uses
+  `#[serde(default = "default_cast_keys")]` for backward-compatible RON
+  deserialization.
+- **`GameAction::Cast`** — new variant in the key-map enum.
+- **`FrameInputIntent.cast: bool`** — decoded with `just_pressed` semantics
+  (toggle, not held).
+- **`movement_blocked_for_mode`** — `SpellCasting(_)` added so movement and
+  interaction are blocked while the spell menu is open.
+- **`handle_global_mode_toggles`** — `frame_input.cast` in `Exploration`
+  calls `enter_spell_casting_with_caster_select()`; `menu_toggle`
+  (Escape) in `SpellCasting` calls `exit_spell_casting()`.
+
+#### Game Systems Layer — `exploration_spells.rs`
+
+**`ExplorationSpellPlugin`** registers four systems chained in `Update`:
+
+1. **`setup_spell_casting_ui`** — Spawns the full-screen dark overlay with a
+   centred panel (title + `SpellCastingContent` list area + hint line) when
+   the game enters `SpellCasting` mode. Idempotent (checks
+   `existing: Query<Entity, With<SpellCastingOverlay>>`).
+
+2. **`update_spell_casting_ui`** — Runs every frame. Clears and rebuilds the
+   `SpellCastingContent` children based on the current step and cursor
+   position. Step-specific content:
+
+   - `SelectCaster`: one row per party member showing `name [SP cur/max]`
+   - `SelectSpell`: one row per castable spell showing `Lx Name — y SP`
+   - `SelectTarget`: one row per living party member showing `name [HP cur/max]`
+   - `ShowResult`: feedback message + "Press Enter or Esc to continue."
+     Selected row highlighted in yellow with a tinted background.
+
+3. **`handle_spell_casting_input`** — Handles `Escape` (cancel), `ArrowUp`/`W`
+   (cursor up), `ArrowDown`/`S` (cursor down), `Enter`/`Space` (confirm).
+   Confirm transitions through steps: `SelectCaster` → `SelectSpell` →
+   `SelectTarget` (only for `SingleCharacter` spells) → executes cast →
+   `ShowResult`. `ShowResult` confirm restores the previous mode.
+
+4. **`cleanup_spell_casting_ui`** — Despawns the overlay (and all its
+   descendant entities) when the mode is no longer `SpellCasting`.
+
+**`execute_exploration_cast`** helper (private):
+
+- Resolves `ExplorationTarget` from the spell's `SpellTarget` and the state's
+  `target_index`.
+- Calls `cast_exploration_spell` with the item DB from `GameContent` (falls
+  back to an empty `ItemDatabase` if content is not loaded).
+- Formats a human-readable result message and writes it to `GameLog` as
+  `LogCategory::Exploration`.
+- Calls `sc.show_result(message)` to advance to the result step.
+
+### Target Resolution Table
+
+| `SpellTarget`                                                   | Exploration behaviour                             |
+| --------------------------------------------------------------- | ------------------------------------------------- |
+| `Self_`                                                         | Applies to the caster only                        |
+| `SingleCharacter`                                               | UI prompts for party member (`SelectTarget` step) |
+| `AllCharacters`                                                 | Applied to all living party members               |
+| `SingleMonster / MonsterGroup / AllMonsters / SpecificMonsters` | `SpellError::CombatOnly` — rejected               |
+
+### Utility Spell World Effects
+
+Effects are applied by `cast_exploration_spell` via `apply_spell_effect`:
+
+| Spell type                          | World effect                                                                                   |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `Light` / `Lasting Light`           | `active_spells.light = duration` (existing light system reads this)                            |
+| `Walk on Water`                     | `active_spells.walk_on_water = duration`                                                       |
+| `Levitate` / `Fly`                  | `active_spells.levitate = duration`                                                            |
+| `Create Food`                       | `food_created` ration items added to party inventories via `add_food_to_party`                 |
+| `Teleport` / `Jump`                 | `UtilityType::Teleport` — result message logged; world-position change is a future enhancement |
+| `Location` / `Detect Magic`         | `UtilityType::Information` — logged as feedback message                                        |
+| Healing                             | `character.hp.current` raised up to `hp.base`                                                  |
+| Buff (Bless, Shield, etc.)          | `active_spells.<field> = duration`                                                             |
+| Cure (Paralysis, Poison, Blindness) | `character.remove_condition(id)` via `apply_cure_condition`                                    |
+
+### Tests Added
+
+**`exploration_casting.rs`** (28 tests):
+
+- `can_cast_exploration_spell`: anytime ✓, non-combat ✓, rejects combat-only,
+  rejects monster targets, rejects insufficient SP, rejects wrong class,
+  rejects silenced/unconscious characters.
+- `cast_exploration_spell`: SP consumption, healing, multi-target, combat-only
+  rejection, out-of-bounds caster/target, light buff updates `active_spells`,
+  `Create Food` adds food ration inventory slots, gem consumption, dead members
+  skipped in `AllCharacters` target.
+- `get_castable_exploration_spells`: excludes combat-only, excludes
+  insufficient SP, sorted by `(level, id)`.
+- `add_food_to_party`: empty DB returns 0, distributes across members when
+  one is full.
+- `ExplorationTarget::from_spell_target`: Self\_, AllCharacters, SingleCharacter
+  (None), monster targets (None).
+
+**`spell_casting_state.rs`** (13 tests): All constructors, step transitions,
+cursor navigation with wrapping and empty-list no-ops, `Default` impl.
+
+**`exploration_spells.rs`** (9 tests): Marker component smoke tests,
+`count_items_for_step` for all four steps, `collect_castable_spell_ids` without
+content, round-trip `enter`/`exit` spell casting, caster-select step assertion,
+`ExplorationTarget` from spell target variants.
+
+**`application/mod.rs`** (new doctests): `enter_spell_casting`,
+`enter_spell_casting_with_caster_select`, `exit_spell_casting`.
+
+### Quality Gates
+
+```text
+cargo fmt --all                                         → no output (clean)
+cargo check --all-targets --all-features               → Finished 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished 0 warnings
+cargo nextest run --all-features                       → 4200 passed, 0 failed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 exactly
+- [x] `SpellId`, `ItemId`, `CharacterId` type aliases used throughout
+- [x] `AttributePair` pattern respected — `hp.current` modified, `hp.base` preserved
+- [x] `ActiveSpells` fields set via `apply_buff_spell` dispatcher, never directly
+- [x] `GameMode::SpellCasting` follows `InventoryState` / `MenuState` box pattern
+- [x] `ControlsConfig.cast` uses `#[serde(default)]` — no RON data files broken
+- [x] RON format unchanged — no `.json` / `.yaml` data files created
+- [x] No test references `campaigns/tutorial` — all fixtures in `data/test_campaign`
+- [x] SPDX copyright/license headers on all new `.rs` files
+- [x] Markdown files use `lowercase_underscore.md` naming
+
+---
+
+## Compilation Error Fixes — SpellDatabase Type, Bevy ChildSpawner, and ControlsConfig (Complete)
+
+### Overview
+
+Fixed four categories of compilation errors that prevented the project from building:
+
+1. **`SpellDatabase` type mismatch** in `exploration_casting.rs` — the function
+   `get_castable_exploration_spells` accepted `&crate::domain::magic::database::SpellDatabase`
+   but all callers in the game layer pass `&crate::sdk::database::SpellDatabase` (from
+   `ContentDatabase`). The two types have different `all_spells()` signatures:
+   the domain version returns `Vec<&Spell>` while the SDK version returns `Vec<SpellId>`.
+
+2. **Wrong spawner type in Bevy 0.17** — helper functions `build_caster_rows`,
+   `build_spell_rows`, `build_target_rows`, `build_result_rows`, and `spawn_row` in
+   `exploration_spells.rs` declared their `list` parameter as `&mut ChildSpawner<'_>`
+   (= `RelatedSpawner<'_, ChildOf>`). However `commands.entity(e).with_children(|list| …)`
+   yields `&mut ChildSpawnerCommands<'_>` (= `RelatedSpawnerCommands<'_, ChildOf>`).
+   These are two distinct types in Bevy 0.17.
+
+3. **`children.iter().copied()` double-copy** — `Children::iter()` already yields
+   `Entity` values directly in Bevy 0.17 (not `&Entity`), so `.copied()` was illegal.
+
+4. **Missing `cast` field** in `ControlsConfig` struct literals — three test struct
+   literals in `keymap.rs` and `input.rs` were missing the newly added `cast` field,
+   causing `E0063` errors.
+
+### Files Changed
+
+| File                                      | Change                                                                                                                                                                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/magic/exploration_casting.rs` | Changed `spell_db` parameter type; updated implementation to use `all_spells() -> Vec<SpellId>` + `get_spell(id)`; updated doctest and three unit tests                                                             |
+| `src/game/systems/exploration_spells.rs`  | Removed `.copied()` from `children.iter()`; changed all five helper-function `list` parameters from `&mut ChildSpawner<'_>` to `&mut ChildSpawnerCommands<'_>`; replaced `drop(sc)` on `()` with a `matches!` guard |
+| `src/game/systems/input/keymap.rs`        | Added `cast: vec!["C".to_string()]` to two `ControlsConfig` struct literals                                                                                                                                         |
+| `src/game/systems/input.rs`               | Added `cast: vec!["C".to_string()]` to one `ControlsConfig` struct literal                                                                                                                                          |
+
+### Key Design Decisions
+
+- **`Vec<&'a Spell>` return type preserved** — by collecting IDs first with
+  `spell_db.all_spells()` and then using `filter_map(|id| spell_db.get_spell(id))`,
+  the lifetime `'a` still ties the returned references to the `spell_db` borrow. No
+  callers needed to change.
+
+- **`ChildSpawnerCommands<'_>` type alias used** — Bevy 0.17 exports
+  `bevy::ecs::hierarchy::ChildSpawnerCommands<'w>` as a type alias for
+  `RelatedSpawnerCommands<'w, ChildOf>` and includes it in `bevy::prelude`. Using the
+  alias keeps signatures readable and consistent with official Bevy examples.
+
+- **`drop(sc)` replaced with `matches!` guard** — the original intent was to verify
+  the current game mode before releasing the immutable borrow. Because `sc` was a `()`
+  unit value (Copy), `drop` was a no-op and triggered a clippy warning. The replacement
+  `if !matches!(global_state.0.mode, GameMode::SpellCasting(_)) { return; }` is
+  idiomatic and borrow-free.
+
+- **SDK `SpellDatabase` in doctests** — the doctest for `get_castable_exploration_spells`
+  now imports `antares::sdk::database::SpellDatabase` to match the updated parameter type,
+  keeping the example runnable.
+
+### Quality Gates
+
+```text
+cargo fmt --all                                    → no output (already formatted)
+cargo check --all-targets --all-features           → Finished 0 errors 0 warnings
+cargo clippy --all-targets --all-features -D warnings → Finished 0 warnings
+cargo nextest run --all-features                   → 4200 passed, 0 failed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 exactly
+- [x] No test references `campaigns/tutorial`
+- [x] Type aliases used consistently (`SpellId` etc.)
+- [x] No new files created — only targeted fixes to existing files
+- [x] RON format unchanged for data files
+
+## Domain Magic — `exploration_casting.rs` (Exploration-Mode Spell Casting) (Complete)
+
+### Overview
+
+Implements the domain logic for casting spells outside of combat. This module
+is Phase 3 of the spell system, providing a clean boundary between UI target
+resolution and the underlying `effect_dispatch` engine.
+
+Key responsibilities:
+
+- **`ExplorationTarget`** enum — resolves which party member(s) receive a spell
+- **`can_cast_exploration_spell`** — validates all casting prerequisites (class,
+  level, SP, gems, conditions, context) and rejects monster-targeting spells as
+  `CombatOnly`
+- **`cast_exploration_spell`** — consumes SP/gems, splits the `GameState` borrow,
+  applies effects via `apply_spell_effect`, and distributes food side effects via
+  `add_food_to_party`
+- **`get_castable_exploration_spells`** — filters a `SpellDatabase` to spells the
+  character can currently cast and returns them sorted by `(level, id)`
+- **`add_food_to_party`** / **`find_food_item_id`** — utility helpers that locate
+  the best food item in an `ItemDatabase` and distribute ration slots across party
+  member inventories
+
+### Files Changed
+
+| File                                      | Change                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------- |
+| `src/domain/magic/exploration_casting.rs` | **Created** — full implementation                                   |
+| `src/domain/magic/mod.rs`                 | Registered `pub mod exploration_casting` and re-exported public API |
+
+### Key Design Decisions
+
+- **Monster-targeting guard runs first** — `SpellTarget::SingleMonster`,
+  `MonsterGroup`, `AllMonsters`, and `SpecificMonsters` always return
+  `SpellError::CombatOnly` before any other validation, even for
+  `SpellContext::Anytime` spells.
+- **Split-borrow via destructuring** — `cast_exploration_spell` uses
+  `let GameState { ref mut active_spells, ref mut party, .. } = *game_state;`
+  so `apply_spell_effect` can hold `&mut ActiveSpells` and `&mut Character`
+  simultaneously without a double-borrow error.
+- **`AllCharacters` skips fatal conditions** — `member.conditions.is_fatal()`
+  (value ≥ 128, i.e. DEAD/STONE/ERADICATED) prevents dead characters from
+  receiving healing or buff effects during party-wide casts.
+- **Food distributed across inventories** — `add_food_to_party` fills each party
+  member's inventory in order, overflowing to the next member when one is full,
+  and returns the actual number of rations placed.
+- **`ExplorationTarget::from_spell_target`** returns `None` for
+  `SingleCharacter` (requires a UI prompt) and all monster targets, forcing the
+  caller to handle those cases explicitly.
+
+### Public API
+
+```antares/src/domain/magic/exploration_casting.rs#L47-52
+pub enum ExplorationTarget {
+    Self_,
+    Character(usize),
+    AllCharacters,
+}
+```
+
+```antares/src/domain/magic/exploration_casting.rs#L126-130
+pub fn can_cast_exploration_spell(
+    character: &crate::domain::character::Character,
+    spell: &Spell,
+    is_outdoor: bool,
+) -> Result<(), SpellError>
+```
+
+```antares/src/domain/magic/exploration_casting.rs#L215-222
+pub fn cast_exploration_spell<R: Rng>(
+    caster_index: usize,
+    spell: &Spell,
+    target: ExplorationTarget,
+    game_state: &mut GameState,
+    item_db: &ItemDatabase,
+    rng: &mut R,
+) -> Result<SpellEffectResult, SpellError>
+```
+
+```antares/src/domain/magic/exploration_casting.rs#L313-317
+pub fn get_castable_exploration_spells<'a>(
+    character: &crate::domain::character::Character,
+    spell_db: &'a crate::domain::magic::database::SpellDatabase,
+    is_outdoor: bool,
+) -> Vec<&'a Spell>
+```
+
+### Tests Added (28 total)
+
+| Test                                                            | Covers                                                |
+| --------------------------------------------------------------- | ----------------------------------------------------- |
+| `test_can_cast_exploration_anytime_spell_succeeds`              | Happy path for `Anytime` context                      |
+| `test_can_cast_exploration_noncombat_spell_succeeds`            | `NonCombatOnly` allowed outside combat                |
+| `test_can_cast_exploration_rejects_combat_only`                 | `CombatOnly` context rejected                         |
+| `test_can_cast_exploration_rejects_monster_targets`             | Monster-targeting `Anytime` spell rejected            |
+| `test_can_cast_exploration_rejects_insufficient_sp`             | `NotEnoughSP` error path                              |
+| `test_can_cast_exploration_rejects_wrong_class`                 | `WrongClass` error path                               |
+| `test_can_cast_exploration_rejects_silenced_character`          | `Silenced` condition blocks casting                   |
+| `test_can_cast_exploration_rejects_unconscious_character`       | `Unconscious` condition blocks casting                |
+| `test_cast_exploration_spell_self_target_consumes_sp`           | SP is deducted from caster                            |
+| `test_cast_exploration_spell_heals_target`                      | HP restored by 1d8 healing spell                      |
+| `test_cast_exploration_spell_heals_other_character`             | Caster heals a different party member                 |
+| `test_cast_exploration_spell_all_characters`                    | Party-wide effect populates `affected_targets`        |
+| `test_cast_exploration_spell_rejects_combat_only`               | Validation re-checked inside `cast_exploration_spell` |
+| `test_cast_exploration_spell_rejects_out_of_bounds_caster`      | `InvalidTarget` for bad caster index                  |
+| `test_cast_exploration_spell_rejects_out_of_bounds_target`      | `InvalidTarget` for bad target index                  |
+| `test_cast_exploration_spell_buff_light_updates_active_spells`  | `ActiveSpells::light` set to 60                       |
+| `test_cast_exploration_spell_create_food_adds_items`            | 6 ration slots added to inventory                     |
+| `test_cast_exploration_spell_consumes_gems`                     | Gem cost deducted from caster                         |
+| `test_cast_exploration_all_chars_skips_dead`                    | Dead member excluded from `AllCharacters`             |
+| `test_get_castable_exploration_spells_excludes_combat_only`     | Fireball filtered out                                 |
+| `test_get_castable_exploration_spells_excludes_insufficient_sp` | Zero-SP cleric gets empty list                        |
+| `test_get_castable_exploration_spells_sorted_by_level_id`       | Results sorted ascending by level then ID             |
+| `test_add_food_to_party_with_empty_db_returns_zero`             | Returns 0 when no food item exists                    |
+| `test_add_food_to_party_distributes_across_members`             | Overflows to next member when first is full           |
+| `test_exploration_target_from_self`                             | `Self_` maps correctly                                |
+| `test_exploration_target_from_all_characters`                   | `AllCharacters` maps correctly                        |
+| `test_exploration_target_from_single_character_returns_none`    | `SingleCharacter` returns `None`                      |
+| `test_exploration_target_from_monster_targets_returns_none`     | All monster variants return `None`                    |
+
+### Quality Gates
+
+```text
+cargo fmt --all         → clean
+cargo check             → 0 errors
+cargo clippy -D warnings → 0 warnings
+cargo nextest run       → 4188 passed, 0 failed (28 new tests all green)
+```
+
+### Architecture Compliance
+
+- [x] Data structures match `architecture.md` Section 4 (`AttributePair16`, `Condition`, `Party`)
+- [x] Type aliases used: `ItemId`, `SpellId`, `GameMode`
+- [x] Constants referenced: `Inventory::MAX_ITEMS`, `Condition::DEAD`
+- [x] No hardcoded magic numbers
+- [x] `RON` format unchanged; no new data files created
+- [x] No test references `campaigns/tutorial`
+- [x] SPDX headers on new `.rs` file
+
+---
+
+## Application Layer — `SpellCastingState` (Exploration Spell Casting Flow)
+
+### Overview
+
+Added `src/application/spell_casting_state.rs`, which introduces a multi-step
+UI flow state for casting spells outside of combat (exploration mode). The
+design mirrors `InventoryState` and the other application-layer state structs:
+the previous `GameMode` is boxed to break the recursive size dependency, and
+the struct is stored inside a new `GameMode::SpellCasting` variant.
+
+### Files Changed
+
+| File                                     | Change                                                                                              |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `src/application/spell_casting_state.rs` | **New** — full implementation                                                                       |
+| `src/application/mod.rs`                 | Registered `pub mod spell_casting_state`; added `GameMode::SpellCasting(SpellCastingState)` variant |
+
+### Flow Steps (`SpellCastingStep`)
+
+| Step           | Description                                                                                               |
+| -------------- | --------------------------------------------------------------------------------------------------------- |
+| `SelectCaster` | Player chooses which party member casts. Used when no character card is in focus.                         |
+| `SelectSpell`  | Player browses and selects from the caster's spell book. Default entry point when caster is pre-selected. |
+| `SelectTarget` | Player picks a target party member. Skipped for `Self_` and `AllCharacters` spells.                       |
+| `ShowResult`   | Cast result message is displayed until the player dismisses it.                                           |
+
+### Key Methods
+
+| Method                                            | Purpose                                                        |
+| ------------------------------------------------- | -------------------------------------------------------------- |
+| `SpellCastingState::new(mode, idx)`               | Creates state at `SelectSpell` with a pre-selected caster.     |
+| `SpellCastingState::new_with_caster_select(mode)` | Creates state at `SelectCaster` when no caster is pre-focused. |
+| `get_resume_mode()`                               | Returns the `GameMode` to restore on cancel or completion.     |
+| `select_spell(id)`                                | Stores the chosen `SpellId` and resets `selected_row`.         |
+| `select_target(idx)`                              | Records the target party-member index.                         |
+| `show_result(msg)`                                | Sets feedback message and advances step to `ShowResult`.       |
+| `cursor_up(n)` / `cursor_down(n)`                 | Keyboard navigation with wrapping; no-op when list is empty.   |
+
+### Tests
+
+13 unit tests cover all public methods, boundary conditions (wrap-at-zero,
+wrap-at-max, no-op on empty list), and the `Default` impl. All pass with
+`cargo nextest run --all-features -E 'test(spell_casting)'` (29 total,
+including pre-existing combat spell-casting tests).
+
+---
+
+## Spell System — Phase 2.3/2.4: Spell Selection Panel UI and Improved Spell Cast Feedback (Complete)
+
+### Overview
+
+Implemented Phase 2.3 (spell selection panel UI) and Phase 2.4 (improved spell
+cast feedback messages) of the Spell System Updates.
+
+Players can now click the **Cast** action button to open a scrollable spell
+selection panel that lists all known spells organised by level. Each spell
+button shows its name, SP cost, and gem cost (if any), and is greyed out when
+the spell cannot currently be cast. Selecting a single-monster spell enters the
+existing target-selection flow; self/group/all-monster spells fire immediately.
+The panel is closed by clicking Cancel, pressing Escape, or selecting a spell.
+
+Spell combat feedback now emits `SpellCast` / `SpellHeal` variants that carry
+the spell name, producing log lines like:
+
+> _Ariadne: Casts Fireball at Goblin for [25] damage_ > _Ariadne: Casts Cure Wounds healing Ariadne for [12] HP_
+
+Condition applications are also surfaced as a follow-up `Status` log entry.
+
+### Files Changed
+
+- `src/game/systems/combat.rs` — sole modified file
+
+### A — New Components
+
+| Component           | Purpose                                             |
+| ------------------- | --------------------------------------------------- |
+| `SpellCancelButton` | Marker on the Cancel button inside the spell panel. |
+
+`SpellSelectionPanel` and `SpellButton` were already defined but not spawned;
+this phase wires them up.
+
+### B — New Resources
+
+| Resource           | Default        | Purpose                                                                                                                                              |
+| ------------------ | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SpellPanelState`  | `caster: None` | Tracks whether the spell panel is open and for whom. Set to `Some(actor)` when Cast is dispatched; cleared when a spell is chosen or Escape pressed. |
+| `PendingSpellCast` | `data: None`   | Holds `(caster, spell_id)` when a SingleMonster spell needs a target; consumed by the keyboard target-confirm flow.                                  |
+
+Both are registered in `CombatPlugin::build`.
+
+### C — New `CombatFeedbackEffect` Variants
+
+```antares/src/game/systems/combat.rs#L663-676
+    SpellCast {
+        name: String,
+        damage: u32,
+    },
+    SpellHeal {
+        name: String,
+        amount: u32,
+    },
+```
+
+`format_combat_log_line` and `spawn_combat_feedback` both handle these variants
+in their existing match blocks (both the source-known and source-unknown paths).
+
+### D — `format_combat_log_line` Changes
+
+Two new arms added in the `if let Some(source)` block (with early `return`)
+and two matching arms in the fallback block:
+
+- `SpellCast { damage > 0 }` → `"Source: Casts Name at Target for [N] damage"` (blue spell colour)
+- `SpellCast { damage == 0 }` → `"Source: Casts Name — no effect"` (blue spell colour)
+- `SpellHeal` → `"Source: Casts Name healing Target for [N] HP"` (teal spell colour)
+
+### E — `spawn_combat_feedback` Changes
+
+Text/colour match extended:
+
+- `SpellCast { damage > 0 }` → `"Name! -N"` in `FEEDBACK_COLOR_DAMAGE`, font 18
+- `SpellCast { damage == 0 }` → `"Name — no effect"` in `FEEDBACK_COLOR_MISS`, font 15
+- `SpellHeal` → `"Name! +N"` in `FEEDBACK_COLOR_HEAL`, font 18
+
+### F — `handle_cast_spell_action` Changes
+
+1. Spell name and `applied_conditions` are looked up from the content DB
+   **before** the cast (using `get_spell(action.spell_id)`).
+2. After computing `pre_hp − post_hp`, both `dmg` (positive delta = damage)
+   and `healed` (negative delta = HP restored) are derived.
+3. Emits `SpellHeal` when `healed > 0`, otherwise `SpellCast { damage: dmg }`.
+4. If the spell has `applied_conditions`, a follow-up `Status` feedback is
+   emitted with the condition label, e.g. `"Goblin is now poisoned!"`.
+5. SFX trigger updated to fire `combat_hit` for both `dmg > 0` **and**
+   `healed > 0`.
+
+### G — `dispatch_combat_action` Changes
+
+Signature gained `spell_panel_state: &mut SpellPanelState`. The combined
+`Cast | Item` arm is now two separate arms:
+
+```antares/src/game/systems/combat.rs#L2690-2697
+        ActionButtonType::Cast => {
+            spell_panel_state.caster = Some(actor);
+        }
+        ActionButtonType::Item => {
+            // Item submenu — handled by separate systems
+        }
+```
+
+`#[allow(clippy::too_many_arguments)]` added to the function (now 8 params).
+All three call sites in `combat_input_system` pass `&mut spell_panel_state`.
+
+### H — `combat_input_system` Changes
+
+Three new parameters:
+
+- `mut cast_writer: Option<MessageWriter<CastSpellAction>>`
+- `mut spell_panel_state: ResMut<SpellPanelState>`
+- `mut pending_spell: ResMut<PendingSpellCast>`
+
+Keyboard behaviour changes:
+
+| Mode          | Key    | Old behaviour                  | New behaviour                                                                       |
+| ------------- | ------ | ------------------------------ | ----------------------------------------------------------------------------------- |
+| Target-select | Enter  | always `confirm_attack_target` | `confirm_spell_target` if `pending_spell.data` is set, else `confirm_attack_target` |
+| Target-select | Escape | clear target selection         | also clears `pending_spell.data`                                                    |
+| Action menu   | Escape | no-op                          | closes spell panel if open                                                          |
+
+### I — New `confirm_spell_target` Function
+
+Mirrors `confirm_attack_target`. Writes a `CastSpellAction` targeting the
+confirmed monster participant index, then clears `TargetSelection` and
+`active_target_index`.
+
+### J — New Systems
+
+| System                               | Registered after               |
+| ------------------------------------ | ------------------------------ |
+| `update_spell_selection_panel`       | `combat_input_system`          |
+| `handle_spell_button_interaction`    | `update_spell_selection_panel` |
+| `cleanup_spell_panel_on_combat_exit` | (unconditional)                |
+
+**`update_spell_selection_panel`**: spawns the panel node when
+`SpellPanelState.caster` becomes `Some`, despawns it when it becomes `None`.
+Spells are grouped under level headers (1–7); castability is checked via
+`validate_spell_cast`; disabled spells use `ACTION_BUTTON_DISABLED_COLOR`.
+
+**`handle_spell_button_interaction`**: responds to `Interaction::Pressed` on
+`SpellButton` and `SpellCancelButton`. Routes `SingleMonster` spells into
+target-selection mode (populates `PendingSpellCast`); all other target types
+fire `CastSpellAction` directly.
+
+**`cleanup_spell_panel_on_combat_exit`**: resets `SpellPanelState` and
+`PendingSpellCast` to defaults when the game mode leaves `Combat`.
+
+### K — Tests Added
+
+All tests live in existing test modules (no new files created).
+
+**`mod combat_log_format_tests`**:
+
+| Test                                      | Asserts                                                                 |
+| ----------------------------------------- | ----------------------------------------------------------------------- |
+| `test_spell_cast_feedback_has_spell_name` | Log line contains "Fireball" and "25" for `SpellCast { damage: 25 }`    |
+| `test_spell_heal_feedback_has_spell_name` | Log line contains "Cure Wounds" and "12" for `SpellHeal { amount: 12 }` |
+| `test_spell_panel_state_default_is_none`  | `SpellPanelState::default().caster` is `None`                           |
+| `test_pending_spell_cast_default_is_none` | `PendingSpellCast::default().data` is `None`                            |
+
+**`mod tests`** (main combat test block):
+
+| Test                                               | Asserts                                                                                                                  |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `test_dispatch_cast_sets_spell_panel`              | `dispatch_combat_action(Cast, …)` sets `spell_panel_state.caster = Some(actor)` and does not enter target-selection mode |
+| `test_dispatch_item_does_not_set_spell_panel`      | `dispatch_combat_action(Item, …)` leaves `spell_panel_state.caster = None`                                               |
+| (extended `test_combat_plugin_registers_messages`) | Both `SpellPanelState` and `PendingSpellCast` are present and default to `None` after `CombatPlugin` init                |
+
+### Quality Gates
+
+All four gates passed with zero errors and zero warnings:
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt --all          → no output
+cargo check              → Finished, 0 errors
+cargo clippy -D warnings → Finished, 0 warnings
+cargo nextest run        → 4147 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Spell System — Phase 2: SP Bar in HUD Character Cards (Complete)
+
+### Overview
+
+Implemented Phase 2 of the Spell System Updates: SP (Spell Point) bars are now
+rendered on each character card in the HUD. Spellcasting characters show a
+colour-coded SP bar beneath their HP bar; non-casters (characters whose
+`sp.base == 0`, e.g. Knights and Robbers) have the bar hidden entirely via
+`Display::None`.
+
+### Files Changed
+
+- `src/game/systems/hud.rs` — sole modified file
+
+### 2.1 — New Constants
+
+Added to the constants block after `HP_CRITICAL_THRESHOLD`:
+
+| Constant               | Value                         | Purpose                                        |
+| ---------------------- | ----------------------------- | ---------------------------------------------- |
+| `SP_HEALTHY_COLOR`     | `srgb(0.2, 0.4, 0.9)`         | Blue fill when SP ≥ 50%                        |
+| `SP_LOW_COLOR`         | `srgb(0.4, 0.6, 0.8)`         | Light-blue fill when SP > 0% and < 50%         |
+| `SP_EMPTY_COLOR`       | `srgb(0.31, 0.31, 0.31)`      | Grey fill when SP == 0%                        |
+| `SP_BAR_HEIGHT`        | `Val::Px(8.0)`                | Thinner than HP bar (10 px)                    |
+| `SP_HEALTHY_THRESHOLD` | `0.5`                         | 50% — boundary between healthy and low colours |
+| `SP_TEXT_COLOR`        | `srgba(0.80, 0.90, 1.0, 1.0)` | Light-blue tint for overlay text               |
+
+### 2.2 — New Marker Components
+
+Three new `#[derive(Component)]` structs, all carrying `pub party_index: usize`:
+
+- `SpBarBackground` — the grey backing container; `display` is toggled per frame
+- `SpBarFill` — the coloured inner fill; `width` is driven by `sp.current / sp.base`
+- `SpBarTextOverlay` — absolute-positioned text overlay showing "SP: current/max"
+
+### 2.3 — New Type Aliases
+
+Four type aliases now sit alongside `HpOverlayQuery` / `ConditionTextQuery`:
+
+- `SpBarBgQuery` — mutable `Node` on `SpBarBackground` entities, excluding
+  `CharacterCard`, `HpBarFill`, and `SpBarFill` from the filter
+- `SpBarFillQuery` — mutable `Node` + `BackgroundColor` on `SpBarFill`, with
+  the symmetric filter set
+- `SpBarTextQuery` — mutable `Text` + `TextColor` on `SpBarTextOverlay`,
+  excluding `HpTextOverlay` and `ConditionText`
+
+Extracting these aliases was necessary to satisfy `clippy::type_complexity`.
+
+### 2.4 — `setup_hud` Changes
+
+Inside the per-party-index card spawning loop, a new SP bar container is
+spawned between the HP bar `.with_children(…)` block and the `ConditionText`
+spawn. Its children are `SpBarFill` and `SpBarTextOverlay`, mirroring the
+existing HP bar structure but using `SP_BAR_HEIGHT` (8 px) and font size 8.
+
+### 2.5 — `update_hud` Changes
+
+The function gained `#[allow(clippy::too_many_arguments)]` and three new
+parameters (`sp_bar_bg_query`, `sp_bar_fill_query`, `sp_text_query`). Three
+new loops run after the condition-text loop:
+
+1. **SP background visibility** — sets `node.display` to `Display::None` when
+   `character.sp.base == 0`, otherwise `Display::Flex`.
+2. **SP fill width + colour** — computes `sp_percent = current / base`,
+   sets `node.width = Val::Percent(sp_percent * 100.0)`, and calls
+   `sp_bar_color(sp_percent)`.
+3. **SP text overlay** — writes `format_sp_display(current, base)` and
+   adjusts `TextColor` based on whether `sp_percent >= SP_HEALTHY_THRESHOLD`.
+
+### 2.6 — New Public Functions
+
+#### `sp_bar_color(sp_percent: f32) -> Color`
+
+```antares/src/game/systems/hud.rs#L2199-2207
+pub fn sp_bar_color(sp_percent: f32) -> Color {
+    if sp_percent >= SP_HEALTHY_THRESHOLD {
+        SP_HEALTHY_COLOR
+    } else if sp_percent > 0.0 {
+        SP_LOW_COLOR
+    } else {
+        SP_EMPTY_COLOR
+    }
+}
+```
+
+#### `format_sp_display(current: u16, max: u16) -> String`
+
+Returns `"SP: {current}/{max}"` — symmetric to `format_hp_display`.
+
+### 2.7 — Tests Added
+
+**Unit tests** (in `mod tests`):
+
+| Test                                     | Asserts                                  |
+| ---------------------------------------- | ---------------------------------------- |
+| `test_sp_bar_color_healthy`              | `sp_bar_color(1.0) == SP_HEALTHY_COLOR`  |
+| `test_sp_bar_color_at_threshold`         | boundary at exactly 0.5 → healthy colour |
+| `test_sp_bar_color_low`                  | `sp_bar_color(0.25) == SP_LOW_COLOR`     |
+| `test_sp_bar_color_empty`                | `sp_bar_color(0.0) == SP_EMPTY_COLOR`    |
+| `test_sp_bar_color_just_above_threshold` | 0.51 → healthy                           |
+| `test_sp_bar_color_just_below_threshold` | 0.49 → low                               |
+| `test_format_sp_display`                 | `"SP: 15/30"`                            |
+| `test_format_sp_display_full`            | `"SP: 30/30"`                            |
+| `test_format_sp_display_zero`            | `"SP: 0/30"`                             |
+
+**Integration tests** (Bevy `App` + `HudPlugin`):
+
+- `test_update_hud_sp_bar_hidden_for_non_caster` — Knight with `sp.base == 0`:
+  verifies `SpBarBackground` node has `display == Display::None`.
+- `test_update_hud_sp_bar_visible_for_caster` — Sorcerer with
+  `sp = { base: 30, current: 20 }`: verifies `Display::Flex` on the background
+  and `Val::Percent(≈66.67)` on the fill.
+
+### Quality Gates
+
+All four gates passed with zero errors and zero warnings:
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt --all          → no output
+cargo check              → Finished, 0 errors
+cargo clippy -D warnings → Finished, 0 warnings
+cargo nextest run        → 4141 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Spell System — Phase 1: Spell Effect Resolution Engine (Complete)
+
+### Overview
+
+Implemented Phase 1 of the Spell System Updates Implementation Plan: the
+foundational spell effect dispatch layer. Every spell category — damage,
+healing, buff, debuff, condition-cure, utility, resurrection, and composite —
+now resolves through a single, well-tested pipeline. Both the combat casting
+system and the upcoming exploration casting system (Phase 3) delegate to the
+new dispatcher.
+
+### 1.1 — New Enums in `src/domain/magic/types.rs`
+
+Three new public enums classify spell effects for the dispatcher:
+
+#### `BuffField`
+
+Maps spell buff effects to their corresponding [`ActiveSpells`] fields:
+
+```antares/src/domain/magic/types.rs#L148-168
+pub enum BuffField {
+    FearProtection,
+    ColdProtection,
+    FireProtection,
+    PoisonProtection,
+    AcidProtection,
+    ElectricityProtection,
+    MagicProtection,
+    Light,
+    LeatherSkin,
+    Levitate,
+    WalkOnWater,
+    GuardDog,
+    PsychicProtection,
+    Bless,
+    Invisibility,
+    Shield,
+    PowerShield,
+    Cursed,
+}
+```
+
+#### `UtilityType`
+
+Classifies utility spell sub-types:
+
+- `CreateFood { amount: u32 }` — food ration creation
+- `Teleport` — Town Portal / Surface / Jump
+- `Information` — Location / Detect Magic / Identify
+
+#### `SpellEffectType`
+
+The central routing enum with eight variants:
+
+| Variant                           | State Mutation                                          |
+| --------------------------------- | ------------------------------------------------------- |
+| `Damage`                          | damage dice + caster bonus → `target.hp`                |
+| `Healing { amount: DiceRoll }`    | `target.hp.current += roll` (clamped to base)           |
+| `CureCondition { condition_id }`  | `target.remove_condition(id)` + bitfield clear          |
+| `Buff { buff_field, duration }`   | `active_spells.{field} = duration`                      |
+| `Utility { utility_type }`        | food creation, teleport, or info                        |
+| `Debuff`                          | applies `spell.applied_conditions` via condition system |
+| `Resurrection`                    | `revive_from_dead(target, resurrect_hp)`                |
+| `Composite(Vec<SpellEffectType>)` | applies each sub-effect in order                        |
+
+### 1.2 — `effect_type` Field on `Spell`
+
+Added `pub effect_type: Option<SpellEffectType>` with `#[serde(default)]` to
+the `Spell` struct. All existing RON data files continue to load unchanged —
+the field defaults to `None`, which triggers inference.
+
+Two new methods:
+
+- `Spell::infer_effect_type()` — infers from existing fields:
+  `resurrect_hp` → `Resurrection`, `damage` → `Damage`,
+  `applied_conditions` → `Debuff`, otherwise `Utility(Information)`
+- `Spell::effective_effect_type()` — returns the explicit type if set,
+  otherwise delegates to `infer_effect_type()`
+
+### 1.3 — New Module `src/domain/magic/effect_dispatch.rs`
+
+The central dispatch module with four focused helpers and one top-level router:
+
+#### Result Types
+
+| Type                  | Carries                                         |
+| --------------------- | ----------------------------------------------- |
+| `HealResult`          | `hp_restored: u16`, `already_at_max: bool`      |
+| `BuffResult`          | `buff_field: BuffField`, `duration_set: u8`     |
+| `CureConditionResult` | `condition_id: String`, `was_present: bool`     |
+| `UtilityResult`       | `utility_type`, `food_created: u32`, `message`  |
+| `SpellEffectResult`   | aggregate of all mutations + `affected_targets` |
+
+#### Helper Functions
+
+**`apply_healing_spell(amount, target, rng) -> HealResult`**
+Rolls `amount` dice and adds to `target.hp.current`, clamping at `hp.base`.
+
+**`apply_buff_spell(buff_field, duration, active_spells) -> BuffResult`**
+Writes `duration` directly into the matching `ActiveSpells` field.
+
+**`apply_cure_condition(condition_id, target) -> CureConditionResult`**
+Removes the condition from `active_conditions` AND clears the matching
+`Condition` bitfield flag (e.g. `PARALYZED`, `POISONED`, `SILENCED`).
+
+**`apply_utility_spell(utility_type) -> UtilityResult`**
+Returns a description of the effect; the application layer applies side-effects
+(food item creation deferred to Phase 3 exploration casting).
+
+**`apply_spell_effect(spell, target, active_spells, rng) -> SpellEffectResult`**
+Top-level dispatcher. Calls `spell.effective_effect_type()` and routes to the
+appropriate helper. `Composite` spells use a two-pass approach — non-character
+effects (Buff, Utility) in pass 1; character effects (Healing, CureCondition)
+in pass 2 — to avoid mutable-borrow conflicts.
+
+### 1.4 — `execute_spell_cast_with_spell` Refactored
+
+Added `active_spells: &mut ActiveSpells` parameter to both
+`execute_spell_cast_with_spell` and `execute_spell_cast_by_id` in
+`src/domain/combat/spell_casting.rs`.
+
+New dispatch paths added after the existing damage path:
+
+- **Healing** — iterates `SingleCharacter`, `Self_`, or `AllCharacters` targets
+  and calls `spell_dispatch::apply_healing_spell`; populates `SpellResult::healing`.
+- **Buff** — calls `spell_dispatch::apply_buff_spell` on `active_spells`.
+- **CureCondition** — calls `spell_dispatch::apply_cure_condition` on the
+  target player character.
+- **Utility** — calls `spell_dispatch::apply_utility_spell`; defers side-effects
+  to the application layer.
+- **Composite** — two-pass dispatch: buff/utility in pass 1, healing/cure in
+  pass 2 targeting the single `CombatantId::Player` target.
+
+Existing damage and resurrection paths are unchanged.
+
+### 1.5 — `src/game/systems/combat.rs` Updated
+
+`perform_cast_action_with_rng` now passes `&mut global_state.0.active_spells`
+to `execute_spell_cast_by_id` so buff spells correctly write to the party's
+active spell tracker during combat.
+
+### 1.6 — `src/domain/magic/mod.rs` Updated
+
+`pub mod effect_dispatch;` added. All new public types re-exported:
+`apply_buff_spell`, `apply_cure_condition`, `apply_healing_spell`,
+`apply_spell_effect`, `apply_utility_spell`, `BuffField`, `BuffResult`,
+`CureConditionResult`, `HealResult`, `SpellEffectResult`, `SpellEffectType`,
+`UtilityResult`, `UtilityType`.
+
+### Files Changed
+
+| File                                  | Change                                                                                                                                      |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/magic/types.rs`           | Added `BuffField`, `UtilityType`, `SpellEffectType`; added `effect_type` field and `infer_effect_type` / `effective_effect_type` to `Spell` |
+| `src/domain/magic/effect_dispatch.rs` | **New** — dispatcher module with helpers and 34 unit tests                                                                                  |
+| `src/domain/magic/mod.rs`             | Export `effect_dispatch` and new types                                                                                                      |
+| `src/domain/magic/database.rs`        | Added `effect_type: None` to test spell constructor                                                                                         |
+| `src/domain/combat/spell_casting.rs`  | Added `active_spells` parameter; new healing/buff/cure/utility/composite dispatch paths; 5 new integration tests                            |
+| `src/game/systems/combat.rs`          | Pass `active_spells` to `execute_spell_cast_by_id`                                                                                          |
+
+### Deliverables Checklist
+
+- [x] `src/domain/magic/effect_dispatch.rs` — spell effect dispatcher module
+- [x] `SpellEffectType` enum in `src/domain/magic/types.rs`
+- [x] `BuffField` and `UtilityType` enums in `src/domain/magic/types.rs`
+- [x] `Spell::infer_effect_type()` fallback method
+- [x] `Spell::effective_effect_type()` accessor
+- [x] `effect_type: Option<SpellEffectType>` field on `Spell` (serde-defaulted)
+- [x] Refactored `execute_spell_cast_with_spell` using dispatcher
+- [x] Unit tests with >80% coverage for all effect categories (34 in dispatcher, 5 in combat)
+- [x] Updated `src/domain/magic/mod.rs` to export new module
+
+### Quality Gates
+
+```
+cargo fmt         → ✅ No output
+cargo check       → ✅ Finished — 0 errors, 0 warnings
+cargo clippy      → ✅ Finished — 0 warnings
+cargo nextest run → ✅ 4130 passed, 0 failed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] Data structures match `architecture.md` Section 4 (`ActiveSpells`, `Spell`, `SpellTarget`)
+- [x] `SpellEffectType` fields use `crate::domain::types::DiceRoll` (existing type alias pattern)
+- [x] `BuffField` mirrors all 18 fields of `ActiveSpells` exactly
+- [x] No RON format changed — `#[serde(default)]` preserves backward load compatibility
+- [x] No test references `campaigns/tutorial` — all test data is in-code or `data/test_campaign`
+- [x] SPDX headers on new file (`2026 Brett Smith`)
+- [x] `///` doc comments on every public type and function in `effect_dispatch.rs`
+- [x] Runnable `///` examples on all public functions
+
 ## SDK Codebase Cleanup — Phase 9: Final Structural Cleanup (Complete)
 
 ### Overview
@@ -4686,3 +7234,385 @@ the inline `#[cfg(test)]` module of `map_editor.rs`.
 - [x] No `#[allow(...)]` directives remain in SDK source
 - [x] `show_editor` uses `MapEditorRefs` and `EditorContext` consistently with every other editor in the codebase
 - [x] No orphaned test files remain in `src/`; all tests reachable by `cargo nextest`
+
+---
+
+## Spell System — Phase 5: Monster Spell Casting AI (Complete)
+
+### Overview
+
+Extends the combat monster domain with spell-casting capability and provides a
+dedicated AI module that decides when to cast and how to execute each spell
+effect. Monster casting is intentionally simpler than player casting: no SP
+cost, no class/level restrictions, and a post-cast cooldown to prevent spamming.
+
+### Deliverables
+
+- [x] `src/domain/combat/monster.rs` — two new `Monster` fields, three new
+      methods, five new unit tests
+- [x] `src/domain/combat/monster_spells.rs` — new module: `MonsterAction` enum,
+      `choose_monster_action`, `execute_monster_spell_cast`, ten unit tests
+- [x] `src/domain/combat/mod.rs` — `pub mod monster_spells` registration
+- [x] `src/domain/magic/effect_dispatch.rs` — `DispelMagic` arm added to
+      `apply_spell_effect` (pre-existing omission fixed as part of this phase)
+- [x] `src/domain/world/creature_binding.rs` — `Monster` struct literal updated
+      with new fields (cascade from struct change)
+- [x] `tests/campaign_integration_tests.rs` — `Monster` struct literal updated
+      with new fields (cascade from struct change)
+
+### Monster struct changes (`monster.rs`)
+
+Two new `#[serde(default)]` fields appended to `Monster`:
+
+| Field            | Type           | Default      | Purpose                             |
+| ---------------- | -------------- | ------------ | ----------------------------------- |
+| `spells`         | `Vec<SpellId>` | `Vec::new()` | Spell IDs this monster may cast     |
+| `spell_cooldown` | `u8`           | `0`          | Rounds until next cast is permitted |
+
+Three new `impl Monster` methods:
+
+| Method                | Signature         | Description                                                     |
+| --------------------- | ----------------- | --------------------------------------------------------------- |
+| `can_cast_spell`      | `(&self) -> bool` | True when spells non-empty, cooldown = 0, not silenced, can act |
+| `tick_spell_cooldown` | `(&mut self)`     | Decrements cooldown by 1 (saturating)                           |
+| `set_spell_cooldown`  | `(&mut self, u8)` | Sets cooldown after a cast                                      |
+
+Five new tests in `mod tests`:
+
+- `test_monster_can_cast_spell_with_spells_and_zero_cooldown`
+- `test_monster_cannot_cast_spell_with_no_spells`
+- `test_monster_cannot_cast_spell_with_cooldown`
+- `test_monster_cannot_cast_spell_when_silenced`
+- `test_monster_tick_spell_cooldown`
+
+### New module `monster_spells.rs`
+
+#### `MonsterAction` enum
+
+```antares/src/domain/combat/monster_spells.rs#L47-54
+pub enum MonsterAction {
+    PhysicalAttack,
+    CastSpell {
+        spell_id: SpellId,
+    },
+}
+```
+
+#### `choose_monster_action` — AI decision function
+
+Decision tree applied in order:
+
+1. `!monster.can_cast_spell()` → `PhysicalAttack`
+2. `AiBehavior::Defensive` **and** HP > 60 % of base → 30 % cast, 70 % physical
+3. Default → 40 % cast, 60 % physical
+
+A random spell index is selected from `monster.spells` when deciding to cast.
+
+#### `execute_monster_spell_cast` — effect routing
+
+Clones monster spell data first to avoid simultaneous borrow conflicts, then
+routes by `spell.effective_effect_type()`:
+
+| `SpellEffectType` | Behaviour                                                 |
+| ----------------- | --------------------------------------------------------- |
+| `Damage`          | Rolls `spell.damage` dice; applies to every living player |
+| `Healing`         | Monster heals itself, clamped to `hp.base`                |
+| `Buff`            | Writes duration to party `ActiveSpells` tracker           |
+| `Debuff`          | Applies `spell.applied_conditions` to first living player |
+| all others        | No-op; `SpellResult` message still records the cast       |
+
+After any successful dispatch, `monster.set_spell_cooldown(2)` is called.
+No SP is deducted — monsters have unlimited spell energy.
+
+Ten unit tests covering:
+
+- `test_choose_monster_action_no_spells_returns_physical`
+- `test_choose_monster_action_with_spells_sometimes_casts`
+- `test_choose_monster_action_silenced_returns_physical`
+- `test_choose_monster_action_with_cooldown_returns_physical`
+- `test_choose_monster_action_defensive_high_hp_prefers_physical`
+- `test_execute_monster_spell_cast_no_spells_returns_none`
+- `test_execute_monster_spell_cast_deals_damage_to_players`
+- `test_execute_monster_spell_cast_unknown_spell_returns_none`
+- `test_execute_monster_spell_cast_heals_monster`
+- `test_execute_monster_spell_cast_cooldown_set_after_cast`
+- `test_execute_monster_spell_cast_nonzero_cooldown_returns_none`
+
+### `DispelMagic` fix in `effect_dispatch.rs`
+
+`SpellEffectType::DispelMagic` was added to `types.rs` in a prior working-tree
+change but the exhaustive match in `apply_spell_effect` was never updated.
+Added the missing arm:
+
+```antares/src/domain/magic/effect_dispatch.rs#L615-626
+SpellEffectType::DispelMagic => {
+    active_spells.reset();
+    SpellEffectResult {
+        success: true,
+        message: format!("{} dispels all active magic!", spell.name),
+        total_hp_healed: 0,
+        buff_applied: None,
+        condition_cured: None,
+        food_created: 0,
+        affected_targets: Vec::new(),
+    }
+}
+```
+
+### Key Design Decisions
+
+- **No SP deduction** — monsters have unlimited spell energy; SP management
+  would add state without meaningful gameplay depth at the monster level.
+- **Post-cast cooldown (2 rounds)** — prevents single-spell monsters from
+  casting every turn; configurable via `set_spell_cooldown(rounds)`.
+- **Silenced check separate from `can_act()`** — `MonsterCondition::Silenced`
+  passes `can_act()` (the monster can still attack), but `can_cast_spell()` must
+  also explicitly reject `Silenced` to model the silenced mechanic correctly.
+- **Clone-before-borrow pattern** — `execute_monster_spell_cast` clones
+  `monster.spells` and the `Spell` definition before taking any mutable borrow
+  on `combat_state.participants`, sidestepping the split-borrow limitation.
+- **`DispelMagic` parity** — the new module's `_ => {}` wildcard arm means
+  monsters can hold a `DispelMagic` spell ID in their list; the combat engine
+  caller (not yet wired) would dispatch via `execute_monster_spell_cast` which
+  silently no-ops until the engine routes it explicitly.
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output (all files formatted)
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings
+✅ cargo nextest run → 4297/4297 passed, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] `Monster` struct fields use `SpellId` type alias (not raw `u16`)
+- [x] `#[serde(default)]` on new fields — existing RON data loads without change
+- [x] New module follows Section 3.2 module placement (combat sub-module)
+- [x] All public items have `///` doc comments with runnable examples
+- [x] Test data uses no `campaigns/tutorial` references
+- [x] No architectural deviations from architecture.md
+
+---
+
+## Phase 7: Remediation of Audit Gaps
+
+**Date**: 2025
+
+**Plan reference**: `docs/explanation/spell_system_updates_implementation_plan.md` § Phase 7
+
+### Overview
+
+Phase 7 closed five concrete integration gaps identified during the Phase 1–6
+post-implementation audit. Every gap was a missing wire-up between an already-
+correct domain function and the game or Bevy layer that should consume it. No
+new domain concepts were introduced — only call-site plumbing and integration
+hooks.
+
+### 7.1 — Wire Exploration Scroll Dispatch (CastSpell / LearnSpell)
+
+**Problem**: `handle_use_item_action_exploration` in
+`src/game/systems/inventory_ui.rs` called `apply_consumable_effect_exploration`
+and obtained a `ConsumableApplyResult`, but never checked
+`result.spell_cast_id` or `result.spell_learn_id`. Using a casting scroll
+logged "Casting spell 257" without actually casting anything; using a learning
+scroll logged a message but left the spellbook unchanged.
+
+**Fix**:
+
+- Moved `character_name` capture to before the mutable borrow in step 6 so
+  it is available to the spell-dispatch blocks.
+- Added **step 6a**: if `result.spell_cast_id` is `Some(spell_id)`, look up
+  the spell in `content_db.spells`, then call
+  `cast_exploration_spell(party_index, &spell, ExplorationTarget::Self_,
+&mut game_state, &content_db.items, &mut rng)`. Log the resolved spell name
+  on success or the `SpellError` on failure.
+- Added **step 6b**: if `result.spell_learn_id` is `Some(spell_id)`, call
+  `learn_spell(&mut character, spell_id, &content_db.spells, &content_db.classes)`.
+  Log success, "already knows", or the failure reason. Scroll charge is
+  consumed regardless of learning outcome — consistent with dialogue/quest
+  reward handlers.
+- Updated `build_consumable_use_log` comments for `CastSpell`/`LearnSpell` to
+  reflect that these are now fallback messages only (used when the spell ID
+  cannot be resolved).
+- Added new imports:
+  `crate::domain::magic::exploration_casting::{cast_exploration_spell, ExplorationTarget}`
+  and `crate::domain::magic::learning::{learn_spell, SpellLearnError}`.
+
+**Tests added** (all in `inventory_ui.rs`):
+
+| Test                                                | What it checks                                                                |
+| --------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `test_cast_spell_scroll_unknown_spell_id_no_panic`  | Unknown spell ID → no panic; scroll consumed; log names item                  |
+| `test_learn_spell_scroll_unknown_spell_id_no_panic` | Unknown spell ID → "could not learn" logged; scroll consumed                  |
+| `test_cast_spell_scroll_logs_spell_name_on_failure` | Known spell ID → resolved name "First Aid" appears in log even on failed cast |
+| `test_learn_spell_scroll_logs_spell_name`           | Known spell, wrong class → "First Aid" appears in log; scroll consumed        |
+
+### 7.2 — Wire Walk on Water to Map Traversal
+
+**Problem**: `BuffField::WalkOnWater` correctly wrote `active_spells.walk_on_water`
+when cast, but movement code in `exploration_movement.rs` never read that
+field. Water tiles (`TerrainType::Water`) auto-set `blocked = true` in
+`Tile::new`, so the party was always blocked regardless of the buff.
+
+**Fix**:
+
+- Added private helper `should_override_water(game_state, target) -> bool`:
+  returns `true` when `active_spells.walk_on_water > 0` AND the target tile
+  has `TerrainType::Water`.
+- Added private helper `with_water_override(game_state, target, closure)`:
+  temporarily sets `tile.blocked = false`, runs the closure, then restores
+  `tile.blocked = true` unconditionally (even if the closure returns `false`).
+- Refactored `handle_move_forward` and `handle_move_back` to use a local
+  `let mut attempt = |gs| { … }` closure that wraps the existing
+  movement logic, then conditionally runs it through `with_water_override` when
+  the water override applies.
+- Added `use crate::domain::types::Position` and
+  `use crate::domain::world::TerrainType` imports.
+
+**Tests added** (all in `exploration_movement.rs`):
+
+| Test                                                                     | What it checks                                      |
+| ------------------------------------------------------------------------ | --------------------------------------------------- |
+| `test_should_override_water_returns_false_without_buff`                  | No buff → returns false                             |
+| `test_should_override_water_returns_true_with_buff`                      | Buff active + water tile → returns true             |
+| `test_should_override_water_returns_false_for_non_water_tile`            | Buff active but non-water tile → returns false      |
+| `test_with_water_override_unblocks_and_restores_tile`                    | Tile is unblocked inside closure and restored after |
+| `test_with_water_override_restores_tile_even_when_closure_returns_false` | Tile always restored even on failed movement        |
+
+### 7.3 — Wire Levitate to Pit/Chasm Tile Validation
+
+**Problem**: `BuffField::Levitate` correctly wrote `active_spells.levitate`,
+but the `EventResult::Trap` arm in `GameState::move_party_and_handle_events`
+never checked it. Trap damage and conditions were applied to the party
+regardless of the Levitate buff.
+
+**Fix**: Added an `if self.active_spells.levitate > 0` guard at the top of the
+`Trap` arm in `src/application/mod.rs`. When the buff is active, the entire
+trap is skipped and `tracing::info!` logs the avoidance. When the buff is not
+active, the existing damage + condition + game-over logic runs unchanged.
+
+**Tests added** (all in `application/mod.rs`):
+
+| Test                                        | What it checks                                             |
+| ------------------------------------------- | ---------------------------------------------------------- |
+| `test_levitate_buff_skips_trap_damage`      | 25-damage trap → 0 HP lost, mode stays Exploration         |
+| `test_levitate_buff_skips_trap_condition`   | Poison trap → no POISONED condition when levitating        |
+| `test_trap_damage_applies_without_levitate` | Regression: trap must still deal damage when levitate is 0 |
+
+### 7.4 — Implement Town Portal / Surface Teleport
+
+**Problem**: `apply_utility_spell` handled `UtilityType::Teleport` by returning
+a generic "Teleport effect triggered." message and never signalled a
+destination. The Bevy exploration layer never mutated `world.party_position` or
+`world.current_map`.
+
+**Fix — domain layer (`src/domain/magic/types.rs`)**:
+
+- Added `TeleportDestination` enum (`Surface`, `TownPortal`, `Jump`) with
+  `#[derive(Default)]` and `#[default]` on `Surface`.
+- Changed `UtilityType::Teleport` from a unit variant to a struct variant:
+  `Teleport { #[serde(default)] destination: TeleportDestination }`.
+  The `#[serde(default)]` ensures backward-compatible RON deserialisation —
+  an empty `Teleport()` form deserialises with `destination: Surface`.
+- Exported `TeleportDestination` from `src/domain/magic/mod.rs`.
+
+**Fix — domain layer (`src/domain/magic/effect_dispatch.rs`)**:
+
+- Added `teleport_destination: Option<TeleportDestination>` field to
+  `UtilityResult`.
+- Updated `apply_utility_spell` to populate `teleport_destination: Some(dest)`
+  for the `Teleport { destination }` arm and `None` for all other variants.
+- Added doc-comment examples and four new unit tests for the new field.
+
+**Fix — Bevy layer (`src/game/systems/exploration_spells.rs`)**:
+
+- Added imports for `SpellEffectType`, `TeleportDestination`, `UtilityType`,
+  and `Position`.
+- After a successful `cast_exploration_spell` call, pattern-matches
+  `spell.effective_effect_type()` for
+  `SpellEffectType::Utility { utility_type: UtilityType::Teleport { destination } }`:
+  - `Surface` → `world.set_party_position(Position::new(1, 1))` (map entry
+    tile convention; a future phase will store the per-map entry position).
+  - `TownPortal` → `world.set_current_map(1)` + `set_party_position(1, 1)`.
+  - `Jump` → logs a "not yet implemented" trace; SP is consumed but position
+    is unchanged (target-selection UI is deferred).
+
+**Fix — RON data**:
+
+Updated teleport spells to use the new struct-variant syntax:
+
+| File                                 | Spell                   | Old         | New                                 |
+| ------------------------------------ | ----------------------- | ----------- | ----------------------------------- |
+| `data/spells.ron`                    | Word of Recall (0x0902) | `Teleport`  | `Teleport(destination: TownPortal)` |
+| `data/spells.ron`                    | Teleport (0x0C03)       | `Teleport`  | `Teleport(destination: TownPortal)` |
+| `data/spells.ron`                    | Jump (0x0504)           | _(missing)_ | `Teleport(destination: Jump)`       |
+| `data/test_campaign/data/spells.ron` | Jump (1284)             | _(missing)_ | `Teleport(destination: Jump)`       |
+| `campaigns/tutorial/data/spells.ron` | Jump (1284)             | _(missing)_ | `Teleport(destination: Jump)`       |
+
+**Tests added** (`effect_dispatch.rs`):
+
+| Test                                                           | What it checks                                    |
+| -------------------------------------------------------------- | ------------------------------------------------- |
+| `test_apply_utility_spell_teleport_town_portal`                | TownPortal destination populated in UtilityResult |
+| `test_apply_utility_spell_teleport_jump`                       | Jump destination populated in UtilityResult       |
+| `test_apply_utility_spell_create_food_no_teleport_destination` | teleport_destination is None for CreateFood       |
+| `test_apply_utility_spell_information_no_teleport_destination` | teleport_destination is None for Information      |
+
+### 7.5 — Implement Location Spell Coordinate Display
+
+**Problem**: `apply_utility_spell` is a pure function with no access to game
+state, so it returned a generic "Information gathered." message. The Bevy
+exploration system did not post-process the result to inject real coordinates.
+
+**Fix** (Bevy layer only, `src/game/systems/exploration_spells.rs`):
+
+In `execute_exploration_cast`, before building the feedback message, check
+`spell.effective_effect_type()`. If it resolves to
+`SpellEffectType::Utility { utility_type: UtilityType::Information }`,
+override the message with:
+
+```text
+Location: Map {current_map}, ({x}, {y}).
+```
+
+where `current_map`, `x`, and `y` are read from `global_state.0.world` after
+the cast completes. No domain-layer changes are required — the Bevy layer
+uniquely has access to `world` state that the pure domain function should not
+depend on.
+
+### Files Modified
+
+| File                                             | Change                                                                                        |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `src/domain/magic/types.rs`                      | Added `TeleportDestination` enum; changed `UtilityType::Teleport` to struct variant           |
+| `src/domain/magic/mod.rs`                        | Re-exported `TeleportDestination`                                                             |
+| `src/domain/magic/effect_dispatch.rs`            | Added `teleport_destination` to `UtilityResult`; updated `apply_utility_spell`; new tests     |
+| `src/game/systems/input/exploration_movement.rs` | Added `should_override_water`, `with_water_override`; refactored movement handlers; new tests |
+| `src/application/mod.rs`                         | Levitate guard in Trap arm; new tests                                                         |
+| `src/game/systems/exploration_spells.rs`         | Teleport world-state dispatch; Location coordinate message                                    |
+| `src/game/systems/inventory_ui.rs`               | CastSpell/LearnSpell scroll dispatch in step 6a/6b; new tests                                 |
+| `data/spells.ron`                                | Updated 3 teleport spell entries                                                              |
+| `data/test_campaign/data/spells.ron`             | Updated Jump spell entry                                                                      |
+| `campaigns/tutorial/data/spells.ron`             | Updated Jump spell entry                                                                      |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output (all files formatted)
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings
+✅ cargo nextest run → 4332 passed, 8 skipped, 0 failed
+```
+
+### Architecture Compliance
+
+- [x] All new types use `SpellId`, `MapId`, `Position` type aliases
+- [x] `#[serde(default)]` on `UtilityType::Teleport.destination` — RON backward-compatible
+- [x] `TeleportDestination` follows architecture enum naming conventions
+- [x] `ActiveSpells` fields (`walk_on_water`, `levitate`) used directly — no parallel tracking
+- [x] Game mode context respected — teleport and walk-on-water only fire in exploration
+- [x] All new public items have `///` doc comments with runnable examples
+- [x] No test references to `campaigns/tutorial` (all fixtures use `data/test_campaign`)
+- [x] No architectural deviations from architecture.md

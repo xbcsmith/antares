@@ -73,6 +73,38 @@ pub struct DespawnRecruitableVisual {
     pub character_id: String,
 }
 
+/// Message requesting immediate despawn of an encounter visual at a specific map tile.
+///
+/// Emitted by [`handle_combat_victory`](crate::game::systems::combat) when the
+/// party defeats all monsters. The encounter visual remains alive when the party
+/// flees (no message is emitted in that case) so the monsters stay on the map
+/// for a potential second encounter.
+///
+/// `cleanup_encounter_visuals` remains as a passive fallback that will catch
+/// any entity this message misses (e.g. entities spawned outside the normal
+/// map-load path).
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::map::DespawnEncounterVisual;
+/// use antares::domain::types::Position;
+///
+/// let msg = DespawnEncounterVisual {
+///     map_id: 1,
+///     position: Position::new(5, 5),
+/// };
+/// assert_eq!(msg.map_id, 1);
+/// assert_eq!(msg.position, Position::new(5, 5));
+/// ```
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct DespawnEncounterVisual {
+    /// Map ID containing the encounter visual.
+    pub map_id: types::MapId,
+    /// Tile position of the originating `MapEvent::Encounter`.
+    pub position: types::Position,
+}
+
 /// Component tagging an entity as a visual marker for a map encounter.
 ///
 /// Despawned by `cleanup_encounter_visuals` when the backing `MapEvent::Encounter`
@@ -162,6 +194,7 @@ impl Plugin for MapManagerPlugin {
         // Register the map change message and the handler + spawn systems
         app.add_message::<MapChangeEvent>()
             .add_message::<DespawnRecruitableVisual>()
+            .add_message::<DespawnEncounterVisual>()
             // Register SetFacing message and proximity/facing systems
             .add_plugins(crate::game::systems::facing::FacingPlugin)
             // Seed lock_states for every map present at startup.
@@ -176,6 +209,7 @@ impl Plugin for MapManagerPlugin {
                     map_change_handler,
                     spawn_map_markers,
                     handle_despawn_recruitable_visual,
+                    handle_despawn_encounter_visual,
                     cleanup_recruitable_visuals,
                     cleanup_encounter_visuals,
                     cleanup_locked_door_markers,
@@ -227,6 +261,25 @@ fn handle_despawn_recruitable_visual(
                 && tile_coord.0 == ev.position
                 && marker.character_id == ev.character_id
             {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+/// Handles explicit encounter-visual despawn requests triggered by combat victory.
+///
+/// Mirrors `handle_despawn_recruitable_visual`: provides an immediate despawn
+/// path so the monster mesh disappears in the same frame the combat ends,
+/// while `cleanup_encounter_visuals` remains as a passive safety net.
+fn handle_despawn_encounter_visual(
+    mut commands: Commands,
+    mut ev_reader: MessageReader<DespawnEncounterVisual>,
+    query: Query<(Entity, &EncounterVisualMarker)>,
+) {
+    for ev in ev_reader.read() {
+        for (entity, marker) in query.iter() {
+            if marker.map_id == ev.map_id && marker.position == ev.position {
                 commands.entity(entity).despawn();
             }
         }
@@ -4562,6 +4615,116 @@ mod tests {
         assert!(
             app.world().get_entity(marker_entity).is_err(),
             "Entity must be despawned after the LockedDoor event is removed"
+        );
+    }
+
+    /// T4-EV1: `DespawnEncounterVisual` message removes only the targeted entity.
+    ///
+    /// Spawns two `EncounterVisualMarker` entities on map 1 at different positions.
+    /// Sends a `DespawnEncounterVisual` for the first position and asserts that
+    /// only that entity is despawned while the other survives.
+    #[test]
+    fn test_despawn_encounter_visual_message_removes_entity() {
+        use crate::domain::types::Position;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<DespawnEncounterVisual>();
+        app.add_systems(Update, handle_despawn_encounter_visual);
+
+        let target_pos = Position::new(5, 5);
+        let other_pos = Position::new(3, 3);
+
+        let target_entity = app
+            .world_mut()
+            .spawn(EncounterVisualMarker {
+                map_id: 1,
+                position: target_pos,
+            })
+            .id();
+
+        let other_entity = app
+            .world_mut()
+            .spawn(EncounterVisualMarker {
+                map_id: 1,
+                position: other_pos,
+            })
+            .id();
+
+        {
+            let mut messages = app
+                .world_mut()
+                .resource_mut::<Messages<DespawnEncounterVisual>>();
+            messages.write(DespawnEncounterVisual {
+                map_id: 1,
+                position: target_pos,
+            });
+        }
+
+        app.update();
+
+        assert!(
+            app.world().get_entity(target_entity).is_err(),
+            "Entity at (5,5) must be despawned after DespawnEncounterVisual message"
+        );
+        assert!(
+            app.world().get_entity(other_entity).is_ok(),
+            "Entity at (3,3) must remain — it was not targeted by the message"
+        );
+    }
+
+    /// T4-EV2: `DespawnEncounterVisual` with a non-existent `map_id` leaves all entities intact.
+    ///
+    /// Spawns two `EncounterVisualMarker` entities on map 1.  Sends a message
+    /// targeting `map_id: 99` (which has no entities) and asserts that both
+    /// entities survive the update unchanged.
+    #[test]
+    fn test_despawn_encounter_visual_wrong_map_id_is_ignored() {
+        use crate::domain::types::Position;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<DespawnEncounterVisual>();
+        app.add_systems(Update, handle_despawn_encounter_visual);
+
+        let pos_a = Position::new(5, 5);
+        let pos_b = Position::new(3, 3);
+
+        let entity_a = app
+            .world_mut()
+            .spawn(EncounterVisualMarker {
+                map_id: 1,
+                position: pos_a,
+            })
+            .id();
+
+        let entity_b = app
+            .world_mut()
+            .spawn(EncounterVisualMarker {
+                map_id: 1,
+                position: pos_b,
+            })
+            .id();
+
+        {
+            let mut messages = app
+                .world_mut()
+                .resource_mut::<Messages<DespawnEncounterVisual>>();
+            messages.write(DespawnEncounterVisual {
+                map_id: 99,
+                position: pos_a,
+            });
+        }
+
+        app.update();
+
+        assert!(
+            app.world().get_entity(entity_a).is_ok(),
+            "Entity at (5,5) must remain — map_id 99 does not match any spawned entity"
+        );
+        assert!(
+            app.world().get_entity(entity_b).is_ok(),
+            "Entity at (3,3) must remain — map_id 99 does not match any spawned entity"
         );
     }
 }

@@ -1151,6 +1151,7 @@ impl eframe::App for CampaignBuilderApp {
                     ui,
                     &mut self.campaign_data.items,
                     &self.editor_registry.classes_editor_state.classes,
+                    &self.campaign_data.spells,
                     &mut items_ctx,
                 );
                 // Handle cross-tab navigation: items editor wants to open the
@@ -1408,6 +1409,7 @@ impl eframe::App for CampaignBuilderApp {
                     &mut self.campaign_data.dialogues,
                     &self.campaign_data.quests,
                     &self.campaign_data.items,
+                    &self.campaign_data.spells,
                     &mut dialogues_ctx,
                 );
             }
@@ -1771,6 +1773,7 @@ impl CampaignBuilderApp {
             &self.campaign_data.items,
             &self.campaign_data.monsters,
             &self.campaign_data.maps,
+            &self.campaign_data.spells,
             &mut quests_ctx,
         );
     }

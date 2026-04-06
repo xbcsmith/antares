@@ -57,6 +57,8 @@ pub struct FrameInputIntent {
     pub mouse_center_interact: bool,
     /// Whether the full-screen game log toggle was requested this frame.
     pub game_log_toggle: bool,
+    /// Whether the exploration spell-casting menu was requested this frame.
+    pub cast: bool,
 }
 
 impl FrameInputIntent {
@@ -173,6 +175,7 @@ pub fn decode_frame_input(
         interact: key_map.is_action_pressed(GameAction::Interact, keyboard_input),
         mouse_center_interact: mouse_center_interact_pressed(mouse_buttons, primary_window),
         game_log_toggle: key_map.is_action_just_pressed(GameAction::GameLog, keyboard_input),
+        cast: key_map.is_action_just_pressed(GameAction::Cast, keyboard_input),
     }
 }
 
@@ -208,6 +211,7 @@ mod tests {
         assert!(!intent.interact);
         assert!(!intent.mouse_center_interact);
         assert!(!intent.game_log_toggle);
+        assert!(!intent.cast);
     }
 
     #[test]

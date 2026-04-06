@@ -8363,7 +8363,7 @@
             description: "A welcoming inn where you can rest and manage your party.",
             text: "Welcome to the Cozy Inn",
             time_condition: None,
-            facing: None,
+            facing: Some(East),
         ),
         (
             x: 5,
@@ -8373,7 +8373,7 @@
             description: "A sign advertising the general store\'s wares and services.",
             text: "General Store - Buy and Sell items for your party!",
             time_condition: None,
-            facing: None,
+            facing: Some(East),
         ),
         (
             x: 5,
@@ -8383,7 +8383,7 @@
             description: "The Village Elder",
             text: "The Village Elder",
             time_condition: None,
-            facing: None,
+            facing: Some(East),
         ),
         (
             x: 7,
@@ -8454,7 +8454,7 @@
             description: "A notice outside the temple detailing its services.",
             text: "Temple of Healing - The priests can restore your health.",
             time_condition: None,
-            facing: None,
+            facing: Some(West),
         ),
         (
             x: 13,
@@ -8479,7 +8479,7 @@
             description: "A wooden sign pointing toward the Dark Forrest.",
             text: "To the Dark Forrest",
             time_condition: None,
-            facing: None,
+            facing: Some(West),
         ),
         (
             x: 14,
@@ -8508,7 +8508,7 @@
             character_id: "old_gareth",
             dialogue_id: Some(100),
             time_condition: None,
-            facing: Some(West),
+            facing: Some(East),
         ),
         (
             x: 16,

@@ -38,6 +38,8 @@ pub enum GameAction {
     Automap,
     /// Open or close the full-screen game log overlay.
     GameLog,
+    /// Open the exploration spell-casting menu.
+    Cast,
 }
 
 /// Key mapping structure for efficient input lookups.
@@ -99,6 +101,7 @@ impl KeyMap {
         insert_action_bindings(&mut bindings, &config.rest, GameAction::Rest);
         insert_action_bindings(&mut bindings, &config.automap, GameAction::Automap);
         insert_action_bindings(&mut bindings, &config.game_log, GameAction::GameLog);
+        insert_action_bindings(&mut bindings, &config.cast, GameAction::Cast);
 
         Self { bindings }
     }
@@ -461,6 +464,7 @@ mod tests {
             rest: vec!["G".to_string()],
             automap: vec!["M".to_string()],
             game_log: vec!["H".to_string()],
+            cast: vec!["C".to_string()],
             movement_cooldown: 0.1,
         };
 
@@ -505,6 +509,7 @@ mod tests {
             rest: vec!["R".to_string()],
             automap: vec!["M".to_string()],
             game_log: vec!["G".to_string()],
+            cast: vec!["C".to_string()],
             movement_cooldown: 0.2,
         };
 

@@ -183,15 +183,25 @@ pub fn validate_item_use_slot(
         .get_item(slot.item_id)
         .ok_or(ItemUseError::ItemNotFound(slot.item_id))?;
 
-    // Consumable?
-    let consumable = match &item.item_type {
-        ItemType::Consumable(data) => data,
-        _ => return Err(ItemUseError::NotConsumable),
-    };
-
-    // Combat use allowed?
-    if in_combat && !consumable.is_combat_usable {
-        return Err(ItemUseError::NotUsableInCombat);
+    // Accept the slot if it is either:
+    //  (a) a Consumable — original path, or
+    //  (b) a non-consumable magical charged item with spell_effect set — new path.
+    match &item.item_type {
+        ItemType::Consumable(consumable) => {
+            // Combat use allowed?
+            if in_combat && !consumable.is_combat_usable {
+                return Err(ItemUseError::NotUsableInCombat);
+            }
+        }
+        _ => {
+            // Non-consumable: only valid if it has a spell effect and charges.
+            if item.spell_effect.is_none() || item.max_charges == 0 {
+                return Err(ItemUseError::NotConsumable);
+            }
+            if slot.charges == 0 {
+                return Err(ItemUseError::NoCharges);
+            }
+        }
     }
 
     // Alignment
@@ -281,7 +291,7 @@ pub fn execute_item_use_by_slot<R: Rng>(
     inventory_index: usize,
     target: CombatantId,
     content: &ContentDatabase,
-    _rng: &mut R,
+    rng: &mut R,
 ) -> Result<ItemUseResult, ItemUseError> {
     use crate::domain::combat::engine::Combatant;
 
@@ -293,6 +303,58 @@ pub fn execute_item_use_by_slot<R: Rng>(
 
     // Validate using snapshot (no active mutable borrow on combat_state)
     validate_item_use_slot(&user_snapshot, inventory_index, content, true)?;
+
+    // ── Charged spell-item path ──────────────────────────────────────────────
+    // If the item at `inventory_index` is a non-consumable charged item with a
+    // `spell_effect` set, route it through the combat spell pipeline instead of
+    // the consumable path below.  The charge is consumed inside
+    // `execute_charged_item_spell`.
+    {
+        let slot_item_id = user_snapshot
+            .inventory
+            .items
+            .get(inventory_index)
+            .map(|s| s.item_id);
+
+        if let Some(iid) = slot_item_id {
+            if let Some(item) = content.items.get_item(iid) {
+                let is_spell_charged = item.spell_effect.is_some()
+                    && item.max_charges > 0
+                    && !matches!(item.item_type, ItemType::Consumable(_));
+                if is_spell_charged {
+                    use crate::application::ActiveSpells;
+                    // We need an ActiveSpells but the combat path doesn't carry
+                    // one; create a temporary one so the spell pipeline compiles.
+                    // Callers that want buff tracking must use
+                    // `execute_charged_item_spell` directly with their own
+                    // `ActiveSpells`.
+                    let mut temp_active = ActiveSpells::new();
+                    let spell_result =
+                        crate::domain::combat::spell_casting::execute_charged_item_spell(
+                            combat_state,
+                            user,
+                            inventory_index,
+                            target,
+                            &mut temp_active,
+                            content,
+                            rng,
+                        )
+                        .map_err(|e| ItemUseError::Other(e.to_string()))?;
+
+                    let msg = spell_result.effect_message.clone();
+                    let res = ItemUseResult::success(msg);
+                    let final_res = if let Some(dmg) = spell_result.damage {
+                        res.with_damage(dmg, spell_result.affected_targets.clone())
+                    } else if let Some(hp) = spell_result.healing {
+                        res.with_healing(hp, spell_result.affected_targets.clone())
+                    } else {
+                        res
+                    };
+                    return Ok(final_res);
+                }
+            }
+        }
+    }
 
     // Perform the effect by splitting the operation into two phases to avoid
     // simultaneous mutable borrows of `combat_state`:
@@ -373,6 +435,58 @@ pub fn execute_item_use_by_slot<R: Rng>(
         let total_damage: i32 = 0;
         let mut total_healing: i32 = 0;
         let mut applied_conditions: Vec<String> = Vec::new();
+
+        // ── ConsumableEffect::CastSpell path ────────────────────────────────
+        // When the consumable signals a spell cast, route through the full
+        // combat spell pipeline (damage, healing, buff, fizzle, etc.).
+        // The charge was already consumed in Phase A above.
+        if let ConsumableEffect::CastSpell(spell_id) = consumable_data.effect {
+            use crate::application::ActiveSpells;
+            let mut temp_active = ActiveSpells::new();
+            if let Some(spell) = content.spells.get_spell(spell_id).cloned() {
+                // Determine the user player index for the result
+                if let CombatantId::Player(user_idx) = user {
+                    // Re-borrow the caster to give them enough SP for the spell
+                    // (the item pays the cost; SP is not consumed from the caster).
+                    {
+                        if let Some(Combatant::Player(pc)) = combat_state.get_combatant_mut(&user) {
+                            let needed = spell.sp_cost;
+                            if pc.sp.current < needed {
+                                pc.sp.current = needed;
+                            }
+                        }
+                    }
+                    let spell_result =
+                        crate::domain::combat::spell_casting::execute_spell_cast_with_spell(
+                            combat_state,
+                            user,
+                            &spell,
+                            target,
+                            &mut temp_active,
+                            content,
+                            rng,
+                        )
+                        .map_err(|e| ItemUseError::Other(e.to_string()))?;
+
+                    let msg = spell_result.effect_message.clone();
+                    let res = ItemUseResult::success(msg);
+                    let final_res = if let Some(dmg) = spell_result.damage {
+                        res.with_damage(dmg, spell_result.affected_targets.clone())
+                    } else if let Some(hp) = spell_result.healing {
+                        res.with_healing(hp, spell_result.affected_targets.clone())
+                    } else {
+                        res
+                    };
+                    let _ = user_idx;
+                    return Ok(final_res);
+                }
+            }
+            // Spell not found in DB — treat as no-op success
+            return Ok(ItemUseResult::success(format!(
+                "Item used: spell {} not found",
+                spell_id
+            )));
+        }
 
         match combat_state.get_combatant_mut(&target) {
             Some(Combatant::Player(pc_target)) => {

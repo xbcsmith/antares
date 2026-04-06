@@ -53,6 +53,7 @@ pub fn movement_blocked_for_mode(mode: &GameMode) -> bool {
             | GameMode::Resting(_)
             | GameMode::RestMenu
             | GameMode::GameLog
+            | GameMode::SpellCasting(_)
     )
 }
 

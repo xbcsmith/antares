@@ -144,23 +144,62 @@ Write a plan with a phased approach to implementing the spell system updates in 
 
 ## Future Features and Fixes
 
-### Notes
+FIXED - When interaction with Recruitable Character is initiated from an adjacent tile, after the recruit dialog is finished and the player joins the party the Recruitable Characters mesh does not disappear until they are walked over. It should disappear immediately on recruitment. It looks remove_event`is called at the party's position instead of the adjacent tile where the event actually is, the event stays on the map, so the visual persists. The party then has to walk to that adjacent tile, triggering`check_for_events`again, which finds the`RecruitableCharacter` event but logs that it's not...
 
-Items moved to [Game Feature Completion Plan](./game_feature_completion_plan.md):
+FIXED - Combat should be able to be initiatiated using the E key or Mouse when standing on an adjacent tile to an encounter trigger, not just by stepping on the encounter trigger tile. This is important for accessibility and also for allowing players to choose when to engage in combat rather than being forced into it by stepping on a tile.
 
-- ✅ Game Log relocation to upper-left, full-screen log view, scroll, filters → Phase 1
-- ✅ Recruitable Character Mesh disappears immediately on recruitment → Phase 1
-- ✅ Time advancement on movement (30s), combat (10s/turn), configurable → Phase 2
-- ✅ Lock UI input: arrow keys fall through, ESC double-fires → Phase 1
+FIXED - Campaign Builder --> Maps --> Edit Map --> Click on NPC options are Edit NPC (goes straight to the NPC editor) and Remove NPC. Need a way to edit the Event so I can control what direction the NPC is facing. Currently there is no way to edit the NPC's facing direction, so all NPCs face the same direction which looks bad. We should add an Edit Event option that allows you to edit the event's facing direction as well as other properties of the event like the dialogue it triggers, the quests it gives, etc.
 
-### Remaining Notes
+FIXED - Spell Casting pop up during combat should be in the upper left hand corner of the screen. Currently it is low and to the left and is covered by the grey box that shows the Action buttons and the Monster HP. You can't get to it to click cancel when a Character has no combat spells or spell points left. We should move the Spell Casting pop up to the upper right hand corner of the screen so that it is not covered by the grey box and so that it is more visible and easier to click on.
+
+## Things you never think of until you have to implement them
+
+### Spell Management
+
+@spell_system_updates_implementation_plan.md did not cover player interaction with the spell system outside of combat.
+
+There is no way to manage spells for a character in the game engine. We need to add a Spell Book Management UI where you can see the spells a character has learned, the spell points they have, and the spell scrolls they have in their inventory. You should also be able to learn new spells from NPCs and from quests. We should also add support for spell effects that can be applied outside of combat as well as in combat. We should also add support for spell effects that can be applied to characters, monsters, and the environment as well.
+
+@spell_system_updates_implementation_plan.md Phase 4 added ways to learn spells but did not add any management for the Character Spell Book in the game engine or the SDK.
+
+Write a plan with a phased approach to implementing the rest of the spell system in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Spell Management Implementation Plan](./spell_management_implementation_plan.md)
+
+### SDK Fixes
+
+Campaign Builder --> Maps --> Edit Map --> Add Event --> Container can contain items but there is no way to add Gold or Gems to the container in the SDK. We should add the ability to add Gold and Gems to the container in the SDK as well as in the game engine when looting a container.
+
+Campaign Builder --> Maps --> Edit Map --> Edit Event in the right column the Event Editor should be placed right under the Event Details instead of at the bottom of the column.
+
+Campaign Builder --> Furniture --> Edit Furniture does not have a Back to List button that is required to get back to the list of furniture. We should add a Back to List button to the Edit Furniture screen that takes you back to the list of furniture.
+
+Campaign Builder --> Stock Templates --> Edit Stock Template does not load the description of the Stock Template in the editor. We should load the description of the Stock Template in the editor so that it can be edited as well.
+
+Write a plan with a phased approach to implementing the SDK fixes in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [SDK Fixes Implementation Plan](./sdk_fixes_implementation_plan.md)
+
+### Combat Fixes
+
+In Combat Defense system is not implemented. What happens when a CHaracter selects Defend in its action round? We should add a defense system to combat where when characters choose to defend instead of attacking. Defending should reduce the damage taken from the next attack by a certain percentage based on the character's defense stat and the type of attack. We should also add support for spells and items that can increase defense or provide temporary invulnerability.
+
+Combat Use Item system is not implemented. There is no way for a character to use an item in combat. We should add a system for using items in combat where characters can choose to use an item from their inventory instead of attacking or defending. Using an item should consume the item and apply its effects immediately. We should also add support for items that can be used outside of combat as well as in combat.
+
+Out of combat use item system is not implemented. There is no way for a character to use an item outside of combat. We should add a system for using items outside of combat where characters can choose to use an item from their inventory while exploring the world or interacting with NPCs. Using an item should consume the item and apply its effects immediately. We should also add support for items that can be used in combat as well as outside of combat.
+
+Write a plan with a phased approach to implementing the combat fixes in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Combat Fixes Implementation Plan](./combat_fixes_implementation_plan.md)
+
+## Notes
 
 Month Year Date in Game Engine View looks horrible.
 
-Trees are still horrible. Grass sucks as well. Is tree bark textures being applied? The trees on Map 1 look no different than before.
-You can not tell one tree from the next. Oak, Pine, Palm, Dead all look the same.
-Foliage particularly Bushes clip tree trunks. And seems like editing them in the SDK does nothing to change their appearance.
+Trees are still horrible. Grass sucks as well. Is tree bark textures being applied? You can not tell one tree from the next. Oak, Pine, Palm, Dead all look the same.Foliage particularly Bushes clip tree trunks. And seems like editing them in the SDK does nothing to change their appearance.
 
 All the doors are facing the wrong way
 
 Show/Hide Tray ICON SDK is not working
+
+Game log is not part of a Game Save. Loading a save game from the main menu on restart does not restore the game log. The game log should be saved and loaded with the rest of the game state.

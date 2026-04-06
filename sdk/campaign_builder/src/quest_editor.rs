@@ -18,11 +18,12 @@
 
 use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
-    handle_reload, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
-    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    autocomplete_spell_selector, handle_reload, show_standard_list_item, EditorToolbar, ItemAction,
+    MetadataBadge, StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::items::types::Item;
+use antares::domain::magic::types::Spell;
 use antares::domain::quest::{Quest, QuestId, QuestObjective, QuestReward, QuestStage};
 use antares::domain::types::{ItemId, MapId, MonsterId, Position};
 use antares::domain::world::Map;
@@ -111,6 +112,9 @@ pub struct QuestEditorState {
 
     /// Validation errors for current quest
     pub validation_errors: Vec<String>,
+
+    /// Available spells for reward editors
+    pub available_spells: Vec<Spell>,
 }
 
 /// Quest editor mode
@@ -251,6 +255,8 @@ pub struct RewardEditBuffer {
     pub faction_name: String,
     pub reputation_change: String,
     pub item_quantity: String,
+    /// Spell ID (hex string) for LearnSpell rewards
+    pub spell_id: String,
 }
 
 /// Reward type selector
@@ -262,6 +268,8 @@ pub enum RewardType {
     UnlockQuest,
     SetFlag,
     Reputation,
+    /// Teach a spell to the first eligible party member
+    LearnSpell,
 }
 
 impl RewardType {
@@ -273,6 +281,7 @@ impl RewardType {
             RewardType::UnlockQuest => "Unlock Quest",
             RewardType::SetFlag => "Set Flag",
             RewardType::Reputation => "Reputation",
+            RewardType::LearnSpell => "Learn Spell",
         }
     }
 }
@@ -290,6 +299,7 @@ impl Default for RewardEditBuffer {
             faction_name: String::new(),
             reputation_change: "10".to_string(),
             item_quantity: "1".to_string(),
+            spell_id: String::new(),
         }
     }
 }
@@ -309,6 +319,7 @@ impl Default for QuestEditorState {
             search_filter: String::new(),
             has_unsaved_changes: false,
             validation_errors: Vec::new(),
+            available_spells: Vec::new(),
         }
     }
 }
@@ -393,6 +404,11 @@ impl QuestEditorState {
                     ..Default::default()
                 }
             }
+            antares::domain::quest::QuestReward::LearnSpell { spell_id } => RewardEditBuffer {
+                reward_type: RewardType::LearnSpell,
+                spell_id: spell_id.to_string(),
+                ..Default::default()
+            },
         };
 
         // Fix for item quantity:
@@ -476,6 +492,14 @@ impl QuestEditorState {
                     faction: self.reward_buffer.faction_name.clone(),
                     change,
                 }
+            }
+            RewardType::LearnSpell => {
+                let spell_id = self
+                    .reward_buffer
+                    .spell_id
+                    .parse::<antares::domain::types::SpellId>()
+                    .map_err(|_| QuestEditorError::ParseError("Invalid spell ID".to_string()))?;
+                antares::domain::quest::QuestReward::LearnSpell { spell_id }
             }
         };
 
@@ -1104,6 +1128,7 @@ impl QuestEditorState {
     /// * `items` - Available items used for objective/reward selection
     /// * `monsters` - Monster definitions used for objective selection
     /// * `maps` - Map definitions and NPC lists used for location/objective selection
+    /// * `spells` - Available spell definitions for reward selection
     /// * `ctx` - Shared editor context providing campaign directory, data file,
     ///   unsaved-changes flag, status message, and file-load merge mode
     ///
@@ -1124,8 +1149,11 @@ impl QuestEditorState {
         items: &[Item],
         monsters: &[MonsterDefinition],
         maps: &[Map],
+        spells: &[Spell],
         ctx: &mut EditorContext<'_>,
     ) {
+        // Sync available spells cache
+        self.available_spells = spells.to_vec();
         ui.heading("📜 Quests Editor");
         ui.add_space(5.0);
 
@@ -1573,6 +1601,15 @@ impl QuestEditorState {
                     antares::domain::quest::QuestReward::Reputation { faction, change } => {
                         format!("Reputation with {}: {:+}", faction, change)
                     }
+                    antares::domain::quest::QuestReward::LearnSpell { spell_id } => {
+                        let spell_name = self
+                            .available_spells
+                            .iter()
+                            .find(|s| s.id == *spell_id)
+                            .map(|s| s.name.as_str())
+                            .unwrap_or("Unknown Spell");
+                        format!("Learn Spell: {} (ID: {})", spell_name, spell_id)
+                    }
                 };
                 preview.push_str(&format!("  - {}\n", desc));
             }
@@ -1659,6 +1696,9 @@ impl QuestEditorState {
                         }
                         QuestReward::Reputation { faction, change } => {
                             ui.label(format!("  • {} Reputation: {:+}", faction, change))
+                        }
+                        QuestReward::LearnSpell { spell_id } => {
+                            ui.label(format!("  • Learn Spell (ID: {:#06x})", spell_id))
                         }
                     };
                 }
@@ -2477,6 +2517,15 @@ impl QuestEditorState {
                                     QuestReward::Reputation { faction, change } => {
                                         format!("Reputation: {} ({:+})", faction, change)
                                     }
+                                    QuestReward::LearnSpell { spell_id } => {
+                                        let spell_name = self
+                                            .available_spells
+                                            .iter()
+                                            .find(|s| s.id == *spell_id)
+                                            .map(|s| s.name.as_str())
+                                            .unwrap_or("Unknown Spell");
+                                        format!("Learn Spell: {} (ID: {})", spell_name, spell_id)
+                                    }
                                 };
 
                                 ui.label(format!("{}.", reward_idx + 1));
@@ -2576,6 +2625,11 @@ impl QuestEditorState {
                                         crate::quest_editor::RewardType::Reputation,
                                         "Reputation",
                                     );
+                                    ui.selectable_value(
+                                        &mut self.reward_buffer.reward_type,
+                                        crate::quest_editor::RewardType::LearnSpell,
+                                        "Learn Spell",
+                                    );
                                 });
                         });
 
@@ -2645,6 +2699,20 @@ impl QuestEditorState {
                                         &mut self.reward_buffer.reputation_change,
                                     );
                                 });
+                            }
+                            crate::quest_editor::RewardType::LearnSpell => {
+                                let spells = self.available_spells.clone();
+                                let mut spell_id_num: antares::domain::types::SpellId =
+                                    self.reward_buffer.spell_id.parse().unwrap_or(0);
+                                if autocomplete_spell_selector(
+                                    ui,
+                                    &format!("reward_spell_selector_{}", reward_idx),
+                                    "Spell:",
+                                    &mut spell_id_num,
+                                    &spells,
+                                ) {
+                                    self.reward_buffer.spell_id = spell_id_num.to_string();
+                                }
                             }
                         }
 
@@ -2962,6 +3030,52 @@ mod tests {
     // =========================================================================
     // Quest Giver Tests
     // =========================================================================
+
+    #[test]
+    fn test_quest_editor_state_has_available_spells_field() {
+        let state = QuestEditorState::new();
+        assert!(
+            state.available_spells.is_empty(),
+            "available_spells should be empty on creation"
+        );
+    }
+
+    #[test]
+    fn test_learn_spell_reward_roundtrip() {
+        let mut state = QuestEditorState::new();
+        let mut quests = Vec::new();
+        let mut quest = Quest::new(1, "Test Quest", "Test description");
+        quest
+            .rewards
+            .push(QuestReward::LearnSpell { spell_id: 0x0101 });
+        quests.push(quest);
+
+        assert!(state.edit_reward(&quests, 0, 0).is_ok());
+        assert_eq!(state.reward_buffer.reward_type, RewardType::LearnSpell);
+        // 0x0101 = 257 in decimal
+        assert_eq!(state.reward_buffer.spell_id, "257");
+    }
+
+    #[test]
+    fn test_save_learn_spell_reward() {
+        let mut state = QuestEditorState::new();
+        let mut quests = Vec::new();
+        let mut quest = Quest::new(1, "Test Quest", "Test description");
+        quest.rewards.push(QuestReward::LearnSpell { spell_id: 0 });
+        quests.push(quest);
+
+        state.selected_quest = Some(0);
+        state.reward_buffer.reward_type = RewardType::LearnSpell;
+        state.reward_buffer.spell_id = "257".to_string();
+
+        assert!(state.save_reward(&mut quests, 0, 0).is_ok());
+        match &quests[0].rewards[0] {
+            QuestReward::LearnSpell { spell_id } => {
+                assert_eq!(*spell_id, 257);
+            }
+            _ => panic!("Expected LearnSpell reward"),
+        }
+    }
 
     #[test]
     fn test_quest_giver_auto_population() {

@@ -19,6 +19,7 @@ pub mod merchant_inventory_state;
 pub mod quests;
 pub mod resources;
 pub mod save_game;
+pub mod spell_casting_state;
 
 use crate::application::menu::MenuState;
 use crate::domain::campaign::CampaignConfig;
@@ -100,6 +101,13 @@ pub enum GameMode {
     /// member.  The UI should display a "Game Over" screen with options to
     /// load a save or quit.
     GameOver,
+    /// Exploration-mode spell casting flow.
+    ///
+    /// Entered when a player opens the spell menu outside of combat (default
+    /// key `C`).  The multi-step flow is tracked by
+    /// [`crate::application::spell_casting_state::SpellCastingState`]:
+    /// caster selection → spell selection → optional target selection → result.
+    SpellCasting(crate::application::spell_casting_state::SpellCastingState),
 }
 
 // ===== Rest State =====
@@ -545,6 +553,24 @@ impl ActiveSpells {
         self.shield = self.shield.saturating_sub(1);
         self.power_shield = self.power_shield.saturating_sub(1);
         self.cursed = self.cursed.saturating_sub(1);
+    }
+
+    /// Resets all active spell effects to zero (e.g. when Dispel Magic is cast).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::ActiveSpells;
+    ///
+    /// let mut spells = ActiveSpells::new();
+    /// spells.fire_protection = 30;
+    /// spells.bless = 10;
+    /// spells.reset();
+    /// assert_eq!(spells.fire_protection, 0);
+    /// assert_eq!(spells.bless, 0);
+    /// ```
+    pub fn reset(&mut self) {
+        *self = Self::new();
     }
 }
 
@@ -1490,33 +1516,39 @@ impl GameState {
             }
 
             crate::domain::world::EventResult::Trap { damage, effect } => {
-                // Apply trap damage to all living party members.
-                for member in &mut self.party.members {
-                    if member.is_alive() {
-                        member.hp.modify(-(damage as i32));
-                        if member.hp.current == 0 {
-                            member
-                                .conditions
-                                .add(crate::domain::character::Condition::DEAD);
-                        }
-                    }
-                }
-
-                // Apply status effect if present.
-                if let Some(ref effect_name) = effect {
-                    let flag = map_effect_to_condition(effect_name);
-                    if flag != crate::domain::character::Condition::FINE {
-                        for member in &mut self.party.members {
-                            if member.is_alive() {
-                                member.conditions.add(flag);
+                // Levitate buff negates all trap effects — the party floats over
+                // pit traps and ground-based hazards entirely.
+                if self.active_spells.levitate > 0 {
+                    tracing::info!("Trap avoided — party is levitating.");
+                } else {
+                    // Apply trap damage to all living party members.
+                    for member in &mut self.party.members {
+                        if member.is_alive() {
+                            member.hp.modify(-(damage as i32));
+                            if member.hp.current == 0 {
+                                member
+                                    .conditions
+                                    .add(crate::domain::character::Condition::DEAD);
                             }
                         }
                     }
-                }
 
-                // Check for party wipe.
-                if self.party.living_count() == 0 {
-                    self.mode = GameMode::GameOver;
+                    // Apply status effect if present.
+                    if let Some(ref effect_name) = effect {
+                        let flag = map_effect_to_condition(effect_name);
+                        if flag != crate::domain::character::Condition::FINE {
+                            for member in &mut self.party.members {
+                                if member.is_alive() {
+                                    member.conditions.add(flag);
+                                }
+                            }
+                        }
+                    }
+
+                    // Check for party wipe.
+                    if self.party.living_count() == 0 {
+                        self.mode = GameMode::GameOver;
+                    }
                 }
             }
 
@@ -1629,6 +1661,86 @@ impl GameState {
     pub fn enter_menu(&mut self) {
         let prev = self.mode.clone();
         self.mode = GameMode::Menu(MenuState::new(prev));
+    }
+
+    /// Enters exploration-mode spell casting with a pre-selected caster.
+    ///
+    /// Stores the current mode so it can be restored when the player cancels
+    /// or finishes casting.  The UI starts at the spell-selection step because
+    /// the caster is already known.
+    ///
+    /// Use [`enter_spell_casting_with_caster_select`] when the player should
+    /// choose the caster first.
+    ///
+    /// # Arguments
+    ///
+    /// * `caster_index` — index into `party.members` of the character who casts.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_spell_casting(0);
+    /// assert!(matches!(state.mode, GameMode::SpellCasting(_)));
+    /// ```
+    ///
+    /// [`enter_spell_casting_with_caster_select`]: Self::enter_spell_casting_with_caster_select
+    pub fn enter_spell_casting(&mut self, caster_index: usize) {
+        let prev = self.mode.clone();
+        self.mode = GameMode::SpellCasting(
+            crate::application::spell_casting_state::SpellCastingState::new(prev, caster_index),
+        );
+    }
+
+    /// Enters exploration-mode spell casting with the caster-selection step first.
+    ///
+    /// Use this when no specific caster is pre-selected and the player must
+    /// choose which party member will cast before browsing spells.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    /// use antares::application::spell_casting_state::SpellCastingStep;
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_spell_casting_with_caster_select();
+    /// if let GameMode::SpellCasting(sc) = &state.mode {
+    ///     assert_eq!(sc.step, SpellCastingStep::SelectCaster);
+    /// } else {
+    ///     panic!("expected SpellCasting mode");
+    /// }
+    /// ```
+    pub fn enter_spell_casting_with_caster_select(&mut self) {
+        let prev = self.mode.clone();
+        self.mode = GameMode::SpellCasting(
+            crate::application::spell_casting_state::SpellCastingState::new_with_caster_select(
+                prev,
+            ),
+        );
+    }
+
+    /// Exits exploration-mode spell casting and restores the previous mode.
+    ///
+    /// If the current mode is not `SpellCasting` this is a no-op.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_spell_casting(0);
+    /// assert!(matches!(state.mode, GameMode::SpellCasting(_)));
+    /// state.exit_spell_casting();
+    /// assert!(matches!(state.mode, GameMode::Exploration));
+    /// ```
+    pub fn exit_spell_casting(&mut self) {
+        if let GameMode::SpellCasting(ref sc) = self.mode.clone() {
+            self.mode = sc.get_resume_mode();
+        }
     }
 
     /// Enters dialogue mode
@@ -2197,6 +2309,53 @@ mod tests {
         }
         assert_eq!(spells.light, 4);
         assert_eq!(spells.bless, 0);
+    }
+
+    #[test]
+    fn test_active_spells_reset_clears_all_fields() {
+        let mut spells = ActiveSpells::new();
+
+        // Set every field to a non-zero value
+        spells.fear_protection = 5;
+        spells.cold_protection = 10;
+        spells.fire_protection = 15;
+        spells.poison_protection = 20;
+        spells.acid_protection = 8;
+        spells.electricity_protection = 12;
+        spells.magic_protection = 7;
+        spells.light = 30;
+        spells.leather_skin = 6;
+        spells.levitate = 9;
+        spells.walk_on_water = 11;
+        spells.guard_dog = 4;
+        spells.psychic_protection = 3;
+        spells.bless = 25;
+        spells.invisibility = 14;
+        spells.shield = 18;
+        spells.power_shield = 2;
+        spells.cursed = 1;
+
+        spells.reset();
+
+        // Every field must be zeroed after reset
+        assert_eq!(spells.fear_protection, 0);
+        assert_eq!(spells.cold_protection, 0);
+        assert_eq!(spells.fire_protection, 0);
+        assert_eq!(spells.poison_protection, 0);
+        assert_eq!(spells.acid_protection, 0);
+        assert_eq!(spells.electricity_protection, 0);
+        assert_eq!(spells.magic_protection, 0);
+        assert_eq!(spells.light, 0);
+        assert_eq!(spells.leather_skin, 0);
+        assert_eq!(spells.levitate, 0);
+        assert_eq!(spells.walk_on_water, 0);
+        assert_eq!(spells.guard_dog, 0);
+        assert_eq!(spells.psychic_protection, 0);
+        assert_eq!(spells.bless, 0);
+        assert_eq!(spells.invisibility, 0);
+        assert_eq!(spells.shield, 0);
+        assert_eq!(spells.power_shield, 0);
+        assert_eq!(spells.cursed, 0);
     }
 
     #[test]
@@ -5155,6 +5314,144 @@ mod tests {
         assert_eq!(state.party.members[0].hp.current, 40);
         // Dead member unchanged
         assert_eq!(state.party.members[1].hp.current, 0);
+    }
+
+    #[test]
+    fn test_levitate_buff_skips_trap_damage() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let mut hero = Character::new(
+            "Floater".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        hero.hp = crate::domain::character::AttributePair16::new(50);
+        state.party.add_member(hero).unwrap();
+
+        // Activate the Levitate buff.
+        state.active_spells.levitate = 20;
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let trap_pos = Position::new(1, 0);
+        map.add_event(
+            trap_pos,
+            MapEvent::Trap {
+                name: "Pit Trap".to_string(),
+                description: "A nasty pit".to_string(),
+                damage: 25,
+                effect: None,
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let result =
+            state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        assert!(result.is_ok());
+
+        // No damage: levitate buff must have negated the trap.
+        assert_eq!(
+            state.party.members[0].hp.current, 50,
+            "party should take no trap damage while levitating"
+        );
+        // Mode must remain Exploration (no game over).
+        assert!(
+            matches!(state.mode, crate::application::GameMode::Exploration),
+            "game mode must remain Exploration"
+        );
+    }
+
+    #[test]
+    fn test_levitate_buff_skips_trap_condition() {
+        use crate::domain::character::{Alignment, Character, Condition, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let mut hero = Character::new(
+            "Floater".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        hero.hp = crate::domain::character::AttributePair16::new(50);
+        state.party.add_member(hero).unwrap();
+
+        state.active_spells.levitate = 10;
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            Position::new(1, 0),
+            MapEvent::Trap {
+                name: "Poison Pit".to_string(),
+                description: "".to_string(),
+                damage: 15,
+                effect: Some("poison".to_string()),
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        // HP unchanged and poison condition not applied.
+        assert_eq!(state.party.members[0].hp.current, 50);
+        assert!(
+            !state.party.members[0].conditions.has(Condition::POISONED),
+            "poisoned condition must not be applied when levitating"
+        );
+    }
+
+    #[test]
+    fn test_trap_damage_applies_without_levitate() {
+        // Regression: trap must still deal damage when levitate is NOT active.
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let mut hero = Character::new(
+            "Grounded".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp = crate::domain::character::AttributePair16::new(50);
+        state.party.add_member(hero).unwrap();
+        state.active_spells.levitate = 0; // explicitly no buff
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            Position::new(1, 0),
+            MapEvent::Trap {
+                name: "Pit".to_string(),
+                description: "".to_string(),
+                damage: 10,
+                effect: None,
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        assert_eq!(
+            state.party.members[0].hp.current, 40,
+            "trap must deal 10 damage when levitate is not active"
+        );
     }
 
     #[test]

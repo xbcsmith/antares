@@ -310,6 +310,8 @@ mod tests {
             conditions: MonsterCondition::Normal,
             active_conditions: vec![],
             has_acted: false,
+            spells: Vec::new(),
+            spell_cooldown: 0,
         }
     }
 

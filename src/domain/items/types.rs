@@ -425,6 +425,45 @@ pub enum ConsumableEffect {
     /// }
     /// ```
     Resurrect(u16),
+
+    /// Cast a spell from a single-use scroll (combat or exploration).
+    ///
+    /// The item is consumed and the named spell is cast once on behalf of the
+    /// user. The actual spell dispatch is handled at the game-system layer;
+    /// `apply_consumable_effect` sets the `spell_cast_id` field of
+    /// [`ConsumableApplyResult`] and returns without mutating the character.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::types::ConsumableEffect;
+    ///
+    /// let scroll = ConsumableEffect::CastSpell(0x0301);
+    /// if let ConsumableEffect::CastSpell(sid) = scroll {
+    ///     assert_eq!(sid, 0x0301);
+    /// }
+    /// ```
+    CastSpell(SpellId),
+
+    /// Permanently teach a spell to the user (learning scroll).
+    ///
+    /// Unlike [`ConsumableEffect::CastSpell`], this variant adds the spell to
+    /// the character's [`SpellBook`] so it can be cast repeatedly. The actual
+    /// `learn_spell` call is handled at the game-system layer; `apply_consumable_effect`
+    /// sets the `spell_learn_id` field of [`ConsumableApplyResult`] and returns
+    /// without mutating the character's spellbook.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::items::types::ConsumableEffect;
+    ///
+    /// let scroll = ConsumableEffect::LearnSpell(0x0201);
+    /// if let ConsumableEffect::LearnSpell(sid) = scroll {
+    ///     assert_eq!(sid, 0x0201);
+    /// }
+    /// ```
+    LearnSpell(SpellId),
 }
 
 /// Attribute types that can be boosted

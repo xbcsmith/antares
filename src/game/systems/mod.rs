@@ -20,6 +20,7 @@ pub mod dialogue_validation;
 pub mod dialogue_visuals;
 pub mod dropped_item_visuals;
 pub mod events;
+pub mod exploration_spells;
 pub mod facing;
 pub mod furniture_rendering;
 pub mod hud;

@@ -96,8 +96,10 @@ fn check_for_events(
                 // the party steps on their tile. These events must be explicitly
                 // interacted with by the player (press the Interact key).
                 //
-                // Encounters are intentionally excluded from this list: stepping on
-                // an encounter tile should immediately trigger combat.
+                // Encounters require explicit interaction (E key / mouse click from the
+                // current or an adjacent tile via try_interact_adjacent_world_events).
+                // This gives the player agency to choose when to engage rather than being
+                // forced into combat by accidentally stepping on the tile.
                 match event {
                     MapEvent::RecruitableCharacter { .. } => {
                         info!(
@@ -135,8 +137,14 @@ fn check_for_events(
                             current_pos
                         );
                     }
+                    MapEvent::Encounter { .. } => {
+                        info!(
+                            "Party at {:?} is on an Encounter event; not auto-triggering (requires interact)",
+                            current_pos
+                        );
+                    }
                     _ => {
-                        // Trigger other event types automatically (encounters, traps, etc.)
+                        // Trigger other event types automatically (traps, etc.)
                         event_writer.write(MapEventTriggered {
                             event: event.clone(),
                             position: current_pos,
@@ -628,32 +636,35 @@ fn handle_events(
                     });
                 }
 
-                let current_pos = global_state.0.world.party_position;
+                // Use trigger.position — the tile where the event lives — not the party
+                // position.  When interaction is initiated from an adjacent tile these two
+                // positions differ, and using the party position would cause remove_event
+                // to target the wrong tile, leaving the recruitable mesh visible on the
+                // map until the party physically walks over it.
+                let event_pos = trigger.position;
 
                 // If dialogue is specified, trigger dialogue system
                 if let Some(dlg_id) = dialogue_id {
-                    // Find NPC entity at current position for speaker (optional visual).
+                    // Find NPC entity at the event position for speaker (optional visual).
                     // NOTE: We intentionally prefer using the fallback tile position for
                     // recruitable character visuals rather than treating low-level event/tile
                     // marker entities as speakers. This avoids placing UI on marker geometry
                     // (which can be near the ground) and keeps visuals consistent.
                     let speaker_entity = npc_query
                         .iter()
-                        .find(|(_, _, coord)| {
-                            coord.0.x == current_pos.x && coord.0.y == current_pos.y
-                        })
+                        .find(|(_, _, coord)| coord.0.x == event_pos.x && coord.0.y == event_pos.y)
                         .map(|(entity, _, _)| entity);
 
                     if speaker_entity.is_none() {
                         info!(
                             "No NpcMarker found at {:?} for recruitable '{}' - preferring fallback map position for dialogue visuals",
-                            current_pos, character_id
+                            event_pos, character_id
                         );
 
                         // Diagnostic: list entities that exist at this tile for debugging purposes.
                         let mut entities = Vec::new();
                         for (ent, coord, transform_opt, evt_opt) in all_tile_query.iter() {
-                            if coord.0.x == current_pos.x && coord.0.y == current_pos.y {
+                            if coord.0.x == event_pos.x && coord.0.y == event_pos.y {
                                 entities.push(format!(
                                     "entity={:?}, has_transform={}, has_event_trigger={}",
                                     ent,
@@ -662,7 +673,7 @@ fn handle_events(
                                 ));
                             }
                         }
-                        info!("Entities at {:?}: {:?}", current_pos, entities);
+                        info!("Entities at {:?}: {:?}", event_pos, entities);
                     } else {
                         info!(
                             "Speaker entity for recruitable '{}' resolved to {:?} (NpcMarker); will use it for visuals",
@@ -670,10 +681,13 @@ fn handle_events(
                         );
                     }
 
-                    // Create recruitment context
+                    // Create recruitment context using the event's map position so that
+                    // execute_recruit_to_party calls remove_event on the correct tile
+                    // regardless of whether the party interacted from the same tile or an
+                    // adjacent one.
                     let recruitment_context = crate::application::dialogue::RecruitmentContext {
                         character_id: character_id.clone(),
-                        event_position: current_pos,
+                        event_position: event_pos,
                     };
 
                     // Store context in PendingRecruitmentContext resource for handle_start_dialogue to consume
@@ -685,7 +699,7 @@ fn handle_events(
                     dialogue_writer.write(StartDialogue {
                         dialogue_id: *dlg_id,
                         speaker_entity,
-                        fallback_position: Some(current_pos),
+                        fallback_position: Some(event_pos),
                     });
 
                     if speaker_entity.is_some() {
@@ -696,7 +710,7 @@ fn handle_events(
                     } else {
                         info!(
                             "Starting recruitment dialogue {} for character {} using fallback position {:?} for visuals",
-                            dlg_id, character_id, current_pos
+                            dlg_id, character_id, event_pos
                         );
                     }
                 } else {
@@ -1563,7 +1577,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encounter_auto_triggers_when_stepping_on_tile() {
+    fn test_encounter_does_not_auto_trigger_when_stepping_on_tile() {
         use crate::application::resources::GameContent;
         use crate::domain::types::Position;
         use crate::domain::world::MapEvent;
@@ -1611,8 +1625,73 @@ mod tests {
         let mut reader = events.get_cursor();
         let triggered_events: Vec<_> = reader.read(events).collect();
         assert!(
+            triggered_events.is_empty(),
+            "Encounter must NOT auto-trigger when stepping on the tile — player must press Interact"
+        );
+    }
+
+    #[test]
+    fn test_encounter_triggered_from_current_position_via_interact() {
+        use crate::application::resources::GameContent;
+        use crate::domain::types::Position;
+        use crate::domain::world::MapEvent;
+        use crate::game::resources::GlobalState;
+        use crate::sdk::database::ContentDatabase;
+        use bevy::prelude::*;
+
+        // Arrange
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
+        app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(EventPlugin);
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let event_pos = Position::new(5, 5);
+        let encounter_event = MapEvent::Encounter {
+            name: "Skeleton Ambush".to_string(),
+            description: "A skeleton blocks the path".to_string(),
+            monster_group: vec![1],
+            time_condition: None,
+            facing: None,
+            proximity_facing: false,
+            rotation_speed: None,
+            combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
+        };
+        map.add_event(event_pos, encounter_event.clone());
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(event_pos);
+
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(ContentDatabase::new()));
+
+        // Act — directly emit MapEventTriggered to simulate the player pressing
+        // the Interact key while standing on (or adjacent to) the encounter tile.
+        // This bypasses check_for_events and exercises the explicit trigger path.
+        {
+            let mut writer = app
+                .world_mut()
+                .resource_mut::<Messages<MapEventTriggered>>();
+            writer.write(MapEventTriggered {
+                event: encounter_event.clone(),
+                position: event_pos,
+            });
+        }
+
+        app.update();
+
+        // Assert — the message we explicitly wrote is present, confirming the
+        // explicit interaction path works from the current (on-tile) position.
+        let messages = app.world().resource::<Messages<MapEventTriggered>>();
+        let mut reader = messages.get_cursor();
+        let triggered_events: Vec<_> = reader.read(messages).collect();
+        assert!(
             !triggered_events.is_empty(),
-            "Expected encounter event to auto-trigger when stepping on the tile"
+            "Encounter MUST trigger when explicitly interacted with from the current position"
         );
     }
 
@@ -2043,6 +2122,120 @@ mod tests {
                 .contains("Error: NPC 'whisper' not found in database")),
             "Recruitable interactions must not go through NPC database lookup with character_id"
         );
+    }
+
+    #[test]
+    fn test_recruitable_character_adjacent_tile_uses_event_position_not_party_position() {
+        // Regression test: when a RecruitableCharacter is interacted with from an adjacent
+        // tile, handle_events must store the event's map tile (trigger.position) in
+        // RecruitmentContext.event_position — NOT the party's current position.
+        //
+        // If the party position were used instead, execute_recruit_to_party would call
+        // remove_event on the wrong tile, the removal would silently fail, and the
+        // recruitable mesh would stay visible on the map until the party walked over it.
+        use crate::application::resources::GameContent;
+        use crate::domain::dialogue::{DialogueNode, DialogueTree};
+        use crate::game::resources::GlobalState;
+        use crate::game::systems::dialogue::PendingRecruitmentContext;
+        use crate::game::systems::ui::GameLog;
+        use crate::sdk::database::ContentDatabase;
+        use bevy::prelude::{App, ButtonInput, KeyCode};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
+        app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(EventPlugin);
+        app.add_plugins(crate::game::systems::dialogue::DialoguePlugin);
+        app.insert_resource(ButtonInput::<KeyCode>::default());
+
+        // Party stands one tile away from the recruitable character — simulate an
+        // adjacent-tile interaction where event_pos != party_pos.
+        let party_pos = Position::new(7, 14);
+        let event_pos = Position::new(7, 15);
+        assert_ne!(
+            party_pos, event_pos,
+            "test requires distinct party and event positions"
+        );
+
+        let recruitable_event = MapEvent::RecruitableCharacter {
+            character_id: "gareth".to_string(),
+            name: "Old Gareth".to_string(),
+            description: "A grizzled dwarf veteran stands nearby.".to_string(),
+            dialogue_id: Some(200u16),
+            time_condition: None,
+            facing: None,
+        };
+
+        let mut map = Map::new(1, "Adjacent Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(event_pos, recruitable_event.clone());
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        // Party is at party_pos, one tile away from the event.
+        game_state.world.set_party_position(party_pos);
+
+        let mut tree = DialogueTree::new(200, "Gareth Recruitment".to_string(), 1);
+        let node = DialogueNode::new(1, "Hail, adventurer! Room for one more?");
+        tree.add_node(node);
+
+        let mut db = ContentDatabase::new();
+        db.dialogues.add_dialogue(tree);
+
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(db));
+        // Start with empty context — handle_events must populate it with event_pos.
+        app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(GameLog::default());
+
+        // Fire the MapEventTriggered message with position = event_pos (the adjacent tile),
+        // exactly as try_interact_npc_or_recruitable would do.
+        {
+            let mut messages = app
+                .world_mut()
+                .resource_mut::<Messages<MapEventTriggered>>();
+            messages.write(MapEventTriggered {
+                event: recruitable_event,
+                position: event_pos, // adjacent tile where the event actually lives
+            });
+        }
+
+        app.update();
+        app.update();
+
+        // The game mode must have entered Dialogue.
+        let global_state = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(
+                global_state.0.mode,
+                crate::application::GameMode::Dialogue(_)
+            ),
+            "Adjacent-tile recruitable interaction should enter Dialogue mode"
+        );
+
+        if let crate::application::GameMode::Dialogue(dialogue_state) = &global_state.0.mode {
+            // Critical assertion: event_position must be the event tile, not the party tile.
+            // A wrong value here means remove_event targets the wrong tile and the mesh persists.
+            assert_eq!(
+                dialogue_state.recruitment_context,
+                Some(crate::application::dialogue::RecruitmentContext {
+                    character_id: "gareth".to_string(),
+                    event_position: event_pos,
+                }),
+                "event_position must equal trigger.position (the event tile), \
+                 not the party position — using the party position breaks adjacent-tile recruitment"
+            );
+            assert_ne!(
+                dialogue_state
+                    .recruitment_context
+                    .as_ref()
+                    .map(|ctx| ctx.event_position),
+                Some(party_pos),
+                "event_position must NOT be the party position when interacting from an adjacent tile"
+            );
+        }
     }
 
     #[test]

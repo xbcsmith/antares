@@ -1192,6 +1192,357 @@ pub fn validate_recruitable_character_references(
     results
 }
 
+// =============================================================================
+// Spell Validation Functions
+// =============================================================================
+
+/// Validates spell data integrity: duplicate IDs and level range.
+///
+/// Checks that all spells have unique IDs and that their levels are within
+/// the valid range of 1 through 7 (inclusive).
+///
+/// # Arguments
+///
+/// * `spells` - Slice of spell definitions to validate
+///
+/// # Returns
+///
+/// A vector of [`ValidationResult`] containing errors for each problem found,
+/// or a single `Passed` result if all checks succeed.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::validation::validate_spell_data_integrity;
+/// use antares::domain::magic::types::{Spell, SpellSchool, SpellContext, SpellTarget};
+///
+/// let spells = vec![
+///     Spell::new(0x0101, "Heal", SpellSchool::Cleric, 1, 3, 0,
+///         SpellContext::Anytime, SpellTarget::SingleCharacter, "Heals", None, 0, false),
+/// ];
+/// let results = validate_spell_data_integrity(&spells);
+/// assert_eq!(results.len(), 1);
+/// assert!(results[0].is_passed());
+/// ```
+pub fn validate_spell_data_integrity(
+    spells: &[antares::domain::magic::types::Spell],
+) -> Vec<ValidationResult> {
+    let mut results = Vec::new();
+
+    // Check for duplicate spell IDs
+    let mut seen_ids = std::collections::HashSet::new();
+    for spell in spells {
+        if !seen_ids.insert(spell.id) {
+            results.push(ValidationResult::error(
+                ValidationCategory::Spells,
+                format!(
+                    "Duplicate spell ID {}: '{}' shares its ID with another spell",
+                    spell.id, spell.name
+                ),
+            ));
+        }
+    }
+
+    // Check that each spell's level is within the valid range 1..=7
+    for spell in spells {
+        if spell.level < 1 || spell.level > 7 {
+            results.push(ValidationResult::error(
+                ValidationCategory::Spells,
+                format!(
+                    "Spell '{}' (ID: {}) has level {} which is outside the valid range 1-7",
+                    spell.name, spell.id, spell.level
+                ),
+            ));
+        }
+    }
+
+    if results.is_empty() {
+        results.push(ValidationResult::passed(
+            ValidationCategory::Spells,
+            "All spell data integrity checks passed".to_string(),
+        ));
+    }
+
+    results
+}
+
+/// Validates that item `spell_effect` fields reference known spell IDs.
+///
+/// # Arguments
+///
+/// * `items`  - Slice of item definitions to validate
+/// * `spells` - Slice of known spell definitions
+///
+/// # Returns
+///
+/// A vector of [`ValidationResult`] containing errors for each item whose
+/// `spell_effect` ID does not match any entry in `spells`, or a single
+/// `Passed` result when all references are valid.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::validation::validate_item_spell_effects;
+/// use antares::domain::items::types::Item;
+/// use antares::domain::magic::types::Spell;
+///
+/// let items: Vec<Item> = vec![];
+/// let spells: Vec<Spell> = vec![];
+/// let results = validate_item_spell_effects(&items, &spells);
+/// assert_eq!(results.len(), 1);
+/// assert!(results[0].is_passed());
+/// ```
+pub fn validate_item_spell_effects(
+    items: &[antares::domain::items::types::Item],
+    spells: &[antares::domain::magic::types::Spell],
+) -> Vec<ValidationResult> {
+    let mut results = Vec::new();
+    let spell_ids: std::collections::HashSet<antares::domain::types::SpellId> =
+        spells.iter().map(|s| s.id).collect();
+
+    for item in items {
+        if let Some(spell_id) = item.spell_effect {
+            if !spell_ids.contains(&spell_id) {
+                results.push(ValidationResult::error(
+                    ValidationCategory::Items,
+                    format!(
+                        "Item '{}' (ID: {}) has spell_effect ID {} which does not reference a known spell",
+                        item.name, item.id, spell_id
+                    ),
+                ));
+            }
+        }
+    }
+
+    if results.is_empty() {
+        results.push(ValidationResult::passed(
+            ValidationCategory::Items,
+            "All item spell effect references are valid".to_string(),
+        ));
+    }
+
+    results
+}
+
+/// Validates that consumable item spell effects reference known spell IDs.
+///
+/// Checks [`ConsumableEffect::CastSpell`] and [`ConsumableEffect::LearnSpell`]
+/// variants to ensure the embedded spell ID exists in the known spell list.
+///
+/// # Arguments
+///
+/// * `items`  - Slice of item definitions to validate
+/// * `spells` - Slice of known spell definitions
+///
+/// # Returns
+///
+/// A vector of [`ValidationResult`] with errors for each invalid reference,
+/// or a single `Passed` result when all consumable spell effects are valid.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::validation::validate_consumable_spell_effects;
+/// use antares::domain::items::types::Item;
+/// use antares::domain::magic::types::Spell;
+///
+/// let items: Vec<Item> = vec![];
+/// let spells: Vec<Spell> = vec![];
+/// let results = validate_consumable_spell_effects(&items, &spells);
+/// assert_eq!(results.len(), 1);
+/// assert!(results[0].is_passed());
+/// ```
+pub fn validate_consumable_spell_effects(
+    items: &[antares::domain::items::types::Item],
+    spells: &[antares::domain::magic::types::Spell],
+) -> Vec<ValidationResult> {
+    use antares::domain::items::types::{ConsumableEffect, ItemType};
+
+    let mut results = Vec::new();
+    let spell_ids: std::collections::HashSet<antares::domain::types::SpellId> =
+        spells.iter().map(|s| s.id).collect();
+
+    for item in items {
+        if let ItemType::Consumable(ref data) = item.item_type {
+            let spell_id_opt = match &data.effect {
+                ConsumableEffect::CastSpell(sid) => Some(*sid),
+                ConsumableEffect::LearnSpell(sid) => Some(*sid),
+                _ => None,
+            };
+
+            if let Some(spell_id) = spell_id_opt {
+                if !spell_ids.contains(&spell_id) {
+                    results.push(ValidationResult::error(
+                        ValidationCategory::Items,
+                        format!(
+                            "Item '{}' (ID: {}) has consumable spell effect ID {} which does not reference a known spell",
+                            item.name, item.id, spell_id
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    if results.is_empty() {
+        results.push(ValidationResult::passed(
+            ValidationCategory::Items,
+            "All consumable spell effect references are valid".to_string(),
+        ));
+    }
+
+    results
+}
+
+/// Validates that `LearnSpell` actions in dialogue trees reference known spell IDs.
+///
+/// Iterates every node (both node-level `actions` and per-choice `actions`) in
+/// every [`DialogueTree`] and reports errors for any
+/// [`DialogueAction::LearnSpell`] whose `spell_id` is not present in `spells`.
+///
+/// # Arguments
+///
+/// * `dialogues` - Slice of dialogue trees to validate
+/// * `spells`    - Slice of known spell definitions
+///
+/// # Returns
+///
+/// A vector of [`ValidationResult`] with errors for each invalid reference,
+/// or a single `Passed` result when all learn-spell actions are valid.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::validation::validate_dialogue_learn_spell_actions;
+/// use antares::domain::dialogue::DialogueTree;
+/// use antares::domain::magic::types::Spell;
+///
+/// let dialogues: Vec<DialogueTree> = vec![];
+/// let spells: Vec<Spell> = vec![];
+/// let results = validate_dialogue_learn_spell_actions(&dialogues, &spells);
+/// assert_eq!(results.len(), 1);
+/// assert!(results[0].is_passed());
+/// ```
+pub fn validate_dialogue_learn_spell_actions(
+    dialogues: &[antares::domain::dialogue::DialogueTree],
+    spells: &[antares::domain::magic::types::Spell],
+) -> Vec<ValidationResult> {
+    use antares::domain::dialogue::DialogueAction;
+
+    let mut results = Vec::new();
+    let spell_ids: std::collections::HashSet<antares::domain::types::SpellId> =
+        spells.iter().map(|s| s.id).collect();
+
+    for dialogue in dialogues {
+        for (node_id, node) in &dialogue.nodes {
+            // Check node-level actions
+            for action in &node.actions {
+                if let DialogueAction::LearnSpell { spell_id, .. } = action {
+                    if !spell_ids.contains(spell_id) {
+                        results.push(ValidationResult::error(
+                            ValidationCategory::Dialogues,
+                            format!(
+                                "Dialogue '{}' (ID: {}), node {}: LearnSpell action references unknown spell ID {}",
+                                dialogue.name, dialogue.id, node_id, spell_id
+                            ),
+                        ));
+                    }
+                }
+            }
+
+            // Check actions attached to each choice
+            for choice in &node.choices {
+                for action in &choice.actions {
+                    if let DialogueAction::LearnSpell { spell_id, .. } = action {
+                        if !spell_ids.contains(spell_id) {
+                            results.push(ValidationResult::error(
+                                ValidationCategory::Dialogues,
+                                format!(
+                                    "Dialogue '{}' (ID: {}), node {}: choice LearnSpell action references unknown spell ID {}",
+                                    dialogue.name, dialogue.id, node_id, spell_id
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if results.is_empty() {
+        results.push(ValidationResult::passed(
+            ValidationCategory::Dialogues,
+            "All dialogue learn spell actions reference valid spells".to_string(),
+        ));
+    }
+
+    results
+}
+
+/// Validates that `LearnSpell` quest rewards reference known spell IDs.
+///
+/// Iterates every reward in every [`Quest`] and reports errors for any
+/// [`QuestReward::LearnSpell`] whose `spell_id` is not present in `spells`.
+///
+/// # Arguments
+///
+/// * `quests` - Slice of quest definitions to validate
+/// * `spells` - Slice of known spell definitions
+///
+/// # Returns
+///
+/// A vector of [`ValidationResult`] with errors for each invalid reference,
+/// or a single `Passed` result when all learn-spell rewards are valid.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::validation::validate_quest_learn_spell_rewards;
+/// use antares::domain::quest::Quest;
+/// use antares::domain::magic::types::Spell;
+///
+/// let quests: Vec<Quest> = vec![];
+/// let spells: Vec<Spell> = vec![];
+/// let results = validate_quest_learn_spell_rewards(&quests, &spells);
+/// assert_eq!(results.len(), 1);
+/// assert!(results[0].is_passed());
+/// ```
+pub fn validate_quest_learn_spell_rewards(
+    quests: &[antares::domain::quest::Quest],
+    spells: &[antares::domain::magic::types::Spell],
+) -> Vec<ValidationResult> {
+    use antares::domain::quest::QuestReward;
+
+    let mut results = Vec::new();
+    let spell_ids: std::collections::HashSet<antares::domain::types::SpellId> =
+        spells.iter().map(|s| s.id).collect();
+
+    for quest in quests {
+        for reward in &quest.rewards {
+            if let QuestReward::LearnSpell { spell_id } = reward {
+                if !spell_ids.contains(spell_id) {
+                    results.push(ValidationResult::error(
+                        ValidationCategory::Quests,
+                        format!(
+                            "Quest '{}' (ID: {}) has LearnSpell reward with unknown spell ID {}",
+                            quest.name, quest.id, spell_id
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    if results.is_empty() {
+        results.push(ValidationResult::passed(
+            ValidationCategory::Quests,
+            "All quest learn spell rewards reference valid spells".to_string(),
+        ));
+    }
+
+    results
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1914,5 +2265,434 @@ mod tests {
             "Invalid dialogue_id should produce error"
         );
         assert!(results[0].message.contains("invalid dialogue ID"));
+    }
+
+    // =========================================================================
+    // Spell Validation Function Tests
+    // =========================================================================
+
+    fn make_spell(
+        id: antares::domain::types::SpellId,
+        level: u8,
+    ) -> antares::domain::magic::types::Spell {
+        antares::domain::magic::types::Spell::new(
+            id,
+            format!("Spell {:#06x}", id),
+            antares::domain::magic::types::SpellSchool::Cleric,
+            level,
+            3,
+            0,
+            antares::domain::magic::types::SpellContext::Anytime,
+            antares::domain::magic::types::SpellTarget::SingleCharacter,
+            "Test spell description",
+            None,
+            0,
+            false,
+        )
+    }
+
+    fn make_weapon_item(
+        id: antares::domain::types::ItemId,
+        spell_effect: Option<antares::domain::types::SpellId>,
+    ) -> antares::domain::items::types::Item {
+        use antares::domain::items::types::{ItemType, WeaponClassification, WeaponData};
+        use antares::domain::types::DiceRoll;
+        antares::domain::items::types::Item {
+            id,
+            name: format!("Item {}", id),
+            item_type: ItemType::Weapon(WeaponData {
+                damage: DiceRoll::new(1, 6, 0),
+                bonus: 0,
+                hands_required: 1,
+                classification: WeaponClassification::Simple,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        }
+    }
+
+    fn make_consumable_item(
+        id: antares::domain::types::ItemId,
+        effect: antares::domain::items::types::ConsumableEffect,
+    ) -> antares::domain::items::types::Item {
+        use antares::domain::items::types::{ConsumableData, ItemType};
+        antares::domain::items::types::Item {
+            id,
+            name: format!("Consumable {}", id),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect,
+                is_combat_usable: true,
+                duration_minutes: None,
+            }),
+            base_cost: 10,
+            sell_cost: 5,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 1,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        }
+    }
+
+    // --- validate_spell_data_integrity ---
+
+    #[test]
+    fn test_validate_spell_data_integrity_valid_spells_returns_passed() {
+        let spells = vec![
+            make_spell(0x0101, 1),
+            make_spell(0x0102, 3),
+            make_spell(0x0201, 7),
+        ];
+        let results = validate_spell_data_integrity(&spells);
+        assert_eq!(
+            results.len(),
+            1,
+            "Only a Passed result expected for valid spells"
+        );
+        assert!(
+            results[0].is_passed(),
+            "All valid spells should yield a Passed result"
+        );
+    }
+
+    #[test]
+    fn test_validate_spell_data_integrity_duplicate_ids_returns_error() {
+        let spells = vec![make_spell(0x0101, 1), make_spell(0x0101, 2)];
+        let results = validate_spell_data_integrity(&spells);
+        assert!(
+            results.iter().any(|r| r.is_error()),
+            "Duplicate ID should produce an error"
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.message.contains("Duplicate spell ID")),
+            "Error message should mention duplicate spell ID"
+        );
+    }
+
+    #[test]
+    fn test_validate_spell_data_integrity_level_out_of_range_returns_error() {
+        let mut spell = make_spell(0x0101, 1);
+        spell.level = 8;
+        let results = validate_spell_data_integrity(&[spell]);
+        assert!(
+            results.iter().any(|r| r.is_error()),
+            "Level 8 should produce an error"
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.message.contains("outside the valid range")),
+            "Error message should mention invalid range"
+        );
+    }
+
+    #[test]
+    fn test_validate_spell_data_integrity_level_zero_returns_error() {
+        let mut spell = make_spell(0x0101, 1);
+        spell.level = 0;
+        let results = validate_spell_data_integrity(&[spell]);
+        assert!(
+            results.iter().any(|r| r.is_error()),
+            "Level 0 should produce an error"
+        );
+    }
+
+    #[test]
+    fn test_validate_spell_data_integrity_empty_spells_returns_passed() {
+        let results = validate_spell_data_integrity(&[]);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_passed(),
+            "Empty spell list should yield a Passed result"
+        );
+    }
+
+    // --- validate_item_spell_effects ---
+
+    #[test]
+    fn test_validate_item_spell_effects_no_spell_effect_returns_passed() {
+        let items = vec![make_weapon_item(1, None), make_weapon_item(2, None)];
+        let spells = vec![make_spell(0x0101, 1)];
+        let results = validate_item_spell_effects(&items, &spells);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_passed(),
+            "Items without spell_effect should yield Passed"
+        );
+    }
+
+    #[test]
+    fn test_validate_item_spell_effects_valid_spell_id_returns_passed() {
+        let items = vec![make_weapon_item(1, Some(0x0101))];
+        let spells = vec![make_spell(0x0101, 1)];
+        let results = validate_item_spell_effects(&items, &spells);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_passed(),
+            "Valid spell_effect ID should yield Passed"
+        );
+    }
+
+    #[test]
+    fn test_validate_item_spell_effects_invalid_spell_id_returns_error() {
+        let items = vec![make_weapon_item(1, Some(0x9999))];
+        let spells = vec![make_spell(0x0101, 1)];
+        let results = validate_item_spell_effects(&items, &spells);
+        assert!(
+            results.iter().any(|r| r.is_error()),
+            "Unknown spell_effect ID should produce error"
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.message.contains("does not reference a known spell")),
+            "Error message should describe the issue"
+        );
+    }
+
+    #[test]
+    fn test_validate_item_spell_effects_empty_inputs_returns_passed() {
+        let results = validate_item_spell_effects(&[], &[]);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_passed(),
+            "Empty item/spell lists should yield Passed"
+        );
+    }
+
+    // --- validate_consumable_spell_effects ---
+
+    #[test]
+    fn test_validate_consumable_spell_effects_non_spell_consumable_returns_passed() {
+        use antares::domain::items::types::ConsumableEffect;
+        let items = vec![make_consumable_item(1, ConsumableEffect::HealHp(10))];
+        let spells = vec![make_spell(0x0101, 1)];
+        let results = validate_consumable_spell_effects(&items, &spells);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_passed(),
+            "Non-spell consumable should yield Passed"
+        );
+    }
+
+    #[test]
+    fn test_validate_consumable_spell_effects_valid_cast_spell_returns_passed() {
+        use antares::domain::items::types::ConsumableEffect;
+        let items = vec![make_consumable_item(1, ConsumableEffect::CastSpell(0x0101))];
+        let spells = vec![make_spell(0x0101, 1)];
+        let results = validate_consumable_spell_effects(&items, &spells);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_passed(),
+            "Valid CastSpell ID should yield Passed"
+        );
+    }
+
+    #[test]
+    fn test_validate_consumable_spell_effects_invalid_learn_spell_returns_error() {
+        use antares::domain::items::types::ConsumableEffect;
+        let items = vec![make_consumable_item(
+            1,
+            ConsumableEffect::LearnSpell(0x9999),
+        )];
+        let spells = vec![make_spell(0x0101, 1)];
+        let results = validate_consumable_spell_effects(&items, &spells);
+        assert!(
+            results.iter().any(|r| r.is_error()),
+            "Unknown LearnSpell ID should produce error"
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.message.contains("does not reference a known spell")),
+            "Error message should describe the issue"
+        );
+    }
+
+    #[test]
+    fn test_validate_consumable_spell_effects_invalid_cast_spell_returns_error() {
+        use antares::domain::items::types::ConsumableEffect;
+        let items = vec![make_consumable_item(2, ConsumableEffect::CastSpell(0x8888))];
+        let spells = vec![make_spell(0x0101, 1)];
+        let results = validate_consumable_spell_effects(&items, &spells);
+        assert!(
+            results.iter().any(|r| r.is_error()),
+            "Unknown CastSpell ID should produce error"
+        );
+    }
+
+    #[test]
+    fn test_validate_consumable_spell_effects_empty_inputs_returns_passed() {
+        let results = validate_consumable_spell_effects(&[], &[]);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_passed(), "Empty inputs should yield Passed");
+    }
+
+    // --- validate_dialogue_learn_spell_actions ---
+
+    #[test]
+    fn test_validate_dialogue_learn_spell_actions_empty_dialogues_returns_passed() {
+        let spells = vec![make_spell(0x0101, 1)];
+        let results = validate_dialogue_learn_spell_actions(&[], &spells);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_passed(),
+            "Empty dialogue list should yield Passed"
+        );
+    }
+
+    #[test]
+    fn test_validate_dialogue_learn_spell_actions_valid_spell_id_returns_passed() {
+        use antares::domain::dialogue::{DialogueAction, DialogueNode, DialogueTree};
+        let spells = vec![make_spell(0x0101, 1)];
+
+        let mut tree = DialogueTree::new(1, "Test Dialogue", 1);
+        let mut node = DialogueNode::new(1, "Greetings, traveller!");
+        node.add_action(DialogueAction::LearnSpell {
+            spell_id: 0x0101,
+            target_character_id: None,
+        });
+        tree.add_node(node);
+
+        let results = validate_dialogue_learn_spell_actions(&[tree], &spells);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_passed(),
+            "Valid LearnSpell action should yield Passed"
+        );
+    }
+
+    #[test]
+    fn test_validate_dialogue_learn_spell_actions_invalid_spell_id_returns_error() {
+        use antares::domain::dialogue::{DialogueAction, DialogueNode, DialogueTree};
+        let spells = vec![make_spell(0x0101, 1)];
+
+        let mut tree = DialogueTree::new(2, "Sage Dialogue", 1);
+        let mut node = DialogueNode::new(1, "Learn this forbidden spell!");
+        node.add_action(DialogueAction::LearnSpell {
+            spell_id: 0x9999,
+            target_character_id: None,
+        });
+        tree.add_node(node);
+
+        let results = validate_dialogue_learn_spell_actions(&[tree], &spells);
+        assert!(
+            results.iter().any(|r| r.is_error()),
+            "Unknown spell_id in LearnSpell action should produce error"
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.message.contains("unknown spell ID")),
+            "Error message should mention unknown spell ID"
+        );
+    }
+
+    #[test]
+    fn test_validate_dialogue_learn_spell_actions_choice_invalid_spell_id_returns_error() {
+        use antares::domain::dialogue::{
+            DialogueAction, DialogueChoice, DialogueNode, DialogueTree,
+        };
+        let spells = vec![make_spell(0x0101, 1)];
+
+        let mut tree = DialogueTree::new(3, "Choice Dialogue", 1);
+        let mut node = DialogueNode::new(1, "Pick wisely.");
+        let mut choice = DialogueChoice::new("Teach me the spell", None);
+        choice.actions.push(DialogueAction::LearnSpell {
+            spell_id: 0x7777,
+            target_character_id: None,
+        });
+        node.add_choice(choice);
+        tree.add_node(node);
+
+        let results = validate_dialogue_learn_spell_actions(&[tree], &spells);
+        assert!(
+            results.iter().any(|r| r.is_error()),
+            "Unknown spell_id in choice action should produce error"
+        );
+    }
+
+    // --- validate_quest_learn_spell_rewards ---
+
+    #[test]
+    fn test_validate_quest_learn_spell_rewards_no_learn_spell_rewards_returns_passed() {
+        use antares::domain::quest::{Quest, QuestReward};
+        let spells = vec![make_spell(0x0101, 1)];
+        let mut quest = Quest::new(1, "The Goblin King", "Slay the goblin king");
+        quest.rewards.push(QuestReward::Experience(500));
+        quest.rewards.push(QuestReward::Gold(100));
+
+        let results = validate_quest_learn_spell_rewards(&[quest], &spells);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_passed(),
+            "Quest with no LearnSpell rewards should yield Passed"
+        );
+    }
+
+    #[test]
+    fn test_validate_quest_learn_spell_rewards_valid_spell_id_returns_passed() {
+        use antares::domain::quest::{Quest, QuestReward};
+        let spells = vec![make_spell(0x0101, 1)];
+        let mut quest = Quest::new(2, "Arcane Discovery", "Find the hidden tome");
+        quest
+            .rewards
+            .push(QuestReward::LearnSpell { spell_id: 0x0101 });
+
+        let results = validate_quest_learn_spell_rewards(&[quest], &spells);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_passed(),
+            "Valid LearnSpell reward should yield Passed"
+        );
+    }
+
+    #[test]
+    fn test_validate_quest_learn_spell_rewards_invalid_spell_id_returns_error() {
+        use antares::domain::quest::{Quest, QuestReward};
+        let spells = vec![make_spell(0x0101, 1)];
+        let mut quest = Quest::new(3, "Mystery Quest", "A strange quest");
+        quest
+            .rewards
+            .push(QuestReward::LearnSpell { spell_id: 0x9999 });
+
+        let results = validate_quest_learn_spell_rewards(&[quest], &spells);
+        assert!(
+            results.iter().any(|r| r.is_error()),
+            "Unknown spell ID in LearnSpell reward should produce error"
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.message.contains("unknown spell ID")),
+            "Error message should mention unknown spell ID"
+        );
+    }
+
+    #[test]
+    fn test_validate_quest_learn_spell_rewards_empty_inputs_returns_passed() {
+        let results = validate_quest_learn_spell_rewards(&[], &[]);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_passed(),
+            "Empty quest/spell lists should yield Passed"
+        );
     }
 }

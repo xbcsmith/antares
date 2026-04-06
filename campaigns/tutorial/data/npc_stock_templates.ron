@@ -204,4 +204,27 @@
         magic_slot_count: 1,
         magic_refresh_days: 7,
     ),
+    MerchantStockTemplate(
+        id: "village_elder_stock",
+        entries: [
+            TemplateStockEntry(
+                item_id: 111,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 112,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 50,
+                quantity: 1,
+                override_price: None,
+            ),
+        ],
+        magic_item_pool: [],
+        magic_slot_count: 0,
+        magic_refresh_days: 7,
+    ),
 ]

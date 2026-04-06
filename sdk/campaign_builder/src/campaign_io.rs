@@ -1916,6 +1916,37 @@ impl CampaignBuilderApp {
             .validation_errors
             .extend(self.validate_proficiency_ids());
 
+        // Spell cross-reference validation (Phase 6)
+        self.validation_state
+            .validation_errors
+            .extend(validation::validate_spell_data_integrity(
+                &self.campaign_data.spells,
+            ));
+        self.validation_state
+            .validation_errors
+            .extend(validation::validate_item_spell_effects(
+                &self.campaign_data.items,
+                &self.campaign_data.spells,
+            ));
+        self.validation_state.validation_errors.extend(
+            validation::validate_consumable_spell_effects(
+                &self.campaign_data.items,
+                &self.campaign_data.spells,
+            ),
+        );
+        self.validation_state.validation_errors.extend(
+            validation::validate_dialogue_learn_spell_actions(
+                &self.campaign_data.dialogues,
+                &self.campaign_data.spells,
+            ),
+        );
+        self.validation_state.validation_errors.extend(
+            validation::validate_quest_learn_spell_rewards(
+                &self.campaign_data.quests,
+                &self.campaign_data.spells,
+            ),
+        );
+
         // Add category status checks (passed or no data info)
         self.validation_state
             .validation_errors

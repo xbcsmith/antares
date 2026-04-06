@@ -228,6 +228,7 @@ mod tests {
             saving_throw: false,
             applied_conditions: Vec::new(),
             resurrect_hp: None,
+            effect_type: None,
         }
     }
 

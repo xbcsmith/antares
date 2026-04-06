@@ -2963,3 +2963,36 @@ fn test_dispatch_list_action_no_selection_is_noop() {
     assert!(!changed);
     assert_eq!(data.len(), 1); // nothing deleted
 }
+
+#[test]
+fn test_autocomplete_spell_selector_no_panic_on_empty() {
+    let ctx = egui::Context::default();
+    let raw_input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(800.0, 600.0),
+        )),
+        ..Default::default()
+    };
+    ctx.begin_pass(raw_input);
+
+    egui::CentralPanel::default().show(&ctx, |ui| {
+        let spells: Vec<antares::domain::magic::types::Spell> = vec![];
+        let mut selected_spell_id: antares::domain::types::SpellId = 0;
+
+        // Should not panic with an empty spell list and no active selection
+        let changed = autocomplete_spell_selector(
+            ui,
+            "spell_test",
+            "Spell:",
+            &mut selected_spell_id,
+            &spells,
+        );
+
+        assert!(!changed, "No change expected when no spells are available");
+        assert_eq!(
+            selected_spell_id, 0,
+            "SpellId should remain 0 when no spells are provided"
+        );
+    });
+}

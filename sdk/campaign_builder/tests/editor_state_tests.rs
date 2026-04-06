@@ -970,6 +970,7 @@ fn test_spells_referencing_condition_and_removal() {
         saving_throw: false,
         resurrect_hp: None,
         applied_conditions: vec!["bless".to_string()],
+        effect_type: None,
     });
 
     spells.push(Spell {
@@ -987,6 +988,7 @@ fn test_spells_referencing_condition_and_removal() {
         saving_throw: false,
         resurrect_hp: None,
         applied_conditions: vec!["burn".to_string()],
+        effect_type: None,
     });
 
     // No match for a nonexistent condition

@@ -11,7 +11,8 @@
 
 use crate::application::resources::GameContent;
 use crate::application::{GameMode, GameState, MoveHandleError};
-use crate::domain::world::{self, MovementError, VISIBILITY_RADIUS};
+use crate::domain::types::Position;
+use crate::domain::world::{self, MovementError, TerrainType, VISIBILITY_RADIUS};
 use crate::game::components::furniture::DoorState;
 use crate::game::components::FurnitureEntity;
 use crate::game::systems::combat::VictorySummaryRoot;
@@ -173,7 +174,50 @@ pub fn handle_exploration_movement(
     true
 }
 
+/// Returns `true` if `target` is a water tile and the party's Walk on Water
+/// buff is active (`active_spells.walk_on_water > 0`).
+fn should_override_water(game_state: &GameState, target: Position) -> bool {
+    game_state.active_spells.walk_on_water > 0
+        && game_state
+            .world
+            .get_current_map()
+            .and_then(|m| m.get_tile(target))
+            .is_some_and(|t| matches!(t.terrain, TerrainType::Water))
+}
+
+/// Temporarily unblocks the tile at `target` so the movement pipeline allows
+/// traversal, then restores the blocked flag afterwards.
+///
+/// The blocked flag is restored regardless of whether movement succeeded, so
+/// the map state is always left consistent.
+fn with_water_override<F>(game_state: &mut GameState, target: Position, f: F) -> bool
+where
+    F: FnOnce(&mut GameState) -> bool,
+{
+    // Unblock the water tile.
+    if let Some(map) = game_state.world.get_current_map_mut() {
+        if let Some(tile) = map.get_tile_mut(target) {
+            tile.blocked = false;
+        }
+    }
+
+    let result = f(game_state);
+
+    // Restore the water tile's blocked flag unconditionally.
+    if let Some(map) = game_state.world.get_current_map_mut() {
+        if let Some(tile) = map.get_tile_mut(target) {
+            tile.blocked = true;
+        }
+    }
+
+    result
+}
+
 /// Handles forward movement, including locked furniture-door blocking.
+///
+/// If the party has the Walk on Water buff active and the target tile is water,
+/// the tile is temporarily unblocked so `move_party_and_handle_events` proceeds
+/// normally, then the blocked flag is restored.
 fn handle_move_forward(
     game_state: &mut GameState,
     game_content: Option<&GameContent>,
@@ -197,64 +241,92 @@ fn handle_move_forward(
         return false;
     }
 
-    if let Some(content) = game_content {
-        match game_state.move_party_and_handle_events(facing, content.db()) {
-            Ok(()) => true,
-            Err(MoveHandleError::Movement(MovementError::DoorLocked(_, _))) => {
-                log_locked_door(game_log);
-                false
+    let water_override = should_override_water(game_state, target);
+
+    let mut attempt = |gs: &mut GameState| {
+        if let Some(content) = game_content {
+            match gs.move_party_and_handle_events(facing, content.db()) {
+                Ok(()) => true,
+                Err(MoveHandleError::Movement(MovementError::DoorLocked(_, _))) => {
+                    log_locked_door(game_log);
+                    false
+                }
+                Err(MoveHandleError::Movement(MovementError::Blocked(_, _))) => false,
+                Err(MoveHandleError::Movement(MovementError::OutOfBounds(_, _))) => false,
+                Err(err) => {
+                    warn!("move forward failed: {}", err);
+                    false
+                }
             }
-            Err(MoveHandleError::Movement(MovementError::Blocked(_, _))) => false,
-            Err(MoveHandleError::Movement(MovementError::OutOfBounds(_, _))) => false,
-            Err(err) => {
-                warn!("move forward failed: {}", err);
-                false
-            }
-        }
-    } else if let Some(map) = game_state.world.get_current_map() {
-        if !map.is_blocked(target) {
-            game_state.world.set_party_position(target);
-            true
         } else {
-            false
+            let can_move = gs
+                .world
+                .get_current_map()
+                .is_some_and(|m| !m.is_blocked(target));
+            if can_move {
+                gs.world.set_party_position(target);
+                true
+            } else {
+                false
+            }
         }
+    };
+
+    if water_override {
+        with_water_override(game_state, target, attempt)
     } else {
-        false
+        attempt(game_state)
     }
 }
 
 /// Handles backward movement through the same world movement path used for
 /// forward movement.
+///
+/// If the party has the Walk on Water buff active and the target tile is water,
+/// the tile is temporarily unblocked so `move_party_and_handle_events` proceeds
+/// normally, then the blocked flag is restored.
 fn handle_move_back(
     game_state: &mut GameState,
     game_content: Option<&GameContent>,
     game_log: &mut GameLog,
 ) -> bool {
     let back_facing = game_state.world.party_facing.turn_left().turn_left();
+    let target = back_facing.forward(game_state.world.party_position);
+    let water_override = should_override_water(game_state, target);
 
-    if let Some(content) = game_content {
-        match game_state.move_party_and_handle_events(back_facing, content.db()) {
-            Ok(()) => true,
-            Err(MoveHandleError::Movement(MovementError::DoorLocked(_, _))) => {
-                log_locked_door(game_log);
-                false
+    let mut attempt = |gs: &mut GameState| {
+        if let Some(content) = game_content {
+            match gs.move_party_and_handle_events(back_facing, content.db()) {
+                Ok(()) => true,
+                Err(MoveHandleError::Movement(MovementError::DoorLocked(_, _))) => {
+                    log_locked_door(game_log);
+                    false
+                }
+                Err(MoveHandleError::Movement(MovementError::Blocked(_, _))) => false,
+                Err(MoveHandleError::Movement(MovementError::OutOfBounds(_, _))) => false,
+                Err(err) => {
+                    warn!("move backward failed: {}", err);
+                    false
+                }
             }
-            Err(MoveHandleError::Movement(MovementError::Blocked(_, _))) => false,
-            Err(MoveHandleError::Movement(MovementError::OutOfBounds(_, _))) => false,
-            Err(err) => {
-                warn!("move backward failed: {}", err);
+        } else {
+            let can_move = gs
+                .world
+                .get_current_map()
+                .is_some_and(|m| !m.is_blocked(target));
+            if can_move {
+                gs.world.set_party_position(target);
+                true
+            } else {
                 false
             }
         }
+    };
+
+    if water_override {
+        with_water_override(game_state, target, attempt)
     } else {
-        let target = back_facing.forward(game_state.world.party_position);
-        if let Some(map) = game_state.world.get_current_map() {
-            if !map.is_blocked(target) {
-                game_state.world.set_party_position(target);
-                return true;
-            }
-        }
-        false
+        attempt(game_state)
     }
 }
 
@@ -377,6 +449,119 @@ mod tests {
     fn test_movement_blocked_by_cooldown_false_on_exact_boundary() {
         let blocked = movement_blocked_by_cooldown(turn_right_intent(), 2.0, 1.8, 0.2);
         assert!(!blocked);
+    }
+
+    // ── Walk on Water tests ──────────────────────────────────────────────────
+
+    fn make_world_with_water_tile() -> (crate::domain::world::World, crate::domain::types::Position)
+    {
+        use crate::domain::types::{Direction, Position};
+        use crate::domain::world::{Map, TerrainType};
+
+        let mut map = Map::new(1, "Test".to_string(), "desc".to_string(), 5, 5);
+        // Place a water tile at (2, 1) — directly north of (2, 2)
+        let water_pos = Position::new(2, 1);
+        // Mutate the existing tile in-place: set terrain to Water and blocked to
+        // true (Water tiles auto-block, so this mirrors the in-game behaviour).
+        if let Some(tile) = map.get_tile_mut(water_pos) {
+            tile.terrain = TerrainType::Water;
+            tile.blocked = true;
+        }
+
+        let mut world = crate::domain::world::World::new();
+        world.add_map(map);
+        world.set_current_map(1);
+        // Stand at (2, 2) facing North so position_ahead() == (2, 1)
+        world.set_party_position(Position::new(2, 2));
+        world.set_party_facing(Direction::North);
+
+        (world, water_pos)
+    }
+
+    #[test]
+    fn test_should_override_water_returns_false_without_buff() {
+        let mut gs = crate::application::GameState::new();
+        let (world, water_pos) = make_world_with_water_tile();
+        gs.world = world;
+        gs.active_spells.walk_on_water = 0;
+
+        assert!(!should_override_water(&gs, water_pos));
+    }
+
+    #[test]
+    fn test_should_override_water_returns_true_with_buff() {
+        let mut gs = crate::application::GameState::new();
+        let (world, water_pos) = make_world_with_water_tile();
+        gs.world = world;
+        gs.active_spells.walk_on_water = 10;
+
+        assert!(should_override_water(&gs, water_pos));
+    }
+
+    #[test]
+    fn test_should_override_water_returns_false_for_non_water_tile() {
+        use crate::domain::types::Position;
+        let mut gs = crate::application::GameState::new();
+        let (world, _) = make_world_with_water_tile();
+        gs.world = world;
+        gs.active_spells.walk_on_water = 10;
+        // (2, 2) is a normal ground tile — Position is imported at module level
+        assert!(!should_override_water(&gs, Position::new(2, 2)));
+    }
+
+    #[test]
+    fn test_with_water_override_unblocks_and_restores_tile() {
+        let mut gs = crate::application::GameState::new();
+        let (world, water_pos) = make_world_with_water_tile();
+        gs.world = world;
+
+        // Tile should be blocked before the call
+        assert!(gs
+            .world
+            .get_current_map()
+            .and_then(|m| m.get_tile(water_pos))
+            .is_some_and(|t| t.blocked));
+
+        // The closure receives an unblocked tile; we check inside and return false
+        let mut was_unblocked_during = false;
+        with_water_override(&mut gs, water_pos, |gs_inner| {
+            was_unblocked_during = gs_inner
+                .world
+                .get_current_map()
+                .and_then(|m| m.get_tile(water_pos))
+                .is_some_and(|t| !t.blocked);
+            false
+        });
+
+        assert!(
+            was_unblocked_during,
+            "tile must be unblocked inside closure"
+        );
+
+        // Tile should be restored to blocked after the call
+        assert!(
+            gs.world
+                .get_current_map()
+                .and_then(|m| m.get_tile(water_pos))
+                .is_some_and(|t| t.blocked),
+            "tile must be restored to blocked after with_water_override"
+        );
+    }
+
+    #[test]
+    fn test_with_water_override_restores_tile_even_when_closure_returns_false() {
+        let mut gs = crate::application::GameState::new();
+        let (world, water_pos) = make_world_with_water_tile();
+        gs.world = world;
+
+        let result = with_water_override(&mut gs, water_pos, |_| false);
+        assert!(!result);
+        // Tile must still be restored
+        assert!(gs
+            .world
+            .get_current_map()
+            .and_then(|m| m.get_tile(water_pos))
+            .is_some_and(|t| t.blocked));
     }
 
     #[test]
