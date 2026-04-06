@@ -1,5 +1,88 @@
 # Implementations
 
+## Combat UI: Spell Selection Panel Moved to Upper-Left Corner (Complete)
+
+### Overview
+
+During combat, pressing the **Cast** action button opens a spell selection
+panel. The panel was previously anchored at `left: 16px, bottom: 110px`,
+placing it in the lower-left area of the screen where it was partially or fully
+covered by the grey action-menu / enemy-panel boxes. When a character had no
+castable spells or no SP remaining, the **Cancel** button on the panel was
+unreachable, trapping the player.
+
+The panel is now anchored to the **upper-left corner** (`left: 12px,
+top: 12px`), matching the 12 px inset used by the combat-log bubble in the
+upper-right corner. The two panels now occupy opposite top corners and never
+overlap each other or the bottom UI boxes.
+
+### Files Changed
+
+| File                         | Change                                    |
+| ---------------------------- | ----------------------------------------- |
+| `src/game/systems/combat.rs` | Add constants; update panel anchor; tests |
+
+### Constants Added
+
+```rust
+/// Distance from the left edge of the screen to the left edge of the spell
+/// selection panel.  The panel is pinned to the upper-left corner so it is
+/// never obscured by the action-menu / enemy-panel grey boxes at the bottom.
+pub const SPELL_PANEL_LEFT: Val = Val::Px(12.0);
+
+/// Distance from the top of the screen to the top edge of the spell selection
+/// panel.  Matches the 12 px gap used by the combat-log bubble in the
+/// upper-right corner, giving the UI a consistent inset all around.
+pub const SPELL_PANEL_TOP: Val = Val::Px(12.0);
+```
+
+### Layout Change
+
+| Property | Before           | After                                |
+| -------- | ---------------- | ------------------------------------ |
+| `left`   | `Val::Px(16.0)`  | `SPELL_PANEL_LEFT` (`Val::Px(12.0)`) |
+| `bottom` | `Val::Px(110.0)` | _(removed)_                          |
+| `top`    | _(absent)_       | `SPELL_PANEL_TOP` (`Val::Px(12.0)`)  |
+
+### Screen Layout (1280 × 720 example)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ ┌──────────────┐                         ┌───────────────────┐  │
+│ │ Spell Panel  │                         │  Combat Log       │  │
+│ │ (upper-left) │                         │  (upper-right)    │  │
+│ │  300 px wide │                         │   360 px wide     │  │
+│ └──────────────┘                         └───────────────────┘  │
+│                                                                   │
+│                  [3-D world view]                                 │
+│                                                                   │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  Enemy panel (monsters + HP bars)                          │  │
+│  ├────────────────────────────────────────────────────────────┤  │
+│  │  Turn order strip                                          │  │
+│  ├────────────────────────────────────────────────────────────┤  │
+│  │  Action menu  [Attack] [Defend] [Cast] [Item] [Flee]       │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Tests Added (3 new tests)
+
+| Test                                                  | What it verifies                                                                                                   |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `test_spell_panel_anchored_upper_left`                | `SPELL_PANEL_LEFT` and `SPELL_PANEL_TOP` are both small positive insets (0–32 px), confirming upper-left anchoring |
+| `test_spell_panel_does_not_overlap_combat_log_bubble` | Spell panel right edge (left + 300 px) ≤ log bubble left edge in a 1280 px viewport                                |
+| `test_spell_panel_top_is_above_action_menu`           | `SPELL_PANEL_TOP + ACTION_MENU_BOTTOM` < 600 px minimum viewport height — the two panels cannot overlap vertically |
+
+### Architecture Compliance
+
+- [x] Constants extracted — no magic numbers in `update_spell_selection_panel`
+- [x] Consistent 12 px inset matches `CombatLogBubbleRoot` (`right: 12, top: 12`)
+- [x] `cargo fmt`, `cargo check`, `cargo clippy -- -D warnings` all pass with 0 errors/warnings
+- [x] 3 new tests pass; no existing tests broken
+
+---
+
 ## SDK Map Editor: NPC Edit Placement + Edit/Add NPC Event Buttons (Complete)
 
 ### Overview

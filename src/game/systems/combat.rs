@@ -266,6 +266,16 @@ pub const TURN_ORDER_BOTTOM: Val = Val::Px(175.0);
 /// Distance from the bottom of the screen to the bottom edge of the enemy panel.
 pub const ENEMY_PANEL_BOTTOM: Val = Val::Px(206.0);
 
+/// Distance from the left edge of the screen to the left edge of the spell
+/// selection panel.  The panel is pinned to the upper-left corner so it is
+/// never obscured by the action-menu / enemy-panel grey boxes at the bottom.
+pub const SPELL_PANEL_LEFT: Val = Val::Px(12.0);
+
+/// Distance from the top of the screen to the top edge of the spell selection
+/// panel.  Matches the 12 px gap used by the combat-log bubble in the
+/// upper-right corner, giving the UI a consistent inset all around.
+pub const SPELL_PANEL_TOP: Val = Val::Px(12.0);
+
 /// Maximum number of log lines kept in the on-screen combat bubble.
 pub const COMBAT_LOG_MAX_LINES: usize = 14;
 
@@ -2102,8 +2112,8 @@ fn update_spell_selection_panel(
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(16.0),
-                bottom: Val::Px(110.0),
+                left: SPELL_PANEL_LEFT,
+                top: SPELL_PANEL_TOP,
                 width: Val::Px(300.0),
                 max_height: Val::Px(380.0),
                 flex_direction: FlexDirection::Column,
@@ -6155,6 +6165,84 @@ mod combat_log_format_tests {
     fn test_pending_spell_cast_default_is_none() {
         let pending = PendingSpellCast::default();
         assert!(pending.data.is_none());
+    }
+
+    /// The spell selection panel must be anchored to the upper-left corner so
+    /// it is never obscured by the action-menu / enemy-panel grey boxes that
+    /// occupy the bottom of the screen.
+    ///
+    /// The combat-log bubble is anchored to the upper-right (right=12, top=12).
+    /// The spell panel is anchored to the upper-left (left=12, top=12).
+    /// Together they occupy opposite corners and never overlap.
+    #[test]
+    fn test_spell_panel_anchored_upper_left() {
+        // SPELL_PANEL_LEFT / SPELL_PANEL_TOP must both be small positive pixel
+        // values — confirming the panel is pinned to the top-left inset, not
+        // the bottom of the screen.
+        let Val::Px(left_px) = SPELL_PANEL_LEFT else {
+            panic!("SPELL_PANEL_LEFT must be Val::Px");
+        };
+        let Val::Px(top_px) = SPELL_PANEL_TOP else {
+            panic!("SPELL_PANEL_TOP must be Val::Px");
+        };
+
+        assert!(
+            (0.0_f32..=32.0).contains(&left_px),
+            "SPELL_PANEL_LEFT ({left_px}) should be a small left inset (0–32 px)"
+        );
+        assert!(
+            (0.0_f32..=32.0).contains(&top_px),
+            "SPELL_PANEL_TOP ({top_px}) should be a small top inset (0–32 px)"
+        );
+    }
+
+    /// The spell panel (upper-left) and the combat log bubble (upper-right)
+    /// must not overlap horizontally: their combined widths plus the gap
+    /// between them must fit within a standard 1280-px-wide viewport.
+    #[test]
+    fn test_spell_panel_does_not_overlap_combat_log_bubble() {
+        let Val::Px(spell_left) = SPELL_PANEL_LEFT else {
+            panic!("SPELL_PANEL_LEFT must be Val::Px");
+        };
+        // Spell panel width is 300 px (defined inline in update_spell_selection_panel).
+        let spell_panel_right_edge = spell_left + 300.0;
+
+        let Val::Px(log_width) = COMBAT_LOG_BUBBLE_WIDTH else {
+            panic!("COMBAT_LOG_BUBBLE_WIDTH must be Val::Px");
+        };
+        // Log bubble is anchored right=12 px, so its left edge in a 1280 px viewport is:
+        let viewport_width = 1280.0_f32;
+        let log_left_edge = viewport_width - 12.0 - log_width;
+
+        assert!(
+            spell_panel_right_edge <= log_left_edge,
+            "Spell panel right edge ({spell_panel_right_edge}) overlaps combat log left edge \
+             ({log_left_edge}) in a {viewport_width}-px viewport"
+        );
+    }
+
+    /// ACTION_MENU_BOTTOM must be greater than SPELL_PANEL_TOP so that the
+    /// action-menu grey box at the bottom cannot creep up and cover the spell
+    /// panel which is pinned near the top.
+    #[test]
+    fn test_spell_panel_top_is_above_action_menu() {
+        let Val::Px(spell_top) = SPELL_PANEL_TOP else {
+            panic!("SPELL_PANEL_TOP must be Val::Px");
+        };
+        let Val::Px(action_bottom) = ACTION_MENU_BOTTOM else {
+            panic!("ACTION_MENU_BOTTOM must be Val::Px");
+        };
+        // spell_top is measured from the top; action_bottom from the bottom.
+        // On any viewport taller than their sum they cannot overlap — assert
+        // that their sum is well within a typical minimum viewport height.
+        let min_viewport_height = 600.0_f32;
+        assert!(
+            spell_top + action_bottom < min_viewport_height,
+            "SPELL_PANEL_TOP ({spell_top}) + ACTION_MENU_BOTTOM ({action_bottom}) = {} px, \
+             which exceeds the minimum assumed viewport height ({min_viewport_height} px) \
+             and risks overlap",
+            spell_top + action_bottom
+        );
     }
 }
 

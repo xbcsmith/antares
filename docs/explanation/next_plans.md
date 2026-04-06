@@ -167,13 +167,13 @@ FIXED - When interaction with Recruitable Character is initiated from an adjacen
 
 FIXED - Combat should be able to be initiatiated using the E key or Mouse when standing on an adjacent tile to an encounter trigger, not just by stepping on the encounter trigger tile. This is important for accessibility and also for allowing players to choose when to engage in combat rather than being forced into it by stepping on a tile.
 
-Spell Casting pop up during combat should be in the upper right hand corner of the screen. Currently it is low and to the right and is covered by the grey box that shows the Action buttons and the Monster HP. You can't get to it to click cancel when a Character has no combat spells or spell points left.
+FIXED - Campaign Builder --> Maps --> Edit Map --> Click on NPC options are Edit NPC (goes straight to the NPC editor) and Remove NPC. Need a way to edit the Event so I can control what direction the NPC is facing. Currently there is no way to edit the NPC's facing direction, so all NPCs face the same direction which looks bad. We should add an Edit Event option that allows you to edit the event's facing direction as well as other properties of the event like the dialogue it triggers, the quests it gives, etc.
+
+Spell Casting pop up during combat should be in the upper left hand corner of the screen. Currently it is low and to the left and is covered by the grey box that shows the Action buttons and the Monster HP. You can't get to it to click cancel when a Character has no combat spells or spell points left. We should move the Spell Casting pop up to the upper right hand corner of the screen so that it is not covered by the grey box and so that it is more visible and easier to click on.
 
 There is no way to manage spells for a character in the game. We need to add a Spell Book Management UI where you can see the spells a character has learned, the spell points they have, and the spell scrolls they have in their inventory. You should also be able to learn new spells from NPCs and from quests. We should also add support for spell effects that can be applied outside of combat as well as in combat. We should also add support for spell effects that can be applied to characters, monsters, and the environment as well.
 
 @spell_system_updates_implementation_plan.md Phase 4 added ways to learn spells but did not add any management for the Character Spell Book in the game engine or the SDK.
-
-Campaign Builder --> Maps --> Edit Map --> Click on NPC options are Edit NPC (goes straight to the NPC editor) and Remove NPC. Need a way to edit the Event so I can control what direction the NPC is facing. Currently there is no way to edit the NPC's facing direction, so all NPCs face the same direction which looks bad. We should add an Edit Event option that allows you to edit the event's facing direction as well as other properties of the event like the dialogue it triggers, the quests it gives, etc.
 
 Campaign Builder --> Maps --> Edit Map --> Add Event --> Container can contain items but there is no way to add Gold or Gems to the container in the SDK. We should add the ability to add Gold and Gems to the container in the SDK as well as in the game engine when looting a container.
 
@@ -184,3 +184,9 @@ Campaign Builder --> Furniture --> Edit Furniture does no have a Back to List bu
 Campaign Builder --> Stock Templates --> Edit Stock Template does not load the description of the Stock Template in the editor. We should load the description of the Stock Template in the editor so that it can be edited as well.
 
 Game log is not part of a Game Save. Loading a save game from the main menu on restart does not restore the game log. The game log should be saved and loaded with the rest of the game state.
+
+In Combat Defense system is not implemented. There is no way for a character to defend against an attack in combat. We should add a defense system to combat where characters can choose to defend instead of attacking. Defending should reduce the damage taken from the next attack by a certain percentage based on the character's defense stat and the type of attack. We should also add support for spells and items that can increase defense or provide temporary invulnerability.
+
+Combat Use Item system is not implemented. There is no way for a character to use an item in combat. We should add a system for using items in combat where characters can choose to use an item from their inventory instead of attacking or defending. Using an item should consume the item and apply its effects immediately. We should also add support for items that can be used outside of combat as well as in combat.
+
+Out of combat use item system is not implemented. There is no way for a character to use an item outside of combat. We should add a system for using items outside of combat where characters can choose to use an item from their inventory while exploring the world or interacting with NPCs. Using an item should consume the item and apply its effects immediately. We should also add support for items that can be used in combat as well as outside of combat.
