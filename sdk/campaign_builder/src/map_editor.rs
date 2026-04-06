@@ -214,6 +214,12 @@ enum EditorAction {
         index: usize,
         placement: NpcPlacement,
     },
+    /// NPC placement was replaced (edited in-place)
+    NpcPlacementReplaced {
+        index: usize,
+        old_placement: NpcPlacement,
+        new_placement: NpcPlacement,
+    },
 }
 
 /// Undo/redo stack
@@ -1722,6 +1728,47 @@ impl MapEditorState {
         }
     }
 
+    /// Replaces an NPC placement at the given index with a new placement.
+    ///
+    /// Pushes an [`EditorAction::NpcPlacementReplaced`] onto the undo stack so the
+    /// change can be undone via [`Self::undo`].
+    ///
+    /// If `index` is out of range this is a no-op.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::map_editor::MapEditorState;
+    /// use antares::domain::world::npc::NpcPlacement;
+    /// use antares::domain::world::Map;
+    /// use antares::domain::types::{Position, Direction};
+    ///
+    /// let mut state =
+    ///     MapEditorState::new(Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10));
+    /// state.add_npc_placement(NpcPlacement::new("guard", Position::new(3, 3)));
+    /// assert_eq!(state.map.npc_placements[0].facing, None);
+    ///
+    /// let mut updated = NpcPlacement::new("guard", Position::new(3, 3));
+    /// updated.facing = Some(Direction::South);
+    /// state.replace_npc_placement(0, updated);
+    /// assert_eq!(state.map.npc_placements[0].facing, Some(Direction::South));
+    ///
+    /// state.undo();
+    /// assert_eq!(state.map.npc_placements[0].facing, None);
+    /// ```
+    pub fn replace_npc_placement(&mut self, index: usize, new_placement: NpcPlacement) {
+        if index < self.map.npc_placements.len() {
+            let old_placement = self.map.npc_placements[index].clone();
+            self.map.npc_placements[index] = new_placement.clone();
+            self.undo_stack.push(EditorAction::NpcPlacementReplaced {
+                index,
+                old_placement,
+                new_placement,
+            });
+            self.has_changes = true;
+        }
+    }
+
     /// Undoes the last action
     pub fn undo(&mut self) {
         if let Some(action) = self.undo_stack.undo() {
@@ -1761,6 +1808,15 @@ impl MapEditorState {
             EditorAction::NpcPlacementRemoved { index, placement } => {
                 self.map.npc_placements.insert(index, placement);
             }
+            EditorAction::NpcPlacementReplaced {
+                index,
+                old_placement,
+                ..
+            } => {
+                if index < self.map.npc_placements.len() {
+                    self.map.npc_placements[index] = old_placement;
+                }
+            }
         }
     }
 
@@ -1786,6 +1842,15 @@ impl MapEditorState {
             }
             EditorAction::NpcPlacementRemoved { index, .. } => {
                 self.map.npc_placements.remove(index);
+            }
+            EditorAction::NpcPlacementReplaced {
+                index,
+                new_placement,
+                ..
+            } => {
+                if index < self.map.npc_placements.len() {
+                    self.map.npc_placements[index] = new_placement;
+                }
             }
         }
     }
@@ -2557,6 +2622,9 @@ pub struct NpcPlacementEditorState {
     pub position_y: String,
     pub facing: Option<String>,
     pub dialogue_override: String,
+    /// When `Some(index)`, we are editing the existing placement at this index
+    /// rather than adding a new one.  `None` means we are creating a new placement.
+    pub editing_index: Option<usize>,
 }
 
 impl NpcPlacementEditorState {
@@ -2603,6 +2671,45 @@ impl NpcPlacementEditorState {
         self.position_y = String::new();
         self.facing = None;
         self.dialogue_override = String::new();
+        self.editing_index = None;
+    }
+
+    /// Initializes the editor state from an existing [`NpcPlacement`] for in-place editing.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - Index of the placement in `map.npc_placements`
+    /// * `placement` - The existing placement to edit
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::npc::NpcPlacement;
+    /// use antares::domain::types::{Position, Direction};
+    /// use campaign_builder::map_editor::NpcPlacementEditorState;
+    ///
+    /// let mut placement = NpcPlacement::new("village_elder", Position::new(3, 7));
+    /// placement.facing = Some(Direction::South);
+    ///
+    /// let state = NpcPlacementEditorState::from_placement(2, &placement);
+    /// assert_eq!(state.selected_npc_id, "village_elder");
+    /// assert_eq!(state.position_x, "3");
+    /// assert_eq!(state.position_y, "7");
+    /// assert_eq!(state.facing.as_deref(), Some("South"));
+    /// assert_eq!(state.editing_index, Some(2));
+    /// ```
+    pub fn from_placement(index: usize, placement: &NpcPlacement) -> Self {
+        Self {
+            selected_npc_id: placement.npc_id.clone(),
+            position_x: placement.position.x.to_string(),
+            position_y: placement.position.y.to_string(),
+            facing: placement.facing.map(|d| format!("{:?}", d)),
+            dialogue_override: placement
+                .dialogue_override
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+            editing_index: Some(index),
+        }
     }
 }
 
@@ -4016,11 +4123,53 @@ impl MapsEditorState {
                     // Drop the temporary borrow of the placement so we can mutate the placements vector.
                     let _ = placement;
 
-                    // Allow quick navigation to NPC editor for this NPC and removal
-                    ui.horizontal(|ui| {
+                    // Clone the full placement so we can use it for the Edit Placement button
+                    // after the immutable borrow of `editor.map.npc_placements` is released.
+                    let placement_clone = editor.map.npc_placements[idx].clone();
+
+                    // Allow quick navigation to NPC editor, placement editing, and removal
+                    ui.horizontal_wrapped(|ui| {
                         if ui.button("✏️ Edit NPC").clicked() {
                             requested_open_npc = Some(npc_id.clone());
                         }
+
+                        let is_editing_placement = editor
+                            .npc_placement_editor
+                            .as_ref()
+                            .and_then(|e| e.editing_index)
+                            .map(|ei| {
+                                editor
+                                    .map
+                                    .npc_placements
+                                    .get(ei)
+                                    .map(|p| p.position == pos)
+                                    .unwrap_or(false)
+                            })
+                            .unwrap_or(false);
+
+                        let edit_placement_btn = if is_editing_placement {
+                            egui::Button::new("📐 Editing Placement...")
+                                .fill(egui::Color32::from_rgb(100, 150, 255))
+                        } else {
+                            egui::Button::new("📐 Edit Placement")
+                        };
+
+                        if ui
+                            .add(edit_placement_btn)
+                            .on_hover_text(
+                                "Edit this NPC's facing direction, position, and dialogue override",
+                            )
+                            .clicked()
+                            && !is_editing_placement
+                        {
+                            editor.current_tool = EditorTool::PlaceNpc;
+                            editor.npc_placement_editor =
+                                Some(NpcPlacementEditorState::from_placement(
+                                    idx,
+                                    &placement_clone,
+                                ));
+                        }
+
                         if ui
                             .button("🗑️ Remove NPC")
                             .on_hover_text("Remove this NPC placement from the map")
@@ -4029,6 +4178,56 @@ impl MapsEditorState {
                             editor.remove_npc_placement(idx);
                         }
                     });
+
+                    // Offer to edit or create the NPC dialogue event for this placement
+                    {
+                        let has_event = editor.map.get_event(pos).is_some();
+                        let is_editing_event = editor
+                            .event_editor
+                            .as_ref()
+                            .map(|ed| ed.position == pos)
+                            .unwrap_or(false);
+
+                        let (event_btn, hover_text) = if is_editing_event {
+                            (
+                                egui::Button::new("🎭 Editing Event...")
+                                    .fill(egui::Color32::from_rgb(100, 150, 255)),
+                                "The event editor for this tile is already open below",
+                            )
+                        } else if has_event {
+                            (
+                                egui::Button::new("🎭 Edit NPC Event"),
+                                "Edit this NPC's dialogue event (facing direction, dialogue trigger, proximity behaviour, etc.)",
+                            )
+                        } else {
+                            (
+                                egui::Button::new("➕ Add NPC Event"),
+                                "Create an NPC dialogue event for this tile (controls facing direction, dialogue trigger, proximity behaviour, etc.)",
+                            )
+                        };
+
+                        if ui
+                            .add(event_btn)
+                            .on_hover_text(hover_text)
+                            .clicked()
+                            && !is_editing_event
+                        {
+                            editor.current_tool = EditorTool::PlaceEvent;
+                            if let Some(existing) = editor.map.get_event(pos).cloned() {
+                                editor.event_editor =
+                                    Some(EventEditorState::from_map_event(pos, &existing));
+                            } else {
+                                // Pre-populate a new NpcDialogue event with this NPC's ID
+                                editor.event_editor = Some(EventEditorState {
+                                    position: pos,
+                                    event_type: EventType::NpcDialogue,
+                                    npc_id: npc_id.clone(),
+                                    npc_id_input_buffer: npc_id.clone(),
+                                    ..Default::default()
+                                });
+                            }
+                        }
+                    }
                 }
 
                 if let Some(event) = editor.map.get_event(pos).cloned() {
@@ -4359,7 +4558,17 @@ impl MapsEditorState {
         // NPC placement editor (when PlaceNpc tool is active)
         if matches!(editor.current_tool, EditorTool::PlaceNpc) {
             ui.group(|ui| {
-                ui.heading("Place NPC");
+                let heading = if editor
+                    .npc_placement_editor
+                    .as_ref()
+                    .and_then(|e| e.editing_index)
+                    .is_some()
+                {
+                    "Edit NPC Placement"
+                } else {
+                    "Place NPC"
+                };
+                ui.heading(heading);
                 Self::show_npc_placement_editor(ui, editor, data.npcs);
             });
         }
@@ -5787,13 +5996,25 @@ impl MapsEditorState {
             ui.separator();
 
             let mut add_placement = false;
+            let mut replace_placement = false;
             let mut placement_to_add: Option<NpcPlacement> = None;
+            let editing_index = placement_editor.editing_index;
 
-            if ui.button("➕ Place NPC").clicked() {
+            let save_label = if editing_index.is_some() {
+                "💾 Update Placement"
+            } else {
+                "➕ Place NPC"
+            };
+
+            if ui.button(save_label).clicked() {
                 match placement_editor.to_placement() {
                     Ok(placement) => {
                         placement_to_add = Some(placement);
-                        add_placement = true;
+                        if editing_index.is_some() {
+                            replace_placement = true;
+                        } else {
+                            add_placement = true;
+                        }
                     }
                     Err(err) => {
                         ui.colored_label(egui::Color32::RED, format!("Error: {}", err));
@@ -5803,10 +6024,17 @@ impl MapsEditorState {
 
             if ui.button("❌ Cancel").clicked() {
                 editor.npc_placement_editor = None;
+                editor.current_tool = EditorTool::Select;
             }
 
             // Apply after borrow ends
-            if add_placement {
+            if replace_placement {
+                if let (Some(placement), Some(idx)) = (placement_to_add, editing_index) {
+                    editor.replace_npc_placement(idx, placement);
+                    editor.npc_placement_editor = None;
+                    editor.current_tool = EditorTool::Select;
+                }
+            } else if add_placement {
                 if let Some(placement) = placement_to_add {
                     editor.add_npc_placement(placement);
                     if let Some(ref mut ed) = editor.npc_placement_editor {
@@ -9720,5 +9948,185 @@ mod tests {
             }
             _ => panic!("Expected MapEvent::Furniture"),
         }
+    }
+
+    #[test]
+    fn test_npc_placement_editor_state_from_placement() {
+        use antares::domain::types::Direction;
+        use antares::domain::world::npc::NpcPlacement;
+
+        let mut placement = NpcPlacement::new("village_elder", Position::new(5, 9));
+        placement.facing = Some(Direction::South);
+
+        let state = NpcPlacementEditorState::from_placement(3, &placement);
+        assert_eq!(state.selected_npc_id, "village_elder");
+        assert_eq!(state.position_x, "5");
+        assert_eq!(state.position_y, "9");
+        assert_eq!(state.facing.as_deref(), Some("South"));
+        assert_eq!(state.dialogue_override, "");
+        assert_eq!(state.editing_index, Some(3));
+    }
+
+    #[test]
+    fn test_npc_placement_editor_state_from_placement_no_facing() {
+        use antares::domain::world::npc::NpcPlacement;
+
+        let placement = NpcPlacement::new("merchant", Position::new(0, 0));
+        let state = NpcPlacementEditorState::from_placement(0, &placement);
+        assert_eq!(state.facing, None);
+        assert_eq!(state.editing_index, Some(0));
+    }
+
+    #[test]
+    fn test_npc_placement_editor_state_from_placement_all_directions() {
+        use antares::domain::types::Direction;
+        use antares::domain::world::npc::NpcPlacement;
+
+        for (dir, expected) in [
+            (Direction::North, "North"),
+            (Direction::South, "South"),
+            (Direction::East, "East"),
+            (Direction::West, "West"),
+        ] {
+            let mut p = NpcPlacement::new("npc", Position::new(1, 1));
+            p.facing = Some(dir);
+            let state = NpcPlacementEditorState::from_placement(0, &p);
+            assert_eq!(
+                state.facing.as_deref(),
+                Some(expected),
+                "direction {expected} should round-trip through from_placement"
+            );
+        }
+    }
+
+    #[test]
+    fn test_npc_placement_editor_clear_resets_editing_index() {
+        use antares::domain::world::npc::NpcPlacement;
+
+        let placement = NpcPlacement::new("guard", Position::new(2, 2));
+        let mut state = NpcPlacementEditorState::from_placement(1, &placement);
+        assert_eq!(state.editing_index, Some(1));
+        state.clear();
+        assert_eq!(state.editing_index, None);
+        assert!(state.selected_npc_id.is_empty());
+    }
+
+    #[test]
+    fn test_npc_editor_state_default_editing_index_is_none() {
+        let state = NpcPlacementEditorState::default();
+        assert_eq!(state.editing_index, None);
+    }
+
+    #[test]
+    fn test_replace_npc_placement_updates_facing() {
+        use antares::domain::types::Direction;
+        use antares::domain::world::npc::NpcPlacement;
+
+        let mut state =
+            MapEditorState::new(Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10));
+        state.add_npc_placement(NpcPlacement::new("guard", Position::new(3, 3)));
+        assert_eq!(state.map.npc_placements[0].facing, None);
+
+        let mut updated = NpcPlacement::new("guard", Position::new(3, 3));
+        updated.facing = Some(Direction::South);
+        state.replace_npc_placement(0, updated);
+
+        assert_eq!(state.map.npc_placements[0].facing, Some(Direction::South));
+    }
+
+    #[test]
+    fn test_replace_npc_placement_undo_restores_original() {
+        use antares::domain::types::Direction;
+        use antares::domain::world::npc::NpcPlacement;
+
+        let mut state =
+            MapEditorState::new(Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10));
+        state.add_npc_placement(NpcPlacement::new("guard", Position::new(3, 3)));
+
+        let mut updated = NpcPlacement::new("guard", Position::new(3, 3));
+        updated.facing = Some(Direction::East);
+        state.replace_npc_placement(0, updated);
+        assert_eq!(state.map.npc_placements[0].facing, Some(Direction::East));
+
+        state.undo();
+        assert_eq!(state.map.npc_placements[0].facing, None);
+    }
+
+    #[test]
+    fn test_replace_npc_placement_redo_reapplies_update() {
+        use antares::domain::types::Direction;
+        use antares::domain::world::npc::NpcPlacement;
+
+        let mut state =
+            MapEditorState::new(Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10));
+        state.add_npc_placement(NpcPlacement::new("guard", Position::new(3, 3)));
+
+        let mut updated = NpcPlacement::new("guard", Position::new(3, 3));
+        updated.facing = Some(Direction::West);
+        state.replace_npc_placement(0, updated);
+        state.undo();
+        assert_eq!(state.map.npc_placements[0].facing, None);
+        state.redo();
+        assert_eq!(state.map.npc_placements[0].facing, Some(Direction::West));
+    }
+
+    #[test]
+    fn test_replace_npc_placement_out_of_range_noop() {
+        use antares::domain::world::npc::NpcPlacement;
+
+        let mut state =
+            MapEditorState::new(Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10));
+        state.add_npc_placement(NpcPlacement::new("guard", Position::new(3, 3)));
+        let updated = NpcPlacement::new("guard", Position::new(3, 3));
+        state.replace_npc_placement(5, updated);
+        assert_eq!(state.map.npc_placements.len(), 1);
+        assert_eq!(state.map.npc_placements[0].npc_id, "guard");
+    }
+
+    #[test]
+    fn test_replace_npc_placement_marks_has_changes() {
+        use antares::domain::world::npc::NpcPlacement;
+
+        let mut state =
+            MapEditorState::new(Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10));
+        state.add_npc_placement(NpcPlacement::new("guard", Position::new(1, 1)));
+        state.has_changes = false;
+        let updated = NpcPlacement::new("guard_v2", Position::new(1, 1));
+        state.replace_npc_placement(0, updated);
+        assert!(
+            state.has_changes,
+            "replace_npc_placement must set has_changes"
+        );
+    }
+
+    #[test]
+    fn test_add_npc_event_pre_populates_npc_id() {
+        let npc_id = "village_elder".to_string();
+        let pos = Position::new(4, 4);
+        let event_state = EventEditorState {
+            position: pos,
+            event_type: EventType::NpcDialogue,
+            npc_id: npc_id.clone(),
+            npc_id_input_buffer: npc_id.clone(),
+            ..Default::default()
+        };
+        assert_eq!(event_state.event_type, EventType::NpcDialogue);
+        assert_eq!(event_state.npc_id, "village_elder");
+        assert_eq!(event_state.npc_id_input_buffer, "village_elder");
+        assert_eq!(event_state.position, pos);
+        assert_eq!(event_state.event_facing, None);
+    }
+
+    #[test]
+    fn test_npc_placement_editor_save_label_logic() {
+        let mut state = NpcPlacementEditorState::default();
+        assert_eq!(state.editing_index, None, "default is new-placement mode");
+        state.editing_index = Some(2);
+        assert_eq!(state.editing_index, Some(2), "edit mode stores index");
+        state.clear();
+        assert_eq!(
+            state.editing_index, None,
+            "clear resets to new-placement mode"
+        );
     }
 }

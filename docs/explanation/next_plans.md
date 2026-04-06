@@ -163,11 +163,15 @@ All the doors are facing the wrong way
 
 Show/Hide Tray ICON SDK is not working
 
-When interaction with Recruitable Character is initiated from an adjacent tile, after the recruit dialog is finished and the player joins the party the Recruitable Characters mesh does not disappear until they are walked over. It should disappear immediately on recruitment. It looks remove_event` is called at the party's position instead of the adjacent tile where the event actually is, the event stays on the map, so the visual persists. The party then has to walk to that adjacent tile, triggering `check_for_events` again, which finds the `RecruitableCharacter` event but logs that it's not...
+FIXED - When interaction with Recruitable Character is initiated from an adjacent tile, after the recruit dialog is finished and the player joins the party the Recruitable Characters mesh does not disappear until they are walked over. It should disappear immediately on recruitment. It looks remove_event` is called at the party's position instead of the adjacent tile where the event actually is, the event stays on the map, so the visual persists. The party then has to walk to that adjacent tile, triggering `check_for_events` again, which finds the `RecruitableCharacter` event but logs that it's not...
 
-Game log is not part of a Game Save. Loading a save game from the main menu on restart does not restore the game log. The game log should be saved and loaded with the rest of the game state.
+FIXED - Combat should be able to be initiatiated using the E key or Mouse when standing on an adjacent tile to an encounter trigger, not just by stepping on the encounter trigger tile. This is important for accessibility and also for allowing players to choose when to engage in combat rather than being forced into it by stepping on a tile.
 
-Combat should be able to be initiatiated using the E key or Mouse when standing on an adjacent tile to an encounter trigger, not just by stepping on the encounter trigger tile. This is important for accessibility and also for allowing players to choose when to engage in combat rather than being forced into it by stepping on a tile.
+Spell Casting pop up during combat should be in the upper right hand corner of the screen. Currently it is low and to the right and is covered by the grey box that shows the Action buttons and the Monster HP. You can't get to it to click cancel when a Character has no combat spells or spell points left.
+
+There is no way to manage spells for a character in the game. We need to add a Spell Book Management UI where you can see the spells a character has learned, the spell points they have, and the spell scrolls they have in their inventory. You should also be able to learn new spells from NPCs and from quests. We should also add support for spell effects that can be applied outside of combat as well as in combat. We should also add support for spell effects that can be applied to characters, monsters, and the environment as well.
+
+@spell_system_updates_implementation_plan.md Phase 4 added ways to learn spells but did not add any management for the Character Spell Book in the game engine or the SDK.
 
 Campaign Builder --> Maps --> Edit Map --> Click on NPC options are Edit NPC (goes straight to the NPC editor) and Remove NPC. Need a way to edit the Event so I can control what direction the NPC is facing. Currently there is no way to edit the NPC's facing direction, so all NPCs face the same direction which looks bad. We should add an Edit Event option that allows you to edit the event's facing direction as well as other properties of the event like the dialogue it triggers, the quests it gives, etc.
 
@@ -178,3 +182,5 @@ Campaign Builder --> Maps --> Edit Map --> Edit Event in the right column the Ev
 Campaign Builder --> Furniture --> Edit Furniture does no have a Back to List button that is required to get back to the list of furniture. We should add a Back to List button to the Edit Furniture screen that takes you back to the list of furniture.
 
 Campaign Builder --> Stock Templates --> Edit Stock Template does not load the description of the Stock Template in the editor. We should load the description of the Stock Template in the editor so that it can be edited as well.
+
+Game log is not part of a Game Save. Loading a save game from the main menu on restart does not restore the game log. The game log should be saved and loaded with the rest of the game state.

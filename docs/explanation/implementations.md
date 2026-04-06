@@ -1,5 +1,132 @@
 # Implementations
 
+## SDK Map Editor: NPC Edit Placement + Edit/Add NPC Event Buttons (Complete)
+
+### Overview
+
+When a content author clicks on a tile that contains an NPC placement in the
+Campaign Builder's Map Editor, the Inspector panel previously offered only two
+actions: **Edit NPC** (navigate to the NPC editor) and **Remove NPC** (delete
+the placement). There was no way to change the NPC's facing direction, position,
+or dialogue override after initial placement, and no shortcut to open or create
+the dialogue event that controls facing, proximity-turn behaviour, and the
+dialogue tree. All NPCs consequently defaulted to the same facing direction.
+
+Two new capabilities were added:
+
+1. **"📐 Edit Placement"** — opens the NPC placement editor pre-filled with the
+   existing placement's data (NPC ID, position, facing direction, dialogue
+   override) so the author can update any field and click **"💾 Update
+   Placement"** to save in-place with full undo/redo support.
+
+2. **"🎭 Edit NPC Event" / "➕ Add NPC Event"** — if a `MapEvent::NpcDialogue`
+   (or any other event) already exists on the tile, opens the event editor
+   pre-loaded with that event; otherwise creates a new `NpcDialogue` event
+   pre-populated with the NPC's ID so the author only needs to set the facing
+   direction, proximity-facing toggle, rotation speed, and dialogue ID.
+
+### Files Changed
+
+| File                                     | Change            |
+| ---------------------------------------- | ----------------- |
+| `sdk/campaign_builder/src/map_editor.rs` | All changes below |
+
+### Data-Structure Changes
+
+#### `EditorAction::NpcPlacementReplaced` (new variant)
+
+```rust
+NpcPlacementReplaced {
+    index: usize,
+    old_placement: NpcPlacement,
+    new_placement: NpcPlacement,
+}
+```
+
+Enables undo (`old_placement` restored) and redo (`new_placement` re-applied)
+for in-place placement edits, consistent with the existing
+`NpcPlacementRemoved` pattern.
+
+#### `NpcPlacementEditorState::editing_index: Option<usize>` (new field)
+
+`None` = creating a new placement (existing behaviour); `Some(i)` = editing the
+placement at index `i` in `map.npc_placements`. `clear()` resets it to `None`.
+
+### New Methods
+
+#### `NpcPlacementEditorState::from_placement(index, placement)`
+
+Pre-fills all editor fields from an existing `NpcPlacement` and sets
+`editing_index = Some(index)`. Facing directions are serialised with
+`format!("{:?}", dir)` so they round-trip through the existing combo-box
+strings (`"North"`, `"South"`, `"East"`, `"West"`).
+
+#### `MapEditorState::replace_npc_placement(index, new_placement)`
+
+Replaces `map.npc_placements[index]` in-place, pushes
+`EditorAction::NpcPlacementReplaced` onto the undo stack, and sets
+`has_changes = true`. Out-of-range indices are a no-op.
+
+### UI Changes
+
+#### Inspector panel — NPC section
+
+- `ui.horizontal` → `ui.horizontal_wrapped` (accommodates three buttons).
+- **"📐 Edit Placement"** button added between "✏️ Edit NPC" and "🗑️ Remove
+  NPC". While editing, it renders as **"📐 Editing Placement..."** with a blue
+  fill (matching the existing "✏️ Editing..." style used by events).
+- New **"🎭 Edit NPC Event"** / **"➕ Add NPC Event"** button block below the
+  main row:
+  - If an event exists at the position → loads it into `EventEditorState` via
+    `from_map_event` and switches to `PlaceEvent` tool.
+  - If no event exists → creates a fresh `EventEditorState` with
+    `event_type = NpcDialogue` and `npc_id` / `npc_id_input_buffer` pre-filled
+    with the placement's NPC ID, then switches to `PlaceEvent` tool.
+  - While the event editor is already open for this tile → renders as
+    **"🎭 Editing Event..."** with a blue fill and is non-interactive.
+
+#### NPC placement editor panel heading
+
+Changes from `"Place NPC"` to `"Edit NPC Placement"` when `editing_index` is
+`Some`, giving the author clear visual confirmation of which mode is active.
+
+#### `show_npc_placement_editor` save/cancel logic
+
+- Save button label: **"💾 Update Placement"** (edit mode) vs **"➕ Place NPC"**
+  (new-placement mode).
+- In edit mode, save calls `replace_npc_placement(idx, placement)`, clears the
+  editor, and returns to `Select` tool.
+- **"❌ Cancel"** now also resets `current_tool` to `Select` in both modes.
+
+### Tests Added (12 new tests in `map_editor.rs`)
+
+| Test                                                            | What it verifies                                                                                         |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `test_npc_placement_editor_state_from_placement`                | All fields populated correctly, `editing_index = Some(3)`                                                |
+| `test_npc_placement_editor_state_from_placement_no_facing`      | `facing = None` when placement has no facing                                                             |
+| `test_npc_placement_editor_state_from_placement_all_directions` | All four `Direction` variants round-trip                                                                 |
+| `test_npc_placement_editor_clear_resets_editing_index`          | `clear()` resets `editing_index` to `None`                                                               |
+| `test_npc_editor_state_default_editing_index_is_none`           | Default state is new-placement mode                                                                      |
+| `test_replace_npc_placement_updates_facing`                     | In-place replacement updates the facing field                                                            |
+| `test_replace_npc_placement_undo_restores_original`             | Undo restores the original placement                                                                     |
+| `test_replace_npc_placement_redo_reapplies_update`              | Redo re-applies the updated placement                                                                    |
+| `test_replace_npc_placement_out_of_range_noop`                  | Out-of-range index is a no-op                                                                            |
+| `test_replace_npc_placement_marks_has_changes`                  | `has_changes` is set to `true`                                                                           |
+| `test_add_npc_event_pre_populates_npc_id`                       | `EventEditorState` pre-population fills `npc_id` and `npc_id_input_buffer`, `event_facing` starts `None` |
+| `test_npc_placement_editor_save_label_logic`                    | `editing_index` drives the button-label selection                                                        |
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md Section 4 (NpcPlacement, MapEvent::NpcDialogue)
+- [x] Module placement: all changes in `sdk/campaign_builder/src/map_editor.rs`
+- [x] `EditorAction` undo/redo pattern extended consistently with existing variants
+- [x] `egui` ID rules: new buttons use unique IDs, no loops without `push_id`
+- [x] No architectural deviations — new UI builds on existing `EventEditorState`
+      and `NpcPlacementEditorState` patterns
+- [x] `cargo fmt`, `cargo check`, `cargo clippy -- -D warnings` all pass with 0 errors/warnings
+
+---
+
 ## Feature: Encounter Interaction from Adjacent Tile + Immediate Monster Mesh Despawn on Victory
 
 ### Overview
