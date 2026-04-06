@@ -126,6 +126,11 @@
         description: "A relentless elven mage who delights in using the arcane arts against others. Sirius is perfect for players who want to learn how spellcasting works.",
         is_premade: true,
         starts_in_party: true,
+        starting_spells: [
+            1027,
+            257,
+            1030,
+        ],
     ),
     (
         id: "tutorial_human_cleric",
@@ -189,6 +194,11 @@
         description: "A kind-hearted healer from the local temple. Mira\'s divine magic can mend wounds and cure ailments, teaching players the value of support characters.",
         is_premade: true,
         starts_in_party: true,
+        starting_spells: [
+            261,
+            258,
+            260,
+        ],
     ),
     (
         id: "old_gareth",
@@ -382,6 +392,11 @@
         is_premade: true,
         starts_in_party: false,
         creature_id: Some(1008),
+        starting_spells: [
+            1027,
+            257,
+            261,
+        ],
     ),
     (
         id: "template_human_fighter",

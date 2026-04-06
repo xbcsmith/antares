@@ -70,6 +70,7 @@ fn main() {
     let camera_config = campaign.game_config.camera.clone();
     let controls_config = campaign.game_config.controls.clone();
     let audio_config = campaign.game_config.audio.clone();
+    let audio_dir = campaign.assets.audio.clone();
 
     // Configure window plugin from graphics config
     let window_plugin = WindowPlugin {
@@ -144,6 +145,7 @@ fn main() {
     .add_plugins(antares::game::systems::events::EventPlugin)
     .add_plugins(antares::game::systems::audio::AudioPlugin {
         config: audio_config,
+        audio_dir,
     })
     .add_plugins(antares::game::systems::ui::UiPlugin);
 
@@ -374,6 +376,7 @@ mod tests {
             },
             assets: CampaignAssets {
                 tilesets: "assets/tilesets".to_string(),
+                audio: "assets/audio".to_string(),
                 music: "assets/music".to_string(),
                 sounds: "assets/sounds".to_string(),
                 images: "assets/images".to_string(),

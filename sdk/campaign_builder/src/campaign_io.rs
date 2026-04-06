@@ -1948,7 +1948,7 @@ impl CampaignBuilderApp {
         );
         self.validation_state.validation_errors.extend(
             validation::validate_character_starting_spells(
-                &self.campaign_data.characters,
+                &self.editor_registry.characters_editor_state.characters,
                 &self.campaign_data.spells,
             ),
         );

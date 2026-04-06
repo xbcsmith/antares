@@ -2037,6 +2037,8 @@ impl CharactersEditorState {
                 }
 
                 ui.add_space(10.0);
+                ui.heading("Starting Spells");
+
                 self.show_starting_spells_editor(ui, spells, classes);
 
                 ui.add_space(10.0);
@@ -2119,117 +2121,117 @@ impl CharactersEditorState {
         available_spells: &[Spell],
         classes: &[ClassDefinition],
     ) {
-        egui::CollapsingHeader::new("📚 Starting Spells")
-            .id_salt("starting_spells_header")
-            .default_open(false)
-            .show(ui, |ui| {
-                // Non-caster warning: shown when the class has no spell school and spells
-                // are defined. The spells are still stored (serialised), but will have no
-                // effect at runtime.
-                let is_non_caster = classes
-                    .iter()
-                    .find(|c| c.id == self.buffer.class_id)
-                    .map(|c| c.spell_school.is_none())
-                    .unwrap_or(false);
+        // Non-caster warning: shown when the class has no spell school and spells
+        // are defined. The spells are still stored (serialised), but will have no
+        // effect at runtime.
+        let is_non_caster = classes
+            .iter()
+            .find(|c| c.id == self.buffer.class_id)
+            .map(|c| c.spell_school.is_none())
+            .unwrap_or(false);
 
-                if is_non_caster && !self.buffer.starting_spells.is_empty() {
-                    ui.colored_label(
-                        egui::Color32::YELLOW,
-                        format!(
-                            "⚠ \"{}\" cannot cast spells; starting spells are stored but \
-                             have no in-game effect.",
-                            self.buffer.class_id
-                        ),
-                    );
-                    ui.add_space(4.0);
-                }
+        if is_non_caster && !self.buffer.starting_spells.is_empty() {
+            ui.colored_label(
+                egui::Color32::YELLOW,
+                format!(
+                    "⚠ \"{}\" cannot cast spells; starting spells are stored but \
+                     have no in-game effect.",
+                    self.buffer.class_id
+                ),
+            );
+            ui.add_space(4.0);
+        }
 
-                // "Add Spell" autocomplete selector — uses a staging ID in the buffer.
-                // When the user picks a spell the staging ID is set, then immediately
-                // pushed to `starting_spells` (dedup-checked) and reset to 0.
-                let add_changed = autocomplete_spell_selector(
-                    ui,
-                    "starting_spells_add",
-                    "Add Spell:",
-                    &mut self.buffer.starting_spell_add_id,
-                    available_spells,
-                );
-                if add_changed && self.buffer.starting_spell_add_id != 0 {
-                    let spell_id = self.buffer.starting_spell_add_id;
-                    if !self.buffer.starting_spells.contains(&spell_id) {
-                        self.buffer.starting_spells.push(spell_id);
-                        self.has_unsaved_changes = true;
-                    }
-                    // Reset staging ID and clear the autocomplete text buffer so the
-                    // picker shows empty on the next frame, ready for a new entry.
-                    self.buffer.starting_spell_add_id = 0;
-                    crate::ui_helpers::remove_autocomplete_buffer(
-                        ui.ctx(),
-                        egui::Id::new("autocomplete:spell:starting_spells_add"),
-                    );
-                }
+        // "Add Spell" autocomplete selector — uses a staging ID in the buffer.
+        // When the user picks a spell the staging ID is set, then immediately
+        // pushed to `starting_spells` (dedup-checked) and reset to 0.
+        let add_changed = autocomplete_spell_selector(
+            ui,
+            "starting_spells_add",
+            "Add Spell:",
+            &mut self.buffer.starting_spell_add_id,
+            available_spells,
+        );
+        if add_changed && self.buffer.starting_spell_add_id != 0 {
+            let spell_id = self.buffer.starting_spell_add_id;
+            if !self.buffer.starting_spells.contains(&spell_id) {
+                self.buffer.starting_spells.push(spell_id);
+                self.has_unsaved_changes = true;
+            }
+            // Reset staging ID and clear the autocomplete text buffer so the
+            // picker shows empty on the next frame, ready for a new entry.
+            self.buffer.starting_spell_add_id = 0;
+            crate::ui_helpers::remove_autocomplete_buffer(
+                ui.ctx(),
+                egui::Id::new("autocomplete:spell:starting_spells_add"),
+            );
+        }
 
-                ui.add_space(4.0);
+        ui.add_space(4.0);
 
-                if self.buffer.starting_spells.is_empty() {
-                    ui.label(egui::RichText::new("No starting spells defined.").italics());
-                } else {
-                    // Capture the current list as an owned clone so that we can mutably
-                    // borrow `self` inside and after the UI closures without conflict.
-                    let spell_ids = self.buffer.starting_spells.clone();
-                    let mut remove_idx: Option<usize> = None;
+        if self.buffer.starting_spells.is_empty() {
+            ui.label(egui::RichText::new("No starting spells defined.").italics());
+        } else {
+            // Capture the current list as an owned clone so that we can mutably
+            // borrow `self` inside and after the UI closures without conflict.
+            let spell_ids = self.buffer.starting_spells.clone();
+            let mut remove_idx: Option<usize> = None;
 
-                    egui::ScrollArea::vertical()
-                        .id_salt("starting_spells_scroll")
-                        .max_height(200.0)
+            egui::ScrollArea::vertical()
+                .id_salt("starting_spells_scroll")
+                .max_height(200.0)
+                .show(ui, |ui| {
+                    egui::Grid::new("starting_spells_grid")
+                        .num_columns(5)
+                        .spacing([10.0, 2.0])
                         .show(ui, |ui| {
-                            egui::Grid::new("starting_spells_grid")
-                                .num_columns(5)
-                                .spacing([10.0, 2.0])
-                                .show(ui, |ui| {
-                                    // Header row
-                                    ui.label(egui::RichText::new("Slot").strong());
-                                    ui.label(egui::RichText::new("Name").strong());
-                                    ui.label(egui::RichText::new("School").strong());
-                                    ui.label(egui::RichText::new("Level").strong());
-                                    ui.label(""); // remove-button column
-                                    ui.end_row();
+                            // Header row
+                            ui.label(egui::RichText::new("Slot").strong());
+                            ui.label(egui::RichText::new("Name").strong());
+                            ui.label(egui::RichText::new("School").strong());
+                            ui.label(egui::RichText::new("Level").strong());
+                            ui.label(""); // remove-button column
+                            ui.end_row();
 
-                                    // Data rows — each row wrapped in push_id (SDK Rule 1)
-                                    for (idx, &spell_id) in spell_ids.iter().enumerate() {
-                                        ui.push_id(idx, |ui| {
-                                            ui.label(format!("{}", idx + 1));
-                                            if let Some(spell) =
-                                                available_spells.iter().find(|s| s.id == spell_id)
-                                            {
-                                                ui.label(&spell.name);
-                                                ui.label(format!("{:?}", spell.school));
-                                                ui.label(format!("{}", spell.level));
-                                            } else {
-                                                ui.label(format!("Unknown (0x{:04X})", spell_id));
-                                                ui.label("—");
-                                                ui.label("—");
-                                            }
-                                            if ui
-                                                .small_button("❌")
-                                                .on_hover_text("Remove spell")
-                                                .clicked()
-                                            {
-                                                remove_idx = Some(idx);
-                                            }
-                                            ui.end_row();
-                                        });
-                                    }
-                                });
+                            // Data rows — push_id wraps only the remove button so that
+                            // multiple "❌" buttons get unique IDs (AGENTS.md egui rule).
+                            // end_row() must be called on the grid's ui, NOT inside a
+                            // push_id closure, otherwise push_id counts as one cell and
+                            // all spells land on the same horizontal row.
+                            for (idx, &spell_id) in spell_ids.iter().enumerate() {
+                                ui.label(format!("{}", idx + 1));
+                                if let Some(spell) =
+                                    available_spells.iter().find(|s| s.id == spell_id)
+                                {
+                                    ui.label(&spell.name);
+                                    ui.label(format!("{:?}", spell.school));
+                                    ui.label(format!("{}", spell.level));
+                                } else {
+                                    ui.label(format!("Unknown (0x{:04X})", spell_id));
+                                    ui.label("—");
+                                    ui.label("—");
+                                }
+                                if ui
+                                    .push_id(idx, |ui| {
+                                        ui.small_button("❌")
+                                            .on_hover_text("Remove spell")
+                                            .clicked()
+                                    })
+                                    .inner
+                                {
+                                    remove_idx = Some(idx);
+                                }
+                                ui.end_row();
+                            }
                         });
+                });
 
-                    // Apply removal outside all closures to avoid borrow conflicts
-                    if let Some(idx) = remove_idx {
-                        self.buffer.starting_spells.remove(idx);
-                        self.has_unsaved_changes = true;
-                    }
-                }
-            });
+            // Apply removal outside all closures to avoid borrow conflicts
+            if let Some(idx) = remove_idx {
+                self.buffer.starting_spells.remove(idx);
+                self.has_unsaved_changes = true;
+            }
+        }
     }
 
     /// Show equipment slot editor

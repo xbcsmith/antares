@@ -164,7 +164,11 @@ There is no way to manage spells for a character in the game engine. We need to 
 
 Write a plan with a phased approach to implementing the rest of the spell system in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Spell Management Implementation Plan](./spell_management_implementation_plan.md)
+✅ COMPLETED - [Spell Management Implementation Plan](./spell_management_implementation_plan.md)
+
+### SpellBook eGui Conversion
+
+✅ PLAN WRITTEN - [SpellBook eGui Conversion Plan](./spellbook_egui_conversion_plan.md)
 
 ### SDK Fixes
 
@@ -203,3 +207,5 @@ All the doors are facing the wrong way
 Show/Hide Tray ICON SDK is not working
 
 Game log is not part of a Game Save. Loading a save game from the main menu on restart does not restore the game log. The game log should be saved and loaded with the rest of the game state.
+
+Players can't pickup dropped items. There is a dropped sword in Map 1 and the game logs when I walk over it but the item does not get added to my inventory. The player should be able to pickup a dropped item from an adjacent tile by pressing the E key or clicking on it with the mouse. The item should then be added to the player's inventory and removed from the ground.

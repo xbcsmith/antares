@@ -1796,7 +1796,10 @@ fn test_validate_campaign_character_invalid_starting_spell_produces_error() {
         Alignment::Neutral,
     );
     char_def.starting_spells = vec![9999];
-    app.campaign_data.characters.push(char_def);
+    app.editor_registry
+        .characters_editor_state
+        .characters
+        .push(char_def);
 
     app.validate_campaign();
 
@@ -1836,7 +1839,10 @@ fn test_validate_campaign_character_valid_starting_spell_no_error() {
         Alignment::Neutral,
     );
     char_def.starting_spells = vec![200];
-    app.campaign_data.characters.push(char_def);
+    app.editor_registry
+        .characters_editor_state
+        .characters
+        .push(char_def);
 
     app.validate_campaign();
 
@@ -1869,7 +1875,10 @@ fn test_validate_campaign_character_empty_starting_spells_no_error() {
         Sex::Male,
         Alignment::Neutral,
     );
-    app.campaign_data.characters.push(char_def);
+    app.editor_registry
+        .characters_editor_state
+        .characters
+        .push(char_def);
 
     app.validate_campaign();
 
@@ -1909,7 +1918,10 @@ fn test_validate_campaign_multiple_characters_one_invalid_starting_spell() {
         Alignment::Good,
     );
     char1.starting_spells = vec![300];
-    app.campaign_data.characters.push(char1);
+    app.editor_registry
+        .characters_editor_state
+        .characters
+        .push(char1);
 
     // Character 2: invalid reference (spell ID 8888 not in campaign)
     let mut char2 = CharacterDefinition::new(
@@ -1921,7 +1933,10 @@ fn test_validate_campaign_multiple_characters_one_invalid_starting_spell() {
         Alignment::Evil,
     );
     char2.starting_spells = vec![8888];
-    app.campaign_data.characters.push(char2);
+    app.editor_registry
+        .characters_editor_state
+        .characters
+        .push(char2);
 
     app.validate_campaign();
 

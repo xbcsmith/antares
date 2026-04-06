@@ -3039,6 +3039,7 @@ mod tests {
             },
             assets: crate::sdk::campaign_loader::CampaignAssets {
                 tilesets: "tilesets".to_string(),
+                audio: "audio".to_string(),
                 music: "music".to_string(),
                 sounds: "sounds".to_string(),
                 images: "images".to_string(),
@@ -3204,6 +3205,7 @@ mod tests {
             },
             assets: crate::sdk::campaign_loader::CampaignAssets {
                 tilesets: "tilesets".to_string(),
+                audio: "audio".to_string(),
                 music: "music".to_string(),
                 sounds: "sounds".to_string(),
                 images: "images".to_string(),
@@ -5663,6 +5665,7 @@ mod tests {
             },
             assets: crate::sdk::campaign_loader::CampaignAssets {
                 tilesets: "assets/tilesets".to_string(),
+                audio: "assets/audio".to_string(),
                 music: "assets/music".to_string(),
                 sounds: "assets/sounds".to_string(),
                 images: "assets/images".to_string(),
