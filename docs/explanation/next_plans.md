@@ -168,7 +168,9 @@ Write a plan with a phased approach to implementing the rest of the spell system
 
 ### SpellBook eGui Conversion
 
-✅ PLAN WRITTEN - [SpellBook eGui Conversion Plan](./spellbook_egui_conversion_plan.md)
+Presing ESC closes Spellbook and triggers the game menu. ESC should just close the Spellbook.
+
+✅ COMPLETED - [SpellBook eGui Conversion Plan](./spellbook_egui_conversion_plan.md)
 
 ### SDK Fixes
 

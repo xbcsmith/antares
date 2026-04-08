@@ -128,7 +128,7 @@
         starts_in_party: true,
         starting_spells: [
             1027,
-            257,
+            1025,
             1030,
         ],
     ),

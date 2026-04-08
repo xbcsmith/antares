@@ -20,15 +20,13 @@
 //! │ ──────────  │ ─────────────        │ ──────            │
 //! │ [*Aria  ✓] │ -- Level 1 --        │ First Aid         │
 //! │ [ Korbin  ] │  First Aid — 5 SP   │ School: Cleric    │
-//! │ [ Sylva ✓] │  Cure Poison — 8 SP │ Level: 1          │
-//! │             │  💎1                │ SP Cost: 5        │
-//! │             │ -- Level 2 --        │ Gem Cost: —       │
-//! │             │  Bless — 12 SP ⚔   │ Context: Any      │
-//! │             │                      │                   │
-//! │             │ -- Learnable Scrolls │ Restores 1d6+1 HP │
-//! │             │  Scroll -> Light     │ to a single tgt.  │
+//! │ [ Sylva ✓] │  Cure Poison — 8 SP ⚔ │ Level: 1          │
+//! │             │                      │ SP Cost: 5        │
+//! │             │ -- Learnable Scrolls │ Gem Cost: —       │
+//! │             │  Scroll -> Light     │ Context: Any      │
+//! │             │  [✓ use from inv]    │                   │
 //! ├─────────────┴──────────────────────┴───────────────────┤
-//! │  [C] Cast Spell   [Tab] Switch Char   [↑↓] Select Spell│
+//! │  [C] Cast Spell   [Tab] Switch Char   [↑↓] Select Spell │
 //! └────────────────────────────────────────────────────────┘
 //! ```
 //!
@@ -211,13 +209,12 @@ pub fn spellbook_input_system(
 
 /// Renders the Spell Book management screen using egui while in `SpellBook` mode.
 ///
-/// Displays a three-column [`egui::CentralPanel`]:
+/// Displays a three-column [`egui::CentralPanel`] with vertical lists in each
+/// column:
 ///
-/// - **Left column** (~150 px): character-tab list via [`render_char_tabs`].
-/// - **Centre column** (fills remaining space): scrollable spell list via
-///   [`render_spell_list`].
-/// - **Right column** (~200 px): scrollable spell detail panel via
-///   [`render_detail_panel`].
+/// - **Left column**: character-tab list via [`render_char_tabs`].
+/// - **Center column**: scrollable spell list via [`render_spell_list`].
+/// - **Right column**: scrollable spell detail panel via [`render_detail_panel`].
 ///
 /// The system is chained after [`spellbook_input_system`] so that input-state
 /// changes are visible to the renderer in the same frame.
@@ -245,61 +242,79 @@ fn spellbook_ui_system(
     let spell_ids = collect_spell_ids_from_state(&global_state.0, content.as_deref());
 
     egui::CentralPanel::default().show(ctx, |ui| {
-        // ── Title bar ─────────────────────────────────────────────────────────
+        // ── Title bar — hints included right-aligned so columns get the full
+        //   remaining height with no bottom reservation needed ─────────────────
         ui.horizontal(|ui| {
             ui.heading("\u{1F4DA} Spell Book"); // 📚
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(egui::RichText::new("[ESC] Close").color(SPELLBOOK_HINT_COLOR));
+                ui.separator();
+                ui.label(
+                    egui::RichText::new("[\u{2191}\u{2193}] Select Spell")
+                        .color(SPELLBOOK_HINT_COLOR),
+                );
+                ui.separator();
+                ui.label(egui::RichText::new("[Tab] Switch Char").color(SPELLBOOK_HINT_COLOR));
+                ui.separator();
+                ui.label(egui::RichText::new("[C] Cast Spell").color(SPELLBOOK_HINT_COLOR));
             });
         });
 
         ui.separator();
 
-        // ── Three-column body ─────────────────────────────────────────────────
+        // Pre-compute column geometry from the available rect before entering
+        // ui.horizontal. ui.allocate_ui gives each column an explicit rect so the
+        // ScrollAreas fill the full column height rather than collapsing.
+        let available = ui.available_size();
+        let col_h = available.y;
+        let left_w = 160.0_f32;
+        let right_w = 220.0_f32;
+        // Reserve approx width for 2 separators (1 px line + item_spacing.x each side).
+        let sep_total = (1.0 + 2.0 * ui.spacing().item_spacing.x) * 2.0;
+        let center_w = (available.x - left_w - right_w - sep_total).max(200.0);
+
+        // ── Three-column body — each column owns an explicit rect ─────────────
         ui.horizontal(|ui| {
-            // Left column — character tabs
-            ui.vertical(|ui| {
-                ui.set_min_width(140.0);
-                ui.set_max_width(160.0);
-                render_char_tabs(ui, &sb, &global_state);
+            // Left column — character tabs (fixed width, no scroll needed ≤6 chars)
+            ui.allocate_ui(egui::vec2(left_w, col_h), |ui| {
+                ui.vertical(|ui| {
+                    render_char_tabs(ui, &sb, &global_state);
+                });
             });
 
             ui.separator();
 
-            // Center column — spell list (scrollable)
-            ui.vertical(|ui| {
-                ui.set_min_width(200.0);
+            // Center column — spell list (scrollable, fills window height)
+            ui.allocate_ui(egui::vec2(center_w, col_h), |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("spellbook_spell_list")
+                    .auto_shrink([true, false])
                     .show(ui, |ui| {
-                        render_spell_list(ui, &sb, &global_state, content.as_deref(), &spell_ids);
+                        ui.vertical(|ui| {
+                            render_spell_list(
+                                ui,
+                                &sb,
+                                &global_state,
+                                content.as_deref(),
+                                &spell_ids,
+                            );
+                        });
                     });
             });
 
             ui.separator();
 
-            // Right column — spell detail panel (scrollable)
-            ui.vertical(|ui| {
-                ui.set_min_width(180.0);
-                ui.set_max_width(215.0);
+            // Right column — spell detail panel (scrollable, fills window height)
+            ui.allocate_ui(egui::vec2(right_w, col_h), |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("spellbook_detail_pane")
+                    .auto_shrink([true, false])
                     .show(ui, |ui| {
-                        render_detail_panel(ui, &sb, content.as_deref());
+                        ui.vertical(|ui| {
+                            render_detail_panel(ui, &sb, content.as_deref());
+                        });
                     });
             });
-        });
-
-        ui.separator();
-
-        // ── Bottom hint bar ────────────────────────────────────────────────────
-        ui.horizontal_centered(|ui| {
-            ui.label(
-                egui::RichText::new(
-                    "[C] Cast Spell   [Tab] Switch Character   [\u{2191}\u{2193}] Select Spell",
-                )
-                .color(SPELLBOOK_HINT_COLOR),
-            );
         });
     });
 }

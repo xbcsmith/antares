@@ -124,7 +124,7 @@
         description: "A relentless elven mage who delights in using the arcane arts against others. Sirius is perfect for players who want to learn how spellcasting works.",
         is_premade: true,
         starts_in_party: true,
-        starting_spells: [1029, 1025],
+        starting_spells: [1027, 1029, 1025],
     ),
     (
         id: "tutorial_human_cleric",
