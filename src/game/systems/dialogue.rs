@@ -1063,16 +1063,17 @@ fn execute_action(
             };
 
             // 4. Instantiate character
-            let character = match char_def.instantiate(&db.races, &db.classes, &db.items) {
-                Ok(c) => c,
-                Err(e) => {
-                    error!("Failed to instantiate character '{}': {}", character_id, e);
-                    if let Some(log) = game_log.as_mut() {
-                        log.add_system(format!("Error creating character: {}", e));
+            let character =
+                match char_def.instantiate(&db.races, &db.classes, &db.items, &db.spells) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        error!("Failed to instantiate character '{}': {}", character_id, e);
+                        if let Some(log) = game_log.as_mut() {
+                            log.add_system(format!("Error creating character: {}", e));
+                        }
+                        return;
                     }
-                    return;
-                }
-            };
+                };
 
             // 5. Add to roster at specified inn
             let location = crate::domain::character::CharacterLocation::AtInn(innkeeper_id.clone());

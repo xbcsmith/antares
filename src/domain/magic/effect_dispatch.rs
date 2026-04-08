@@ -796,8 +796,10 @@ mod tests {
     #[test]
     fn test_apply_healing_spell_clamps_to_max() {
         let mut character = make_character("Hero", 10, 8);
-        // A very large dice (1d100) will almost certainly overflow base 10
-        let amount = DiceRoll::new(1, 100, 0);
+        // 1d1+100 = always 101: guaranteed to overflow base HP of 10.
+        // Using a fixed-bonus roll avoids the 1-in-100 failure that 1d100 had
+        // when it rolled 1, healing only 1 HP (8→9) instead of the full 2 (8→10).
+        let amount = DiceRoll::new(1, 1, 100);
         let result = apply_healing_spell(amount, &mut character, &mut rand::rng());
 
         assert_eq!(

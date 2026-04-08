@@ -45,6 +45,65 @@ use crate::sdk::game_config::AudioConfig;
 use bevy::audio::Volume;
 use bevy::prelude::*;
 
+/// Resource that holds the resolved audio directory path for the loaded campaign.
+///
+/// Inserted by [`AudioPlugin`] at startup.  All music track IDs and SFX IDs
+/// are resolved relative to this directory.  If a track/sfx identifier has no
+/// recognised audio file extension (`.ogg`, `.mp3`, `.wav`, `.flac`), `.ogg`
+/// is appended automatically.
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::game::systems::audio::AudioPaths;
+///
+/// let paths = AudioPaths { audio_dir: "assets/audio".to_string() };
+/// assert_eq!(paths.audio_dir, "assets/audio");
+/// ```
+#[derive(Resource, Clone, Debug)]
+pub struct AudioPaths {
+    /// Directory (relative to campaign root) where all audio files live.
+    pub audio_dir: String,
+}
+
+impl Default for AudioPaths {
+    fn default() -> Self {
+        Self {
+            audio_dir: "assets/audio".to_string(),
+        }
+    }
+}
+
+/// Resolves a bare track/sfx identifier to a campaign-relative asset path.
+///
+/// If `id` already ends with a recognised audio extension (`.ogg`, `.mp3`,
+/// `.wav`, `.flac`) the extension is preserved.  Otherwise `.ogg` is appended
+/// as the project-standard audio format.
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::game::systems::audio::resolve_audio_path;
+///
+/// assert_eq!(resolve_audio_path("assets/audio", "combat_theme"),
+///            "assets/audio/combat_theme.ogg");
+/// assert_eq!(resolve_audio_path("assets/audio", "combat_theme.ogg"),
+///            "assets/audio/combat_theme.ogg");
+/// assert_eq!(resolve_audio_path("assets/audio", "fanfare.mp3"),
+///            "assets/audio/fanfare.mp3");
+/// ```
+pub fn resolve_audio_path(audio_dir: &str, id: &str) -> String {
+    let has_ext = id.ends_with(".ogg")
+        || id.ends_with(".mp3")
+        || id.ends_with(".wav")
+        || id.ends_with(".flac");
+    if has_ext {
+        format!("{}/{}", audio_dir, id)
+    } else {
+        format!("{}/{}.ogg", audio_dir, id)
+    }
+}
+
 /// Audio settings resource for runtime access
 ///
 /// This resource holds the current audio configuration and is available
@@ -311,6 +370,7 @@ fn handle_audio_messages(
     mut music_reader: MessageReader<PlayMusic>,
     mut sfx_reader: MessageReader<PlaySfx>,
     settings: Res<AudioSettings>,
+    paths: Res<AudioPaths>,
     asset_server: Option<Res<AssetServer>>,
     mut commands: Commands,
     mut current_music: ResMut<CurrentMusicTrack>,
@@ -336,7 +396,8 @@ fn handle_audio_messages(
         }
 
         let volume = settings.effective_music_volume();
-        let handle: Handle<AudioSource> = server.load(ev.track_id.clone());
+        let asset_path = resolve_audio_path(&paths.audio_dir, &ev.track_id);
+        let handle: Handle<AudioSource> = server.load(asset_path);
 
         let playback = if ev.looped {
             PlaybackSettings::LOOP
@@ -353,8 +414,11 @@ fn handle_audio_messages(
         current_music.track_id = Some(ev.track_id.clone());
 
         info!(
-            "Audio: Playing music '{}' looped={} volume={:.2}",
-            ev.track_id, ev.looped, volume
+            "Audio: Playing music '{}' path='{}' looped={} volume={:.2}",
+            ev.track_id,
+            resolve_audio_path(&paths.audio_dir, &ev.track_id),
+            ev.looped,
+            volume
         );
     }
 
@@ -371,26 +435,42 @@ fn handle_audio_messages(
         };
 
         let volume = settings.effective_sfx_volume();
-        let handle: Handle<AudioSource> = server.load(ev.sfx_id.clone());
+        let asset_path = resolve_audio_path(&paths.audio_dir, &ev.sfx_id);
+        let handle: Handle<AudioSource> = server.load(asset_path);
 
         let playback = PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume));
 
         commands.spawn((AudioPlayer::<AudioSource>::new(handle), playback, SfxMarker));
 
-        info!("Audio: Playing SFX '{}' volume={:.2}", ev.sfx_id, volume);
+        info!(
+            "Audio: Playing SFX '{}' path='{}' volume={:.2}",
+            ev.sfx_id,
+            resolve_audio_path(&paths.audio_dir, &ev.sfx_id),
+            volume
+        );
     }
 }
 
 pub struct AudioPlugin {
     /// Audio configuration to use for initializing AudioSettings
     pub config: AudioConfig,
+    /// Campaign-relative directory where audio files are stored.
+    ///
+    /// Typically `"assets/audio"` (the default).  Passed through to the
+    /// [`AudioPaths`] resource so [`handle_audio_messages`] can build
+    /// correct relative asset paths from bare track/sfx identifiers.
+    pub audio_dir: String,
 }
 
 impl Plugin for AudioPlugin {
     fn build(&self, app: &mut App) {
         let settings = AudioSettings::from_config(&self.config);
+        let paths = AudioPaths {
+            audio_dir: self.audio_dir.clone(),
+        };
 
         app.insert_resource(settings)
+            .insert_resource(paths)
             .init_resource::<CurrentMusicTrack>()
             .add_message::<PlayMusic>()
             .add_message::<PlaySfx>()
@@ -538,6 +618,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(AudioPlugin {
             config: config.clone(),
+            audio_dir: "assets/audio".to_string(),
         });
 
         // Verify resources were inserted

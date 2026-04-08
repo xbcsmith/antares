@@ -19,6 +19,7 @@ pub mod merchant_inventory_state;
 pub mod quests;
 pub mod resources;
 pub mod save_game;
+pub mod spell_book_state;
 pub mod spell_casting_state;
 
 use crate::application::menu::MenuState;
@@ -108,6 +109,18 @@ pub enum GameMode {
     /// [`crate::application::spell_casting_state::SpellCastingState`]:
     /// caster selection → spell selection → optional target selection → result.
     SpellCasting(crate::application::spell_casting_state::SpellCastingState),
+    /// Read-only in-game Spell Book management screen.
+    ///
+    /// Entered when the player presses the Spell Book key (default `B`) in
+    /// Exploration mode.  The player can browse each caster's known spells,
+    /// view SP status, read spell descriptions, and inspect learnable scrolls
+    /// in the character's inventory — without casting.
+    ///
+    /// Stored state is tracked by
+    /// [`crate::application::spell_book_state::SpellBookState`]:
+    /// which character's book is open, which spell is highlighted, and which
+    /// mode to restore on close.
+    SpellBook(crate::application::spell_book_state::SpellBookState),
 }
 
 // ===== Rest State =====
@@ -1054,8 +1067,12 @@ impl GameState {
         let mut starting_party_count = 0;
 
         for def in content_db.characters.premade_characters() {
-            let character =
-                def.instantiate(&content_db.races, &content_db.classes, &content_db.items)?;
+            let character = def.instantiate(
+                &content_db.races,
+                &content_db.classes,
+                &content_db.items,
+                &content_db.spells,
+            )?;
 
             // Determine initial location
             let location = if def.starts_in_party {
@@ -1381,8 +1398,12 @@ impl GameState {
             .ok_or_else(|| RecruitmentError::CharacterNotFound(character_id.to_string()))?;
 
         // Instantiate character from definition
-        let character =
-            char_def.instantiate(&content_db.races, &content_db.classes, &content_db.items)?;
+        let character = char_def.instantiate(
+            &content_db.races,
+            &content_db.classes,
+            &content_db.items,
+            &content_db.spells,
+        )?;
 
         // Mark as encountered to prevent re-recruitment
         self.encountered_characters.insert(character_id.to_string());
@@ -1740,6 +1761,81 @@ impl GameState {
     pub fn exit_spell_casting(&mut self) {
         if let GameMode::SpellCasting(ref sc) = self.mode.clone() {
             self.mode = sc.get_resume_mode();
+        }
+    }
+
+    /// Opens the in-game Spell Book screen for the given party member.
+    ///
+    /// Stores the current mode so it can be restored when the player closes
+    /// the Spell Book screen.
+    ///
+    /// # Arguments
+    ///
+    /// * `character_index` — index into `party.members` whose book to open.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_spellbook(2);
+    /// if let GameMode::SpellBook(sb) = &state.mode {
+    ///     assert_eq!(sb.character_index, 2);
+    /// } else {
+    ///     panic!("expected SpellBook mode");
+    /// }
+    /// ```
+    pub fn enter_spellbook(&mut self, character_index: usize) {
+        let prev = self.mode.clone();
+        self.mode = GameMode::SpellBook(crate::application::spell_book_state::SpellBookState::new(
+            character_index,
+            prev,
+        ));
+    }
+
+    /// Opens the in-game Spell Book screen starting at party member 0.
+    ///
+    /// Convenience wrapper for `enter_spellbook(0)`.  The UI may advance to
+    /// the first caster automatically when the first party member is not a
+    /// spell-caster.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_spellbook_with_caster_select();
+    /// if let GameMode::SpellBook(sb) = &state.mode {
+    ///     assert_eq!(sb.character_index, 0);
+    /// } else {
+    ///     panic!("expected SpellBook mode");
+    /// }
+    /// ```
+    pub fn enter_spellbook_with_caster_select(&mut self) {
+        self.enter_spellbook(0);
+    }
+
+    /// Closes the Spell Book screen and restores the mode that was active
+    /// before it was opened.
+    ///
+    /// If the current mode is not `SpellBook`, this is a no-op.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_spellbook(0);
+    /// assert!(matches!(state.mode, GameMode::SpellBook(_)));
+    /// state.exit_spellbook();
+    /// assert!(matches!(state.mode, GameMode::Exploration));
+    /// ```
+    pub fn exit_spellbook(&mut self) {
+        if let GameMode::SpellBook(ref sb) = self.mode.clone() {
+            self.mode = sb.get_resume_mode();
         }
     }
 
@@ -2943,6 +3039,7 @@ mod tests {
             },
             assets: crate::sdk::campaign_loader::CampaignAssets {
                 tilesets: "tilesets".to_string(),
+                audio: "audio".to_string(),
                 music: "music".to_string(),
                 sounds: "sounds".to_string(),
                 images: "images".to_string(),
@@ -3108,6 +3205,7 @@ mod tests {
             },
             assets: crate::sdk::campaign_loader::CampaignAssets {
                 tilesets: "tilesets".to_string(),
+                audio: "audio".to_string(),
                 music: "music".to_string(),
                 sounds: "sounds".to_string(),
                 images: "images".to_string(),
@@ -5567,6 +5665,7 @@ mod tests {
             },
             assets: crate::sdk::campaign_loader::CampaignAssets {
                 tilesets: "assets/tilesets".to_string(),
+                audio: "assets/audio".to_string(),
                 music: "assets/music".to_string(),
                 sounds: "assets/sounds".to_string(),
                 images: "assets/images".to_string(),
@@ -5580,6 +5679,96 @@ mod tests {
         assert_eq!(
             state.current_inn_id(),
             Some("default_innkeeper".to_string())
+        );
+    }
+
+    // ── SpellBook state transition tests ────────────────────────────────────
+
+    #[test]
+    fn test_enter_spellbook_sets_mode() {
+        let mut state = GameState::new();
+        state.enter_spellbook(2);
+        assert!(
+            matches!(state.mode, GameMode::SpellBook(_)),
+            "enter_spellbook must transition mode to GameMode::SpellBook"
+        );
+    }
+
+    #[test]
+    fn test_enter_spellbook_character_index() {
+        let mut state = GameState::new();
+        state.enter_spellbook(2);
+        if let GameMode::SpellBook(ref sb) = state.mode {
+            assert_eq!(sb.character_index, 2);
+        } else {
+            panic!("expected SpellBook mode");
+        }
+    }
+
+    #[test]
+    fn test_enter_spellbook_stores_previous_mode() {
+        let mut state = GameState::new();
+        // Default is Exploration
+        assert!(matches!(state.mode, GameMode::Exploration));
+        state.enter_spellbook(0);
+        if let GameMode::SpellBook(ref sb) = state.mode {
+            assert!(
+                matches!(sb.get_resume_mode(), GameMode::Exploration),
+                "previous_mode must be Exploration"
+            );
+        } else {
+            panic!("expected SpellBook mode");
+        }
+    }
+
+    #[test]
+    fn test_enter_spellbook_with_caster_select_starts_at_index_zero() {
+        let mut state = GameState::new();
+        state.enter_spellbook_with_caster_select();
+        if let GameMode::SpellBook(ref sb) = state.mode {
+            assert_eq!(
+                sb.character_index, 0,
+                "enter_spellbook_with_caster_select must start at index 0"
+            );
+        } else {
+            panic!("expected SpellBook mode");
+        }
+    }
+
+    #[test]
+    fn test_exit_spellbook_restores_previous_mode() {
+        let mut state = GameState::new();
+        state.enter_spellbook(0);
+        assert!(matches!(state.mode, GameMode::SpellBook(_)));
+        state.exit_spellbook();
+        assert!(
+            matches!(state.mode, GameMode::Exploration),
+            "exit_spellbook must restore Exploration mode"
+        );
+    }
+
+    #[test]
+    fn test_exit_spellbook_noop_when_not_in_spellbook_mode() {
+        let mut state = GameState::new();
+        // mode is Exploration, not SpellBook
+        assert!(matches!(state.mode, GameMode::Exploration));
+        state.exit_spellbook();
+        // still Exploration — no-op
+        assert!(
+            matches!(state.mode, GameMode::Exploration),
+            "exit_spellbook must be a no-op when mode is not SpellBook"
+        );
+    }
+
+    #[test]
+    fn test_enter_spellbook_from_automap_mode_restores_automap() {
+        let mut state = GameState::new();
+        state.mode = GameMode::Automap;
+        state.enter_spellbook(1);
+        state.exit_spellbook();
+        assert!(
+            matches!(state.mode, GameMode::Automap),
+            "exit_spellbook must restore the mode that was active before SpellBook"
         );
     }
 }

@@ -561,6 +561,12 @@ pub struct ControlsConfig {
     #[serde(default = "default_cast_keys")]
     pub cast: Vec<String>,
 
+    /// Keys for opening the in-game Spell Book management screen.
+    ///
+    /// Default: `["B"]`
+    #[serde(default = "default_spell_book_keys")]
+    pub spell_book: Vec<String>,
+
     /// Movement cooldown in seconds (prevents double-moves)
     pub movement_cooldown: f32,
 }
@@ -585,6 +591,10 @@ fn default_cast_keys() -> Vec<String> {
     vec!["C".to_string()]
 }
 
+fn default_spell_book_keys() -> Vec<String> {
+    vec!["B".to_string()]
+}
+
 impl Default for ControlsConfig {
     fn default() -> Self {
         Self {
@@ -599,6 +609,7 @@ impl Default for ControlsConfig {
             automap: default_automap_keys(),
             game_log: default_game_log_keys(),
             cast: default_cast_keys(),
+            spell_book: default_spell_book_keys(),
             movement_cooldown: 0.2,
         }
     }

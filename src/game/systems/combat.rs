@@ -9434,6 +9434,14 @@ mod tests {
         }
         app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
 
+        // Remove the MonsterTurnTimer so execute_monster_turn uses the
+        // immediate "no-timer" path documented for minimal test harnesses.
+        // With the timer present the monster would wait 1.2 real-time seconds
+        // before acting, which never elapses in a single app.update() call
+        // under MinimalPlugins (near-zero time deltas), leaving current_turn
+        // stuck at 1 instead of wrapping back to 0.
+        app.world_mut().remove_resource::<MonsterTurnTimer>();
+
         // Spawn combat UI and keep default action index at 0 (Attack).
         app.update();
 
@@ -9450,12 +9458,14 @@ mod tests {
             "single Enter attack should not enter target-selection mode"
         );
 
-        // With execute_monster_turn now scheduled after update_combat_ui, the
+        // With execute_monster_turn now scheduled after update_combat_ui, and
+        // MonsterTurnTimer removed (so the immediate test path is taken), the
         // monster (Goblin) fires its turn in the *same* frame as the player's
         // attack: the sequence within one app.update() is:
         //   1. handle_attack_action  → advances current_turn to 1, sets EnemyTurn
         //   2. update_combat_ui      → hides action menu (sees EnemyTurn)
-        //   3. execute_monster_turn  → Goblin acts, advances current_turn back to 0,
+        //   3. execute_monster_turn  → MonsterTurnTimer absent → acts immediately;
+        //                              Goblin acts, advances current_turn back to 0,
         //                              sets PlayerTurn
         //
         // So after the frame the observable state is back to PlayerTurn with

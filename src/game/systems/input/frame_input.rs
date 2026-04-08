@@ -59,6 +59,8 @@ pub struct FrameInputIntent {
     pub game_log_toggle: bool,
     /// Whether the exploration spell-casting menu was requested this frame.
     pub cast: bool,
+    /// Whether the Spell Book management screen was requested this frame.
+    pub spell_book_toggle: bool,
 }
 
 impl FrameInputIntent {
@@ -176,6 +178,8 @@ pub fn decode_frame_input(
         mouse_center_interact: mouse_center_interact_pressed(mouse_buttons, primary_window),
         game_log_toggle: key_map.is_action_just_pressed(GameAction::GameLog, keyboard_input),
         cast: key_map.is_action_just_pressed(GameAction::Cast, keyboard_input),
+        spell_book_toggle: key_map
+            .is_action_just_pressed(GameAction::OpenSpellBook, keyboard_input),
     }
 }
 
@@ -212,6 +216,7 @@ mod tests {
         assert!(!intent.mouse_center_interact);
         assert!(!intent.game_log_toggle);
         assert!(!intent.cast);
+        assert!(!intent.spell_book_toggle);
     }
 
     #[test]

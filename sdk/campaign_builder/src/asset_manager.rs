@@ -2686,6 +2686,7 @@ mod tests {
             is_premade: true,
             starts_in_party: true,
             creature_id: None,
+            starting_spells: vec![],
         };
 
         manager.scan_references(&CampaignRefs {
@@ -3136,6 +3137,7 @@ mod tests {
             is_premade: true,
             starts_in_party: true,
             creature_id: None,
+            starting_spells: vec![],
         }];
 
         let npcs = vec![
@@ -3423,6 +3425,7 @@ mod tests {
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
+            starting_spells: vec![],
         };
 
         let character2 = CharacterDefinition {
@@ -3444,6 +3447,7 @@ mod tests {
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
+            starting_spells: vec![],
         };
 
         manager.scan_references(&CampaignRefs {

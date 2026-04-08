@@ -61,9 +61,11 @@ use crate::domain::classes::{ClassDatabase, ClassDefinition, ClassId, SpellStat}
 use crate::domain::items::calculate_armor_class;
 use crate::domain::items::types::{ConsumableEffect, ItemType};
 use crate::domain::items::ItemDatabase;
+use crate::domain::magic::types::SpellSchool;
 use crate::domain::races::{RaceDatabase, RaceDefinition};
 use crate::domain::transactions::equip_item;
-use crate::domain::types::{CreatureId, ItemId, RaceId};
+use crate::domain::types::{CreatureId, ItemId, RaceId, SpellId};
+use crate::sdk::database::SpellDatabase;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -139,6 +141,15 @@ pub enum CharacterDefinitionError {
         character_id: String,
         item_id: ItemId,
         reason: String,
+    },
+
+    /// A spell ID in `starting_spells` does not exist in the `SpellDatabase`
+    #[error(
+        "Invalid spell_id {spell_id} in character '{character_id}': not found in spell database"
+    )]
+    InvalidSpellId {
+        character_id: String,
+        spell_id: SpellId,
     },
 }
 
@@ -453,6 +464,18 @@ pub struct CharacterDefinition {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub creature_id: Option<CreatureId>,
+
+    /// Spells to pre-populate in the character's `SpellBook` on instantiation
+    ///
+    /// Each `SpellId` is resolved against a `SpellDatabase` to determine school
+    /// and level. The spell is placed into `cleric_spells` or `sorcerer_spells`
+    /// at the zero-based level index `spell.level.saturating_sub(1)` (clamped
+    /// to `0..=6`). Duplicate IDs in this list are silently deduplicated.
+    ///
+    /// Omitted from serialized RON when empty for backward compatibility.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub starting_spells: Vec<SpellId>,
 }
 
 /// Default starting food value (10 units)
@@ -500,6 +523,8 @@ struct CharacterDefinitionDef {
     pub starts_in_party: bool,
     #[serde(default)]
     pub creature_id: Option<CreatureId>,
+    #[serde(default)]
+    pub starting_spells: Vec<SpellId>,
 }
 
 impl From<CharacterDefinitionDef> for CharacterDefinition {
@@ -539,6 +564,7 @@ impl From<CharacterDefinitionDef> for CharacterDefinition {
             is_premade: def.is_premade,
             starts_in_party: def.starts_in_party,
             creature_id: def.creature_id,
+            starting_spells: def.starting_spells,
         }
     }
 }
@@ -601,6 +627,7 @@ impl CharacterDefinition {
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
+            starting_spells: Vec::new(),
         }
     }
 
@@ -726,6 +753,7 @@ impl CharacterDefinition {
     /// * `races` - RaceDatabase for race lookups and modifier application
     /// * `classes` - ClassDatabase for class lookups and HP/SP calculation
     /// * `items` - ItemDatabase for validating item references
+    /// * `spell_db` - SpellDatabase for resolving `starting_spells` to school and level
     ///
     /// # Returns
     ///
@@ -757,7 +785,7 @@ impl CharacterDefinition {
     /// let classes = ClassDatabase::load_from_file("data/classes.ron").unwrap();
     /// let items = ItemDatabase::load_from_file("data/items.ron").unwrap();
     ///
-    /// let character = definition.instantiate(&races, &classes, &items).unwrap();
+    /// let character = definition.instantiate(&races, &classes, &items, &spell_db).unwrap();
     /// assert_eq!(character.name, "Sir Test");
     /// ```
     pub fn instantiate(
@@ -765,6 +793,7 @@ impl CharacterDefinition {
         races: &RaceDatabase,
         classes: &ClassDatabase,
         items: &ItemDatabase,
+        spell_db: &SpellDatabase,
     ) -> Result<Character, CharacterDefinitionError> {
         // Validate race exists
         let race_def = races.get_race(&self.race_id).ok_or_else(|| {
@@ -899,6 +928,28 @@ impl CharacterDefinition {
 
             // Recalculate AC once after all equipment is in place.
             character.ac.current = calculate_armor_class(&character.equipment, items);
+        }
+
+        // Populate starting spells from `starting_spells` list.
+        // Each spell is resolved in the SpellDatabase to determine its school
+        // and level, then placed in the correct slot of the character's SpellBook.
+        // Duplicate IDs are silently skipped (idempotent).
+        for &spell_id in &self.starting_spells {
+            let spell = spell_db.get_spell(spell_id).ok_or_else(|| {
+                CharacterDefinitionError::InvalidSpellId {
+                    character_id: self.id.clone(),
+                    spell_id,
+                }
+            })?;
+            // Zero-based level index, clamped to the valid range 0..=6.
+            let level_index = (spell.level.saturating_sub(1) as usize).min(6);
+            let spell_list = match spell.school {
+                SpellSchool::Cleric => &mut character.spells.cleric_spells[level_index],
+                SpellSchool::Sorcerer => &mut character.spells.sorcerer_spells[level_index],
+            };
+            if !spell_list.contains(&spell_id) {
+                spell_list.push(spell_id);
+            }
         }
 
         Ok(character)
@@ -1909,7 +1960,7 @@ mod tests {
         });
 
         let character = def
-            .instantiate(&races, &classes, &items)
+            .instantiate(&races, &classes, &items, &SpellDatabase::new())
             .expect("Instantiation failed");
         assert_eq!(character.hp.base, 50u16);
         assert_eq!(character.hp.current, 25u16);
@@ -1938,7 +1989,7 @@ mod tests {
         });
 
         let character = def
-            .instantiate(&races, &classes, &items)
+            .instantiate(&races, &classes, &items, &SpellDatabase::new())
             .expect("Instantiation failed");
         assert_eq!(character.hp.base, 30u16);
         assert_eq!(character.hp.current, 30u16); // Should be clamped
@@ -1964,7 +2015,7 @@ mod tests {
         // No hp_override set
 
         let character = def
-            .instantiate(&races, &classes, &items)
+            .instantiate(&races, &classes, &items, &SpellDatabase::new())
             .expect("Instantiation failed");
         assert!(character.hp.base > 0);
         assert_eq!(character.hp.current, character.hp.base);
@@ -3189,10 +3240,11 @@ mod tests {
             is_premade: true,
             starts_in_party: false,
             creature_id: None,
+            starting_spells: vec![],
         };
 
         let character = definition
-            .instantiate(&races, &classes, &items)
+            .instantiate(&races, &classes, &items, &SpellDatabase::new())
             .expect("Failed to instantiate character");
 
         // Verify basic fields
@@ -3292,10 +3344,11 @@ mod tests {
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
+            starting_spells: vec![],
         };
 
         let character = definition
-            .instantiate(&races, &classes, &items)
+            .instantiate(&races, &classes, &items, &SpellDatabase::new())
             .expect("Failed to instantiate character");
 
         // Weapon must be in the equipment slot.
@@ -3354,10 +3407,11 @@ mod tests {
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
+            starting_spells: vec![],
         };
 
         let mut character = definition
-            .instantiate(&races, &classes, &items)
+            .instantiate(&races, &classes, &items, &SpellDatabase::new())
             .expect("Failed to instantiate character");
 
         // Confirm weapon is equipped after instantiation.
@@ -3415,10 +3469,11 @@ mod tests {
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
+            starting_spells: vec![],
         };
 
         let character = definition
-            .instantiate(&races, &classes, &items)
+            .instantiate(&races, &classes, &items, &SpellDatabase::new())
             .expect("Failed to instantiate character");
 
         assert_eq!(
@@ -3457,10 +3512,11 @@ mod tests {
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
+            starting_spells: vec![],
         };
 
         let character = definition
-            .instantiate(&races, &classes, &items)
+            .instantiate(&races, &classes, &items, &SpellDatabase::new())
             .expect("Failed to instantiate character");
 
         assert_eq!(
@@ -3509,9 +3565,10 @@ mod tests {
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
+            starting_spells: vec![],
         };
 
-        let result = definition.instantiate(&races, &classes, &items);
+        let result = definition.instantiate(&races, &classes, &items, &SpellDatabase::new());
 
         assert!(
             result.is_err(),
@@ -3541,7 +3598,7 @@ mod tests {
             Alignment::Good,
         );
 
-        let result = definition.instantiate(&races, &classes, &items);
+        let result = definition.instantiate(&races, &classes, &items, &SpellDatabase::new());
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -3565,7 +3622,7 @@ mod tests {
             Alignment::Good,
         );
 
-        let result = definition.instantiate(&races, &classes, &items);
+        let result = definition.instantiate(&races, &classes, &items, &SpellDatabase::new());
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -3591,7 +3648,7 @@ mod tests {
         );
         definition.starting_items = vec![255]; // Invalid item ID (not in empty database)
 
-        let result = definition.instantiate(&races, &classes, &items);
+        let result = definition.instantiate(&races, &classes, &items, &SpellDatabase::new());
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -3612,7 +3669,7 @@ mod tests {
             .expect("Failed to load characters.ron");
 
         for char_def in char_db.all_characters() {
-            let result = char_def.instantiate(&races, &classes, &items);
+            let result = char_def.instantiate(&races, &classes, &items, &SpellDatabase::new());
             assert!(
                 result.is_ok(),
                 "Failed to instantiate character '{}': {:?}",
@@ -3668,10 +3725,11 @@ mod tests {
             is_premade: true,
             starts_in_party: false,
             creature_id: None,
+            starting_spells: vec![],
         };
 
         let character = definition
-            .instantiate(&races, &classes, &items)
+            .instantiate(&races, &classes, &items, &SpellDatabase::new())
             .expect("Failed to instantiate sorcerer");
 
         assert_eq!(character.class_id, "sorcerer");
@@ -3714,10 +3772,11 @@ mod tests {
             is_premade: true,
             starts_in_party: false,
             creature_id: None,
+            starting_spells: vec![],
         };
 
         let character = definition
-            .instantiate(&races, &classes, &items)
+            .instantiate(&races, &classes, &items, &SpellDatabase::new())
             .expect("Failed to instantiate knight");
 
         assert_eq!(character.class_id, "knight");
@@ -3899,7 +3958,7 @@ mod tests {
             .expect("Should find Kira");
 
         let kira = kira_def
-            .instantiate(&races, &classes, &items)
+            .instantiate(&races, &classes, &items, &SpellDatabase::new())
             .expect("Should instantiate Kira successfully");
 
         // Verify instantiation worked correctly
@@ -3939,8 +3998,13 @@ mod tests {
 
         let mut success_count = 0;
 
+        let spells = crate::sdk::database::SpellDatabase::load_from_file(
+            "data/test_campaign/data/spells.ron",
+        )
+        .expect("Failed to load test_campaign spells.ron");
+
         for char_def in char_db.all_characters() {
-            match char_def.instantiate(&races, &classes, &items) {
+            match char_def.instantiate(&races, &classes, &items, &spells) {
                 Ok(character) => {
                     success_count += 1;
                     // Verify basic invariants
@@ -3975,7 +4039,7 @@ mod tests {
         let mut success_count = 0;
 
         for char_def in char_db.all_characters() {
-            match char_def.instantiate(&races, &classes, &items) {
+            match char_def.instantiate(&races, &classes, &items, &SpellDatabase::new()) {
                 Ok(character) => {
                     success_count += 1;
                     // Verify basic invariants
@@ -4203,10 +4267,11 @@ mod tests {
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
+            starting_spells: vec![],
         };
 
         let character = definition
-            .instantiate(&races, &classes, &items)
+            .instantiate(&races, &classes, &items, &SpellDatabase::new())
             .expect("Failed to instantiate character with starting helmet");
 
         // Helmet must be placed in the helmet equipment slot.
@@ -4265,10 +4330,11 @@ mod tests {
             is_premade: false,
             starts_in_party: false,
             creature_id: None,
+            starting_spells: vec![],
         };
 
         let character = definition
-            .instantiate(&races, &classes, &items)
+            .instantiate(&races, &classes, &items, &SpellDatabase::new())
             .expect("Failed to instantiate character with starting boots");
 
         // Boots must be placed in the boots equipment slot.
@@ -4289,6 +4355,339 @@ mod tests {
         assert_eq!(
             character.ac.current, 11,
             "AC should be AC_DEFAULT(10) + Leather Boots ac_bonus(1) = 11"
+        );
+    }
+
+    // ===== starting_spells Tests =====
+
+    /// Helper: build a minimal SpellDatabase with a cleric L1 spell and a sorcerer L1 spell.
+    fn build_spell_db_for_tests() -> SpellDatabase {
+        use crate::domain::magic::types::{SpellContext, SpellTarget};
+        let mut db = SpellDatabase::new();
+
+        let cleric_spell = crate::domain::magic::types::Spell::new(
+            260,
+            "First Aid",
+            crate::domain::magic::types::SpellSchool::Cleric,
+            1,
+            2,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Heals a small amount of HP",
+            None,
+            0,
+            false,
+        );
+        db.add_spell(cleric_spell).unwrap();
+
+        let sorcerer_spell = crate::domain::magic::types::Spell::new(
+            1029,
+            "Light",
+            crate::domain::magic::types::SpellSchool::Sorcerer,
+            1,
+            3,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Creates light",
+            None,
+            0,
+            false,
+        );
+        db.add_spell(sorcerer_spell).unwrap();
+
+        let cleric_l2_spell = crate::domain::magic::types::Spell::new(
+            513,
+            "Cure Wounds",
+            crate::domain::magic::types::SpellSchool::Cleric,
+            2,
+            8,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Cures moderate wounds",
+            None,
+            0,
+            false,
+        );
+        db.add_spell(cleric_l2_spell).unwrap();
+
+        db
+    }
+
+    #[test]
+    fn test_instantiate_cleric_starting_spell_in_cleric_spells() {
+        // A cleric spell in starting_spells should appear in cleric_spells[level-1].
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let spell_db = build_spell_db_for_tests();
+
+        let mut def = CharacterDefinition::new(
+            "test_cleric_spells".to_string(),
+            "Mira".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        def.starting_spells = vec![260]; // First Aid, Cleric level 1
+
+        let character = def
+            .instantiate(&races, &classes, &items, &spell_db)
+            .expect("Instantiation failed");
+
+        // Spell 260 (level 1) → cleric_spells[0]
+        assert!(
+            character.spells.cleric_spells[0].contains(&260),
+            "First Aid (id 260) should be in cleric_spells[0]"
+        );
+        // No sorcerer spells should be set
+        assert!(
+            character
+                .spells
+                .sorcerer_spells
+                .iter()
+                .all(|v| v.is_empty()),
+            "sorcerer_spells should all be empty for a cleric"
+        );
+    }
+
+    #[test]
+    fn test_instantiate_sorcerer_starting_spell_in_sorcerer_spells() {
+        // A sorcerer spell in starting_spells should appear in sorcerer_spells[level-1].
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let spell_db = build_spell_db_for_tests();
+
+        let mut def = CharacterDefinition::new(
+            "test_sorcerer_spells".to_string(),
+            "Sirius".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        def.starting_spells = vec![1029]; // Light, Sorcerer level 1
+
+        let character = def
+            .instantiate(&races, &classes, &items, &spell_db)
+            .expect("Instantiation failed");
+
+        // Spell 1029 (level 1) → sorcerer_spells[0]
+        assert!(
+            character.spells.sorcerer_spells[0].contains(&1029),
+            "Light (id 1029) should be in sorcerer_spells[0]"
+        );
+        // No cleric spells should be set
+        assert!(
+            character.spells.cleric_spells.iter().all(|v| v.is_empty()),
+            "cleric_spells should all be empty for a sorcerer"
+        );
+    }
+
+    #[test]
+    fn test_instantiate_unknown_spell_id_returns_err_invalid_spell_id() {
+        // A SpellId not present in the SpellDatabase must return Err(InvalidSpellId).
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let spell_db = SpellDatabase::new(); // empty — no spells registered
+
+        let mut def = CharacterDefinition::new(
+            "test_bad_spell".to_string(),
+            "Bad Spell Char".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        def.starting_spells = vec![9999]; // non-existent spell ID
+
+        let result = def.instantiate(&races, &classes, &items, &spell_db);
+
+        assert!(
+            result.is_err(),
+            "instantiate should fail when a starting_spell ID is not in the database"
+        );
+        assert!(
+            matches!(
+                result.unwrap_err(),
+                CharacterDefinitionError::InvalidSpellId { spell_id: 9999, .. }
+            ),
+            "error should be InvalidSpellId for unknown spell 9999"
+        );
+    }
+
+    #[test]
+    fn test_instantiate_invalid_spell_id_error_display_contains_ids() {
+        // The error display message must contain both the character ID and the spell ID.
+        let err = CharacterDefinitionError::InvalidSpellId {
+            character_id: "my_char".to_string(),
+            spell_id: 9999,
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("my_char"),
+            "error display should contain character_id; got: {msg}"
+        );
+        assert!(
+            msg.contains("9999"),
+            "error display should contain spell_id; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_instantiate_empty_starting_spells_leaves_spell_book_empty() {
+        // A definition with no starting_spells should produce an empty SpellBook.
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let def = CharacterDefinition::new(
+            "test_no_spells".to_string(),
+            "Empty SpellBook".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        // starting_spells is empty by default
+
+        let character = def
+            .instantiate(&races, &classes, &items, &SpellDatabase::new())
+            .expect("Instantiation failed");
+
+        assert!(
+            character.spells.cleric_spells.iter().all(|v| v.is_empty()),
+            "cleric_spells should be empty when starting_spells is empty"
+        );
+        assert!(
+            character
+                .spells
+                .sorcerer_spells
+                .iter()
+                .all(|v| v.is_empty()),
+            "sorcerer_spells should be empty when starting_spells is empty"
+        );
+    }
+
+    #[test]
+    fn test_instantiate_duplicate_starting_spell_ids_no_duplicate_in_spell_book() {
+        // Duplicate IDs in starting_spells must not produce duplicate entries in the SpellBook.
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let spell_db = build_spell_db_for_tests();
+
+        let mut def = CharacterDefinition::new(
+            "test_dup_spells".to_string(),
+            "Dup Spell Char".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        def.starting_spells = vec![260, 260, 260]; // same spell three times
+
+        let character = def
+            .instantiate(&races, &classes, &items, &spell_db)
+            .expect("Instantiation failed");
+
+        let count = character.spells.cleric_spells[0]
+            .iter()
+            .filter(|&&id| id == 260)
+            .count();
+        assert_eq!(
+            count, 1,
+            "duplicate spell IDs in starting_spells must be collapsed to one entry"
+        );
+    }
+
+    #[test]
+    fn test_instantiate_starting_spell_level2_goes_to_correct_slot() {
+        // A level-2 spell must land in slot index 1, not slot index 0.
+        let races =
+            RaceDatabase::load_from_file("data/races.ron").expect("Failed to load races.ron");
+        let classes =
+            ClassDatabase::load_from_file("data/classes.ron").expect("Failed to load classes.ron");
+        let items =
+            ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+
+        let spell_db = build_spell_db_for_tests();
+
+        let mut def = CharacterDefinition::new(
+            "test_l2_spell".to_string(),
+            "L2 Spell Char".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        def.starting_spells = vec![513]; // Cure Wounds, Cleric level 2
+
+        let character = def
+            .instantiate(&races, &classes, &items, &spell_db)
+            .expect("Instantiation failed");
+
+        assert!(
+            character.spells.cleric_spells[1].contains(&513),
+            "level-2 spell (id 513) should be in cleric_spells[1]"
+        );
+        assert!(
+            !character.spells.cleric_spells[0].contains(&513),
+            "level-2 spell must NOT appear in cleric_spells[0]"
+        );
+    }
+
+    #[test]
+    fn test_instantiate_no_starting_spells_serde_backward_compat() {
+        // RON files without a starting_spells field must still deserialize correctly.
+        let ron_str = r#"(
+            id: "legacy_char",
+            name: "Legacy Character",
+            race_id: "human",
+            class_id: "knight",
+            sex: Male,
+            alignment: Good,
+            base_stats: (
+                might: 14,
+                intellect: 10,
+                personality: 10,
+                endurance: 12,
+                speed: 11,
+                accuracy: 12,
+                luck: 10,
+            ),
+        )"#;
+
+        let def: CharacterDefinition =
+            ron::from_str(ron_str).expect("RON without starting_spells should deserialize cleanly");
+
+        assert!(
+            def.starting_spells.is_empty(),
+            "starting_spells should default to empty when absent from RON"
         );
     }
 }

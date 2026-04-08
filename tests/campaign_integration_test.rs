@@ -56,6 +56,7 @@ fn create_test_campaign(id: &str, name: &str, version: &str) -> Campaign {
         },
         assets: CampaignAssets {
             tilesets: "assets/tilesets".to_string(),
+            audio: "assets/audio".to_string(),
             music: "assets/music".to_string(),
             sounds: "assets/sounds".to_string(),
             images: "assets/images".to_string(),

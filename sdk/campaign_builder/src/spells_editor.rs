@@ -1375,12 +1375,14 @@ mod tests {
     fn test_effect_type_utility_teleport() {
         let mut state = SpellsEditorState::new();
         state.edit_buffer.effect_type = Some(SpellEffectType::Utility {
-            utility_type: UtilityType::Teleport,
+            utility_type: UtilityType::Teleport {
+                destination: antares::domain::magic::types::TeleportDestination::Surface,
+            },
         });
         assert!(matches!(
             state.edit_buffer.effect_type,
             Some(SpellEffectType::Utility {
-                utility_type: UtilityType::Teleport,
+                utility_type: UtilityType::Teleport { .. },
             })
         ));
     }

@@ -163,7 +163,11 @@ fn test_context_restrictions() {
     let spell_db =
         SpellDatabase::load_from_file("data/spells.ron").expect("Failed to load spell database");
     let mut cleric = create_caster("Cleric", "cleric", 100);
-    cleric.level = 10; // Set level high enough to cast any spell
+    cleric.level = 20; // Must exceed level 13 (required for level-7 spells) so that
+                       // HashMap iteration order cannot surface a high-level spell that
+                       // returns LevelTooLow before the CombatOnly check is reached.
+    cleric.gems = 100; // Some combat-only spells cost gems; provide enough so the gem
+                       // check never fires before the context check is reached.
 
     // Find a combat-only cleric spell
     let all_combat_spells = spell_db.all_spells();
