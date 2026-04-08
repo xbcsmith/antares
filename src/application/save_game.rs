@@ -529,6 +529,7 @@ mod tests {
             },
             assets: CampaignAssets {
                 tilesets: "tilesets".to_string(),
+                audio: "audio".to_string(),
                 music: "music".to_string(),
                 sounds: "sounds".to_string(),
                 images: "images".to_string(),

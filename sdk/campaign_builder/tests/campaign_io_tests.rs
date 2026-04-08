@@ -1766,3 +1766,194 @@ fn test_no_duplicate_ids_validation_passes() {
     let errors = app.validate_item_ids();
     assert_eq!(errors.len(), 0);
 }
+
+// =========================================================================
+// validate_character_starting_spells integration tests
+// =========================================================================
+
+#[test]
+fn test_validate_campaign_character_invalid_starting_spell_produces_error() {
+    let mut app = CampaignBuilderApp::default();
+    app.campaign.id = "test_campaign".to_string();
+    app.campaign.name = "Test Campaign".to_string();
+    app.campaign.version = "1.0.0".to_string();
+    app.campaign.engine_version = "0.1.0".to_string();
+    app.campaign.starting_map = "start".to_string();
+
+    // Add a spell with ID 100 to the campaign
+    let mut known_spell = CampaignBuilderApp::default_spell();
+    known_spell.id = 100;
+    known_spell.name = "Known Spell".to_string();
+    app.campaign_data.spells.push(known_spell);
+
+    // Add a character that references a spell ID not in the campaign (ID 9999)
+    let mut char_def = CharacterDefinition::new(
+        "test_char".to_string(),
+        "Test Character".to_string(),
+        "human".to_string(),
+        "knight".to_string(),
+        Sex::Male,
+        Alignment::Neutral,
+    );
+    char_def.starting_spells = vec![9999];
+    app.editor_registry
+        .characters_editor_state
+        .characters
+        .push(char_def);
+
+    app.validate_campaign();
+
+    let has_spell_error = app
+        .validation_state
+        .validation_errors
+        .iter()
+        .any(|e| e.is_error() && e.message.contains("unknown spell ID"));
+    assert!(
+        has_spell_error,
+        "validate_campaign() must surface an error for a character with an invalid starting spell ID"
+    );
+}
+
+#[test]
+fn test_validate_campaign_character_valid_starting_spell_no_error() {
+    let mut app = CampaignBuilderApp::default();
+    app.campaign.id = "test_campaign".to_string();
+    app.campaign.name = "Test Campaign".to_string();
+    app.campaign.version = "1.0.0".to_string();
+    app.campaign.engine_version = "0.1.0".to_string();
+    app.campaign.starting_map = "start".to_string();
+
+    // Add a spell with ID 200 to the campaign
+    let mut known_spell = CampaignBuilderApp::default_spell();
+    known_spell.id = 200;
+    known_spell.name = "Valid Spell".to_string();
+    app.campaign_data.spells.push(known_spell);
+
+    // Add a character that references the valid spell ID
+    let mut char_def = CharacterDefinition::new(
+        "spell_char".to_string(),
+        "Spell Character".to_string(),
+        "human".to_string(),
+        "knight".to_string(),
+        Sex::Male,
+        Alignment::Neutral,
+    );
+    char_def.starting_spells = vec![200];
+    app.editor_registry
+        .characters_editor_state
+        .characters
+        .push(char_def);
+
+    app.validate_campaign();
+
+    let has_starting_spell_error = app
+        .validation_state
+        .validation_errors
+        .iter()
+        .any(|e| e.is_error() && e.message.contains("starting_spells"));
+    assert!(
+        !has_starting_spell_error,
+        "A character whose starting_spells all resolve should not produce a starting_spells error"
+    );
+}
+
+#[test]
+fn test_validate_campaign_character_empty_starting_spells_no_error() {
+    let mut app = CampaignBuilderApp::default();
+    app.campaign.id = "test_campaign".to_string();
+    app.campaign.name = "Test Campaign".to_string();
+    app.campaign.version = "1.0.0".to_string();
+    app.campaign.engine_version = "0.1.0".to_string();
+    app.campaign.starting_map = "start".to_string();
+
+    // Add a character with no starting spells
+    let char_def = CharacterDefinition::new(
+        "no_spell_char".to_string(),
+        "No Spell Character".to_string(),
+        "human".to_string(),
+        "knight".to_string(),
+        Sex::Male,
+        Alignment::Neutral,
+    );
+    app.editor_registry
+        .characters_editor_state
+        .characters
+        .push(char_def);
+
+    app.validate_campaign();
+
+    let has_starting_spell_error = app
+        .validation_state
+        .validation_errors
+        .iter()
+        .any(|e| e.is_error() && e.message.contains("starting_spells"));
+    assert!(
+        !has_starting_spell_error,
+        "A character with empty starting_spells should not produce a starting_spells error"
+    );
+}
+
+#[test]
+fn test_validate_campaign_multiple_characters_one_invalid_starting_spell() {
+    let mut app = CampaignBuilderApp::default();
+    app.campaign.id = "test_campaign".to_string();
+    app.campaign.name = "Test Campaign".to_string();
+    app.campaign.version = "1.0.0".to_string();
+    app.campaign.engine_version = "0.1.0".to_string();
+    app.campaign.starting_map = "start".to_string();
+
+    // Add a spell with ID 300
+    let mut known_spell = CampaignBuilderApp::default_spell();
+    known_spell.id = 300;
+    known_spell.name = "Fireball".to_string();
+    app.campaign_data.spells.push(known_spell);
+
+    // Character 1: valid reference
+    let mut char1 = CharacterDefinition::new(
+        "char_valid".to_string(),
+        "Valid Char".to_string(),
+        "human".to_string(),
+        "knight".to_string(),
+        Sex::Male,
+        Alignment::Good,
+    );
+    char1.starting_spells = vec![300];
+    app.editor_registry
+        .characters_editor_state
+        .characters
+        .push(char1);
+
+    // Character 2: invalid reference (spell ID 8888 not in campaign)
+    let mut char2 = CharacterDefinition::new(
+        "char_invalid".to_string(),
+        "Invalid Char".to_string(),
+        "human".to_string(),
+        "knight".to_string(),
+        Sex::Female,
+        Alignment::Evil,
+    );
+    char2.starting_spells = vec![8888];
+    app.editor_registry
+        .characters_editor_state
+        .characters
+        .push(char2);
+
+    app.validate_campaign();
+
+    let spell_errors: Vec<_> = app
+        .validation_state
+        .validation_errors
+        .iter()
+        .filter(|e| e.is_error() && e.message.contains("unknown spell ID"))
+        .collect();
+
+    assert_eq!(
+        spell_errors.len(),
+        1,
+        "Only the one invalid starting spell reference should produce an error"
+    );
+    assert!(
+        spell_errors[0].message.contains("Invalid Char"),
+        "The error should name the character with the invalid spell"
+    );
+}

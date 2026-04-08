@@ -24,6 +24,7 @@ GameConfig(
         inventory: ["I"],
         rest: ["R"],
         automap: ["M"],
+        spell_book: ["B"],
         movement_cooldown: 0.2,
     ),
     camera: CameraConfig(

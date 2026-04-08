@@ -19,16 +19,16 @@ matching loot mechanics), so each phase can be shipped and tested independently.
 
 ### Existing Infrastructure
 
-| Area | File(s) | Notes |
-|---|---|---|
-| Map event data model | `src/domain/world/types.rs` | `MapEvent::Container` has `id`, `name`, `description`, `items` – **no `gold` or `gems`** |
-| Container event result | `src/domain/world/events.rs` | `EventResult::EnterContainer` carries `container_event_id`, `container_name`, `items` – **no gold/gems** |
-| Container loot UI | `src/game/systems/container_inventory_ui.rs` | Renders item list only; no currency row |
-| Stock template domain | `src/domain/world/npc_runtime.rs` | `MerchantStockTemplate` has `id`, `entries`, magic fields – **no `description`** |
-| SDK map editor | `sdk/campaign_builder/src/map_editor.rs` | `EventEditorState` container branch has items UI; **no gold/gems fields** |
-| SDK map inspector | `sdk/campaign_builder/src/map_editor.rs` | `show_inspector_panel` renders the Event Editor at the **bottom** of the column, below Visual Properties, Terrain Settings, and Preset Palette |
-| SDK furniture editor | `sdk/campaign_builder/src/furniture_editor.rs` | `show_form` has Save and Cancel buttons only at the **bottom inside** a `ScrollArea`; **no Back button at the top** |
-| SDK stock templates | `sdk/campaign_builder/src/stock_templates_editor.rs` | `StockTemplateEditBuffer::from_template` hardcodes `description: String::new()` with a comment "templates have no description field in the domain type"; `to_template` omits `description` from the constructed struct |
+| Area                   | File(s)                                              | Notes                                                                                                                                                                                                                  |
+| ---------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Map event data model   | `src/domain/world/types.rs`                          | `MapEvent::Container` has `id`, `name`, `description`, `items` – **no `gold` or `gems`**                                                                                                                               |
+| Container event result | `src/domain/world/events.rs`                         | `EventResult::EnterContainer` carries `container_event_id`, `container_name`, `items` – **no gold/gems**                                                                                                               |
+| Container loot UI      | `src/game/systems/container_inventory_ui.rs`         | Renders item list only; no currency row                                                                                                                                                                                |
+| Stock template domain  | `src/domain/world/npc_runtime.rs`                    | `MerchantStockTemplate` has `id`, `entries`, magic fields – **no `description`**                                                                                                                                       |
+| SDK map editor         | `sdk/campaign_builder/src/map_editor.rs`             | `EventEditorState` container branch has items UI; **no gold/gems fields**                                                                                                                                              |
+| SDK map inspector      | `sdk/campaign_builder/src/map_editor.rs`             | `show_inspector_panel` renders the Event Editor at the **bottom** of the column, below Visual Properties, Terrain Settings, and Preset Palette                                                                         |
+| SDK furniture editor   | `sdk/campaign_builder/src/furniture_editor.rs`       | `show_form` has Save and Cancel buttons only at the **bottom inside** a `ScrollArea`; **no Back button at the top**                                                                                                    |
+| SDK stock templates    | `sdk/campaign_builder/src/stock_templates_editor.rs` | `StockTemplateEditBuffer::from_template` hardcodes `description: String::new()` with a comment "templates have no description field in the domain type"; `to_template` omits `description` from the constructed struct |
 
 ### Identified Issues
 
@@ -127,7 +127,74 @@ block from its current location at the bottom and re-render it at the new
 position described above. The inner `ui.group` wrapper and heading `"Event
 Editor"` are preserved.
 
-#### 1.3 Testing Requirements
+#### 1.3 Character Editor – Replace Starting Spells Collapsible Header with Flat Section Heading
+
+**File:** `sdk/campaign_builder/src/characters_editor.rs`
+
+**Problem:** `show_starting_spells_editor` wraps all its content in an
+`egui::CollapsingHeader` (a collapsible dropdown), while every other section
+of the Character Editor form uses a flat `ui.heading(...)` followed by
+always-visible content. The collapsible is visually inconsistent and out of
+place.
+
+**Call site fix** — `show_character_form` (currently near L2038):
+
+Replace the bare call:
+
+```
+ui.add_space(10.0);
+self.show_starting_spells_editor(ui, spells, classes);
+```
+
+with the same heading-first pattern used by every adjacent section:
+
+```
+ui.add_space(10.0);
+ui.heading("Starting Spells");
+
+self.show_starting_spells_editor(ui, spells, classes);
+```
+
+**Function fix** — `show_starting_spells_editor`:
+
+Remove the outer `egui::CollapsingHeader::new("📚 Starting Spells")` /
+`.id_salt("starting_spells_header")` / `.default_open(false)` / `.show(ui,
+|ui| { ... })` wrapper entirely. The function body (non-caster warning,
+autocomplete picker, `ScrollArea` grid) becomes the direct content of the
+function with no additional nesting level. The `id_salt` on the
+`CollapsingHeader` is deleted; the `ScrollArea` and `Grid` already carry their
+own `id_salt` / `id` values and are unaffected.
+
+The resulting function structure is:
+
+```
+fn show_starting_spells_editor(
+    &mut self,
+    ui: &mut egui::Ui,
+    available_spells: &[Spell],
+    classes: &[ClassDefinition],
+) {
+    // Non-caster warning (unchanged logic)
+    …
+
+    // "Add Spell" autocomplete selector (unchanged)
+    …
+
+    ui.add_space(4.0);
+
+    if self.buffer.starting_spells.is_empty() {
+        ui.label(egui::RichText::new("No starting spells defined.").italics());
+    } else {
+        // ScrollArea + Grid (unchanged, id_salt values preserved)
+        …
+    }
+}
+```
+
+No changes to `CharacterEditBuffer`, serialization, validation, or any other
+file are required.
+
+#### 1.4 Testing Requirements
 
 - Add a unit test
   `test_event_editor_renders_before_visual_properties_section` in
@@ -137,17 +204,23 @@ Editor"` are preserved.
 - Add a unit test `test_furniture_show_form_back_button_returns_to_list` in
   `furniture_editor_tests.rs` constructing a `FurnitureEditorState` in Edit
   mode, simulating a click on Back, and asserting the mode returns to `List`.
+- Verify existing `characters_editor.rs` tests for `show_starting_spells_editor`
+  (`test_non_caster_warning_detection`, `test_starting_spells_no_duplicate`,
+  `test_starting_spells_remove_entry`, etc.) continue to pass unchanged — the
+  logic is untouched so no test changes are needed.
 - Run the full SDK test suite: `cargo nextest run --all-features -p
-  campaign_builder`.
+campaign_builder`.
 
-#### 1.4 Deliverables
+#### 1.5 Deliverables
 
 - [ ] `◀ Back to List` button added to top of furniture `show_form`
 - [ ] Event Editor moved directly below Event Details in `show_inspector_panel`
+- [ ] `egui::CollapsingHeader` removed from `show_starting_spells_editor`
+- [ ] `ui.heading("Starting Spells")` added at the call site in `show_character_form`
 - [ ] Unit tests added and passing
 - [ ] `cargo fmt`, `cargo check`, `cargo clippy -D warnings` all clean
 
-#### 1.5 Success Criteria
+#### 1.6 Success Criteria
 
 - Opening Furniture → Edit Furniture shows a Back to List button at the top
   of the form without scrolling.
@@ -155,6 +228,10 @@ Editor"` are preserved.
 - Opening Maps → Edit Map → selecting a tile with an event and activating the
   Edit Event button shows the Event Editor immediately below the Event
   Details, not at the page footer.
+- Opening Characters → Edit Character shows "Starting Spells" as a plain
+  section heading (matching "Starting Equipment", "Starting Items",
+  "Description", etc.) with the spell table and Add Spell picker always
+  visible — no collapsible dropdown.
 
 ---
 
@@ -231,12 +308,12 @@ description: self.description.clone(),
 #### 2.5 Deliverables
 
 - [ ] `description: String` field added to `MerchantStockTemplate` with
-  `#[serde(default)]`
+      `#[serde(default)]`
 - [ ] All struct literal construction sites updated
 - [ ] `from_template` reads `template.description`
 - [ ] `to_template` writes `self.description` into the returned struct
 - [ ] RON serialisation round-trip test passes (existing
-  `test_load_from_file_round_trip` must continue to pass)
+      `test_load_from_file_round_trip` must continue to pass)
 - [ ] New unit tests added and passing
 - [ ] `cargo fmt`, `cargo check`, `cargo clippy -D warnings` all clean
 
@@ -426,6 +503,7 @@ opens and empties the container.
 #### 3.8 Testing Requirements
 
 **Game engine tests** (`src/domain/world/events.rs` `mod tests`):
+
 - `test_container_event_with_gold_returns_gold_in_result` – verify
   `EventResult::EnterContainer` carries the gold set on the event.
 - `test_container_event_with_gems_returns_gems_in_result` – same for gems.
@@ -433,10 +511,12 @@ opens and empties the container.
   currency fields (`#[serde(default)]`) returns `gold: 0, gems: 0`.
 
 **Game engine tests** (`src/application/save_game.rs` or equivalent):
+
 - Extend `test_save_load_preserves_container_items_after_partial_take` to
   verify that `gold` and `gems` also survive a save/load round-trip.
 
 **SDK tests** (`sdk/campaign_builder/src/map_editor.rs` `mod tests`):
+
 - `test_event_editor_state_to_container_with_gold_and_gems` – construct an
   `EventEditorState` with `container_gold = "50"`, `container_gems = "3"`,
   call `to_map_event`, assert the result is
@@ -448,6 +528,7 @@ opens and empties the container.
   state has `"0"` for both fields.
 
 **SDK tests** (data/test_campaign integration):
+
 - Ensure any test campaign container events in
   `data/test_campaign/data/` RON files that omit `gold`/`gems` still parse
   cleanly under `#[serde(default)]`.
@@ -458,7 +539,7 @@ crate after each sub-step.
 #### 3.9 Deliverables
 
 - [ ] `gold: u32` and `gems: u32` added to `MapEvent::Container` with
-  `#[serde(default)]`
+      `#[serde(default)]`
 - [ ] `EventResult::EnterContainer` carries `gold` and `gems`
 - [ ] `trigger_event` propagates gold/gems from the map event
 - [ ] `ContainerInventoryState` tracks gold/gems
@@ -488,11 +569,11 @@ crate after each sub-step.
 
 ## Implementation Order Summary
 
-| Phase | Scope | Files Changed |
-|---|---|---|
-| 1 | Furniture Back to List + Event Editor position | `furniture_editor.rs`, `map_editor.rs` |
-| 2 | Stock Template description round-trip | `npc_runtime.rs`, `stock_templates_editor.rs` |
-| 3 | Container gold/gems (engine + SDK + loot UI) | `types.rs`, `events.rs`, `container_inventory_state.rs`, `container_inventory_ui.rs`, `map_editor.rs` |
+| Phase | Scope                                                                         | Files Changed                                                                                         |
+| ----- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 1     | Furniture Back to List + Event Editor position + Starting Spells flat heading | `furniture_editor.rs`, `map_editor.rs`, `characters_editor.rs`                                        |
+| 2     | Stock Template description round-trip                                         | `npc_runtime.rs`, `stock_templates_editor.rs`                                                         |
+| 3     | Container gold/gems (engine + SDK + loot UI)                                  | `types.rs`, `events.rs`, `container_inventory_state.rs`, `container_inventory_ui.rs`, `map_editor.rs` |
 
 Each phase must pass all four quality gates before the next phase begins:
 

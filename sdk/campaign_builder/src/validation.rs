@@ -1543,6 +1543,70 @@ pub fn validate_quest_learn_spell_rewards(
     results
 }
 
+/// Validates that `starting_spells` in character definitions reference known spell IDs.
+///
+/// For each [`CharacterDefinition`] whose `starting_spells` list is non-empty,
+/// every [`SpellId`] in that list is checked against the provided `spells` slice.
+/// An error is produced for every spell ID that cannot be resolved, containing
+/// the character's `id` and the unknown `spell_id` in the message to aid
+/// campaign authors in locating the problem.
+///
+/// # Arguments
+///
+/// * `characters` - Slice of character definitions to validate
+/// * `spells`     - Slice of known spell definitions (the campaign's spell database)
+///
+/// # Returns
+///
+/// A vector of [`ValidationResult`] with errors for each unresolvable spell
+/// reference, or a single `Passed` result when all `starting_spells` are valid
+/// (including the case where no characters carry any starting spells).
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::validation::validate_character_starting_spells;
+/// use antares::domain::character_definition::CharacterDefinition;
+/// use antares::domain::magic::types::Spell;
+///
+/// let characters: Vec<CharacterDefinition> = vec![];
+/// let spells: Vec<Spell> = vec![];
+/// let results = validate_character_starting_spells(&characters, &spells);
+/// assert_eq!(results.len(), 1);
+/// assert!(results[0].is_passed());
+/// ```
+pub fn validate_character_starting_spells(
+    characters: &[antares::domain::character_definition::CharacterDefinition],
+    spells: &[antares::domain::magic::types::Spell],
+) -> Vec<ValidationResult> {
+    let mut results = Vec::new();
+    let spell_ids: std::collections::HashSet<antares::domain::types::SpellId> =
+        spells.iter().map(|s| s.id).collect();
+
+    for character in characters {
+        for &spell_id in &character.starting_spells {
+            if !spell_ids.contains(&spell_id) {
+                results.push(ValidationResult::error(
+                    ValidationCategory::Characters,
+                    format!(
+                        "Character '{}' (ID: {}) has starting_spells entry with unknown spell ID {}",
+                        character.name, character.id, spell_id
+                    ),
+                ));
+            }
+        }
+    }
+
+    if results.is_empty() {
+        results.push(ValidationResult::passed(
+            ValidationCategory::Characters,
+            "All character starting_spells references are valid".to_string(),
+        ));
+    }
+
+    results
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2693,6 +2757,174 @@ mod tests {
         assert!(
             results[0].is_passed(),
             "Empty quest/spell lists should yield Passed"
+        );
+    }
+
+    // --- validate_character_starting_spells ---
+
+    fn make_character_definition(
+        id: &str,
+        name: &str,
+        starting_spells: Vec<antares::domain::types::SpellId>,
+    ) -> antares::domain::character_definition::CharacterDefinition {
+        use antares::domain::character::{Alignment, Sex};
+        let mut def = antares::domain::character_definition::CharacterDefinition::new(
+            id.to_string(),
+            name.to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        );
+        def.starting_spells = starting_spells;
+        def
+    }
+
+    #[test]
+    fn test_validate_character_starting_spells_empty_characters_returns_passed() {
+        let spells = vec![make_spell(0x0101, 1)];
+        let results = validate_character_starting_spells(&[], &spells);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_passed(),
+            "Empty character list should yield a Passed result"
+        );
+    }
+
+    #[test]
+    fn test_validate_character_starting_spells_no_starting_spells_returns_passed() {
+        let characters = vec![make_character_definition("hero", "Hero", vec![])];
+        let spells = vec![make_spell(0x0101, 1)];
+        let results = validate_character_starting_spells(&characters, &spells);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_passed(),
+            "Character with empty starting_spells should yield Passed"
+        );
+    }
+
+    #[test]
+    fn test_validate_character_starting_spells_valid_spell_ids_returns_passed() {
+        let characters = vec![make_character_definition(
+            "wizard",
+            "Wizard",
+            vec![0x0101, 0x0102],
+        )];
+        let spells = vec![make_spell(0x0101, 1), make_spell(0x0102, 2)];
+        let results = validate_character_starting_spells(&characters, &spells);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_passed(),
+            "All valid starting spell IDs should yield Passed"
+        );
+    }
+
+    #[test]
+    fn test_validate_character_starting_spells_invalid_spell_id_returns_error() {
+        let characters = vec![make_character_definition("wizard", "Wizard", vec![0x9999])];
+        let spells = vec![make_spell(0x0101, 1)];
+        let results = validate_character_starting_spells(&characters, &spells);
+        assert!(
+            results.iter().any(|r| r.is_error()),
+            "Unknown starting spell ID should produce an error"
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.message.contains("unknown spell ID")),
+            "Error message should mention the unknown spell ID"
+        );
+        assert!(
+            results.iter().any(|r| r.message.contains("Wizard")),
+            "Error message should include the character name"
+        );
+        assert!(
+            results.iter().any(|r| r.message.contains("wizard")),
+            "Error message should include the character ID"
+        );
+    }
+
+    #[test]
+    fn test_validate_character_starting_spells_error_contains_spell_id() {
+        let bad_spell_id: antares::domain::types::SpellId = 0xDEAD;
+        let characters = vec![make_character_definition(
+            "cleric_id",
+            "Cleric Name",
+            vec![bad_spell_id],
+        )];
+        let spells = vec![make_spell(0x0101, 1)];
+        let results = validate_character_starting_spells(&characters, &spells);
+        assert!(
+            results.iter().any(|r| r.is_error()),
+            "Unknown spell ID should produce an error"
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.message.contains(&bad_spell_id.to_string())),
+            "Error message should contain the unknown spell ID value"
+        );
+    }
+
+    #[test]
+    fn test_validate_character_starting_spells_multiple_characters_one_invalid() {
+        let characters = vec![
+            make_character_definition("valid_char", "Valid Char", vec![0x0101]),
+            make_character_definition("bad_char", "Bad Char", vec![0x9999]),
+        ];
+        let spells = vec![make_spell(0x0101, 1)];
+        let results = validate_character_starting_spells(&characters, &spells);
+        // Should have one error for the bad reference
+        let errors: Vec<_> = results.iter().filter(|r| r.is_error()).collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "Only the invalid reference should produce an error"
+        );
+        assert!(
+            errors[0].message.contains("Bad Char"),
+            "Error should name the character with the invalid spell"
+        );
+    }
+
+    #[test]
+    fn test_validate_character_starting_spells_multiple_invalid_spell_ids_in_one_character() {
+        let characters = vec![make_character_definition(
+            "multi_bad",
+            "Multi Bad",
+            vec![0x8888, 0x9999],
+        )];
+        let spells = vec![make_spell(0x0101, 1)];
+        let results = validate_character_starting_spells(&characters, &spells);
+        let errors: Vec<_> = results.iter().filter(|r| r.is_error()).collect();
+        assert_eq!(
+            errors.len(),
+            2,
+            "Each invalid spell ID should produce its own error"
+        );
+    }
+
+    #[test]
+    fn test_validate_character_starting_spells_empty_spell_list_with_references_returns_errors() {
+        let characters = vec![make_character_definition("hero", "Hero", vec![0x0101])];
+        let results = validate_character_starting_spells(&characters, &[]);
+        assert!(
+            results.iter().any(|r| r.is_error()),
+            "Spell reference against empty spell list should produce error"
+        );
+    }
+
+    #[test]
+    fn test_validate_character_starting_spells_uses_characters_category() {
+        let characters = vec![make_character_definition("hero", "Hero", vec![0x9999])];
+        let spells = vec![make_spell(0x0101, 1)];
+        let results = validate_character_starting_spells(&characters, &spells);
+        assert!(
+            results
+                .iter()
+                .filter(|r| r.is_error())
+                .all(|r| r.category == ValidationCategory::Characters),
+            "All errors should use the Characters validation category"
         );
     }
 }

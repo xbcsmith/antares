@@ -329,11 +329,20 @@ pub struct CampaignAssets {
     #[serde(default = "default_tilesets_path")]
     pub tilesets: String,
 
-    /// Music directory
+    /// Audio directory (music and sound effects)
+    ///
+    /// All audio files (music tracks and SFX) are resolved relative to
+    /// this directory inside the campaign root.  The audio system appends
+    /// `.ogg` when the track/sfx identifier has no file extension.
+    /// Defaults to `assets/audio`.
+    #[serde(default = "default_audio_path")]
+    pub audio: String,
+
+    /// Music directory (legacy; use `audio` for new campaigns)
     #[serde(default = "default_music_path")]
     pub music: String,
 
-    /// Sound effects directory
+    /// Sound effects directory (legacy; use `audio` for new campaigns)
     #[serde(default = "default_sounds_path")]
     pub sounds: String,
 
@@ -348,6 +357,10 @@ pub struct CampaignAssets {
 
 fn default_tilesets_path() -> String {
     "assets/tilesets".to_string()
+}
+
+fn default_audio_path() -> String {
+    "assets/audio".to_string()
 }
 
 fn default_music_path() -> String {
@@ -562,6 +575,7 @@ impl TryFrom<CampaignMetadata> for Campaign {
             },
             assets: CampaignAssets {
                 tilesets: "assets/tilesets".to_string(),
+                audio: "assets/audio".to_string(),
                 music: "assets/music".to_string(),
                 sounds: "assets/sounds".to_string(),
                 images: "assets/images".to_string(),

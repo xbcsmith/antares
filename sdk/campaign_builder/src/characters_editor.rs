@@ -12,16 +12,17 @@ use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
     autocomplete_class_selector, autocomplete_creature_selector, autocomplete_item_list_selector,
     autocomplete_item_selector, autocomplete_portrait_selector, autocomplete_race_selector,
-    extract_portrait_candidates, handle_toolbar_action, resolve_portrait_path,
-    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
-    ToolbarAction, TwoColumnLayout,
+    autocomplete_spell_selector, extract_portrait_candidates, handle_toolbar_action,
+    resolve_portrait_path, show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge,
+    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::character::{Alignment, Sex, Stats};
 use antares::domain::character_definition::{CharacterDefinition, StartingEquipment};
 use antares::domain::classes::ClassDefinition;
 use antares::domain::items::types::Item;
+use antares::domain::magic::types::Spell;
 use antares::domain::races::RaceDefinition;
-use antares::domain::types::{CreatureId, ItemId};
+use antares::domain::types::{CreatureId, ItemId, SpellId};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -232,6 +233,14 @@ pub struct CharacterEditBuffer {
     pub boots_id: ItemId,
     pub accessory1_id: ItemId,
     pub accessory2_id: ItemId,
+    /// Starting spells (by SpellId) defined for this character.
+    /// Populated from `CharacterDefinition::starting_spells` on edit,
+    /// and written back on save.
+    pub starting_spells: Vec<SpellId>,
+    /// Staging SpellId for the "Add Spell" autocomplete widget.
+    /// Set to the selected spell on pick, immediately pushed to
+    /// `starting_spells` (dedup-checked), then reset to 0.
+    pub starting_spell_add_id: SpellId,
 }
 
 impl Default for CharacterEditBuffer {
@@ -275,6 +284,8 @@ impl Default for CharacterEditBuffer {
             boots_id: 0,
             accessory1_id: 0,
             accessory2_id: 0,
+            starting_spells: Vec::new(),
+            starting_spell_add_id: 0,
         }
     }
 }
@@ -372,6 +383,8 @@ impl CharactersEditorState {
                 boots_id: character.starting_equipment.boots.unwrap_or(0),
                 accessory1_id: character.starting_equipment.accessory1.unwrap_or(0),
                 accessory2_id: character.starting_equipment.accessory2.unwrap_or(0),
+                starting_spells: character.starting_spells.clone(),
+                starting_spell_add_id: 0,
             };
             // Ensure autocomplete widgets show values from the newly loaded buffer
             self.reset_autocomplete_buffers = true;
@@ -664,6 +677,7 @@ impl CharactersEditorState {
             } else {
                 self.buffer.creature_id.trim().parse::<CreatureId>().ok()
             },
+            starting_spells: self.buffer.starting_spells.clone(),
         };
 
         if let Some(idx) = self.selected_character {
@@ -1091,6 +1105,7 @@ impl CharactersEditorState {
         races: &[RaceDefinition],
         classes: &[ClassDefinition],
         items: &[Item],
+        spells: &[Spell],
         creature_manager: Option<&CreatureAssetManager>,
         ctx: &mut EditorContext<'_>,
     ) {
@@ -1164,7 +1179,7 @@ impl CharactersEditorState {
                 self.show_list(ui, items, ctx);
             }
             CharactersEditorMode::Add | CharactersEditorMode::Edit => {
-                self.show_character_form(ui, races, classes, items, creature_manager, ctx);
+                self.show_character_form(ui, races, classes, items, spells, creature_manager, ctx);
             }
         }
 
@@ -1677,6 +1692,7 @@ impl CharactersEditorState {
         races: &[RaceDefinition],
         classes: &[ClassDefinition],
         items: &[Item],
+        spells: &[Spell],
         creature_manager: Option<&CreatureAssetManager>,
         ctx: &mut EditorContext<'_>,
     ) {
@@ -1705,6 +1721,10 @@ impl CharactersEditorState {
             crate::ui_helpers::remove_autocomplete_buffer(
                 ctx,
                 egui::Id::new("autocomplete:creature:character_creature".to_string()),
+            );
+            crate::ui_helpers::remove_autocomplete_buffer(
+                ctx,
+                egui::Id::new("autocomplete:spell:starting_spells_add"),
             );
             self.reset_autocomplete_buffers = false;
         }
@@ -2017,6 +2037,11 @@ impl CharactersEditorState {
                 }
 
                 ui.add_space(10.0);
+                ui.heading("Starting Spells");
+
+                self.show_starting_spells_editor(ui, spells, classes);
+
+                ui.add_space(10.0);
                 ui.heading("Description");
 
                 ui.add(
@@ -2076,6 +2101,137 @@ impl CharactersEditorState {
                     }
                 });
             });
+    }
+
+    /// Show the Starting Spells editor section in the character edit form.
+    ///
+    /// Renders a collapsible `"📚 Starting Spells"` section containing:
+    /// - An autocomplete spell picker to add spells to the list (deduplication enforced)
+    /// - A scrollable table of assigned spells with slot number, name, school, level, and remove button
+    /// - A yellow warning label for non-caster classes that have spells assigned
+    ///
+    /// # Arguments
+    ///
+    /// * `ui` - The egui UI context
+    /// * `available_spells` - All known spells, used for autocomplete candidates and name resolution
+    /// * `classes` - All known class definitions, used for non-caster detection
+    fn show_starting_spells_editor(
+        &mut self,
+        ui: &mut egui::Ui,
+        available_spells: &[Spell],
+        classes: &[ClassDefinition],
+    ) {
+        // Non-caster warning: shown when the class has no spell school and spells
+        // are defined. The spells are still stored (serialised), but will have no
+        // effect at runtime.
+        let is_non_caster = classes
+            .iter()
+            .find(|c| c.id == self.buffer.class_id)
+            .map(|c| c.spell_school.is_none())
+            .unwrap_or(false);
+
+        if is_non_caster && !self.buffer.starting_spells.is_empty() {
+            ui.colored_label(
+                egui::Color32::YELLOW,
+                format!(
+                    "⚠ \"{}\" cannot cast spells; starting spells are stored but \
+                     have no in-game effect.",
+                    self.buffer.class_id
+                ),
+            );
+            ui.add_space(4.0);
+        }
+
+        // "Add Spell" autocomplete selector — uses a staging ID in the buffer.
+        // When the user picks a spell the staging ID is set, then immediately
+        // pushed to `starting_spells` (dedup-checked) and reset to 0.
+        let add_changed = autocomplete_spell_selector(
+            ui,
+            "starting_spells_add",
+            "Add Spell:",
+            &mut self.buffer.starting_spell_add_id,
+            available_spells,
+        );
+        if add_changed && self.buffer.starting_spell_add_id != 0 {
+            let spell_id = self.buffer.starting_spell_add_id;
+            if !self.buffer.starting_spells.contains(&spell_id) {
+                self.buffer.starting_spells.push(spell_id);
+                self.has_unsaved_changes = true;
+            }
+            // Reset staging ID and clear the autocomplete text buffer so the
+            // picker shows empty on the next frame, ready for a new entry.
+            self.buffer.starting_spell_add_id = 0;
+            crate::ui_helpers::remove_autocomplete_buffer(
+                ui.ctx(),
+                egui::Id::new("autocomplete:spell:starting_spells_add"),
+            );
+        }
+
+        ui.add_space(4.0);
+
+        if self.buffer.starting_spells.is_empty() {
+            ui.label(egui::RichText::new("No starting spells defined.").italics());
+        } else {
+            // Capture the current list as an owned clone so that we can mutably
+            // borrow `self` inside and after the UI closures without conflict.
+            let spell_ids = self.buffer.starting_spells.clone();
+            let mut remove_idx: Option<usize> = None;
+
+            egui::ScrollArea::vertical()
+                .id_salt("starting_spells_scroll")
+                .max_height(200.0)
+                .show(ui, |ui| {
+                    egui::Grid::new("starting_spells_grid")
+                        .num_columns(5)
+                        .spacing([10.0, 2.0])
+                        .show(ui, |ui| {
+                            // Header row
+                            ui.label(egui::RichText::new("Slot").strong());
+                            ui.label(egui::RichText::new("Name").strong());
+                            ui.label(egui::RichText::new("School").strong());
+                            ui.label(egui::RichText::new("Level").strong());
+                            ui.label(""); // remove-button column
+                            ui.end_row();
+
+                            // Data rows — push_id wraps only the remove button so that
+                            // multiple "❌" buttons get unique IDs (AGENTS.md egui rule).
+                            // end_row() must be called on the grid's ui, NOT inside a
+                            // push_id closure, otherwise push_id counts as one cell and
+                            // all spells land on the same horizontal row.
+                            for (idx, &spell_id) in spell_ids.iter().enumerate() {
+                                ui.label(format!("{}", idx + 1));
+                                if let Some(spell) =
+                                    available_spells.iter().find(|s| s.id == spell_id)
+                                {
+                                    ui.label(&spell.name);
+                                    ui.label(format!("{:?}", spell.school));
+                                    ui.label(format!("{}", spell.level));
+                                } else {
+                                    ui.label(format!("Unknown (0x{:04X})", spell_id));
+                                    ui.label("—");
+                                    ui.label("—");
+                                }
+                                if ui
+                                    .push_id(idx, |ui| {
+                                        ui.small_button("❌")
+                                            .on_hover_text("Remove spell")
+                                            .clicked()
+                                    })
+                                    .inner
+                                {
+                                    remove_idx = Some(idx);
+                                }
+                                ui.end_row();
+                            }
+                        });
+                });
+
+            // Apply removal outside all closures to avoid borrow conflicts
+            if let Some(idx) = remove_idx {
+                self.buffer.starting_spells.remove(idx);
+                self.has_unsaved_changes = true;
+            }
+        }
     }
 
     /// Show equipment slot editor
@@ -2703,6 +2859,7 @@ mod tests {
             is_premade: true,
             starts_in_party: false,
             creature_id: None,
+            starting_spells: vec![],
         };
 
         state.characters.push(character);
@@ -3321,7 +3478,7 @@ mod tests {
                     &mut status,
                     &mut merge,
                 );
-                state.show_character_form(ui, &races, &classes, &items, None, &mut editor_ctx);
+                state.show_character_form(ui, &races, &classes, &items, &[], None, &mut editor_ctx);
             });
         });
 
@@ -3593,5 +3750,224 @@ mod tests {
         assert_eq!(state.characters[2].portrait_id, "4");
         assert_eq!(state.characters[3].portrait_id, "6");
         assert_eq!(state.characters[4].portrait_id, "8");
+    }
+
+    // ===== starting_spells Tests =====
+
+    /// Tests that `CharacterEditBuffer::default()` initialises `starting_spells`
+    /// to an empty `Vec` and `starting_spell_add_id` to 0.
+    #[test]
+    fn test_character_edit_buffer_default_has_empty_starting_spells() {
+        let buf = CharacterEditBuffer::default();
+        assert!(buf.starting_spells.is_empty());
+        assert_eq!(buf.starting_spell_add_id, 0);
+    }
+
+    /// Tests that `start_edit_character()` copies `starting_spells` from an
+    /// existing `CharacterDefinition` into the edit buffer.
+    #[test]
+    fn test_start_edit_character_loads_starting_spells() {
+        use antares::domain::character_definition::CharacterDefinition;
+
+        let mut state = CharactersEditorState::default();
+        let mut def = CharacterDefinition::new(
+            "c1".to_string(),
+            "Hero".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            antares::domain::character::Sex::Male,
+            antares::domain::character::Alignment::Good,
+        );
+        def.starting_spells = vec![260, 261];
+        state.characters.push(def);
+
+        state.start_edit_character(0);
+
+        assert_eq!(state.buffer.starting_spells, vec![260, 261]);
+        assert_eq!(state.buffer.starting_spell_add_id, 0);
+    }
+
+    /// Tests that `start_edit_character()` sets `starting_spells` to an empty
+    /// `Vec` when the definition has no spells.
+    #[test]
+    fn test_start_edit_character_empty_starting_spells() {
+        use antares::domain::character_definition::CharacterDefinition;
+
+        let mut state = CharactersEditorState::default();
+        let def = CharacterDefinition::new(
+            "c2".to_string(),
+            "Squire".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            antares::domain::character::Sex::Female,
+            antares::domain::character::Alignment::Neutral,
+        );
+        // No starting_spells set — default is empty
+        state.characters.push(def);
+
+        state.start_edit_character(0);
+
+        assert!(state.buffer.starting_spells.is_empty());
+    }
+
+    /// Tests the round-trip: set spells in the buffer, call `save_character()`,
+    /// then verify the persisted `CharacterDefinition` has the correct spells.
+    #[test]
+    fn test_save_character_persists_starting_spells() {
+        let mut state = CharactersEditorState::default();
+        state.buffer.id = "wizard1".to_string();
+        state.buffer.name = "Merlin".to_string();
+        state.buffer.race_id = "human".to_string();
+        state.buffer.class_id = "sorcerer".to_string();
+        state.buffer.starting_spells = vec![0x0501, 0x0502];
+
+        let result = state.save_character();
+        assert!(result.is_ok(), "save_character failed: {:?}", result);
+        assert_eq!(state.characters[0].starting_spells, vec![0x0501, 0x0502]);
+    }
+
+    /// Tests that adding a spell ID already present in `starting_spells` does not
+    /// create a duplicate entry. Simulates the logic in `show_starting_spells_editor`.
+    #[test]
+    fn test_starting_spells_no_duplicate() {
+        let mut state = CharactersEditorState::default();
+        state.buffer.starting_spells = vec![260u16];
+
+        // Simulate the add logic: attempt to add the same spell twice
+        let spell_id: SpellId = 260;
+        if !state.buffer.starting_spells.contains(&spell_id) {
+            state.buffer.starting_spells.push(spell_id);
+        }
+
+        assert_eq!(
+            state.buffer.starting_spells.len(),
+            1,
+            "Duplicate spell should not be added"
+        );
+    }
+
+    /// Tests that removing a spell by index removes only the targeted entry
+    /// and does not affect the remaining entries.
+    #[test]
+    fn test_starting_spells_remove_entry() {
+        let mut state = CharactersEditorState::default();
+        state.buffer.starting_spells = vec![260u16, 261u16, 262u16];
+
+        // Remove the middle entry (index 1)
+        state.buffer.starting_spells.remove(1);
+
+        assert_eq!(state.buffer.starting_spells, vec![260u16, 262u16]);
+    }
+
+    /// Tests that the non-caster warning condition is detected correctly for a
+    /// knight-class character with starting spells assigned.
+    #[test]
+    fn test_non_caster_warning_detection() {
+        use antares::domain::classes::ClassDefinition;
+        use antares::domain::types::DiceRoll;
+
+        let knight = ClassDefinition {
+            id: "knight".to_string(),
+            name: "Knight".to_string(),
+            description: String::new(),
+            hp_die: DiceRoll::new(1, 10, 0),
+            spell_school: None, // Knights cannot cast spells
+            is_pure_caster: false,
+            spell_stat: None,
+            special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
+            proficiencies: vec![],
+        };
+        let classes = vec![knight];
+
+        let mut state = CharactersEditorState::default();
+        state.buffer.class_id = "knight".to_string();
+        state.buffer.starting_spells = vec![260];
+
+        // Replicate the is_non_caster detection logic from show_starting_spells_editor
+        let is_non_caster = classes
+            .iter()
+            .find(|c| c.id == state.buffer.class_id)
+            .map(|c| c.spell_school.is_none())
+            .unwrap_or(false);
+
+        assert!(
+            is_non_caster,
+            "Knight should be detected as a non-caster class"
+        );
+    }
+
+    /// Tests that a caster class (cleric) is NOT flagged as a non-caster.
+    #[test]
+    fn test_caster_class_not_flagged_as_non_caster() {
+        use antares::domain::classes::{ClassDefinition, SpellSchool, SpellStat};
+        use antares::domain::types::DiceRoll;
+
+        let cleric = ClassDefinition {
+            id: "cleric".to_string(),
+            name: "Cleric".to_string(),
+            description: String::new(),
+            hp_die: DiceRoll::new(1, 8, 0),
+            spell_school: Some(SpellSchool::Cleric),
+            is_pure_caster: true,
+            spell_stat: Some(SpellStat::Personality),
+            special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
+            proficiencies: vec![],
+        };
+        let classes = vec![cleric];
+
+        let mut state = CharactersEditorState::default();
+        state.buffer.class_id = "cleric".to_string();
+        state.buffer.starting_spells = vec![260];
+
+        let is_non_caster = classes
+            .iter()
+            .find(|c| c.id == state.buffer.class_id)
+            .map(|c| c.spell_school.is_none())
+            .unwrap_or(false);
+
+        assert!(
+            !is_non_caster,
+            "Cleric should NOT be detected as a non-caster class"
+        );
+    }
+
+    /// Tests the full round-trip: start_edit_character populates starting_spells
+    /// from a definition, then save_character writes them back.
+    #[test]
+    fn test_starting_spells_edit_save_roundtrip() {
+        use antares::domain::character_definition::CharacterDefinition;
+
+        let mut state = CharactersEditorState::default();
+        let mut def = CharacterDefinition::new(
+            "druid1".to_string(),
+            "Gandalf".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            antares::domain::character::Sex::Male,
+            antares::domain::character::Alignment::Good,
+        );
+        def.starting_spells = vec![0x0501];
+        state.characters.push(def);
+
+        // Load into buffer
+        state.start_edit_character(0);
+        assert_eq!(state.buffer.starting_spells, vec![0x0501u16]);
+
+        // Modify the spell list in the buffer
+        state.buffer.starting_spells.push(0x0502);
+
+        // Save back
+        let result = state.save_character();
+        assert!(result.is_ok(), "save_character failed: {:?}", result);
+        assert_eq!(
+            state.characters[0].starting_spells,
+            vec![0x0501u16, 0x0502u16]
+        );
     }
 }

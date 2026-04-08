@@ -1392,6 +1392,7 @@ impl eframe::App for CampaignBuilderApp {
                     &self.editor_registry.races_editor_state.races,
                     &self.editor_registry.classes_editor_state.classes,
                     &self.campaign_data.items,
+                    &self.campaign_data.spells,
                     char_creature_manager.as_ref(),
                     &mut chars_ctx,
                 )

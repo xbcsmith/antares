@@ -213,6 +213,19 @@ pub fn handle_global_mode_toggles(
         return true;
     }
 
+    if frame_input.spell_book_toggle {
+        if matches!(game_state.mode, GameMode::Exploration) {
+            bevy::prelude::info!("Spell Book key pressed: opening spell book");
+            game_state.enter_spellbook_with_caster_select();
+        } else {
+            bevy::prelude::info!(
+                "Spell Book key pressed but mode is {:?} — ignoring",
+                game_state.mode
+            );
+        }
+        return true;
+    }
+
     if frame_input.game_log_toggle {
         match game_state.mode {
             GameMode::Exploration => {
@@ -707,5 +720,101 @@ mod tests {
 
         assert!(consumed);
         assert!(matches!(state.mode, GameMode::Inventory(_)));
+    }
+
+    fn spell_book_toggle_intent() -> FrameInputIntent {
+        FrameInputIntent {
+            spell_book_toggle: true,
+            ..FrameInputIntent::default()
+        }
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_spell_book_opens_from_exploration() {
+        let mut state = GameState::new();
+        assert!(matches!(state.mode, GameMode::Exploration));
+
+        let consumed = handle_global_mode_toggles(&mut state, spell_book_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::SpellBook(_)));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_spell_book_ignored_in_menu_mode() {
+        let mut state = GameState::new();
+        state.enter_menu();
+        assert!(matches!(state.mode, GameMode::Menu(_)));
+
+        let consumed = handle_global_mode_toggles(&mut state, spell_book_toggle_intent(), None);
+
+        assert!(consumed);
+        // menu mode is preserved — spell book open is ignored outside Exploration
+        assert!(matches!(state.mode, GameMode::Menu(_)));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_spell_book_ignored_in_inventory_mode() {
+        let mut state = GameState::new();
+        state.enter_inventory();
+        assert!(matches!(state.mode, GameMode::Inventory(_)));
+
+        let consumed = handle_global_mode_toggles(&mut state, spell_book_toggle_intent(), None);
+
+        assert!(consumed);
+        // inventory mode is preserved — spell book open is ignored outside Exploration
+        assert!(matches!(state.mode, GameMode::Inventory(_)));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_spell_book_ignored_in_combat_mode() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        let mut state = GameState::new();
+        let hero = Character::new(
+            "Spell Guard".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+        state.enter_combat();
+
+        let consumed = handle_global_mode_toggles(&mut state, spell_book_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::Combat(_)));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_spell_book_stores_previous_mode() {
+        let mut state = GameState::new();
+        assert!(matches!(state.mode, GameMode::Exploration));
+
+        handle_global_mode_toggles(&mut state, spell_book_toggle_intent(), None);
+
+        if let GameMode::SpellBook(ref sb) = state.mode {
+            assert!(
+                matches!(sb.get_resume_mode(), GameMode::Exploration),
+                "SpellBook must store Exploration as the previous mode"
+            );
+        } else {
+            panic!("expected SpellBook mode after spell_book_toggle in Exploration");
+        }
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_spell_book_character_index_is_zero() {
+        let mut state = GameState::new();
+        handle_global_mode_toggles(&mut state, spell_book_toggle_intent(), None);
+
+        if let GameMode::SpellBook(ref sb) = state.mode {
+            assert_eq!(
+                sb.character_index, 0,
+                "enter_spellbook_with_caster_select must open at character index 0"
+            );
+        } else {
+            panic!("expected SpellBook mode");
+        }
     }
 }

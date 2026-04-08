@@ -8295,6 +8295,42 @@
     events: {
         (
             x: 3,
+            y: 1,
+        ): Furniture(
+            name: "Wooden Chair",
+            furniture_id: Some(6),
+            furniture_type: Chair,
+            rotation_y: Some(90.0),
+            scale: 1.0,
+            material: Wood,
+            flags: (
+                lit: false,
+                locked: false,
+                blocking: true,
+            ),
+            color_tint: None,
+            key_item_id: None,
+        ),
+        (
+            x: 3,
+            y: 7,
+        ): Container(
+            id: "container_3007",
+            name: "Chest",
+            description: "Locked Container",
+            items: [
+                (
+                    item_id: 2,
+                    charges: 0,
+                ),
+                (
+                    item_id: 3,
+                    charges: 0,
+                ),
+            ],
+        ),
+        (
+            x: 3,
             y: 17,
         ): DroppedItem(
             name: "Dropped Sword",

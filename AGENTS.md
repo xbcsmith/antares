@@ -533,6 +533,143 @@ Fixture data is reviewed and stable; live campaign data is not.
 
 ---
 
+### Implementation Rule 6: egui Multi-Column Layouts Must Use `allocate_ui` with Explicit Column Rects
+
+**THIS IS THE FOURTH MOST VIOLATED RULE — every new egui screen with columns gets this wrong**
+
+#### The Three Traps (all discovered the hard way on the Spell Book screen)
+
+**Trap 1 — `auto_shrink = true` (egui default) collapses ScrollArea to content height.**
+`ScrollArea::vertical()` defaults to `auto_shrink = true`. With 3 spell rows the
+area is ~60 px tall regardless of window size. Setting `max_height` alone does NOT
+fix this — `max_height` is a ceiling, not a floor.
+
+**Trap 2 — `ui.available_height()` inside `ui.horizontal` returns line height (~20 px).**
+Inside a `left_to_right` layout, `available_height()` reports only the line height,
+not the remaining window height. Any `max_height` computed there is useless.
+
+**Trap 3 — `auto_shrink([false, false])` consumes all horizontal space.**
+Disabling x-shrink inside `ui.horizontal` causes the `ScrollArea` to fill the
+entire remaining width, pushing subsequent columns (e.g. the Detail panel) off
+screen entirely. You will lose whole columns with zero compiler warning.
+
+#### The Correct Pattern — `allocate_ui` with explicit column rects
+
+Pre-compute ALL column dimensions from `ui.available_size()` **before** entering
+`ui.horizontal`, then use `ui.allocate_ui(egui::vec2(width, col_h), …)` for each
+column. This guarantees every column gets the exact rect you specify:
+
+```antares/src/game/systems/right_multi_column.rs#L1-32
+// ── Title bar with hints right-aligned (no bottom bar needed) ────────────────
+ui.horizontal(|ui| {
+    ui.heading("📚 Spell Book");
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.label("[ESC] Close");
+        ui.separator();
+        ui.label("[↑↓] Select Spell");
+        ui.separator();
+        ui.label("[Tab] Switch Char");
+        ui.separator();
+        ui.label("[C] Cast Spell");
+    });
+});
+ui.separator();
+
+// Pre-compute geometry from available_size() BEFORE ui.horizontal.
+let available = ui.available_size();
+let col_h   = available.y;           // full remaining height
+let left_w  = 160.0_f32;
+let right_w = 220.0_f32;
+// 2 separators: 1 px line + item_spacing.x each side, times two.
+let sep_total = (1.0 + 2.0 * ui.spacing().item_spacing.x) * 2.0;
+let center_w = (available.x - left_w - right_w - sep_total).max(200.0);
+
+ui.horizontal(|ui| {
+    // Left column — allocate_ui gives it an exact (left_w × col_h) rect.
+    ui.allocate_ui(egui::vec2(left_w, col_h), |ui| {
+        render_left_column(ui, ...);
+    });
+    ui.separator();
+
+    // Center column — fills remaining width between left and right.
+    ui.allocate_ui(egui::vec2(center_w, col_h), |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt("screen_center_scroll")
+            .auto_shrink([true, false])  // shrink x to content; never shrink y
+            .show(ui, |ui| { render_center_column(ui, ...); });
+    });
+    ui.separator();
+
+    // Right column — fixed width, always visible.
+    ui.allocate_ui(egui::vec2(right_w, col_h), |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt("screen_right_scroll")
+            .auto_shrink([true, false])  // shrink x to content; never shrink y
+            .show(ui, |ui| { render_right_column(ui, ...); });
+    });
+});
+```
+
+Key points:
+
+- `ui.allocate_ui(vec2(w, col_h), …)` — the allocated rect is exactly `col_h`
+  tall, so the inner `ScrollArea` sees `available_height() = col_h` and fills it.
+- `.auto_shrink([true, false])` — `false` for y (don't shrink below `col_h`),
+  `true` for x (don't consume extra horizontal space and break adjacent columns).
+- Navigation hints go **in the title bar** (right-aligned). This eliminates the
+  bottom bar and any height-reservation arithmetic.
+
+#### The Hint Bar Pattern
+
+**WRONG — separate bottom bar requires height calculation:**
+
+```antares/src/game/systems/wrong_bottom_bar.rs#L1-8
+ui.separator();
+let available_h = ui.available_height() - 36.0; // fragile magic number
+ui.horizontal(|ui| { /* columns */ });
+ui.separator();
+ui.horizontal_centered(|ui| {
+    ui.label("[C] Cast   [Tab] Switch   [↑↓] Select");
+});
+```
+
+**RIGHT — hints inline in title bar, columns own 100 % of remaining height:**
+
+```antares/src/game/systems/right_title_hints.rs#L1-6
+ui.horizontal(|ui| {
+    ui.heading("Screen Title");
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.label("[ESC] Close");
+        ui.separator();
+        ui.label("[Key] Action"); // add as many as needed
+    });
+});
+ui.separator();
+// Now ui.available_size().y is the full remaining height — no subtraction needed.
+```
+
+#### YOU MUST:
+
+- Call `ui.available_size()` **before** `ui.horizontal` and store `col_h = available.y`
+- Use `ui.allocate_ui(egui::vec2(col_width, col_h), …)` for **every** column
+- Use `.auto_shrink([true, false])` on every `ScrollArea` inside a column
+- Put navigation hints in the title bar row (right-aligned) — no separate bottom bar
+
+#### NEVER:
+
+- ❌ Use `ui.vertical(…)` + `ScrollArea` without `allocate_ui` — height is not propagated
+- ❌ Use `auto_shrink([false, false])` — disabling x-shrink consumes all remaining width, destroying adjacent columns
+- ❌ Call `ui.available_height()` inside `ui.horizontal` — returns line height (~20 px), not window height
+- ❌ Use only `max_height(available_h)` without `allocate_ui` — `auto_shrink = true` still collapses the area
+- ❌ Put navigation hints in a separate bottom bar — requires fragile height arithmetic
+
+#### Reference Implementation
+
+`src/game/systems/spellbook_ui.rs` — `spellbook_ui_system` is the canonical
+example of this pattern in the game codebase.
+
+---
+
 ## Git Rules
 
 **LEAVE ALL GIT OPERATIONS TO THE USER**
@@ -635,6 +772,12 @@ Is it a step-by-step tutorial?
       no SidePanel/TopBottomPanel/CentralPanel skipped by a same-frame guard
       (show a placeholder instead), every layout-driving state mutation calls
       request_repaint()
+5b. (Any egui screen with multi-column layout) Verify column layout (Rule 6):
+      - available_size() called BEFORE ui.horizontal; col_h = available.y
+      - every column uses ui.allocate_ui(egui::vec2(col_w, col_h), ...)
+      - every ScrollArea inside a column uses .auto_shrink([true, false])
+      - navigation hints are in the title bar row, NOT a separate bottom bar
+      - auto_shrink([false, false]) is NEVER used — it destroys adjacent columns
 6.  Run: cargo fmt --all
 7.  Run: cargo check --all-targets --all-features
 8.  Run: cargo clippy --all-targets --all-features -- -D warnings
@@ -644,6 +787,8 @@ Is it a step-by-step tutorial?
 12. Verify: All checklist items above are checked
       - [ ] No test references campaigns/tutorial (Implementation Rule 5)
       - [ ] Any new campaign-level fixture data added to data/test_campaign/
+      - [ ] Any egui multi-column screen: allocate_ui(vec2(col_w, col_h)) for every
+            column; ScrollArea uses auto_shrink([true, false]); no bottom hint bar (Rule 6)
 ```
 
 **IF YOU FOLLOW THIS WORKFLOW, YOUR CODE WILL BE ACCEPTED.**
