@@ -1,5 +1,93 @@
 # Implementations
 
+## SDK Fixes — Phase 4: NPC Editor – Create Merchant Dialog (Complete)
+
+### Overview
+
+When an NPC is designated as a Merchant, the **Create merchant dialogue** button
+in the NPC edit form now fully generates a standard merchant `DialogueTree` and
+wires it to the NPC. The implementation was already present but lacked the two
+required Phase 4 unit tests; those have been added.
+
+**Button action (`create_or_repair_merchant_dialogue_for_buffer`):**
+
+- Calls `DialogueEditorState::ensure_merchant_dialogue_for_npc` to create or
+  repair the dialogue tree.
+- If the NPC has no assigned dialogue, `DialogueTree::standard_merchant_template`
+  is called to generate a new tree containing:
+  - A root node: `"Welcome. Take a look at what {npc_name} has for sale."`
+  - An SDK-managed `"Show me your wares."` choice → merchant action node with
+    `DialogueAction::OpenMerchant { npc_id }`.
+  - A `"Farewell."` choice that ends the conversation.
+- If the NPC already has a dialogue assigned, `ensure_standard_merchant_branch`
+  augments the existing tree non-destructively.
+- The generated dialogue is inserted into `available_dialogues` (the campaign's
+  in-memory dialogue collection).
+- `edit_buffer.dialogue_id` is updated to the new dialogue's numeric id.
+- `pending_status` is set with a human-readable confirmation message.
+- `ui.ctx().request_repaint()` is called implicitly through `needs_save = true`.
+
+**Files changed:**
+
+| File                                         | Change                                                                                              |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/npc_editor/mod.rs` | Added `test_create_merchant_dialog_generates_dialog` and `test_create_merchant_dialog_id_is_unique` |
+
+---
+
+### 4.1 — Button Action: `create_or_repair_merchant_dialogue_for_buffer`
+
+**File:** `sdk/campaign_builder/src/npc_editor/mod.rs`
+
+The `"Create merchant dialogue"` button in `show_edit_view` calls
+`create_or_repair_merchant_dialogue_for_buffer`, which:
+
+1. Guards on `is_merchant` — returns `Ok(String::new())` for non-merchants.
+2. Builds a temporary `NpcDefinition` from the edit buffer (without persisting).
+3. Delegates to `merchant_dialogue_editor.ensure_merchant_dialogue_for_npc`.
+4. Syncs `available_dialogues` from the internal `merchant_dialogue_editor`.
+5. Updates `edit_buffer.dialogue_id` from the (possibly newly assigned)
+   `npc.dialogue_id`.
+6. Returns a status string consumed by `pending_status`.
+
+`DialogueTree::standard_merchant_template` produces:
+
+- Root node with a greeting text and two choices.
+- SDK-managed merchant node (contains `DialogueAction::OpenMerchant { npc_id }`).
+- `sdk_metadata.managed_content` populated with `MerchantTemplateTree`.
+- `repeatable = true` so players can trade multiple times.
+
+---
+
+### 4.2 — New Tests
+
+**File:** `sdk/campaign_builder/src/npc_editor/mod.rs` — `mod tests`
+
+**`test_create_merchant_dialog_generates_dialog`**
+
+Constructs an `NpcEditorState` with a merchant edit buffer (no pre-assigned
+dialogue) and calls `create_or_repair_merchant_dialogue_for_buffer` directly to
+simulate a button click. Asserts:
+
+- Return value is `Ok` with a `"Created merchant dialogue"` message.
+- `available_dialogues` now contains exactly one `DialogueTree`.
+- The generated tree contains `OpenMerchant` for `"merchant_vendor"`.
+- The tree is marked as SDK-managed (`has_sdk_managed_merchant_content()`).
+- The root node has at least two choices (browse + goodbye).
+- `edit_buffer.dialogue_id` equals the generated dialogue's numeric id (as string).
+
+**`test_create_merchant_dialog_id_is_unique`**
+
+Calls the create action for two different NPCs (`"merchant_alpha"` and
+`"merchant_beta"`) sequentially on the same editor state. Asserts:
+
+- Both calls succeed.
+- The two resulting `dialogue_id` strings differ.
+- `available_dialogues` contains exactly two entries.
+- Each dialogue targets the correct NPC via `contains_open_merchant_for_npc`.
+
+---
+
 ## SDK Fixes — Phase 3: Container Gold and Gems + Place Event Map RON Save Fix (Complete)
 
 ### Overview
