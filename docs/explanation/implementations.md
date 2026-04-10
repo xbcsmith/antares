@@ -1,5 +1,120 @@
 # Implementations
 
+## SDK Fixes — Phase 5: Validation – NPC Stock Templates (Complete)
+
+### Overview
+
+The validation subsystem was producing false-positive "unknown stock template"
+errors for NPC `stock_template` references that were perfectly valid. The root
+cause was a stale-mirror bug: `validate_npc_ids()` reads from
+`campaign_data.stock_templates`, a mirror that is only refreshed when the user
+opens the Stock Templates tab. If the user clicked _Validate Campaign_ before
+visiting that tab the mirror was empty, flagging every stock-template reference
+as unknown.
+
+**Root cause:** cache/ordering bug — `campaign_data.stock_templates` not synced
+before `validate_npc_ids()` was called.
+
+**Fix:** `validate_campaign()` now explicitly syncs the mirror from the editor
+state (`stock_templates_editor_state.templates`) at the top of the validation
+pass, before any validator runs.
+
+**New pure function:** `validate_npc_stock_template_refs` extracted to
+`validation.rs` so the rule is testable independently of `CampaignBuilderApp`.
+
+**`validate_npc_ids` refactored** to delegate the stock-template check to the
+new pure function (root cause comment added to both sites).
+
+**Files changed:**
+
+| File                                      | Change                                                                                                            |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/validation.rs`  | Added `validate_npc_stock_template_refs` pure function with doc comment explaining root cause; two new unit tests |
+| `sdk/campaign_builder/src/campaign_io.rs` | `validate_npc_ids` refactored to call `validate_npc_stock_template_refs`; root cause comment added                |
+
+---
+
+### 5.1 — Root Cause: Stale `campaign_data.stock_templates` Mirror
+
+**File:** `sdk/campaign_builder/src/campaign_io.rs`
+
+`validate_npc_ids()` cross-checks each NPC's `stock_template` field against
+`self.campaign_data.stock_templates`. That mirror is populated lazily — it is
+only refreshed when the Stock Templates tab is rendered or when
+`load_stock_templates()` is called explicitly. If the user triggered validation
+(via toolbar, Re-validate button, or metadata editor) without first opening the
+Stock Templates tab, the mirror contained stale (often empty) data.
+
+---
+
+### 5.2 — Fix: Sync Mirror Before Validation Pass
+
+**File:** `sdk/campaign_builder/src/campaign_io.rs` — `validate_campaign()`
+
+The fix was already applied in `validate_campaign()`:
+
+```sdk/campaign_builder/src/campaign_io.rs#L1877-1887
+// Always sync the stock_templates mirror from the editor state before
+// validating.  validate_npc_ids() checks self.campaign_data.stock_templates,
+// but that mirror is only refreshed during tab renders.  When the user clicks
+// "Validate Campaign" directly (toolbar, Re-validate button, metadata editor)
+// neither tab render runs first, so the mirror can be stale and cause false
+// "unknown stock template" errors for templates that are perfectly loaded in
+// the editor state.
+self.campaign_data.stock_templates = self
+    .editor_registry
+    .stock_templates_editor_state
+    .templates
+    .clone();
+```
+
+---
+
+### 5.3 — Pure Function: `validate_npc_stock_template_refs`
+
+**File:** `sdk/campaign_builder/src/validation.rs`
+
+A new pure validation function was added following the pattern of
+`validate_character_starting_spells` and other pure validators:
+
+- Takes `&[NpcDefinition]` and `&[MerchantStockTemplate]`
+- Builds a `HashSet<&str>` of known template ids
+- Emits one `ValidationResult::error` per NPC with an unresolvable reference
+- Emits a single `ValidationResult::passed` when all references are valid
+- Doc comment documents the stale-mirror root cause so future maintainers
+  understand why callers must pass a current snapshot
+
+`validate_npc_ids` in `campaign_io.rs` was refactored to delegate the
+stock-template check to this pure function (filtering out the `Passed`
+sentinel before extending the error list).
+
+---
+
+### 5.4 — New Tests
+
+**File:** `sdk/campaign_builder/src/validation.rs` — `mod tests`
+
+**`test_validation_known_stock_template_not_flagged`**
+
+Builds a `MerchantStockTemplate` with `id = "basic_goods"` and an NPC with
+`stock_template = Some("basic_goods")`, runs `validate_npc_stock_template_refs`,
+and asserts:
+
+- No error results are produced.
+- At least one `Passed` result is present.
+
+**`test_validation_unknown_stock_template_is_flagged`**
+
+Builds a template with `id = "real_goods"` and an NPC referencing
+`"missing_template"` (not in the collection), runs the validator, and asserts:
+
+- At least one error result is present.
+- The error message contains `"missing_template"` (the unknown id).
+- The error message contains `"merchant_bad"` (the offending NPC id).
+- No `Passed` result is present.
+
+---
+
 ## SDK Fixes — Phase 4: NPC Editor – Create Merchant Dialog (Complete)
 
 ### Overview
