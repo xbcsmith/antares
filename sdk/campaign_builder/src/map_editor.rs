@@ -1933,6 +1933,25 @@ impl MapEditorState {
         // Returns true if event editor should be shown
         self.event_editor.is_some()
     }
+
+    /// Flush any pending `PlaceEvent` edit into `self.map.events` so that the
+    /// map saved to disk includes Container/Furniture events placed but not yet
+    /// explicitly saved by the user.
+    ///
+    /// If the current tool is not `PlaceEvent`, or if there is no active event
+    /// editor, this is a no-op.
+    pub fn commit_pending_event_to_map(&mut self) {
+        if !matches!(self.current_tool, EditorTool::PlaceEvent) {
+            return;
+        }
+        if let Some(ref event_editor) = self.event_editor {
+            let pos = event_editor.position;
+            if let Ok(event) = event_editor.to_map_event() {
+                self.map.add_event(pos, event);
+                self.has_changes = true;
+            }
+        }
+    }
 }
 
 // ===== Event Editor State =====
@@ -2027,6 +2046,10 @@ pub struct EventEditorState {
     pub container_description: String,
     /// Unique string identifier for this container instance
     pub container_id: String,
+    /// Gold coins placed in the container (text field, parsed as u32 on save)
+    pub container_gold: String,
+    /// Gems placed in the container (text field, parsed as u32 on save)
+    pub container_gems: String,
 }
 
 impl Default for EventEditorState {
@@ -2078,6 +2101,8 @@ impl Default for EventEditorState {
             container_locked: false,
             container_description: String::new(),
             container_id: String::new(),
+            container_gold: "0".to_string(),
+            container_gems: "0".to_string(),
         }
     }
 }
@@ -2379,11 +2404,15 @@ impl EventEditorState {
                         charges: 0,
                     })
                     .collect();
+                let gold = self.container_gold.trim().parse::<u32>().unwrap_or(0);
+                let gems = self.container_gems.trim().parse::<u32>().unwrap_or(0);
                 Ok(MapEvent::Container {
                     id,
                     name: self.name.clone(),
                     description,
                     items,
+                    gold,
+                    gems,
                 })
             }
         }
@@ -2568,6 +2597,9 @@ impl EventEditorState {
                 name,
                 description,
                 items,
+                gold,
+                gems,
+                ..
             } => {
                 s.event_type = EventType::Container;
                 s.container_id = id.clone();
@@ -2576,6 +2608,8 @@ impl EventEditorState {
                 s.container_description = description.clone();
                 s.container_items = items.iter().map(|slot| slot.item_id).collect();
                 s.container_locked = false;
+                s.container_gold = gold.to_string();
+                s.container_gems = gems.to_string();
             }
             MapEvent::DroppedItem { name, .. } => {
                 s.event_type = EventType::Treasure;
@@ -3919,6 +3953,7 @@ impl MapsEditorState {
                 let map_opt: Option<Map> = self.active_editor.as_mut().and_then(|editor| {
                     if editor.has_changes {
                         // Ensure metadata is reflected in the map before saving
+                        editor.commit_pending_event_to_map();
                         editor.apply_metadata();
                         Some(editor.map.clone())
                     } else {
@@ -3955,7 +3990,8 @@ impl MapsEditorState {
         if save_clicked {
             // Acquire a clone of the map to save while avoiding overlapping borrows
             let map_opt: Option<Map> = self.active_editor.as_mut().map(|editor| {
-                // Sync metadata to the underlying map before saving
+                // Flush any pending PlaceEvent edit before saving, then sync metadata
+                editor.commit_pending_event_to_map();
                 editor.apply_metadata();
                 editor.map.clone()
             });
@@ -5728,6 +5764,40 @@ impl MapsEditorState {
                                     .id_salt("container_evt_id")
                                     .hint_text("auto-generated if empty"),
                             )
+                            .changed()
+                        {
+                            editor.has_changes = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("💰 Gold:");
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut event_editor.container_gold)
+                                    .id_salt("container_evt_gold")
+                                    .desired_width(80.0)
+                                    .hint_text("0"),
+                            )
+                            .on_hover_text(
+                                "Gold coins awarded when player takes all or takes currency",
+                            )
+                            .changed()
+                        {
+                            editor.has_changes = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("💎 Gems:");
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut event_editor.container_gems)
+                                    .id_salt("container_evt_gems")
+                                    .desired_width(80.0)
+                                    .hint_text("0"),
+                            )
+                            .on_hover_text("Gems awarded when player takes all or takes currency")
                             .changed()
                         {
                             editor.has_changes = true;
@@ -9338,6 +9408,8 @@ mod tests {
                     charges: 3,
                 },
             ],
+            gold: 0,
+            gems: 0,
         };
 
         let editor = EventEditorState::from_map_event(Position::new(3, 4), &event);
@@ -10197,6 +10269,131 @@ mod tests {
         assert_eq!(
             state.editing_index, None,
             "clear resets to new-placement mode"
+        );
+    }
+
+    // ── Container gold/gems: to_map_event ────────────────────────────────
+
+    #[test]
+    fn test_event_editor_state_to_container_with_gold_and_gems() {
+        let editor = EventEditorState {
+            event_type: EventType::Container,
+            name: "Rich Chest".to_string(),
+            container_gold: "50".to_string(),
+            container_gems: "3".to_string(),
+            ..Default::default()
+        };
+
+        let result = editor.to_map_event();
+        assert!(
+            result.is_ok(),
+            "to_map_event failed: {:?}",
+            result.unwrap_err()
+        );
+
+        match result.unwrap() {
+            MapEvent::Container { gold, gems, .. } => {
+                assert_eq!(gold, 50, "gold must match container_gold field");
+                assert_eq!(gems, 3, "gems must match container_gems field");
+            }
+            other => panic!("expected Container event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_event_editor_state_from_container_with_gold_and_gems() {
+        use antares::domain::types::Position;
+
+        let event = MapEvent::Container {
+            id: "gold_chest".to_string(),
+            name: "Treasure".to_string(),
+            description: String::new(),
+            items: vec![],
+            gold: 100,
+            gems: 5,
+        };
+
+        let editor = EventEditorState::from_map_event(Position::new(0, 0), &event);
+        assert_eq!(
+            editor.container_gold, "100",
+            "container_gold must be set from gold field"
+        );
+        assert_eq!(
+            editor.container_gems, "5",
+            "container_gems must be set from gems field"
+        );
+    }
+
+    #[test]
+    fn test_event_editor_state_container_gold_gems_default_zero() {
+        let state = EventEditorState::default();
+        assert_eq!(
+            state.container_gold, "0",
+            "container_gold must default to '0'"
+        );
+        assert_eq!(
+            state.container_gems, "0",
+            "container_gems must default to '0'"
+        );
+    }
+
+    // ── commit_pending_event_to_map ───────────────────────────────────────
+
+    #[test]
+    fn test_commit_pending_event_to_map_adds_container_event() {
+        use antares::domain::types::Position;
+
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let mut editor = MapEditorState::new(map);
+
+        let pos = Position::new(5, 5);
+        editor.current_tool = EditorTool::PlaceEvent;
+        editor.event_editor = Some(EventEditorState {
+            event_type: EventType::Container,
+            position: pos,
+            name: "Test Chest".to_string(),
+            container_id: "chest_commit_test".to_string(),
+            ..Default::default()
+        });
+
+        editor.commit_pending_event_to_map();
+
+        let event = editor.map.get_event(pos);
+        assert!(
+            event.is_some(),
+            "commit_pending_event_to_map must add the event to editor.map"
+        );
+        match event.unwrap() {
+            MapEvent::Container { id, .. } => {
+                assert_eq!(id, "chest_commit_test");
+            }
+            other => panic!("expected Container event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_commit_pending_event_noop_when_not_place_event_tool() {
+        use antares::domain::types::Position;
+
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let mut editor = MapEditorState::new(map);
+
+        editor.current_tool = EditorTool::Select; // NOT PlaceEvent
+        editor.event_editor = Some(EventEditorState {
+            event_type: EventType::Container,
+            position: Position::new(2, 2),
+            name: "Should Not Be Added".to_string(),
+            container_id: "noop_chest".to_string(),
+            ..Default::default()
+        });
+
+        editor.commit_pending_event_to_map();
+
+        // No event should have been added
+        let event = editor.map.get_event(Position::new(2, 2));
+        assert!(
+            event.is_none(),
+            "commit must be a no-op when tool is not PlaceEvent"
         );
     }
 }

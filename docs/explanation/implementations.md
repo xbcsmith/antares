@@ -1,5 +1,188 @@
 # Implementations
 
+## SDK Fixes — Phase 3: Container Gold and Gems + Place Event Map RON Save Fix (Complete)
+
+### Overview
+
+Two related map-event bugs are resolved in this phase:
+
+1. **Gold and Gems in containers** — `MapEvent::Container` gains `gold: u32`
+   and `gems: u32` fields (both `#[serde(default)]`). The values propagate
+   through `EventResult::EnterContainer`, `ContainerInventoryState`, and the
+   in-game container UI so players can take currency from containers.
+2. **Place Event save-path bug** — Placing a Container or Furniture event via
+   the SDK PlaceEvent tool and clicking Save Map no longer silently discards
+   the pending edit; `commit_pending_event_to_map` is called before the map is
+   serialised.
+
+**Files changed:**
+
+| File                                             | Change                                                                                                                                                                          |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/world/types.rs`                      | `gold`/`gems` added to `MapEvent::Container`                                                                                                                                    |
+| `src/domain/world/events.rs`                     | `gold`/`gems` added to `EventResult::EnterContainer`; `trigger_event` propagates them; 3 new tests                                                                              |
+| `src/application/container_inventory_state.rs`   | `pub gold`/`pub gems` fields; `take_currency()` method; 3 new tests                                                                                                             |
+| `src/application/mod.rs`                         | `enter_container_inventory` accepts `gold`/`gems`                                                                                                                               |
+| `src/game/systems/container_inventory_ui.rs`     | `TakeCurrencyAction`; Take Gold/Take Gems buttons; TakeAll sweeps currency; `write_container_items_back` writes back gold/gems; all call-sites updated                          |
+| `src/game/systems/events.rs`                     | `handle_events` Container arm passes gold/gems to `enter_container_inventory`                                                                                                   |
+| `src/game/systems/lock_ui.rs`                    | Container construction updated; `enter_container_inventory` call updated                                                                                                        |
+| `src/game/systems/input/exploration_interact.rs` | 4 Container struct literals updated                                                                                                                                             |
+| `src/application/save_game.rs`                   | Container test construction updated; gold/gems asserted in round-trip test                                                                                                      |
+| `sdk/campaign_builder/src/map_editor.rs`         | `container_gold`/`container_gems` in `EventEditorState`; `to_map_event`/`from_map_event` wired; Gold/Gems UI rows; `commit_pending_event_to_map` + save-path flush; 5 new tests |
+
+---
+
+### 3.1 — Game Engine: `gold` and `gems` Added to `MapEvent::Container`
+
+**File:** `src/domain/world/types.rs`
+
+Added two new fields after `items` in the `Container` variant:
+
+```rust
+/// Gold coins placed in the container by the campaign author.
+#[serde(default)]
+gold: u32,
+/// Gems placed in the container by the campaign author.
+#[serde(default)]
+gems: u32,
+```
+
+`#[serde(default)]` makes the fields backward-compatible: all existing `.ron`
+map files that omit `gold`/`gems` continue to parse without error, defaulting
+both to `0`.
+
+---
+
+### 3.2 — Game Engine: `EventResult::EnterContainer` Carries Gold and Gems
+
+**File:** `src/domain/world/events.rs`
+
+Added `gold: u32` and `gems: u32` to `EventResult::EnterContainer`. Updated
+`trigger_event`'s `MapEvent::Container` arm to destructure and propagate them:
+
+```rust
+MapEvent::Container { id, name, items, gold, gems, .. } => {
+    EventResult::EnterContainer {
+        container_event_id: id.clone(),
+        container_name: name.clone(),
+        items: items.clone(),
+        gold,
+        gems,
+    }
+}
+```
+
+**New tests:**
+
+- `test_container_event_with_gold_returns_gold_in_result`
+- `test_container_event_with_gems_returns_gems_in_result`
+- `test_container_event_zero_currency_default` — verifies `#[serde(default)]`
+  works for a RON-parsed container that omits the fields
+
+---
+
+### 3.3 — Application: `ContainerInventoryState` Tracks Gold and Gems
+
+**File:** `src/application/container_inventory_state.rs`
+
+Added `pub gold: u32` and `pub gems: u32` to the struct (initialised to `0` in
+`new()`). Added `take_currency() -> (u32, u32)` which atomically zeroes and
+returns both values, used by the TakeAll and TakeCurrency action handlers.
+
+**New tests:**
+
+- `test_container_inventory_state_gold_gems_default_zero`
+- `test_take_currency_zeroes_and_returns_values`
+- `test_take_currency_on_zero_returns_zeros`
+
+---
+
+### 3.4 — Application: `enter_container_inventory` Accepts Gold and Gems
+
+**File:** `src/application/mod.rs`
+
+Added `gold: u32` and `gems: u32` as the last two parameters. The function sets
+`container_state.gold` and `container_state.gems` after creating the
+`ContainerInventoryState` via the unchanged `new()` call. All call sites
+updated: `game/systems/events.rs` (passes live values), `lock_ui.rs`
+(passes `0, 0` for freshly unlocked containers), all test call sites.
+
+---
+
+### 3.5 — Game Engine: Container UI Currency Actions
+
+**File:** `src/game/systems/container_inventory_ui.rs`
+
+- Added `TakeCurrencyAction { gold: u32, gems: u32 }` message struct, registered in `ContainerInventoryPlugin`.
+- `render_container_items_panel` shows `💰 Gold: N [Take Gold]` and `💎 Gems: N [Take Gems]` rows when `gold > 0` or `gems > 0`. Each button emits `TakeCurrencyAction` targeting only that currency.
+- `container_inventory_action_system` handles `TakeCurrencyAction`: adds values to `party.gold`/`party.gems` and zeroes the container fields.
+- **TakeAll** was extended to call `cs.take_currency()` and sweep gold/gems into the party pool after draining items.
+- `write_container_items_back` gained `gold: u32, gems: u32` parameters; it now writes all three fields (`items`, `gold`, `gems`) back to the `MapEvent::Container` on container close (Escape key path).
+
+---
+
+### 3.6 — SDK: `EventEditorState` Wired for Gold and Gems
+
+**File:** `sdk/campaign_builder/src/map_editor.rs`
+
+Added `container_gold: String` and `container_gems: String` to `EventEditorState` (defaults `"0"`). Updated:
+
+- `to_map_event` Container arm: parses both strings as `u32` (default `0` on parse failure) and writes them into `MapEvent::Container`.
+- `from_map_event` Container arm: loads `gold.to_string()` / `gems.to_string()` into the buffer strings.
+- `show_event_editor` Container branch: added `💰 Gold:` and `💎 Gems:` `TextEdit` rows (id_salts `container_evt_gold` / `container_evt_gems`) immediately after the Container ID row.
+
+**New tests:**
+
+- `test_event_editor_state_to_container_with_gold_and_gems`
+- `test_event_editor_state_from_container_with_gold_and_gems`
+- `test_event_editor_state_container_gold_gems_default_zero`
+
+---
+
+### 3.7 — SDK: Place Event Save-Path Bug Fixed
+
+**File:** `sdk/campaign_builder/src/map_editor.rs`
+
+Added `MapEditorState::commit_pending_event_to_map()`: when `current_tool ==
+PlaceEvent` and an `event_editor` is active, it calls `to_map_event()` and
+inserts the result into `self.map.events` before serialisation.
+
+Both save paths in `show_editor` now call `editor.commit_pending_event_to_map()`
+before `editor.apply_metadata()` and `editor.map.clone()`:
+
+```rust
+editor.commit_pending_event_to_map();
+editor.apply_metadata();
+let map = editor.map.clone();
+```
+
+**New tests:**
+
+- `test_commit_pending_event_to_map_adds_container_event`
+- `test_commit_pending_event_noop_when_not_place_event_tool`
+
+---
+
+### Quality Gates
+
+```text
+cargo fmt --all                                       → clean
+cargo check --all-targets --all-features              → 0 errors
+cargo clippy --all-targets --all-features -D warnings → 0 warnings
+cargo nextest run --all-features                      → 4408 passed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] `gold`/`gems` added with `#[serde(default)]` — backward-compatible with all existing map RON files
+- [x] No `campaigns/tutorial` references in new test code
+- [x] All new egui widgets follow SDK rules: unique `id_salt` on all `TextEdit` widgets
+- [x] `///` doc comments on all new public items (`TakeCurrencyAction`, `take_currency`, `commit_pending_event_to_map`)
+- [x] Data files remain in RON format
+- [x] No architectural deviations from architecture.md
+
+---
+
 ## SDK Fixes — Phase 2: Stock Template Description – Data Model + SDK Wire-up + Display (Complete)
 
 ### Overview

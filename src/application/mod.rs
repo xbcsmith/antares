@@ -1900,6 +1900,8 @@ impl GameState {
     ///     "chest_001".to_string(),
     ///     "Wooden Chest".to_string(),
     ///     vec![],
+    ///     0,
+    ///     0,
     /// );
     /// assert!(matches!(state.mode, GameMode::ContainerInventory(_)));
     /// ```
@@ -1908,18 +1910,22 @@ impl GameState {
         container_event_id: String,
         container_name: String,
         items: Vec<crate::domain::character::InventorySlot>,
+        gold: u32,
+        gems: u32,
     ) {
         let prev = self.mode.clone();
         let active_character_index = 0;
-        self.mode = GameMode::ContainerInventory(
+        let mut container_state =
             crate::application::container_inventory_state::ContainerInventoryState::new(
                 container_event_id,
                 container_name,
                 items,
                 active_character_index,
                 prev,
-            ),
-        );
+            );
+        container_state.gold = gold;
+        container_state.gems = gems;
+        self.mode = GameMode::ContainerInventory(container_state);
     }
 
     /// Returns to exploration mode (or resumes previous mode when exiting menu)

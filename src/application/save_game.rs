@@ -1543,6 +1543,8 @@ mod tests {
                         charges: 0,
                     },
                 ],
+                gold: 75,
+                gems: 3,
             },
         );
         let mut world = World::new();
@@ -1556,6 +1558,17 @@ mod tests {
             if let Some(MapEvent::Container { items, .. }) = map_mut.events.get_mut(&container_pos)
             {
                 items.retain(|slot| slot.item_id != 20);
+            }
+        }
+
+        // Simulate taking the gold and gems from the container.
+        {
+            let map_mut = state.world.get_current_map_mut().unwrap();
+            if let Some(MapEvent::Container { gold, gems, .. }) =
+                map_mut.events.get_mut(&container_pos)
+            {
+                *gold = 0;
+                *gems = 0;
             }
         }
 
@@ -1573,7 +1586,13 @@ mod tests {
             .expect("container event must be present after round-trip");
 
         match loaded_event {
-            MapEvent::Container { items, id, .. } => {
+            MapEvent::Container {
+                items,
+                id,
+                gold,
+                gems,
+                ..
+            } => {
                 assert_eq!(id, "chest_room1", "container id must be preserved");
                 assert_eq!(
                     items.len(),
@@ -1591,6 +1610,14 @@ mod tests {
                 assert!(
                     !items.iter().any(|s| s.item_id == 20),
                     "taken item_id 20 must NOT be in the container after round-trip"
+                );
+                assert_eq!(
+                    *gold, 0,
+                    "gold must be 0 after being taken and round-tripped"
+                );
+                assert_eq!(
+                    *gems, 0,
+                    "gems must be 0 after being taken and round-tripped"
                 );
             }
             other => panic!("expected Container event, got {:?}", other),
