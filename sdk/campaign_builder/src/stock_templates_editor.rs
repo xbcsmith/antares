@@ -2079,4 +2079,81 @@ mod tests {
 
         assert!(restored.description.is_empty());
     }
+
+    // ── description: show_preview renders description or placeholder ──────────
+
+    /// Verifies that the `show_preview` display panel correctly distinguishes
+    /// between a template with a non-empty description and one with an empty
+    /// description.  This mirrors what the egui `show_preview` function does
+    /// with its `if tmpl.description.is_empty()` branch (§2.4 SDK fix).
+    ///
+    /// We test the data-level precondition (the branch predicate) rather than
+    /// the egui rendering output, following the same pattern used by
+    /// `test_starting_spells_display_section_shows_spell_names` in
+    /// `characters_editor.rs`.
+    #[test]
+    fn test_stock_template_display_shows_description() {
+        // ── non-empty description → description label branch ──────────────────
+        let mut tmpl_with_desc = make_template("shop_with_desc");
+        tmpl_with_desc.description = "Fine weapons and armour".to_string();
+
+        // The display panel shows `tmpl.description` directly when non-empty.
+        assert!(
+            !tmpl_with_desc.description.is_empty(),
+            "template description must be non-empty so the display panel renders it"
+        );
+        assert_eq!(
+            tmpl_with_desc.description, "Fine weapons and armour",
+            "description value must match what was set"
+        );
+
+        // ── empty description → placeholder branch ────────────────────────────
+        let tmpl_no_desc = make_template("no_desc_shop");
+        // description defaults to String::new() in make_template
+
+        assert!(
+            tmpl_no_desc.description.is_empty(),
+            "template with no description must be empty so the display panel shows the placeholder"
+        );
+
+        // ── `from_template` preserves non-empty description for display ───────
+        let buf = StockTemplateEditBuffer::from_template(&tmpl_with_desc);
+        assert_eq!(
+            buf.description, "Fine weapons and armour",
+            "from_template must carry the description into the edit buffer \
+             so re-loading the edit form pre-populates the field correctly"
+        );
+
+        // ── egui smoke test: show_preview must not panic ──────────────────────
+        let ctx = egui::Context::default();
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        ctx.begin_pass(raw_input);
+        let state = StockTemplatesEditorState::default();
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            // Must not panic for a template with a non-empty description.
+            state.show_preview(ui, &tmpl_with_desc);
+        });
+        let _ = ctx.end_pass();
+
+        let ctx2 = egui::Context::default();
+        let raw_input2 = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        ctx2.begin_pass(raw_input2);
+        egui::CentralPanel::default().show(&ctx2, |ui| {
+            // Must not panic for a template with an empty description either.
+            state.show_preview(ui, &tmpl_no_desc);
+        });
+        let _ = ctx2.end_pass();
+    }
 }

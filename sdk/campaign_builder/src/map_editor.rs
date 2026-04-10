@@ -10396,4 +10396,50 @@ mod tests {
             "commit must be a no-op when tool is not PlaceEvent"
         );
     }
+
+    /// Verifies that `commit_pending_event_to_map` flushes a pending
+    /// **Furniture** event into `editor.map` so that the RON save path
+    /// includes it.  This is the furniture counterpart of
+    /// `test_commit_pending_event_to_map_adds_container_event` (§3.8 SDK fix).
+    #[test]
+    fn test_place_event_furniture_commits_to_map_on_save() {
+        use antares::domain::types::Position;
+
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let mut editor = MapEditorState::new(map);
+
+        let pos = Position::new(7, 3);
+        editor.current_tool = EditorTool::PlaceEvent;
+        editor.event_editor = Some(EventEditorState {
+            event_type: EventType::Furniture,
+            position: pos,
+            name: "Throne".to_string(),
+            furniture_type: FurnitureType::Throne,
+            ..Default::default()
+        });
+
+        editor.commit_pending_event_to_map();
+
+        let event = editor.map.get_event(pos);
+        assert!(
+            event.is_some(),
+            "commit_pending_event_to_map must add the Furniture event to editor.map"
+        );
+        match event.unwrap() {
+            MapEvent::Furniture {
+                name,
+                furniture_type,
+                ..
+            } => {
+                assert_eq!(name, "Throne");
+                assert_eq!(*furniture_type, FurnitureType::Throne);
+            }
+            other => panic!("expected Furniture event, got {:?}", other),
+        }
+
+        assert!(
+            editor.has_changes,
+            "has_changes must be set after committing a Furniture event"
+        );
+    }
 }

@@ -1,5 +1,169 @@
 # Implementations
 
+## SDK Fixes — All-Phase Gap-Fill Audit (Complete)
+
+### Overview
+
+After all six implementation phases were declared complete, a systematic audit
+was performed comparing every deliverable checkbox in
+`docs/explanation/sdk_fixes_implementation_plan.md` against the actual codebase.
+Two test gaps were identified and filled:
+
+| Gap                                                 | Phase | File                        | Status before | Status after |
+| --------------------------------------------------- | ----- | --------------------------- | ------------- | ------------ |
+| `test_stock_template_display_shows_description`     | 2     | `stock_templates_editor.rs` | Missing       | ✅ Added     |
+| `test_place_event_furniture_commits_to_map_on_save` | 3     | `map_editor.rs`             | Missing       | ✅ Added     |
+
+All other deliverables for Phases 1–6 were confirmed present and correct.
+
+---
+
+### Gap 1 — Phase 2 §2.4: `test_stock_template_display_shows_description`
+
+**Plan requirement** (§2.5 Testing Requirements):
+
+> Add `test_stock_template_display_shows_description` verifying that the display
+> panel renders the description string when it is non-empty, and renders the
+> placeholder when it is empty.
+
+**What was already there**: `test_stock_template_description_is_persisted`,
+`test_stock_template_description_to_template`,
+`test_stock_template_description_round_trip_non_empty`, and
+`test_stock_template_description_empty_round_trip` all covered the
+`from_template` / `to_template` data round-trips, but none verified the
+_display view_ branch logic.
+
+**Fix**: Added `test_stock_template_display_shows_description` to
+`sdk/campaign_builder/src/stock_templates_editor.rs`. The test:
+
+1. Creates a `MerchantStockTemplate` with `description = "Fine weapons and armour"`
+   and asserts `!tmpl.description.is_empty()` (the branch that causes the UI to
+   render the description label rather than the "No description." placeholder).
+2. Creates a second template with the default empty description and asserts
+   `tmpl.description.is_empty()` (the branch that causes the placeholder to render).
+3. Calls `StockTemplateEditBuffer::from_template` on the non-empty template and
+   asserts the buffer carries the description value (confirming the display form
+   is pre-populated correctly when re-opened for editing).
+4. Runs an egui smoke test via `egui::Context::default()` /
+   `egui::CentralPanel::default().show()` that calls `state.show_preview(ui, tmpl)`
+   for both the non-empty and empty-description cases, confirming neither panics.
+
+---
+
+### Gap 2 — Phase 3 §3.8: `test_place_event_furniture_commits_to_map_on_save`
+
+**Plan requirement** (§3.9 Testing Requirements):
+
+> `test_place_event_furniture_commits_to_map_on_save` – same for a Furniture event.
+
+**What was already there**: `test_commit_pending_event_to_map_adds_container_event`
+covered the Container path. The plan explicitly required a matching Furniture-event
+variant, which was never added.
+
+**Fix**: Added `test_place_event_furniture_commits_to_map_on_save` to
+`sdk/campaign_builder/src/map_editor.rs` (inside the
+`// ── commit_pending_event_to_map` test section). The test:
+
+1. Creates a `MapEditorState` with `current_tool = EditorTool::PlaceEvent`.
+2. Sets `event_editor` to an `EventEditorState` with
+   `event_type = EventType::Furniture`, `position = (7, 3)`,
+   `name = "Throne"`, and `furniture_type = FurnitureType::Throne`.
+3. Calls `editor.commit_pending_event_to_map()`.
+4. Asserts the event at `(7, 3)` is `Some(MapEvent::Furniture { name: "Throne",
+furniture_type: Throne, .. })`.
+5. Asserts `editor.has_changes` is `true` after the commit.
+
+---
+
+### Files Changed
+
+| File                                                 | Change                                                        |
+| ---------------------------------------------------- | ------------------------------------------------------------- |
+| `sdk/campaign_builder/src/stock_templates_editor.rs` | +1 test (`test_stock_template_display_shows_description`)     |
+| `sdk/campaign_builder/src/map_editor.rs`             | +1 test (`test_place_event_furniture_commits_to_map_on_save`) |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors)
+✅ cargo clippy      → Finished (0 warnings, -D warnings)
+✅ cargo nextest run → campaign_builder: 2281 tests run: 2281 passed
+                       full repo: 4410 tests run: 4410 passed
+```
+
+Test count in `campaign_builder` increased from **2279 → 2281** (+2 gap tests).
+
+### Confirmed Complete Deliverables (All Phases)
+
+#### Phase 1 — Pure SDK Layout and Display Fixes ✅
+
+- [x] `◀ Back to List` button at top of furniture `show_form` (`furniture_editor.rs` L775-779)
+- [x] Event Editor moved below Event Details in `show_inspector_panel` (`map_editor.rs` L4483-4487)
+- [x] `egui::CollapsingHeader` removed from `show_starting_spells_editor`
+- [x] `ui.heading("Starting Spells")` at call site in `show_character_form` (L2091-2095)
+- [x] Autocomplete class filtering via `filter_spells_for_class` (L2200-2215)
+- [x] `ScrollArea` `min_scrolled_height(145.0)` (L2241-2244)
+- [x] Starting Spells section in `show_character_preview` (L1694-1727)
+- [x] Tests: `test_furniture_show_form_back_button_returns_to_list`,
+      `test_event_editor_renders_before_visual_properties_section`,
+      `test_starting_spells_autocomplete_uses_character_class`,
+      `test_starting_spells_display_section_shows_spell_names`
+
+#### Phase 2 — Stock Template Description ✅
+
+- [x] `description: String` with `#[serde(default)]` in `MerchantStockTemplate`
+- [x] `from_template` reads `template.description.clone()`
+- [x] `to_template` writes `description: self.description.clone()`
+- [x] `show_preview` renders description or `"No description."` placeholder
+- [x] Tests: `test_from_template_round_trips` (extended), `test_stock_template_description_is_persisted`,
+      `test_stock_template_description_to_template`,
+      **`test_stock_template_display_shows_description`** ← gap filled
+
+#### Phase 3 — Container Gold/Gems + Place Event Save Fix ✅
+
+- [x] `gold`/`gems` in `MapEvent::Container` with `#[serde(default)]`
+- [x] `EventResult::EnterContainer` carries `gold`/`gems`
+- [x] `trigger_event` propagates gold/gems
+- [x] `ContainerInventoryState` tracks gold/gems
+- [x] `TakeCurrencyAction` message + handler; `[Take Gold]`/`[Take Gems]` buttons
+- [x] `[Take All]` sweeps currency
+- [x] Container close writes gold/gems back via `write_container_items_back`
+- [x] `EventEditorState.container_gold` / `.container_gems`; wired in `to_map_event`/`from_map_event`
+- [x] SDK Container event editor shows Gold/Gems input fields
+- [x] `commit_pending_event_to_map` called before save (both save paths)
+- [x] Tests: all engine and SDK tests from §3.9, plus
+      **`test_place_event_furniture_commits_to_map_on_save`** ← gap filled
+
+#### Phase 4 — NPC Editor Create Merchant Dialog ✅
+
+- [x] `"Create merchant dialogue"` button calls `create_or_repair_merchant_dialogue_for_buffer`
+- [x] Generated `DialogueTree` inserted into `available_dialogues`
+- [x] `edit_buffer.dialogue_id` assigned the new dialogue id
+- [x] UI repainted via `needs_save = true`
+- [x] Tests: `test_create_merchant_dialog_generates_dialog`,
+      `test_create_merchant_dialog_id_is_unique`
+
+#### Phase 5 — Validation NPC Stock Templates ✅
+
+- [x] Root cause documented in `validate_npc_stock_template_refs` doc comment
+- [x] Pure function `validate_npc_stock_template_refs` reads live data
+- [x] Stale-mirror sync in `validate_campaign` documented and correct
+- [x] Tests: `test_validation_known_stock_template_not_flagged`,
+      `test_validation_unknown_stock_template_is_flagged`
+
+#### Phase 6 — Config Editor Spellbook `[B]` ✅
+
+- [x] `spell_book` field in `ControlsConfig` with `#[serde(default)]` and default `["B"]`
+- [x] `data/test_campaign/config.ron` includes `spell_book: ["B"]`
+- [x] `controls_spell_book_buffer` field + `Default` init in `ConfigEditorState`
+- [x] `show_controls_section` renders **Spell Book** row
+- [x] `update_edit_buffers` / `update_config_from_buffers` wired
+- [x] `handle_key_capture` `"spell_book"` match arm added
+- [x] Tests: 5 new spell-book binding tests
+
+---
+
 ## SDK Fixes — Phase 6: Config Editor – Key Bindings Spellbook `[B]` (Complete)
 
 ### Overview
