@@ -1,5 +1,142 @@
 # Implementations
 
+## SDK Fixes — Phase 6: Config Editor – Key Bindings Spellbook `[B]` (Complete)
+
+### Overview
+
+The Config Editor's Key Bindings section was missing the **Spell Book** action
+binding (`[B]`), preventing campaign authors from remapping the key through the
+SDK. The `ControlsConfig` field `spell_book: Vec<String>` already existed in
+`src/sdk/game_config.rs` with `#[serde(default = "default_spell_book_keys")]`
+and default `["B"]`, and `data/test_campaign/config.ron` already contained the
+`spell_book` entry. What was missing was the editor-side plumbing inside
+`sdk/campaign_builder/src/config_editor.rs`.
+
+### 6.1 — `ControlsConfig::spell_book` Field (already present)
+
+No engine change required. The field was confirmed present:
+
+```antares/src/sdk/game_config.rs#L561-568
+/// Keys for opening the in-game Spell Book management screen.
+///
+/// Default: `["B"]`
+#[serde(default = "default_spell_book_keys")]
+pub spell_book: Vec<String>,
+```
+
+and `default_spell_book_keys()` returns `vec!["B".to_string()]`.
+
+### 6.2 — `data/test_campaign/config.ron` (already present)
+
+No fixture change required. The file already contained:
+
+```antares/data/test_campaign/config.ron#L18-30
+controls: ControlsConfig(
+    ...
+    spell_book: ["B"],
+    ...
+),
+```
+
+### 6.3 — SDK `ConfigEditorState` — New Buffer Field
+
+Added `controls_spell_book_buffer: String` to the struct and initialised it
+to `String::new()` in `Default::default()`, following the identical pattern
+used by every existing key-binding buffer field.
+
+### 6.4 — SDK `show_controls_section` — New UI Row
+
+Added a **Spell Book** row immediately after the Automap row using the same
+`show_key_binding_with_capture` closure already used by all other rows:
+
+```antares/sdk/campaign_builder/src/config_editor.rs#L732-744
+// Spell Book
+show_key_binding_with_capture(
+    ui,
+    "Spell Book",
+    &mut self.controls_spell_book_buffer,
+    "spell_book",
+    unsaved_changes,
+    &mut self.validation_errors,
+    &mut self.capturing_key_for,
+);
+```
+
+### 6.5 — SDK `update_edit_buffers` / `update_config_from_buffers`
+
+`spell_book` was wired into both helper methods so the buffer is always
+synchronised with `game_config.controls.spell_book`:
+
+- `update_edit_buffers`: appended
+  `self.controls_spell_book_buffer = format_key_list(&self.game_config.controls.spell_book);`
+- `update_config_from_buffers`: appended
+  `self.game_config.controls.spell_book = parse_key_list(&self.controls_spell_book_buffer);`
+
+### 6.6 — SDK `handle_key_capture` — New Match Arm
+
+Added `"spell_book" => &mut self.controls_spell_book_buffer` to the match
+inside `handle_key_capture` so keyboard-capture mode works for the new row.
+
+### 6.7 — Pre-existing Clippy Fixes
+
+Two pre-existing `clippy::unnecessary_unwrap` errors were found during the
+clippy gate and fixed in the same PR:
+
+| File                                  | Location | Fix                                                   |
+| ------------------------------------- | -------- | ----------------------------------------------------- |
+| `src/bin/class_editor.rs`             | L253-254 | `is_some()` + `unwrap()` → `if let Some(school)`      |
+| `tests/campaign_integration_tests.rs` | L119+123 | `is_some()` + `unwrap()` → `if let Some(creature_id)` |
+
+### New Tests Added (5 tests in `config_editor::tests`)
+
+| Test name                                                    | What it verifies                                                                       |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| `test_config_editor_spellbook_key_binding_present`           | `ControlsConfig::default().spell_book == ["B"]`                                        |
+| `test_spell_book_key_binding_appears_in_update_edit_buffers` | buffer reflects multi-key binding after `update_edit_buffers`                          |
+| `test_spell_book_key_binding_update_config_from_buffers`     | `update_config_from_buffers` parses buffer back into `spell_book`                      |
+| `test_spell_book_buffer_default_is_empty`                    | `ConfigEditorState::default()` has empty buffer (not pre-populated)                    |
+| `test_config_editor_spellbook_key_binding_roundtrips`        | set `["K"]` → `update_edit_buffers` → `update_config_from_buffers` → `["K"]` preserved |
+
+### Files Changed
+
+| File                                        | Change                                                                      |
+| ------------------------------------------- | --------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/config_editor.rs` | Add buffer field, `Default` init, UI row, buffer sync, capture arm, 5 tests |
+| `src/bin/class_editor.rs`                   | Fix pre-existing `clippy::unnecessary_unwrap`                               |
+| `tests/campaign_integration_tests.rs`       | Fix pre-existing `clippy::unnecessary_unwrap`                               |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors)
+✅ cargo clippy      → Finished (0 warnings, -D warnings)
+✅ cargo nextest run → 4408 tests run: 4408 passed, 8 skipped
+```
+
+Test count increased from **4403 → 4408** (+5 new spell-book binding tests).
+
+### Deliverables Checklist
+
+- [x] `spell_book` field present in `ControlsConfig` with `#[serde(default)]` and default `["B"]`
+- [x] `data/test_campaign/config.ron` includes `spell_book` key
+- [x] Key Bindings editor in the SDK renders a **Spell Book** row
+- [x] Changing the binding round-trips correctly through the buffer helpers
+- [x] Unit tests added and passing (5 new tests)
+- [x] `cargo fmt`, `cargo check`, `cargo clippy -D warnings` all clean
+
+### Architecture Compliance
+
+- No new raw types — `spell_book` uses `Vec<String>`, consistent with all other
+  `ControlsConfig` fields.
+- `#[serde(default)]` ensures existing `config.ron` files that omit `spell_book`
+  load without error and receive the default `["B"]` binding.
+- Test data lives exclusively in `data/test_campaign`; `campaigns/tutorial` was
+  not touched (Implementation Rule 5).
+- All new `.rs` code carries the SPDX header (Implementation Rule 1).
+
+---
+
 ## SDK Fixes — Phase 5: Validation – NPC Stock Templates (Complete)
 
 ### Overview
