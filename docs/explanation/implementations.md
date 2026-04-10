@@ -1,5 +1,208 @@
 # Implementations
 
+## SDK Fixes — Phase 1: Pure SDK Layout and Display Fixes (Complete)
+
+### Overview
+
+Seven UI gaps in the Campaign Builder SDK have been resolved. All changes are
+SDK-only (no game-engine data model changes). Files changed:
+
+- `sdk/campaign_builder/src/furniture_editor.rs`
+- `sdk/campaign_builder/src/map_editor.rs`
+- `sdk/campaign_builder/src/characters_editor.rs`
+- `sdk/campaign_builder/src/quest_editor.rs` (pre-existing `too_many_arguments` suppression)
+
+---
+
+### 1.1 — Furniture Editor: Back to List Button
+
+**File:** `sdk/campaign_builder/src/furniture_editor.rs`
+**Function:** `show_form`
+
+Added a `"◀ Back to List"` button at the top of the furniture edit/add form,
+directly after the heading and separator, before the `ScrollArea` opens. When
+clicked, sets `self.mode = FurnitureEditorMode::List` and requests a repaint.
+The existing Cancel button at the bottom of the form was left intact.
+
+**Tests added:**
+
+- `test_furniture_show_form_back_button_returns_to_list` — verifies the mode
+  transitions from `Edit` to `List`.
+- `test_furniture_show_form_back_button_from_add_mode_returns_to_list` — same
+  for `Add` mode.
+
+---
+
+### 1.2 — Map Editor Inspector: Event Editor Moved Above Visual Properties
+
+**File:** `sdk/campaign_builder/src/map_editor.rs`
+**Function:** `show_inspector_panel`
+
+The `if matches!(editor.current_tool, EditorTool::PlaceEvent)` block that
+rendered the Event Editor was at the very bottom of the inspector column
+(after Visual Properties, Terrain-Specific Settings, and Preset Palette). It
+has been moved inside the selected-tile `ui.group`, immediately after the
+Event Details summary and `"✏️ Edit Event"` / `"🗑 Remove Event"` buttons.
+
+The Event Editor block at the old location (after `} else { ui.label("No tile
+selected"); }`) was deleted.
+
+New inspector column order:
+
+1. Map ID / Size / Name group
+2. **Selected tile info group** (position, terrain, NPC info, event details,
+   Edit/Remove buttons, **Event Editor ← moved here**)
+3. Visual Properties group
+4. Terrain-Specific Settings group
+5. Visual Preset Palette group
+6. NPC Placement editor (unchanged)
+7. Statistics group
+8. Validation Errors group
+
+**Test added:**
+
+- `test_event_editor_renders_before_visual_properties_section` — constructs a
+  `MapEditorState` with `PlaceEvent` active, renders the inspector via a
+  headless `egui::Context`, and asserts that `event_editor` remains `Some(…)`
+  with its `position` unchanged after the panel runs.
+
+---
+
+### 1.3 — Character Editor: Starting Spells Section Already Flat
+
+The `egui::CollapsingHeader` wrapper had already been removed from
+`show_starting_spells_editor` and the `ui.heading("Starting Spells")` call
+was already at the `show_character_form` call site in a previous
+implementation pass. No changes were required for this sub-step.
+
+---
+
+### 1.4 — Character Editor: Starting Spells Autocomplete Class Filtering
+
+**File:** `sdk/campaign_builder/src/characters_editor.rs`
+**Function:** `show_starting_spells_editor`
+
+**Problem:** `autocomplete_spell_selector` was called with the full
+`available_spells` slice. When a spell name (e.g. `Awaken`) exists in both
+the Cleric and Sorcerer school, the autocomplete always resolved to the first
+match (typically the Cleric variant), silently assigning the wrong spell to a
+Sorcerer character.
+
+**Fix:** Added `filter_spells_for_class(class_id, available_spells, classes)`,
+a module-level helper function that filters the spell list to those matching
+the character's class `spell_school`. The autocomplete is now called with this
+filtered list. The full `available_spells` slice is still used for name lookup
+in the display table so previously-saved spells continue to render correctly.
+
+`ClassDefinition::spell_school` (`antares::domain::classes::SpellSchool`) and
+`Spell::school` (`antares::domain::magic::types::SpellSchool`) are separate
+enum types with the same variants; the comparison is done via an explicit
+`match` on the `ClassSpellSchool` arm.
+
+If the class is not found or has `spell_school: None` (non-caster), the full
+spell list is returned as a fallback so the picker remains usable during
+initial character creation.
+
+**Test added:**
+
+- `test_starting_spells_autocomplete_uses_character_class` — constructs a
+  Sorcerer and Cleric class, a Cleric `Awaken` (0x0101) and a Sorcerer
+  `Awaken` (0x0401), and asserts that:
+  - `filter_spells_for_class("sorcerer", …)` returns only the Sorcerer variant.
+  - `filter_spells_for_class("cleric", …)` returns only the Cleric variant.
+  - `filter_spells_for_class("knight", …)` (unknown class) returns both spells
+    as a fallback.
+
+---
+
+### 1.5 — Character Editor: Starting Spells ScrollArea Height
+
+**File:** `sdk/campaign_builder/src/characters_editor.rs`
+**Function:** `show_starting_spells_editor`
+
+Changed the `ScrollArea` constraint from `.max_height(200.0)` to
+`.min_scrolled_height(145.0)`. At approximately 24 dp per row plus 4 dp
+spacing, this shows ~5 rows without a scrollbar while still allowing the area
+to grow when the window is taller.
+
+---
+
+### 1.6 — Characters Display: Starting Spells Section
+
+**File:** `sdk/campaign_builder/src/characters_editor.rs`
+**Functions:** `show_character_preview`, `show_list`
+
+**Problem:** The character detail/display view showed attributes, stats,
+resources, equipment, and items — but not starting spells.
+
+**Fix:**
+
+- Added `spells: &[Spell]` parameter to `show_character_preview` and
+  `show_list` (the only call site for `show_character_preview`).
+- The `show` entry-point already received `spells` and was already passing it
+  to `show_character_form`; it now also passes it through `show_list`.
+- After the existing "Starting Items" section, a "Starting Spells" section is
+  rendered:
+  - Always shown (heading + separator always present).
+  - If `character.starting_spells` is empty: an italicised `"No starting spells defined."` label.
+  - Otherwise: a two-column `egui::Grid` (`id_salt("display_starting_spells_grid")`)
+    with **Name** and **School** columns. Spell names are resolved by looking
+    up each `SpellId` in the `spells` slice; unknown IDs display `"(unknown)"`.
+
+**Test added:**
+
+- `test_starting_spells_display_section_shows_spell_names` — constructs a
+  `Spell` with id `0x0201` and name `"Cure Light Wounds"`, verifies the
+  lookup logic that the display panel relies on, and confirms the
+  `CharacterDefinition`'s `starting_spells` field carries the expected id.
+
+---
+
+### Pre-existing Clippy Suppressions Added
+
+The `show` and `show_character_form` functions in `characters_editor.rs`, and
+the `show` function in `quest_editor.rs`, each have 8 total parameters
+(including `self`), one over the default `clippy::too_many_arguments` limit of 7. These signatures pre-date the `EditorContext` parameter-bundle pattern
+introduced elsewhere in the SDK and are tracked for refactoring in the
+codebase cleanup plan Phase 5. `#[allow(clippy::too_many_arguments)]`
+suppressions have been added with explanatory comments.
+
+---
+
+### Files Changed
+
+| File                                            | Change                                                                                                                                                                                                           |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/furniture_editor.rs`  | Back to List button in `show_form`; 2 new tests                                                                                                                                                                  |
+| `sdk/campaign_builder/src/map_editor.rs`        | Event Editor moved inside selected-tile group; 1 new test                                                                                                                                                        |
+| `sdk/campaign_builder/src/characters_editor.rs` | `filter_spells_for_class` helper; autocomplete fix; ScrollArea height; Starting Spells display section; `spells` threaded through `show_list` / `show_character_preview`; 2 new tests; 2 `#[allow]` suppressions |
+| `sdk/campaign_builder/src/quest_editor.rs`      | 1 `#[allow]` suppression (pre-existing)                                                                                                                                                                          |
+
+### Quality Gates
+
+```text
+cargo fmt --all                                     → clean
+cargo check --all-targets --all-features            → 0 errors
+cargo clippy --all-targets --all-features -D warnings → 0 warnings
+cargo nextest run --all-features                    → 4402 passed, 8 skipped
+cargo nextest run --all-features -p campaign_builder → 2261 passed, 0 skipped
+```
+
+### Architecture Compliance
+
+- [x] All code is in `.rs` files under `sdk/campaign_builder/src/`
+- [x] SPDX headers present on modified files (pre-existing)
+- [x] No game-engine data model changes — all fixes are SDK-only
+- [x] No `campaigns/tutorial` references in new test code
+- [x] All new `egui` widgets follow `AGENTS.md` SDK rules (unique `id_salt` on
+      every `ScrollArea` and `Grid`, `push_id` on looped remove buttons)
+- [x] `///` doc comments on every new public/module-level function
+- [x] `filter_spells_for_class` includes a `# Examples` section in its doc
+      comment (doctest for the struct literal; not a runnable example since
+      `Spell::new` has a required `effect_type` field that would add noise)
+
+---
+
 ## Spell Book egui Conversion — Phase 4: Test Rewrite and Documentation (Complete)
 
 ### Overview
@@ -11,14 +214,14 @@ summarised below for future reference.
 
 ### What Changed
 
-| Symbol / group              | Before (Bevy entity lifecycle)                                                                                                                              | After (egui)                                                                                                |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Plugin systems              | `setup_spellbook_ui`, `handle_spellbook_input`, `update_spellbook_ui`, `cleanup_spellbook_ui` (4 systems)                                                   | `spellbook_input_system`, `spellbook_ui_system` (2 systems)                                                 |
-| Marker components           | `SpellBookOverlay`, `SpellBookContent`, `SpellBookCharTab`, `SpellBookSpellRow`, `SpellBookCharList`, `SpellBookSpellList`, `SpellBookDetailPane` (7 types) | None — egui owns layout                                                                                     |
-| Color constants             | 10 `bevy::prelude::Color` constants                                                                                                                         | 10 `egui::Color32` constants with canonical names (no `_EG` suffix)                                         |
-| Rendering                   | Entity spawn / update / despawn lifecycle                                                                                                                   | `egui::CentralPanel` + single-column stacked layout with `ScrollArea` for spell list and detail sections      |
-| `ScrollArea` id_salt values | N/A                                                                                                                                                         | `"spellbook_spell_list"`, `"spellbook_detail_pane"`                                                         |
-| Loop ID isolation           | N/A                                                                                                                                                         | `ui.push_id(i, …)` for character tabs; `ui.push_id(spell_id, …)` for spell rows                             |
+| Symbol / group              | Before (Bevy entity lifecycle)                                                                                                                              | After (egui)                                                                                             |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Plugin systems              | `setup_spellbook_ui`, `handle_spellbook_input`, `update_spellbook_ui`, `cleanup_spellbook_ui` (4 systems)                                                   | `spellbook_input_system`, `spellbook_ui_system` (2 systems)                                              |
+| Marker components           | `SpellBookOverlay`, `SpellBookContent`, `SpellBookCharTab`, `SpellBookSpellRow`, `SpellBookCharList`, `SpellBookSpellList`, `SpellBookDetailPane` (7 types) | None — egui owns layout                                                                                  |
+| Color constants             | 10 `bevy::prelude::Color` constants                                                                                                                         | 10 `egui::Color32` constants with canonical names (no `_EG` suffix)                                      |
+| Rendering                   | Entity spawn / update / despawn lifecycle                                                                                                                   | `egui::CentralPanel` + single-column stacked layout with `ScrollArea` for spell list and detail sections |
+| `ScrollArea` id_salt values | N/A                                                                                                                                                         | `"spellbook_spell_list"`, `"spellbook_detail_pane"`                                                      |
+| Loop ID isolation           | N/A                                                                                                                                                         | `ui.push_id(i, …)` for character tabs; `ui.push_id(spell_id, …)` for spell rows                          |
 
 ### What Did Not Change
 

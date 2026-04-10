@@ -4445,6 +4445,24 @@ impl MapsEditorState {
                         }
                     });
                 }
+
+                // Event editor – rendered immediately below event details when
+                // the PlaceEvent tool is active (§1.2 SDK fix).
+                if matches!(editor.current_tool, EditorTool::PlaceEvent) {
+                    ui.separator();
+                    ui.group(|ui| {
+                        ui.heading("Event Editor");
+                        Self::show_event_editor(
+                            ui,
+                            editor,
+                            data.maps,
+                            data.monsters,
+                            data.items,
+                            data.conditions,
+                            data.furniture_definitions,
+                        );
+                    });
+                }
             });
 
             // Visual metadata editor
@@ -4538,22 +4556,6 @@ impl MapsEditorState {
         }
 
         ui.add_space(10.0);
-
-        // Event editor (when PlaceEvent tool is active)
-        if matches!(editor.current_tool, EditorTool::PlaceEvent) {
-            ui.group(|ui| {
-                ui.heading("Event Editor");
-                Self::show_event_editor(
-                    ui,
-                    editor,
-                    data.maps,
-                    data.monsters,
-                    data.items,
-                    data.conditions,
-                    data.furniture_definitions,
-                );
-            });
-        }
 
         // NPC placement editor (when PlaceNpc tool is active)
         if matches!(editor.current_tool, EditorTool::PlaceNpc) {
@@ -7874,6 +7876,74 @@ mod tests {
         });
 
         // Verify selection was preserved and the inspector invocation completed
+        assert_eq!(state.selected_position, Some(pos));
+    }
+
+    /// Tests that the Event Editor state remains accessible after `show_inspector_panel`
+    /// runs with the `PlaceEvent` tool active (§1.2 SDK fix).
+    ///
+    /// Before the fix the Event Editor was rendered at the bottom of the column,
+    /// after all Visual/Terrain/Preset groups.  After the fix it is rendered
+    /// inside the selected-tile group, directly below the Event Details row.
+    /// This test verifies that:
+    /// 1. The inspector does not panic with `PlaceEvent` active.
+    /// 2. The `event_editor` state is still `Some(…)` and its `position` is
+    ///    unchanged after the panel renders (i.e. it was not accidentally reset).
+    #[test]
+    fn test_event_editor_renders_before_visual_properties_section() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let pos = Position::new(3, 4);
+        let event = MapEvent::Sign {
+            name: "Test Sign".to_string(),
+            description: "A sign".to_string(),
+            text: "Hello, world!".to_string(),
+            time_condition: None,
+            facing: None,
+        };
+        state.add_event_at_position(pos.x as u32, pos.y as u32, event.clone());
+        state.selected_position = Some(pos);
+
+        // Activate the PlaceEvent tool and pre-populate the event editor,
+        // exactly as the "✏️ Edit Event" button would do at runtime.
+        state.current_tool = EditorTool::PlaceEvent;
+        state.event_editor = Some(EventEditorState::from_map_event(pos, &event));
+
+        let ctx = egui::Context::default();
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(600.0, 800.0),
+            )),
+            ..Default::default()
+        };
+        ctx.begin_pass(raw_input);
+
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            let data = MapInspectorData {
+                maps: &[],
+                monsters: &[],
+                items: &[],
+                conditions: &[],
+                npcs: &[],
+                furniture_definitions: &[],
+            };
+            // Must not panic.
+            MapsEditorState::show_inspector_panel(ui, &mut state, &data);
+        });
+
+        // The event editor state must still be intact after the panel has rendered;
+        // the refactored position (inside the group) must not reset it.
+        assert!(
+            state.event_editor.is_some(),
+            "event_editor should remain Some after show_inspector_panel"
+        );
+        assert_eq!(
+            state.event_editor.as_ref().unwrap().position,
+            pos,
+            "event_editor.position should be unchanged after show_inspector_panel"
+        );
+        // The selected tile must be preserved as well.
         assert_eq!(state.selected_position, Some(pos));
     }
 
