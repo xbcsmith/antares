@@ -2636,6 +2636,7 @@ mod tests {
             magic_item_pool: vec![],
             magic_slot_count: 0,
             magic_refresh_days: 7,
+            description: String::new(),
         });
 
         // Insert a merchant with depleted stock referencing that template.
@@ -4135,6 +4136,7 @@ mod tests {
             magic_item_pool: vec![],
             magic_slot_count: 0,
             magic_refresh_days: 7,
+            description: String::new(),
         });
         db.npc_stock_templates = templates;
 

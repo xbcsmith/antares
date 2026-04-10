@@ -91,6 +91,7 @@ fn default_magic_refresh_days() -> u32 {
 ///     magic_item_pool: vec![],
 ///     magic_slot_count: 0,
 ///     magic_refresh_days: 7,
+///     description: String::new(),
 /// };
 ///
 /// assert_eq!(template.id, "blacksmith_basic");
@@ -124,6 +125,13 @@ pub struct MerchantStockTemplate {
     /// Defaults to 7. Values of 0 are treated as 1 at runtime.
     #[serde(default = "default_magic_refresh_days")]
     pub magic_refresh_days: u32,
+
+    /// Optional human-readable description shown in the SDK editor.
+    ///
+    /// Not used at runtime; purely an authoring aid so campaign authors can
+    /// describe what a template is for without opening the edit form.
+    #[serde(default)]
+    pub description: String,
 }
 
 impl MerchantStockTemplate {
@@ -146,6 +154,7 @@ impl MerchantStockTemplate {
     ///     magic_item_pool: vec![],
     ///     magic_slot_count: 0,
     ///     magic_refresh_days: 7,
+    ///     description: String::new(),
     /// };
     ///
     /// let stock = template.to_runtime_stock();
@@ -291,6 +300,7 @@ impl NpcRuntimeState {
     ///     magic_item_pool: vec![],
     ///     magic_slot_count: 0,
     ///     magic_refresh_days: 7,
+    ///     description: String::new(),
     /// };
     ///
     /// let state = NpcRuntimeState::initialize_stock_from_template(
@@ -341,6 +351,7 @@ impl NpcRuntimeState {
     ///     magic_item_pool: vec![],
     ///     magic_slot_count: 0,
     ///     magic_refresh_days: 7,
+    ///     description: String::new(),
     /// };
     ///
     /// let mut state = NpcRuntimeState::initialize_stock_from_template(
@@ -408,6 +419,7 @@ impl NpcRuntimeState {
     ///     magic_item_pool: vec![100, 101, 102, 103, 104],
     ///     magic_slot_count: 2,
     ///     magic_refresh_days: 7,
+    ///     description: String::new(),
     /// };
     ///
     /// let mut state = NpcRuntimeState::new("wizard_zara".to_string());
@@ -611,6 +623,7 @@ impl NpcRuntimeStore {
     ///     magic_item_pool: vec![],
     ///     magic_slot_count: 0,
     ///     magic_refresh_days: 7,
+    ///     description: String::new(),
     /// });
     ///
     /// let mut merchant = NpcDefinition::merchant("smith", "The Smith", "smith.png");
@@ -678,6 +691,7 @@ impl NpcRuntimeStore {
     ///     magic_item_pool: vec![],
     ///     magic_slot_count: 0,
     ///     magic_refresh_days: 7,
+    ///     description: String::new(),
     /// });
     ///
     /// let mut merchant = NpcDefinition::merchant("bob", "Bob", "bob.png");
@@ -832,6 +846,7 @@ pub enum MerchantStockTemplateDatabaseError {
 ///     magic_item_pool: vec![],
 ///     magic_slot_count: 0,
 ///     magic_refresh_days: 7,
+///     description: String::new(),
 /// });
 ///
 /// assert!(db.get("basic").is_some());
@@ -886,7 +901,14 @@ impl MerchantStockTemplateDatabase {
     /// use antares::domain::world::npc_runtime::{MerchantStockTemplateDatabase, MerchantStockTemplate};
     ///
     /// let mut db = MerchantStockTemplateDatabase::new();
-    /// db.add(MerchantStockTemplate { id: "shop_a".to_string(), entries: vec![], magic_item_pool: vec![], magic_slot_count: 0, magic_refresh_days: 7 });
+    /// db.add(MerchantStockTemplate {
+    ///     id: "shop_a".to_string(),
+    ///     entries: vec![],
+    ///     magic_item_pool: vec![],
+    ///     magic_slot_count: 0,
+    ///     magic_refresh_days: 7,
+    ///     description: String::new(),
+    /// });
     /// assert_eq!(db.len(), 1);
     /// ```
     pub fn add(&mut self, template: MerchantStockTemplate) {
@@ -905,7 +927,14 @@ impl MerchantStockTemplateDatabase {
     /// use antares::domain::world::npc_runtime::{MerchantStockTemplateDatabase, MerchantStockTemplate};
     ///
     /// let mut db = MerchantStockTemplateDatabase::new();
-    /// db.add(MerchantStockTemplate { id: "basic".to_string(), entries: vec![], magic_item_pool: vec![], magic_slot_count: 0, magic_refresh_days: 7 });
+    /// db.add(MerchantStockTemplate {
+    ///     id: "basic".to_string(),
+    ///     entries: vec![],
+    ///     magic_item_pool: vec![],
+    ///     magic_slot_count: 0,
+    ///     magic_refresh_days: 7,
+    ///     description: String::new(),
+    /// });
     ///
     /// assert!(db.get("basic").is_some());
     /// assert!(db.get("nope").is_none());
@@ -966,6 +995,7 @@ mod tests {
             magic_item_pool: vec![],
             magic_slot_count: 0,
             magic_refresh_days: 7,
+            description: String::new(),
         }
     }
 
@@ -982,6 +1012,7 @@ mod tests {
             magic_item_pool: pool,
             magic_slot_count: slot_count,
             magic_refresh_days: refresh_days,
+            description: String::new(),
         }
     }
 
@@ -1035,6 +1066,7 @@ mod tests {
             magic_item_pool: vec![],
             magic_slot_count: 0,
             magic_refresh_days: 7,
+            description: String::new(),
         };
 
         let state =
@@ -1067,6 +1099,7 @@ mod tests {
             magic_item_pool: vec![],
             magic_slot_count: 0,
             magic_refresh_days: 7,
+            description: String::new(),
         };
 
         let mut state =
@@ -1640,6 +1673,7 @@ mod tests {
             magic_item_pool: vec![],
             magic_slot_count: 0,
             magic_refresh_days: 7,
+            description: String::new(),
         });
 
         let mut merchant = NpcDefinition::merchant("smith", "The Smith", "smith.png");
@@ -1707,6 +1741,7 @@ mod tests {
             magic_item_pool: vec![],
             magic_slot_count: 0,
             magic_refresh_days: 7,
+            description: String::new(),
         });
 
         assert!(db.get("general_goods").is_some());
@@ -1806,6 +1841,7 @@ mod tests {
             magic_item_pool: vec![],
             magic_slot_count: 0,
             magic_refresh_days: 7,
+            description: String::new(),
         };
 
         let stock = template.to_runtime_stock();

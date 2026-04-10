@@ -1,5 +1,167 @@
 # Implementations
 
+## SDK Fixes — Phase 2: Stock Template Description – Data Model + SDK Wire-up + Display (Complete)
+
+### Overview
+
+The `description` field on `MerchantStockTemplate` was silently ignored in the
+round-trip between the SDK editor and the RON data file. The field existed on
+`StockTemplateEditBuffer` but was never read from nor written to the domain
+struct. This phase:
+
+1. Adds `description: String` to the game-engine `MerchantStockTemplate` with
+   `#[serde(default)]` so existing RON files load without modification.
+2. Fixes `StockTemplateEditBuffer::from_template` to copy the description from
+   the domain struct into the edit buffer.
+3. Fixes `StockTemplateEditBuffer::to_template` to write the buffer's
+   description back into the returned `MerchantStockTemplate`.
+4. Adds a description row to the stock-templates display/preview panel so
+   authors can see what a template is for without opening the edit form.
+5. Updates every `MerchantStockTemplate { … }` struct literal construction
+   site across the codebase to include the new field.
+
+**Files changed:**
+
+- `src/domain/world/npc_runtime.rs`
+- `sdk/campaign_builder/src/stock_templates_editor.rs`
+- `src/application/mod.rs`
+- `sdk/campaign_builder/tests/editor_state_tests.rs`
+- `src/sdk/database.rs`
+- `src/sdk/validation.rs`
+
+---
+
+### 2.1 — Game Engine: `description` Added to `MerchantStockTemplate`
+
+**File:** `src/domain/world/npc_runtime.rs`
+**Struct:** `MerchantStockTemplate`
+
+Added the following field at the end of the struct, after `magic_refresh_days`:
+
+```rust
+/// Optional human-readable description shown in the SDK editor.
+///
+/// Not used at runtime; purely an authoring aid so campaign authors can
+/// describe what a template is for without opening the edit form.
+#[serde(default)]
+pub description: String,
+```
+
+`#[serde(default)]` means all existing `.ron` files that omit `description`
+continue to deserialise successfully — the field defaults to `String::new()`.
+
+**All struct literal construction sites updated** (18 locations including doc
+examples, unit-test helper functions, and inline test functions):
+
+- `make_basic_template` / `make_magic_template` test helpers
+- `test_npc_runtime_state_initialize_stock_from_template`
+- `test_npc_runtime_state_stock_independent_of_template`
+- `test_npc_runtime_store_initialize_merchant_with_template`
+- `test_merchant_stock_template_database_add_and_get`
+- `test_merchant_stock_template_to_runtime_stock`
+- All `///` doc-comment examples throughout the file
+
+---
+
+### 2.2 — SDK Fix: `from_template` Reads `description`
+
+**File:** `sdk/campaign_builder/src/stock_templates_editor.rs`
+**Function:** `StockTemplateEditBuffer::from_template`
+
+Replaced:
+
+```rust
+description: String::new(), // templates have no description field in the domain type
+```
+
+with:
+
+```rust
+description: template.description.clone(),
+```
+
+The stale comment was removed.
+
+---
+
+### 2.3 — SDK Fix: `to_template` Persists `description`
+
+**File:** `sdk/campaign_builder/src/stock_templates_editor.rs`
+**Function:** `StockTemplateEditBuffer::to_template`
+
+Added `description: self.description.clone(),` to the `Ok(MerchantStockTemplate { … })` return value so the field is included in every saved template.
+
+---
+
+### 2.4 — SDK: Description Row in Stock Templates Display Panel
+
+**File:** `sdk/campaign_builder/src/stock_templates_editor.rs`
+**Function:** `show_preview`
+
+Inserted a two-column `egui::Grid` (id_salt `"stock_template_display_grid"`)
+between the heading/separator and the stock-count labels. It always renders a
+`"Description:"` label in the left column. The right column shows either:
+
+- The template's description string (when non-empty), or
+- An italicised + dimmed `"No description."` placeholder (when empty).
+
+This ensures the row is always present and scannable in the list view without
+having to open the edit form.
+
+---
+
+### 2.5 — Tests
+
+**Existing tests updated:**
+
+- `make_template` test helper — added `description: String::new()`
+- `test_from_template_round_trips` — extended to set `original.description =
+"Test round-trip shop"` and assert `restored.description == original.description`
+- All `MerchantStockTemplate { … }` literals in `editor_state_tests.rs`,
+  `src/sdk/database.rs`, `src/sdk/validation.rs`, and `src/application/mod.rs`
+
+**New tests added** (in `stock_templates_editor.rs` `mod tests`):
+
+| Test                                                   | Verifies                                                                              |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| `test_stock_template_description_is_persisted`         | `from_template` copies a non-empty description into the buffer                        |
+| `test_stock_template_description_to_template`          | `to_template` writes the buffer's description into the returned struct                |
+| `test_stock_template_description_round_trip_non_empty` | Full `from_template` → mutate → `to_template` round-trip with a non-empty description |
+| `test_stock_template_description_empty_round_trip`     | Same round-trip for an empty description                                              |
+
+---
+
+### Files Changed
+
+| File                                                 | Change                                                                                                                                                                              |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/world/npc_runtime.rs`                    | `description: String` field added to `MerchantStockTemplate`; all struct literals + doc examples updated                                                                            |
+| `sdk/campaign_builder/src/stock_templates_editor.rs` | `from_template` fix; `to_template` fix; `show_preview` description row; doc example updated; `make_template` helper updated; `test_from_template_round_trips` extended; 4 new tests |
+| `src/application/mod.rs`                             | 2 struct literals updated                                                                                                                                                           |
+| `sdk/campaign_builder/tests/editor_state_tests.rs`   | 3 struct literals updated                                                                                                                                                           |
+| `src/sdk/database.rs`                                | 1 struct literal updated                                                                                                                                                            |
+| `src/sdk/validation.rs`                              | 2 struct literals updated                                                                                                                                                           |
+
+### Quality Gates
+
+```text
+cargo fmt --all                                       → clean
+cargo check --all-targets --all-features              → 0 errors
+cargo clippy --all-targets --all-features -D warnings → 0 warnings
+cargo nextest run --all-features                      → 4402 passed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] `description: String` added with `#[serde(default)]` — backward-compatible with all existing `.ron` files
+- [x] No `campaigns/tutorial` references in new test code
+- [x] All new `egui` widgets follow SDK rules: unique `id_salt` on the new `Grid`
+- [x] `///` doc comments unchanged / present on all public items
+- [x] Data files remain in RON format (no JSON/YAML added)
+- [x] No architectural deviations from architecture.md
+
+---
+
 ## SDK Fixes — Phase 1: Pure SDK Layout and Display Fixes (Complete)
 
 ### Overview
