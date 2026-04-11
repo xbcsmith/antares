@@ -13,9 +13,16 @@
 
 use crate::application::GameState;
 use crate::domain::campaign::CampaignConfig;
+use crate::domain::levels::LevelDatabase;
+use crate::domain::progression::{
+    check_level_up_with_db, level_up_and_grant_spells_with_level_db, ProgressionError,
+};
+use crate::domain::types::SpellId;
 use crate::domain::validation::ValidationError;
 use crate::sdk::database::ContentDatabase;
 use bevy::prelude::*;
+use rand::Rng;
+use thiserror::Error;
 
 /// Wrapper resource exposing campaign content as a Bevy resource.
 ///
@@ -94,6 +101,176 @@ pub fn check_permadeath_allows_resurrection(
     } else {
         Ok(())
     }
+}
+
+/// Errors returned by [`perform_training_service`].
+#[derive(Error, Debug, Clone, PartialEq)]
+pub enum TrainingError {
+    /// The specified NPC is not flagged as a trainer.
+    #[error("NPC '{0}' is not a trainer")]
+    NotATrainer(String),
+
+    /// The target character is dead or does not yet have enough XP for a level-up.
+    #[error("Character is not eligible for level-up (dead or insufficient XP)")]
+    CharacterNotEligible,
+
+    /// The party does not have enough gold to pay the training fee.
+    #[error("Insufficient gold: need {need}, have {have}")]
+    InsufficientGold { need: u32, have: u32 },
+
+    /// The underlying domain-level level-up operation failed.
+    #[error("Level-up failed: {0}")]
+    LevelUpFailed(#[from] ProgressionError),
+}
+
+/// Performs a trainer NPC level-up service for the party member at `party_index`.
+///
+/// This function is the authoritative application-layer entry point for the
+/// NPC trainer flow.  It enforces all preconditions atomically before modifying
+/// any state.
+///
+/// ## Steps performed
+///
+/// 1. Looks up the NPC by `npc_id` in `db.npcs`.
+/// 2. Verifies the NPC has `is_trainer == true`.
+/// 3. Verifies the party member at `party_index` is alive and eligible for
+///    level-up via [`check_level_up_with_db`].
+/// 4. Computes the training fee via
+///    [`NpcDefinition::training_fee_for_level`][crate::domain::world::npc::NpcDefinition::training_fee_for_level].
+/// 5. Checks `party.gold >= fee`; returns [`TrainingError::InsufficientGold`] if not.
+/// 6. Deducts gold and calls [`level_up_and_grant_spells_with_level_db`]
+///    using `db.classes` and `db.spells`.
+/// 7. Returns `Ok((hp_gained, spells_granted))`.
+///
+/// # Arguments
+///
+/// * `game_state`   — Mutable game state; party gold and character data are
+///   modified on success.
+/// * `npc_id`       — String ID of the trainer NPC.
+/// * `party_index`  — Index into `game_state.party.members`.
+/// * `level_db`     — Optional per-class XP threshold table (`None` = formula fallback).
+/// * `rng`          — Random-number generator for HP rolls.
+/// * `db`           — Content database for NPC, class, and spell lookups.
+///
+/// # Returns
+///
+/// `Ok((hp_gained, spells_granted))` on success.
+///
+/// # Errors
+///
+/// Returns [`TrainingError`] when any precondition fails.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::GameState;
+/// use antares::application::resources::perform_training_service;
+/// use antares::domain::character::{Alignment, Character, Sex};
+/// use antares::domain::progression::award_experience;
+/// use antares::domain::world::npc::NpcDefinition;
+/// use antares::sdk::database::ContentDatabase;
+/// use antares::domain::classes::ClassDatabase;
+///
+/// let mut state = GameState::new();
+/// state.campaign_config.level_up_mode =
+///     antares::domain::campaign::LevelUpMode::NpcTrainer;
+///
+/// // Add a trainer NPC to the content DB
+/// let mut db = ContentDatabase::new();
+/// db.classes = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+/// let trainer = NpcDefinition::trainer("trainer_bob", "Trainer Bob", "bob.png", 100);
+/// db.npcs.add_npc(trainer).unwrap();
+///
+/// // Add a knight with enough XP for level 2 (1000 XP)
+/// let mut knight = Character::new(
+///     "Sir Lancelot".to_string(),
+///     "human".to_string(),
+///     "knight".to_string(),
+///     Sex::Male,
+///     Alignment::Good,
+/// );
+/// knight.hp.base = 30;
+/// knight.hp.current = 30;
+/// award_experience(&mut knight, 1_000).unwrap();
+/// state.party.members.push(knight);
+/// state.party.gold = 500;
+///
+/// let mut rng = rand::rng();
+///
+/// let result = perform_training_service(
+///     &mut state,
+///     "trainer_bob",
+///     0,
+///     None,
+///     &mut rng,
+///     &db,
+/// );
+///
+/// assert!(result.is_ok());
+/// assert_eq!(state.party.members[0].level, 2);
+/// assert_eq!(state.party.gold, 400); // 500 - 100 fee
+/// ```
+pub fn perform_training_service(
+    game_state: &mut GameState,
+    npc_id: &str,
+    party_index: usize,
+    level_db: Option<&LevelDatabase>,
+    rng: &mut impl Rng,
+    db: &ContentDatabase,
+) -> Result<(u16, Vec<SpellId>), TrainingError> {
+    // Step 1: Look up and validate the NPC.
+    let npc = db
+        .npcs
+        .get_npc(npc_id)
+        .ok_or_else(|| TrainingError::NotATrainer(npc_id.to_string()))?;
+
+    // Step 2: Verify the NPC is a trainer.
+    if !npc.is_trainer {
+        return Err(TrainingError::NotATrainer(npc_id.to_string()));
+    }
+
+    // Clone what we need before the mutable borrow of game_state.
+    let npc_clone = npc.clone();
+
+    // Step 3: Verify eligibility — alive and enough XP.
+    let member = game_state
+        .party
+        .members
+        .get(party_index)
+        .ok_or(TrainingError::CharacterNotEligible)?;
+
+    if !member.is_alive() || !check_level_up_with_db(member, level_db) {
+        return Err(TrainingError::CharacterNotEligible);
+    }
+
+    let current_level = member.level;
+
+    // Step 4: Compute the training fee for the character's current level.
+    let fee = npc_clone.training_fee_for_level(current_level, &game_state.campaign_config);
+
+    // Step 5: Check gold.
+    let gold = game_state.party.gold;
+    if gold < fee {
+        return Err(TrainingError::InsufficientGold {
+            need: fee,
+            have: gold,
+        });
+    }
+
+    // Step 6: Deduct gold and apply the level-up using class/spell DBs from content.
+    game_state.party.gold = gold.saturating_sub(fee);
+
+    let max_level = game_state.campaign_config.max_party_level;
+    let result = level_up_and_grant_spells_with_level_db(
+        &mut game_state.party.members[party_index],
+        &db.classes,
+        &db.spells,
+        level_db,
+        max_level,
+        rng,
+    )?;
+
+    Ok(result)
 }
 
 /// Performs a priest resurrection service for the party member at `character_index`.
@@ -567,5 +744,160 @@ mod tests {
         assert_eq!(state.party.gold, 0);
         assert_eq!(state.party.gems, 0);
         assert!(!state.party.members[0].conditions.is_dead());
+    }
+
+    // ── Training Service Tests ────────────────────────────────────────────────
+
+    fn make_trainer_db() -> ContentDatabase {
+        let mut db = ContentDatabase::new();
+        db.classes = crate::domain::classes::ClassDatabase::load_from_file("data/classes.ron")
+            .expect("classes.ron must exist for training tests");
+        db.spells = crate::sdk::database::SpellDatabase::load_from_file("data/spells.ron")
+            .unwrap_or_default();
+        let trainer = crate::domain::world::npc::NpcDefinition::trainer(
+            "trainer_bob",
+            "Trainer Bob",
+            "bob.png",
+            100, // 100 gold base fee
+        );
+        db.npcs.add_npc(trainer).unwrap();
+        db
+    }
+
+    fn make_knight_with_xp(xp: u64) -> crate::domain::character::Character {
+        let mut c = crate::domain::character::Character::new(
+            "Sir Lancelot".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Good,
+        );
+        c.hp.base = 30;
+        c.hp.current = 30;
+        c.experience = xp;
+        c
+    }
+
+    #[test]
+    fn test_perform_training_service_success() {
+        let mut state = GameState::new();
+        state.campaign_config.level_up_mode = crate::domain::campaign::LevelUpMode::NpcTrainer;
+        state.party.members.push(make_knight_with_xp(1_000));
+        state.party.gold = 500;
+
+        let db = make_trainer_db();
+        let mut rng = rand::rng();
+
+        let result = perform_training_service(&mut state, "trainer_bob", 0, None, &mut rng, &db);
+
+        assert!(
+            result.is_ok(),
+            "training should succeed: {:?}",
+            result.err()
+        );
+        let (hp_gained, _) = result.unwrap();
+        assert!(hp_gained > 0, "knight must gain HP on level-up");
+        assert_eq!(state.party.members[0].level, 2);
+        assert_eq!(state.party.gold, 400); // 500 - 100 fee (100 * 1.0 * 1)
+    }
+
+    #[test]
+    fn test_perform_training_service_insufficient_gold() {
+        let mut state = GameState::new();
+        state.campaign_config.level_up_mode = crate::domain::campaign::LevelUpMode::NpcTrainer;
+        state.party.members.push(make_knight_with_xp(1_000));
+        state.party.gold = 50; // Less than the 100 fee
+
+        let db = make_trainer_db();
+        let mut rng = rand::rng();
+
+        let result = perform_training_service(&mut state, "trainer_bob", 0, None, &mut rng, &db);
+
+        assert!(matches!(
+            result,
+            Err(TrainingError::InsufficientGold {
+                need: 100,
+                have: 50
+            })
+        ));
+        assert_eq!(
+            state.party.members[0].level, 1,
+            "level must remain 1 on failure"
+        );
+        assert_eq!(state.party.gold, 50, "gold must not be deducted on failure");
+    }
+
+    #[test]
+    fn test_perform_training_service_character_not_eligible() {
+        let mut state = GameState::new();
+        state.campaign_config.level_up_mode = crate::domain::campaign::LevelUpMode::NpcTrainer;
+        state.party.members.push(make_knight_with_xp(0)); // No XP — not eligible
+        state.party.gold = 500;
+
+        let db = make_trainer_db();
+        let mut rng = rand::rng();
+
+        let result = perform_training_service(&mut state, "trainer_bob", 0, None, &mut rng, &db);
+
+        assert!(
+            matches!(result, Err(TrainingError::CharacterNotEligible)),
+            "should be CharacterNotEligible, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_perform_training_service_not_a_trainer() {
+        let mut state = GameState::new();
+        state.party.members.push(make_knight_with_xp(1_000));
+        state.party.gold = 500;
+
+        // NPC exists but is NOT a trainer
+        let mut db = ContentDatabase::new();
+        let mut npc =
+            crate::domain::world::npc::NpcDefinition::new("plain_npc", "Plain NPC", "plain.png");
+        npc.is_trainer = false;
+        db.npcs.add_npc(npc).unwrap();
+
+        let mut rng = rand::rng();
+
+        let result = perform_training_service(&mut state, "plain_npc", 0, None, &mut rng, &db);
+
+        assert!(
+            matches!(result, Err(TrainingError::NotATrainer(_))),
+            "should be NotATrainer, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_perform_training_service_deducts_correct_fee_at_level_5() {
+        let mut state = GameState::new();
+        state.campaign_config.level_up_mode = crate::domain::campaign::LevelUpMode::NpcTrainer;
+
+        // Character at level 5 with enough XP for level 6
+        // Level 6 threshold (formula): 1000 * 5^1.5 ≈ 11180
+        let mut knight = make_knight_with_xp(12_000);
+        knight.level = 5;
+        // Must set experience >= level-6 threshold
+        state.party.members.push(knight);
+        state.party.gold = 10_000;
+
+        let db = make_trainer_db(); // base fee = 100
+        let mut rng = rand::rng();
+
+        let result = perform_training_service(&mut state, "trainer_bob", 0, None, &mut rng, &db);
+
+        assert!(
+            result.is_ok(),
+            "training level 5→6 should succeed: {:?}",
+            result.err()
+        );
+        // fee = 100 * 1.0 * 5 = 500
+        assert_eq!(
+            state.party.gold, 9_500,
+            "expected 500 gold deducted for level-5 training"
+        );
+        assert_eq!(state.party.members[0].level, 6);
     }
 }

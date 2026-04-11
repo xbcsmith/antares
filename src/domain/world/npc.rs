@@ -30,9 +30,12 @@
 //!     is_merchant: false,
 //!     is_innkeeper: false,
 //!     is_priest: false,
+//!     is_trainer: false,
 //!     stock_template: None,
 //!     service_catalog: None,
 //!     economy: None,
+//!     training_fee_base: None,
+//!     training_fee_multiplier: None,
 //! };
 //! ```
 //!
@@ -82,9 +85,12 @@ pub type NpcId = String;
 ///     is_merchant: true,
 ///     is_innkeeper: false,
 ///     is_priest: false,
+///     is_trainer: false,
 ///     stock_template: Some("general_goods".to_string()),
 ///     service_catalog: None,
 ///     economy: None,
+///     training_fee_base: None,
+///     training_fee_multiplier: None,
 /// };
 ///
 /// assert_eq!(merchant.id, "merchant_tom");
@@ -136,9 +142,12 @@ pub struct NpcDefinition {
     ///     is_merchant: false,
     ///     is_innkeeper: false,
     ///     is_priest: false,
+    ///     is_trainer: false,
     ///     stock_template: None,
     ///     service_catalog: None,
     ///     economy: None,
+    ///     training_fee_base: None,
+    ///     training_fee_multiplier: None,
     /// };
     /// ```
     #[serde(default)]
@@ -171,9 +180,12 @@ pub struct NpcDefinition {
     ///     is_merchant: false,
     ///     is_innkeeper: false,
     ///     is_priest: false,
+    ///     is_trainer: false,
     ///     stock_template: None,
     ///     service_catalog: None,
     ///     economy: None,
+    ///     training_fee_base: None,
+    ///     training_fee_multiplier: None,
     /// };
     /// ```
     #[serde(default)]
@@ -226,6 +238,24 @@ pub struct NpcDefinition {
     /// settings (buy 50%, sell 100%).
     #[serde(default)]
     pub economy: Option<NpcEconomySettings>,
+
+    /// If true, this NPC offers character level-up training for a gold fee.
+    #[serde(default)]
+    pub is_trainer: bool,
+
+    /// Per-NPC override for the base gold fee charged per training session.
+    ///
+    /// When `Some`, overrides [`crate::domain::campaign::CampaignConfig::training_fee_base`].
+    /// When `None`, the campaign default is used.
+    #[serde(default)]
+    pub training_fee_base: Option<u32>,
+
+    /// Per-NPC override for the per-level fee multiplier applied during training.
+    ///
+    /// When `Some`, overrides [`crate::domain::campaign::CampaignConfig::training_fee_multiplier`].
+    /// When `None`, the campaign default is used.
+    #[serde(default)]
+    pub training_fee_multiplier: Option<f32>,
 }
 
 impl NpcDefinition {
@@ -270,9 +300,12 @@ impl NpcDefinition {
             is_merchant: false,
             is_innkeeper: false,
             is_priest: false,
+            is_trainer: false,
             stock_template: None,
             service_catalog: None,
             economy: None,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         }
     }
 
@@ -311,9 +344,12 @@ impl NpcDefinition {
             is_merchant: true,
             is_innkeeper: false,
             is_priest: false,
+            is_trainer: false,
             stock_template: None,
             service_catalog: None,
             economy: None,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         }
     }
 
@@ -356,9 +392,12 @@ impl NpcDefinition {
             is_merchant: false,
             is_innkeeper: false,
             is_priest: true,
+            is_trainer: false,
             stock_template: None,
             service_catalog: None,
             economy: None,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         }
     }
 
@@ -397,10 +436,111 @@ impl NpcDefinition {
             is_merchant: false,
             is_innkeeper: true,
             is_priest: false,
+            is_trainer: false,
             stock_template: None,
             service_catalog: None,
             economy: None,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         }
+    }
+
+    /// Creates a trainer NPC that charges a level-up fee.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Unique identifier
+    /// * `name` - Display name
+    /// * `portrait_id` - Portrait image path
+    /// * `fee_base` - Base gold fee per training session (overrides campaign default)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::npc::NpcDefinition;
+    ///
+    /// let trainer = NpcDefinition::trainer(
+    ///     "master_swordsman",
+    ///     "Master Swordsman",
+    ///     "assets/portraits/trainer.png",
+    ///     300,
+    /// );
+    ///
+    /// assert!(trainer.is_trainer);
+    /// assert!(!trainer.is_merchant);
+    /// assert_eq!(trainer.training_fee_base, Some(300));
+    /// ```
+    pub fn trainer(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        portrait_id: impl Into<String>,
+        fee_base: u32,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            description: String::new(),
+            portrait_id: portrait_id.into(),
+            dialogue_id: None,
+            creature_id: None,
+            sprite: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+            is_priest: false,
+            is_trainer: true,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
+            training_fee_base: Some(fee_base),
+            training_fee_multiplier: None,
+        }
+    }
+
+    /// Computes the gold fee for training a character from `level` to `level + 1`.
+    ///
+    /// Uses the NPC's override values when present, otherwise falls back to
+    /// the campaign-wide defaults from `campaign_config`.
+    ///
+    /// Formula: `floor(base * multiplier * level)`
+    ///
+    /// # Arguments
+    ///
+    /// * `level` - The character's **current** level (fee is for advancing beyond it)
+    /// * `campaign_config` - Campaign configuration supplying defaults when no
+    ///   NPC override is set
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::npc::NpcDefinition;
+    /// use antares::domain::campaign::CampaignConfig;
+    ///
+    /// let config = CampaignConfig::default(); // training_fee_base=500, multiplier=1.0
+    ///
+    /// // NPC with no override — uses campaign defaults
+    /// let trainer = NpcDefinition::trainer("t", "T", "t.png", 500);
+    /// assert_eq!(trainer.training_fee_for_level(1, &config), 500);
+    /// assert_eq!(trainer.training_fee_for_level(5, &config), 2500);
+    ///
+    /// // NPC with override
+    /// let mut custom = NpcDefinition::trainer("t2", "T2", "t2.png", 300);
+    /// custom.training_fee_multiplier = Some(2.0);
+    /// assert_eq!(custom.training_fee_for_level(1, &config), 600);
+    /// ```
+    pub fn training_fee_for_level(
+        &self,
+        level: u32,
+        campaign_config: &crate::domain::campaign::CampaignConfig,
+    ) -> u32 {
+        let base = self
+            .training_fee_base
+            .unwrap_or(campaign_config.training_fee_base);
+        let multiplier = self
+            .training_fee_multiplier
+            .unwrap_or(campaign_config.training_fee_multiplier);
+        (base as f32 * multiplier * level as f32) as u32
     }
 
     /// Checks if this NPC has a dialogue
@@ -679,9 +819,12 @@ mod tests {
             is_merchant: false,
             is_innkeeper: false,
             is_priest: false,
+            is_trainer: false,
             stock_template: None,
             service_catalog: None,
             economy: None,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         let serialized = ron::to_string(&npc).expect("Failed to serialize");
@@ -820,9 +963,12 @@ NpcDefinition(
             is_merchant: true,
             is_innkeeper: true,
             is_priest: false,
+            is_trainer: false,
             stock_template: None,
             service_catalog: None,
             economy: None,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         assert_eq!(npc.id, "complete_npc");
@@ -870,9 +1016,12 @@ NpcDefinition(
             is_merchant: false,
             is_innkeeper: false,
             is_priest: false,
+            is_trainer: false,
             stock_template: None,
             service_catalog: None,
             economy: None,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         let serialized = ron::to_string(&npc).expect("Failed to serialize");
@@ -1074,9 +1223,12 @@ NpcDefinition(
             is_merchant: false,
             is_innkeeper: false,
             is_priest: true,
+            is_trainer: false,
             stock_template: None,
             service_catalog: Some(catalog),
             economy: None,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         let serialized = ron::to_string(&priest).expect("Failed to serialize");
@@ -1107,9 +1259,12 @@ NpcDefinition(
             is_merchant: true,
             is_innkeeper: false,
             is_priest: false,
+            is_trainer: false,
             stock_template: Some("blacksmith_basic_stock".to_string()),
             service_catalog: None,
             economy: Some(NpcEconomySettings::new(0.4, 1.2)),
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         let serialized = ron::to_string(&npc).expect("Failed to serialize");
@@ -1124,5 +1279,94 @@ NpcDefinition(
         let economy = deserialized.economy.as_ref().unwrap();
         assert_eq!(economy.buy_rate, 0.4);
         assert_eq!(economy.sell_rate, 1.2);
+    }
+
+    #[test]
+    fn test_npc_definition_is_trainer_defaults_false() {
+        let ron_str = r#"
+NpcDefinition(
+    id: "old_npc",
+    name: "Old NPC",
+    portrait_id: "portrait.png",
+)
+"#;
+        let npc: NpcDefinition = ron::from_str(ron_str).expect("Failed to deserialize old format");
+        assert!(
+            !npc.is_trainer,
+            "is_trainer should default to false for old RON files without the field"
+        );
+        assert!(npc.training_fee_base.is_none());
+        assert!(npc.training_fee_multiplier.is_none());
+    }
+
+    #[test]
+    fn test_npc_definition_trainer_constructor() {
+        let trainer = NpcDefinition::trainer(
+            "master_swordsman",
+            "Master Swordsman",
+            "assets/portraits/trainer.png",
+            300,
+        );
+
+        assert!(trainer.is_trainer, "trainer() must set is_trainer = true");
+        assert!(!trainer.is_merchant);
+        assert!(!trainer.is_innkeeper);
+        assert!(!trainer.is_priest);
+        assert_eq!(trainer.training_fee_base, Some(300));
+        assert!(trainer.training_fee_multiplier.is_none());
+        assert_eq!(trainer.id, "master_swordsman");
+    }
+
+    #[test]
+    fn test_npc_definition_training_fee_for_level_uses_campaign_defaults() {
+        let config = crate::domain::campaign::CampaignConfig::default();
+        // default training_fee_base=500, multiplier=1.0
+        let trainer = NpcDefinition::trainer("t", "T", "t.png", 500);
+
+        assert_eq!(trainer.training_fee_for_level(1, &config), 500);
+        assert_eq!(trainer.training_fee_for_level(5, &config), 2500);
+        assert_eq!(trainer.training_fee_for_level(10, &config), 5000);
+    }
+
+    #[test]
+    fn test_npc_definition_training_fee_for_level_npc_override() {
+        let config = crate::domain::campaign::CampaignConfig::default();
+        let mut trainer = NpcDefinition::trainer("t", "T", "t.png", 200);
+        trainer.training_fee_multiplier = Some(2.0);
+
+        assert_eq!(trainer.training_fee_for_level(1, &config), 400); // 200 * 2.0 * 1
+        assert_eq!(trainer.training_fee_for_level(3, &config), 1200); // 200 * 2.0 * 3
+    }
+
+    #[test]
+    fn test_npc_definition_training_fee_falls_back_to_campaign_config() {
+        let config = crate::domain::campaign::CampaignConfig::default(); // base=500, mult=1.0
+                                                                         // NPC with no overrides uses campaign values
+        let mut npc = NpcDefinition::new("guard", "Guard", "guard.png");
+        npc.is_trainer = true;
+
+        assert_eq!(npc.training_fee_for_level(1, &config), 500); // 500 * 1.0 * 1
+        assert_eq!(npc.training_fee_for_level(4, &config), 2000); // 500 * 1.0 * 4
+    }
+
+    #[test]
+    fn test_npc_definition_trainer_serialization_roundtrip() {
+        let trainer = NpcDefinition::trainer("training_master", "Training Master", "tm.png", 750);
+
+        let serialized = ron::to_string(&trainer).expect("Failed to serialize");
+        let deserialized: NpcDefinition =
+            ron::from_str(&serialized).expect("Failed to deserialize");
+
+        assert_eq!(trainer, deserialized);
+        assert!(deserialized.is_trainer);
+        assert_eq!(deserialized.training_fee_base, Some(750));
+    }
+
+    #[test]
+    fn test_npc_definition_new_has_trainer_false() {
+        let npc = NpcDefinition::new("guard", "Guard", "guard.png");
+        assert!(!npc.is_trainer);
+        assert!(npc.training_fee_base.is_none());
+        assert!(npc.training_fee_multiplier.is_none());
     }
 }

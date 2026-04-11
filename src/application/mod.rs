@@ -122,6 +122,13 @@ pub enum GameMode {
     /// which character's book is open, which spell is highlighted, and which
     /// mode to restore on close.
     SpellBook(crate::application::spell_book_state::SpellBookState),
+    /// NPC trainer level-up session.
+    ///
+    /// Entered when a dialogue node fires [`crate::domain::dialogue::DialogueAction::OpenTraining`]
+    /// for an NPC with `is_trainer: true` and the campaign uses
+    /// [`crate::domain::campaign::LevelUpMode::NpcTrainer`].  The UI presents
+    /// eligible party members and their training costs.
+    Training(TrainingState),
 }
 
 // ===== Rest State =====
@@ -332,6 +339,81 @@ impl TempleServiceState {
     /// let mut state = TempleServiceState::new("temple_priest".to_string());
     /// state.selected_member_index = Some(0);
     /// state.status_message = Some("Resurrection complete!".to_string());
+    /// state.clear();
+    /// assert!(state.selected_member_index.is_none());
+    /// assert!(state.status_message.is_none());
+    /// ```
+    pub fn clear(&mut self) {
+        self.selected_member_index = None;
+        self.status_message = None;
+    }
+}
+
+// ===== Training State =====
+
+/// State for an active NPC trainer level-up session.
+///
+/// Stored inside [`GameMode::Training`] while the player is interacting
+/// with a trainer NPC that offers level-up services.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::TrainingState;
+///
+/// let state = TrainingState::new("master_swordsman".to_string());
+/// assert_eq!(state.npc_id, "master_swordsman");
+/// assert!(state.eligible_member_indices.is_empty());
+/// assert!(state.selected_member_index.is_none());
+/// assert!(state.status_message.is_none());
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrainingState {
+    /// The NPC ID of the trainer conducting the session (e.g., `"master_swordsman"`)
+    pub npc_id: String,
+    /// Indices into `party.members` for members eligible for level-up
+    pub eligible_member_indices: Vec<usize>,
+    /// Currently selected party-member index in the eligible list
+    pub selected_member_index: Option<usize>,
+    /// Last status or error message to display in the UI (`None` when idle)
+    pub status_message: Option<String>,
+}
+
+impl TrainingState {
+    /// Creates a new training state for the given trainer NPC.
+    ///
+    /// # Arguments
+    ///
+    /// * `npc_id` - The NPC ID of the trainer (e.g., `"master_swordsman"`)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::TrainingState;
+    ///
+    /// let state = TrainingState::new("master_swordsman".to_string());
+    /// assert_eq!(state.npc_id, "master_swordsman");
+    /// assert!(state.eligible_member_indices.is_empty());
+    /// ```
+    pub fn new(npc_id: String) -> Self {
+        Self {
+            npc_id,
+            eligible_member_indices: Vec::new(),
+            selected_member_index: None,
+            status_message: None,
+        }
+    }
+
+    /// Clears the current selection and status message.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::TrainingState;
+    ///
+    /// let mut state = TrainingState::new("trainer".to_string());
+    /// state.selected_member_index = Some(0);
+    /// state.status_message = Some("Training complete!".to_string());
     /// state.clear();
     /// assert!(state.selected_member_index.is_none());
     /// assert!(state.status_message.is_none());
@@ -1762,6 +1844,10 @@ impl GameState {
                 true
             }
             GameMode::TempleService(_) => {
+                self.mode = GameMode::Exploration;
+                true
+            }
+            GameMode::Training(_) => {
                 self.mode = GameMode::Exploration;
                 true
             }

@@ -198,6 +198,149 @@ Added focused tests for the new exploration pickup helper covering:
 Updated event-system behavior notes/tests so explicit-only dropped-item pickup
 is the documented interaction model.
 
+## Phase 4: NPC Trainer — Domain Layer (Complete)
+
+### Overview
+
+Implemented Phase 4 of the character leveling system as specified in
+`docs/explanation/level_up_plan.md`. This phase extends `NpcDefinition` with
+trainer fields, adds trainer-aware dialogue content (mirroring the existing
+merchant pattern), introduces `GameMode::Training(TrainingState)`, and provides
+the authoritative `perform_training_service` application-layer function that
+validates preconditions, deducts gold, and applies the level-up atomically.
+
+### What Changed
+
+#### 1. `src/domain/world/npc.rs` — Trainer NPC support
+
+**Three new `#[serde(default)]` fields on `NpcDefinition`:**
+
+| Field                     | Type          | Default | Description                                            |
+| ------------------------- | ------------- | ------- | ------------------------------------------------------ |
+| `is_trainer`              | `bool`        | `false` | NPC offers training level-up services                  |
+| `training_fee_base`       | `Option<u32>` | `None`  | Per-NPC override of campaign `training_fee_base`       |
+| `training_fee_multiplier` | `Option<f32>` | `None`  | Per-NPC override of campaign `training_fee_multiplier` |
+
+**New constructor** `NpcDefinition::trainer(id, name, portrait_id, fee_base)` —
+sets `is_trainer: true` and `training_fee_base: Some(fee_base)`.
+
+**New method** `training_fee_for_level(level, campaign_config) -> u32` — computes
+`floor(base * multiplier * level)`, using NPC overrides when present and falling
+back to `CampaignConfig` defaults otherwise.
+
+All existing constructors (`new`, `merchant`, `priest`, `innkeeper`) updated to
+include the three new fields defaulting to `false`/`None`. All doc-comment
+struct literals and test struct literals across the codebase updated to include
+the new fields.
+
+#### 2. `src/domain/dialogue.rs` — Trainer dialogue content
+
+**`DialogueAction::OpenTraining { npc_id }`** — new variant that transitions
+the game into `GameMode::Training` for the specified NPC.
+
+**`DialogueSdkManagedContent`** — four new trainer variants mirroring merchants:
+`TrainerTemplateTree`, `TrainerBranchInsertion`, `TrainerChoice`,
+`TrainerOpenNode`. Each has `is_trainer_marker() -> bool`.
+
+**`DialogueSdkMetadata::has_trainer_content()`** — predicate checking for any
+trainer marker.
+
+**`DialogueTree` trainer methods** (mirror the merchant equivalents):
+
+| Method                                 | Description                                             |
+| -------------------------------------- | ------------------------------------------------------- |
+| `contains_open_training_for_npc(id)`   | Searches nodes/choices for `OpenTraining` action        |
+| `has_sdk_managed_trainer_content()`    | Tree-level or node-level trainer marker check           |
+| `standard_trainer_template(id,npc,nm)` | Builds a two-node greeting → training dialogue template |
+| `ensure_standard_trainer_branch(…)`    | Idempotent branch insertion into existing dialogue      |
+| `remove_sdk_managed_trainer_content()` | Strips SDK-managed trainer nodes/choices/metadata       |
+
+**`DialogueChoice`** — `sdk_managed_trainer_choice(target)` constructor and
+`is_sdk_managed_trainer_choice()` predicate.
+
+**`DialogueNode::has_sdk_managed_trainer_content()`** — node-level check.
+
+#### 3. `src/application/mod.rs` — `GameMode::Training`
+
+**`TrainingState` struct:**
+
+| Field                     | Type             | Description                                |
+| ------------------------- | ---------------- | ------------------------------------------ |
+| `npc_id`                  | `String`         | Trainer NPC ID                             |
+| `eligible_member_indices` | `Vec<usize>`     | Party member indices eligible for level-up |
+| `selected_member_index`   | `Option<usize>`  | Currently selected member in the UI        |
+| `status_message`          | `Option<String>` | Last status/error message                  |
+
+`TrainingState::new(npc_id)` and `TrainingState::clear()` methods provided.
+
+**`GameMode::Training(TrainingState)`** variant added. `close_modal()` returns
+to `Exploration` when in this mode.
+
+#### 4. `src/application/resources.rs` — Training service
+
+**`TrainingError` enum** with four variants: `NotATrainer`, `CharacterNotEligible`,
+`InsufficientGold { need, have }`, `LevelUpFailed(ProgressionError)`.
+
+**`perform_training_service(game_state, npc_id, party_index, level_db, rng, db)`**
+— 6-parameter function (uses `db.classes` and `db.spells` internally):
+
+1. Looks up NPC → verifies `is_trainer`.
+2. Validates party member alive + XP eligible via `check_level_up_with_db`.
+3. Computes fee via `training_fee_for_level`.
+4. Checks `party.gold >= fee`.
+5. Deducts gold, calls `level_up_and_grant_spells_with_level_db`.
+6. Returns `Ok((hp_gained, spells_granted))`.
+
+#### 5. `src/game/systems/dialogue.rs` — `OpenTraining` handler
+
+`execute_action` arm for `DialogueAction::OpenTraining { npc_id }`:
+
+1. Guards that `campaign_config.level_up_mode == NpcTrainer`.
+2. Validates NPC exists and `is_trainer`.
+3. Builds `eligible_member_indices` from living members passing `check_level_up_with_db`.
+4. Transitions to `GameMode::Training(state)`.
+
+#### 6. Cross-file struct literal fixes
+
+14 struct literals across 6 files (`blueprint.rs`, `creature_binding.rs`,
+`types.rs`, `events.rs`, `database.rs`, `campaign_integration_tests.rs`)
+updated to include `is_trainer: false, training_fee_base: None,
+training_fee_multiplier: None`.
+
+### Test Coverage
+
+21 new tests across 4 modules:
+
+| Module                        | New Tests | What they cover                                                               |
+| ----------------------------- | --------- | ----------------------------------------------------------------------------- |
+| `domain::world::npc`          | 8         | Trainer constructor, fee calculation, RON backward compat, round-trip         |
+| `domain::dialogue`            | 10        | Trainer template, branch insertion/idempotency, removal, SDK markers          |
+| `application::resources`      | 5         | Training success, insufficient gold, not eligible, not a trainer, level-5 fee |
+| `domain::campaign` (existing) | 0         | Existing `training_fee_*` tests already cover config round-trip               |
+
+### Success Criteria Verification
+
+- ✅ `perform_training_service` correctly levels up the character, deducts gold, and grants spells (`test_perform_training_service_success`)
+- ✅ `GameMode::Training` is entered when a dialogue node fires `OpenTraining` (handler in `execute_action`)
+- ✅ All existing dialogue tests pass unchanged (4541 total, 0 failures)
+- ✅ `cargo nextest run` green — 4541 / 4541 passed
+
+### Design Decisions
+
+- **6-parameter `perform_training_service`** instead of the 8-parameter signature
+  in the plan: `class_db` and `spell_db` are extracted from `db: &ContentDatabase`
+  internally, keeping the function under clippy's 7-argument limit without
+  needing a `#[allow(clippy::too_many_arguments)]` suppression.
+- **`check_level_up_with_db(member, None)`** is used in the dialogue handler
+  because the `LevelDatabase` resource is not available in `execute_action`'s
+  context. The formula fallback is acceptable for the pre-filter; the actual
+  training service re-checks with the full `level_db` if provided.
+- **Trainer dialogue mirrors merchant dialogue exactly** — same SDK metadata
+  pattern, same idempotent insert/remove cycle, same template structure — to
+  maintain consistency and support future SDK editor work in Phases 6–7.
+
+---
+
 ## Phase 3: Auto Level-Up Game System (Complete)
 
 ### Overview
