@@ -190,6 +190,12 @@ fn handle_exploration_input_interact(
     )>,
     mut game_log: ResMut<GameLog>,
     mut lock_pending: ResMut<LockInteractionPending>,
+    mut item_picked_up_messages: Option<
+        MessageWriter<crate::game::systems::item_world_events::ItemPickedUpEvent>,
+    >,
+    mut quest_progress_messages: Option<
+        MessageWriter<crate::application::quests::QuestProgressEvent>,
+    >,
 ) {
     let frame_input = decode_frame_input(
         &input_config.key_map,
@@ -216,6 +222,8 @@ fn handle_exploration_input_interact(
         &mut door_entity_query,
         &mut game_log,
         &mut lock_pending,
+        item_picked_up_messages.as_mut(),
+        quest_progress_messages.as_mut(),
     );
 }
 

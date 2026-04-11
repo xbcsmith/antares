@@ -1,5 +1,203 @@
 # Implementations
 
+## Modal ESC behavior, centralized modal close helper, and lock prompt navigation fix
+
+### Overview
+
+Fixed two related exploration/UI problems:
+
+- the **Locked Object** prompt now supports complete keyboard focus navigation
+  in addition to direct number-key character selection and mouse clicks
+- pressing `Esc` in modal screens now **closes that modal** instead of opening
+  the game menu
+
+This aligns the runtime behavior with the intended exploration flow:
+
+- `Esc` closes lock prompts, dialogue, inventory-style screens, and similar
+  modal overlays
+- the game menu only opens from top-level modes where opening the menu is
+  appropriate, instead of interrupting dialogue or inventory management
+
+### What Changed
+
+#### 1. `src/game/systems/lock_ui.rs`
+
+Expanded lock prompt navigation state so the lock window has an explicit notion
+of focus, not just selected character index.
+
+Added a new focus enum for the prompt:
+
+- character list
+- pick lock button
+- bash button
+- cancel button
+
+Updated the lock prompt UI so:
+
+- `Tab` cycles keyboard focus across the character list and action buttons
+- `Enter` / `Space` activates the currently focused action button
+- number keys still select a character immediately
+- arrow keys still move through the character list when the character list has focus
+- mouse clicks update both the selection and the focused region
+- `Esc` closes only the lock prompt and resets lock navigation state
+
+This fixes the broken state where you could select a character with `1`–`6`
+but could not move focus to an action button and had to escape out of the
+prompt.
+
+#### 2. `src/application/mod.rs`
+
+Added a small shared `GameState::close_modal()` helper to centralize modal-close
+behavior.
+
+The helper returns `true` when the current mode is a closeable modal and
+restores the correct prior mode, otherwise it returns `false`.
+
+Centralized close behavior now covers:
+
+- `Automap` → `Exploration`
+- `Inventory` → stored resume mode
+- `MerchantInventory` → stored resume mode
+- `ContainerInventory` → stored resume mode
+- `SpellBook` → stored resume mode
+- `SpellCasting` → stored resume mode
+- `Dialogue` → `Exploration`
+- `TempleService` → `Exploration`
+- `RestMenu` → `Exploration`
+- `GameLog` → `Exploration`
+
+This removes duplicated per-mode close logic from input handling and gives the
+application layer one canonical definition of “close the current modal”.
+
+#### 3. `src/game/systems/input/global_toggles.rs`
+
+Refactored global menu-key behavior to use `GameState::close_modal()` first,
+instead of embedding the full per-mode close logic directly in the input
+system.
+
+Updated menu-key handling so:
+
+- modal modes are closed through the shared application-layer helper
+- only `Exploration` and `Menu` use the true menu toggle path
+- other blocked/special modes are ignored instead of opening the menu
+
+This ensures the game menu appears only in appropriate top-level contexts and
+does not hijack `Esc` from modal gameplay screens, while also keeping the
+close rules centralized in one place.
+
+### Behavior After Fix
+
+- In the **Locked Object** window, you can:
+
+  - select a character with number keys
+  - press `Tab` to move focus to **Pick Lock**, **Bash**, or **Cancel**
+  - press `Enter` / `Space` to activate the focused button
+  - click characters and buttons with the mouse
+  - press `Esc` to close only the lock prompt
+
+- In other modal screens:
+
+  - `Esc` in dialogue closes dialogue
+  - `Esc` in inventory closes inventory
+  - `Esc` in merchant inventory closes merchant trading
+  - `Esc` in container inventory closes the container screen
+  - `Esc` in spell book closes the spell book
+  - `Esc` in temple service closes the temple screen
+
+- The game menu now opens only from the normal top-level menu contexts instead
+  of appearing from dialogue/inventory/modal overlays.
+
+### Test Coverage
+
+Added and updated tests covering:
+
+- `GameState::close_modal()` returns `false` in `Exploration`
+- `GameState::close_modal()` correctly closes inventory/dialogue/merchant/container/spell book/spell casting/automap/temple/rest menu/game log modes
+- closing inventory with `Esc` returns to exploration instead of opening menu
+- closing dialogue with `Esc` returns to exploration instead of opening menu
+- closing spell book with `Esc` returns to exploration instead of opening menu
+- existing merchant/container/temple/game-log escape behavior remains modal-close behavior
+
+## Dropped-item pickup interaction fix
+
+### Overview
+
+Fixed exploration dropped-item pickup so ground items are collected only through
+explicit interaction. Dropped items are no longer auto-picked up just by
+stepping onto their tile. The intended player flow is now:
+
+- press `E` / the configured interact key while standing on or adjacent to a
+  dropped item
+- or click to interact using the exploration mouse-interact path
+- the item is added to party inventory
+- the ground item is removed from the map
+- the dropped-item visual is despawned
+- item-collection quest progress is emitted
+
+### What Changed
+
+#### 1. `src/game/systems/input/exploration_interact.rs`
+
+Added explicit adjacent dropped-item handling to the exploration interaction
+pipeline.
+
+A new helper, `try_pickup_adjacent_dropped_item`, now:
+
+- checks the current tile first, then adjacent tiles
+- finds the first dropped item in FIFO order on the first matching tile
+- calls the existing domain `pickup_item()` transaction
+- adds a player-visible exploration log message on success or failure
+- emits `ItemPickedUpEvent` so the world visual is removed
+- emits `QuestProgressEvent::ItemCollected` so collect-item objectives advance
+
+The interaction ordering was updated so dropped-item pickup is attempted during
+the normal exploration interact flow, before the generic adjacent world-event
+fallback.
+
+#### 2. `src/game/systems/input.rs`
+
+Wired the exploration interaction system to pass through the optional pickup
+side-effect message writers used by the new dropped-item pickup helper:
+
+- dropped-item visual removal event writer
+- quest item-collection progress event writer
+
+This makes keyboard interact (`E`) and mouse-based interact use the same
+explicit pickup path.
+
+#### 3. `src/game/systems/events.rs`
+
+Removed the old auto-pickup-on-step path from the event system.
+
+This means:
+
+- stepping onto a dropped-item tile no longer emits a pickup request
+- the event plugin no longer owns a separate dropped-item auto-pickup message flow
+- dropped-item collection behavior is now centralized in explicit exploration
+  interaction
+
+### Behavior After Fix
+
+- A dropped sword on Map 1 can be picked up from an adjacent tile.
+- Pressing the interact key picks it up instead of merely logging proximity.
+- Mouse interaction follows the same pickup path.
+- Walking onto a dropped-item tile does not auto-pick it up.
+- The item is added to inventory and removed from `Map::dropped_items`.
+- The world marker/mesh is removed through the existing pickup event flow.
+- Collect-item quests can react to ground pickup correctly.
+
+### Test Coverage
+
+Added focused tests for the new exploration pickup helper covering:
+
+- successful adjacent pickup adds the item to inventory and removes it from the ground
+- current-tile pickup is preferred before adjacent-tile pickup
+- no dropped item nearby returns `false`
+- full inventory logs a visible failure and leaves the item on the ground
+
+Updated event-system behavior notes/tests so explicit-only dropped-item pickup
+is the documented interaction model.
+
 ## Phase 2: Campaign Config — XP Curve and Level-Up Mode (Complete)
 
 ### Overview

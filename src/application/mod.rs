@@ -1696,6 +1696,87 @@ impl GameState {
         self.mode = GameMode::Menu(MenuState::new(prev));
     }
 
+    /// Closes the current modal screen and restores the appropriate prior mode.
+    ///
+    /// Returns `true` when the current [`GameMode`] was a closeable modal and
+    /// was closed successfully. Returns `false` when the current mode is not a
+    /// modal-close target and callers should apply different behavior (such as
+    /// opening the game menu from [`GameMode::Exploration`]).
+    ///
+    /// This centralizes Escape / menu-key modal-close behavior so UI systems
+    /// and global input toggles do not have to duplicate the per-mode resume
+    /// logic.
+    ///
+    /// # Modal close behavior
+    ///
+    /// - `Automap` → `Exploration`
+    /// - `Inventory` → stored resume mode
+    /// - `MerchantInventory` → stored resume mode
+    /// - `ContainerInventory` → stored resume mode
+    /// - `SpellBook` → stored resume mode
+    /// - `SpellCasting` → stored resume mode
+    /// - `Dialogue` → `Exploration`
+    /// - `TempleService` → `Exploration`
+    /// - `RestMenu` → `Exploration`
+    /// - `GameLog` → `Exploration`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameMode, GameState};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_inventory();
+    ///
+    /// assert!(state.close_modal());
+    /// assert!(matches!(state.mode, GameMode::Exploration));
+    /// ```
+    pub fn close_modal(&mut self) -> bool {
+        match self.mode.clone() {
+            GameMode::Automap => {
+                self.mode = GameMode::Exploration;
+                true
+            }
+            GameMode::Inventory(inv_state) => {
+                self.mode = inv_state.get_resume_mode();
+                true
+            }
+            GameMode::MerchantInventory(merchant_state) => {
+                self.mode = merchant_state.get_resume_mode();
+                true
+            }
+            GameMode::ContainerInventory(container_state) => {
+                self.mode = container_state.get_resume_mode();
+                true
+            }
+            GameMode::SpellBook(spell_book_state) => {
+                self.mode = spell_book_state.get_resume_mode();
+                true
+            }
+            GameMode::SpellCasting(spell_casting_state) => {
+                self.mode = spell_casting_state.get_resume_mode();
+                true
+            }
+            GameMode::Dialogue(_) => {
+                self.mode = GameMode::Exploration;
+                true
+            }
+            GameMode::TempleService(_) => {
+                self.mode = GameMode::Exploration;
+                true
+            }
+            GameMode::RestMenu => {
+                self.mode = GameMode::Exploration;
+                true
+            }
+            GameMode::GameLog => {
+                self.mode = GameMode::Exploration;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Enters exploration-mode spell casting with a pre-selected caster.
     ///
     /// Stores the current mode so it can be restored when the player cancels
@@ -2368,6 +2449,117 @@ mod tests {
         assert!(matches!(state.mode, GameMode::Dialogue(_)));
 
         state.return_to_exploration();
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_returns_false_in_exploration() {
+        let mut state = GameState::new();
+
+        assert!(!state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_inventory_to_resume_mode() {
+        let mut state = GameState::new();
+        state.enter_inventory();
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_dialogue_to_exploration() {
+        let mut state = GameState::new();
+        state.enter_dialogue();
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_merchant_inventory_to_resume_mode() {
+        let mut state = GameState::new();
+        state.mode = GameMode::MerchantInventory(
+            crate::application::merchant_inventory_state::MerchantInventoryState::new(
+                "merchant_tom".to_string(),
+                "Tom the Merchant".to_string(),
+                0,
+                GameMode::Dialogue(crate::application::dialogue::DialogueState::new()),
+            ),
+        );
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Dialogue(_)));
+    }
+
+    #[test]
+    fn test_close_modal_closes_container_inventory_to_resume_mode() {
+        let mut state = GameState::new();
+        state.enter_container_inventory(
+            "crate_01".to_string(),
+            "Wooden Crate".to_string(),
+            vec![],
+            0,
+            0,
+        );
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_spell_book_to_resume_mode() {
+        let mut state = GameState::new();
+        state.enter_spellbook_with_caster_select();
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_spell_casting_to_resume_mode() {
+        let mut state = GameState::new();
+        state.enter_spell_casting_with_caster_select();
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_automap_to_exploration() {
+        let mut state = GameState::new();
+        state.mode = GameMode::Automap;
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_temple_service_to_exploration() {
+        let mut state = GameState::new();
+        state.mode = GameMode::TempleService(TempleServiceState::new("temple_priest".to_string()));
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_rest_menu_to_exploration() {
+        let mut state = GameState::new();
+        state.mode = GameMode::RestMenu;
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_game_log_to_exploration() {
+        let mut state = GameState::new();
+        state.mode = GameMode::GameLog;
+
+        assert!(state.close_modal());
         assert!(matches!(state.mode, GameMode::Exploration));
     }
 
