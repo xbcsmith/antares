@@ -23,6 +23,7 @@ pub mod spell_book_state;
 pub mod spell_casting_state;
 
 use crate::application::menu::MenuState;
+use crate::application::save_game::SavedLogEntry;
 use crate::domain::campaign::CampaignConfig;
 use crate::domain::character::{Party, Roster};
 use crate::domain::party_manager::{PartyManagementError, PartyManager};
@@ -790,6 +791,15 @@ pub struct GameState {
     /// Defaults to `CampaignConfig::default()` for new games without a campaign.
     #[serde(default)]
     pub campaign_config: CampaignConfig,
+
+    /// Persisted game log entries so the log survives save/load cycles.
+    ///
+    /// Populated from the live [`crate::game::systems::ui::GameLog`] resource
+    /// immediately before a save is written, and used to restore that resource
+    /// after a save is loaded.  Uses `#[serde(default)]` so that saves created
+    /// before this field was added load cleanly with an empty log.
+    #[serde(default)]
+    pub game_log_entries: Vec<SavedLogEntry>,
 }
 
 /// Errors returned by `GameState::initialize_roster`.
@@ -918,6 +928,7 @@ impl GameState {
             encountered_characters: std::collections::HashSet::new(),
             npc_runtime: NpcRuntimeStore::new(),
             campaign_config: CampaignConfig::default(),
+            game_log_entries: Vec::new(),
         }
     }
 
@@ -996,6 +1007,7 @@ impl GameState {
             encountered_characters: std::collections::HashSet::new(),
             npc_runtime: NpcRuntimeStore::new(),
             campaign_config: CampaignConfig::default(),
+            game_log_entries: Vec::new(),
         };
 
         // Initialize roster from content database (premade characters)

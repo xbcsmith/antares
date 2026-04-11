@@ -8328,6 +8328,8 @@
                     charges: 0,
                 ),
             ],
+            gold: 0,
+            gems: 0,
         ),
         (
             x: 3,
@@ -8620,7 +8622,7 @@
                 x: 1,
                 y: 3,
             ),
-            facing: None,
+            facing: Some(East),
             dialogue_override: None,
         ),
         (
@@ -8629,7 +8631,7 @@
                 x: 1,
                 y: 9,
             ),
-            facing: None,
+            facing: Some(East),
             dialogue_override: None,
         ),
         (
@@ -8638,7 +8640,7 @@
                 x: 18,
                 y: 4,
             ),
-            facing: None,
+            facing: Some(West),
             dialogue_override: None,
         ),
     ],

@@ -135,6 +135,38 @@ pub struct CampaignReference {
     pub name: String,
 }
 
+/// A serializable snapshot of a single game log entry.
+///
+/// Stores the text, category name, and sequence number so that the game log
+/// survives save/load cycles.  The display colour is intentionally omitted —
+/// it is always derived from the category at render time via
+/// `LogCategory::default_color()`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::save_game::SavedLogEntry;
+///
+/// let entry = SavedLogEntry {
+///     category: "Combat".to_string(),
+///     text: "You hit the goblin for 5 damage!".to_string(),
+///     sequence: 0,
+/// };
+///
+/// assert_eq!(entry.category, "Combat");
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SavedLogEntry {
+    /// Category name — one of "Combat", "Dialogue", "Item", "Exploration", "System".
+    pub category: String,
+
+    /// Display text of the entry.
+    pub text: String,
+
+    /// Monotonically-increasing sequence number for stable ordering.
+    pub sequence: u64,
+}
+
 /// Save game structure
 ///
 /// Contains all necessary information to restore a game session,

@@ -1,5 +1,189 @@
 # Implementations
 
+## Bugfix: Game Log Not Persisted Across Save/Load (Complete)
+
+### Overview
+
+Loading a save game from the main menu (or after a restart) did not restore the
+**game log** — combat events, dialogue lines, item pickups, and exploration
+messages accumulated during a session were silently discarded.
+
+The root cause was that `GameLog` is a Bevy `Resource` that lives entirely in
+the ECS world and was never written into the serialised `GameState`. The
+`SaveGameManager::save` / `load` path operated only on `GameState`, so the log
+was always started fresh on every load.
+
+### What Changed
+
+#### 1. New `SavedLogEntry` struct (`src/application/save_game.rs`)
+
+A lightweight, fully serialisable snapshot of a single log entry:
+
+| Field      | Type     | Notes                                             |
+| ---------- | -------- | ------------------------------------------------- |
+| `category` | `String` | Category name: "Combat", "Dialogue", "Item", etc. |
+| `text`     | `String` | Display text of the entry                         |
+| `sequence` | `u64`    | Monotonic ordering number                         |
+
+The display colour is intentionally omitted — it is always derived from the
+category at render time via `LogCategory::default_color()`, keeping the saved
+data lean and forward-compatible.
+
+#### 2. `game_log_entries` field in `GameState` (`src/application/mod.rs`)
+
+```rust
+#[serde(default)]
+pub game_log_entries: Vec<SavedLogEntry>,
+```
+
+`#[serde(default)]` means saves created before this field was added load
+cleanly with an empty log — no migration needed.
+
+#### 3. `to_saved_entries` / `restore_from_saved` on `GameLog` (`src/game/systems/ui.rs`)
+
+| Method                               | Behaviour                                                                                                                                                                               |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GameLog::to_saved_entries()`        | Converts all `LogEntry` values to `Vec<SavedLogEntry>` for embedding in `GameState` before a save                                                                                       |
+| `GameLog::restore_from_saved(saved)` | Clears the live log and repopulates it from a `Vec<SavedLogEntry>`; advances `sequence_counter` past the highest restored sequence so new entries never collide; trims to `max_entries` |
+
+Unknown category names (forward-compat) fall back to `LogCategory::System`
+silently.
+
+#### 4. Save/load wiring (`src/game/systems/menu.rs`)
+
+`menu_button_interaction` and `handle_menu_keyboard` now accept
+`Option<ResMut<GameLog>>` as an additional Bevy system parameter. This is
+threaded through `handle_button_press` → `save_game_operation` /
+`load_game_operation` as `Option<&mut GameLog>`.
+
+**On save** (`save_game_operation`):
+
+```
+global_state.0.game_log_entries = log.to_saved_entries();
+```
+
+called _before_ `save_manager.save()` so the snapshot is part of the
+serialised RON file.
+
+**On load** (`load_game_operation`):
+
+```
+let entries = std::mem::take(&mut global_state.0.game_log_entries);
+log.restore_from_saved(entries);
+```
+
+called _after_ `global_state.0 = loaded_state` so the live ECS resource is
+repopulated from the just-loaded snapshot.
+
+Passing `None` (e.g. in unit tests where the resource is not registered) is
+safe and produces the same behaviour as before: the log is simply not
+synced.
+
+### Files Changed
+
+| File                           | Change                                                                                         |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `src/application/save_game.rs` | Added `SavedLogEntry` struct (Serialize/Deserialize)                                           |
+| `src/application/mod.rs`       | Added `game_log_entries: Vec<SavedLogEntry>` to `GameState`; initialised in `new` / `new_game` |
+| `src/game/systems/ui.rs`       | Added `to_saved_entries()` and `restore_from_saved()` to `GameLog`; added 7 unit tests         |
+| `src/game/systems/menu.rs`     | Threaded `Option<&mut GameLog>` through save/load ops; added 4 integration tests               |
+
+### New Tests Added (11 total)
+
+#### `src/game/systems/ui.rs` (7 tests)
+
+| Test                                                            | What it verifies                                                                         |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `test_to_saved_entries_empty_log`                               | Empty log produces empty `Vec`                                                           |
+| `test_to_saved_entries_preserves_category_text_and_sequence`    | All five categories serialise with correct name, text, and monotonic sequence            |
+| `test_restore_from_saved_empty_vec_clears_log`                  | Restoring an empty slice clears the live log and resets the counter                      |
+| `test_restore_from_saved_rebuilds_entries_correctly`            | Category, text, and sequence are faithfully reconstructed                                |
+| `test_restore_from_saved_advances_sequence_counter`             | `sequence_counter` is set past the highest restored sequence; new entries do not collide |
+| `test_restore_from_saved_unknown_category_falls_back_to_system` | Unrecognised category names map to `LogCategory::System`                                 |
+| `test_to_saved_entries_and_restore_round_trips_all_categories`  | Full round-trip (all five categories) produces identical entries in the restored log     |
+| `test_restore_from_saved_trims_to_max_entries`                  | Restoring more entries than `MAX_LOG_ENTRIES` trims the oldest ones                      |
+
+#### `src/game/systems/menu.rs` (4 tests)
+
+| Test                                                      | What it verifies                                                                               |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `test_save_game_operation_snapshots_log_entries`          | `save_game_operation` copies live log entries into `game_log_entries` before writing the file  |
+| `test_load_game_operation_restores_log_entries`           | `load_game_operation` populates the live `GameLog` from entries embedded in the save file      |
+| `test_save_load_cycle_preserves_game_log`                 | End-to-end: save with a populated log, load into a fresh log, all entries and categories match |
+| `test_save_load_without_game_log_resource_does_not_panic` | Passing `None` for the log resource is safe and produces a clean load without panicking        |
+
+### Quality Gates
+
+All four gates passed with zero errors and zero warnings:
+
+```
+cargo fmt         → clean
+cargo check       → Finished, 0 errors
+cargo clippy      → Finished, 0 warnings
+cargo nextest run → 4420 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Bugfix: Create Merchant Dialog Silent No-Op on Non-Merchant NPCs (Complete)
+
+### Overview
+
+Clicking **"Create merchant dialogue"** on an NPC that did not have the
+`🏪 Is Merchant` checkbox enabled produced **no visible feedback** — the status
+bar was silently cleared and nothing was created or repaired.
+
+Three root causes were identified and fixed together:
+
+| #   | Root cause                                                                                                                                                                                                  | Fix                                                                                                                                                                      |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | `create_or_repair_merchant_dialogue_for_buffer` returned `Ok(String::new())` for non-merchants, setting `pending_status = Some("")` → status bar cleared, zero feedback                                     | Return a non-empty guidance string instead                                                                                                                               |
+| 2   | "Create merchant dialogue" / "Repair merchant dialogue" buttons were rendered **outside** the `if self.edit_buffer.is_merchant` block, so they appeared for non-merchant NPCs                               | Moved both buttons inside the `is_merchant` guard                                                                                                                        |
+| 3   | `auto_apply_merchant_dialogue_to_edit_buffer` did not handle the `"Assigned dialogue missing"` status (stale `dialogue_id` pointing to a deleted tree) — it fell through to "already valid" and did nothing | Added `"Assigned dialogue missing"` to the match arm that triggers `create_or_repair_merchant_dialogue_for_buffer`                                                       |
+| 4   | When the assigned dialogue tree is genuinely missing from `merchant_dialogue_editor.dialogues` (stale id), `create_or_repair` returned a confusing `Err("Assigned dialogue X was not found")`               | Added a stale-id pre-clear: if `dialogue_id` is set but the tree is absent, the id is cleared before `ensure_merchant_dialogue_for_npc` runs, so a fresh tree is created |
+
+### Scenario That Triggered the Bug
+
+User workflow:
+
+1. Creates a **new stock template** in the Stock Templates tab during the
+   current session.
+2. Opens an existing innkeeper NPC ("Inn Keeper Village") for editing.
+3. The NPC is loaded from disk with `is_innkeeper = true`, `is_merchant = false`,
+   `dialogue_id` empty.
+4. The Stock Template ComboBox is hidden (it lives inside
+   `if self.edit_buffer.is_merchant`).
+5. The three merchant dialogue buttons are **always shown** (they lived outside
+   the guard). User clicks **"Create merchant dialogue"**.
+6. `create_or_repair_merchant_dialogue_for_buffer` early-returns `Ok("")`.
+7. `pending_status = Some("")` → lib.rs clears `status_message` → nothing visible.
+
+### Files Changed
+
+| File                                         | Change                                                                                                                                                                                                                                             |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/npc_editor/mod.rs` | (1) non-merchant early return now returns guidance string; (2) Create/Repair buttons moved inside `is_merchant` guard; (3) `"Assigned dialogue missing"` added to auto-apply trigger list; (4) stale `dialogue_id` pre-clear in `create_or_repair` |
+
+### New Tests Added (2)
+
+| Test                                                                     | What it verifies                                                                                                                                                  |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_create_merchant_dialog_returns_guidance_when_not_merchant`         | Clicking the button on a non-merchant NPC returns `Ok(non_empty_string)` — the old `Ok("")` silent no-op is gone                                                  |
+| `test_create_merchant_dialog_clears_stale_dialogue_id_and_creates_fresh` | When `dialogue_id` is set to a stale id (tree not in `merchant_dialogue_editor.dialogues`), the stale id is cleared and a fresh merchant dialogue tree is created |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors)
+✅ cargo clippy      → Finished (0 warnings, -D warnings)
+✅ cargo nextest run → campaign_builder: 2283 tests run: 2283 passed
+```
+
+Test count in `campaign_builder` increased from **2281 → 2283** (+2 new tests).
+
+---
+
 ## SDK Fixes — All-Phase Gap-Fill Audit (Complete)
 
 ### Overview
