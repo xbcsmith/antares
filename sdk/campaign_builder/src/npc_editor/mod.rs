@@ -1174,28 +1174,33 @@ impl NpcEditorState {
                     }
 
                     ui.horizontal(|ui| {
-                        if ui.button("Create merchant dialogue").clicked() {
-                            match self.create_or_repair_merchant_dialogue_for_buffer() {
-                                Ok(message) => {
-                                    self.pending_status = Some(message);
-                                    needs_save = true;
-                                }
-                                Err(error) => {
-                                    self.validation_errors.push(error.clone());
-                                    self.pending_status = Some(error);
+                        // "Create" and "Repair" only make sense for merchant NPCs.
+                        // Previously these were always shown; clicking them on a
+                        // non-merchant NPC silently returned an empty status message.
+                        if self.edit_buffer.is_merchant {
+                            if ui.button("Create merchant dialogue").clicked() {
+                                match self.create_or_repair_merchant_dialogue_for_buffer() {
+                                    Ok(message) => {
+                                        self.pending_status = Some(message);
+                                        needs_save = true;
+                                    }
+                                    Err(error) => {
+                                        self.validation_errors.push(error.clone());
+                                        self.pending_status = Some(error);
+                                    }
                                 }
                             }
-                        }
 
-                        if ui.button("Repair merchant dialogue").clicked() {
-                            match self.repair_merchant_dialogue_for_buffer() {
-                                Ok(message) => {
-                                    self.pending_status = Some(message);
-                                    needs_save = true;
-                                }
-                                Err(error) => {
-                                    self.validation_errors.push(error.clone());
-                                    self.pending_status = Some(error);
+                            if ui.button("Repair merchant dialogue").clicked() {
+                                match self.repair_merchant_dialogue_for_buffer() {
+                                    Ok(message) => {
+                                        self.pending_status = Some(message);
+                                        needs_save = true;
+                                    }
+                                    Err(error) => {
+                                        self.validation_errors.push(error.clone());
+                                        self.pending_status = Some(error);
+                                    }
                                 }
                             }
                         }
@@ -1746,7 +1751,30 @@ impl NpcEditorState {
 
     fn create_or_repair_merchant_dialogue_for_buffer(&mut self) -> Result<String, String> {
         if !self.edit_buffer.is_merchant {
-            return Ok(String::new());
+            // Return an actionable message instead of a silent empty-string no-op.
+            // Previously this returned Ok("") which caused the status bar to be
+            // cleared with no visible feedback, making the button appear to do nothing.
+            return Ok(
+                "Enable '🏪 Is Merchant' to create a merchant dialogue for this NPC.".to_string(),
+            );
+        }
+
+        // If a dialogue_id is set but the referenced tree no longer exists in the
+        // in-memory dialogue list (e.g. it was deleted, or the campaign was edited
+        // externally in a previous session), clear the stale id so that
+        // ensure_merchant_dialogue_for_npc creates a fresh tree instead of
+        // returning an error such as "Assigned dialogue X was not found".
+        if !self.edit_buffer.dialogue_id.trim().is_empty() {
+            if let Ok(stale_id) = self.edit_buffer.dialogue_id.parse::<DialogueId>() {
+                if !self
+                    .merchant_dialogue_editor
+                    .dialogues
+                    .iter()
+                    .any(|d| d.id == stale_id)
+                {
+                    self.edit_buffer.dialogue_id.clear();
+                }
+            }
         }
 
         let mut npc = NpcDefinition {
@@ -2055,7 +2083,12 @@ impl NpcEditorState {
 
         if matches!(
             status_label,
-            "No dialogue assigned" | "Merchant dialogue missing OpenMerchant"
+            "No dialogue assigned"
+                | "Merchant dialogue missing OpenMerchant"
+                // "Assigned dialogue missing" means dialogue_id is set but the tree
+                // was deleted.  create_or_repair now clears the stale id first, so
+                // calling it here produces a fresh tree rather than an error.
+                | "Assigned dialogue missing"
         ) {
             return self.create_or_repair_merchant_dialogue_for_buffer();
         }
@@ -3790,6 +3823,257 @@ mod tests {
             state.npcs.len(),
             1,
             "npcs must be unchanged when file is missing"
+        );
+    }
+
+    // ── Phase 4: Create Merchant Dialog ──────────────────────────────────────
+
+    /// Simulates clicking "Create merchant dialogue" for a merchant NPC that
+    /// has no pre-assigned dialogue and asserts that:
+    ///
+    /// - a `DialogueTree` is created and stored in `available_dialogues`
+    /// - the generated tree contains an explicit `OpenMerchant` action for the NPC
+    /// - the root node has at least two response branches (browse + goodbye)
+    /// - `edit_buffer.dialogue_id` is set to the new dialogue's id
+    #[test]
+    fn test_create_merchant_dialog_generates_dialog() {
+        let mut state = NpcEditorState::new();
+        state.available_dialogues = Vec::new();
+        state
+            .merchant_dialogue_editor
+            .load_dialogues(state.available_dialogues.clone());
+
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "merchant_vendor".to_string();
+        state.edit_buffer.name = "Vendor".to_string();
+        state.edit_buffer.description = "A friendly vendor".to_string();
+        state.edit_buffer.portrait_id = "vendor".to_string();
+        state.edit_buffer.is_merchant = true;
+        // No dialogue_id assigned — simulates clicking "Create merchant dialogue"
+        // when the NPC has no existing dialogue.
+
+        let result = state.create_or_repair_merchant_dialogue_for_buffer();
+        assert!(result.is_ok(), "create should succeed: {:?}", result);
+
+        let message = result.unwrap();
+        assert!(
+            message.contains("Created merchant dialogue"),
+            "expected 'Created' status, got: {message}"
+        );
+
+        // A dialogue must now be present in the campaign data.
+        assert_eq!(
+            state.available_dialogues.len(),
+            1,
+            "exactly one dialogue should be present after creation"
+        );
+
+        // Retrieve the generated dialogue.
+        let generated = &state.available_dialogues[0];
+
+        // The dialogue must contain an explicit OpenMerchant action for this NPC.
+        assert!(
+            generated.contains_open_merchant_for_npc("merchant_vendor"),
+            "generated dialogue must contain OpenMerchant for the NPC"
+        );
+
+        // The dialogue must carry SDK-managed content metadata.
+        assert!(
+            generated.has_sdk_managed_merchant_content(),
+            "generated dialogue must be marked as SDK-managed"
+        );
+
+        // The root node must have at least two response branches —
+        // one "Show me your wares." / browse choice and one "Farewell." / goodbye choice.
+        let root = generated
+            .get_node(generated.root_node)
+            .expect("root node must exist");
+        assert!(
+            root.choices.len() >= 2,
+            "root node must have at least two choices (browse + goodbye), got: {}",
+            root.choices.len()
+        );
+
+        // The edit buffer dialogue_id must now reference the new dialogue.
+        let generated_id_str = generated.id.to_string();
+        assert_eq!(
+            state.edit_buffer.dialogue_id, generated_id_str,
+            "buffer.dialogue_id must be set to the newly created dialogue id"
+        );
+    }
+
+    /// Calls the create-merchant-dialogue action for two different NPCs and
+    /// asserts that each receives a distinct dialogue id so no collision occurs
+    /// in the campaign's dialogue collection.
+    #[test]
+    fn test_create_merchant_dialog_id_is_unique() {
+        let mut state = NpcEditorState::new();
+        state.available_dialogues = Vec::new();
+        state
+            .merchant_dialogue_editor
+            .load_dialogues(state.available_dialogues.clone());
+
+        // ── First NPC ──────────────────────────────────────────────────────
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "merchant_alpha".to_string();
+        state.edit_buffer.name = "Alpha Merchant".to_string();
+        state.edit_buffer.description = "First merchant".to_string();
+        state.edit_buffer.portrait_id = "alpha".to_string();
+        state.edit_buffer.is_merchant = true;
+        state.edit_buffer.dialogue_id = String::new();
+
+        let first_result = state.create_or_repair_merchant_dialogue_for_buffer();
+        assert!(
+            first_result.is_ok(),
+            "first create should succeed: {:?}",
+            first_result
+        );
+
+        let first_dialogue_id = state.edit_buffer.dialogue_id.clone();
+        assert!(
+            !first_dialogue_id.is_empty(),
+            "first dialogue id must be set after creation"
+        );
+
+        // ── Second NPC ─────────────────────────────────────────────────────
+        state.edit_buffer.id = "merchant_beta".to_string();
+        state.edit_buffer.name = "Beta Merchant".to_string();
+        state.edit_buffer.description = "Second merchant".to_string();
+        state.edit_buffer.portrait_id = "beta".to_string();
+        state.edit_buffer.is_merchant = true;
+        state.edit_buffer.dialogue_id = String::new(); // no pre-assigned dialogue
+
+        let second_result = state.create_or_repair_merchant_dialogue_for_buffer();
+        assert!(
+            second_result.is_ok(),
+            "second create should succeed: {:?}",
+            second_result
+        );
+
+        let second_dialogue_id = state.edit_buffer.dialogue_id.clone();
+        assert!(
+            !second_dialogue_id.is_empty(),
+            "second dialogue id must be set after creation"
+        );
+
+        // The two generated dialogue ids must be different.
+        assert_ne!(
+            first_dialogue_id, second_dialogue_id,
+            "two different NPCs must receive distinct dialogue ids"
+        );
+
+        // Both dialogues must be present in the campaign dialogue collection.
+        assert_eq!(
+            state.available_dialogues.len(),
+            2,
+            "two separate dialogues should exist after two creations"
+        );
+
+        // Each dialogue must target the correct NPC via OpenMerchant.
+        let first_id: u16 = first_dialogue_id
+            .parse()
+            .expect("first dialogue id must be numeric");
+        let second_id: u16 = second_dialogue_id
+            .parse()
+            .expect("second dialogue id must be numeric");
+
+        assert!(
+            state
+                .available_dialogues
+                .iter()
+                .find(|d| d.id == first_id)
+                .expect("first dialogue must exist in campaign data")
+                .contains_open_merchant_for_npc("merchant_alpha"),
+            "first dialogue must open the correct (alpha) merchant"
+        );
+
+        assert!(
+            state
+                .available_dialogues
+                .iter()
+                .find(|d| d.id == second_id)
+                .expect("second dialogue must exist in campaign data")
+                .contains_open_merchant_for_npc("merchant_beta"),
+            "second dialogue must open the correct (beta) merchant"
+        );
+    }
+
+    // ── create_or_repair non-merchant guard tests ─────────────────────────────
+
+    /// Verifies that clicking "Create Merchant Dialog" on a non-merchant NPC now
+    /// returns a non-empty guidance message instead of the previous silent
+    /// empty-string no-op that made the button appear broken.
+    ///
+    /// Root cause: `create_or_repair_merchant_dialogue_for_buffer` previously
+    /// returned `Ok(String::new())` when `is_merchant = false`, which caused
+    /// `pending_status = Some("")` → the status bar was cleared with no visible
+    /// feedback.
+    #[test]
+    fn test_create_merchant_dialog_returns_guidance_when_not_merchant() {
+        let mut state = NpcEditorState::new();
+        state.edit_buffer.id = "innkeeper_01".to_string();
+        state.edit_buffer.name = "Village Innkeeper".to_string();
+        state.edit_buffer.is_merchant = false; // NOT a merchant
+        state.edit_buffer.is_innkeeper = true;
+
+        let result = state.create_or_repair_merchant_dialogue_for_buffer();
+
+        // Must be Ok (not an Err — the user just needs guidance, not an alarm)
+        assert!(result.is_ok(), "must return Ok even for non-merchants");
+        let message = result.unwrap();
+        // Must be non-empty so the status bar shows something actionable
+        assert!(
+            !message.is_empty(),
+            "must return a non-empty guidance message when is_merchant = false; \
+             got empty string (the old silent no-op)"
+        );
+        assert!(
+            message.to_lowercase().contains("merchant"),
+            "guidance message must mention 'merchant', got: {:?}",
+            message
+        );
+    }
+
+    /// Verifies that a stale `dialogue_id` (pointing to a dialogue tree that no
+    /// longer exists in the in-memory list) is cleared automatically so that a
+    /// fresh merchant dialogue is created instead of returning the opaque error
+    /// "Assigned dialogue X was not found".
+    ///
+    /// This covers the scenario where a user creates a new stock template in the
+    /// same session, edits an NPC that already has `is_merchant = true` and a
+    /// `dialogue_id` that somehow became stale (e.g. the campaign was partially
+    /// reloaded), and then clicks "Create merchant dialogue".
+    #[test]
+    fn test_create_merchant_dialog_clears_stale_dialogue_id_and_creates_fresh() {
+        let mut state = NpcEditorState::new();
+        state.edit_buffer.id = "stale_merchant".to_string();
+        state.edit_buffer.name = "Stale Merchant".to_string();
+        state.edit_buffer.is_merchant = true;
+
+        // Set a dialogue_id that does NOT exist in merchant_dialogue_editor.dialogues.
+        // (The editor starts empty, so id 999 will never be found.)
+        state.edit_buffer.dialogue_id = "999".to_string();
+
+        let result = state.create_or_repair_merchant_dialogue_for_buffer();
+
+        assert!(
+            result.is_ok(),
+            "must not error out with 'Assigned dialogue 999 was not found', got: {:?}",
+            result
+        );
+
+        // A fresh dialogue must have been created and the buffer's dialogue_id updated.
+        assert!(
+            !state.edit_buffer.dialogue_id.is_empty(),
+            "dialogue_id must be set to the newly created dialogue"
+        );
+        assert_ne!(
+            state.edit_buffer.dialogue_id, "999",
+            "stale dialogue_id 999 must have been replaced with the new dialogue's id"
+        );
+        assert!(
+            !state.available_dialogues.is_empty(),
+            "a new dialogue tree must have been added to available_dialogues"
         );
     }
 }

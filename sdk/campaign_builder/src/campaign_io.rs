@@ -292,6 +292,19 @@ impl CampaignBuilderApp {
     /// Validate NPC IDs for uniqueness
     ///
     /// Returns validation errors for any duplicate IDs found.
+    ///
+    /// # Root Cause Note – False "Unknown Stock Template" Errors
+    ///
+    /// Stock template references are checked against `campaign_data.stock_templates`,
+    /// a mirror that is only refreshed when the user opens the Stock Templates tab.
+    /// If the user clicks *Validate Campaign* before visiting that tab, the mirror
+    /// may be empty even though the templates are fully loaded in the editor state,
+    /// causing every stock-template reference to appear invalid.
+    ///
+    /// The fix is applied in `validate_campaign()`: the mirror is synced from the
+    /// editor state (`stock_templates_editor_state.templates`) before any validation
+    /// pass runs.  Callers who invoke `validate_npc_ids()` directly should ensure
+    /// `campaign_data.stock_templates` is up-to-date first.
     pub fn validate_npc_ids(&self) -> Vec<validation::ValidationResult> {
         let mut errors = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
@@ -303,25 +316,19 @@ impl CampaignBuilderApp {
                     format!("Duplicate NPC ID: {}", npc.id),
                 ));
             }
-
-            // Cross-check stock_template reference against loaded templates
-            if let Some(ref tmpl_id) = npc.stock_template {
-                if !self
-                    .campaign_data
-                    .stock_templates
-                    .iter()
-                    .any(|t| &t.id == tmpl_id)
-                {
-                    errors.push(validation::ValidationResult::error(
-                        validation::ValidationCategory::NPCs,
-                        format!(
-                            "NPC '{}' references unknown stock template '{}'",
-                            npc.id, tmpl_id
-                        ),
-                    ));
-                }
-            }
         }
+
+        // Delegate stock-template cross-reference check to the pure validation
+        // function so the same rule is tested independently of CampaignBuilderApp.
+        // Filter out the Passed sentinel — validate_npc_ids only accumulates errors.
+        errors.extend(
+            validation::validate_npc_stock_template_refs(
+                &self.editor_registry.npc_editor_state.npcs,
+                &self.campaign_data.stock_templates,
+            )
+            .into_iter()
+            .filter(|r| !r.is_passed()),
+        );
 
         errors.extend(self.validate_merchant_dialogue_rules());
         errors

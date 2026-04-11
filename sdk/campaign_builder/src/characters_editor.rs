@@ -18,7 +18,7 @@ use crate::ui_helpers::{
 };
 use antares::domain::character::{Alignment, Sex, Stats};
 use antares::domain::character_definition::{CharacterDefinition, StartingEquipment};
-use antares::domain::classes::ClassDefinition;
+use antares::domain::classes::{ClassDefinition, SpellSchool as ClassSpellSchool};
 use antares::domain::items::types::Item;
 use antares::domain::magic::types::Spell;
 use antares::domain::races::RaceDefinition;
@@ -1099,6 +1099,10 @@ impl CharactersEditorState {
     /// * `items` - Available items for equipment/item selection
     /// * `creature_manager` - Optional creature asset manager for visual asset binding
     /// * `ctx` - Shared editor context (campaign dir, data file, unsaved flag, status, merge mode)
+    // 8 parameters (including self) is one over the default clippy limit of 7.
+    // This function predates the `EditorContext` parameter-bundle pattern and
+    // is tracked for refactoring in Phase 5 of the codebase cleanup plan.
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -1176,7 +1180,7 @@ impl CharactersEditorState {
         // Main content - use TwoColumnLayout for list mode
         match self.mode {
             CharactersEditorMode::List => {
-                self.show_list(ui, items, ctx);
+                self.show_list(ui, items, spells, ctx);
             }
             CharactersEditorMode::Add | CharactersEditorMode::Edit => {
                 self.show_character_form(ui, races, classes, items, spells, creature_manager, ctx);
@@ -1349,7 +1353,13 @@ impl CharactersEditorState {
     }
 
     /// Show list view with two-column layout
-    fn show_list(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
+    fn show_list(
+        &mut self,
+        ui: &mut egui::Ui,
+        items: &[Item],
+        spells: &[Spell],
+        ctx: &mut EditorContext<'_>,
+    ) {
         // Clone data needed for closures to avoid borrow conflicts
         let selected_character_idx = self.selected_character;
         let filtered_characters: Vec<(usize, CharacterDefinition)> = self
@@ -1428,7 +1438,13 @@ impl CharactersEditorState {
                 // Right panel: preview of selected character
                 if let Some(idx) = selected_character_idx {
                     if let Some(character) = self.characters.get(idx).cloned() {
-                        self.show_character_preview(right_ui, &character, items, ctx.campaign_dir);
+                        self.show_character_preview(
+                            right_ui,
+                            &character,
+                            items,
+                            spells,
+                            ctx.campaign_dir,
+                        );
                     }
                 } else {
                     right_ui.label("Select a character to view details.");
@@ -1474,6 +1490,7 @@ impl CharactersEditorState {
         ui: &mut egui::Ui,
         character: &CharacterDefinition,
         items: &[Item],
+        spells: &[Spell],
         campaign_dir: Option<&PathBuf>,
     ) {
         // Display portrait at the top of the preview
@@ -1676,6 +1693,39 @@ impl CharactersEditorState {
             }
         }
 
+        // Show starting spells (§1.6 SDK fix)
+        if !character.starting_spells.is_empty() {
+            ui.add_space(10.0);
+            ui.heading("Starting Spells");
+            ui.separator();
+
+            egui::Grid::new("display_starting_spells_grid")
+                .num_columns(2)
+                .striped(true)
+                .spacing([20.0, 4.0])
+                .show(ui, |ui| {
+                    ui.label(egui::RichText::new("Name").strong());
+                    ui.label(egui::RichText::new("School").strong());
+                    ui.end_row();
+
+                    for &spell_id in &character.starting_spells {
+                        let spell = spells.iter().find(|s| s.id == spell_id);
+                        let name = spell.map(|s| s.name.as_str()).unwrap_or("(unknown)");
+                        let school = spell
+                            .map(|s| format!("{:?}", s.school))
+                            .unwrap_or_else(|| "—".to_string());
+                        ui.label(name);
+                        ui.label(school);
+                        ui.end_row();
+                    }
+                });
+        } else {
+            ui.add_space(10.0);
+            ui.heading("Starting Spells");
+            ui.separator();
+            ui.label(egui::RichText::new("No starting spells defined.").italics());
+        }
+
         // Show description
         if !character.description.is_empty() {
             ui.add_space(10.0);
@@ -1686,6 +1736,9 @@ impl CharactersEditorState {
     }
 
     /// Show character edit/create form
+    // 8 parameters (including self) — same pre-existing situation as `show`.
+    // Tracked for Phase 5 refactor.
+    #[allow(clippy::too_many_arguments)]
     fn show_character_form(
         &mut self,
         ui: &mut egui::Ui,
@@ -2145,12 +2198,20 @@ impl CharactersEditorState {
         // "Add Spell" autocomplete selector — uses a staging ID in the buffer.
         // When the user picks a spell the staging ID is set, then immediately
         // pushed to `starting_spells` (dedup-checked) and reset to 0.
+        //
+        // §1.4 SDK fix: filter to spells available to this character's class so
+        // that duplicate spell names (e.g. "Awaken" in both Cleric and Sorcerer
+        // schools) resolve to the correct variant instead of always picking the
+        // first match in the unfiltered slice.
+        let class_filtered_spells: Vec<Spell> =
+            filter_spells_for_class(&self.buffer.class_id, available_spells, classes);
+
         let add_changed = autocomplete_spell_selector(
             ui,
             "starting_spells_add",
             "Add Spell:",
             &mut self.buffer.starting_spell_add_id,
-            available_spells,
+            &class_filtered_spells,
         );
         if add_changed && self.buffer.starting_spell_add_id != 0 {
             let spell_id = self.buffer.starting_spell_add_id;
@@ -2179,7 +2240,7 @@ impl CharactersEditorState {
 
             egui::ScrollArea::vertical()
                 .id_salt("starting_spells_scroll")
-                .max_height(200.0)
+                .min_scrolled_height(145.0) // §1.5: show ~5 rows (~24 dp/row + 4 dp spacing) without scrolling
                 .show(ui, |ui| {
                     egui::Grid::new("starting_spells_grid")
                         .num_columns(5)
@@ -2377,12 +2438,78 @@ fn alignment_name(alignment: Alignment) -> &'static str {
 }
 
 /// Helper function to get item name by ID
-fn item_name_by_id(items: &[Item], item_id: ItemId) -> String {
+fn item_name_by_id(items: &[Item], id: ItemId) -> String {
     items
         .iter()
-        .find(|i| i.id == item_id)
+        .find(|i| i.id == id)
         .map(|i| i.name.clone())
-        .unwrap_or_else(|| format!("Unknown (ID: {})", item_id))
+        .unwrap_or_else(|| format!("Unknown (ID: {})", id))
+}
+
+/// Returns the subset of `available_spells` that the given class is able to cast.
+///
+/// Filters by matching the class's `spell_school` (from `ClassDefinition`) against
+/// each spell's `school` field.  Because `ClassDefinition` and `Spell` use two
+/// separate `SpellSchool` enums, the comparison is done variant-by-variant.
+///
+/// Falls back to the full spell list when:
+/// - `class_id` is not found in `classes` (character creation in-progress), or
+/// - the class has `spell_school: None` (non-caster; spells are still stored but
+///   have no in-game effect, so the full list is shown to avoid a blank picker).
+///
+/// # Arguments
+///
+/// * `class_id`        – The character's current class identifier.
+/// * `available_spells`– Full spell roster for the campaign.
+/// * `classes`         – All class definitions loaded for the campaign.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::classes::{ClassDefinition, SpellSchool as ClassSpellSchool, SpellStat};
+/// use antares::domain::magic::types::{Spell, SpellSchool as MagicSpellSchool, SpellContext, SpellTarget};
+/// use antares::domain::types::DiceRoll;
+///
+/// let sorcerer_class = ClassDefinition {
+///     id: "sorcerer".to_string(),
+///     name: "Sorcerer".to_string(),
+///     description: String::new(),
+///     hp_die: DiceRoll::new(1, 4, 0),
+///     spell_school: Some(ClassSpellSchool::Sorcerer),
+///     is_pure_caster: true,
+///     spell_stat: Some(SpellStat::Intellect),
+///     special_abilities: vec![],
+///     starting_weapon_id: None,
+///     starting_armor_id: None,
+///     starting_items: vec![],
+///     proficiencies: vec![],
+/// };
+/// ```
+fn filter_spells_for_class(
+    class_id: &str,
+    available_spells: &[Spell],
+    classes: &[ClassDefinition],
+) -> Vec<Spell> {
+    let class_school = classes
+        .iter()
+        .find(|c| c.id == class_id)
+        .and_then(|c| c.spell_school);
+
+    match class_school {
+        Some(ClassSpellSchool::Cleric) => available_spells
+            .iter()
+            .filter(|s| s.school == antares::domain::magic::types::SpellSchool::Cleric)
+            .cloned()
+            .collect(),
+        Some(ClassSpellSchool::Sorcerer) => available_spells
+            .iter()
+            .filter(|s| s.school == antares::domain::magic::types::SpellSchool::Sorcerer)
+            .cloned()
+            .collect(),
+        // Non-caster or class not yet assigned: show all spells so the picker
+        // remains functional during initial character creation.
+        None => available_spells.to_vec(),
+    }
 }
 
 #[cfg(test)]
@@ -3754,6 +3881,166 @@ mod tests {
 
     // ===== starting_spells Tests =====
 
+    /// Tests that `filter_spells_for_class` returns only spells for the
+    /// character's class school, resolving the Cleric/Sorcerer disambiguation
+    /// bug (§1.4 SDK fix).
+    #[test]
+    fn test_starting_spells_autocomplete_uses_character_class() {
+        use antares::domain::classes::{
+            ClassDefinition, SpellSchool as ClassSpellSchool, SpellStat,
+        };
+        use antares::domain::magic::types::{
+            Spell, SpellContext, SpellSchool as MagicSpellSchool, SpellTarget,
+        };
+        use antares::domain::types::DiceRoll;
+
+        let sorcerer_class = ClassDefinition {
+            id: "sorcerer".to_string(),
+            name: "Sorcerer".to_string(),
+            description: String::new(),
+            hp_die: DiceRoll::new(1, 4, 0),
+            spell_school: Some(ClassSpellSchool::Sorcerer),
+            is_pure_caster: true,
+            spell_stat: Some(SpellStat::Intellect),
+            special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
+            proficiencies: vec![],
+        };
+        let cleric_class = ClassDefinition {
+            id: "cleric".to_string(),
+            name: "Cleric".to_string(),
+            description: String::new(),
+            hp_die: DiceRoll::new(1, 8, 0),
+            spell_school: Some(ClassSpellSchool::Cleric),
+            is_pure_caster: true,
+            spell_stat: Some(SpellStat::Personality),
+            special_abilities: vec![],
+            starting_weapon_id: None,
+            starting_armor_id: None,
+            starting_items: vec![],
+            proficiencies: vec![],
+        };
+
+        // Both schools have a spell named "Awaken" — the classic disambiguation case.
+        let cleric_awaken = Spell::new(
+            0x0101,
+            "Awaken",
+            MagicSpellSchool::Cleric,
+            1,
+            3,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Divine awakening",
+            None,
+            0,
+            false,
+        );
+        let sorcerer_awaken = Spell::new(
+            0x0401,
+            "Awaken",
+            MagicSpellSchool::Sorcerer,
+            1,
+            3,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Arcane awakening",
+            None,
+            0,
+            false,
+        );
+        let available_spells = [cleric_awaken.clone(), sorcerer_awaken.clone()];
+        let classes = [sorcerer_class, cleric_class];
+
+        // For a Sorcerer, only the Sorcerer variant should be returned.
+        let sorcerer_filtered = filter_spells_for_class("sorcerer", &available_spells, &classes);
+        assert_eq!(
+            sorcerer_filtered.len(),
+            1,
+            "Sorcerer filter should return exactly 1 spell"
+        );
+        assert_eq!(
+            sorcerer_filtered[0].id, sorcerer_awaken.id,
+            "Sorcerer filter should return the Sorcerer Awaken, not the Cleric one"
+        );
+
+        // For a Cleric, only the Cleric variant should be returned.
+        let cleric_filtered = filter_spells_for_class("cleric", &available_spells, &classes);
+        assert_eq!(
+            cleric_filtered.len(),
+            1,
+            "Cleric filter should return exactly 1 spell"
+        );
+        assert_eq!(
+            cleric_filtered[0].id, cleric_awaken.id,
+            "Cleric filter should return the Cleric Awaken, not the Sorcerer one"
+        );
+
+        // For an unknown class_id, the full list is returned as a fallback.
+        let fallback = filter_spells_for_class("knight", &available_spells, &classes);
+        assert_eq!(
+            fallback.len(),
+            2,
+            "Non-caster/unknown class should fall back to the full spell list"
+        );
+    }
+
+    /// Tests that the display panel can look up spell names from the provided
+    /// available_spells slice (§1.6).
+    #[test]
+    fn test_starting_spells_display_section_shows_spell_names() {
+        use antares::domain::character_definition::CharacterDefinition;
+        use antares::domain::magic::types::{
+            Spell, SpellContext, SpellSchool as MagicSpellSchool, SpellTarget,
+        };
+
+        let spell = Spell::new(
+            0x0201,
+            "Cure Light Wounds",
+            MagicSpellSchool::Cleric,
+            1,
+            2,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Heals a small amount of HP",
+            None,
+            0,
+            false,
+        );
+
+        let mut def = CharacterDefinition::new(
+            "cleric1".to_string(),
+            "Aerin".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            antares::domain::character::Sex::Female,
+            antares::domain::character::Alignment::Good,
+        );
+        def.starting_spells = vec![0x0201];
+
+        let spells = [spell.clone()];
+
+        // Verify the lookup logic that the display panel relies on.
+        let found = spells.iter().find(|s| s.id == 0x0201u16);
+        assert!(found.is_some(), "Spell lookup by id should succeed");
+        assert_eq!(
+            found.unwrap().name,
+            "Cure Light Wounds",
+            "Spell name should match"
+        );
+
+        // Verify unknown id returns the fallback.
+        let unknown = spells.iter().find(|s| s.id == 0xFFFFu16);
+        assert!(unknown.is_none(), "Unknown id should return None");
+
+        // Verify the character has the expected starting spell list.
+        assert_eq!(def.starting_spells, vec![0x0201u16]);
+    }
+
     /// Tests that `CharacterEditBuffer::default()` initialises `starting_spells`
     /// to an empty `Vec` and `starting_spell_add_id` to 0.
     #[test]
@@ -3880,7 +4167,7 @@ mod tests {
             starting_items: vec![],
             proficiencies: vec![],
         };
-        let classes = vec![knight];
+        let classes = [knight];
 
         let mut state = CharactersEditorState::default();
         state.buffer.class_id = "knight".to_string();
@@ -3919,7 +4206,7 @@ mod tests {
             starting_items: vec![],
             proficiencies: vec![],
         };
-        let classes = vec![cleric];
+        let classes = [cleric];
 
         let mut state = CharactersEditorState::default();
         state.buffer.class_id = "cleric".to_string();

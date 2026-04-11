@@ -2552,6 +2552,7 @@ mod tests {
             magic_item_pool: vec![],
             magic_slot_count: 0,
             magic_refresh_days: 7,
+            description: String::new(),
         });
 
         // Add a merchant NPC referencing the template
@@ -2617,6 +2618,7 @@ mod tests {
             magic_item_pool: vec![],
             magic_slot_count: 0,
             magic_refresh_days: 7,
+            description: String::new(),
         });
 
         let mut merchant = crate::domain::world::npc::NpcDefinition::merchant(

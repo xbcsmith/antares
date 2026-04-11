@@ -22,6 +22,7 @@ use crate::application::GameMode;
 use crate::game::components::menu::*;
 use crate::game::resources::GlobalState;
 use crate::game::systems::mouse_input;
+use crate::game::systems::ui::GameLog;
 use crate::game::systems::ui_helpers::{text_style, BODY_FONT_SIZE};
 
 /// Path to the Antares icon, relative to the Bevy asset root (campaign directory).
@@ -1347,6 +1348,7 @@ fn menu_button_interaction(
     mut interaction_query: Query<(&Interaction, Ref<Interaction>, &MenuButton), With<Button>>,
     mut global_state: ResMut<GlobalState>,
     save_manager: Res<SaveGameManager>,
+    mut game_log: Option<ResMut<GameLog>>,
 ) {
     let mouse_just_pressed = mouse_input::mouse_just_pressed(mouse_buttons.as_deref());
 
@@ -1358,7 +1360,12 @@ fn menu_button_interaction(
         ) {
             // Call the unified handler using dereferenced resources so the same logic
             // is used for both mouse and keyboard-driven actions.
-            handle_button_press(button, &mut global_state, &save_manager);
+            handle_button_press(
+                button,
+                &mut global_state,
+                &save_manager,
+                game_log.as_deref_mut(),
+            );
         }
     }
 }
@@ -1371,6 +1378,7 @@ fn handle_button_press(
     button: &MenuButton,
     global_state: &mut GlobalState,
     save_manager: &SaveGameManager,
+    game_log: Option<&mut GameLog>,
 ) {
     match button {
         MenuButton::Resume => {
@@ -1394,7 +1402,7 @@ fn handle_button_press(
                     debug!("Load Game pressed (in SaveLoad)");
                     if let Some(save_info) = menu_state.save_list.get(menu_state.selected_index) {
                         let filename = save_info.filename.clone();
-                        load_game_operation(global_state, save_manager, &filename);
+                        load_game_operation(global_state, save_manager, &filename, game_log);
                     } else {
                         warn!("Load pressed but no save selected");
                     }
@@ -1431,7 +1439,7 @@ fn handle_button_press(
             match submenu {
                 Some(MenuType::SaveLoad) => {
                     // In the Save/Load dialog the Confirm button is labeled "Save".
-                    save_game_operation(global_state, save_manager);
+                    save_game_operation(global_state, save_manager, game_log);
                 }
                 Some(MenuType::Settings) => {
                     if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
@@ -1518,10 +1526,20 @@ fn handle_button_press(
 }
 
 /// Save the current game state to a file
-fn save_game_operation(global_state: &mut GlobalState, save_manager: &SaveGameManager) {
+fn save_game_operation(
+    global_state: &mut GlobalState,
+    save_manager: &SaveGameManager,
+    game_log: Option<&mut GameLog>,
+) {
     let GameMode::Menu(_menu_state) = &global_state.0.mode else {
         return;
     };
+
+    // Snapshot the live game log entries into GameState so they are included
+    // in the serialised save file.
+    if let Some(log) = game_log {
+        global_state.0.game_log_entries = log.to_saved_entries();
+    }
 
     // Generate filename with timestamp
     let timestamp = Local::now();
@@ -1547,6 +1565,7 @@ fn load_game_operation(
     global_state: &mut GlobalState,
     save_manager: &SaveGameManager,
     selected_filename: &str,
+    game_log: Option<&mut GameLog>,
 ) {
     match save_manager.load(selected_filename) {
         Ok(loaded_state) => {
@@ -1557,6 +1576,12 @@ fn load_game_operation(
 
             // Return to exploration mode
             global_state.0.mode = GameMode::Exploration;
+
+            // Restore the live game log from the entries embedded in the save.
+            if let Some(log) = game_log {
+                let entries = std::mem::take(&mut global_state.0.game_log_entries);
+                log.restore_from_saved(entries);
+            }
         }
         Err(e) => {
             error!("Failed to load game: {}", e);
@@ -1767,6 +1792,7 @@ fn handle_menu_keyboard(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut global_state: ResMut<GlobalState>,
     save_manager: Res<SaveGameManager>,
+    mut game_log: Option<ResMut<GameLog>>,
 ) {
     if !matches!(global_state.0.mode, GameMode::Menu(_)) {
         return;
@@ -1829,12 +1855,22 @@ fn handle_menu_keyboard(
                     5 => MenuButton::Quit,
                     _ => return,
                 };
-                handle_button_press(&sel_button, &mut global_state, &save_manager);
+                handle_button_press(
+                    &sel_button,
+                    &mut global_state,
+                    &save_manager,
+                    game_log.as_deref_mut(),
+                );
             }
             MenuType::SaveLoad => {
                 // Pressing Enter on a save slot should load it (if there is a save at that index)
                 if selected_index < save_list.len() {
-                    handle_button_press(&MenuButton::LoadGame, &mut global_state, &save_manager);
+                    handle_button_press(
+                        &MenuButton::LoadGame,
+                        &mut global_state,
+                        &save_manager,
+                        game_log.as_deref_mut(),
+                    );
                 }
             }
             MenuType::Settings => {
@@ -2112,7 +2148,7 @@ mod tests {
         gs.0.enter_menu();
 
         // Press Save (simulate button press)
-        handle_button_press(&MenuButton::SaveGame, &mut gs, &manager);
+        handle_button_press(&MenuButton::SaveGame, &mut gs, &manager, None);
 
         // Should be in Menu mode and SaveLoad submenu
         if let GameMode::Menu(ms) = &gs.0.mode {
@@ -2142,7 +2178,7 @@ mod tests {
         assert_eq!(manager.list_saves().unwrap().len(), 0);
 
         // Press Confirm (Save) in SaveLoad
-        handle_button_press(&MenuButton::Confirm, &mut gs, &manager);
+        handle_button_press(&MenuButton::Confirm, &mut gs, &manager, None);
 
         // After save, we should have at least one save file and menu returned to Main
         let saves = manager.list_saves().unwrap();
@@ -2183,7 +2219,7 @@ mod tests {
         }
 
         // Press Load
-        handle_button_press(&MenuButton::LoadGame, &mut gs, &manager);
+        handle_button_press(&MenuButton::LoadGame, &mut gs, &manager, None);
 
         // After a successful load the game mode should be Exploration
         assert!(matches!(gs.0.mode, GameMode::Exploration));
@@ -2339,5 +2375,154 @@ mod tests {
             .audio
             .music_volume;
         assert!(second_value > first_value);
+    }
+
+    #[test]
+    fn test_save_game_operation_snapshots_log_entries() {
+        use crate::game::systems::ui::GameLog;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        // Build a game log with a couple of entries.
+        let mut log = GameLog::new();
+        log.add_combat("Hit goblin for 5 damage.".to_string());
+        log.add_item("Found a sword.".to_string());
+
+        let mut gs = GlobalState(GameState::new());
+        gs.0.enter_menu();
+        if let GameMode::Menu(ms) = &mut gs.0.mode {
+            ms.set_submenu(MenuType::SaveLoad);
+        }
+
+        // GameState::game_log_entries should be empty before save.
+        assert!(gs.0.game_log_entries.is_empty());
+
+        // Perform the save operation with the live log.
+        save_game_operation(&mut gs, &manager, Some(&mut log));
+
+        // After save the snapshot should be embedded in the game state.
+        assert_eq!(gs.0.game_log_entries.len(), 2);
+        assert_eq!(gs.0.game_log_entries[0].category, "Combat");
+        assert_eq!(gs.0.game_log_entries[0].text, "Hit goblin for 5 damage.");
+        assert_eq!(gs.0.game_log_entries[1].category, "Item");
+        assert_eq!(gs.0.game_log_entries[1].text, "Found a sword.");
+    }
+
+    #[test]
+    fn test_load_game_operation_restores_log_entries() {
+        use crate::application::save_game::SavedLogEntry;
+        use crate::game::systems::ui::GameLog;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        // Create a game state with pre-populated log entries.
+        let mut saved_state = GameState::new();
+        saved_state.game_log_entries = vec![
+            SavedLogEntry {
+                category: "Combat".to_string(),
+                text: "Slew the dragon.".to_string(),
+                sequence: 0,
+            },
+            SavedLogEntry {
+                category: "Exploration".to_string(),
+                text: "Entered the dungeon.".to_string(),
+                sequence: 1,
+            },
+        ];
+        manager.save("log_restore_test", &saved_state).unwrap();
+
+        // Load into a fresh global state with an empty game log.
+        let mut gs = GlobalState(GameState::new());
+        let mut log = GameLog::new();
+        assert!(log.entries().is_empty());
+
+        load_game_operation(&mut gs, &manager, "log_restore_test", Some(&mut log));
+
+        // The live game log should now contain the restored entries.
+        let entries = log.entries();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].text, "Slew the dragon.");
+        assert_eq!(entries[1].text, "Entered the dungeon.");
+
+        // The entries should have been moved out of game_log_entries.
+        assert!(gs.0.game_log_entries.is_empty());
+    }
+
+    #[test]
+    fn test_save_load_cycle_preserves_game_log() {
+        use crate::game::systems::ui::{GameLog, LogCategory};
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        // Populate the live game log before saving.
+        let mut log = GameLog::new();
+        log.add_dialogue("The innkeeper greeted you.".to_string());
+        log.add_combat("You defeated a skeleton.".to_string());
+        log.add_exploration("You discovered a secret passage.".to_string());
+
+        // Enter the save menu and save.
+        let mut gs = GlobalState(GameState::new());
+        gs.0.enter_menu();
+        if let GameMode::Menu(ms) = &mut gs.0.mode {
+            ms.set_submenu(MenuType::SaveLoad);
+        }
+        save_game_operation(&mut gs, &manager, Some(&mut log));
+
+        // Clear the in-memory log to simulate a fresh session after restart.
+        let mut fresh_log = GameLog::new();
+        assert!(fresh_log.entries().is_empty());
+
+        // Load the save into the fresh log.
+        let saves = manager.list_saves().unwrap();
+        assert!(!saves.is_empty());
+        let filename = saves[0].clone();
+
+        let mut gs2 = GlobalState(GameState::new());
+        load_game_operation(&mut gs2, &manager, &filename, Some(&mut fresh_log));
+
+        // Verify all three entries are restored with correct categories and text.
+        let entries = fresh_log.entries();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].text, "The innkeeper greeted you.");
+        assert_eq!(entries[1].text, "You defeated a skeleton.");
+        assert_eq!(entries[2].text, "You discovered a secret passage.");
+
+        assert_eq!(entries[0].category, LogCategory::Dialogue);
+        assert_eq!(entries[1].category, LogCategory::Combat);
+        assert_eq!(entries[2].category, LogCategory::Exploration);
+    }
+
+    #[test]
+    fn test_save_load_without_game_log_resource_does_not_panic() {
+        // Passing None for game_log must never panic — the log is optional
+        // (the resource may not be registered in all test environments).
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let mut gs = GlobalState(GameState::new());
+        gs.0.enter_menu();
+        if let GameMode::Menu(ms) = &mut gs.0.mode {
+            ms.set_submenu(MenuType::SaveLoad);
+        }
+
+        // Save without a log — must succeed and produce an empty entries list.
+        save_game_operation(&mut gs, &manager, None);
+
+        let saves = manager.list_saves().unwrap();
+        assert!(!saves.is_empty());
+        let filename = saves[0].clone();
+
+        let mut gs2 = GlobalState(GameState::new());
+        load_game_operation(&mut gs2, &manager, &filename, None);
+
+        assert!(matches!(gs2.0.mode, GameMode::Exploration));
     }
 }

@@ -3952,6 +3952,7 @@ fn test_validate_npc_ids_valid_stock_template_passes() {
         magic_item_pool: vec![],
         magic_slot_count: 0,
         magic_refresh_days: 7,
+        description: String::new(),
     };
     app.campaign_data.stock_templates = vec![tmpl];
 
@@ -3988,6 +3989,7 @@ fn test_validate_campaign_warns_unknown_item_in_template() {
         magic_item_pool: vec![],
         magic_slot_count: 0,
         magic_refresh_days: 7,
+        description: String::new(),
     };
     app.campaign_data.stock_templates = vec![tmpl.clone()];
     app.editor_registry.stock_templates_editor_state.templates = vec![tmpl];
@@ -4017,6 +4019,7 @@ fn test_validate_campaign_warns_unknown_item_in_magic_pool() {
         magic_item_pool: vec![254],
         magic_slot_count: 1,
         magic_refresh_days: 7,
+        description: String::new(),
     };
     app.campaign_data.stock_templates = vec![tmpl.clone()];
     app.editor_registry.stock_templates_editor_state.templates = vec![tmpl];

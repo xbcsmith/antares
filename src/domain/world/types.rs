@@ -2261,6 +2261,19 @@ pub enum MapEvent {
         /// re-interacting within the same session shows the updated contents.
         #[serde(default)]
         items: Vec<crate::domain::character::InventorySlot>,
+        /// Gold coins placed in the container by the campaign author.
+        ///
+        /// Added to the party's shared gold when the player takes all or
+        /// takes the currency individually from the container UI.
+        /// Zeroed out after being taken.
+        #[serde(default)]
+        gold: u32,
+        /// Gems placed in the container by the campaign author.
+        ///
+        /// Added to the party's shared gems when taken.
+        /// Zeroed out after being taken.
+        #[serde(default)]
+        gems: u32,
     },
     /// A single item lying on the ground, placed by a campaign author or
     /// dropped at runtime by the party.

@@ -250,8 +250,8 @@ impl ClassEditor {
         );
         println!(
             "  3. Spell Access (currently: {})",
-            if class.spell_school.is_some() {
-                format!("{:?}", class.spell_school.unwrap())
+            if let Some(school) = class.spell_school {
+                format!("{:?}", school)
             } else {
                 "None".to_string()
             }

@@ -87,6 +87,7 @@
         ],
         magic_slot_count: 5,
         magic_refresh_days: 7,
+        description: "",
     ),
     MerchantStockTemplate(
         id: "mountain_pass_merchant",
@@ -158,6 +159,7 @@
         ],
         magic_slot_count: 7,
         magic_refresh_days: 7,
+        description: "",
     ),
     MerchantStockTemplate(
         id: "holy_temple_menu",
@@ -203,6 +205,7 @@
         ],
         magic_slot_count: 1,
         magic_refresh_days: 7,
+        description: "",
     ),
     MerchantStockTemplate(
         id: "village_elder_stock",
@@ -226,5 +229,25 @@
         magic_item_pool: [],
         magic_slot_count: 0,
         magic_refresh_days: 7,
+        description: "",
+    ),
+    MerchantStockTemplate(
+        id: "inn_keeper_stock_template",
+        entries: [
+            TemplateStockEntry(
+                item_id: 111,
+                quantity: 1,
+                override_price: None,
+            ),
+            TemplateStockEntry(
+                item_id: 112,
+                quantity: 1,
+                override_price: None,
+            ),
+        ],
+        magic_item_pool: [],
+        magic_slot_count: 0,
+        magic_refresh_days: 7,
+        description: "Inn Keeper Stock Mostly Food",
     ),
 ]

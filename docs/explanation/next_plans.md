@@ -200,7 +200,7 @@ Campaign Builder --> Config Editor --> Key Bindings is missing the key binding f
 
 Write a plan with a phased approach to implementing the SDK fixes in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [SDK Fixes Implementation Plan](./sdk_fixes_implementation_plan.md)
+✅ COMPLETED - [SDK Fixes Implementation Plan](./sdk_fixes_implementation_plan.md)
 
 ### Combat Fixes
 
@@ -214,19 +214,40 @@ Write a plan with a phased approach to implementing the combat fixes in the game
 
 ✅ PLAN WRITTEN - [Combat Fixes Implementation Plan](./combat_fixes_implementation_plan.md)
 
+## Character Leveling
+
+Add character leveling to the game engine. The system should be configurable per campaign.
+
+Simple Leveling Metrics- `BASE_XP` and `XP_MULTIPLIER` can be set in the `campaign.ron` and the formula can be handled automatically like it is in `src/domain/progression.ron`
+
+Custom Leveling Metrics - A new file `levels.ron` should define how many XP is required per level by class (linked together by class id). The new file is so the classes.ron stays human readable because we support levels up to 200. The system should support something like Level 1 1000 XP, Level 2 2500 XP, Level 3 5000 XP, Level 4 7500 XP, Level 5 10000 XP, +20000 XP for every level after Level 10. Or just a flat 5000 XP per level where Level 1 is 5000 XP and Level 2 is +5000 Meaning it would take 10000 XP to get to Level 2.
+
+Training Level up should support two methods defined in the config.ron for the campaign Auto and NPC.
+
+Auto Level Up - Auto will just level the character up automatically when they hit the threshhold for their Class as defined in classes.ron.
+
+NPC Level Up - NPC Mode will the Might & Magic-style trainer NPC flow where the player must physically visit a training ground in town and pay a gold fee. Aquire XP, Find NPC, Speak with NPC, Trigger Trainign through Dialog, Pay NPC required amount of money to train. The Dialog System should work like the Merchant Dialog with an option "Level Up?" or something similar. The engine gets `is_trainer` flag on NPCs, training fee, and `GameMode::Training` state. The SDK NPC Editor will implement a `is_trainer` flag and a `create_training_dialog` button just like the create_merchant_dialog.
+
+SDK will get a new Levels Editor Tab that will follow the two column layout pattern allowing users to create `levels.ron` and set level stats for all classes in `classes.ron` . The list and display should autopopulate if a `levels.ron` exists. When creating/editing a set of Level stats the class id should autocomplete.
+
+Write a plan with a phased approach to implement these features. THINK HARD and follow the rules in @PLAN.md
+
+✅ PLAN WRITTEN - [Level Up Plan](./level_up_plan.md)
+
 ## Notes
 
 Month Year Date in Game Engine View looks horrible.
 
-Trees are still horrible. Grass sucks as well. Is tree bark textures being applied? You can not tell one tree from the next. Oak, Pine, Palm, Dead all look the same.Foliage particularly Bushes clip tree trunks. And seems like editing them in the SDK does nothing to change their appearance.
+Trees are still horrible. Grass sucks as well. Is tree bark textures being applied? You can not tell one tree from the next. Oak, Pine, Palm, Dead all look the same. Foliage particularly Bushes clip tree trunks. And seems like editing them in the SDK does nothing to change their appearance.
 
 All the doors are facing the wrong way
 
 Show/Hide Tray ICON SDK is not working
 
-Game log is not part of a Game Save. Loading a save game from the main menu on restart does not restore the game log. The game log should be saved and loaded with the rest of the game state.
+Fixed - Game log is not part of a Game Save. Loading a save game from the main menu on restart does not restore the game log. The game log should be saved and loaded with the rest of the game state.
 
 Players can't pickup dropped items. There is a dropped sword in Map 1 and the game logs when I walk over it but the item does not get added to my inventory. The player should be able to pickup a dropped item from an adjacent tile by pressing the E key or clicking on it with the mouse. The item should then be added to the player's inventory and removed from the ground.
 
-
 Conditions should have a duration of until the next rest, until the end of combat, or until a certain number of turns have passed. This would allow for more strategic use of conditions and would also allow for conditions that are meant to last for a certain amount of time rather than being permanent until removed. The SDK should be updated to support setting the duration of conditions as well as the game engine. The game engine should then handle the expiration of conditions based on their duration.
+
+Fixed - Create Merchant Dialog does not work when a new stock template is created in a session. I added innkeeper stock template and attached it to the Inn Keeper Village in map 1. And the create merchant dialog did nothing.

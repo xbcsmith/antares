@@ -149,7 +149,7 @@ impl StockTemplateEditBuffer {
 
         Self {
             id: template.id.clone(),
-            description: String::new(), // templates have no description field in the domain type
+            description: template.description.clone(),
             entries,
             magic_item_pool,
             magic_slot_count: template.magic_slot_count.to_string(),
@@ -309,6 +309,7 @@ impl StockTemplateEditBuffer {
             magic_item_pool,
             magic_slot_count,
             magic_refresh_days,
+            description: self.description.clone(),
         })
     }
 }
@@ -797,6 +798,20 @@ impl StockTemplatesEditorState {
     /// Render a read-only summary of a template (right panel in list view)
     fn show_preview(&self, ui: &mut egui::Ui, tmpl: &MerchantStockTemplate) {
         ui.heading(format!("📦 {}", tmpl.id));
+        ui.separator();
+
+        egui::Grid::new("stock_template_display_grid")
+            .num_columns(2)
+            .striped(false)
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("Description:").strong());
+                if tmpl.description.is_empty() {
+                    ui.label(egui::RichText::new("No description.").italics().weak());
+                } else {
+                    ui.label(&tmpl.description);
+                }
+                ui.end_row();
+            });
         ui.separator();
 
         ui.label(format!("Regular stock entries: {}", tmpl.entries.len()));
@@ -1342,6 +1357,7 @@ impl StockTemplatesEditorState {
     ///     magic_item_pool: vec![],
     ///     magic_slot_count: 0,
     ///     magic_refresh_days: 7,
+    ///     description: String::new(),
     /// });
     ///
     /// state.open_template_for_edit("foo");
@@ -1454,6 +1470,7 @@ mod tests {
             magic_item_pool: vec![10, 11],
             magic_slot_count: 2,
             magic_refresh_days: 7,
+            description: String::new(),
         }
     }
 
@@ -1486,7 +1503,8 @@ mod tests {
 
     #[test]
     fn test_from_template_round_trips() {
-        let original = make_template("round_trip_test");
+        let mut original = make_template("round_trip_test");
+        original.description = "Test round-trip shop".to_string();
         let buf = StockTemplateEditBuffer::from_template(&original);
         let existing: Vec<String> = vec![];
         let mut warnings = Vec::new();
@@ -1502,6 +1520,7 @@ mod tests {
         assert_eq!(restored.magic_item_pool, original.magic_item_pool);
         assert_eq!(restored.magic_slot_count, original.magic_slot_count);
         assert_eq!(restored.magic_refresh_days, original.magic_refresh_days);
+        assert_eq!(restored.description, original.description);
     }
 
     // ── validation: empty id ─────────────────────────────────────────────────
@@ -1985,5 +2004,156 @@ mod tests {
             "load_from_file must not clear needs_initial_load; caller owns that"
         );
         assert_eq!(reader.templates.len(), 1);
+    }
+
+    // ── description: from_template reads description ─────────────────────────
+
+    #[test]
+    fn test_stock_template_description_is_persisted() {
+        let mut tmpl = make_template("general_goods");
+        tmpl.description = "General goods shop".to_string();
+
+        let buf = StockTemplateEditBuffer::from_template(&tmpl);
+
+        assert_eq!(
+            buf.description, "General goods shop",
+            "from_template must copy the description from the domain struct"
+        );
+    }
+
+    // ── description: to_template writes description ──────────────────────────
+
+    #[test]
+    fn test_stock_template_description_to_template() {
+        let buf = StockTemplateEditBuffer {
+            id: "test_tmpl".to_string(),
+            description: "A fine shop".to_string(),
+            ..StockTemplateEditBuffer::default()
+        };
+        let mut warnings = Vec::new();
+        let result = buf.to_template(&[], StockTemplatesEditorMode::Add, &mut warnings);
+        assert!(
+            result.is_ok(),
+            "to_template failed: {:?}",
+            result.unwrap_err()
+        );
+        let tmpl = result.unwrap();
+        assert_eq!(
+            tmpl.description, "A fine shop",
+            "to_template must copy description into the returned MerchantStockTemplate"
+        );
+    }
+
+    // ── description: round-trip through from→to preserves value ──────────────
+
+    #[test]
+    fn test_stock_template_description_round_trip_non_empty() {
+        let mut original = make_template("shop_with_desc");
+        original.description = "Weapons and armour".to_string();
+
+        let buf = StockTemplateEditBuffer::from_template(&original);
+        assert_eq!(buf.description, "Weapons and armour");
+
+        let mut warnings = Vec::new();
+        let restored = buf
+            .to_template(&[], StockTemplatesEditorMode::Add, &mut warnings)
+            .expect("round-trip must succeed");
+
+        assert_eq!(restored.description, "Weapons and armour");
+    }
+
+    // ── description: empty description round-trips as empty string ────────────
+
+    #[test]
+    fn test_stock_template_description_empty_round_trip() {
+        let original = make_template("no_desc_shop");
+        // description is String::new() from make_template
+
+        let buf = StockTemplateEditBuffer::from_template(&original);
+        assert!(buf.description.is_empty());
+
+        let mut warnings = Vec::new();
+        let restored = buf
+            .to_template(&[], StockTemplatesEditorMode::Add, &mut warnings)
+            .expect("round-trip must succeed");
+
+        assert!(restored.description.is_empty());
+    }
+
+    // ── description: show_preview renders description or placeholder ──────────
+
+    /// Verifies that the `show_preview` display panel correctly distinguishes
+    /// between a template with a non-empty description and one with an empty
+    /// description.  This mirrors what the egui `show_preview` function does
+    /// with its `if tmpl.description.is_empty()` branch (§2.4 SDK fix).
+    ///
+    /// We test the data-level precondition (the branch predicate) rather than
+    /// the egui rendering output, following the same pattern used by
+    /// `test_starting_spells_display_section_shows_spell_names` in
+    /// `characters_editor.rs`.
+    #[test]
+    fn test_stock_template_display_shows_description() {
+        // ── non-empty description → description label branch ──────────────────
+        let mut tmpl_with_desc = make_template("shop_with_desc");
+        tmpl_with_desc.description = "Fine weapons and armour".to_string();
+
+        // The display panel shows `tmpl.description` directly when non-empty.
+        assert!(
+            !tmpl_with_desc.description.is_empty(),
+            "template description must be non-empty so the display panel renders it"
+        );
+        assert_eq!(
+            tmpl_with_desc.description, "Fine weapons and armour",
+            "description value must match what was set"
+        );
+
+        // ── empty description → placeholder branch ────────────────────────────
+        let tmpl_no_desc = make_template("no_desc_shop");
+        // description defaults to String::new() in make_template
+
+        assert!(
+            tmpl_no_desc.description.is_empty(),
+            "template with no description must be empty so the display panel shows the placeholder"
+        );
+
+        // ── `from_template` preserves non-empty description for display ───────
+        let buf = StockTemplateEditBuffer::from_template(&tmpl_with_desc);
+        assert_eq!(
+            buf.description, "Fine weapons and armour",
+            "from_template must carry the description into the edit buffer \
+             so re-loading the edit form pre-populates the field correctly"
+        );
+
+        // ── egui smoke test: show_preview must not panic ──────────────────────
+        let ctx = egui::Context::default();
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        ctx.begin_pass(raw_input);
+        let state = StockTemplatesEditorState::default();
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            // Must not panic for a template with a non-empty description.
+            state.show_preview(ui, &tmpl_with_desc);
+        });
+        let _ = ctx.end_pass();
+
+        let ctx2 = egui::Context::default();
+        let raw_input2 = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        ctx2.begin_pass(raw_input2);
+        egui::CentralPanel::default().show(&ctx2, |ui| {
+            // Must not panic for a template with an empty description either.
+            state.show_preview(ui, &tmpl_no_desc);
+        });
+        let _ = ctx2.end_pass();
     }
 }

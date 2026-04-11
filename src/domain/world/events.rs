@@ -88,6 +88,10 @@ pub enum EventResult {
         container_name: String,
         /// Current item contents of the container.
         items: Vec<crate::domain::character::InventorySlot>,
+        /// Gold coins available to take from the container.
+        gold: u32,
+        /// Gems available to take from the container.
+        gems: u32,
     },
     /// A dropped item is lying on the ground at this position and may be picked up.
     ///
@@ -425,13 +429,20 @@ pub fn trigger_event(
         }
 
         MapEvent::Container {
-            id, name, items, ..
+            id,
+            name,
+            items,
+            gold,
+            gems,
+            ..
         } => {
             // Container events are repeatable (persist partial takes via write-back on close)
             EventResult::EnterContainer {
                 container_event_id: id.clone(),
                 container_name: name.clone(),
                 items: items.clone(),
+                gold,
+                gems,
             }
         }
 
@@ -1465,6 +1476,8 @@ mod tests {
                 name: "Old Chest".to_string(),
                 description: "A dusty old chest".to_string(),
                 items: items.clone(),
+                gold: 0,
+                gems: 0,
             },
         );
 
@@ -1481,6 +1494,8 @@ mod tests {
                 container_event_id,
                 container_name,
                 items: result_items,
+                gold,
+                gems,
             } => {
                 assert_eq!(container_event_id, "test_chest_001");
                 assert_eq!(container_name, "Old Chest");
@@ -1488,6 +1503,8 @@ mod tests {
                 assert_eq!(result_items[0].item_id, 1);
                 assert_eq!(result_items[1].item_id, 2);
                 assert_eq!(result_items[1].charges, 3);
+                assert_eq!(gold, 0, "container with no gold should return 0");
+                assert_eq!(gems, 0, "container with no gems should return 0");
             }
             _ => panic!("Expected EnterContainer result"),
         }
@@ -1510,6 +1527,8 @@ mod tests {
                     item_id: 10,
                     charges: 0,
                 }],
+                gold: 0,
+                gems: 0,
             },
         );
 
@@ -1677,6 +1696,8 @@ mod tests {
                 name: "Empty Crate".to_string(),
                 description: "".to_string(),
                 items: vec![],
+                gold: 0,
+                gems: 0,
             },
         );
 
@@ -1689,6 +1710,84 @@ mod tests {
                 assert!(items.is_empty());
             }
             _ => panic!("Expected EnterContainer for empty container"),
+        }
+    }
+
+    // ── Container event gold/gems propagation ────────────────────────────
+
+    #[test]
+    fn test_container_event_with_gold_returns_gold_in_result() {
+        let mut world = World::new();
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let pos = Position::new(2, 3);
+        map.add_event(
+            pos,
+            MapEvent::Container {
+                id: "gold_chest".to_string(),
+                name: "Gold Chest".to_string(),
+                description: String::new(),
+                items: vec![],
+                gold: 250,
+                gems: 0,
+            },
+        );
+        world.add_map(map);
+        world.set_current_map(1);
+
+        let result = trigger_event(&mut world, pos, &noon()).expect("trigger must succeed");
+        match result {
+            EventResult::EnterContainer { gold, gems, .. } => {
+                assert_eq!(
+                    gold, 250,
+                    "gold must be propagated from MapEvent::Container"
+                );
+                assert_eq!(gems, 0);
+            }
+            _ => panic!("Expected EnterContainer"),
+        }
+    }
+
+    #[test]
+    fn test_container_event_with_gems_returns_gems_in_result() {
+        let mut world = World::new();
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let pos = Position::new(4, 5);
+        map.add_event(
+            pos,
+            MapEvent::Container {
+                id: "gem_chest".to_string(),
+                name: "Gem Chest".to_string(),
+                description: String::new(),
+                items: vec![],
+                gold: 0,
+                gems: 7,
+            },
+        );
+        world.add_map(map);
+        world.set_current_map(1);
+
+        let result = trigger_event(&mut world, pos, &noon()).expect("trigger must succeed");
+        match result {
+            EventResult::EnterContainer { gold, gems, .. } => {
+                assert_eq!(gold, 0);
+                assert_eq!(gems, 7, "gems must be propagated from MapEvent::Container");
+            }
+            _ => panic!("Expected EnterContainer"),
+        }
+    }
+
+    #[test]
+    fn test_container_event_zero_currency_default() {
+        // A container whose RON omits gold/gems must deserialise with both at 0.
+        // (The serde(default) on the fields is what makes this work.)
+        let event_ron = r#"Container(id: "c", name: "C", description: "", items: [])"#;
+        let event: MapEvent = ron::from_str(event_ron).expect("must parse");
+        match event {
+            MapEvent::Container { gold, gems, .. } => {
+                assert_eq!(gold, 0, "gold must default to 0");
+                assert_eq!(gems, 0, "gems must default to 0");
+            }
+            _ => panic!("Expected Container"),
         }
     }
 }

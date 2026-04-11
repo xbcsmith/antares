@@ -3234,6 +3234,7 @@ mod tests {
                 magic_item_pool: vec![],
                 magic_slot_count: 0,
                 magic_refresh_days: 7,
+                description: String::new(),
             });
 
         assert_eq!(db.stats().npc_stock_template_count, 1);

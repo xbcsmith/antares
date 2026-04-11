@@ -116,11 +116,10 @@ fn test_all_monsters_have_creature_id_mapping() {
 
     for monster_id in &monster_ids {
         if let Some(monster) = content.monsters.get_monster(*monster_id) {
-            if monster.creature_id.is_some() {
+            if let Some(creature_id) = monster.creature_id {
                 monsters_with_visuals += 1;
 
                 // Verify creature exists
-                let creature_id = monster.creature_id.unwrap();
                 assert!(
                     content.creatures.has_creature(creature_id),
                     "Monster '{}' references non-existent creature {}",
