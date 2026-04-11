@@ -131,6 +131,18 @@ pub struct ContainerInventoryState {
     /// Items are added to this list when the player stashes them.
     pub items: Vec<InventorySlot>,
 
+    /// Gold coins currently available in this open container.
+    ///
+    /// Set from `MapEvent::Container::gold` when the container is opened.
+    /// Zeroed out when the player takes the gold.
+    pub gold: u32,
+
+    /// Gems currently available in this open container.
+    ///
+    /// Set from `MapEvent::Container::gems` when the container is opened.
+    /// Zeroed out when the player takes the gems.
+    pub gems: u32,
+
     /// Index into `Party::members` of the character whose inventory is
     /// displayed in the left panel.
     ///
@@ -199,6 +211,8 @@ impl ContainerInventoryState {
             container_event_id,
             container_name,
             items,
+            gold: 0,
+            gems: 0,
             active_character_index,
             focus: ContainerFocus::default(),
             character_selected_slot: None,
@@ -472,6 +486,35 @@ impl ContainerInventoryState {
     pub fn stash_item(&mut self, slot: InventorySlot) {
         self.items.push(slot);
     }
+
+    /// Take all gold and gems from the container, zeroing both counters.
+    ///
+    /// Returns `(gold, gems)` so the caller can add the values to the party's
+    /// shared gold and gem pools.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::GameMode;
+    /// use antares::application::container_inventory_state::ContainerInventoryState;
+    ///
+    /// let mut state = ContainerInventoryState::new(
+    ///     "chest".to_string(), "Chest".to_string(), vec![], 0, GameMode::Exploration,
+    /// );
+    /// state.gold = 100;
+    /// state.gems = 3;
+    ///
+    /// let (g, s) = state.take_currency();
+    /// assert_eq!(g, 100);
+    /// assert_eq!(s, 3);
+    /// assert_eq!(state.gold, 0);
+    /// assert_eq!(state.gems, 0);
+    /// ```
+    pub fn take_currency(&mut self) -> (u32, u32) {
+        let gold = std::mem::take(&mut self.gold);
+        let gems = std::mem::take(&mut self.gems);
+        (gold, gems)
+    }
 }
 
 // ============================================================
@@ -708,5 +751,51 @@ mod tests {
         assert_eq!(ContainerFocus::Left, ContainerFocus::Left);
         assert_eq!(ContainerFocus::Right, ContainerFocus::Right);
         assert_ne!(ContainerFocus::Left, ContainerFocus::Right);
+    }
+
+    #[test]
+    fn test_container_inventory_state_gold_gems_default_zero() {
+        let state = ContainerInventoryState::new(
+            "chest".to_string(),
+            "Chest".to_string(),
+            vec![],
+            0,
+            GameMode::Exploration,
+        );
+        assert_eq!(state.gold, 0, "gold must default to 0");
+        assert_eq!(state.gems, 0, "gems must default to 0");
+    }
+
+    #[test]
+    fn test_take_currency_zeroes_and_returns_values() {
+        let mut state = ContainerInventoryState::new(
+            "chest".to_string(),
+            "Chest".to_string(),
+            vec![],
+            0,
+            GameMode::Exploration,
+        );
+        state.gold = 50;
+        state.gems = 4;
+
+        let (gold, gems) = state.take_currency();
+        assert_eq!(gold, 50);
+        assert_eq!(gems, 4);
+        assert_eq!(state.gold, 0, "gold must be zero after take_currency");
+        assert_eq!(state.gems, 0, "gems must be zero after take_currency");
+    }
+
+    #[test]
+    fn test_take_currency_on_zero_returns_zeros() {
+        let mut state = ContainerInventoryState::new(
+            "chest".to_string(),
+            "Chest".to_string(),
+            vec![],
+            0,
+            GameMode::Exploration,
+        );
+        let (gold, gems) = state.take_currency();
+        assert_eq!(gold, 0);
+        assert_eq!(gems, 0);
     }
 }

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::application::save_game::SavedLogEntry;
 use crate::application::GameMode;
 use crate::game::resources::GlobalState;
 use crate::game::systems::ui_helpers::{text_style, LABEL_FONT_SIZE};
@@ -324,6 +325,98 @@ impl GameLog {
             .iter()
             .filter(|entry| self.filter.contains(&entry.category))
             .collect()
+    }
+
+    /// Converts all current entries to a serialisable form for save games.
+    ///
+    /// The display colour is not stored because it can always be recovered
+    /// from the category name via [`LogCategory::default_color`] at render
+    /// time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::systems::ui::{GameLog, LogCategory};
+    ///
+    /// let mut log = GameLog::new();
+    /// log.add_combat("Attacked goblin for 5 damage.".to_string());
+    ///
+    /// let saved = log.to_saved_entries();
+    /// assert_eq!(saved.len(), 1);
+    /// assert_eq!(saved[0].category, "Combat");
+    /// assert_eq!(saved[0].text, "Attacked goblin for 5 damage.");
+    /// ```
+    pub fn to_saved_entries(&self) -> Vec<SavedLogEntry> {
+        self.entries
+            .iter()
+            .map(|entry| {
+                let category_name = match entry.category {
+                    LogCategory::Combat => "Combat",
+                    LogCategory::Dialogue => "Dialogue",
+                    LogCategory::Item => "Item",
+                    LogCategory::Exploration => "Exploration",
+                    LogCategory::System => "System",
+                };
+                SavedLogEntry {
+                    category: category_name.to_string(),
+                    text: entry.text.clone(),
+                    sequence: entry.sequence,
+                }
+            })
+            .collect()
+    }
+
+    /// Restores log entries from a save-game snapshot.
+    ///
+    /// Clears the current entries and replaces them with those from `saved`,
+    /// trimming to [`Self::max_entries`] if necessary.  Entries whose
+    /// category name is not recognised are silently assigned to
+    /// [`LogCategory::System`] so that old saves with unexpected category
+    /// strings load without error.
+    ///
+    /// The `sequence_counter` is advanced past the highest sequence number
+    /// found in the restored entries so that new entries appended after the
+    /// load do not collide with restored ones.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::save_game::SavedLogEntry;
+    /// use antares::game::systems::ui::GameLog;
+    ///
+    /// let saved = vec![
+    ///     SavedLogEntry { category: "Combat".to_string(), text: "Hit!".to_string(), sequence: 0 },
+    ///     SavedLogEntry { category: "Item".to_string(),   text: "Found sword.".to_string(), sequence: 1 },
+    /// ];
+    ///
+    /// let mut log = GameLog::new();
+    /// log.restore_from_saved(saved);
+    ///
+    /// assert_eq!(log.entries().len(), 2);
+    /// assert_eq!(log.entries()[0].text, "Hit!");
+    /// assert_eq!(log.entries()[1].text, "Found sword.");
+    /// ```
+    pub fn restore_from_saved(&mut self, saved: Vec<SavedLogEntry>) {
+        self.entries.clear();
+        self.messages.clear();
+        self.sequence_counter = 0;
+
+        for saved_entry in saved {
+            let category =
+                LogCategory::from_config_name(&saved_entry.category).unwrap_or(LogCategory::System);
+            let entry = LogEntry::new(category, saved_entry.text.clone(), saved_entry.sequence);
+            // Keep the sequence counter ahead of any restored entry.
+            self.sequence_counter = saved_entry.sequence.saturating_add(1);
+            self.entries.push(entry);
+            self.messages.push(saved_entry.text);
+        }
+
+        // Trim to the configured ring-buffer limit.
+        if self.entries.len() > self.max_entries {
+            let overflow = self.entries.len() - self.max_entries;
+            self.entries.drain(0..overflow);
+            self.messages.drain(0..overflow);
+        }
     }
 }
 
@@ -1233,5 +1326,178 @@ mod tests {
             matches!(global_state.0.mode, GameMode::GameLog),
             "clicking the header button should transition to GameMode::GameLog"
         );
+    }
+
+    #[test]
+    fn test_to_saved_entries_empty_log() {
+        let log = GameLog::new();
+        let saved = log.to_saved_entries();
+        assert!(
+            saved.is_empty(),
+            "empty log should produce no saved entries"
+        );
+    }
+
+    #[test]
+    fn test_to_saved_entries_preserves_category_text_and_sequence() {
+        let mut log = GameLog::new();
+        log.add_combat("Hit goblin for 3 damage.".to_string());
+        log.add_item("Found a potion.".to_string());
+        log.add_exploration("Entered the forest.".to_string());
+        log.add_dialogue("The merchant spoke.".to_string());
+        log.add_system("Loaded map_1.".to_string());
+
+        let saved = log.to_saved_entries();
+        assert_eq!(saved.len(), 5);
+
+        assert_eq!(saved[0].category, "Combat");
+        assert_eq!(saved[0].text, "Hit goblin for 3 damage.");
+        assert_eq!(saved[0].sequence, 0);
+
+        assert_eq!(saved[1].category, "Item");
+        assert_eq!(saved[1].text, "Found a potion.");
+        assert_eq!(saved[1].sequence, 1);
+
+        assert_eq!(saved[2].category, "Exploration");
+        assert_eq!(saved[2].text, "Entered the forest.");
+        assert_eq!(saved[2].sequence, 2);
+
+        assert_eq!(saved[3].category, "Dialogue");
+        assert_eq!(saved[3].text, "The merchant spoke.");
+        assert_eq!(saved[3].sequence, 3);
+
+        assert_eq!(saved[4].category, "System");
+        assert_eq!(saved[4].text, "Loaded map_1.");
+        assert_eq!(saved[4].sequence, 4);
+    }
+
+    #[test]
+    fn test_restore_from_saved_empty_vec_clears_log() {
+        let mut log = GameLog::new();
+        log.add_combat("Some combat line.".to_string());
+        assert_eq!(log.entries().len(), 1);
+
+        log.restore_from_saved(vec![]);
+
+        assert!(log.entries().is_empty());
+        assert!(log.messages.is_empty());
+        assert_eq!(log.sequence_counter, 0);
+    }
+
+    #[test]
+    fn test_restore_from_saved_rebuilds_entries_correctly() {
+        use crate::application::save_game::SavedLogEntry;
+
+        let saved = vec![
+            SavedLogEntry {
+                category: "Combat".to_string(),
+                text: "Slew the orc.".to_string(),
+                sequence: 10,
+            },
+            SavedLogEntry {
+                category: "Exploration".to_string(),
+                text: "Discovered a cave.".to_string(),
+                sequence: 11,
+            },
+        ];
+
+        let mut log = GameLog::new();
+        log.restore_from_saved(saved);
+
+        let entries = log.entries();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].text, "Slew the orc.");
+        assert_eq!(entries[0].category, LogCategory::Combat);
+        assert_eq!(entries[0].sequence, 10);
+        assert_eq!(entries[1].text, "Discovered a cave.");
+        assert_eq!(entries[1].category, LogCategory::Exploration);
+        assert_eq!(entries[1].sequence, 11);
+
+        // sequence_counter must be ahead of the last restored sequence.
+        assert!(log.sequence_counter > 11);
+    }
+
+    #[test]
+    fn test_restore_from_saved_advances_sequence_counter() {
+        use crate::application::save_game::SavedLogEntry;
+
+        let saved = vec![SavedLogEntry {
+            category: "System".to_string(),
+            text: "Game loaded.".to_string(),
+            sequence: 42,
+        }];
+
+        let mut log = GameLog::new();
+        log.restore_from_saved(saved);
+
+        // New entries added after restoration must not collide with sequence 42.
+        log.add_system("Post-load message.".to_string());
+        let entries = log.entries();
+        assert_eq!(entries.len(), 2);
+        assert!(entries[1].sequence > 42);
+    }
+
+    #[test]
+    fn test_restore_from_saved_unknown_category_falls_back_to_system() {
+        use crate::application::save_game::SavedLogEntry;
+
+        let saved = vec![SavedLogEntry {
+            category: "UnknownFutureCategory".to_string(),
+            text: "Some unknown entry.".to_string(),
+            sequence: 0,
+        }];
+
+        let mut log = GameLog::new();
+        log.restore_from_saved(saved);
+
+        let entries = log.entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].category, LogCategory::System);
+        assert_eq!(entries[0].text, "Some unknown entry.");
+    }
+
+    #[test]
+    fn test_to_saved_entries_and_restore_round_trips_all_categories() {
+        let mut log = GameLog::new();
+        log.add_combat("Combat entry.".to_string());
+        log.add_dialogue("Dialogue entry.".to_string());
+        log.add_item("Item entry.".to_string());
+        log.add_exploration("Exploration entry.".to_string());
+        log.add_system("System entry.".to_string());
+
+        let saved = log.to_saved_entries();
+
+        let mut restored_log = GameLog::new();
+        restored_log.restore_from_saved(saved);
+
+        let original = log.entries();
+        let restored = restored_log.entries();
+
+        assert_eq!(original.len(), restored.len());
+        for (orig, rest) in original.iter().zip(restored.iter()) {
+            assert_eq!(orig.category, rest.category);
+            assert_eq!(orig.text, rest.text);
+            assert_eq!(orig.sequence, rest.sequence);
+        }
+    }
+
+    #[test]
+    fn test_restore_from_saved_trims_to_max_entries() {
+        use crate::application::save_game::SavedLogEntry;
+
+        // Build more entries than the ring-buffer cap.
+        let saved: Vec<SavedLogEntry> = (0..GameLog::MAX_LOG_ENTRIES + 10)
+            .map(|i| SavedLogEntry {
+                category: "System".to_string(),
+                text: format!("Entry {i}"),
+                sequence: i as u64,
+            })
+            .collect();
+
+        let mut log = GameLog::new();
+        log.restore_from_saved(saved);
+
+        assert_eq!(log.entries().len(), GameLog::MAX_LOG_ENTRIES);
+        assert_eq!(log.messages.len(), GameLog::MAX_LOG_ENTRIES);
     }
 }

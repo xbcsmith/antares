@@ -83,6 +83,7 @@ impl Plugin for ContainerInventoryPlugin {
             .add_message::<StashItemAction>()
             .add_message::<SelectContainerSlotAction>()
             .add_message::<SelectContainerCharacterSlotAction>()
+            .add_message::<TakeCurrencyAction>()
             .init_resource::<ContainerNavState>()
             .add_systems(
                 Update,
@@ -222,6 +223,29 @@ pub struct StashItemAction {
     pub character_index: usize,
     /// Slot index in that character's inventory.
     pub character_slot_index: usize,
+}
+
+/// Emitted when the player confirms taking all currency (gold and/or gems)
+/// from an open container.
+///
+/// The handler adds `gold` to `party.gold` and `gems` to `party.gems`, then
+/// zeroes the container's currency fields and writes them back to the map event.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::container_inventory_ui::TakeCurrencyAction;
+///
+/// let action = TakeCurrencyAction { gold: 50, gems: 3 };
+/// assert_eq!(action.gold, 50);
+/// assert_eq!(action.gems, 3);
+/// ```
+#[derive(Message)]
+pub struct TakeCurrencyAction {
+    /// Gold to award to the party.
+    pub gold: u32,
+    /// Gems to award to the party.
+    pub gems: u32,
 }
 
 // ===== Container action enum (for keyboard nav) =====
@@ -459,7 +483,15 @@ fn container_inventory_input_system(
         // so that partial takes persist within the session.
         let event_id = container_state.container_event_id.clone();
         let updated_items = container_state.items.clone();
-        write_container_items_back(&mut global_state.0, &event_id, updated_items);
+        let remaining_gold = container_state.gold;
+        let remaining_gems = container_state.gems;
+        write_container_items_back(
+            &mut global_state.0,
+            &event_id,
+            updated_items,
+            remaining_gold,
+            remaining_gems,
+        );
 
         let resume = container_state.get_resume_mode();
         global_state.0.mode = resume;
@@ -630,6 +662,7 @@ fn container_inventory_ui_system(
     nav_state: Res<ContainerNavState>,
     mut take_writer: MessageWriter<TakeItemAction>,
     mut take_all_writer: MessageWriter<TakeAllAction>,
+    mut take_currency_writer: MessageWriter<TakeCurrencyAction>,
     mut stash_writer: MessageWriter<StashItemAction>,
     mut select_container_writer: MessageWriter<SelectContainerSlotAction>,
     mut select_char_writer: MessageWriter<SelectContainerCharacterSlotAction>,
@@ -732,6 +765,9 @@ fn container_inventory_ui_system(
                             character_index: char_idx,
                         });
                     }
+                    ContainerPanelResult::TakeCurrency { gold, gems } => {
+                        take_currency_writer.write(TakeCurrencyAction { gold, gems });
+                    }
                     ContainerPanelResult::SelectSlot(slot_idx, has_item) => {
                         select_container_writer.write(SelectContainerSlotAction {
                             slot_index: slot_idx,
@@ -798,13 +834,15 @@ enum CharacterStashPanelResult {
 ///         name: "Chest".to_string(),
 ///         description: "".to_string(),
 ///         items: vec![InventorySlot { item_id: 1, charges: 0 }],
+///         gold: 0,
+///         gems: 0,
 ///     },
 /// );
 /// state.world.add_map(map);
 /// state.world.set_current_map(1);
 ///
 /// // After taking an item the container is empty — write that back.
-/// write_container_items_back(&mut state, "chest_01", vec![]);
+/// write_container_items_back(&mut state, "chest_01", vec![], 0, 0);
 ///
 /// if let Some(event) = state.world.get_current_map().unwrap().get_event(pos) {
 ///     if let MapEvent::Container { items, .. } = event {
@@ -816,6 +854,8 @@ pub fn write_container_items_back(
     game_state: &mut crate::application::GameState,
     container_event_id: &str,
     items: Vec<InventorySlot>,
+    gold: u32,
+    gems: u32,
 ) {
     let Some(map) = game_state.world.get_current_map_mut() else {
         warn!(
@@ -847,13 +887,19 @@ pub fn write_container_items_back(
     // Replace the items field in-place.
     if let Some(MapEvent::Container {
         items: ref mut stored,
+        gold: ref mut stored_gold,
+        gems: ref mut stored_gems,
         ..
     }) = map.events.get_mut(&pos)
     {
         *stored = items;
+        *stored_gold = gold;
+        *stored_gems = gems;
         info!(
-            "write_container_items_back: wrote {} item(s) back to container '{}'",
+            "write_container_items_back: wrote {} item(s), {} gold, {} gems back to container '{}'",
             stored.len(),
+            gold,
+            gems,
             container_event_id
         );
     }
@@ -1095,6 +1141,10 @@ enum ContainerPanelResult {
         slot_index: usize,
     },
     TakeAll,
+    TakeCurrency {
+        gold: u32,
+        gems: u32,
+    },
     /// Player clicked a container row to set it as the active selection and
     /// report whether it contains an item.
     SelectSlot(usize, bool),
@@ -1268,6 +1318,54 @@ fn render_container_items_panel(
             }
         });
 
+    // ── Currency row ──────────────────────────────────────────────────────
+    if container_state.gold > 0 || container_state.gems > 0 {
+        let currency_area = egui::Rect::from_min_size(
+            panel_rect.min + egui::vec2(0.0, PANEL_HEADER_H + body_h),
+            egui::vec2(size.x, CONTAINER_ROW_H),
+        );
+        let mut currency_child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(currency_area)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        currency_child.push_id("container_currency_row", |ui| {
+            if container_state.gold > 0 {
+                ui.label(
+                    egui::RichText::new(format!("💰 Gold: {}", container_state.gold))
+                        .color(egui::Color32::from_rgb(220, 180, 60)),
+                );
+                if ui
+                    .button(egui::RichText::new("Take Gold").color(TAKE_COLOR).small())
+                    .on_hover_text("Add gold to party's shared gold pool")
+                    .clicked()
+                {
+                    result = ContainerPanelResult::TakeCurrency {
+                        gold: container_state.gold,
+                        gems: 0,
+                    };
+                }
+                ui.add_space(8.0);
+            }
+            if container_state.gems > 0 {
+                ui.label(
+                    egui::RichText::new(format!("💎 Gems: {}", container_state.gems))
+                        .color(egui::Color32::from_rgb(160, 100, 220)),
+                );
+                if ui
+                    .button(egui::RichText::new("Take Gems").color(TAKE_COLOR).small())
+                    .on_hover_text("Add gems to party's shared gem pool")
+                    .clicked()
+                {
+                    result = ContainerPanelResult::TakeCurrency {
+                        gold: 0,
+                        gems: container_state.gems,
+                    };
+                }
+            }
+        });
+    }
+
     // ── Action strip: Take / Take All buttons ─────────────────────────────
     // When the container is empty, render greyed-out (disabled) Take and
     // Take All buttons so the player can see the actions are unavailable.
@@ -1413,6 +1511,7 @@ fn render_container_items_panel(
 fn container_inventory_action_system(
     mut take_reader: MessageReader<TakeItemAction>,
     mut take_all_reader: MessageReader<TakeAllAction>,
+    mut take_currency_reader: MessageReader<TakeCurrencyAction>,
     mut stash_reader: MessageReader<StashItemAction>,
     mut select_container_reader: MessageReader<SelectContainerSlotAction>,
     mut select_char_reader: MessageReader<SelectContainerCharacterSlotAction>,
@@ -1425,6 +1524,11 @@ fn container_inventory_action_system(
         .collect();
 
     let take_all_events: Vec<usize> = take_all_reader.read().map(|e| e.character_index).collect();
+
+    let take_currency_events: Vec<(u32, u32)> = take_currency_reader
+        .read()
+        .map(|e| (e.gold, e.gems))
+        .collect();
 
     let stash_events: Vec<(usize, usize)> = stash_reader
         .read()
@@ -1590,9 +1694,47 @@ fn container_inventory_action_system(
             }
         }
 
+        // Sweep gold and gems from the container into the party pool
+        let (container_gold, container_gems) =
+            if let GameMode::ContainerInventory(ref mut cs) = global_state.0.mode {
+                cs.take_currency()
+            } else {
+                (0, 0)
+            };
+        if container_gold > 0 {
+            global_state.0.party.gold = global_state.0.party.gold.saturating_add(container_gold);
+            info!("TakeAll: awarded {} gold to party", container_gold);
+        }
+        if container_gems > 0 {
+            global_state.0.party.gems = global_state.0.party.gems.saturating_add(container_gems);
+            info!("TakeAll: awarded {} gems to party", container_gems);
+        }
+
         nav_state.selected_slot_index = None;
         nav_state.focused_action_index = 0;
         nav_state.phase = NavigationPhase::SlotNavigation;
+    }
+
+    // ── Take Currency events ──────────────────────────────────────────────
+    for (gold, gems) in take_currency_events {
+        // Add currency to party pool
+        global_state.0.party.gold = global_state.0.party.gold.saturating_add(gold);
+        global_state.0.party.gems = global_state.0.party.gems.saturating_add(gems);
+
+        // Zero out the container's currency
+        if let GameMode::ContainerInventory(ref mut cs) = global_state.0.mode {
+            if gold > 0 {
+                cs.gold = 0;
+            }
+            if gems > 0 {
+                cs.gems = 0;
+            }
+        }
+
+        info!(
+            "TakeCurrencyAction: awarded {} gold, {} gems to party",
+            gold, gems
+        );
     }
 
     // ── Stash events ──────────────────────────────────────────────────────
@@ -1882,7 +2024,13 @@ mod tests {
     #[test]
     fn test_game_state_enter_container_inventory_sets_mode() {
         let mut state = GameState::new();
-        state.enter_container_inventory("chest_01".to_string(), "Old Chest".to_string(), vec![]);
+        state.enter_container_inventory(
+            "chest_01".to_string(),
+            "Old Chest".to_string(),
+            vec![],
+            0,
+            0,
+        );
         assert!(matches!(state.mode, GameMode::ContainerInventory(_)));
     }
 
@@ -1890,7 +2038,7 @@ mod tests {
     fn test_game_state_enter_container_inventory_stores_items() {
         let mut state = GameState::new();
         let items = vec![make_slot(1), make_slot(2)];
-        state.enter_container_inventory("c".to_string(), "C".to_string(), items);
+        state.enter_container_inventory("c".to_string(), "C".to_string(), items, 0, 0);
         if let GameMode::ContainerInventory(ref cs) = state.mode {
             assert_eq!(cs.items.len(), 2);
         } else {
@@ -1902,7 +2050,7 @@ mod tests {
     fn test_game_state_enter_container_inventory_stores_previous_mode() {
         let mut state = GameState::new();
         assert!(matches!(state.mode, GameMode::Exploration));
-        state.enter_container_inventory("c".to_string(), "C".to_string(), vec![]);
+        state.enter_container_inventory("c".to_string(), "C".to_string(), vec![], 0, 0);
         if let GameMode::ContainerInventory(ref cs) = state.mode {
             assert!(matches!(cs.get_resume_mode(), GameMode::Exploration));
         } else {
@@ -1913,7 +2061,7 @@ mod tests {
     #[test]
     fn test_game_state_enter_container_inventory_defaults_character_zero() {
         let mut state = GameState::new();
-        state.enter_container_inventory("c".to_string(), "C".to_string(), vec![]);
+        state.enter_container_inventory("c".to_string(), "C".to_string(), vec![], 0, 0);
         if let GameMode::ContainerInventory(ref cs) = state.mode {
             assert_eq!(cs.active_character_index, 0);
         } else {
@@ -1924,7 +2072,7 @@ mod tests {
     #[test]
     fn test_game_state_enter_container_inventory_focus_defaults_left() {
         let mut state = GameState::new();
-        state.enter_container_inventory("c".to_string(), "C".to_string(), vec![]);
+        state.enter_container_inventory("c".to_string(), "C".to_string(), vec![], 0, 0);
         if let GameMode::ContainerInventory(ref cs) = state.mode {
             assert!(matches!(cs.focus, ContainerFocus::Left));
         } else {
@@ -1948,6 +2096,8 @@ mod tests {
                 name: "Test Chest".to_string(),
                 description: "".to_string(),
                 items: initial_items,
+                gold: 0,
+                gems: 0,
             },
         );
         state.world.add_map(map);
@@ -1963,7 +2113,7 @@ mod tests {
             make_game_state_with_container("chest_test", vec![make_slot(1), make_slot(2)], pos);
 
         // Simulate taking one item: write back only item 2.
-        write_container_items_back(&mut state, "chest_test", vec![make_slot(2)]);
+        write_container_items_back(&mut state, "chest_test", vec![make_slot(2)], 0, 0);
 
         // Assert: map event now contains only item 2.
         let event = state
@@ -1991,7 +2141,7 @@ mod tests {
         );
 
         // Simulate taking all: write back an empty list.
-        write_container_items_back(&mut state, "barrel_all", vec![]);
+        write_container_items_back(&mut state, "barrel_all", vec![], 0, 0);
 
         let event = state
             .world
@@ -2013,7 +2163,13 @@ mod tests {
         let mut state = make_game_state_with_container("crate_stash", vec![make_slot(1)], pos);
 
         // Simulate stashing a second item: write back two items.
-        write_container_items_back(&mut state, "crate_stash", vec![make_slot(1), make_slot(5)]);
+        write_container_items_back(
+            &mut state,
+            "crate_stash",
+            vec![make_slot(1), make_slot(5)],
+            0,
+            0,
+        );
 
         let event = state
             .world
@@ -2036,7 +2192,7 @@ mod tests {
         let mut state = make_game_state_with_container("known_chest", vec![make_slot(1)], pos);
 
         // This must not panic.
-        write_container_items_back(&mut state, "unknown_id", vec![]);
+        write_container_items_back(&mut state, "unknown_id", vec![], 0, 0);
 
         // The known container must be unchanged.
         let event = state
@@ -2205,6 +2361,8 @@ mod tests {
             "click_chest".to_string(),
             "Click Chest".to_string(),
             container_items,
+            0,
+            0,
         );
 
         // Simulate what the action system does for TakeItemAction
@@ -2260,6 +2418,8 @@ mod tests {
             "click_barrel".to_string(),
             "Click Barrel".to_string(),
             container_items,
+            0,
+            0,
         );
 
         // Simulate TakeAll: drain items from container, add to character
@@ -2313,6 +2473,8 @@ mod tests {
             "click_crate".to_string(),
             "Click Crate".to_string(),
             vec![],
+            0,
+            0,
         );
 
         // Simulate Stash: remove from character, add to container

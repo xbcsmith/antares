@@ -71,6 +71,8 @@ pub struct ConfigEditorState {
     pub controls_inventory_buffer: String,
     pub controls_rest_buffer: String,
     pub controls_automap_buffer: String,
+    /// Edit buffer for spell book key binding
+    pub controls_spell_book_buffer: String,
 
     /// Validation errors by field name
     pub validation_errors: std::collections::HashMap<String, String>,
@@ -109,6 +111,7 @@ impl Default for ConfigEditorState {
             controls_inventory_buffer: String::new(),
             controls_rest_buffer: String::new(),
             controls_automap_buffer: String::new(),
+            controls_spell_book_buffer: String::new(),
             validation_errors: std::collections::HashMap::new(),
             capturing_key_for: None,
             last_captured_key: None,
@@ -729,6 +732,17 @@ impl ConfigEditorState {
                 &mut self.capturing_key_for,
             );
 
+            // Spell Book
+            show_key_binding_with_capture(
+                ui,
+                "Spell Book",
+                &mut self.controls_spell_book_buffer,
+                "spell_book",
+                unsaved_changes,
+                &mut self.validation_errors,
+                &mut self.capturing_key_for,
+            );
+
             ui.add_space(5.0);
         });
 
@@ -996,6 +1010,7 @@ impl ConfigEditorState {
         self.controls_inventory_buffer = format_key_list(&self.game_config.controls.inventory);
         self.controls_rest_buffer = format_key_list(&self.game_config.controls.rest);
         self.controls_automap_buffer = format_key_list(&self.game_config.controls.automap);
+        self.controls_spell_book_buffer = format_key_list(&self.game_config.controls.spell_book);
     }
 
     /// Update config from edit buffers
@@ -1011,6 +1026,7 @@ impl ConfigEditorState {
         self.game_config.controls.inventory = parse_key_list(&self.controls_inventory_buffer);
         self.game_config.controls.rest = parse_key_list(&self.controls_rest_buffer);
         self.game_config.controls.automap = parse_key_list(&self.controls_automap_buffer);
+        self.game_config.controls.spell_book = parse_key_list(&self.controls_spell_book_buffer);
     }
 
     /// Handle key capture events from egui input
@@ -1051,6 +1067,7 @@ impl ConfigEditorState {
                             "inventory" => &mut self.controls_inventory_buffer,
                             "rest" => &mut self.controls_rest_buffer,
                             "automap" => &mut self.controls_automap_buffer,
+                            "spell_book" => &mut self.controls_spell_book_buffer,
                             _ => return,
                         };
 
@@ -1621,5 +1638,67 @@ mod tests {
         state.update_edit_buffers();
         state.update_config_from_buffers();
         assert_eq!(state.game_config.controls.automap, original_keys);
+    }
+
+    // -----------------------------------------------------------------------
+    // Spell Book Key Binding Tests
+    // -----------------------------------------------------------------------
+
+    /// Verify that `ControlsConfig::default()` uses `["B"]` for `spell_book`.
+    #[test]
+    fn test_config_editor_spellbook_key_binding_present() {
+        let state = ConfigEditorState::new();
+        assert_eq!(
+            state.game_config.controls.spell_book,
+            vec!["B".to_string()],
+            "spell_book default binding must be [\"B\"]"
+        );
+    }
+
+    #[test]
+    fn test_spell_book_key_binding_appears_in_update_edit_buffers() {
+        let mut state = ConfigEditorState::new();
+        state.game_config.controls.spell_book = vec!["B".to_string(), "F7".to_string()];
+        state.update_edit_buffers();
+        assert_eq!(state.controls_spell_book_buffer, "B, F7");
+    }
+
+    #[test]
+    fn test_spell_book_key_binding_update_config_from_buffers() {
+        let mut state = ConfigEditorState::new();
+        state.controls_spell_book_buffer = "B, F7".to_string();
+        state.update_config_from_buffers();
+        assert_eq!(
+            state.game_config.controls.spell_book,
+            vec!["B".to_string(), "F7".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_spell_book_buffer_default_is_empty() {
+        let state = ConfigEditorState::default();
+        assert_eq!(state.controls_spell_book_buffer, "");
+    }
+
+    /// Verify full round-trip: set binding → `update_edit_buffers` → `update_config_from_buffers`
+    /// → binding is preserved.
+    ///
+    /// This is the serialisation round-trip described in §6.4 of the
+    /// implementation plan (without RON, since `ControlsConfig` uses
+    /// `Vec<String>` internally rather than `KeyCode`).
+    #[test]
+    fn test_config_editor_spellbook_key_binding_roundtrips() {
+        let mut state = ConfigEditorState::new();
+        let original_keys = vec!["K".to_string()];
+        state.game_config.controls.spell_book = original_keys.clone();
+        state.update_edit_buffers();
+        // Buffer must reflect the new binding
+        assert_eq!(state.controls_spell_book_buffer, "K");
+        // Round-trip back into the config
+        state.update_config_from_buffers();
+        assert_eq!(
+            state.game_config.controls.spell_book, original_keys,
+            "spell_book binding must survive buffer round-trip"
+        );
     }
 }

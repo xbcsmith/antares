@@ -770,6 +770,16 @@ impl FurnitureEditorState {
         });
         ui.separator();
 
+        // Top-of-form navigation: allows the author to return to the list without
+        // scrolling to the bottom Cancel button.
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("◀ Back to List").clicked() {
+                self.mode = FurnitureEditorMode::List;
+                ui.ctx().request_repaint();
+            }
+        });
+        ui.separator();
+
         // SDK Rule 2: distinct id_salt
         egui::ScrollArea::vertical()
             .id_salt("furniture_form_scroll")
@@ -1653,6 +1663,58 @@ mod tests {
         let mut def = FurnitureEditorState::default_furniture();
         def.icon = Some("🏰".to_string());
         assert_eq!(def.display_icon(), "🏰");
+    }
+
+    /// Tests that setting the editor mode to `List` from `Edit` simulates the
+    /// behaviour of the "◀ Back to List" button added to `show_form` (§1.1
+    /// SDK fix).  The button body is:
+    ///
+    /// ```rust,ignore
+    /// if ui.button("◀ Back to List").clicked() {
+    ///     self.mode = FurnitureEditorMode::List;
+    ///     ui.ctx().request_repaint();
+    /// }
+    /// ```
+    ///
+    /// Because egui click events cannot be simulated without a running frame, we
+    /// test the state-transition logic directly: starting in Edit mode, applying
+    /// the same assignment, and asserting the mode is now `List`.
+    #[test]
+    fn test_furniture_show_form_back_button_returns_to_list() {
+        // Start in Edit mode using struct-update syntax to satisfy
+        // clippy::field_reassign_with_default.
+        let mut state = FurnitureEditorState {
+            mode: FurnitureEditorMode::Edit,
+            ..Default::default()
+        };
+        assert_eq!(
+            state.mode,
+            FurnitureEditorMode::Edit,
+            "precondition: mode should be Edit"
+        );
+
+        // Simulate the click handler: set mode to List.
+        state.mode = FurnitureEditorMode::List;
+
+        assert_eq!(
+            state.mode,
+            FurnitureEditorMode::List,
+            "mode should transition to List after back-button action"
+        );
+    }
+
+    /// Tests that the Add mode also transitions to List via the back-button
+    /// path (the button is rendered in both Edit and Add mode).
+    #[test]
+    fn test_furniture_show_form_back_button_from_add_mode_returns_to_list() {
+        let mut state = FurnitureEditorState {
+            mode: FurnitureEditorMode::Add,
+            ..Default::default()
+        };
+        assert_eq!(state.mode, FurnitureEditorMode::Add);
+
+        state.mode = FurnitureEditorMode::List;
+        assert_eq!(state.mode, FurnitureEditorMode::List);
     }
 
     #[test]

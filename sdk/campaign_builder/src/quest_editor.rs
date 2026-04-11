@@ -1142,6 +1142,10 @@ impl QuestEditorState {
     /// editor.start_new_quest(&mut quests, "1".to_string());
     /// assert_eq!(editor.mode, QuestEditorMode::Creating);
     /// ```
+    // 8 parameters (including self) is one over the default clippy limit of 7.
+    // This function predates the parameter-bundle pattern used elsewhere in the
+    // SDK and is tracked for refactoring in Phase 5 of the codebase cleanup plan.
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,

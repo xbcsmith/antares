@@ -856,6 +856,9 @@ fn handle_events(
                 name,
                 items,
                 description,
+                gold,
+                gems,
+                ..
             } => {
                 let msg = format!("Opening container: {} - {}", name, description);
                 info!("{}", msg);
@@ -869,9 +872,13 @@ fn handle_events(
                 // Enter ContainerInventory mode with the current item contents.
                 // On close, the action system writes the updated item list back
                 // to this MapEvent::Container so partial takes persist.
-                global_state
-                    .0
-                    .enter_container_inventory(id.clone(), name.clone(), items.clone());
+                global_state.0.enter_container_inventory(
+                    id.clone(),
+                    name.clone(),
+                    items.clone(),
+                    *gold,
+                    *gems,
+                );
                 info!(
                     "Entered ContainerInventory mode for container '{}' with {} item(s)",
                     id,
@@ -1323,6 +1330,8 @@ mod container_event_tests {
             name: "Old Chest".to_string(),
             description: "A dusty chest".to_string(),
             items: vec![make_slot(1), make_slot(2)],
+            gold: 0,
+            gems: 0,
         };
         map.add_event(event_pos, container_event.clone());
 
@@ -1368,6 +1377,8 @@ mod container_event_tests {
             name: "Barrel".to_string(),
             description: "".to_string(),
             items: vec![make_slot(10), make_slot(20), make_slot(30)],
+            gold: 0,
+            gems: 0,
         };
         map.add_event(event_pos, container_event.clone());
 
@@ -1403,6 +1414,8 @@ mod container_event_tests {
             name: "Empty Crate".to_string(),
             description: "".to_string(),
             items: vec![],
+            gold: 0,
+            gems: 0,
         };
         map.add_event(event_pos, container_event.clone());
 
@@ -1441,6 +1454,8 @@ mod container_event_tests {
                 name: "No Auto Chest".to_string(),
                 description: "".to_string(),
                 items: vec![make_slot(99)],
+                gold: 0,
+                gems: 0,
             },
         );
 

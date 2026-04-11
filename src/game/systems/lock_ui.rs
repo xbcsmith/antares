@@ -615,13 +615,15 @@ pub(crate) fn apply_success(
                             name: name.clone(),
                             description: String::new(),
                             items: items.clone(),
+                            gold: 0,
+                            gems: 0,
                         },
                     );
                 }
             } // borrow of game_state.world ends here
 
             // Step 2 — enter ContainerInventory mode with the locked items.
-            game_state.enter_container_inventory(id, name.clone(), items);
+            game_state.enter_container_inventory(id, name.clone(), items, 0, 0);
 
             messages.push(format!("The {} is unlocked.", name));
         }

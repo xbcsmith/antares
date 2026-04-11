@@ -1607,6 +1607,92 @@ pub fn validate_character_starting_spells(
     results
 }
 
+/// Validates NPC stock template references.
+///
+/// Checks that each NPC's `stock_template` field (when `Some`) references a
+/// stock template that is present in the campaign's loaded template collection.
+///
+/// # Root Cause Note – False "Unknown Stock Template" Errors
+///
+/// `CampaignBuilderApp::validate_npc_ids()` reads template IDs from
+/// `campaign_data.stock_templates`, a mirror that is only refreshed when the
+/// user opens the Stock Templates tab.  If the user clicks *Validate Campaign*
+/// before visiting that tab, the mirror may be empty even though the templates
+/// are fully loaded in `stock_templates_editor_state`, causing every
+/// stock-template reference to appear invalid.
+///
+/// The fix is applied in `validate_campaign()`: the mirror is synced from the
+/// editor state before any validation pass runs.  This pure function always
+/// operates on whatever slice is passed in, so callers must ensure they pass the
+/// current (post-sync) snapshot rather than a stale cache.
+///
+/// # Arguments
+///
+/// * `npcs` - NPC definitions to validate
+/// * `templates` - Known merchant stock templates in the campaign
+///
+/// # Returns
+///
+/// A vector of [`ValidationResult`] containing one [`ValidationResult::error`]
+/// per NPC with an unresolvable `stock_template` reference, or a single
+/// [`ValidationResult::passed`] when every reference resolves correctly.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::validation::validate_npc_stock_template_refs;
+/// use antares::domain::world::NpcDefinition;
+/// use antares::domain::world::npc_runtime::MerchantStockTemplate;
+///
+/// let mut npc = NpcDefinition::new("merchant_tom", "Tom", "tom.png");
+/// npc.stock_template = Some("basic_goods".to_string());
+///
+/// let template = MerchantStockTemplate {
+///     id: "basic_goods".to_string(),
+///     entries: vec![],
+///     magic_item_pool: vec![],
+///     magic_slot_count: 0,
+///     magic_refresh_days: 7,
+///     description: String::new(),
+/// };
+///
+/// let results = validate_npc_stock_template_refs(&[npc], &[template]);
+/// assert_eq!(results.len(), 1);
+/// assert!(results[0].is_passed());
+/// ```
+pub fn validate_npc_stock_template_refs(
+    npcs: &[antares::domain::world::NpcDefinition],
+    templates: &[antares::domain::world::npc_runtime::MerchantStockTemplate],
+) -> Vec<ValidationResult> {
+    let known_ids: std::collections::HashSet<&str> =
+        templates.iter().map(|t| t.id.as_str()).collect();
+
+    let mut results = Vec::new();
+
+    for npc in npcs {
+        if let Some(ref tmpl_id) = npc.stock_template {
+            if !known_ids.contains(tmpl_id.as_str()) {
+                results.push(ValidationResult::error(
+                    ValidationCategory::NPCs,
+                    format!(
+                        "NPC '{}' references unknown stock template '{}'",
+                        npc.id, tmpl_id
+                    ),
+                ));
+            }
+        }
+    }
+
+    if results.is_empty() {
+        results.push(ValidationResult::passed(
+            ValidationCategory::NPCs,
+            "All NPC stock template references are valid".to_string(),
+        ));
+    }
+
+    results
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2925,6 +3011,88 @@ mod tests {
                 .filter(|r| r.is_error())
                 .all(|r| r.category == ValidationCategory::Characters),
             "All errors should use the Characters validation category"
+        );
+    }
+
+    // ── Phase 5: NPC Stock Template Validation ────────────────────────────────
+
+    /// A known (valid) stock template reference must not produce any error
+    /// results.  This covers the cache-invalidation fix: even when called with
+    /// a freshly-synced template snapshot the pure function must recognise the
+    /// reference and emit only a Passed result.
+    #[test]
+    fn test_validation_known_stock_template_not_flagged() {
+        use antares::domain::world::npc_runtime::MerchantStockTemplate;
+        use antares::domain::world::NpcDefinition;
+
+        let template = MerchantStockTemplate {
+            id: "basic_goods".to_string(),
+            entries: vec![],
+            magic_item_pool: vec![],
+            magic_slot_count: 0,
+            magic_refresh_days: 7,
+            description: String::new(),
+        };
+
+        let mut npc = NpcDefinition::new("merchant_tom", "Tom the Merchant", "tom.png");
+        npc.is_merchant = true;
+        npc.stock_template = Some("basic_goods".to_string());
+
+        let results = validate_npc_stock_template_refs(&[npc], &[template]);
+
+        assert!(
+            results.iter().all(|r| !r.is_error()),
+            "known stock template must not produce an error, got: {:?}",
+            results.iter().map(|r| &r.message).collect::<Vec<_>>()
+        );
+        assert!(
+            results.iter().any(|r| r.is_passed()),
+            "valid stock template reference must produce a Passed result"
+        );
+    }
+
+    /// An NPC that references a template id that does not exist in the campaign
+    /// must be flagged with an error that identifies both the NPC and the
+    /// unknown template id.
+    #[test]
+    fn test_validation_unknown_stock_template_is_flagged() {
+        use antares::domain::world::npc_runtime::MerchantStockTemplate;
+        use antares::domain::world::NpcDefinition;
+
+        // The campaign only knows about "real_goods"; the NPC references
+        // "missing_template" which is not in the collection.
+        let template = MerchantStockTemplate {
+            id: "real_goods".to_string(),
+            entries: vec![],
+            magic_item_pool: vec![],
+            magic_slot_count: 0,
+            magic_refresh_days: 7,
+            description: String::new(),
+        };
+
+        let mut npc = NpcDefinition::new("merchant_bad", "Bad Merchant", "bad.png");
+        npc.is_merchant = true;
+        npc.stock_template = Some("missing_template".to_string());
+
+        let results = validate_npc_stock_template_refs(&[npc], &[template]);
+
+        assert!(
+            results
+                .iter()
+                .any(|r| r.is_error() && r.message.contains("missing_template")),
+            "unknown stock template must produce an error mentioning the template id, got: {:?}",
+            results.iter().map(|r| &r.message).collect::<Vec<_>>()
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.is_error() && r.message.contains("merchant_bad")),
+            "error message must mention the NPC id, got: {:?}",
+            results.iter().map(|r| &r.message).collect::<Vec<_>>()
+        );
+        assert!(
+            results.iter().all(|r| !r.is_passed()),
+            "unknown stock template must not produce a Passed result"
         );
     }
 }

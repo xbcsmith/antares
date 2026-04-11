@@ -379,6 +379,8 @@ pub fn try_interact_locked_container_event(
                     name: name.clone(),
                     description: String::new(),
                     items: vec![],
+                    gold: 0,
+                    gems: 0,
                 },
             );
         }
@@ -388,6 +390,8 @@ pub fn try_interact_locked_container_event(
                 name,
                 description: String::new(),
                 items: vec![],
+                gold: 0,
+                gems: 0,
             },
             position: target,
         });
@@ -431,6 +435,8 @@ pub fn try_interact_locked_container_event(
                         name: name.clone(),
                         description: String::new(),
                         items: vec![],
+                        gold: 0,
+                        gems: 0,
                     },
                 );
             }
@@ -441,6 +447,8 @@ pub fn try_interact_locked_container_event(
                     name: name.clone(),
                     description: String::new(),
                     items: vec![],
+                    gold: 0,
+                    gems: 0,
                 },
                 position: target,
             });

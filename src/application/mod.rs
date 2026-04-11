@@ -23,6 +23,7 @@ pub mod spell_book_state;
 pub mod spell_casting_state;
 
 use crate::application::menu::MenuState;
+use crate::application::save_game::SavedLogEntry;
 use crate::domain::campaign::CampaignConfig;
 use crate::domain::character::{Party, Roster};
 use crate::domain::party_manager::{PartyManagementError, PartyManager};
@@ -790,6 +791,15 @@ pub struct GameState {
     /// Defaults to `CampaignConfig::default()` for new games without a campaign.
     #[serde(default)]
     pub campaign_config: CampaignConfig,
+
+    /// Persisted game log entries so the log survives save/load cycles.
+    ///
+    /// Populated from the live [`crate::game::systems::ui::GameLog`] resource
+    /// immediately before a save is written, and used to restore that resource
+    /// after a save is loaded.  Uses `#[serde(default)]` so that saves created
+    /// before this field was added load cleanly with an empty log.
+    #[serde(default)]
+    pub game_log_entries: Vec<SavedLogEntry>,
 }
 
 /// Errors returned by `GameState::initialize_roster`.
@@ -918,6 +928,7 @@ impl GameState {
             encountered_characters: std::collections::HashSet::new(),
             npc_runtime: NpcRuntimeStore::new(),
             campaign_config: CampaignConfig::default(),
+            game_log_entries: Vec::new(),
         }
     }
 
@@ -996,6 +1007,7 @@ impl GameState {
             encountered_characters: std::collections::HashSet::new(),
             npc_runtime: NpcRuntimeStore::new(),
             campaign_config: CampaignConfig::default(),
+            game_log_entries: Vec::new(),
         };
 
         // Initialize roster from content database (premade characters)
@@ -1900,6 +1912,8 @@ impl GameState {
     ///     "chest_001".to_string(),
     ///     "Wooden Chest".to_string(),
     ///     vec![],
+    ///     0,
+    ///     0,
     /// );
     /// assert!(matches!(state.mode, GameMode::ContainerInventory(_)));
     /// ```
@@ -1908,18 +1922,22 @@ impl GameState {
         container_event_id: String,
         container_name: String,
         items: Vec<crate::domain::character::InventorySlot>,
+        gold: u32,
+        gems: u32,
     ) {
         let prev = self.mode.clone();
         let active_character_index = 0;
-        self.mode = GameMode::ContainerInventory(
+        let mut container_state =
             crate::application::container_inventory_state::ContainerInventoryState::new(
                 container_event_id,
                 container_name,
                 items,
                 active_character_index,
                 prev,
-            ),
-        );
+            );
+        container_state.gold = gold;
+        container_state.gems = gems;
+        self.mode = GameMode::ContainerInventory(container_state);
     }
 
     /// Returns to exploration mode (or resumes previous mode when exiting menu)
@@ -2636,6 +2654,7 @@ mod tests {
             magic_item_pool: vec![],
             magic_slot_count: 0,
             magic_refresh_days: 7,
+            description: String::new(),
         });
 
         // Insert a merchant with depleted stock referencing that template.
@@ -4135,6 +4154,7 @@ mod tests {
             magic_item_pool: vec![],
             magic_slot_count: 0,
             magic_refresh_days: 7,
+            description: String::new(),
         });
         db.npc_stock_templates = templates;
 
