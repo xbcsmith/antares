@@ -20,6 +20,7 @@
 
 use crate::domain::character::Character;
 use crate::domain::classes::{ClassDatabase, ClassError};
+use crate::domain::levels::LevelDatabase;
 use crate::domain::types::{DiceRoll, SpellId};
 use crate::sdk::database::SpellDatabase;
 use rand::Rng;
@@ -128,12 +129,7 @@ pub fn award_experience(character: &mut Character, amount: u64) -> Result<(), Pr
 /// assert!(check_level_up(&character));
 /// ```
 pub fn check_level_up(character: &Character) -> bool {
-    if character.level >= MAX_LEVEL {
-        return false;
-    }
-
-    let required = experience_for_level(character.level + 1);
-    character.experience >= required
+    check_level_up_with_db(character, None)
 }
 
 /// Levels up a character
@@ -346,12 +342,76 @@ pub fn level_up_from_db(
     class_db: &ClassDatabase,
     rng: &mut impl Rng,
 ) -> Result<u16, ProgressionError> {
-    // Check if character can level up
-    if character.level >= MAX_LEVEL {
+    level_up_with_level_db(character, class_db, None, None, rng)
+}
+
+/// Levels up a character using a `ClassDatabase`, an optional `LevelDatabase`,
+/// and an optional campaign-configured maximum level.
+///
+/// This is the canonical implementation that [`level_up_from_db`] delegates to.
+/// Use it directly when you need to supply explicit per-class XP tables or
+/// enforce a campaign-specific `max_party_level`.
+///
+/// # Arguments
+///
+/// * `character`  - The character to level up (will be modified)
+/// * `class_db`   - Reference to the class database (for HP dice and spell school)
+/// * `level_db`   - Optional level database for per-class XP thresholds;
+///   `None` falls back to the formula in [`experience_for_level`]
+/// * `max_level`  - Optional campaign maximum level override;
+///   `None` defaults to [`MAX_LEVEL`] (200)
+/// * `rng`        - Random number generator for HP rolls
+///
+/// # Returns
+///
+/// Returns `Ok(hp_gained)` on success. Returns [`ProgressionError::MaxLevelReached`]
+/// when `character.level >= max_level` (or `MAX_LEVEL` when `max_level` is
+/// `None`), and [`ProgressionError::NotEnoughExperience`] when XP is
+/// insufficient.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::{Character, Sex, Alignment};
+/// use antares::domain::classes::ClassDatabase;
+/// use antares::domain::progression::{award_experience, level_up_with_level_db};
+/// use rand::rng;
+///
+/// let mut knight = Character::new(
+///     "Sir Lancelot".to_string(),
+///     "human".to_string(),
+///     "knight".to_string(),
+///     Sex::Male,
+///     Alignment::Good,
+/// );
+///
+/// // Give enough XP to level up
+/// award_experience(&mut knight, 10000).unwrap();
+///
+/// let db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+/// let mut rng = rng();
+///
+/// // No level database, no max-level override — identical to level_up_from_db
+/// let hp = level_up_with_level_db(&mut knight, &db, None, None, &mut rng).unwrap();
+/// assert_eq!(knight.level, 2);
+/// assert!(hp > 0);
+/// ```
+pub fn level_up_with_level_db(
+    character: &mut Character,
+    class_db: &ClassDatabase,
+    level_db: Option<&LevelDatabase>,
+    max_level: Option<u32>,
+    rng: &mut impl Rng,
+) -> Result<u16, ProgressionError> {
+    let effective_max = max_level.unwrap_or(MAX_LEVEL);
+
+    // Enforce campaign-configured (or global) maximum level
+    if character.level >= effective_max {
         return Err(ProgressionError::MaxLevelReached);
     }
 
-    let required = experience_for_level(character.level + 1);
+    // Use explicit table if available, otherwise fall back to formula
+    let required = experience_for_level_class(character.level + 1, &character.class_id, level_db);
     if character.experience < required {
         return Err(ProgressionError::NotEnoughExperience {
             needed: required,
@@ -437,8 +497,73 @@ pub fn level_up_and_grant_spells(
     spell_db: &SpellDatabase,
     rng: &mut impl Rng,
 ) -> Result<(u16, Vec<SpellId>), ProgressionError> {
-    // Perform standard level-up (HP roll, SP update)
-    let hp_gained = level_up_from_db(character, class_db, rng)?;
+    level_up_and_grant_spells_with_level_db(character, class_db, spell_db, None, None, rng)
+}
+
+/// Full level-up pipeline with optional per-class XP tables and campaign max level.
+///
+/// Combines [`level_up_with_level_db`] with automatic spell-granting. After HP
+/// and SP are updated, every spell that first becomes accessible at the new
+/// level is added to the character's spellbook.
+///
+/// Non-caster classes (Knight, Robber) receive no spells; the returned
+/// `Vec<SpellId>` will be empty.
+///
+/// # Arguments
+///
+/// * `character`  - The character to level up (will be modified)
+/// * `class_db`   - Reference to the class database
+/// * `spell_db`   - Reference to the spell database
+/// * `level_db`   - Optional level database for per-class XP thresholds;
+///   `None` falls back to [`experience_for_level`]
+/// * `max_level`  - Optional campaign maximum level; `None` defaults to [`MAX_LEVEL`]
+/// * `rng`        - Random number generator for HP rolls
+///
+/// # Returns
+///
+/// Returns `Ok((hp_gained, granted_spells))` on success.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::{Character, Sex, Alignment};
+/// use antares::domain::classes::ClassDatabase;
+/// use antares::domain::magic::database::SpellDatabase;
+/// use antares::domain::progression::{award_experience, level_up_and_grant_spells_with_level_db};
+/// use rand::rng;
+///
+/// let mut cleric = Character::new(
+///     "Theodora".to_string(),
+///     "human".to_string(),
+///     "cleric".to_string(),
+///     Sex::Female,
+///     Alignment::Good,
+/// );
+/// award_experience(&mut cleric, 10000).unwrap();
+///
+/// let class_db = ClassDatabase::load_from_file("data/classes.ron").unwrap();
+/// let spell_db = SpellDatabase::load_from_file("data/spells.ron").unwrap_or_default();
+/// let mut rng = rng();
+///
+/// // No level database, no max-level override
+/// let (hp, spells) =
+///     level_up_and_grant_spells_with_level_db(&mut cleric, &class_db, &spell_db, None, None, &mut rng)
+///         .unwrap();
+///
+/// assert_eq!(cleric.level, 2);
+/// assert!(hp > 0);
+/// let _ = spells;
+/// ```
+pub fn level_up_and_grant_spells_with_level_db(
+    character: &mut Character,
+    class_db: &ClassDatabase,
+    spell_db: &SpellDatabase,
+    level_db: Option<&LevelDatabase>,
+    max_level: Option<u32>,
+    rng: &mut impl Rng,
+) -> Result<(u16, Vec<SpellId>), ProgressionError> {
+    // Perform level-up (HP roll, SP update) using explicit table or formula
+    let hp_gained = level_up_with_level_db(character, class_db, level_db, max_level, rng)?;
 
     // Determine which spells first become accessible at the new level
     let new_level = character.level;
@@ -460,7 +585,7 @@ pub fn level_up_and_grant_spells(
             Err(e) => {
                 // Log unexpected errors but do not abort the level-up
                 tracing::warn!(
-                    "level_up_and_grant_spells: could not grant spell {} to {}: {}",
+                    "level_up_and_grant_spells_with_level_db: could not grant spell {} to {}: {}",
                     spell_id,
                     character.name,
                     e
@@ -492,9 +617,107 @@ pub fn experience_for_level(level: u32) -> u64 {
     (BASE_XP as f64 * level_offset.powf(XP_MULTIPLIER)) as u64
 }
 
+/// Calculates the XP required for a given level, consulting an optional
+/// per-class [`LevelDatabase`] before falling back to the formula.
+///
+/// This is the primary entry point for XP threshold lookups anywhere in the
+/// game that may be campaign-configured.
+///
+/// # Arguments
+///
+/// * `level`    - The target character level (1-based)
+/// * `class_id` - The character's class identifier (e.g. `"knight"`)
+/// * `db`       - Optional level database; `None` always uses the formula
+///
+/// # Returns
+///
+/// - If `db` is `Some` **and** the class has an explicit table: returns the
+///   table value (possibly extrapolated via cap behaviour).
+/// - Otherwise: returns `experience_for_level(level)`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::progression::{experience_for_level, experience_for_level_class};
+///
+/// // Without a database — identical to experience_for_level
+/// assert_eq!(experience_for_level_class(1, "knight", None), 0);
+/// assert_eq!(experience_for_level_class(2, "knight", None), experience_for_level(2));
+///
+/// // Unknown class with db — falls back to formula without panic
+/// use antares::domain::levels::LevelDatabase;
+/// let db = LevelDatabase::new();
+/// assert_eq!(
+///     experience_for_level_class(2, "unknown_class", Some(&db)),
+///     experience_for_level(2),
+/// );
+/// ```
+pub fn experience_for_level_class(level: u32, class_id: &str, db: Option<&LevelDatabase>) -> u64 {
+    if let Some(db) = db {
+        if let Some(xp) = db.threshold_for_class(class_id, level) {
+            return xp;
+        }
+    }
+    experience_for_level(level)
+}
+
+/// Checks if a character has enough experience to level up, using an optional
+/// per-class [`LevelDatabase`] for the XP threshold.
+///
+/// This is the canonical implementation. [`check_level_up`] is a thin wrapper
+/// that calls this function with `db = None`.
+///
+/// # Arguments
+///
+/// * `character` - The character to check
+/// * `db`        - Optional level database; `None` falls back to the formula
+///
+/// # Returns
+///
+/// Returns `true` if `character.experience >= threshold(character.level + 1)`
+/// and `character.level < MAX_LEVEL` (or the campaign max level).
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::{Character, Sex, Alignment};
+/// use antares::domain::levels::LevelDatabase;
+/// use antares::domain::progression::{award_experience, check_level_up_with_db};
+///
+/// let mut knight = Character::new(
+///     "Sir Lancelot".to_string(),
+///     "human".to_string(),
+///     "knight".to_string(),
+///     Sex::Male,
+///     Alignment::Good,
+/// );
+///
+/// // No db — uses formula threshold (1000 for level 2)
+/// assert!(!check_level_up_with_db(&knight, None));
+/// award_experience(&mut knight, 1000).unwrap();
+/// assert!(check_level_up_with_db(&knight, None));
+///
+/// // With an explicit db that requires more XP for knights
+/// let ron = r#"(entries: [(class_id: "knight", thresholds: [0, 1200, 3000])])"#;
+/// let db = LevelDatabase::load_from_string(ron).unwrap();
+/// // 1000 XP is not enough when the table requires 1200
+/// assert!(!check_level_up_with_db(&knight, Some(&db)));
+/// award_experience(&mut knight, 200).unwrap();
+/// assert!(check_level_up_with_db(&knight, Some(&db)));
+/// ```
+pub fn check_level_up_with_db(character: &Character, db: Option<&LevelDatabase>) -> bool {
+    if character.level >= MAX_LEVEL {
+        return false;
+    }
+
+    let required = experience_for_level_class(character.level + 1, &character.class_id, db);
+    character.experience >= required
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::levels::LevelDatabase;
     use crate::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
     use crate::sdk::database::SpellDatabase;
     use crate::test_helpers::factories::test_character_with_class;
@@ -507,6 +730,18 @@ mod tests {
     fn make_class_db() -> crate::domain::classes::ClassDatabase {
         crate::domain::classes::ClassDatabase::load_from_file("data/classes.ron")
             .expect("data/classes.ron must exist")
+    }
+
+    /// Builds a small LevelDatabase for testing: knight requires 1200 XP for
+    /// level 2 (vs. formula value of 1000), sorcerer requires 800.
+    fn make_level_db() -> LevelDatabase {
+        let ron = r#"(
+            entries: [
+                (class_id: "knight",   thresholds: [0, 1200, 3000, 6000]),
+                (class_id: "sorcerer", thresholds: [0,  800, 2000, 4000]),
+            ],
+        )"#;
+        LevelDatabase::load_from_string(ron).expect("inline RON must be valid")
     }
 
     fn make_spell_db_with_level1_cleric_and_sorcerer() -> SpellDatabase {
@@ -1011,5 +1246,323 @@ mod tests {
 
         assert!(hp_gained > 0);
         assert_eq!(cleric.hp.base, hp_before + hp_gained);
+    }
+
+    // ===== experience_for_level_class tests =====
+
+    #[test]
+    fn test_experience_for_level_class_no_db_matches_formula() {
+        // With no database, must produce identical results to experience_for_level
+        for lvl in [1u32, 2, 3, 5, 10, 50, 200] {
+            assert_eq!(
+                experience_for_level_class(lvl, "knight", None),
+                experience_for_level(lvl),
+                "Mismatch at level {lvl}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_experience_for_level_class_with_db_found_returns_table_value() {
+        let db = make_level_db();
+
+        // Knight level 2 in the table is 1200, formula gives 1000 — must differ
+        let table_val = experience_for_level_class(2, "knight", Some(&db));
+        let formula_val = experience_for_level(2);
+        assert_eq!(table_val, 1200, "Should use table value for knight level 2");
+        assert_ne!(
+            table_val, formula_val,
+            "Table and formula must differ for this fixture"
+        );
+
+        // Sorcerer level 2 in the table is 800, formula gives 1000
+        assert_eq!(experience_for_level_class(2, "sorcerer", Some(&db)), 800);
+    }
+
+    #[test]
+    fn test_experience_for_level_class_with_db_not_found_falls_back_to_formula() {
+        let db = make_level_db(); // contains knight and sorcerer only
+
+        // "cleric" is absent from the inline DB — must fall back to formula
+        let result = experience_for_level_class(2, "cleric", Some(&db));
+        assert_eq!(result, experience_for_level(2));
+    }
+
+    #[test]
+    fn test_experience_for_level_class_level_1_always_zero() {
+        let db = make_level_db();
+        assert_eq!(experience_for_level_class(1, "knight", None), 0);
+        assert_eq!(experience_for_level_class(1, "knight", Some(&db)), 0);
+        assert_eq!(experience_for_level_class(1, "unknown", Some(&db)), 0);
+    }
+
+    #[test]
+    fn test_experience_for_level_class_empty_db_falls_back_to_formula() {
+        let db = LevelDatabase::new();
+        for lvl in [2u32, 5, 10] {
+            assert_eq!(
+                experience_for_level_class(lvl, "knight", Some(&db)),
+                experience_for_level(lvl),
+                "Empty DB must fall back to formula at level {lvl}"
+            );
+        }
+    }
+
+    // ===== check_level_up_with_db tests =====
+
+    #[test]
+    fn test_check_level_up_with_db_no_db_uses_formula() {
+        let mut character = create_test_character("knight");
+
+        // Not enough XP yet
+        assert!(!check_level_up_with_db(&character, None));
+
+        // Give exactly the formula threshold for level 2 (1000)
+        character.experience = experience_for_level(2);
+        assert!(check_level_up_with_db(&character, None));
+    }
+
+    #[test]
+    fn test_check_level_up_with_db_uses_table_threshold() {
+        let db = make_level_db(); // knight level 2 = 1200
+        let mut knight = create_test_character("knight");
+
+        // 1000 XP satisfies formula but NOT the table (table requires 1200)
+        knight.experience = 1000;
+        assert!(!check_level_up_with_db(&knight, Some(&db)));
+
+        // 1200 XP satisfies the table
+        knight.experience = 1200;
+        assert!(check_level_up_with_db(&knight, Some(&db)));
+    }
+
+    #[test]
+    fn test_check_level_up_with_db_unknown_class_falls_back_to_formula() {
+        let db = make_level_db(); // no "cleric" entry
+        let mut cleric = create_test_character("cleric");
+
+        // Formula threshold for level 2 is 1000
+        cleric.experience = experience_for_level(2);
+        assert!(check_level_up_with_db(&cleric, Some(&db)));
+    }
+
+    #[test]
+    fn test_check_level_up_with_db_max_level_returns_false() {
+        let mut character = create_test_character("knight");
+        character.level = MAX_LEVEL;
+        character.experience = u64::MAX;
+
+        // Should be false regardless of db
+        assert!(!check_level_up_with_db(&character, None));
+        let db = make_level_db();
+        assert!(!check_level_up_with_db(&character, Some(&db)));
+    }
+
+    #[test]
+    fn test_check_level_up_delegates_to_check_level_up_with_db() {
+        // check_level_up must behave identically to check_level_up_with_db(c, None)
+        let mut character = create_test_character("knight");
+        assert_eq!(
+            check_level_up(&character),
+            check_level_up_with_db(&character, None)
+        );
+
+        character.experience = experience_for_level(2);
+        assert_eq!(
+            check_level_up(&character),
+            check_level_up_with_db(&character, None)
+        );
+        assert!(check_level_up(&character));
+    }
+
+    // ===== level_up_with_level_db tests =====
+
+    #[test]
+    fn test_level_up_with_level_db_no_db_behaves_like_level_up_from_db() {
+        let class_db = make_class_db();
+        let mut character = create_test_character("knight");
+        character.experience = experience_for_level(2);
+
+        let mut rng = rng();
+        let hp = level_up_with_level_db(&mut character, &class_db, None, None, &mut rng).unwrap();
+        assert_eq!(character.level, 2);
+        assert!((1..=10).contains(&hp));
+    }
+
+    #[test]
+    fn test_level_up_with_level_db_uses_table_threshold() {
+        let class_db = make_class_db();
+        let db = make_level_db(); // knight level 2 = 1200
+        let mut knight = create_test_character("knight");
+
+        // 1000 XP is enough for formula but NOT for the explicit table
+        knight.experience = 1000;
+        let mut rng = rng();
+        let result = level_up_with_level_db(&mut knight, &class_db, Some(&db), None, &mut rng);
+        assert!(
+            matches!(
+                result,
+                Err(ProgressionError::NotEnoughExperience { needed: 1200, .. })
+            ),
+            "Expected NotEnoughExperience(needed=1200), got {:?}",
+            result
+        );
+        assert_eq!(knight.level, 1, "Level must not change on failure");
+
+        // Now provide 1200 XP — should succeed
+        knight.experience = 1200;
+        let hp = level_up_with_level_db(&mut knight, &class_db, Some(&db), None, &mut rng).unwrap();
+        assert_eq!(knight.level, 2);
+        assert!(hp > 0);
+    }
+
+    #[test]
+    fn test_level_up_with_level_db_enforces_max_party_level() {
+        let class_db = make_class_db();
+        let mut character = create_test_character("knight");
+
+        // Campaign max level of 10 — character is already at 10
+        character.level = 10;
+        character.experience = u64::MAX;
+
+        let mut rng = rng();
+        let result = level_up_with_level_db(&mut character, &class_db, None, Some(10), &mut rng);
+        assert!(
+            matches!(result, Err(ProgressionError::MaxLevelReached)),
+            "Expected MaxLevelReached when level == max_level, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_level_up_with_level_db_max_level_none_uses_global_max() {
+        let class_db = make_class_db();
+        let mut character = create_test_character("knight");
+        character.level = MAX_LEVEL;
+        character.experience = u64::MAX;
+
+        let mut rng = rng();
+        let result = level_up_with_level_db(&mut character, &class_db, None, None, &mut rng);
+        assert!(matches!(result, Err(ProgressionError::MaxLevelReached)));
+    }
+
+    #[test]
+    fn test_level_up_with_level_db_campaign_max_lower_than_global() {
+        let class_db = make_class_db();
+        let mut character = create_test_character("knight");
+        // Campaign allows up to level 5; character is at level 4
+        character.level = 4;
+        character.experience = u64::MAX;
+
+        let mut rng = rng();
+        // Level 5 (max=5) — character is at 4, not yet at cap — should succeed
+        let result = level_up_with_level_db(&mut character, &class_db, None, Some(5), &mut rng);
+        assert!(result.is_ok(), "Should be able to reach level 5");
+        assert_eq!(character.level, 5);
+
+        // Now at 5 — at cap — should fail
+        character.experience = u64::MAX;
+        let result2 = level_up_with_level_db(&mut character, &class_db, None, Some(5), &mut rng);
+        assert!(matches!(result2, Err(ProgressionError::MaxLevelReached)));
+    }
+
+    #[test]
+    fn test_level_up_from_db_still_works_as_wrapper() {
+        // Ensure the existing thin wrapper produces the same result as before
+        let class_db = make_class_db();
+        let mut character = create_test_character("knight");
+        character.experience = experience_for_level(2);
+
+        let mut rng = rng();
+        let hp = level_up_from_db(&mut character, &class_db, &mut rng).unwrap();
+        assert_eq!(character.level, 2);
+        assert!((1..=10).contains(&hp));
+    }
+
+    // ===== level_up_and_grant_spells_with_level_db tests =====
+
+    #[test]
+    fn test_level_up_and_grant_spells_with_level_db_no_db_matches_existing() {
+        let class_db = make_class_db();
+        let spell_db = make_spell_db_with_level1_cleric_and_sorcerer();
+        let mut cleric = create_test_character("cleric");
+        cleric.experience = experience_for_level(2);
+
+        let mut rng = rng();
+        let (hp, spells) = level_up_and_grant_spells_with_level_db(
+            &mut cleric,
+            &class_db,
+            &spell_db,
+            None,
+            None,
+            &mut rng,
+        )
+        .unwrap();
+        assert_eq!(cleric.level, 2);
+        assert!(hp > 0);
+        // Level 2 grants no new cleric spells (spell level 2 opens at char level 3)
+        assert!(spells.is_empty());
+    }
+
+    #[test]
+    fn test_level_up_and_grant_spells_with_level_db_max_level_enforced() {
+        let class_db = make_class_db();
+        let spell_db = make_spell_db_with_level1_cleric_and_sorcerer();
+        let mut cleric = create_test_character("cleric");
+        cleric.level = 5;
+        cleric.experience = u64::MAX;
+
+        let mut rng = rng();
+        let result = level_up_and_grant_spells_with_level_db(
+            &mut cleric,
+            &class_db,
+            &spell_db,
+            None,
+            Some(5),
+            &mut rng,
+        );
+        assert!(matches!(result, Err(ProgressionError::MaxLevelReached)));
+    }
+
+    // ===== Fixture integration test =====
+
+    #[test]
+    fn test_experience_for_level_class_with_fixture_database() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let path =
+            std::path::PathBuf::from(manifest_dir).join("data/test_campaign/data/levels.ron");
+
+        let db = LevelDatabase::load_from_file(&path).expect("levels.ron fixture must load");
+
+        // Knight level 2 from fixture = 1200, formula = 1000 — must use fixture value
+        let xp = experience_for_level_class(2, "knight", Some(&db));
+        assert_eq!(xp, 1200, "Knight level 2 should use fixture value 1200");
+        assert_ne!(xp, experience_for_level(2), "Should differ from formula");
+
+        // Sorcerer level 2 from fixture = 800
+        let sorcerer_xp = experience_for_level_class(2, "sorcerer", Some(&db));
+        assert_eq!(sorcerer_xp, 800);
+
+        // Unknown class falls back to formula
+        let unknown_xp = experience_for_level_class(2, "unknown_class", Some(&db));
+        assert_eq!(unknown_xp, experience_for_level(2));
+    }
+
+    #[test]
+    fn test_check_level_up_with_db_fixture_database() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let path =
+            std::path::PathBuf::from(manifest_dir).join("data/test_campaign/data/levels.ron");
+        let db = LevelDatabase::load_from_file(&path).expect("levels.ron fixture must load");
+
+        let mut knight = create_test_character("knight");
+
+        // 1000 XP is below the knight table threshold of 1200 → not ready
+        knight.experience = 1000;
+        assert!(!check_level_up_with_db(&knight, Some(&db)));
+
+        // 1200 XP satisfies the knight table threshold → ready
+        knight.experience = 1200;
+        assert!(check_level_up_with_db(&knight, Some(&db)));
     }
 }

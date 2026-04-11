@@ -1,5 +1,94 @@
 # Implementations
 
+## Phase 1: Domain — `LevelDatabase` and `levels.ron` (Complete)
+
+### Overview
+
+Implemented the foundational domain layer for the character leveling system
+as specified in `docs/explanation/level_up_plan.md` Phase 1. This introduces
+explicit per-class XP threshold tables (`LevelDatabase`) loaded from
+`levels.ron`, plus database-aware variants of the core progression functions.
+All existing progression tests continue to pass unchanged.
+
+### What Changed
+
+#### 1. New file — `src/domain/levels.rs`
+
+Introduces three public types:
+
+| Type                   | Role                                                                                                        |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `LevelError`           | `thiserror` enum with `LoadError`, `ParseError`, `ClassNotFound`                                            |
+| `ClassLevelThresholds` | Per-class XP vector; `xp_for_level(level)` with cap-behaviour extrapolation                                 |
+| `LevelDatabase`        | Struct-wrapper loaded from `(entries: [...])` RON; internal `HashMap` index rebuilt after every deserialise |
+
+Key design decisions:
+
+- `#[serde(skip)]` on the internal `HashMap` index — the index is rebuilt by
+  `rebuild_index()` after every `load_from_string` / `load_from_file` call so
+  RON round-trips are lossless.
+- Cap behaviour: when a character's level exceeds the explicit table, the last
+  delta (difference between the final two entries) is repeated indefinitely —
+  levels never become impossible to reach.
+- `threshold_for_class` returns `Option<u64>` — `None` means "no entry for
+  this class; caller must use formula fallback". This is a deliberate
+  nullability contract, not an error.
+
+#### 2. `src/domain/mod.rs`
+
+Added `pub mod levels;` and re-exported `ClassLevelThresholds`, `LevelDatabase`,
+`LevelError` from the domain root.
+
+#### 3. `src/domain/progression.rs` — new public functions
+
+| Function                                                                | Description                                                                                                         |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `experience_for_level_class(level, class_id, db)`                       | Consults `LevelDatabase` first; falls back to `experience_for_level` when absent or class not found                 |
+| `check_level_up_with_db(character, db)`                                 | Uses `experience_for_level_class`; `check_level_up` is now a thin wrapper calling `check_level_up_with_db(c, None)` |
+| `level_up_with_level_db(character, class_db, level_db, max_level, rng)` | Canonical level-up implementation; enforces `max_level.unwrap_or(MAX_LEVEL)`; `level_up_from_db` delegates to this  |
+| `level_up_and_grant_spells_with_level_db(...)`                          | Full pipeline variant accepting `level_db` and `max_level`; `level_up_and_grant_spells` delegates to this           |
+
+Backward compatibility: all existing callers of `check_level_up`,
+`level_up_from_db`, and `level_up_and_grant_spells` are unaffected — those
+functions are now thin wrappers passing `None` for the new parameters.
+
+`max_party_level` enforcement lives in `level_up_with_level_db`:
+`character.level >= max_level.unwrap_or(MAX_LEVEL)` → `MaxLevelReached`.
+
+#### 4. `data/test_campaign/data/levels.ron`
+
+New test fixture with two classes whose thresholds deliberately differ from
+the formula so tests can assert the database is actually consulted:
+
+- `"knight"` level 2 → 1200 XP (formula gives 1000)
+- `"sorcerer"` level 2 → 800 XP (formula gives 1000)
+
+#### 5. `src/domain/campaign_loader.rs`
+
+- Added `pub levels: Option<LevelDatabase>` to `GameData`
+- `GameData::new()` initialises `levels: None`
+- `CampaignLoader::load_game_data` calls the new `load_levels()` helper
+- `load_levels()` looks for `campaign/data/levels.ron`; absent file → `Ok(None)`
+  (formula fallback); present file → parsed and returned as `Some(LevelDatabase)`
+
+### Test Coverage
+
+| Module                    | New Tests                                                                                                                                                                                 |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `domain::levels`          | 24 unit tests covering boundary conditions, empty tables, cap behaviour, round-trip serialisation, fixture load, error display                                                            |
+| `domain::progression`     | 18 new tests covering `experience_for_level_class`, `check_level_up_with_db`, `level_up_with_level_db` (incl. `max_party_level` enforcement and explicit thresholds), fixture integration |
+| `domain::campaign_loader` | 2 new integration tests: missing `levels.ron` returns `None`; fixture campaign loads knight/sorcerer entries correctly                                                                    |
+
+### Success Criteria Verification
+
+- ✅ `experience_for_level_class("knight", 2, Some(&db))` → `1200` (fixture value, not formula `1000`)
+- ✅ `experience_for_level_class("unknown_class", 2, Some(&db))` → formula value, no panic
+- ✅ `check_level_up_with_db` returns `true` exactly when `XP ≥ threshold`
+- ✅ `level_up_with_level_db` returns `MaxLevelReached` when `level >= max_party_level`
+- ✅ All 4476 pre-existing tests continue to pass unchanged
+
+---
+
 ## Bugfix: Game Log Not Persisted Across Save/Load (Complete)
 
 ### Overview

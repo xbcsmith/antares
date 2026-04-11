@@ -25,6 +25,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::domain::items::database::ItemMeshDatabase;
+use crate::domain::levels::LevelDatabase;
 use crate::domain::visual::creature_database::CreatureDatabase;
 use crate::domain::world::furniture::{FurnitureDatabase, FurnitureMeshDatabase};
 
@@ -82,12 +83,14 @@ pub enum CampaignError {
 ///     item_meshes: ItemMeshDatabase::new(),
 ///     furniture: FurnitureDatabase::new(),
 ///     furniture_meshes: FurnitureMeshDatabase::new(),
+///     levels: None,
 /// };
 ///
 /// assert!(game_data.creatures.is_empty());
 /// assert!(game_data.item_meshes.is_empty());
 /// assert!(game_data.furniture.is_empty());
 /// assert!(game_data.furniture_meshes.is_empty());
+/// assert!(game_data.levels.is_none());
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct GameData {
@@ -99,6 +102,11 @@ pub struct GameData {
     pub furniture: FurnitureDatabase,
     /// Furniture mesh database — custom OBJ-imported mesh definitions
     pub furniture_meshes: FurnitureMeshDatabase,
+    /// Optional per-class XP threshold tables loaded from `data/levels.ron`.
+    ///
+    /// `None` means the file was absent; all XP calculations fall back to
+    /// the formula in [`crate::domain::progression::experience_for_level`].
+    pub levels: Option<LevelDatabase>,
 }
 
 impl GameData {
@@ -119,6 +127,7 @@ impl GameData {
             item_meshes: ItemMeshDatabase::new(),
             furniture: FurnitureDatabase::new(),
             furniture_meshes: FurnitureMeshDatabase::new(),
+            levels: None,
         }
     }
 
@@ -230,10 +239,39 @@ impl CampaignLoader {
         // Load furniture mesh registry (opt-in per campaign; missing file is OK)
         game_data.furniture_meshes = self.load_furniture_meshes()?;
 
+        // Load per-class XP tables (opt-in per campaign; missing file is OK —
+        // absent levels.ron means "use formula for all classes")
+        game_data.levels = self.load_levels()?;
+
         // Validate all loaded data
         game_data.validate()?;
 
         Ok(game_data)
+    }
+
+    /// Loads per-class XP threshold tables from `data/levels.ron` inside the
+    /// campaign directory.
+    ///
+    /// If the file is absent, returns `Ok(None)` — a missing `levels.ron` is
+    /// not an error; it simply means every class uses the formula fallback.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CampaignError::ParseError` if the file exists but cannot be
+    /// parsed as a valid [`LevelDatabase`].
+    fn load_levels(&self) -> Result<Option<LevelDatabase>, CampaignError> {
+        let levels_path = self.campaign_path.join("data/levels.ron");
+
+        if !levels_path.exists() {
+            // Missing levels.ron is not an error — formula fallback is used
+            return Ok(None);
+        }
+
+        LevelDatabase::load_from_file(&levels_path)
+            .map(Some)
+            .map_err(|e| {
+                CampaignError::ParseError(format!("levels.ron '{}': {}", levels_path.display(), e))
+            })
     }
 
     /// Loads creature database from campaign
@@ -398,6 +436,7 @@ mod tests {
         assert!(data.creatures.is_empty());
         assert!(data.item_meshes.is_empty());
         assert!(data.furniture.is_empty());
+        assert!(data.levels.is_none());
     }
 
     #[test]
@@ -406,6 +445,7 @@ mod tests {
         assert!(data.creatures.is_empty());
         assert!(data.item_meshes.is_empty());
         assert!(data.furniture.is_empty());
+        assert!(data.levels.is_none());
     }
 
     #[test]
@@ -511,5 +551,66 @@ mod tests {
             "Expected empty FurnitureDatabase when furniture.ron is absent"
         );
         assert!(result.unwrap().is_empty());
+    }
+
+    /// Phase 1 — a campaign without `levels.ron` loads without error and
+    /// returns `None` (formula fallback).
+    #[test]
+    fn test_levels_missing_is_ok() {
+        let loader = CampaignLoader::new(
+            PathBuf::from("nonexistent_data"),
+            PathBuf::from("nonexistent_campaign"),
+        );
+
+        let result = loader.load_levels();
+        assert!(
+            result.is_ok(),
+            "Expected Ok(None) when levels.ron is absent, got {:?}",
+            result.err()
+        );
+        assert!(
+            result.unwrap().is_none(),
+            "levels should be None when file is absent"
+        );
+    }
+
+    /// Phase 1 — loads `data/test_campaign` and asserts `levels` is `Some`
+    /// with the expected knight and sorcerer entries.
+    #[test]
+    fn test_campaign_loader_loads_levels_from_fixture() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let base = std::path::PathBuf::from(manifest_dir).join("data");
+        let campaign = base.join("test_campaign");
+
+        let mut loader = CampaignLoader::new(base, campaign);
+        let result = loader.load_game_data();
+        assert!(result.is_ok(), "load_game_data failed: {:?}", result.err());
+
+        let game_data = result.unwrap();
+        let levels = game_data
+            .levels
+            .as_ref()
+            .expect("levels.ron fixture must load");
+
+        // Knight entry must be present with the fixture-defined level-2 threshold
+        assert_eq!(
+            levels.threshold_for_class("knight", 2),
+            Some(1200),
+            "Knight level 2 threshold should be 1200 from the fixture"
+        );
+
+        // Sorcerer entry must be present
+        assert_eq!(
+            levels.threshold_for_class("sorcerer", 2),
+            Some(800),
+            "Sorcerer level 2 threshold should be 800 from the fixture"
+        );
+
+        // Class absent from the fixture should return None
+        assert_eq!(
+            levels.threshold_for_class("unknown_class", 2),
+            None,
+            "Unknown class should return None"
+        );
     }
 }

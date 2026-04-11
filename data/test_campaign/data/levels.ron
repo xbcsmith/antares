@@ -1,0 +1,59 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+// Explicit per-class XP threshold tables for the test campaign.
+//
+// Format:
+//   thresholds[0] == 0          (level 1 always costs 0 XP)
+//   thresholds[N] == total XP   required to BE at level N+1
+//
+// When a character's level exceeds the length of the vector the last
+// delta (difference between the final two entries) is repeated —
+// "cap behaviour".
+//
+// Classes absent from this file fall back to the formula:
+//   base_xp * (level - 1) ^ xp_multiplier
+//
+// The values below are intentionally different from the formula so
+// tests can assert that the database is actually consulted.
+//
+//   formula level 2 = 1000  →  knight uses 1200, sorcerer uses 800
+(
+    entries: [
+        // Knight: 10-level explicit table.
+        // Formula values for comparison:
+        //   L2=1000  L3=2828  L4=5196  L5=8000  L6=11390
+        //   L7=15119 L8=19125 L9=23383 L10=27872
+        // All knight values are distinct from the formula.
+        (
+            class_id: "knight",
+            thresholds: [
+                0,      // Level 1:  always 0 XP
+                1200,   // Level 2:  1200  (formula: 1000)
+                3000,   // Level 3:  3000  (formula: 2828)
+                6000,   // Level 4:  6000  (formula: 5196)
+                10000,  // Level 5:  10000 (formula: 8000)
+                15000,  // Level 6:  15000 (formula: 11390)
+                21000,  // Level 7:  21000 (formula: 15119)
+                28000,  // Level 8:  28000 (formula: 19125)
+                36000,  // Level 9:  36000 (formula: 23383)
+                45000,  // Level 10: 45000 (formula: 27872)
+                // Levels > 10: last delta (45000 - 36000 = 9000) is repeated
+            ],
+        ),
+        // Sorcerer: flat-step model — 6-level explicit table.
+        // All values differ from the formula so tests can detect fallback.
+        (
+            class_id: "sorcerer",
+            thresholds: [
+                0,      // Level 1: always 0 XP
+                800,    // Level 2: 800   (formula: 1000)
+                2000,   // Level 3: 2000  (formula: 2828)
+                4000,   // Level 4: 4000  (formula: 5196)
+                6500,   // Level 5: 6500  (formula: 8000)
+                9500,   // Level 6: 9500  (formula: 11390)
+                // Levels > 6: last delta (9500 - 6500 = 3000) is repeated
+            ],
+        ),
+    ],
+)
