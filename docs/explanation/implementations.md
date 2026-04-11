@@ -198,6 +198,107 @@ Added focused tests for the new exploration pickup helper covering:
 Updated event-system behavior notes/tests so explicit-only dropped-item pickup
 is the documented interaction model.
 
+## Phase 3: Auto Level-Up Game System (Complete)
+
+### Overview
+
+Implemented Phase 3 of the character leveling system as specified in
+`docs/explanation/level_up_plan.md`. This phase wires the domain-layer
+progression functions into a Bevy ECS system (`auto_level_up_system`) and a
+`ProgressionPlugin` that runs every `Update` frame, automatically advancing
+party members to higher levels the moment their accumulated XP crosses the
+threshold — when the campaign is configured with `LevelUpMode::Auto`.
+
+### What Changed
+
+#### 1. `src/game/systems/progression.rs` — new file
+
+**`auto_level_up_system`** — Bevy system with four parameters:
+
+| Parameter      | Type                            | Purpose                                            |
+| -------------- | ------------------------------- | -------------------------------------------------- |
+| `global_state` | `ResMut<GlobalState>`           | Party members and `CampaignConfig`                 |
+| `content`      | `Option<Res<GameContent>>`      | Class DB (HP dice) and Spell DB                    |
+| `game_data`    | `Option<Res<GameDataResource>>` | Optional `LevelDatabase` for per-class XP tables   |
+| `game_log`     | `Option<ResMut<GameLog>>`       | Level-up messages written as `LogCategory::System` |
+
+System logic (in order):
+
+1. Returns early when `campaign_config.level_up_mode != LevelUpMode::Auto`.
+2. Returns early while in `GameMode::Combat(_)` — level-ups deferred to the next non-combat frame.
+3. Returns early when `GameContent` is absent (no class DB available for HP rolls).
+4. Extracts the optional `LevelDatabase` from `GameDataResource` (lifetime tied to the resource, no intermediate allocation).
+5. Copies `campaign_config.max_party_level` (`Option<u32>` is `Copy`).
+6. Iterates every party member; skips any whose `is_alive()` returns `false`.
+7. For each living member, loops calling `check_level_up_with_db` until the check fails, applying `level_up_and_grant_spells_with_level_db` each iteration (multi-level-in-one-pass support).
+8. Breaks the inner loop on `ProgressionError::MaxLevelReached` (campaign or global cap hit) or unexpected errors (logged via `tracing::warn!`).
+9. Collects log message strings and flushes them into `GameLog` after the mutable borrow of the party ends.
+
+Log entry format: `"{name} advanced to level {n}! (+{hp} HP[, {k} new spell(s)])"`.
+
+**`ProgressionPlugin`** — registers `auto_level_up_system` in the `Update`
+schedule, ordered after `consume_game_log_events` so that event-driven log
+entries from the same frame are committed before progression messages are
+appended.
+
+#### 2. `src/game/systems/mod.rs`
+
+Added `pub mod progression`.
+
+#### 3. `src/bin/antares.rs`
+
+Registered `ProgressionPlugin` in `AntaresPlugin::build`:
+
+```antares/src/bin/antares.rs#L297-299
+// Auto level-up progression system
+app.add_plugins(antares::game::systems::progression::ProgressionPlugin);
+```
+
+### Design Decisions
+
+- **`game_data` is a 4th system parameter** (beyond the three listed in the
+  plan) because `check_level_up_with_db` requires a `Option<&LevelDatabase>`
+  reference and that data lives in `GameDataResource`, not `GameContent`.
+  Without it the `max_party_level` success criterion cannot be satisfied.
+- **Borrow split**: `level_db` borrows from `game_data` (a separate Bevy
+  resource from `global_state`), so the mutable party borrow and the
+  immutable level-DB borrow do not conflict.
+- **Log entry batching**: strings are collected into a `Vec<String>` during
+  the party iteration and flushed afterwards, avoiding a simultaneous mutable
+  borrow of `game_log` and `global_state`.
+- **`level_up_and_grant_spells_with_level_db`** is used (not the simpler
+  `level_up_and_grant_spells`) so the `max_party_level` cap and the optional
+  `LevelDatabase` are both respected in one call.
+
+### Test Coverage
+
+9 unit tests in `game::systems::progression::tests`:
+
+| Test                                               | What it verifies                                                              |
+| -------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `test_auto_level_up_advances_level_and_writes_log` | Knight with 1 000 XP reaches level 2; log entry written                       |
+| `test_auto_level_up_noop_in_npc_trainer_mode`      | System is a no-op when `level_up_mode == NpcTrainer`                          |
+| `test_auto_level_up_skipped_during_combat`         | No level-up fires while `GameMode::Combat` is active                          |
+| `test_auto_level_up_skips_dead_characters`         | Dead characters (DEAD condition) are not levelled                             |
+| `test_auto_level_up_multi_level_pass`              | 6 000 XP advances a level-1 knight to level ≥ 3 in one frame; ≥ 2 log entries |
+| `test_auto_level_up_respects_max_party_level`      | `max_party_level: Some(3)` hard-caps level at 3 even with 1 000 000 XP        |
+| `test_auto_level_up_noop_without_content`          | No panic and no level change when `GameContent` resource is absent            |
+| `test_auto_level_up_uses_level_db_when_present`    | Custom table requiring 1 200 XP blocks level-up at 1 000 XP                   |
+| `test_auto_level_up_uses_level_db_threshold_met`   | Same custom table allows level-up at exactly 1 200 XP                         |
+| `test_progression_plugin_builds_without_panic`     | Plugin construction in a bare `App` does not panic                            |
+
+### Success Criteria Verification
+
+- ✅ A character that earns enough XP in combat levels up before the next exploration frame completes (`test_auto_level_up_advances_level_and_writes_log`)
+- ✅ Level-up message appears in the game log (same test, `LogCategory::System` entry contains "advanced to level 2")
+- ✅ Auto-level does not fire during combat (`test_auto_level_up_skipped_during_combat`)
+- ✅ Auto-level does not fire in `NpcTrainer` mode (`test_auto_level_up_noop_in_npc_trainer_mode`)
+- ✅ `max_party_level` cap is respected (`test_auto_level_up_respects_max_party_level`)
+- ✅ Dead characters are skipped (`test_auto_level_up_skips_dead_characters`)
+- ✅ Multi-level advance in one pass works (`test_auto_level_up_multi_level_pass`)
+
+---
+
 ## Phase 2: Campaign Config — XP Curve and Level-Up Mode (Complete)
 
 ### Overview

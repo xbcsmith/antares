@@ -140,7 +140,7 @@ We will need to add support for spell effects that can be applied to characters,
 
 Write a plan with a phased approach to implementing the spell system updates in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Spell System Updates Implementation Plan](./spell_system_updates_implementation_plan.md)
+✅ COMPLETED - [Spell System Updates Implementation Plan](./spell_system_updates_implementation_plan.md)
 
 ## Future Features and Fixes
 

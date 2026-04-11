@@ -39,6 +39,7 @@ pub mod monster_rendering;
 pub mod mouse_input;
 pub mod performance;
 pub mod procedural_meshes;
+pub mod progression;
 pub mod quest;
 pub mod recruitment_dialog;
 pub mod rest;

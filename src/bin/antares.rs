@@ -295,6 +295,9 @@ impl Plugin for AntaresPlugin {
 
         // Lock prompt UI and lock action handler
         app.add_plugins(antares::game::systems::lock_ui::LockUiPlugin);
+
+        // Auto level-up progression system
+        app.add_plugins(antares::game::systems::progression::ProgressionPlugin);
     }
 }
 
