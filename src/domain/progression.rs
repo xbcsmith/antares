@@ -49,11 +49,23 @@ pub enum ProgressionError {
 /// Maximum character level
 pub const MAX_LEVEL: u32 = 200;
 
-/// Base experience for level 2
-const BASE_XP: u64 = 1000;
+/// Default base XP required to reach level 2.
+///
+/// This is the fallback value used when no [`crate::domain::campaign::CampaignConfig`]
+/// is available (or when the campaign config retains its default).
+/// Pass this constant to [`experience_for_level_class`] when you have no config.
+pub const DEFAULT_BASE_XP: u64 = 1000;
 
-/// Experience multiplier for exponential curve
-const XP_MULTIPLIER: f64 = 1.5;
+/// Default XP curve exponent (steepness of the level-up curve).
+///
+/// This is the fallback value used when no [`crate::domain::campaign::CampaignConfig`]
+/// is available. Pass this constant to [`experience_for_level_class`] when you
+/// have no config.
+pub const DEFAULT_XP_MULTIPLIER: f64 = 1.5;
+
+// Keep private aliases so internal code remains concise.
+const BASE_XP: u64 = DEFAULT_BASE_XP;
+const XP_MULTIPLIER: f64 = DEFAULT_XP_MULTIPLIER;
 
 // ===== Experience and Leveling =====
 
@@ -411,7 +423,13 @@ pub fn level_up_with_level_db(
     }
 
     // Use explicit table if available, otherwise fall back to formula
-    let required = experience_for_level_class(character.level + 1, &character.class_id, level_db);
+    let required = experience_for_level_class(
+        character.level + 1,
+        &character.class_id,
+        level_db,
+        BASE_XP,
+        XP_MULTIPLIER,
+    );
     if character.experience < required {
         return Err(ProgressionError::NotEnoughExperience {
             needed: required,
@@ -597,7 +615,24 @@ pub fn level_up_and_grant_spells_with_level_db(
     Ok((hp_gained, granted))
 }
 
-/// Calculates the experience required for a given level
+/// Internal parametric XP formula: `base_xp * (level - 1) ^ xp_multiplier`.
+///
+/// This is the shared implementation used by both [`experience_for_level`]
+/// (with the module-default constants) and [`experience_for_level_class`]
+/// (with per-campaign or per-call values).
+fn experience_for_level_parametric(level: u32, base_xp: u64, xp_multiplier: f64) -> u64 {
+    if level <= 1 {
+        return 0;
+    }
+    let level_offset = (level - 1) as f64;
+    (base_xp as f64 * level_offset.powf(xp_multiplier)) as u64
+}
+
+/// Calculates the experience required for a given level using the default curve.
+///
+/// Uses the module-default constants [`DEFAULT_BASE_XP`] = 1000 and
+/// [`DEFAULT_XP_MULTIPLIER`] = 1.5. For campaign-configured curves use
+/// [`experience_for_level_with_config`] instead.
 ///
 /// # Examples
 ///
@@ -609,56 +644,115 @@ pub fn level_up_and_grant_spells_with_level_db(
 /// assert!(experience_for_level(10) > experience_for_level(5));
 /// ```
 pub fn experience_for_level(level: u32) -> u64 {
-    if level <= 1 {
-        return 0;
-    }
-
-    let level_offset = (level - 1) as f64;
-    (BASE_XP as f64 * level_offset.powf(XP_MULTIPLIER)) as u64
+    experience_for_level_parametric(level, BASE_XP, XP_MULTIPLIER)
 }
 
 /// Calculates the XP required for a given level, consulting an optional
-/// per-class [`LevelDatabase`] before falling back to the formula.
+/// per-class [`LevelDatabase`] before falling back to the parametric formula.
 ///
-/// This is the primary entry point for XP threshold lookups anywhere in the
-/// game that may be campaign-configured.
+/// This is the low-level entry point for XP threshold lookups. Callers that
+/// have a [`crate::domain::campaign::CampaignConfig`] should prefer the
+/// [`experience_for_level_with_config`] convenience wrapper.
 ///
 /// # Arguments
 ///
-/// * `level`    - The target character level (1-based)
-/// * `class_id` - The character's class identifier (e.g. `"knight"`)
-/// * `db`       - Optional level database; `None` always uses the formula
+/// * `level`         - The target character level (1-based)
+/// * `class_id`      - The character's class identifier (e.g. `"knight"`)
+/// * `db`            - Optional level database; `None` always uses the formula
+/// * `base_xp`       - Base XP for the formula fallback; pass [`DEFAULT_BASE_XP`]
+///   when no campaign config is available
+/// * `xp_multiplier` - Curve exponent for the formula fallback; pass
+///   [`DEFAULT_XP_MULTIPLIER`] when no campaign config is available
 ///
 /// # Returns
 ///
 /// - If `db` is `Some` **and** the class has an explicit table: returns the
 ///   table value (possibly extrapolated via cap behaviour).
-/// - Otherwise: returns `experience_for_level(level)`.
+/// - Otherwise: returns `experience_for_level_parametric(level, base_xp, xp_multiplier)`.
 ///
 /// # Examples
 ///
 /// ```
-/// use antares::domain::progression::{experience_for_level, experience_for_level_class};
+/// use antares::domain::progression::{
+///     experience_for_level, experience_for_level_class,
+///     DEFAULT_BASE_XP, DEFAULT_XP_MULTIPLIER,
+/// };
 ///
 /// // Without a database — identical to experience_for_level
-/// assert_eq!(experience_for_level_class(1, "knight", None), 0);
-/// assert_eq!(experience_for_level_class(2, "knight", None), experience_for_level(2));
+/// assert_eq!(
+///     experience_for_level_class(1, "knight", None, DEFAULT_BASE_XP, DEFAULT_XP_MULTIPLIER),
+///     0
+/// );
+/// assert_eq!(
+///     experience_for_level_class(2, "knight", None, DEFAULT_BASE_XP, DEFAULT_XP_MULTIPLIER),
+///     experience_for_level(2)
+/// );
 ///
 /// // Unknown class with db — falls back to formula without panic
 /// use antares::domain::levels::LevelDatabase;
 /// let db = LevelDatabase::new();
 /// assert_eq!(
-///     experience_for_level_class(2, "unknown_class", Some(&db)),
+///     experience_for_level_class(2, "unknown_class", Some(&db), DEFAULT_BASE_XP, DEFAULT_XP_MULTIPLIER),
 ///     experience_for_level(2),
 /// );
 /// ```
-pub fn experience_for_level_class(level: u32, class_id: &str, db: Option<&LevelDatabase>) -> u64 {
+pub fn experience_for_level_class(
+    level: u32,
+    class_id: &str,
+    db: Option<&LevelDatabase>,
+    base_xp: u64,
+    xp_multiplier: f64,
+) -> u64 {
     if let Some(db) = db {
         if let Some(xp) = db.threshold_for_class(class_id, level) {
             return xp;
         }
     }
-    experience_for_level(level)
+    experience_for_level_parametric(level, base_xp, xp_multiplier)
+}
+
+/// Convenience wrapper: calculates XP threshold using campaign-configured curve.
+///
+/// This is the preferred call site for any game system that has access to a
+/// [`crate::domain::campaign::CampaignConfig`]. It reads `base_xp` and
+/// `xp_multiplier` from the config and delegates to [`experience_for_level_class`].
+///
+/// # Arguments
+///
+/// * `level`    - The target character level (1-based)
+/// * `class_id` - The character's class identifier (e.g. `"knight"`)
+/// * `config`   - Campaign config supplying `base_xp` and `xp_multiplier`
+/// * `level_db` - Optional per-class level database; `None` uses the formula
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::campaign::CampaignConfig;
+/// use antares::domain::progression::{experience_for_level, experience_for_level_with_config};
+///
+/// let config = CampaignConfig::default(); // base_xp=1000, xp_multiplier=1.5
+///
+/// // Level 1 is always 0
+/// assert_eq!(experience_for_level_with_config(1, "knight", &config, None), 0);
+/// // Level 2 with default config matches the standard formula
+/// assert_eq!(
+///     experience_for_level_with_config(2, "knight", &config, None),
+///     experience_for_level(2),
+/// );
+/// ```
+pub fn experience_for_level_with_config(
+    level: u32,
+    class_id: &str,
+    config: &crate::domain::campaign::CampaignConfig,
+    level_db: Option<&LevelDatabase>,
+) -> u64 {
+    experience_for_level_class(
+        level,
+        class_id,
+        level_db,
+        config.base_xp,
+        config.xp_multiplier,
+    )
 }
 
 /// Checks if a character has enough experience to level up, using an optional
@@ -710,7 +804,13 @@ pub fn check_level_up_with_db(character: &Character, db: Option<&LevelDatabase>)
         return false;
     }
 
-    let required = experience_for_level_class(character.level + 1, &character.class_id, db);
+    let required = experience_for_level_class(
+        character.level + 1,
+        &character.class_id,
+        db,
+        BASE_XP,
+        XP_MULTIPLIER,
+    );
     character.experience >= required
 }
 
@@ -1255,7 +1355,13 @@ mod tests {
         // With no database, must produce identical results to experience_for_level
         for lvl in [1u32, 2, 3, 5, 10, 50, 200] {
             assert_eq!(
-                experience_for_level_class(lvl, "knight", None),
+                experience_for_level_class(
+                    lvl,
+                    "knight",
+                    None,
+                    DEFAULT_BASE_XP,
+                    DEFAULT_XP_MULTIPLIER
+                ),
                 experience_for_level(lvl),
                 "Mismatch at level {lvl}"
             );
@@ -1267,7 +1373,13 @@ mod tests {
         let db = make_level_db();
 
         // Knight level 2 in the table is 1200, formula gives 1000 — must differ
-        let table_val = experience_for_level_class(2, "knight", Some(&db));
+        let table_val = experience_for_level_class(
+            2,
+            "knight",
+            Some(&db),
+            DEFAULT_BASE_XP,
+            DEFAULT_XP_MULTIPLIER,
+        );
         let formula_val = experience_for_level(2);
         assert_eq!(table_val, 1200, "Should use table value for knight level 2");
         assert_ne!(
@@ -1276,7 +1388,16 @@ mod tests {
         );
 
         // Sorcerer level 2 in the table is 800, formula gives 1000
-        assert_eq!(experience_for_level_class(2, "sorcerer", Some(&db)), 800);
+        assert_eq!(
+            experience_for_level_class(
+                2,
+                "sorcerer",
+                Some(&db),
+                DEFAULT_BASE_XP,
+                DEFAULT_XP_MULTIPLIER
+            ),
+            800
+        );
     }
 
     #[test]
@@ -1284,16 +1405,43 @@ mod tests {
         let db = make_level_db(); // contains knight and sorcerer only
 
         // "cleric" is absent from the inline DB — must fall back to formula
-        let result = experience_for_level_class(2, "cleric", Some(&db));
+        let result = experience_for_level_class(
+            2,
+            "cleric",
+            Some(&db),
+            DEFAULT_BASE_XP,
+            DEFAULT_XP_MULTIPLIER,
+        );
         assert_eq!(result, experience_for_level(2));
     }
 
     #[test]
     fn test_experience_for_level_class_level_1_always_zero() {
         let db = make_level_db();
-        assert_eq!(experience_for_level_class(1, "knight", None), 0);
-        assert_eq!(experience_for_level_class(1, "knight", Some(&db)), 0);
-        assert_eq!(experience_for_level_class(1, "unknown", Some(&db)), 0);
+        assert_eq!(
+            experience_for_level_class(1, "knight", None, DEFAULT_BASE_XP, DEFAULT_XP_MULTIPLIER),
+            0
+        );
+        assert_eq!(
+            experience_for_level_class(
+                1,
+                "knight",
+                Some(&db),
+                DEFAULT_BASE_XP,
+                DEFAULT_XP_MULTIPLIER
+            ),
+            0
+        );
+        assert_eq!(
+            experience_for_level_class(
+                1,
+                "unknown",
+                Some(&db),
+                DEFAULT_BASE_XP,
+                DEFAULT_XP_MULTIPLIER
+            ),
+            0
+        );
     }
 
     #[test]
@@ -1301,7 +1449,13 @@ mod tests {
         let db = LevelDatabase::new();
         for lvl in [2u32, 5, 10] {
             assert_eq!(
-                experience_for_level_class(lvl, "knight", Some(&db)),
+                experience_for_level_class(
+                    lvl,
+                    "knight",
+                    Some(&db),
+                    DEFAULT_BASE_XP,
+                    DEFAULT_XP_MULTIPLIER,
+                ),
                 experience_for_level(lvl),
                 "Empty DB must fall back to formula at level {lvl}"
             );
@@ -1535,16 +1689,34 @@ mod tests {
         let db = LevelDatabase::load_from_file(&path).expect("levels.ron fixture must load");
 
         // Knight level 2 from fixture = 1200, formula = 1000 — must use fixture value
-        let xp = experience_for_level_class(2, "knight", Some(&db));
+        let xp = experience_for_level_class(
+            2,
+            "knight",
+            Some(&db),
+            DEFAULT_BASE_XP,
+            DEFAULT_XP_MULTIPLIER,
+        );
         assert_eq!(xp, 1200, "Knight level 2 should use fixture value 1200");
         assert_ne!(xp, experience_for_level(2), "Should differ from formula");
 
         // Sorcerer level 2 from fixture = 800
-        let sorcerer_xp = experience_for_level_class(2, "sorcerer", Some(&db));
+        let sorcerer_xp = experience_for_level_class(
+            2,
+            "sorcerer",
+            Some(&db),
+            DEFAULT_BASE_XP,
+            DEFAULT_XP_MULTIPLIER,
+        );
         assert_eq!(sorcerer_xp, 800);
 
         // Unknown class falls back to formula
-        let unknown_xp = experience_for_level_class(2, "unknown_class", Some(&db));
+        let unknown_xp = experience_for_level_class(
+            2,
+            "unknown_class",
+            Some(&db),
+            DEFAULT_BASE_XP,
+            DEFAULT_XP_MULTIPLIER,
+        );
         assert_eq!(unknown_xp, experience_for_level(2));
     }
 
@@ -1564,5 +1736,99 @@ mod tests {
         // 1200 XP satisfies the knight table threshold → ready
         knight.experience = 1200;
         assert!(check_level_up_with_db(&knight, Some(&db)));
+    }
+
+    // ===== Phase 2: experience_for_level_with_config tests =====
+
+    #[test]
+    fn test_experience_for_level_with_config_default_matches_formula() {
+        // Default CampaignConfig has base_xp=1000, xp_multiplier=1.5 — must match
+        // the standard formula for every level.
+        use crate::domain::campaign::CampaignConfig;
+        let config = CampaignConfig::default();
+        for lvl in [1u32, 2, 3, 5, 10, 50, 100] {
+            assert_eq!(
+                experience_for_level_with_config(lvl, "knight", &config, None),
+                experience_for_level(lvl),
+                "Default config must match formula at level {lvl}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_experience_for_level_with_config_custom_base_xp() {
+        // base_xp=500, xp_multiplier=2.0 → level 5 = 500 * (4^2) = 8000
+        use crate::domain::campaign::CampaignConfig;
+        let config = CampaignConfig {
+            base_xp: 500,
+            xp_multiplier: 2.0,
+            ..CampaignConfig::default()
+        };
+
+        let xp_level2 = experience_for_level_with_config(2, "knight", &config, None);
+        // level 2: 500 * (1^2.0) = 500
+        assert_eq!(
+            xp_level2, 500,
+            "level 2 with base_xp=500, mult=2.0 should be 500"
+        );
+
+        let xp_level5 = experience_for_level_with_config(5, "knight", &config, None);
+        // level 5: 500 * (4^2.0) = 500 * 16 = 8000
+        assert_eq!(
+            xp_level5, 8000,
+            "level 5 with base_xp=500, mult=2.0 should be 8000"
+        );
+    }
+
+    #[test]
+    fn test_experience_for_level_with_config_prefers_db_over_formula() {
+        // When the level DB has an entry, it takes priority over the formula,
+        // even when the campaign config provides custom base_xp/xp_multiplier.
+        use crate::domain::campaign::CampaignConfig;
+        let db = make_level_db(); // knight level 2 = 1200 in fixture
+        let config = CampaignConfig {
+            base_xp: 500,
+            xp_multiplier: 2.0, // would give 500 for level 2
+            ..CampaignConfig::default()
+        };
+
+        let xp = experience_for_level_with_config(2, "knight", &config, Some(&db));
+        assert_eq!(xp, 1200, "DB entry must override the parametric formula");
+    }
+
+    #[test]
+    fn test_experience_for_level_with_config_level_1_always_zero() {
+        use crate::domain::campaign::CampaignConfig;
+        let config = CampaignConfig {
+            base_xp: 9999,
+            xp_multiplier: 10.0,
+            ..CampaignConfig::default()
+        };
+
+        assert_eq!(
+            experience_for_level_with_config(1, "knight", &config, None),
+            0,
+            "Level 1 must always require 0 XP regardless of config"
+        );
+    }
+
+    #[test]
+    fn test_experience_for_level_parametric_matches_known_values() {
+        // Verify the parametric function gives expected values at level boundaries.
+        // base_xp=1000, xp_multiplier=1.5:
+        //   level 1 → 0
+        //   level 2 → 1000 * (1^1.5) = 1000
+        //   level 3 → 1000 * (2^1.5) ≈ 2828
+        assert_eq!(experience_for_level_parametric(1, 1000, 1.5), 0);
+        assert_eq!(experience_for_level_parametric(2, 1000, 1.5), 1000);
+        let lv3 = experience_for_level_parametric(3, 1000, 1.5);
+        assert!(
+            (2820..=2840).contains(&lv3),
+            "level 3 expected ~2828, got {lv3}"
+        );
+
+        // With base_xp=500, xp_multiplier=2.0:
+        //   level 5 → 500 * (4^2.0) = 8000
+        assert_eq!(experience_for_level_parametric(5, 500, 2.0), 8000);
     }
 }

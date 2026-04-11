@@ -1,5 +1,202 @@
 # Implementations
 
+## Phase 2: Campaign Config — XP Curve and Level-Up Mode (Complete)
+
+### Overview
+
+Implemented Phase 2 of the character leveling system as specified in
+`docs/explanation/level_up_plan.md`. This phase wires per-campaign XP curve
+parameters and the `LevelUpMode` switch into `CampaignConfig` and propagates
+the `experience_rate` multiplier to all XP award sites (combat victory and
+quest rewards).
+
+### What Changed
+
+#### 1. `src/domain/campaign.rs` — `LevelUpMode` enum + new `CampaignConfig` fields
+
+**New `LevelUpMode` enum:**
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum LevelUpMode {
+    #[default]
+    Auto,       // Characters level up automatically when XP threshold is reached
+    NpcTrainer, // Characters must visit and pay a trainer NPC to apply levels
+}
+```
+
+**Five new fields added to `CampaignConfig`** (all `#[serde(default)]` for
+backward-compatible deserialisation of existing files):
+
+| Field                     | Type          | Default | Description                                     |
+| ------------------------- | ------------- | ------- | ----------------------------------------------- |
+| `base_xp`                 | `u64`         | 1000    | Base XP for level-2; drives the XP formula      |
+| `xp_multiplier`           | `f64`         | 1.5     | Exponent in `base_xp * (level-1)^xp_multiplier` |
+| `level_up_mode`           | `LevelUpMode` | `Auto`  | Automatic vs. trainer-gated levelling           |
+| `training_fee_base`       | `u32`         | 500     | Gold per level charged by trainer NPCs          |
+| `training_fee_multiplier` | `f32`         | 1.0     | Per-level fee scaling factor for trainer NPCs   |
+
+`CampaignConfig::default()` and all serde helper functions updated to match.
+
+#### 2. `src/domain/progression.rs` — Parametric formula + updated signatures
+
+**New public constants** (callers that have no config pass these as defaults):
+
+```rust
+pub const DEFAULT_BASE_XP: u64 = 1000;
+pub const DEFAULT_XP_MULTIPLIER: f64 = 1.5;
+```
+
+Private aliases `BASE_XP` and `XP_MULTIPLIER` preserved for internal use.
+
+**New private function `experience_for_level_parametric`:**
+
+```rust
+fn experience_for_level_parametric(level: u32, base_xp: u64, xp_multiplier: f64) -> u64
+```
+
+`experience_for_level` now delegates to this helper with the module defaults,
+keeping the public signature unchanged.
+
+**Updated `experience_for_level_class` signature (5 parameters):**
+
+```rust
+pub fn experience_for_level_class(
+    level: u32,
+    class_id: &str,
+    db: Option<&LevelDatabase>,
+    base_xp: u64,
+    xp_multiplier: f64,
+) -> u64
+```
+
+Callers without a campaign config pass `DEFAULT_BASE_XP, DEFAULT_XP_MULTIPLIER`.
+The internal callers `check_level_up_with_db` and `level_up_with_level_db`
+both updated to pass those constants.
+
+**New convenience wrapper `experience_for_level_with_config`:**
+
+```rust
+pub fn experience_for_level_with_config(
+    level: u32,
+    class_id: &str,
+    config: &CampaignConfig,
+    level_db: Option<&LevelDatabase>,
+) -> u64
+```
+
+This is the preferred call site for any system that has access to a
+`CampaignConfig`. It reads `config.base_xp` and `config.xp_multiplier` and
+delegates to `experience_for_level_class`.
+
+#### 3. `src/game/systems/combat.rs` — `experience_rate` applied in victory
+
+In `process_combat_victory_with_rng`, each per-member XP share is now scaled
+by `global_state.0.campaign_config.experience_rate` before being awarded:
+
+```rust
+let experience_rate = global_state.0.campaign_config.experience_rate;
+let scaled_award = (award as f64 * experience_rate as f64).round() as u64;
+```
+
+The scaled amount is also stored in `xp_awarded` so the `VictorySummary`
+reflects the actual XP received. `total_xp` in the summary is the raw
+pre-scaling monster XP (unchanged).
+
+#### 4. `src/application/quests.rs` — `experience_rate` applied in quest rewards
+
+In `apply_rewards`, `QuestReward::Experience(amount)` is now multiplied by
+`game_state.campaign_config.experience_rate`:
+
+```rust
+let rate = game_state.campaign_config.experience_rate;
+let scaled = (*amount as f64 * rate as f64).round() as u64;
+```
+
+No new parameters were needed — `apply_rewards` already receives `game_state`
+and `game_state.campaign_config` is accessible directly.
+
+#### 5. `data/test_campaign/config.ron` — N/A (architecture note)
+
+The `config.ron` file in each campaign directory stores `GameConfig` (engine
+settings: graphics, audio, controls). The domain `CampaignConfig` (gameplay
+rules) lives in `GameState.campaign_config` and is currently initialised from
+`CampaignConfig::default()` in `GameState::new_game`. Loading it from a
+dedicated file is deferred to a future phase. All new fields use
+`#[serde(default)]` so any future RON loading will be backward-compatible with
+files that predate these fields.
+
+### Test Coverage
+
+#### `src/domain/campaign.rs` — 8 new tests
+
+| Test                                                  | What it verifies                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `test_level_up_mode_default_is_auto`                  | `LevelUpMode::default()` == `Auto`                                             |
+| `test_level_up_mode_serialization_round_trip`         | Both `Auto` and `NpcTrainer` survive RON round-trip                            |
+| `test_training_fee_fields_round_trip`                 | `training_fee_base` and `training_fee_multiplier` survive RON round-trip       |
+| `test_base_xp_and_multiplier_round_trip`              | Fields survive RON; level-5 formula produces 8000 with `base_xp=500, mult=2.0` |
+| `test_campaign_config_new_fields_default_when_absent` | Old RON without new fields still deserialises (serde(default) works)           |
+| `test_campaign_config_new_fields_explicit_values`     | Full RON with all new fields reads back correctly                              |
+| `test_campaign_config_default` (updated)              | Default assertions extended to cover all five new fields                       |
+
+#### `src/domain/progression.rs` — 5 new tests
+
+| Test                                                            | What it verifies                                     |
+| --------------------------------------------------------------- | ---------------------------------------------------- |
+| `test_experience_for_level_with_config_default_matches_formula` | Default config produces identical results to formula |
+| `test_experience_for_level_with_config_custom_base_xp`          | `base_xp=500, mult=2.0` → level-2=500, level-5=8000  |
+| `test_experience_for_level_with_config_prefers_db_over_formula` | DB entry overrides the parametric formula            |
+| `test_experience_for_level_with_config_level_1_always_zero`     | Level-1 always returns 0 regardless of config        |
+| `test_experience_for_level_parametric_matches_known_values`     | Raw parametric values at levels 1, 2, 3, 5           |
+
+#### `src/game/systems/combat.rs` — 2 new tests
+
+| Test                                         | What it verifies                                              |
+| -------------------------------------------- | ------------------------------------------------------------- |
+| `test_victory_xp_doubled_by_experience_rate` | `experience_rate=2.0` doubles each member's XP share (50→100) |
+| `test_victory_xp_halved_by_experience_rate`  | `experience_rate=0.5` halves each member's XP share (50→25)   |
+
+#### `src/application/quests.rs` — 3 new tests
+
+| Test                                                     | What it verifies                                 |
+| -------------------------------------------------------- | ------------------------------------------------ |
+| `test_quest_experience_reward_scaled_by_experience_rate` | `experience_rate=2.0` doubles quest XP (100→200) |
+| `test_quest_experience_reward_halved_by_experience_rate` | `experience_rate=0.5` halves quest XP (100→50)   |
+| `test_quest_experience_reward_default_rate_unchanged`    | Default rate 1.0 leaves quest XP unmodified      |
+
+### Deliverables Checklist
+
+- [x] `src/domain/campaign.rs` — `LevelUpMode` enum, five new `CampaignConfig` fields
+- [x] `src/domain/progression.rs` — `experience_for_level_with_config` wrapper,
+      updated `experience_for_level_class` signature, `experience_for_level_parametric`
+      private helper, `DEFAULT_BASE_XP` / `DEFAULT_XP_MULTIPLIER` public constants
+- [x] `src/game/systems/combat.rs` — `experience_rate` applied in XP award loop
+- [x] `src/application/quests.rs` — `experience_rate` applied in `apply_rewards`
+- [ ] `data/test_campaign/config.ron` — deferred; domain `CampaignConfig` is not
+      loaded from `config.ron` in the current architecture (see architecture note above)
+
+### Success Criteria Verification
+
+- ✅ `experience_rate = 0.5` halves post-combat XP (`test_victory_xp_halved_by_experience_rate`)
+- ✅ `experience_rate = 2.0` doubles post-combat XP (`test_victory_xp_doubled_by_experience_rate`)
+- ✅ `experience_rate = 2.0` doubles quest XP (`test_quest_experience_reward_scaled_by_experience_rate`)
+- ✅ `LevelUpMode::Auto` is the default (`test_level_up_mode_default_is_auto`)
+- ✅ All new `CampaignConfig` fields use `serde(default)` — old files parse without errors
+- ✅ `base_xp=500, xp_multiplier=2.0` → level-5 threshold = 8000
+- ✅ All 4492 tests pass (4476 pre-existing + 16 new, 8 skipped)
+
+### Quality Gates
+
+```
+cargo fmt --all          → clean (no output)
+cargo check              → Finished, 0 errors
+cargo clippy -D warnings → Finished, 0 warnings
+cargo nextest run        → 4492 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Phase 1: Domain — `LevelDatabase` and `levels.ron` (Complete)
 
 ### Overview
