@@ -9,6 +9,7 @@ pub mod audio;
 pub mod billboard;
 pub mod camera;
 pub mod campaign_loading;
+pub mod character_sheet_ui;
 pub mod combat;
 pub mod combat_visual;
 pub mod container_inventory_ui;

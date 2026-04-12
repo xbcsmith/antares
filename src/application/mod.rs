@@ -11,6 +11,7 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.1 for complete specifications.
 
+pub mod character_sheet_state;
 pub mod container_inventory_state;
 pub mod dialogue;
 pub mod inventory_state;
@@ -129,6 +130,12 @@ pub enum GameMode {
     /// [`crate::domain::campaign::LevelUpMode::NpcTrainer`].  The UI presents
     /// eligible party members and their training costs.
     Training(TrainingState),
+    /// Read-only character stats viewer (out of combat).
+    ///
+    /// Entered by pressing the character sheet key (default `P`) in Exploration
+    /// mode. Tab / Shift-Tab cycles through party members. Esc returns to the
+    /// previous [`GameMode`].
+    CharacterSheet(crate::application::character_sheet_state::CharacterSheetState),
 }
 
 // ===== Rest State =====
@@ -1859,6 +1866,10 @@ impl GameState {
                 self.mode = GameMode::Exploration;
                 true
             }
+            GameMode::CharacterSheet(cs_state) => {
+                self.mode = cs_state.get_resume_mode();
+                true
+            }
             _ => false,
         }
     }
@@ -2016,6 +2027,30 @@ impl GameState {
         if let GameMode::SpellBook(ref sb) = self.mode.clone() {
             self.mode = sb.get_resume_mode();
         }
+    }
+
+    /// Enter the character sheet screen.
+    ///
+    /// Stores the current mode as `previous_mode` so it can be restored on close.
+    /// If already in `CharacterSheet` mode, this is a no-op (idempotent).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameMode, GameState};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_character_sheet();
+    /// assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+    /// ```
+    pub fn enter_character_sheet(&mut self) {
+        if matches!(self.mode, GameMode::CharacterSheet(_)) {
+            return;
+        }
+        let prev = self.mode.clone();
+        self.mode = GameMode::CharacterSheet(
+            crate::application::character_sheet_state::CharacterSheetState::new(prev),
+        );
     }
 
     /// Enters dialogue mode
@@ -6056,6 +6091,56 @@ mod tests {
             matches!(state.mode, GameMode::Exploration),
             "exit_spellbook must be a no-op when mode is not SpellBook"
         );
+    }
+
+    #[test]
+    fn test_enter_character_sheet_sets_mode() {
+        let mut state = GameState::new();
+        state.enter_character_sheet();
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+    }
+
+    #[test]
+    fn test_enter_character_sheet_stores_previous_mode() {
+        let mut state = GameState::new();
+        assert!(matches!(state.mode, GameMode::Exploration));
+        state.enter_character_sheet();
+        if let GameMode::CharacterSheet(ref cs) = state.mode {
+            assert!(
+                matches!(cs.get_resume_mode(), GameMode::Exploration),
+                "CharacterSheet must store Exploration as the previous mode"
+            );
+        } else {
+            panic!("expected CharacterSheet mode");
+        }
+    }
+
+    #[test]
+    fn test_enter_character_sheet_idempotent() {
+        let mut state = GameState::new();
+        state.enter_character_sheet();
+        // Capture the inner state after first call
+        let first_focused_index = if let GameMode::CharacterSheet(ref cs) = state.mode {
+            cs.focused_index
+        } else {
+            panic!("expected CharacterSheet mode");
+        };
+        // Second call must be a no-op
+        state.enter_character_sheet();
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+        if let GameMode::CharacterSheet(ref cs) = state.mode {
+            assert_eq!(cs.focused_index, first_focused_index);
+        }
+    }
+
+    #[test]
+    fn test_close_modal_closes_character_sheet_to_resume_mode() {
+        let mut state = GameState::new();
+        state.enter_character_sheet();
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+        let closed = state.close_modal();
+        assert!(closed);
+        assert!(matches!(state.mode, GameMode::Exploration));
     }
 
     #[test]

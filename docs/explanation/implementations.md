@@ -1,5 +1,145 @@
 # Implementations
 
+## Level-Up Plan — Phase 9: Character Sheet Screen (Complete)
+
+### Overview
+
+Phase 9 delivers a read-only, out-of-combat character stats viewer accessible
+from the exploration HUD. Pressing `P` opens the sheet; `Tab`/`Shift-Tab` or
+`←`/`→` cycles through party members in Single view; `O` toggles between the
+detailed Single panel and the compact Party Overview; `Esc` or pressing `P`
+again closes the screen and restores the prior game mode.
+
+### Files Created
+
+#### `src/application/character_sheet_state.rs`
+
+New application-state module following the `InventoryState` / `SpellBookState`
+box-wrapped previous-mode pattern:
+
+- **`CharacterSheetView`** enum — `Single` (default) / `PartyOverview`.
+- **`CharacterSheetState`** struct — `previous_mode: Box<GameMode>`,
+  `focused_index: usize`, `view: CharacterSheetView`.
+- Public methods: `new`, `get_resume_mode`, `focus_next`, `focus_prev`,
+  `toggle_view`, and `Default` (wraps `Exploration`).
+- 14 unit tests covering all methods including wrap-around navigation and
+  view toggling.
+
+#### `src/game/systems/character_sheet_ui.rs`
+
+New Bevy plugin providing three systems chained in `Update`:
+
+- **`character_sheet_input_system`** — handles Esc (close), Tab/Shift-Tab and
+  Left/Right (cycle character), O (toggle overview) while in
+  `GameMode::CharacterSheet`.
+- **`character_sheet_ui_system`** — renders two egui layouts:
+  - _Single view_: full-width window titled `"{name} — Level {level}
+{race_id} {class_id}"` with header nav buttons, Core Stats table
+    (base/current with amber modifier highlighting), Combat Stats (HP, SP,
+    AC, Spell Level), Experience (with `"✅ Ready to level up!"` in green or
+    `"🎓 Visit a trainer"` in yellow based on `LevelUpMode`), Conditions
+    badge list, Equipment slots, and known Spells.
+  - _Party Overview_: horizontal scroll area with compact per-member cards
+    (portrait placeholder, name, class, level, HP bar, SP bar, `[View]`
+    button).
+- **`character_sheet_cleanup_system`** — documented no-op stub (pure egui;
+  no Bevy entities are spawned).
+- 8 unit tests covering plugin construction, Esc close logic, navigation, view
+  toggle, and open/close round-trip.
+
+### Files Modified
+
+#### `src/application/mod.rs`
+
+- Added `pub mod character_sheet_state;`.
+- Added `GameMode::CharacterSheet(CharacterSheetState)` variant (after
+  `Training`).
+- Updated `close_modal` to handle `CharacterSheet` by calling
+  `cs_state.get_resume_mode()`.
+- Added `enter_character_sheet()` (idempotent; stores previous mode).
+- Added 4 tests: sets mode, stores previous mode, idempotent, close_modal
+  round-trip.
+
+#### `src/game/systems/input/keymap.rs`
+
+- Added `GameAction::CharacterSheet` variant.
+- Wired `config.character_sheet` binding in `KeyMap::from_controls_config`.
+- Added 2 tests: default key `P` maps to `CharacterSheet`, custom binding works.
+
+#### `src/game/systems/input/frame_input.rs`
+
+- Added `character_sheet_toggle: bool` to `FrameInputIntent` (derives
+  `Default` so it zero-initialises automatically).
+- Wired `GameAction::CharacterSheet` via `is_action_just_pressed` in
+  `decode_frame_input`.
+
+#### `src/sdk/game_config.rs`
+
+- Added `character_sheet: Vec<String>` to `ControlsConfig` with
+  `#[serde(default = "default_character_sheet_keys")]` and default `["P"]`.
+- Added validation: `character_sheet` list must not be empty.
+- Added 4 tests: default is `["P"]`, round-trip serialisation, serde default
+  when field absent, validation rejects empty list.
+
+#### `src/game/systems/input/global_toggles.rs`
+
+- Added `character_sheet_toggle` branch (after `spell_book_toggle`): opens
+  from any non-blocking mode, closes when already in `CharacterSheet`,
+  blocked in `Combat`, `Dialogue`, `Training`, `MerchantInventory`.
+- Added `character_sheet_toggle_intent` test helper.
+- Added 7 tests: open from Exploration, close back to Exploration, blocked in
+  Combat/Dialogue/Training, stores previous mode, Esc also closes via
+  `close_modal`.
+
+#### `src/game/systems/mod.rs`
+
+- Added `pub mod character_sheet_ui;`.
+
+#### `src/bin/antares.rs`
+
+- Registered `CharacterSheetPlugin` in `AntaresPlugin::build`.
+
+#### `data/test_campaign/config.ron`
+
+- Added `character_sheet: ["P"]` inside the `ControlsConfig(...)` block so
+  the test fixture deserialises cleanly after validation was tightened.
+
+#### `sdk/campaign_builder/src/config_editor.rs`
+
+- Added `controls_character_sheet_buffer: String` to `ConfigEditorState` and
+  its `Default` impl.
+- Wired in `update_edit_buffers`, `update_config_from_buffers`, and the
+  `handle_key_capture` dispatch (`"character_sheet"` arm).
+- Added `"Character Sheet"` key-binding row in `show_controls_section` after
+  the Spell Book row, using the same `show_key_binding_with_capture` helper.
+- Added 4 tests: buffer populated by `update_edit_buffers`, parsed by
+  `update_config_from_buffers`, default is empty, round-trip.
+
+### Design Decisions
+
+- **Read-only only** — no stat edits permitted; the sheet is a display-only
+  overlay that never mutates `GameState`.
+- **Pure-egui UI** — no Bevy entities are spawned, so the cleanup system is
+  a no-op stub retained for structural consistency.
+- **XP readiness message** uses `game_state.campaign_config.level_up_mode`
+  combined with `check_level_up_with_db` so it accurately reflects both Auto
+  and NpcTrainer campaigns.
+- **`character_sheet_toggle` is blocked** in `Combat`, `Dialogue`,
+  `Training`, and `MerchantInventory` to avoid disrupting active sessions.
+
+### Quality Gates
+
+All four gates passed with zero errors and zero warnings:
+
+```text
+cargo fmt --all          → clean
+cargo check --all-targets --all-features  → Finished (0 errors)
+cargo clippy --all-targets --all-features -- -D warnings  → Finished (0 warnings)
+cargo nextest run --all-features  → 4607 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Level-Up Plan — Phase 8: SDK — Config Editor `LevelUpMode` and XP Formula Settings (Complete)
 
 ### Overview

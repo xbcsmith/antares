@@ -73,6 +73,8 @@ pub struct ConfigEditorState {
     pub controls_automap_buffer: String,
     /// Edit buffer for spell book key binding
     pub controls_spell_book_buffer: String,
+    /// Edit buffer for character sheet key binding
+    pub controls_character_sheet_buffer: String,
 
     /// Validation errors by field name
     pub validation_errors: std::collections::HashMap<String, String>,
@@ -130,6 +132,7 @@ impl Default for ConfigEditorState {
             controls_rest_buffer: String::new(),
             controls_automap_buffer: String::new(),
             controls_spell_book_buffer: String::new(),
+            controls_character_sheet_buffer: String::new(),
             validation_errors: std::collections::HashMap::new(),
             capturing_key_for: None,
             last_captured_key: None,
@@ -769,6 +772,17 @@ impl ConfigEditorState {
                 &mut self.capturing_key_for,
             );
 
+            // Character Sheet
+            show_key_binding_with_capture(
+                ui,
+                "Character Sheet",
+                &mut self.controls_character_sheet_buffer,
+                "character_sheet",
+                unsaved_changes,
+                &mut self.validation_errors,
+                &mut self.capturing_key_for,
+            );
+
             ui.add_space(5.0);
         });
 
@@ -1120,6 +1134,8 @@ impl ConfigEditorState {
         self.controls_rest_buffer = format_key_list(&self.game_config.controls.rest);
         self.controls_automap_buffer = format_key_list(&self.game_config.controls.automap);
         self.controls_spell_book_buffer = format_key_list(&self.game_config.controls.spell_book);
+        self.controls_character_sheet_buffer =
+            format_key_list(&self.game_config.controls.character_sheet);
         self.level_up_mode_is_npc = self.game_config.leveling.level_up_mode
             == antares::domain::campaign::LevelUpMode::NpcTrainer;
         self.base_xp_buffer = self.game_config.leveling.base_xp.to_string();
@@ -1146,6 +1162,8 @@ impl ConfigEditorState {
         self.game_config.controls.rest = parse_key_list(&self.controls_rest_buffer);
         self.game_config.controls.automap = parse_key_list(&self.controls_automap_buffer);
         self.game_config.controls.spell_book = parse_key_list(&self.controls_spell_book_buffer);
+        self.game_config.controls.character_sheet =
+            parse_key_list(&self.controls_character_sheet_buffer);
         self.game_config.leveling.level_up_mode = if self.level_up_mode_is_npc {
             antares::domain::campaign::LevelUpMode::NpcTrainer
         } else {
@@ -1204,6 +1222,7 @@ impl ConfigEditorState {
                             "rest" => &mut self.controls_rest_buffer,
                             "automap" => &mut self.controls_automap_buffer,
                             "spell_book" => &mut self.controls_spell_book_buffer,
+                            "character_sheet" => &mut self.controls_character_sheet_buffer,
                             _ => return,
                         };
 
@@ -2002,6 +2021,47 @@ mod tests {
         assert!(
             (state.game_config.leveling.training_fee_multiplier - 1.25).abs() < 1e-6,
             "training_fee_multiplier must survive round-trip"
+        );
+    }
+
+    // ── Character Sheet buffer tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_character_sheet_key_binding_appears_in_update_edit_buffers() {
+        let mut state = ConfigEditorState::new();
+        state.game_config.controls.character_sheet = vec!["P".to_string()];
+        state.update_edit_buffers();
+        assert_eq!(state.controls_character_sheet_buffer, "P");
+    }
+
+    #[test]
+    fn test_character_sheet_key_binding_update_config_from_buffers() {
+        let mut state = ConfigEditorState::new();
+        state.controls_character_sheet_buffer = "P, F6".to_string();
+        state.update_config_from_buffers();
+        assert_eq!(
+            state.game_config.controls.character_sheet,
+            vec!["P".to_string(), "F6".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_character_sheet_buffer_default_is_empty() {
+        let state = ConfigEditorState::default();
+        assert_eq!(state.controls_character_sheet_buffer, "");
+    }
+
+    #[test]
+    fn test_character_sheet_round_trip_buffer_conversion() {
+        let mut state = ConfigEditorState::new();
+        let original_keys = vec!["P".to_string()];
+        state.game_config.controls.character_sheet = original_keys.clone();
+        state.update_edit_buffers();
+        assert_eq!(state.controls_character_sheet_buffer, "P");
+        state.update_config_from_buffers();
+        assert_eq!(
+            state.game_config.controls.character_sheet, original_keys,
+            "character_sheet binding must survive buffer round-trip"
         );
     }
 }

@@ -574,6 +574,12 @@ pub struct ControlsConfig {
     #[serde(default = "default_spell_book_keys")]
     pub spell_book: Vec<String>,
 
+    /// Keys for opening the character sheet viewer.
+    ///
+    /// Default: `["P"]`
+    #[serde(default = "default_character_sheet_keys")]
+    pub character_sheet: Vec<String>,
+
     /// Movement cooldown in seconds (prevents double-moves)
     pub movement_cooldown: f32,
 }
@@ -602,6 +608,10 @@ fn default_spell_book_keys() -> Vec<String> {
     vec!["B".to_string()]
 }
 
+fn default_character_sheet_keys() -> Vec<String> {
+    vec!["P".to_string()]
+}
+
 impl Default for ControlsConfig {
     fn default() -> Self {
         Self {
@@ -617,6 +627,7 @@ impl Default for ControlsConfig {
             game_log: default_game_log_keys(),
             cast: default_cast_keys(),
             spell_book: default_spell_book_keys(),
+            character_sheet: default_character_sheet_keys(),
             movement_cooldown: 0.2,
         }
     }
@@ -628,8 +639,8 @@ impl ControlsConfig {
     /// # Errors
     ///
     /// Returns `ConfigError::ValidationError` if movement cooldown is negative,
-    /// if the inventory key list is empty, if the rest key list is empty, or if
-    /// the automap key list is empty.
+    /// if the inventory key list is empty, if the rest key list is empty, if
+    /// the automap key list is empty, or if the character_sheet key list is empty.
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.movement_cooldown < 0.0 {
             return Err(ConfigError::ValidationError(format!(
@@ -653,6 +664,12 @@ impl ControlsConfig {
         if self.automap.is_empty() {
             return Err(ConfigError::ValidationError(
                 "automap key list must not be empty".to_string(),
+            ));
+        }
+
+        if self.character_sheet.is_empty() {
+            return Err(ConfigError::ValidationError(
+                "character_sheet key list must not be empty".to_string(),
             ));
         }
 
@@ -1674,6 +1691,59 @@ mod tests {
             ..Default::default()
         };
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_character_sheet_key_default_is_p() {
+        let config = ControlsConfig::default();
+        assert_eq!(config.character_sheet, vec!["P".to_string()]);
+    }
+
+    #[test]
+    fn test_character_sheet_key_binding_round_trip() {
+        let config = ControlsConfig {
+            character_sheet: vec!["F2".to_string(), "KeyP".to_string()],
+            ..ControlsConfig::default()
+        };
+        let ron = ron::to_string(&config).expect("serialize");
+        let back: ControlsConfig = ron::from_str(&ron).expect("deserialize");
+        assert_eq!(
+            back.character_sheet,
+            vec!["F2".to_string(), "KeyP".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_controls_config_character_sheet_defaults_when_missing_from_ron() {
+        // A RON string that omits `character_sheet` entirely — the serde
+        // default must kick in and produce `["P"]`.
+        let ron_str = r#"(
+            move_forward: ["W", "ArrowUp"],
+            move_back: ["S", "ArrowDown"],
+            turn_left: ["A", "ArrowLeft"],
+            turn_right: ["D", "ArrowRight"],
+            interact: ["Space", "E"],
+            menu: ["Escape"],
+            movement_cooldown: 0.2,
+        )"#;
+        let config: ControlsConfig = ron::from_str(ron_str).expect("deserialize");
+        assert_eq!(config.character_sheet, vec!["P".to_string()]);
+    }
+
+    #[test]
+    fn test_controls_validation_empty_character_sheet_keys_fails() {
+        let config = ControlsConfig {
+            character_sheet: vec![],
+            ..ControlsConfig::default()
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        if let Err(ConfigError::ValidationError(msg)) = result {
+            assert!(
+                msg.contains("character_sheet"),
+                "error message should mention character_sheet, got: {msg}"
+            );
+        }
     }
 
     #[test]

@@ -25,6 +25,7 @@ GameConfig(
         rest: ["R"],
         automap: ["M"],
         spell_book: ["B"],
+        character_sheet: ["P"],
         movement_cooldown: 0.2,
     ),
     camera: CameraConfig(
