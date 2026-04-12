@@ -639,6 +639,147 @@ cargo nextest run        → 4492 passed, 0 failed, 8 skipped
 
 ---
 
+## Phase 5: NPC Trainer — Game UI System (Complete)
+
+### Overview
+
+Implemented Phase 5 of the character leveling system as specified in
+`docs/explanation/level_up_plan.md`. This phase delivers the egui-based
+`GameMode::Training` screen that lets players spend gold at a trainer NPC to
+advance eligible party members to the next level. The system follows the
+`temple_ui.rs` pattern exactly: a plugin registers four systems in a chained
+`Update` schedule, with pure-logic helpers kept fully testable outside Bevy.
+
+### What Changed
+
+#### 1. `src/game/systems/training_ui.rs` — new file
+
+**`TrainingUiRoot` component** — marker attached to any Bevy entity spawned as
+part of the training UI. `training_cleanup_system` despawns entities carrying
+this component when the game is no longer in `Training` mode.
+
+**Three message types** (analogues of the temple events):
+
+| Message                | Direction         | Purpose                                            |
+| ---------------------- | ----------------- | -------------------------------------------------- |
+| `TrainCharacter`       | UI/input → action | Train the party member at `party_index`            |
+| `ExitTraining`         | UI/input → action | Leave the training session (→ Exploration)         |
+| `SelectTrainingMember` | UI/input → select | Change the highlighted member; `usize::MAX` clears |
+
+**`TrainingNavState` resource** — keyboard navigation state (focused list
+index + Leave-button focus flag). `Default` initialises both fields to
+`None`/`false`.
+
+**`eligible_members(training_state, party) -> Vec<(usize, &Character)>`** —
+pure helper that resolves `TrainingState::eligible_member_indices` to
+`(party_index, &Character)` tuples. Out-of-bounds indices are silently
+filtered so the UI never panics regardless of stale state.
+
+**Private UI helpers:**
+
+| Helper                       | Responsibility                                                                                |
+| ---------------------------- | --------------------------------------------------------------------------------------------- |
+| `render_training_header`     | Heading, flavour quote, party gold                                                            |
+| `render_eligible_member_row` | Per-member frame: name, class, level progression, XP / threshold, fee, Select + Train buttons |
+| `render_training_footer`     | Status message, Leave button, keyboard instructions                                           |
+
+**Five Bevy systems** registered in order:
+
+| System                      | Responsibility                                                                    |
+| --------------------------- | --------------------------------------------------------------------------------- |
+| `training_input_system`     | ESC → ExitTraining; ↑↓ cycles list; Tab toggles Leave focus; Enter/Space trains   |
+| `training_selection_system` | Applies `SelectTrainingMember` events to `TrainingState::selected_member_index`   |
+| `training_ui_system`        | Renders the egui `CentralPanel`; no-op outside `Training` mode                    |
+| `training_selection_system` | Second pass — processes UI-generated selections in the same frame                 |
+| `training_action_system`    | Calls `perform_training_service` on `TrainCharacter`; sets mode on `ExitTraining` |
+| `training_cleanup_system`   | Resets `TrainingNavState` and despawns `TrainingUiRoot` entities on mode exit     |
+
+**`TrainingPlugin`** — registers all messages, the nav resource, and the
+six-system chain in `Update`.
+
+#### 2. `src/game/systems/mod.rs`
+
+Added `pub mod training_ui`.
+
+#### 3. `src/bin/antares.rs`
+
+Registered `TrainingPlugin` in `AntaresPlugin::build` after `ProgressionPlugin`:
+
+```antares/src/bin/antares.rs#L300-303
+// NPC trainer level-up UI
+app.add_plugins(antares::game::systems::training_ui::TrainingPlugin);
+```
+
+### Design Decisions
+
+- **Temple UI as direct template** — `training_ui.rs` mirrors `temple_ui.rs`
+  structurally (plugin → events → nav resource → pure helper → private
+  helpers → systems → tests) so the codebase stays internally consistent and
+  reviewers already familiar with the temple flow can read this one immediately.
+- **Per-row XP threshold and fee** — both values are computed fresh each frame
+  inside the scroll-area loop from `experience_for_level_with_config` and
+  `NpcDefinition::training_fee_for_level`. This means the displayed values
+  stay correct after a level-up without requiring a separate invalidation step.
+- **`level_db` borrow pattern** — `game_data: Option<Res<GameDataResource>>`
+  is a distinct Bevy resource from `global_state`, so the borrow
+  `game_data.as_deref().and_then(|gd| gd.data().levels.as_ref())` never
+  conflicts with the mutable party borrow inside `perform_training_service`.
+  This reuses the exact same split established in `progression.rs`.
+- **`selected_member_index` cleared on success** — after a successful training
+  call the selection is reset to `None` so the player must explicitly re-select
+  a member before training again, preventing accidental double-spends.
+- **`training_cleanup_system` is a no-op in practice** — the training UI is
+  fully egui-based (no Bevy entity spawning), so the query over `TrainingUiRoot`
+  always yields zero results. The system still provides the correct structural
+  pattern and will correctly clean up any entities a future enhancement might spawn.
+- **`#[allow(clippy::too_many_arguments)]`** on `render_eligible_member_row` —
+  the function takes 8 parameters (threshold, fee, can_afford in addition to
+  the standard UI + index + member + highlight arguments) to keep the row
+  renderer pure and testable. A parameter struct would add verbosity without
+  improving clarity at the single call site.
+
+### Test Coverage
+
+16 unit tests in `game::systems::training_ui::tests`:
+
+| Test                                                   | What it verifies                                                                     |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `test_eligible_members_empty_list`                     | Empty `eligible_member_indices` → empty result, no panic                             |
+| `test_eligible_members_out_of_bounds_filtered`         | Out-of-bounds index silently dropped                                                 |
+| `test_eligible_members_resolves_correct_party_members` | Correct `(party_index, &Character)` tuples returned                                  |
+| `test_eligible_members_preserves_order`                | Order of `eligible_member_indices` is preserved                                      |
+| `test_eligible_members_mixed_valid_invalid`            | Only valid indices survive a mixed list                                              |
+| `test_training_nav_state_default`                      | `focused_index = None`, `focus_on_leave = false`                                     |
+| `test_training_plugin_builds`                          | Plugin registers without panicking                                                   |
+| `test_training_mode_no_eligible_members_no_panic`      | Empty list returns empty result (plan requirement 1)                                 |
+| `test_exit_training_transitions_to_exploration`        | `ExitTraining` event → `GameMode::Exploration` (plan requirement 2)                  |
+| `test_successful_training_updates_status_message`      | Level advances; `status_message` contains "advanced to level 2" (plan requirement 3) |
+| `test_training_system_noop_when_not_in_training_mode`  | No state change in Exploration mode (plan requirement 4)                             |
+| `test_exit_training_noop_when_not_in_training_mode`    | `ExitTraining` outside Training mode is silently ignored                             |
+| `test_selection_updates_selected_member_index`         | `SelectTrainingMember` updates `selected_member_index`                               |
+| `test_selection_max_clears_selected_member_index`      | `usize::MAX` clears the selection                                                    |
+| `test_training_insufficient_gold_shows_error`          | Insufficient gold → level unchanged; status mentions "insufficient"                  |
+| `test_training_plugin_registered_events_accessible`    | Nav resource accessible after plugin registration                                    |
+
+### Success Criteria Verification
+
+- ✅ Training screen renders correctly for all eligible party members
+  (egui `CentralPanel` iterates `eligible_member_indices` via `eligible_members`)
+- ✅ Gold cost per member is accurate
+  (`npc.training_fee_for_level(member.level, campaign_config)` called per row)
+- ✅ Character advances on "Train", gold is deducted, updated level visible
+  (`test_successful_training_updates_status_message`)
+- ✅ Ineligible characters (wrong XP or dead) are not listed
+  (`eligible_member_indices` is pre-populated by the dialogue system using
+  `check_level_up_with_db`; `eligible_members` filters out-of-bounds indices
+  defensively)
+- ✅ Pressing Escape transitions back to Exploration
+  (`test_exit_training_transitions_to_exploration`)
+- ✅ System is a complete no-op when mode is not Training
+  (`test_training_system_noop_when_not_in_training_mode`)
+
+---
+
 ## Phase 1: Domain — `LevelDatabase` and `levels.ron` (Complete)
 
 ### Overview

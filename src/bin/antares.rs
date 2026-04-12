@@ -298,6 +298,9 @@ impl Plugin for AntaresPlugin {
 
         // Auto level-up progression system
         app.add_plugins(antares::game::systems::progression::ProgressionPlugin);
+
+        // NPC trainer level-up UI
+        app.add_plugins(antares::game::systems::training_ui::TrainingPlugin);
     }
 }
 
