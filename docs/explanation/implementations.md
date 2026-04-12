@@ -1,5 +1,166 @@
 # Implementations
 
+## Level-Up Plan — Phase 7: SDK — NPC Editor Trainer Support (Complete)
+
+### Overview
+
+Phase 7 extends the SDK Campaign Builder's NPC editor with full trainer-role
+support, mirroring the complete `is_merchant` / merchant-dialogue lifecycle
+pattern for trainers. An NPC may be both a merchant and a trainer
+simultaneously; the two roles are fully independent.
+
+### What Changed
+
+#### 1. `sdk/campaign_builder/src/dialogue_editor.rs`
+
+Added two new public methods to `DialogueEditorState` that mirror the merchant
+equivalents:
+
+- **`ensure_trainer_dialogue_for_npc(&mut self, npc: &mut NpcDefinition) -> Result<MerchantDialogueUpdate, String>`**
+  — Creates a new `standard_trainer_template` when the trainer has no assigned
+  dialogue, or augments an existing dialogue tree with
+  `ensure_standard_trainer_branch` when one is already assigned. Returns a
+  `MerchantDialogueUpdate` variant describing what was done (same enum reused
+  for both roles).
+
+- **`remove_trainer_dialogue_for_npc(&mut self, npc: &NpcDefinition) -> Result<MerchantDialogueUpdate, String>`**
+  — Non-destructively removes SDK-managed trainer nodes and choices from the
+  assigned dialogue tree via `remove_sdk_managed_trainer_content`. Unrelated
+  authored dialogue content is preserved; the dialogue asset itself is retained.
+
+#### 2. `sdk/campaign_builder/src/npc_editor/mod.rs`
+
+**New enum — `TrainerDialogueValidationState`**
+
+```rust
+pub enum TrainerDialogueValidationState {
+    NotTrainer,
+    Valid,
+    Missing,
+    AssignedDialogueMissing,
+    StaleTrainerContent,
+}
+```
+
+Mirrors `MerchantDialogueValidationState` for the trainer role.
+
+**`NpcEditBuffer` — three new fields**
+
+| Field                     | Type     | Purpose                                   |
+| ------------------------- | -------- | ----------------------------------------- |
+| `is_trainer`              | `bool`   | Trainer role toggle                       |
+| `training_fee_base`       | `String` | Text buffer; empty = use campaign default |
+| `training_fee_multiplier` | `String` | Text buffer; empty = use campaign default |
+
+**`NpcEditorState` — new filter field**
+
+`pub filter_trainers: bool` added alongside `filter_merchants`,
+`filter_innkeepers`, and `filter_quest_givers`.
+
+**`Default for NpcEditorState`** — initialises `filter_trainers: false`.
+
+**`show()` filter bar**
+
+Added `🎓 Trainers` selectable-label filter chip after `📜 Quest Givers`.
+The `🔄 Clear Filters` button now also resets `filter_trainers`.
+
+**`show_list_view` — trainer badge**
+
+Pre-computes `TrainerDialogueValidationState` for every visible NPC (alongside
+the existing merchant pre-computation) to avoid borrow conflicts. Renders:
+
+- `🎓 Trainer` badge (purple) when `is_trainer == true`, colour shifts to red
+  for `Missing` / `AssignedDialogueMissing` states.
+- `Stale Trainer` badge (amber) when a non-trainer NPC's dialogue still
+  contains SDK-managed trainer content.
+
+**`show_edit_view` — Faction & Roles section**
+
+New trainer sub-section added below the merchant block and above the innkeeper
+checkbox:
+
+- `ui.checkbox(…, "🎓 Is Trainer")` toggle.
+- Checking: calls `auto_apply_trainer_dialogue_to_edit_buffer()` — creates or
+  repairs a trainer dialogue automatically.
+- Unchecking: calls `remove_trainer_dialogue_from_edit_buffer()` — removes only
+  SDK-managed trainer content.
+- When `is_trainer` is `true`:
+  - Colour-coded status label (green = valid, red = missing).
+  - `Training Fee Base (gold per level)` text field.
+  - `Training Fee Multiplier` text field.
+  - `Create trainer dialogue` button.
+  - `Repair trainer dialogue` button.
+  - `Remove trainer branch` button.
+  - SDK workflow help text.
+- Save button also applies `auto_apply_trainer_dialogue_to_edit_buffer` /
+  `remove_trainer_dialogue_from_edit_buffer` in the same way the save path
+  does for merchants.
+
+**New private methods on `NpcEditorState`**
+
+| Method                                            | Description                                                                             |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `trainer_dialogue_validation_for_definition(npc)` | Returns `TrainerDialogueValidationState` for a stored `NpcDefinition`                   |
+| `trainer_dialogue_status_for_buffer()`            | Human-readable status string for the current edit buffer                                |
+| `create_or_repair_trainer_dialogue_for_buffer()`  | Creates / augments trainer dialogue; returns guidance string when `is_trainer == false` |
+| `remove_trainer_dialogue_from_edit_buffer()`      | Non-destructively removes SDK-managed trainer content                                   |
+| `auto_apply_trainer_dialogue_to_edit_buffer()`    | Auto-creates/repairs trainer dialogue on toggle-on                                      |
+
+**`matches_filters`** — trainer filter gate added.
+
+**`start_edit_npc`** — populates `is_trainer`, `training_fee_base`, and
+`training_fee_multiplier` from the stored `NpcDefinition`.
+
+**`build_npc_from_edit_buffer`** — parses `training_fee_base` and
+`training_fee_multiplier` strings to `Option<u32>` / `Option<f32>`; propagates
+`is_trainer`.
+
+**`save_npc`** — same parse-and-propagate logic as `build_npc_from_edit_buffer`.
+
+### New Tests (10 tests in `npc_editor::tests`)
+
+| Test                                                                          | What it covers                                                                                                    |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `test_is_trainer_toggle_auto_applies_training_dialogue`                       | Enabling `is_trainer` creates a standard trainer dialogue and assigns its ID                                      |
+| `test_create_trainer_dialogue_returns_guidance_when_not_trainer`              | Returns non-empty guidance message (not silent no-op) when `is_trainer == false`                                  |
+| `test_create_trainer_dialogue_generates_open_training_action`                 | Generated tree contains `OpenTraining` action; root has ≥ 2 choices                                               |
+| `test_build_npc_from_edit_buffer_roundtrips_trainer_fields`                   | `is_trainer`, `training_fee_base` (300), `training_fee_multiplier` (1.5) survive the buffer→definition round-trip |
+| `test_build_npc_from_edit_buffer_empty_fee_fields_yield_none`                 | Empty fee strings produce `None` (campaign defaults)                                                              |
+| `test_filter_trainers_hides_non_trainer_npcs`                                 | `filter_trainers == false` passes both; `true` hides non-trainers                                                 |
+| `test_save_npc_persists_trainer_fields`                                       | `save_npc()` writes `is_trainer`, fee base (500), and multiplier (2.0) to stored NPC                              |
+| `test_start_edit_npc_populates_trainer_fields`                                | `start_edit_npc` fills buffer with `is_trainer`, `"250"`, `"1.25"`                                                |
+| `test_remove_trainer_dialogue_from_generated_template_leaves_dialogue_intact` | Dialogue asset remains after trainer content removal; `contains_open_training_for_npc` returns false              |
+| `test_create_trainer_dialogue_id_is_unique`                                   | Two trainer NPCs receive distinct dialogue IDs; each targets the correct NPC                                      |
+| `test_merchant_and_trainer_are_independent`                                   | An NPC may be both merchant and trainer; the two dialogue-creation operations produce separate trees              |
+
+### Architecture Compliance
+
+- [ ] `NpcEditBuffer` trainer fields: `is_trainer: bool`, `training_fee_base: String`, `training_fee_multiplier: String`
+- [ ] `TrainerDialogueValidationState` enum mirrors `MerchantDialogueValidationState`
+- [ ] `filter_trainers` field in `NpcEditorState`; chip in filter bar; `Clear Filters` resets it
+- [ ] `🎓` badge in list view; SDK-managed stale badge for non-trainer NPCs
+- [ ] Trainer checkbox + fee fields + dialogue buttons in edit view
+- [ ] All five trainer logic methods implemented
+- [ ] `build_npc_from_edit_buffer` and `save_npc` propagate trainer fields
+- [ ] `start_edit_npc` populates trainer fields
+- [ ] `DialogueEditorState::ensure_trainer_dialogue_for_npc` and `remove_trainer_dialogue_for_npc` added
+- [ ] `is_merchant` and `is_trainer` are fully independent
+- [ ] RON format used for all data files
+- [ ] SPDX headers present on all `.rs` files
+- [ ] No test references `campaigns/tutorial`
+
+### Quality Gates
+
+```
+cargo fmt --all         → no output (all files formatted)
+cargo check             → Finished (0 errors)
+cargo clippy -D warnings → Finished (0 warnings)
+cargo nextest run       → 4557 passed, 8 skipped (workspace)
+                          2315 passed (campaign_builder package)
+```
+
+---
+
 ## Level-Up Plan — Phase 6: SDK Levels Editor Tab (Complete)
 
 ### Overview
