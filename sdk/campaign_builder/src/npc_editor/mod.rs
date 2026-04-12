@@ -1699,6 +1699,9 @@ impl NpcEditorState {
             },
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         self.merchant_dialogue_status_for_definition(&npc)
@@ -1744,6 +1747,9 @@ impl NpcEditorState {
             },
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         self.merchant_dialogue_repair_action_for_definition(&npc)
@@ -1821,6 +1827,9 @@ impl NpcEditorState {
             },
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         let update = self
@@ -1985,6 +1994,9 @@ impl NpcEditorState {
             stock_template,
             service_catalog: None::<ServiceCatalog>,
             economy: None::<NpcEconomySettings>,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         })
     }
 
@@ -2154,6 +2166,9 @@ impl NpcEditorState {
             is_priest: false,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         // Perform the in-memory save and remember the result
@@ -2440,6 +2455,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
 
         state.start_edit_npc(0);
@@ -2966,6 +2984,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         let mut state = NpcEditorState::new();
@@ -3011,6 +3032,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
 
         // Edit it
@@ -3044,6 +3068,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
         assert!(state.matches_filters(&npc));
     }
@@ -3069,6 +3096,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
         assert!(state.matches_filters(&npc));
 
@@ -3088,6 +3118,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
         assert!(!state.matches_filters(&npc2));
     }
@@ -3113,6 +3146,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
         assert!(state.matches_filters(&merchant));
 
@@ -3132,6 +3168,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
         assert!(!state.matches_filters(&non_merchant));
     }
@@ -3159,6 +3198,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
 
         let id2 = state.next_npc_id();
@@ -3207,6 +3249,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
 
         state.start_edit_npc(0);
@@ -3272,6 +3317,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
 
         state.mode = NpcEditorMode::Add;
@@ -3425,6 +3473,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
 
         // Start editing
@@ -3582,6 +3633,9 @@ mod tests {
             stock_template: Some("wizard_shop".to_string()),
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
         state.npcs.push(npc);
 
@@ -3653,6 +3707,9 @@ mod tests {
                 stock_template: None,
                 service_catalog: None,
                 economy: None,
+                is_trainer: false,
+                training_fee_base: None,
+                training_fee_multiplier: None,
             },
             NpcDefinition {
                 id: "npc_b".to_string(),
@@ -3670,6 +3727,9 @@ mod tests {
                 stock_template: None,
                 service_catalog: None,
                 economy: None,
+                is_trainer: false,
+                training_fee_base: None,
+                training_fee_multiplier: None,
             },
         ];
         let ron_str =
@@ -3694,6 +3754,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
         state.selected_npc = Some(0);
         state.mode = NpcEditorMode::Edit;
@@ -3803,6 +3866,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
 
         let missing_path = std::path::Path::new("/no/such/dir/npcs.ron");

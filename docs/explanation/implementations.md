@@ -1,5 +1,175 @@
 # Implementations
 
+## Level-Up Plan — Phase 6: SDK Levels Editor Tab (Complete)
+
+### Overview
+
+Implemented Phase 6 of the character leveling system as specified in
+`docs/explanation/level_up_plan.md`. This phase delivers a full two-column
+SDK Campaign Builder editor tab for creating and managing `levels.ron` files
+(per-class XP threshold tables). The implementation follows all SDK rules from
+`sdk/AGENTS.md` and the standard editor pattern established by
+`stock_templates_editor.rs`.
+
+Also fixed pre-existing Phase 4 regressions in the SDK test suite — all
+`NpcDefinition { … }` struct literals in `npc_editor/mod.rs`,
+`asset_manager.rs`, `campaign_io_tests.rs`, and `ron_serialization_tests.rs`
+were updated to include the `is_trainer`, `training_fee_base`, and
+`training_fee_multiplier` fields that Phase 4 added to the domain struct.
+
+### What Changed
+
+#### 1. `sdk/campaign_builder/src/levels_editor.rs` (new file)
+
+Full two-column Levels Editor.
+
+**Types:**
+
+- `LevelsEditorError` — `thiserror`-based error type (`Io`, `Parse`,
+  `Serialization`).
+- `LevelsEditorMode` — `List` / `Add` / `Edit` (default `List`).
+- `FillFlatModalState` — ephemeral state for the "Fill Flat" dialog (delta
+  buffer string).
+- `FillStepModalState` — ephemeral state for the "Fill Step" dialog (base,
+  step, breakpoint buffer strings).
+- `LevelDatabaseFile` — internal serde wrapper matching the on-disk
+  `(entries: […])` format consumed by the game engine's `LevelDatabase`
+  loader.
+- `LevelsEditorState` — top-level state struct with full `Serialize` /
+  `Deserialize` and `#[serde(skip)]` annotations on transient fields.
+
+**Methods:**
+
+- `new()` / `reset_for_new_campaign()` — lifecycle management following Rule 13.
+- `show(ui, available_classes, campaign_dir, levels_file, base_xp,
+xp_multiplier) -> bool` — main entry point with auto-load-on-first-show
+  guard.
+- `fill_formula(base_xp, xp_multiplier)` — fills 200 thresholds using
+  `base_xp × (level-1)^xp_multiplier`.
+- `fill_flat(delta)` — fills 200 thresholds as `i × delta` (cumulative flat).
+- `fill_step(base, step, breakpoint)` — fills 200 thresholds step-wise; delta
+  starts at `base` and increases by `step` every `breakpoint` transitions.
+- `load_from_file(path)` / `save_to_file(path)` — RON I/O with `loaded_from_file`
+  guard.
+
+**UI structure:**
+
+- List view: `TwoColumnLayout` (Rule 9) with `show_standard_list_item` rows
+  (Rule 15), `push_id` on every loop iteration (Rule 1), `id_salt` on every
+  `ScrollArea` (Rule 2), `horizontal_wrapped` toolbar (Rule 12), deferred
+  mutations (Rule 10).
+- Edit view: `autocomplete_class_selector` for the class ID field (Rule 14);
+  scrollable 200-row threshold table with `DragValue` + live Delta column;
+  `FillFormula`, `FillFlat…`, `FillStep…` buttons; floating `egui::Window`
+  modals for Flat / Step fill dialogs; `horizontal_wrapped` Save/Cancel row.
+- Preview panel: read-only first-10-levels grid shown in the right column
+  of the list view when an entry is selected.
+
+**Tests (21 tests):**
+
+- `test_levels_editor_state_default` — empty list, `needs_initial_load = true`
+- `test_fill_formula_level_1_is_zero`, `test_fill_formula_level_2`,
+  `test_fill_formula_200_rows`, `test_fill_formula_is_non_decreasing`
+- `test_fill_flat_delta_5000_levels_1_4`, `test_fill_flat_200_rows`
+- `test_fill_step_base_1000_step_500_breakpoint_10`,
+  `test_fill_step_200_rows`,
+  `test_fill_step_breakpoint_1_every_level_is_its_own_section`
+- `test_load_from_file_round_trip`, `test_load_from_file_missing_returns_error`,
+  `test_round_trip_multiple_classes`
+- `test_reset_for_new_campaign_clears_data`
+- `test_add_entry_populates_200_rows`
+- `test_validate_edit_buffer_empty_class_id_returns_error`,
+  `test_validate_edit_buffer_duplicate_id_in_add_mode_returns_error`,
+  `test_validate_edit_buffer_valid_returns_entry`
+- `test_next_duplicate_class_id_basic`,
+  `test_next_duplicate_class_id_increments_suffix`
+- `test_loaded_from_file_flag_lifecycle`
+
+#### 2. `sdk/campaign_builder/src/editor_state.rs`
+
+- `CampaignData`: added `pub levels: Vec<antares::domain::ClassLevelThresholds>`.
+- `EditorRegistry`: added `pub levels_editor_state: levels_editor::LevelsEditorState`
+  after `classes_editor_state`.
+- `EditorRegistry::default()`: initialised with `LevelsEditorState::new()`.
+
+#### 3. `sdk/campaign_builder/src/lib.rs`
+
+- `pub mod levels_editor;` added to module list (alphabetical order).
+- `CampaignMetadata`: added `#[serde(default = "default_levels_file")] pub
+levels_file: String` after `furniture_file`.
+- `fn default_levels_file()` added returning `"data/levels.ron"`.
+- `CampaignMetadata::default()`: set `levels_file: "data/levels.ron"`.
+- `EditorTab`: added `Levels` between `Classes` and `Races`.
+- `EditorTab::name()`: added `Levels => "Levels"` arm.
+- `tabs` array in `update()`: `EditorTab::Levels` inserted between `Classes`
+  and `Races`.
+- Central panel `match`: added `EditorTab::Levels` arm that clones the
+  class list, calls `levels_editor_state.show(…)`, and syncs
+  `campaign_data.levels` + `unsaved_changes` on change.
+
+#### 4. `sdk/campaign_builder/src/campaign_editor.rs`
+
+- `CampaignMetadataEditBuffer`: added `pub levels_file: String`.
+- `from_metadata`: copies `m.levels_file`.
+- `apply_to`: writes `dest.levels_file`.
+- Files section grid: added "Levels File:" row with `TextEdit` + Browse button
+  (identical pattern to other data-file rows).
+
+#### 5. `sdk/campaign_builder/src/campaign_io.rs`
+
+- `pub fn load_levels(&mut self)` — follows the Rule 13 standard load pattern:
+  `path.exists()` guard, logs via `self.logger`, syncs
+  `campaign_data.levels` from editor state, clears
+  `levels_editor_state.needs_initial_load` on success.
+- `do_new_campaign`: calls `levels_editor_state.reset_for_new_campaign()` and
+  `campaign_data.levels.clear()`.
+- `do_save_campaign`: saves `levels.ron` guarded by `loaded_from_file ||
+has_unsaved_changes` (same pattern as stock templates, prevents empty-vec
+  clobber).
+- `do_open_campaign`: calls `reset_for_new_campaign()` + `load_levels()` after
+  opening a campaign file.
+
+#### 6. Pre-existing Phase 4 fixes (NpcDefinition missing fields)
+
+Added `is_trainer: false, training_fee_base: None, training_fee_multiplier:
+None` to all `NpcDefinition { … }` struct literals in:
+
+- `sdk/campaign_builder/src/npc_editor/mod.rs` (22 sites)
+- `sdk/campaign_builder/src/asset_manager.rs` (5 sites)
+- `sdk/campaign_builder/tests/campaign_io_tests.rs` (9 sites)
+- `sdk/campaign_builder/tests/ron_serialization_tests.rs` (added
+  `levels_file: "data/levels.ron".to_string()` to `CampaignMetadata` literal)
+
+### Architecture Compliance
+
+- [x] Data structures match `architecture.md` — `ClassLevelThresholds` used
+      exactly as defined in `src/domain/levels.rs`
+- [x] Module placement: new file lives under `sdk/campaign_builder/src/`
+- [x] RON format used for `levels.ron` — `(entries: […])` wrapper compatible
+      with `LevelDatabase::load_from_string`
+- [x] No hardcoded magic numbers — 200-level constant documented via named
+      range literals; formula parameters flow in from `CampaignConfig`
+- [x] `serde(default)` on `CampaignMetadata::levels_file` — existing
+      `campaign.ron` files without the field continue to deserialise correctly
+- [x] All SDK egui rules followed: `push_id` in loops, `id_salt` on all
+      `ScrollArea`s, `from_id_salt` on `ComboBox`, `TwoColumnLayout` for
+      list/detail, `autocomplete_class_selector` for the reference ID field,
+      `horizontal_wrapped` on toolbar and action rows
+
+### Quality Gates
+
+```text
+✅ cargo fmt         — no output (all files formatted)
+✅ cargo check       — Finished (0 errors) — workspace root
+✅ cargo check       — Finished (0 errors) — sdk/campaign_builder
+✅ cargo clippy      — Finished (0 warnings) — workspace root
+✅ cargo clippy      — Finished (0 warnings) — sdk/campaign_builder
+✅ cargo nextest run — 4557 passed, 8 skipped — workspace root
+✅ cargo nextest run — 1733 passed, 0 skipped — sdk/campaign_builder
+```
+
+---
+
 ## Modal ESC behavior, centralized modal close helper, and lock prompt navigation fix
 
 ### Overview

@@ -1439,6 +1439,52 @@ impl CampaignBuilderApp {
         }
     }
 
+    /// Load level thresholds from the campaign's `levels.ron` file.
+    ///
+    /// On success, populates both `levels_editor_state.levels` and the
+    /// `campaign_data.levels` mirror list.  Logs a warning (but does not fail)
+    /// when the file is absent — an empty levels list is a valid state for
+    /// a new campaign.
+    pub fn load_levels(&mut self) {
+        if let Some(dir) = &self.campaign_dir {
+            let path = dir.join(&self.campaign.levels_file);
+            if path.exists() {
+                match self
+                    .editor_registry
+                    .levels_editor_state
+                    .load_from_file(&path)
+                {
+                    Ok(()) => {
+                        self.campaign_data.levels =
+                            self.editor_registry.levels_editor_state.levels.clone();
+                        self.logger.info(
+                            category::FILE_IO,
+                            &format!(
+                                "Loaded {} level threshold entries",
+                                self.campaign_data.levels.len()
+                            ),
+                        );
+                        // Clear the lazy-load flag so show() does not re-read
+                        // the file redundantly on the first tab render.
+                        self.editor_registry.levels_editor_state.needs_initial_load = false;
+                    }
+                    Err(e) => {
+                        self.logger
+                            .warn(category::FILE_IO, &format!("Failed to parse levels: {}", e));
+                    }
+                }
+            } else {
+                self.logger.debug(
+                    category::FILE_IO,
+                    &format!(
+                        "Levels file not found (will auto-load if created later): {}",
+                        path.display()
+                    ),
+                );
+            }
+        }
+    }
+
     /// Load monsters from RON file
     pub fn load_monsters(&mut self) {
         let monsters_file = self.campaign.monsters_file.clone();
@@ -2346,6 +2392,13 @@ impl CampaignBuilderApp {
             .stock_templates_editor_state
             .reset_for_new_campaign();
         self.campaign_data.stock_templates.clear();
+
+        // Reset levels editor for the same reason.
+        self.editor_registry
+            .levels_editor_state
+            .reset_for_new_campaign();
+        self.campaign_data.levels.clear();
+
         self.campaign = CampaignMetadata::default();
 
         // Sync the campaign editor's authoritative metadata and edit buffer with
@@ -2517,6 +2570,23 @@ impl CampaignBuilderApp {
                     save_warnings.push(format!("StockTemplates: {}", e));
                 }
             }
+
+            // Save levels.ron — same guard as stock templates: only persist if
+            // the in-memory data was originally loaded from disk or was
+            // explicitly modified, to prevent overwriting a valid on-disk file
+            // with an empty default Vec before any load has occurred.
+            let levels_path = dir.join(&self.campaign.levels_file);
+            let should_save_levels = self.editor_registry.levels_editor_state.loaded_from_file
+                || self.editor_registry.levels_editor_state.has_unsaved_changes;
+            if should_save_levels {
+                if let Err(e) = self
+                    .editor_registry
+                    .levels_editor_state
+                    .save_to_file(&levels_path)
+                {
+                    save_warnings.push(format!("Levels: {}", e));
+                }
+            }
         }
 
         // Now save campaign metadata to RON format
@@ -2683,6 +2753,13 @@ impl CampaignBuilderApp {
                         .reset_for_new_campaign();
                     self.campaign_data.stock_templates.clear();
                     self.load_stock_templates();
+
+                    // Reset and load level thresholds.
+                    self.editor_registry
+                        .levels_editor_state
+                        .reset_for_new_campaign();
+                    self.campaign_data.levels.clear();
+                    self.load_levels();
 
                     // Scan asset references and mark loaded data files
                     if let Some(ref mut manager) = self.asset_manager {

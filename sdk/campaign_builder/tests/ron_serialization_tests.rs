@@ -52,6 +52,7 @@ fn test_ron_serialization() {
         proficiencies_file: "data/proficiencies.ron".to_string(),
         stock_templates_file: "data/npc_stock_templates.ron".to_string(),
         furniture_file: "data/furniture.ron".to_string(),
+        levels_file: "data/levels.ron".to_string(),
         starting_time: default_starting_time(),
     };
 
