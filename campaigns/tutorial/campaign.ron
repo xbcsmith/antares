@@ -33,8 +33,9 @@ CampaignMetadata(
     creatures_file: "data/creatures.ron",
     stock_templates_file: "data/npc_stock_templates.ron",
     furniture_file: "data/furniture.ron",
+    levels_file: "data/levels.ron",
     starting_time: GameTime(
-        year: 1,
+        year: 1000,
         month: 1,
         day: 1,
         hour: 8,
