@@ -40,6 +40,13 @@ GameConfig(
         light_range: 60.0,
         shadows_enabled: true,
     ),
+    leveling: LevelingConfig(
+        level_up_mode: Auto,
+        base_xp: 1000,
+        xp_multiplier: 1.5,
+        training_fee_base: 500,
+        training_fee_multiplier: 1.0,
+    ),
     time: TimeConfig(
         movement_step_seconds: 30,
         combat_turn_seconds: 10,

@@ -1,5 +1,101 @@
 # Implementations
 
+## Level-Up Plan — Phase 8: SDK — Config Editor `LevelUpMode` and XP Formula Settings (Complete)
+
+### Overview
+
+Phase 8 extends the SDK Campaign Builder's Config Editor with a new collapsible
+"🎓 Leveling Settings" section that exposes the five `LevelingConfig` fields
+(`level_up_mode`, `base_xp`, `xp_multiplier`, `training_fee_base`,
+`training_fee_multiplier`) to campaign authors through the visual editor UI.
+
+### Files Changed
+
+#### `src/sdk/game_config.rs`
+
+- Added `use crate::domain::campaign::LevelUpMode;` import.
+- Added `LevelingConfig` struct with five fields, serde `default` helpers, a
+  hand-written `Default` impl, and a `validate()` method that enforces:
+  - `base_xp >= 1`
+  - `xp_multiplier >= 0.1`
+  - `training_fee_multiplier >= 0.01`
+- Added `#[serde(default)] pub leveling: LevelingConfig` field to `GameConfig`.
+- Updated `GameConfig::validate()` to call `self.leveling.validate()`.
+- Added 10 new unit tests covering defaults, validation edge-cases, RON
+  round-trip, missing-field defaulting, and `GameConfig` propagation.
+
+#### `src/bin/antares.rs`
+
+- Added `leveling: Default::default()` to the `GameConfig` struct literal in the
+  test helper so the explicit initializer compiles after the new field was added.
+
+#### `sdk/campaign_builder/src/config_editor.rs`
+
+- Added `LevelingConfig` to the `antares::sdk::game_config` import.
+- Added six new fields to `ConfigEditorState`:
+  `leveling_expanded`, `level_up_mode_is_npc`, `base_xp_buffer`,
+  `xp_multiplier_buffer`, `training_fee_base_buffer`,
+  `training_fee_multiplier_buffer`.
+- Initialised all six fields to their zero/empty defaults in the `Default` impl.
+- Extended `update_edit_buffers` to populate all six fields from
+  `self.game_config.leveling.*`.
+- Extended `update_config_from_buffers` to parse and clamp all five numeric
+  fields back into `self.game_config.leveling.*` with correct minimum clamps.
+- Added `show_leveling_section` method that renders a collapsible
+  "🎓 Leveling Settings" panel containing:
+  - Radio buttons for `Auto` / `NPC Trainer` mode.
+  - Text fields for `Base XP` and `XP Multiplier` (always visible).
+  - Text fields for `Training Fee Base` and `Training Fee Multiplier`
+    (conditionally visible only when `level_up_mode_is_npc == true`).
+- Added `self.show_leveling_section(ui, unsaved_changes)` call at the end of
+  the vertical `ScrollArea` in `show`, after the camera section.
+- Added 9 new tests:
+  `test_leveling_buffers_default_values`,
+  `test_update_edit_buffers_populates_leveling_fields`,
+  `test_update_edit_buffers_populates_leveling_auto_mode`,
+  `test_update_config_from_buffers_parses_leveling`,
+  `test_update_config_from_buffers_clamps_base_xp_min_1`,
+  `test_update_config_from_buffers_clamps_xp_multiplier_min`,
+  `test_update_config_from_buffers_clamps_fee_multiplier_min`,
+  `test_level_up_mode_npc_round_trip`,
+  `test_level_up_mode_auto_round_trip`,
+  `test_leveling_buffers_round_trip`.
+
+#### `data/test_campaign/config.ron`
+
+- Added `leveling: LevelingConfig(...)` block with all five fields at their
+  default values so the test fixture deserialises cleanly with the new field.
+
+### Design Decisions
+
+- `LevelingConfig` is a **new, purpose-built config struct** rather than
+  embedding a reference to `CampaignConfig`. This keeps the SDK config layer
+  thin: it only carries the subset of settings that are relevant to the
+  `config.ron` file, keeping concerns separated from the domain
+  `CampaignConfig` which carries many additional runtime fields.
+- The `training_fee_base` and `training_fee_multiplier` rows are
+  **conditionally rendered** (`if self.level_up_mode_is_npc`) to avoid
+  confusing campaign authors with irrelevant fields when `Auto` mode is
+  selected.
+- Buffer parsing uses `trim().parse()` so that accidental leading/trailing
+  whitespace in the text field never causes a silent no-op.
+- Clamping happens inside `update_config_from_buffers` so the buffer may
+  temporarily show an out-of-range value while the author is typing, but the
+  stored config is always valid once any change is committed.
+
+### Quality Gates
+
+All four gates passed with zero errors and zero warnings:
+
+```text
+cargo fmt --all          → clean
+cargo check --all-targets --all-features  → Finished (0 errors)
+cargo clippy --all-targets --all-features -- -D warnings  → Finished (0 warnings)
+cargo nextest run --all-features  → 4569 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Level-Up Plan — Phase 7: SDK — NPC Editor Trainer Support (Complete)
 
 ### Overview

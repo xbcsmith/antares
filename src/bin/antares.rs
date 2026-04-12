@@ -397,6 +397,7 @@ mod tests {
                 rest: Default::default(),
                 game_log: Default::default(),
                 time: Default::default(),
+                leveling: Default::default(),
             },
         }
     }
