@@ -873,11 +873,16 @@ pub struct GameState {
     #[serde(default)]
     pub npc_runtime: NpcRuntimeStore,
 
-    /// Campaign-level gameplay rules (permadeath, death mode, difficulty, etc.).
+    /// Campaign-level gameplay rules (level-up mode, XP curve, permadeath, etc.).
     ///
-    /// Loaded from the campaign's `config.ron` file and stored in the save so
-    /// the rules remain constant for the lifetime of that playthrough.
-    /// Defaults to `CampaignConfig::default()` for new games without a campaign.
+    /// Populated by [`GameState::new_game`] from the campaign's `config.ron`
+    /// (`LevelingConfig` — leveling curve and mode) and `campaign.ron`
+    /// (`max_level`, `permadeath`).  All other fields use their
+    /// [`CampaignConfig::default`] values.
+    ///
+    /// Uses `#[serde(default)]` so that saves created via [`GameState::new`]
+    /// (tests, offline contexts) or saves predating this field load cleanly
+    /// with all defaults.
     #[serde(default)]
     pub campaign_config: CampaignConfig,
 
@@ -1078,6 +1083,19 @@ impl GameState {
         // Preserve campaign-specific game configuration for state
         let campaign_config = campaign.game_config.clone();
 
+        // Extract leveling settings and per-campaign rules BEFORE `campaign`
+        // is moved into `Self` below.  These values populate `campaign_config`
+        // (the domain `CampaignConfig`) so that the progression system, combat
+        // XP award, and training service all read the correct runtime values
+        // instead of hard-coded defaults.
+        let leveling = campaign.game_config.leveling.clone();
+        let campaign_permadeath = campaign.config.permadeath;
+        // max_level == 0 is invalid in practice (default is 20); treat it as
+        // "no explicit cap" (None) so a malformed campaign.ron can't lock all
+        // leveling.
+        let max_party_level =
+            (campaign.config.max_level > 0).then_some(u32::from(campaign.config.max_level));
+
         // Initialise the game clock from the campaign's configured starting time.
         // Campaign authors set this in config.ron via `starting_time: (day: N, hour: H, minute: M)`.
         // Falls back to Day 1, 08:00 when the field is absent (serde default).
@@ -1095,7 +1113,18 @@ impl GameState {
             quests: QuestLog::new(),
             encountered_characters: std::collections::HashSet::new(),
             npc_runtime: NpcRuntimeStore::new(),
-            campaign_config: CampaignConfig::default(),
+            // Populate from the campaign's LevelingConfig (config.ron) and
+            // campaign metadata (campaign.ron).  All other fields default.
+            campaign_config: CampaignConfig {
+                level_up_mode: leveling.level_up_mode,
+                base_xp: leveling.base_xp,
+                xp_multiplier: leveling.xp_multiplier,
+                training_fee_base: leveling.training_fee_base,
+                training_fee_multiplier: leveling.training_fee_multiplier,
+                permadeath: campaign_permadeath,
+                max_party_level,
+                ..CampaignConfig::default()
+            },
             game_log_entries: Vec::new(),
         };
 
@@ -6141,6 +6170,84 @@ mod tests {
         let closed = state.close_modal();
         assert!(closed);
         assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    // ── new_game campaign_config propagation tests ────────────────────────────
+
+    /// `GameState::new_game` must bridge `LevelingConfig` (from `config.ron`)
+    /// and campaign metadata (from `campaign.ron`) into `GameState::campaign_config`
+    /// so that the progression system and combat XP award use the correct
+    /// runtime values instead of hard-coded defaults.
+    ///
+    /// The discriminating assertion is `max_party_level == Some(20)`:
+    /// `CampaignConfig::default()` gives `None`, but the test campaign's
+    /// `campaign.ron` sets `max_level: 20`, so a properly wired `new_game`
+    /// must produce `Some(20)`.
+    #[test]
+    fn test_new_game_propagates_leveling_config_to_campaign_config() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let campaign_path = std::path::PathBuf::from(manifest_dir).join("data/test_campaign");
+        let campaign = crate::sdk::campaign_loader::Campaign::load(&campaign_path)
+            .expect("data/test_campaign must load cleanly");
+        let (state, _) =
+            GameState::new_game(campaign).expect("new_game must succeed for test_campaign");
+
+        // Level-up mode — from data/test_campaign/config.ron `leveling: LevelingConfig`
+        assert_eq!(
+            state.campaign_config.level_up_mode,
+            crate::domain::campaign::LevelUpMode::Auto,
+            "level_up_mode must be Auto (from config.ron LevelingConfig)"
+        );
+
+        // XP curve fields — from data/test_campaign/config.ron
+        assert_eq!(
+            state.campaign_config.base_xp, 1000,
+            "base_xp must be 1000 (from config.ron LevelingConfig)"
+        );
+        assert!(
+            (state.campaign_config.xp_multiplier - 1.5).abs() < 1e-9,
+            "xp_multiplier must be 1.5 (from config.ron LevelingConfig)"
+        );
+        assert_eq!(
+            state.campaign_config.training_fee_base, 500,
+            "training_fee_base must be 500 (from config.ron LevelingConfig)"
+        );
+        assert!(
+            (state.campaign_config.training_fee_multiplier - 1.0).abs() < 1e-6,
+            "training_fee_multiplier must be 1.0 (from config.ron LevelingConfig)"
+        );
+
+        // max_party_level — the discriminating assertion.
+        // CampaignConfig::default() → None; campaign.ron `max_level: 20` → Some(20).
+        assert_eq!(
+            state.campaign_config.max_party_level,
+            Some(20),
+            "max_party_level must be Some(20) from campaign.ron max_level: 20, not None"
+        );
+
+        // permadeath — from data/test_campaign/campaign.ron `permadeath: false`
+        assert!(
+            !state.campaign_config.permadeath,
+            "permadeath must be false (from campaign.ron)"
+        );
+    }
+
+    /// `GameState::new_game` must set `campaign_config.max_party_level` to
+    /// `None` when `campaign.config.max_level == 0`, treating 0 as "no cap".
+    #[test]
+    fn test_new_game_max_party_level_none_when_max_level_zero() {
+        use crate::sdk::campaign_loader::Campaign;
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let campaign_path = std::path::PathBuf::from(manifest_dir).join("data/test_campaign");
+        let mut campaign =
+            Campaign::load(&campaign_path).expect("data/test_campaign must load cleanly");
+        // Override max_level to 0 (invalid / "no cap" sentinel)
+        campaign.config.max_level = 0;
+        let (state, _) = GameState::new_game(campaign).expect("new_game must succeed");
+        assert_eq!(
+            state.campaign_config.max_party_level, None,
+            "max_level == 0 must map to max_party_level == None (no cap)"
+        );
     }
 
     #[test]

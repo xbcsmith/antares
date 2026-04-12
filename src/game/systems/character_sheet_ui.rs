@@ -44,11 +44,13 @@
 //!    pure-egui UI with no Bevy entities to despawn.
 
 use crate::application::character_sheet_state::CharacterSheetView;
+use crate::application::resources::GameContent;
 use crate::application::GameMode;
 use crate::domain::campaign::LevelUpMode;
 use crate::domain::progression::experience_for_level_with_config;
 use crate::game::resources::game_data::GameDataResource;
 use crate::game::resources::GlobalState;
+use crate::sdk::database::ContentDatabase;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -193,6 +195,7 @@ fn character_sheet_ui_system(
     mut contexts: EguiContexts,
     mut global_state: ResMut<GlobalState>,
     game_data: Option<Res<GameDataResource>>,
+    content: Option<Res<GameContent>>,
 ) {
     let GameMode::CharacterSheet(_) = &global_state.0.mode else {
         return;
@@ -205,9 +208,10 @@ fn character_sheet_ui_system(
 
     // Clone the data we need to avoid borrow conflicts during UI rendering
     let party_len = global_state.0.party.members.len();
-    let level_up_mode = global_state.0.campaign_config.level_up_mode.clone();
     let campaign_config = global_state.0.campaign_config.clone();
     let level_db = game_data.as_ref().map(|gd| gd.data().levels.clone());
+    // Borrow content database for proficiency lookups; None when not loaded.
+    let content_db: Option<&ContentDatabase> = content.as_ref().map(|c| &c.0);
 
     let GameMode::CharacterSheet(ref cs_state) = global_state.0.mode else {
         return;
@@ -229,9 +233,9 @@ fn character_sheet_ui_system(
                         &mut global_state,
                         party_len,
                         focused_index,
-                        &level_up_mode,
                         &campaign_config,
                         level_db.as_ref().and_then(|opt| opt.as_ref()),
+                        content_db,
                     );
                 }
                 CharacterSheetView::PartyOverview => {
@@ -259,9 +263,9 @@ fn render_single_view(
     global_state: &mut ResMut<GlobalState>,
     party_len: usize,
     focused_index: usize,
-    level_up_mode: &LevelUpMode,
     campaign_config: &crate::domain::campaign::CampaignConfig,
     level_db: Option<&crate::domain::levels::LevelDatabase>,
+    content_db: Option<&ContentDatabase>,
 ) {
     if party_len == 0 {
         ui.colored_label(STAT_EMPTY_COLOR, "No party members.");
@@ -409,7 +413,7 @@ fn render_single_view(
                 );
                 ui.label(format!("XP: {} / {}", character.experience, xp_next));
                 if character.experience >= xp_next {
-                    match level_up_mode {
+                    match &campaign_config.level_up_mode {
                         LevelUpMode::Auto => {
                             ui.colored_label(LEVEL_READY_COLOR, "✅ Ready to level up!");
                         }
@@ -462,24 +466,31 @@ fn render_single_view(
 
                 ui.add_space(8.0);
 
-                // Spells / Proficiencies
-                ui.colored_label(TITLE_COLOR, "Known Spells");
+                // Proficiencies granted by the character's class and race.
+                // Uses the union of class proficiencies and race proficiencies
+                // (deduped), sorted alphabetically for consistent display.
+                // Shows "None" when the content database is not loaded or when
+                // neither the class nor the race grants any proficiencies.
+                ui.colored_label(TITLE_COLOR, "Proficiencies");
                 ui.separator();
-                let mut all_spell_ids: Vec<String> = Vec::new();
-                for level_spells in &character.spells.cleric_spells {
-                    for &id in level_spells {
-                        all_spell_ids.push(format!("{:#06x}", id));
+                let mut profs: Vec<String> = Vec::new();
+                if let Some(db) = content_db {
+                    if let Some(class_def) = db.classes.get_class(&character.class_id) {
+                        profs.extend_from_slice(&class_def.proficiencies);
+                    }
+                    if let Some(race_def) = db.races.get_race(&character.race_id) {
+                        for p in &race_def.proficiencies {
+                            if !profs.contains(p) {
+                                profs.push(p.clone());
+                            }
+                        }
                     }
                 }
-                for level_spells in &character.spells.sorcerer_spells {
-                    for &id in level_spells {
-                        all_spell_ids.push(format!("{:#06x}", id));
-                    }
-                }
-                if all_spell_ids.is_empty() {
+                if profs.is_empty() {
                     ui.colored_label(STAT_EMPTY_COLOR, "None");
                 } else {
-                    ui.label(all_spell_ids.join(", "));
+                    profs.sort();
+                    ui.label(profs.join(", "));
                 }
             });
         });

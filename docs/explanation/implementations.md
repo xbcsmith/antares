@@ -1,5 +1,93 @@
 # Implementations
 
+## Audit Gap Fixes — Phase 2 LevelingConfig Bridge + Phase 9 Proficiencies Section (Complete)
+
+### Overview
+
+Two items identified in the post-implementation audit of `level_up_plan.md`
+were addressed:
+
+1. **Phase 2 — deferred deliverable closed**: `GameState::campaign_config` (the
+   `domain::CampaignConfig` that the progression system, combat XP award, and
+   training service read at runtime) was always initialised to
+   `CampaignConfig::default()` in `GameState::new_game`, so `level_up_mode`,
+   `base_xp`, `xp_multiplier`, `training_fee_base`, and `training_fee_multiplier`
+   were always at their default values regardless of what was in `config.ron`.
+   `max_party_level` and `permadeath` were also ignored at start-up.
+
+2. **Phase 9 — spec deviation corrected**: The plan called for a
+   **Proficiencies** section in the character sheet single view (comma-separated
+   list of proficiency IDs granted by class and race). The original
+   implementation rendered "Known Spells" instead. The section has been
+   replaced with the specified Proficiencies content.
+
+### Files Changed
+
+#### `src/application/mod.rs`
+
+- Updated `/// Campaign-level gameplay rules …` doc comment on the
+  `campaign_config` field to document the new loading behaviour.
+- In `GameState::new_game`, before `campaign` is moved into `Self`, extract:
+  - `leveling = campaign.game_config.leveling.clone()` — all five `LevelingConfig` fields
+  - `campaign_permadeath = campaign.config.permadeath`
+  - `max_party_level = (campaign.config.max_level > 0).then_some(u32::from(campaign.config.max_level))`
+- Replaced `campaign_config: CampaignConfig::default()` with a struct literal
+  that copies the five leveling fields from `leveling`, sets `permadeath` and
+  `max_party_level` from campaign metadata, and fills the rest with
+  `..CampaignConfig::default()`.
+- Added 2 integration tests that load `data/test_campaign` via `Campaign::load`:
+  - `test_new_game_propagates_leveling_config_to_campaign_config` — verifies all
+    7 bridged fields; the discriminating assertion is
+    `max_party_level == Some(20)` (default would produce `None`).
+  - `test_new_game_max_party_level_none_when_max_level_zero` — verifies that
+    `max_level == 0` maps to `None` (no cap) rather than `Some(0)`.
+
+#### `src/game/systems/character_sheet_ui.rs`
+
+- Added `use crate::application::resources::GameContent;` and
+  `use crate::sdk::database::ContentDatabase;` imports.
+- Added `content: Option<Res<GameContent>>` parameter to
+  `character_sheet_ui_system`. Because it is `Option<Res<…>>`, minimal Bevy
+  app tests that do not insert `GameContent` continue to compile and pass
+  unchanged (`None` → proficiencies section shows "None").
+- Extracted `content_db: Option<&ContentDatabase>` from the resource and
+  passed it to `render_single_view`.
+- Removed the now-redundant `level_up_mode: &LevelUpMode` parameter from
+  `render_single_view` (it was one of 7 args; adding `content_db` pushed the
+  count to 8, triggering `clippy::too_many_arguments`). Inside
+  `render_single_view` the match now reads `&campaign_config.level_up_mode`
+  directly from the already-present `campaign_config` parameter.
+- Replaced the "Known Spells" section with a **Proficiencies** section:
+  - Collects `class_def.proficiencies` via `db.classes.get_class(&character.class_id)`
+  - Merges `race_def.proficiencies` via `db.races.get_race(&character.race_id)` (deduped)
+  - Sorts alphabetically and renders as a comma-separated label
+  - Shows `"None"` (muted grey) when the content DB is absent or no proficiencies exist
+
+### Design Decisions
+
+- The `LevelingConfig` in `GameConfig` (`config.ron`) and the `CampaignConfig`
+  in the domain layer are kept as **separate structs** — `LevelingConfig` is the
+  SDK/player settings concern; `CampaignConfig` is the game-runtime concern.
+  `new_game` is the single bridge point, which is correct: it runs once at
+  game-start, and the resulting `campaign_config` is serialised into the save
+  file, ensuring the rules stay constant for the lifetime of a playthrough.
+- `max_level == 0` is treated as "no cap" (`None`) rather than "level cap of 0"
+  to prevent a malformed `campaign.ron` from locking all levelling.
+- Removing the redundant `level_up_mode` parameter eliminates duplication
+  (it was always equal to `campaign_config.level_up_mode`) and keeps the
+  function within Clippy's 7-argument limit without introducing a context struct.
+
+### Quality Gates
+
+```text
+cargo fmt --all                                      → clean
+cargo check --all-targets --all-features             → Finished (0 errors)
+cargo clippy --all-targets --all-features -D warnings → Finished (0 warnings)
+cargo nextest run --all-features                     → 4609 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Level-Up Plan — Phase 9: Character Sheet Screen (Complete)
 
 ### Overview
@@ -1182,8 +1270,11 @@ files that predate these fields.
       private helper, `DEFAULT_BASE_XP` / `DEFAULT_XP_MULTIPLIER` public constants
 - [x] `src/game/systems/combat.rs` — `experience_rate` applied in XP award loop
 - [x] `src/application/quests.rs` — `experience_rate` applied in `apply_rewards`
-- [ ] `data/test_campaign/config.ron` — deferred; domain `CampaignConfig` is not
-      loaded from `config.ron` in the current architecture (see architecture note above)
+- [x] `data/test_campaign/config.ron` — `leveling: LevelingConfig(...)` block
+      already present (added in Phase 8). The bridge from `LevelingConfig` →
+      `GameState::campaign_config` was implemented in the Audit Gap Fix above:
+      `GameState::new_game` now populates `campaign_config` from
+      `campaign.game_config.leveling` and `campaign.config` metadata.
 
 ### Success Criteria Verification
 
