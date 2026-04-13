@@ -340,6 +340,9 @@ fn test_fallback_mechanism_for_missing_creature_id() {
         stock_template: None,
         service_catalog: None,
         economy: None,
+        is_trainer: false,
+        training_fee_base: None,
+        training_fee_multiplier: None,
     };
 
     // Assert: NPC exists but has no creature_id

@@ -29,6 +29,7 @@ pub mod database_common;
 pub mod dialogue;
 pub mod inventory;
 pub mod items;
+pub mod levels;
 pub mod magic;
 pub mod party_manager;
 pub mod proficiency;
@@ -75,6 +76,9 @@ pub use visual::{CreatureDefinition, MeshDefinition, MeshTransform};
 // Re-export campaign types
 pub use campaign::{Campaign, CampaignConfig};
 pub use campaign_loader::{CampaignError, CampaignLoader, GameData};
+
+// Re-export level database types
+pub use levels::{ClassLevelThresholds, LevelDatabase, LevelError};
 
 // Re-export furniture types
 pub use world::furniture::{FurnitureDatabase, FurnitureDatabaseError, FurnitureDefinition};

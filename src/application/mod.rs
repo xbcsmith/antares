@@ -11,6 +11,7 @@
 //!
 //! See `docs/reference/architecture.md` Section 4.1 for complete specifications.
 
+pub mod character_sheet_state;
 pub mod container_inventory_state;
 pub mod dialogue;
 pub mod inventory_state;
@@ -122,6 +123,19 @@ pub enum GameMode {
     /// which character's book is open, which spell is highlighted, and which
     /// mode to restore on close.
     SpellBook(crate::application::spell_book_state::SpellBookState),
+    /// NPC trainer level-up session.
+    ///
+    /// Entered when a dialogue node fires [`crate::domain::dialogue::DialogueAction::OpenTraining`]
+    /// for an NPC with `is_trainer: true` and the campaign uses
+    /// [`crate::domain::campaign::LevelUpMode::NpcTrainer`].  The UI presents
+    /// eligible party members and their training costs.
+    Training(TrainingState),
+    /// Read-only character stats viewer (out of combat).
+    ///
+    /// Entered by pressing the character sheet key (default `P`) in Exploration
+    /// mode. Tab / Shift-Tab cycles through party members. Esc returns to the
+    /// previous [`GameMode`].
+    CharacterSheet(crate::application::character_sheet_state::CharacterSheetState),
 }
 
 // ===== Rest State =====
@@ -332,6 +346,81 @@ impl TempleServiceState {
     /// let mut state = TempleServiceState::new("temple_priest".to_string());
     /// state.selected_member_index = Some(0);
     /// state.status_message = Some("Resurrection complete!".to_string());
+    /// state.clear();
+    /// assert!(state.selected_member_index.is_none());
+    /// assert!(state.status_message.is_none());
+    /// ```
+    pub fn clear(&mut self) {
+        self.selected_member_index = None;
+        self.status_message = None;
+    }
+}
+
+// ===== Training State =====
+
+/// State for an active NPC trainer level-up session.
+///
+/// Stored inside [`GameMode::Training`] while the player is interacting
+/// with a trainer NPC that offers level-up services.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::TrainingState;
+///
+/// let state = TrainingState::new("master_swordsman".to_string());
+/// assert_eq!(state.npc_id, "master_swordsman");
+/// assert!(state.eligible_member_indices.is_empty());
+/// assert!(state.selected_member_index.is_none());
+/// assert!(state.status_message.is_none());
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrainingState {
+    /// The NPC ID of the trainer conducting the session (e.g., `"master_swordsman"`)
+    pub npc_id: String,
+    /// Indices into `party.members` for members eligible for level-up
+    pub eligible_member_indices: Vec<usize>,
+    /// Currently selected party-member index in the eligible list
+    pub selected_member_index: Option<usize>,
+    /// Last status or error message to display in the UI (`None` when idle)
+    pub status_message: Option<String>,
+}
+
+impl TrainingState {
+    /// Creates a new training state for the given trainer NPC.
+    ///
+    /// # Arguments
+    ///
+    /// * `npc_id` - The NPC ID of the trainer (e.g., `"master_swordsman"`)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::TrainingState;
+    ///
+    /// let state = TrainingState::new("master_swordsman".to_string());
+    /// assert_eq!(state.npc_id, "master_swordsman");
+    /// assert!(state.eligible_member_indices.is_empty());
+    /// ```
+    pub fn new(npc_id: String) -> Self {
+        Self {
+            npc_id,
+            eligible_member_indices: Vec::new(),
+            selected_member_index: None,
+            status_message: None,
+        }
+    }
+
+    /// Clears the current selection and status message.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::TrainingState;
+    ///
+    /// let mut state = TrainingState::new("trainer".to_string());
+    /// state.selected_member_index = Some(0);
+    /// state.status_message = Some("Training complete!".to_string());
     /// state.clear();
     /// assert!(state.selected_member_index.is_none());
     /// assert!(state.status_message.is_none());
@@ -784,11 +873,16 @@ pub struct GameState {
     #[serde(default)]
     pub npc_runtime: NpcRuntimeStore,
 
-    /// Campaign-level gameplay rules (permadeath, death mode, difficulty, etc.).
+    /// Campaign-level gameplay rules (level-up mode, XP curve, permadeath, etc.).
     ///
-    /// Loaded from the campaign's `config.ron` file and stored in the save so
-    /// the rules remain constant for the lifetime of that playthrough.
-    /// Defaults to `CampaignConfig::default()` for new games without a campaign.
+    /// Populated by [`GameState::new_game`] from the campaign's `config.ron`
+    /// (`LevelingConfig` — leveling curve and mode) and `campaign.ron`
+    /// (`max_level`, `permadeath`).  All other fields use their
+    /// [`CampaignConfig::default`] values.
+    ///
+    /// Uses `#[serde(default)]` so that saves created via [`GameState::new`]
+    /// (tests, offline contexts) or saves predating this field load cleanly
+    /// with all defaults.
     #[serde(default)]
     pub campaign_config: CampaignConfig,
 
@@ -989,6 +1083,19 @@ impl GameState {
         // Preserve campaign-specific game configuration for state
         let campaign_config = campaign.game_config.clone();
 
+        // Extract leveling settings and per-campaign rules BEFORE `campaign`
+        // is moved into `Self` below.  These values populate `campaign_config`
+        // (the domain `CampaignConfig`) so that the progression system, combat
+        // XP award, and training service all read the correct runtime values
+        // instead of hard-coded defaults.
+        let leveling = campaign.game_config.leveling.clone();
+        let campaign_permadeath = campaign.config.permadeath;
+        // max_level == 0 is invalid in practice (default is 20); treat it as
+        // "no explicit cap" (None) so a malformed campaign.ron can't lock all
+        // leveling.
+        let max_party_level =
+            (campaign.config.max_level > 0).then_some(u32::from(campaign.config.max_level));
+
         // Initialise the game clock from the campaign's configured starting time.
         // Campaign authors set this in config.ron via `starting_time: (day: N, hour: H, minute: M)`.
         // Falls back to Day 1, 08:00 when the field is absent (serde default).
@@ -1006,7 +1113,18 @@ impl GameState {
             quests: QuestLog::new(),
             encountered_characters: std::collections::HashSet::new(),
             npc_runtime: NpcRuntimeStore::new(),
-            campaign_config: CampaignConfig::default(),
+            // Populate from the campaign's LevelingConfig (config.ron) and
+            // campaign metadata (campaign.ron).  All other fields default.
+            campaign_config: CampaignConfig {
+                level_up_mode: leveling.level_up_mode,
+                base_xp: leveling.base_xp,
+                xp_multiplier: leveling.xp_multiplier,
+                training_fee_base: leveling.training_fee_base,
+                training_fee_multiplier: leveling.training_fee_multiplier,
+                permadeath: campaign_permadeath,
+                max_party_level,
+                ..CampaignConfig::default()
+            },
             game_log_entries: Vec::new(),
         };
 
@@ -1696,6 +1814,95 @@ impl GameState {
         self.mode = GameMode::Menu(MenuState::new(prev));
     }
 
+    /// Closes the current modal screen and restores the appropriate prior mode.
+    ///
+    /// Returns `true` when the current [`GameMode`] was a closeable modal and
+    /// was closed successfully. Returns `false` when the current mode is not a
+    /// modal-close target and callers should apply different behavior (such as
+    /// opening the game menu from [`GameMode::Exploration`]).
+    ///
+    /// This centralizes Escape / menu-key modal-close behavior so UI systems
+    /// and global input toggles do not have to duplicate the per-mode resume
+    /// logic.
+    ///
+    /// # Modal close behavior
+    ///
+    /// - `Automap` → `Exploration`
+    /// - `Inventory` → stored resume mode
+    /// - `MerchantInventory` → stored resume mode
+    /// - `ContainerInventory` → stored resume mode
+    /// - `SpellBook` → stored resume mode
+    /// - `SpellCasting` → stored resume mode
+    /// - `Dialogue` → `Exploration`
+    /// - `TempleService` → `Exploration`
+    /// - `RestMenu` → `Exploration`
+    /// - `GameLog` → `Exploration`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameMode, GameState};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_inventory();
+    ///
+    /// assert!(state.close_modal());
+    /// assert!(matches!(state.mode, GameMode::Exploration));
+    /// ```
+    pub fn close_modal(&mut self) -> bool {
+        match self.mode.clone() {
+            GameMode::Automap => {
+                self.mode = GameMode::Exploration;
+                true
+            }
+            GameMode::Inventory(inv_state) => {
+                self.mode = inv_state.get_resume_mode();
+                true
+            }
+            GameMode::MerchantInventory(merchant_state) => {
+                self.mode = merchant_state.get_resume_mode();
+                true
+            }
+            GameMode::ContainerInventory(container_state) => {
+                self.mode = container_state.get_resume_mode();
+                true
+            }
+            GameMode::SpellBook(spell_book_state) => {
+                self.mode = spell_book_state.get_resume_mode();
+                true
+            }
+            GameMode::SpellCasting(spell_casting_state) => {
+                self.mode = spell_casting_state.get_resume_mode();
+                true
+            }
+            GameMode::Dialogue(_) => {
+                self.mode = GameMode::Exploration;
+                true
+            }
+            GameMode::TempleService(_) => {
+                self.mode = GameMode::Exploration;
+                true
+            }
+            GameMode::Training(_) => {
+                self.mode = GameMode::Exploration;
+                true
+            }
+            GameMode::RestMenu => {
+                self.mode = GameMode::Exploration;
+                true
+            }
+            GameMode::GameLog => {
+                self.mode = GameMode::Exploration;
+                true
+            }
+            GameMode::CharacterSheet(cs_state) => {
+                self.mode = cs_state.get_resume_mode();
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Enters exploration-mode spell casting with a pre-selected caster.
     ///
     /// Stores the current mode so it can be restored when the player cancels
@@ -1849,6 +2056,30 @@ impl GameState {
         if let GameMode::SpellBook(ref sb) = self.mode.clone() {
             self.mode = sb.get_resume_mode();
         }
+    }
+
+    /// Enter the character sheet screen.
+    ///
+    /// Stores the current mode as `previous_mode` so it can be restored on close.
+    /// If already in `CharacterSheet` mode, this is a no-op (idempotent).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameMode, GameState};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_character_sheet();
+    /// assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+    /// ```
+    pub fn enter_character_sheet(&mut self) {
+        if matches!(self.mode, GameMode::CharacterSheet(_)) {
+            return;
+        }
+        let prev = self.mode.clone();
+        self.mode = GameMode::CharacterSheet(
+            crate::application::character_sheet_state::CharacterSheetState::new(prev),
+        );
     }
 
     /// Enters dialogue mode
@@ -2368,6 +2599,117 @@ mod tests {
         assert!(matches!(state.mode, GameMode::Dialogue(_)));
 
         state.return_to_exploration();
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_returns_false_in_exploration() {
+        let mut state = GameState::new();
+
+        assert!(!state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_inventory_to_resume_mode() {
+        let mut state = GameState::new();
+        state.enter_inventory();
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_dialogue_to_exploration() {
+        let mut state = GameState::new();
+        state.enter_dialogue();
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_merchant_inventory_to_resume_mode() {
+        let mut state = GameState::new();
+        state.mode = GameMode::MerchantInventory(
+            crate::application::merchant_inventory_state::MerchantInventoryState::new(
+                "merchant_tom".to_string(),
+                "Tom the Merchant".to_string(),
+                0,
+                GameMode::Dialogue(crate::application::dialogue::DialogueState::new()),
+            ),
+        );
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Dialogue(_)));
+    }
+
+    #[test]
+    fn test_close_modal_closes_container_inventory_to_resume_mode() {
+        let mut state = GameState::new();
+        state.enter_container_inventory(
+            "crate_01".to_string(),
+            "Wooden Crate".to_string(),
+            vec![],
+            0,
+            0,
+        );
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_spell_book_to_resume_mode() {
+        let mut state = GameState::new();
+        state.enter_spellbook_with_caster_select();
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_spell_casting_to_resume_mode() {
+        let mut state = GameState::new();
+        state.enter_spell_casting_with_caster_select();
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_automap_to_exploration() {
+        let mut state = GameState::new();
+        state.mode = GameMode::Automap;
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_temple_service_to_exploration() {
+        let mut state = GameState::new();
+        state.mode = GameMode::TempleService(TempleServiceState::new("temple_priest".to_string()));
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_rest_menu_to_exploration() {
+        let mut state = GameState::new();
+        state.mode = GameMode::RestMenu;
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_closes_game_log_to_exploration() {
+        let mut state = GameState::new();
+        state.mode = GameMode::GameLog;
+
+        assert!(state.close_modal());
         assert!(matches!(state.mode, GameMode::Exploration));
     }
 
@@ -3041,6 +3383,9 @@ mod tests {
                 allow_multiclassing: false,
                 starting_level: 1,
                 max_level: 20,
+                level_up_mode: crate::domain::campaign::LevelUpMode::Auto,
+                base_xp: 1000,
+                xp_multiplier: 1.5,
                 starting_time: crate::domain::types::GameTime::new(1, 8, 0),
             },
             data: crate::sdk::campaign_loader::CampaignData {
@@ -3207,6 +3552,9 @@ mod tests {
                 allow_multiclassing: false,
                 starting_level: 1,
                 max_level: 20,
+                level_up_mode: crate::domain::campaign::LevelUpMode::Auto,
+                base_xp: 1000,
+                xp_multiplier: 1.5,
                 starting_time: crate::domain::types::GameTime::new(1, 8, 0),
             },
             data: crate::sdk::campaign_loader::CampaignData {
@@ -5633,6 +5981,8 @@ mod tests {
 
     #[test]
     fn test_current_inn_id_no_inn_on_map_with_campaign_fallback() {
+        use crate::domain::campaign::LevelUpMode;
+
         let mut state = GameState::new();
         // Create a map with no inn events
         let map = crate::domain::world::Map::new(
@@ -5668,6 +6018,9 @@ mod tests {
                 allow_multiclassing: false,
                 starting_level: 1,
                 max_level: 20,
+                level_up_mode: LevelUpMode::Auto,
+                base_xp: 1000,
+                xp_multiplier: 1.5,
                 starting_time: crate::domain::types::GameTime::new(1, 8, 0),
             },
             data: crate::sdk::campaign_loader::CampaignData {
@@ -5777,6 +6130,134 @@ mod tests {
         assert!(
             matches!(state.mode, GameMode::Exploration),
             "exit_spellbook must be a no-op when mode is not SpellBook"
+        );
+    }
+
+    #[test]
+    fn test_enter_character_sheet_sets_mode() {
+        let mut state = GameState::new();
+        state.enter_character_sheet();
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+    }
+
+    #[test]
+    fn test_enter_character_sheet_stores_previous_mode() {
+        let mut state = GameState::new();
+        assert!(matches!(state.mode, GameMode::Exploration));
+        state.enter_character_sheet();
+        if let GameMode::CharacterSheet(ref cs) = state.mode {
+            assert!(
+                matches!(cs.get_resume_mode(), GameMode::Exploration),
+                "CharacterSheet must store Exploration as the previous mode"
+            );
+        } else {
+            panic!("expected CharacterSheet mode");
+        }
+    }
+
+    #[test]
+    fn test_enter_character_sheet_idempotent() {
+        let mut state = GameState::new();
+        state.enter_character_sheet();
+        // Capture the inner state after first call
+        let first_focused_index = if let GameMode::CharacterSheet(ref cs) = state.mode {
+            cs.focused_index
+        } else {
+            panic!("expected CharacterSheet mode");
+        };
+        // Second call must be a no-op
+        state.enter_character_sheet();
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+        if let GameMode::CharacterSheet(ref cs) = state.mode {
+            assert_eq!(cs.focused_index, first_focused_index);
+        }
+    }
+
+    #[test]
+    fn test_close_modal_closes_character_sheet_to_resume_mode() {
+        let mut state = GameState::new();
+        state.enter_character_sheet();
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+        let closed = state.close_modal();
+        assert!(closed);
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    // ── new_game campaign_config propagation tests ────────────────────────────
+
+    /// `GameState::new_game` must bridge `LevelingConfig` (from `config.ron`)
+    /// and campaign metadata (from `campaign.ron`) into `GameState::campaign_config`
+    /// so that the progression system and combat XP award use the correct
+    /// runtime values instead of hard-coded defaults.
+    ///
+    /// The discriminating assertion is `max_party_level == Some(20)`:
+    /// `CampaignConfig::default()` gives `None`, but the test campaign's
+    /// `campaign.ron` sets `max_level: 20`, so a properly wired `new_game`
+    /// must produce `Some(20)`.
+    #[test]
+    fn test_new_game_propagates_leveling_config_to_campaign_config() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let campaign_path = std::path::PathBuf::from(manifest_dir).join("data/test_campaign");
+        let campaign = crate::sdk::campaign_loader::Campaign::load(&campaign_path)
+            .expect("data/test_campaign must load cleanly");
+        let (state, _) =
+            GameState::new_game(campaign).expect("new_game must succeed for test_campaign");
+
+        // Level-up mode — from data/test_campaign/config.ron `leveling: LevelingConfig`
+        assert_eq!(
+            state.campaign_config.level_up_mode,
+            crate::domain::campaign::LevelUpMode::Auto,
+            "level_up_mode must be Auto (from config.ron LevelingConfig)"
+        );
+
+        // XP curve fields — from data/test_campaign/config.ron
+        assert_eq!(
+            state.campaign_config.base_xp, 1000,
+            "base_xp must be 1000 (from config.ron LevelingConfig)"
+        );
+        assert!(
+            (state.campaign_config.xp_multiplier - 1.5).abs() < 1e-9,
+            "xp_multiplier must be 1.5 (from config.ron LevelingConfig)"
+        );
+        assert_eq!(
+            state.campaign_config.training_fee_base, 500,
+            "training_fee_base must be 500 (from config.ron LevelingConfig)"
+        );
+        assert!(
+            (state.campaign_config.training_fee_multiplier - 1.0).abs() < 1e-6,
+            "training_fee_multiplier must be 1.0 (from config.ron LevelingConfig)"
+        );
+
+        // max_party_level — the discriminating assertion.
+        // CampaignConfig::default() → None; campaign.ron `max_level: 20` → Some(20).
+        assert_eq!(
+            state.campaign_config.max_party_level,
+            Some(20),
+            "max_party_level must be Some(20) from campaign.ron max_level: 20, not None"
+        );
+
+        // permadeath — from data/test_campaign/campaign.ron `permadeath: false`
+        assert!(
+            !state.campaign_config.permadeath,
+            "permadeath must be false (from campaign.ron)"
+        );
+    }
+
+    /// `GameState::new_game` must set `campaign_config.max_party_level` to
+    /// `None` when `campaign.config.max_level == 0`, treating 0 as "no cap".
+    #[test]
+    fn test_new_game_max_party_level_none_when_max_level_zero() {
+        use crate::sdk::campaign_loader::Campaign;
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let campaign_path = std::path::PathBuf::from(manifest_dir).join("data/test_campaign");
+        let mut campaign =
+            Campaign::load(&campaign_path).expect("data/test_campaign must load cleanly");
+        // Override max_level to 0 (invalid / "no cap" sentinel)
+        campaign.config.max_level = 0;
+        let (state, _) = GameState::new_game(campaign).expect("new_game must succeed");
+        assert_eq!(
+            state.campaign_config.max_party_level, None,
+            "max_level == 0 must map to max_party_level == None (no cap)"
         );
     }
 

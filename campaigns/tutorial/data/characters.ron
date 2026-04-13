@@ -575,4 +575,62 @@
         is_premade: false,
         starts_in_party: false,
     ),
+    (
+        id: "tutorial_monk",
+        name: "Zhaya",
+        race_id: "human",
+        class_id: "monk",
+        sex: Female,
+        alignment: Neutral,
+        base_stats: (
+            might: (
+                base: 14,
+                current: 10,
+            ),
+            intellect: (
+                base: 10,
+                current: 10,
+            ),
+            personality: (
+                base: 10,
+                current: 10,
+            ),
+            endurance: (
+                base: 17,
+                current: 10,
+            ),
+            speed: (
+                base: 18,
+                current: 10,
+            ),
+            accuracy: (
+                base: 16,
+                current: 10,
+            ),
+            luck: (
+                base: 13,
+                current: 10,
+            ),
+        ),
+        portrait_id: "character_047",
+        starting_gold: 100,
+        starting_gems: 0,
+        starting_food: 10,
+        starting_items: [
+            50,
+            26,
+        ],
+        starting_equipment: (
+            weapon: Some(106),
+            armor: None,
+            shield: None,
+            helmet: None,
+            boots: None,
+            accessory1: None,
+            accessory2: None,
+        ),
+        description: "Zhaya left her people after years of training to search the world for the one true Astrologer",
+        is_premade: true,
+        starts_in_party: false,
+    ),
 ]

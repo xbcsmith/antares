@@ -93,6 +93,7 @@
 //! )
 //! ```
 
+use crate::domain::campaign::LevelUpMode;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -129,6 +130,7 @@ pub enum ConfigError {
 /// assert_eq!(config.rest.full_rest_hours, 12);
 /// assert_eq!(config.game_log.max_entries, 200);
 /// assert_eq!(config.time.movement_step_seconds, 30);
+/// assert_eq!(config.leveling.base_xp, 1000);
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct GameConfig {
@@ -155,6 +157,10 @@ pub struct GameConfig {
     /// Time advancement configuration
     #[serde(default)]
     pub time: TimeConfig,
+
+    /// Leveling and XP curve configuration
+    #[serde(default)]
+    pub leveling: LevelingConfig,
 }
 
 impl GameConfig {
@@ -229,6 +235,7 @@ impl GameConfig {
         self.rest.validate()?;
         self.game_log.validate()?;
         self.time.validate()?;
+        self.leveling.validate()?;
         Ok(())
     }
 }
@@ -567,6 +574,12 @@ pub struct ControlsConfig {
     #[serde(default = "default_spell_book_keys")]
     pub spell_book: Vec<String>,
 
+    /// Keys for opening the character sheet viewer.
+    ///
+    /// Default: `["P"]`
+    #[serde(default = "default_character_sheet_keys")]
+    pub character_sheet: Vec<String>,
+
     /// Movement cooldown in seconds (prevents double-moves)
     pub movement_cooldown: f32,
 }
@@ -595,6 +608,10 @@ fn default_spell_book_keys() -> Vec<String> {
     vec!["B".to_string()]
 }
 
+fn default_character_sheet_keys() -> Vec<String> {
+    vec!["P".to_string()]
+}
+
 impl Default for ControlsConfig {
     fn default() -> Self {
         Self {
@@ -610,6 +627,7 @@ impl Default for ControlsConfig {
             game_log: default_game_log_keys(),
             cast: default_cast_keys(),
             spell_book: default_spell_book_keys(),
+            character_sheet: default_character_sheet_keys(),
             movement_cooldown: 0.2,
         }
     }
@@ -621,8 +639,8 @@ impl ControlsConfig {
     /// # Errors
     ///
     /// Returns `ConfigError::ValidationError` if movement cooldown is negative,
-    /// if the inventory key list is empty, if the rest key list is empty, or if
-    /// the automap key list is empty.
+    /// if the inventory key list is empty, if the rest key list is empty, if
+    /// the automap key list is empty, or if the character_sheet key list is empty.
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.movement_cooldown < 0.0 {
             return Err(ConfigError::ValidationError(format!(
@@ -646,6 +664,12 @@ impl ControlsConfig {
         if self.automap.is_empty() {
             return Err(ConfigError::ValidationError(
                 "automap key list must not be empty".to_string(),
+            ));
+        }
+
+        if self.character_sheet.is_empty() {
+            return Err(ConfigError::ValidationError(
+                "character_sheet key list must not be empty".to_string(),
             ));
         }
 
@@ -940,6 +964,121 @@ impl TimeConfig {
         // map_transition_seconds can be 0 or positive
         // portal_transition_seconds can be 0 or positive
         // All values are u32, so no negative values possible
+        Ok(())
+    }
+}
+
+/// Campaign leveling configuration stored in `config.ron`.
+///
+/// Controls XP curve shape and whether characters must visit trainer NPCs
+/// to apply accumulated levels.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::game_config::LevelingConfig;
+///
+/// let cfg = LevelingConfig::default();
+/// assert_eq!(cfg.base_xp, 1000);
+/// assert_eq!(cfg.xp_multiplier, 1.5);
+/// assert_eq!(cfg.training_fee_base, 500);
+/// assert_eq!(cfg.training_fee_multiplier, 1.0);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LevelingConfig {
+    /// Base XP required to reach level 2 (default: 1000).
+    ///
+    /// Subsequent levels scale from this value according to `xp_multiplier`.
+    #[serde(default = "default_leveling_base_xp")]
+    pub base_xp: u64,
+
+    /// XP curve exponent (default: 1.5).
+    ///
+    /// - `1.0` = flat (every level costs the same)
+    /// - `1.5` = default (moderate curve)
+    /// - `2.0` = steep (levels become much more expensive)
+    #[serde(default = "default_leveling_xp_multiplier")]
+    pub xp_multiplier: f64,
+
+    /// Whether characters level up automatically or must visit a trainer NPC.
+    #[serde(default)]
+    pub level_up_mode: LevelUpMode,
+
+    /// Base gold fee per level-up for NPC trainer mode (default: 500).
+    ///
+    /// Only used when `level_up_mode` is [`LevelUpMode::NpcTrainer`].
+    #[serde(default = "default_leveling_fee_base")]
+    pub training_fee_base: u32,
+
+    /// Per-level fee multiplier for NPC trainer mode (default: 1.0).
+    ///
+    /// The total cost for level N is `training_fee_base * training_fee_multiplier^(N-1)`.
+    /// Only used when `level_up_mode` is [`LevelUpMode::NpcTrainer`].
+    #[serde(default = "default_leveling_fee_multiplier")]
+    pub training_fee_multiplier: f32,
+}
+
+fn default_leveling_base_xp() -> u64 {
+    1000
+}
+
+fn default_leveling_xp_multiplier() -> f64 {
+    1.5
+}
+
+fn default_leveling_fee_base() -> u32 {
+    500
+}
+
+fn default_leveling_fee_multiplier() -> f32 {
+    1.0
+}
+
+impl Default for LevelingConfig {
+    fn default() -> Self {
+        Self {
+            base_xp: default_leveling_base_xp(),
+            xp_multiplier: default_leveling_xp_multiplier(),
+            level_up_mode: LevelUpMode::default(),
+            training_fee_base: default_leveling_fee_base(),
+            training_fee_multiplier: default_leveling_fee_multiplier(),
+        }
+    }
+}
+
+impl LevelingConfig {
+    /// Validate the leveling configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConfigError::ValidationError` if:
+    /// - `base_xp` is 0 (must be at least 1)
+    /// - `xp_multiplier` is below 0.1
+    /// - `training_fee_multiplier` is below 0.01
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::game_config::LevelingConfig;
+    ///
+    /// assert!(LevelingConfig::default().validate().is_ok());
+    /// ```
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.base_xp < 1 {
+            return Err(ConfigError::ValidationError(
+                "leveling.base_xp must be at least 1".to_string(),
+            ));
+        }
+        if self.xp_multiplier < 0.1 {
+            return Err(ConfigError::ValidationError(
+                "leveling.xp_multiplier must be at least 0.1".to_string(),
+            ));
+        }
+        if self.training_fee_multiplier < 0.01 {
+            return Err(ConfigError::ValidationError(
+                "leveling.training_fee_multiplier must be at least 0.01".to_string(),
+            ));
+        }
         Ok(())
     }
 }
@@ -1555,6 +1694,59 @@ mod tests {
     }
 
     #[test]
+    fn test_character_sheet_key_default_is_p() {
+        let config = ControlsConfig::default();
+        assert_eq!(config.character_sheet, vec!["P".to_string()]);
+    }
+
+    #[test]
+    fn test_character_sheet_key_binding_round_trip() {
+        let config = ControlsConfig {
+            character_sheet: vec!["F2".to_string(), "KeyP".to_string()],
+            ..ControlsConfig::default()
+        };
+        let ron = ron::to_string(&config).expect("serialize");
+        let back: ControlsConfig = ron::from_str(&ron).expect("deserialize");
+        assert_eq!(
+            back.character_sheet,
+            vec!["F2".to_string(), "KeyP".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_controls_config_character_sheet_defaults_when_missing_from_ron() {
+        // A RON string that omits `character_sheet` entirely — the serde
+        // default must kick in and produce `["P"]`.
+        let ron_str = r#"(
+            move_forward: ["W", "ArrowUp"],
+            move_back: ["S", "ArrowDown"],
+            turn_left: ["A", "ArrowLeft"],
+            turn_right: ["D", "ArrowRight"],
+            interact: ["Space", "E"],
+            menu: ["Escape"],
+            movement_cooldown: 0.2,
+        )"#;
+        let config: ControlsConfig = ron::from_str(ron_str).expect("deserialize");
+        assert_eq!(config.character_sheet, vec!["P".to_string()]);
+    }
+
+    #[test]
+    fn test_controls_validation_empty_character_sheet_keys_fails() {
+        let config = ControlsConfig {
+            character_sheet: vec![],
+            ..ControlsConfig::default()
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        if let Err(ConfigError::ValidationError(msg)) = result {
+            assert!(
+                msg.contains("character_sheet"),
+                "error message should mention character_sheet, got: {msg}"
+            );
+        }
+    }
+
+    #[test]
     fn test_load_valid_config_file() {
         let ron_content = r#"(
             graphics: (
@@ -1845,6 +2037,189 @@ mod tests {
             config.automap,
             vec!["M".to_string()],
             "missing `automap` field must default to ['M']"
+        );
+    }
+
+    // ── LevelingConfig tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_leveling_config_default_values() {
+        let cfg = LevelingConfig::default();
+        assert_eq!(cfg.base_xp, 1000);
+        assert_eq!(cfg.xp_multiplier, 1.5);
+        assert_eq!(
+            cfg.level_up_mode,
+            crate::domain::campaign::LevelUpMode::Auto
+        );
+        assert_eq!(cfg.training_fee_base, 500);
+        assert_eq!(cfg.training_fee_multiplier, 1.0);
+    }
+
+    #[test]
+    fn test_leveling_config_validate_ok() {
+        assert!(LevelingConfig::default().validate().is_ok());
+    }
+
+    #[test]
+    fn test_leveling_config_validate_base_xp_zero_fails() {
+        let cfg = LevelingConfig {
+            base_xp: 0,
+            ..LevelingConfig::default()
+        };
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("base_xp"),
+            "error must mention base_xp: {err}"
+        );
+    }
+
+    #[test]
+    fn test_leveling_config_validate_xp_multiplier_too_low_fails() {
+        let cfg = LevelingConfig {
+            xp_multiplier: 0.05,
+            ..LevelingConfig::default()
+        };
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("xp_multiplier"),
+            "error must mention xp_multiplier: {err}"
+        );
+    }
+
+    #[test]
+    fn test_leveling_config_validate_xp_multiplier_at_minimum_ok() {
+        let cfg = LevelingConfig {
+            xp_multiplier: 0.1,
+            ..LevelingConfig::default()
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_leveling_config_validate_fee_multiplier_too_low_fails() {
+        let cfg = LevelingConfig {
+            training_fee_multiplier: 0.005,
+            ..LevelingConfig::default()
+        };
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("training_fee_multiplier"),
+            "error must mention training_fee_multiplier: {err}"
+        );
+    }
+
+    #[test]
+    fn test_leveling_config_validate_fee_multiplier_at_minimum_ok() {
+        let cfg = LevelingConfig {
+            training_fee_multiplier: 0.01,
+            ..LevelingConfig::default()
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_leveling_config_ron_roundtrip() {
+        let cfg = LevelingConfig {
+            base_xp: 2000,
+            xp_multiplier: 2.0,
+            level_up_mode: crate::domain::campaign::LevelUpMode::NpcTrainer,
+            training_fee_base: 750,
+            training_fee_multiplier: 1.25,
+        };
+        let ron_str = ron::to_string(&cfg).expect("serialize LevelingConfig");
+        let back: LevelingConfig = ron::from_str(&ron_str).expect("deserialize LevelingConfig");
+        assert_eq!(back, cfg);
+    }
+
+    #[test]
+    fn test_leveling_config_missing_fields_use_defaults() {
+        // Only supply base_xp; everything else should default.
+        let ron_str = r#"(base_xp: 500)"#;
+        let cfg: LevelingConfig =
+            ron::from_str(ron_str).expect("partial LevelingConfig must deserialize");
+        assert_eq!(cfg.base_xp, 500);
+        assert_eq!(cfg.xp_multiplier, 1.5);
+        assert_eq!(cfg.training_fee_base, 500);
+        assert_eq!(cfg.training_fee_multiplier, 1.0);
+        assert_eq!(
+            cfg.level_up_mode,
+            crate::domain::campaign::LevelUpMode::Auto
+        );
+    }
+
+    #[test]
+    fn test_game_config_leveling_field_default() {
+        let cfg = GameConfig::default();
+        assert_eq!(cfg.leveling.base_xp, 1000);
+        assert_eq!(cfg.leveling.xp_multiplier, 1.5);
+        assert_eq!(
+            cfg.leveling.level_up_mode,
+            crate::domain::campaign::LevelUpMode::Auto
+        );
+    }
+
+    #[test]
+    fn test_game_config_validate_propagates_leveling_error() {
+        let mut cfg = GameConfig::default();
+        cfg.leveling.base_xp = 0;
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("base_xp"),
+            "validate must propagate leveling error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_game_config_leveling_defaults_when_missing_from_ron() {
+        // A minimal RON that omits the `leveling` block entirely.
+        let ron_str = r#"(
+            graphics: (
+                resolution: (1280, 720),
+                fullscreen: false,
+                vsync: true,
+                msaa_samples: 4,
+                shadow_quality: Medium,
+            ),
+            audio: (
+                master_volume: 0.8,
+                music_volume: 0.6,
+                sfx_volume: 1.0,
+                ambient_volume: 0.5,
+                enable_audio: true,
+            ),
+            controls: (
+                move_forward: ["W"],
+                move_back: ["S"],
+                turn_left: ["A"],
+                turn_right: ["D"],
+                interact: ["E"],
+                menu: ["Escape"],
+                inventory: ["I"],
+                rest: ["R"],
+                automap: ["M"],
+                spell_book: ["B"],
+                movement_cooldown: 0.2,
+            ),
+            camera: (
+                mode: FirstPerson,
+                eye_height: 0.6,
+                fov: 70.0,
+                near_clip: 0.1,
+                far_clip: 1000.0,
+                smooth_rotation: false,
+                rotation_speed: 180.0,
+                light_height: 5.0,
+                light_intensity: 2000000.0,
+                light_range: 60.0,
+                shadows_enabled: true,
+            ),
+        )"#;
+        let config: GameConfig =
+            ron::from_str(ron_str).expect("GameConfig without leveling must deserialize");
+        assert_eq!(
+            config.leveling,
+            LevelingConfig::default(),
+            "missing leveling block must produce defaults"
         );
     }
 }

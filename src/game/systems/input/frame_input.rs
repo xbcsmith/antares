@@ -61,6 +61,8 @@ pub struct FrameInputIntent {
     pub cast: bool,
     /// Whether the Spell Book management screen was requested this frame.
     pub spell_book_toggle: bool,
+    /// Whether the character sheet toggle was requested this frame.
+    pub character_sheet_toggle: bool,
 }
 
 impl FrameInputIntent {
@@ -180,6 +182,8 @@ pub fn decode_frame_input(
         cast: key_map.is_action_just_pressed(GameAction::Cast, keyboard_input),
         spell_book_toggle: key_map
             .is_action_just_pressed(GameAction::OpenSpellBook, keyboard_input),
+        character_sheet_toggle: key_map
+            .is_action_just_pressed(GameAction::CharacterSheet, keyboard_input),
     }
 }
 
@@ -217,6 +221,13 @@ mod tests {
         assert!(!intent.game_log_toggle);
         assert!(!intent.cast);
         assert!(!intent.spell_book_toggle);
+        assert!(!intent.character_sheet_toggle);
+    }
+
+    #[test]
+    fn test_frame_input_intent_default_has_no_character_sheet_toggle() {
+        let intent = FrameInputIntent::default();
+        assert!(!intent.character_sheet_toggle);
     }
 
     #[test]
@@ -306,6 +317,7 @@ mod tests {
             automap: vec!["U".to_string()],
             interact: vec!["O".to_string()],
             game_log: vec!["H".to_string()],
+            character_sheet: vec!["F4".to_string()],
             ..ControlsConfig::default()
         };
         let key_map = KeyMap::from_controls_config(&config);

@@ -450,6 +450,256 @@ impl DialogueTree {
 
         changed
     }
+
+    /// Returns `true` when any node or choice in this tree contains an
+    /// explicit [`DialogueAction::OpenTraining`] action for `npc_id`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::{DialogueAction, DialogueChoice, DialogueNode, DialogueTree};
+    ///
+    /// let mut tree = DialogueTree::new(8, "Trainer".to_string(), 1);
+    /// let mut root = DialogueNode::new(1, "Welcome, seeker of strength.");
+    /// let mut choice = DialogueChoice::new("I seek training.", Some(2));
+    /// choice.add_action(DialogueAction::OpenTraining {
+    ///     npc_id: "master_swordsman".to_string(),
+    /// });
+    /// root.add_choice(choice);
+    /// tree.add_node(root);
+    ///
+    /// assert!(tree.contains_open_training_for_npc("master_swordsman"));
+    /// assert!(!tree.contains_open_training_for_npc("master_mage"));
+    /// ```
+    pub fn contains_open_training_for_npc(&self, npc_id: &str) -> bool {
+        self.nodes.values().any(|node| {
+            node.actions.iter().any(|action| {
+                matches!(action, DialogueAction::OpenTraining { npc_id: action_npc_id } if action_npc_id == npc_id)
+            }) || node.choices.iter().any(|choice| {
+                choice.actions.iter().any(|action| {
+                    matches!(action, DialogueAction::OpenTraining { npc_id: action_npc_id } if action_npc_id == npc_id)
+                })
+            })
+        })
+    }
+
+    /// Returns `true` when this tree contains SDK-managed trainer content.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::{DialogueSdkManagedContent, DialogueTree};
+    ///
+    /// let mut tree = DialogueTree::new(1, "Trainer".to_string(), 1);
+    /// assert!(!tree.has_sdk_managed_trainer_content());
+    ///
+    /// tree.sdk_metadata
+    ///     .managed_content
+    ///     .insert(DialogueSdkManagedContent::TrainerTemplateTree);
+    ///
+    /// assert!(tree.has_sdk_managed_trainer_content());
+    /// ```
+    pub fn has_sdk_managed_trainer_content(&self) -> bool {
+        self.sdk_metadata.has_trainer_content()
+            || self
+                .nodes
+                .values()
+                .any(|node| node.has_sdk_managed_trainer_content())
+    }
+
+    /// Creates a built-in standard trainer dialogue template tree for `npc_id`.
+    ///
+    /// The generated template:
+    ///
+    /// - marks the tree as SDK-managed trainer content
+    /// - creates a root greeting node
+    /// - adds a choice `"I seek training."` that fires `OpenTraining { npc_id }`
+    /// - includes a goodbye choice that ends the dialogue
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::DialogueTree;
+    ///
+    /// let tree = DialogueTree::standard_trainer_template(
+    ///     10,
+    ///     "master_swordsman",
+    ///     "Master Swordsman",
+    /// );
+    ///
+    /// assert!(tree.contains_open_training_for_npc("master_swordsman"));
+    /// assert!(tree.has_sdk_managed_trainer_content());
+    /// ```
+    pub fn standard_trainer_template(id: DialogueId, npc_id: &str, npc_name: &str) -> Self {
+        let root_node_id: NodeId = 1;
+        let trainer_node_id: NodeId = 2;
+        let goodbye_text = "Farewell.";
+
+        let mut tree =
+            DialogueTree::new(id, format!("{} Trainer Dialogue", npc_name), root_node_id);
+        tree.speaker_name = Some(npc_name.to_string());
+        tree.repeatable = true;
+        tree.sdk_metadata
+            .managed_content
+            .insert(DialogueSdkManagedContent::TrainerTemplateTree);
+
+        let mut root = DialogueNode::new(
+            root_node_id,
+            format!(
+                "Greetings, adventurer. {} can help you reach your potential.",
+                npc_name
+            ),
+        );
+        root.add_choice(DialogueChoice::sdk_managed_trainer_choice(trainer_node_id));
+        root.add_choice(DialogueChoice::new(goodbye_text, None));
+
+        let mut trainer_node = DialogueNode::new(
+            trainer_node_id,
+            format!("Very well. {} shall assess your readiness.", npc_name),
+        );
+        trainer_node
+            .sdk_metadata
+            .managed_content
+            .insert(DialogueSdkManagedContent::TrainerOpenNode);
+        trainer_node.add_action(DialogueAction::OpenTraining {
+            npc_id: npc_id.to_string(),
+        });
+        trainer_node.is_terminal = true;
+
+        tree.add_node(root);
+        tree.add_node(trainer_node);
+        tree
+    }
+
+    /// Inserts the standard trainer branch into the root node when the tree
+    /// does not already contain an explicit trainer-opening path for `npc_id`.
+    ///
+    /// Returns `true` when the tree was modified and `false` when the tree
+    /// already satisfied the trainer dialogue contract.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::{DialogueNode, DialogueTree};
+    ///
+    /// let mut tree = DialogueTree::new(20, "Custom Dialogue".to_string(), 1);
+    /// tree.add_node(DialogueNode::new(1, "Hello there."));
+    ///
+    /// let changed = tree.ensure_standard_trainer_branch("master_swordsman", "Master Swordsman");
+    ///
+    /// assert!(changed);
+    /// assert!(tree.contains_open_training_for_npc("master_swordsman"));
+    /// ```
+    pub fn ensure_standard_trainer_branch(&mut self, npc_id: &str, npc_name: &str) -> bool {
+        if self.contains_open_training_for_npc(npc_id) {
+            return false;
+        }
+
+        let trainer_node_id = self.next_available_node_id();
+        let root_node_id = self.root_node;
+
+        let Some(root) = self.nodes.get_mut(&root_node_id) else {
+            return false;
+        };
+
+        let trainer_choice = DialogueChoice::sdk_managed_trainer_choice(trainer_node_id);
+        root.choices.push(trainer_choice);
+
+        let mut trainer_node = DialogueNode::new(
+            trainer_node_id,
+            format!("Very well. {} shall assess your readiness.", npc_name),
+        );
+        trainer_node
+            .sdk_metadata
+            .managed_content
+            .insert(DialogueSdkManagedContent::TrainerOpenNode);
+        trainer_node.add_action(DialogueAction::OpenTraining {
+            npc_id: npc_id.to_string(),
+        });
+        trainer_node.is_terminal = true;
+
+        self.nodes.insert(trainer_node_id, trainer_node);
+        self.sdk_metadata
+            .managed_content
+            .insert(DialogueSdkManagedContent::TrainerBranchInsertion);
+
+        true
+    }
+
+    /// Removes SDK-managed trainer dialogue content from this tree.
+    ///
+    /// Returns `true` when any trainer content was removed and `false` when
+    /// the tree was unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::DialogueTree;
+    ///
+    /// let mut tree = DialogueTree::standard_trainer_template(
+    ///     30,
+    ///     "master_swordsman",
+    ///     "Master Swordsman",
+    /// );
+    ///
+    /// assert!(tree.remove_sdk_managed_trainer_content());
+    /// assert!(!tree.contains_open_training_for_npc("master_swordsman"));
+    /// ```
+    pub fn remove_sdk_managed_trainer_content(&mut self) -> bool {
+        let removable_nodes: Vec<NodeId> = self
+            .nodes
+            .iter()
+            .filter_map(|(node_id, node)| {
+                node.sdk_metadata
+                    .managed_content
+                    .contains(&DialogueSdkManagedContent::TrainerOpenNode)
+                    .then_some(*node_id)
+            })
+            .collect();
+
+        let mut changed = false;
+
+        for node_id in removable_nodes {
+            if self.nodes.remove(&node_id).is_some() {
+                changed = true;
+            }
+        }
+
+        for node in self.nodes.values_mut() {
+            let original_choice_count = node.choices.len();
+            node.choices
+                .retain(|choice| !choice.is_sdk_managed_trainer_choice());
+            if node.choices.len() != original_choice_count {
+                changed = true;
+            }
+
+            if node
+                .sdk_metadata
+                .managed_content
+                .remove(&DialogueSdkManagedContent::TrainerOpenNode)
+            {
+                changed = true;
+            }
+        }
+
+        if self
+            .sdk_metadata
+            .managed_content
+            .remove(&DialogueSdkManagedContent::TrainerTemplateTree)
+        {
+            changed = true;
+        }
+
+        if self
+            .sdk_metadata
+            .managed_content
+            .remove(&DialogueSdkManagedContent::TrainerBranchInsertion)
+        {
+            changed = true;
+        }
+
+        changed
+    }
 }
 
 /// Dialogue node
@@ -570,6 +820,17 @@ impl DialogueNode {
                 .iter()
                 .any(DialogueChoice::is_sdk_managed_merchant_choice)
     }
+
+    /// Returns `true` when this node contains SDK-managed trainer content.
+    pub fn has_sdk_managed_trainer_content(&self) -> bool {
+        self.sdk_metadata
+            .managed_content
+            .contains(&DialogueSdkManagedContent::TrainerOpenNode)
+            || self
+                .choices
+                .iter()
+                .any(|c| c.is_sdk_managed_trainer_choice())
+    }
 }
 
 /// Dialogue choice
@@ -682,6 +943,46 @@ impl DialogueChoice {
         self.sdk_metadata
             .managed_content
             .contains(&DialogueSdkManagedContent::MerchantChoice)
+    }
+
+    /// Creates the standard SDK-managed trainer choice that opens the trainer branch.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::{DialogueChoice, DialogueSdkManagedContent};
+    ///
+    /// let choice = DialogueChoice::sdk_managed_trainer_choice(2);
+    ///
+    /// assert_eq!(choice.target_node, Some(2));
+    /// assert!(choice
+    ///     .sdk_metadata
+    ///     .managed_content
+    ///     .contains(&DialogueSdkManagedContent::TrainerChoice));
+    /// ```
+    pub fn sdk_managed_trainer_choice(target_node: NodeId) -> Self {
+        let mut choice = Self::new("I seek training.", Some(target_node));
+        choice
+            .sdk_metadata
+            .managed_content
+            .insert(DialogueSdkManagedContent::TrainerChoice);
+        choice
+    }
+
+    /// Returns `true` when this choice is SDK-managed trainer content.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::DialogueChoice;
+    ///
+    /// let choice = DialogueChoice::sdk_managed_trainer_choice(3);
+    /// assert!(choice.is_sdk_managed_trainer_choice());
+    /// ```
+    pub fn is_sdk_managed_trainer_choice(&self) -> bool {
+        self.sdk_metadata
+            .managed_content
+            .contains(&DialogueSdkManagedContent::TrainerChoice)
     }
 }
 
@@ -808,6 +1109,28 @@ impl DialogueSdkMetadata {
             .iter()
             .any(|marker| marker.is_merchant_marker())
     }
+
+    /// Returns `true` when any trainer-related SDK marker is present.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::dialogue::{DialogueSdkManagedContent, DialogueSdkMetadata};
+    ///
+    /// let mut metadata = DialogueSdkMetadata::default();
+    /// assert!(!metadata.has_trainer_content());
+    ///
+    /// metadata
+    ///     .managed_content
+    ///     .insert(DialogueSdkManagedContent::TrainerChoice);
+    ///
+    /// assert!(metadata.has_trainer_content());
+    /// ```
+    pub fn has_trainer_content(&self) -> bool {
+        self.managed_content
+            .iter()
+            .any(|marker| marker.is_trainer_marker())
+    }
 }
 
 /// Marker describing which SDK-managed content is attached to a dialogue structure.
@@ -829,6 +1152,14 @@ pub enum DialogueSdkManagedContent {
     MerchantChoice,
     /// Node was inserted by the SDK to execute `OpenMerchant`.
     MerchantOpenNode,
+    /// Entire dialogue tree was generated from the built-in trainer template.
+    TrainerTemplateTree,
+    /// Existing dialogue tree was augmented with an SDK-managed trainer branch.
+    TrainerBranchInsertion,
+    /// Choice was inserted by the SDK to route into a trainer branch.
+    TrainerChoice,
+    /// Node was inserted by the SDK to execute `OpenTraining`.
+    TrainerOpenNode,
 }
 
 impl DialogueSdkManagedContent {
@@ -840,6 +1171,17 @@ impl DialogueSdkManagedContent {
                 | DialogueSdkManagedContent::MerchantBranchInsertion
                 | DialogueSdkManagedContent::MerchantChoice
                 | DialogueSdkManagedContent::MerchantOpenNode
+        )
+    }
+
+    /// Returns `true` for trainer-related SDK markers.
+    pub fn is_trainer_marker(&self) -> bool {
+        matches!(
+            *self,
+            DialogueSdkManagedContent::TrainerTemplateTree
+                | DialogueSdkManagedContent::TrainerBranchInsertion
+                | DialogueSdkManagedContent::TrainerChoice
+                | DialogueSdkManagedContent::TrainerOpenNode
         )
     }
 }
@@ -956,6 +1298,18 @@ pub enum DialogueAction {
         /// Index into `party.members` for an explicit target (None = first eligible)
         target_character_id: Option<CharacterId>,
     },
+
+    /// Open an NPC trainer level-up session.
+    ///
+    /// Transitions the game into `GameMode::Training` for the specified
+    /// trainer NPC.
+    ///
+    /// This action should only fire when the campaign uses
+    /// [`LevelUpMode::NpcTrainer`][crate::domain::campaign::LevelUpMode].
+    OpenTraining {
+        /// NpcId of the trainer NPC that should conduct the session
+        npc_id: String,
+    },
 }
 
 impl DialogueAction {
@@ -1058,6 +1412,9 @@ impl DialogueAction {
                 Some(cid) => format!("Teach spell {} to character {}", spell_id, cid),
                 None => format!("Teach spell {} to first eligible party member", spell_id),
             },
+            DialogueAction::OpenTraining { npc_id } => {
+                format!("Open training session for '{}'", npc_id)
+            }
         }
     }
 }
@@ -1574,5 +1931,129 @@ mod tests {
 
         let desc = condition.description();
         assert!(desc.contains("AND"));
+    }
+
+    #[test]
+    fn test_standard_trainer_template_contains_open_training_and_metadata() {
+        let tree =
+            DialogueTree::standard_trainer_template(10, "master_swordsman", "Master Swordsman");
+
+        assert!(
+            tree.contains_open_training_for_npc("master_swordsman"),
+            "template must contain OpenTraining for the NPC"
+        );
+        assert!(
+            tree.has_sdk_managed_trainer_content(),
+            "template must be marked as SDK-managed trainer content"
+        );
+        assert!(
+            !tree.contains_open_training_for_npc("other_npc"),
+            "template must not match a different NPC id"
+        );
+    }
+
+    #[test]
+    fn test_ensure_standard_trainer_branch_inserts_one_branch_for_existing_dialogue() {
+        let mut tree = DialogueTree::new(20, "Custom Dialogue".to_string(), 1);
+        tree.add_node(DialogueNode::new(1, "Hello there."));
+
+        let changed = tree.ensure_standard_trainer_branch("master_swordsman", "Master Swordsman");
+
+        assert!(changed, "must return true when tree was modified");
+        assert!(tree.contains_open_training_for_npc("master_swordsman"));
+    }
+
+    #[test]
+    fn test_ensure_standard_trainer_branch_is_noop_when_open_training_exists() {
+        let mut tree =
+            DialogueTree::standard_trainer_template(10, "master_swordsman", "Master Swordsman");
+
+        let node_count_before = tree.node_count();
+        let changed = tree.ensure_standard_trainer_branch("master_swordsman", "Master Swordsman");
+
+        assert!(
+            !changed,
+            "must return false when trainer content already exists"
+        );
+        assert_eq!(
+            tree.node_count(),
+            node_count_before,
+            "node count must not change"
+        );
+    }
+
+    #[test]
+    fn test_remove_sdk_managed_trainer_content_preserves_custom_nodes_and_choices() {
+        let mut tree = DialogueTree::new(30, "Trainer with Custom Content".to_string(), 1);
+        let mut root = DialogueNode::new(1, "Hello.");
+        root.add_choice(DialogueChoice::new("Custom choice.", Some(3)));
+        tree.add_node(root);
+        tree.add_node(DialogueNode::new(3, "Custom node."));
+
+        let changed = tree.ensure_standard_trainer_branch("master_swordsman", "Master Swordsman");
+        assert!(changed);
+
+        let removed = tree.remove_sdk_managed_trainer_content();
+        assert!(removed, "must return true when trainer content was removed");
+        assert!(!tree.contains_open_training_for_npc("master_swordsman"));
+        assert!(tree.nodes.contains_key(&1), "root node must be preserved");
+        assert!(tree.nodes.contains_key(&3), "custom node must be preserved");
+        // Custom choice on root must also be preserved
+        let root = tree.get_node(1).unwrap();
+        assert!(root.choices.iter().any(|c| c.text == "Custom choice."));
+    }
+
+    #[test]
+    fn test_remove_sdk_managed_trainer_content_is_idempotent() {
+        let mut tree =
+            DialogueTree::standard_trainer_template(30, "master_swordsman", "Master Swordsman");
+
+        assert!(tree.remove_sdk_managed_trainer_content());
+        assert!(
+            !tree.remove_sdk_managed_trainer_content(),
+            "second call must be a no-op"
+        );
+    }
+
+    #[test]
+    fn test_ensure_standard_trainer_branch_is_idempotent() {
+        let mut tree = DialogueTree::new(20, "Custom Dialogue".to_string(), 1);
+        tree.add_node(DialogueNode::new(1, "Hello there."));
+
+        let first = tree.ensure_standard_trainer_branch("master_swordsman", "Master Swordsman");
+        let second = tree.ensure_standard_trainer_branch("master_swordsman", "Master Swordsman");
+
+        assert!(first, "first call should modify the tree");
+        assert!(!second, "second call should be a no-op");
+    }
+
+    #[test]
+    fn test_dialogue_action_description_open_training() {
+        let action = DialogueAction::OpenTraining {
+            npc_id: "master_swordsman".to_string(),
+        };
+        let desc = action.description();
+        assert!(
+            desc.contains("master_swordsman"),
+            "description must include the npc_id"
+        );
+    }
+
+    #[test]
+    fn test_sdk_metadata_has_trainer_content() {
+        let mut metadata = DialogueSdkMetadata::default();
+        assert!(!metadata.has_trainer_content());
+
+        metadata
+            .managed_content
+            .insert(DialogueSdkManagedContent::TrainerChoice);
+        assert!(metadata.has_trainer_content());
+    }
+
+    #[test]
+    fn test_trainer_choice_is_sdk_managed() {
+        let choice = DialogueChoice::sdk_managed_trainer_choice(5);
+        assert!(choice.is_sdk_managed_trainer_choice());
+        assert!(!choice.is_sdk_managed_merchant_choice());
     }
 }

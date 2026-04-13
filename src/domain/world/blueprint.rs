@@ -387,6 +387,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         let guard = crate::domain::world::npc::NpcDefinition {
@@ -405,6 +408,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         npc_db.add_npc(merchant).unwrap();

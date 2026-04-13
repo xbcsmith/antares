@@ -32,6 +32,7 @@
 //! # }
 //! ```
 
+use crate::domain::campaign::LevelUpMode;
 use crate::domain::types::{Direction, GameTime, Position};
 use crate::sdk::database::ContentDatabase;
 use serde::{Deserialize, Serialize};
@@ -186,6 +187,18 @@ pub struct CampaignConfig {
     #[serde(default = "default_max_level")]
     pub max_level: u8,
 
+    /// Campaign leveling mode
+    #[serde(default = "default_level_up_mode")]
+    pub level_up_mode: LevelUpMode,
+
+    /// Base XP for the campaign progression formula
+    #[serde(default = "default_base_xp")]
+    pub base_xp: u64,
+
+    /// XP multiplier for the campaign progression formula
+    #[serde(default = "default_xp_multiplier")]
+    pub xp_multiplier: f64,
+
     /// Starting game time for a new campaign (day, hour, minute).
     ///
     /// Defaults to Day 1, 08:00 (morning) if not specified in the RON file.
@@ -213,6 +226,18 @@ fn default_starting_level() -> u8 {
 
 fn default_max_level() -> u8 {
     20
+}
+
+fn default_level_up_mode() -> LevelUpMode {
+    LevelUpMode::Auto
+}
+
+fn default_base_xp() -> u64 {
+    1000
+}
+
+fn default_xp_multiplier() -> f64 {
+    1.5
 }
 
 /// Default starting time: Day 1, 08:00 — campaign begins in the morning.
@@ -485,6 +510,12 @@ pub struct CampaignMetadata {
     pub allow_multiclassing: bool,
     pub starting_level: u8,
     pub max_level: u8,
+    #[serde(default = "default_level_up_mode")]
+    pub level_up_mode: LevelUpMode,
+    #[serde(default = "default_base_xp")]
+    pub base_xp: u64,
+    #[serde(default = "default_xp_multiplier")]
+    pub xp_multiplier: f64,
     pub items_file: String,
     pub spells_file: String,
     pub monsters_file: String,
@@ -558,6 +589,9 @@ impl TryFrom<CampaignMetadata> for Campaign {
                 allow_multiclassing: metadata.allow_multiclassing,
                 starting_level: metadata.starting_level,
                 max_level: metadata.max_level,
+                level_up_mode: metadata.level_up_mode,
+                base_xp: metadata.base_xp,
+                xp_multiplier: metadata.xp_multiplier,
                 starting_time: metadata.starting_time,
             },
             data: CampaignData {
@@ -850,14 +884,41 @@ mod tests {
             allow_multiclassing: false,
             starting_level: default_starting_level(),
             max_level: default_max_level(),
+            level_up_mode: default_level_up_mode(),
+            base_xp: default_base_xp(),
+            xp_multiplier: default_xp_multiplier(),
             starting_time: default_starting_time(),
         };
 
-        assert_eq!(config.max_party_size, 6);
-        assert_eq!(config.max_roster_size, 20);
-        assert_eq!(config.starting_level, 1);
-        assert_eq!(config.max_level, 20);
-        assert_eq!(config.difficulty, Difficulty::Normal);
+        assert_eq!(config.level_up_mode, LevelUpMode::Auto);
+        assert_eq!(config.base_xp, 1000);
+        assert_eq!(config.xp_multiplier, 1.5);
+    }
+
+    #[test]
+    fn test_campaign_config_leveling_defaults_are_serialized() {
+        let ron_str = r#"(
+            starting_map: 1,
+            starting_position: (x: 0, y: 0),
+            starting_direction: North,
+            starting_gold: 100,
+            starting_food: 50,
+            starting_innkeeper: "tutorial_innkeeper_town",
+            max_party_size: 6,
+            max_roster_size: 20,
+            difficulty: Normal,
+            permadeath: false,
+            allow_multiclassing: false,
+            starting_level: 1,
+            max_level: 20,
+        )"#;
+
+        let config: CampaignConfig =
+            ron::from_str(ron_str).expect("deserialization of minimal RON failed");
+
+        assert_eq!(config.level_up_mode, LevelUpMode::Auto);
+        assert_eq!(config.base_xp, 1000);
+        assert_eq!(config.xp_multiplier, 1.5);
     }
 
     /// `CampaignConfig::default_starting_time` returns Day 1, 08:00.
@@ -889,6 +950,9 @@ mod tests {
             allow_multiclassing: false,
             starting_level: 1,
             max_level: 20,
+            level_up_mode: default_level_up_mode(),
+            base_xp: default_base_xp(),
+            xp_multiplier: default_xp_multiplier(),
             starting_time: GameTime::new(3, 22, 30),
         };
 
@@ -1058,6 +1122,9 @@ mod tests {
             allow_multiclassing: false,
             starting_level: 1,
             max_level: 20,
+            level_up_mode: LevelUpMode::Auto,
+            base_xp: 1000,
+            xp_multiplier: 1.5,
             items_file: "data/items.ron".to_string(),
             spells_file: "data/spells.ron".to_string(),
             monsters_file: "data/monsters.ron".to_string(),

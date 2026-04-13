@@ -87,54 +87,23 @@ pub fn handle_global_mode_toggles(
     }
 
     if frame_input.menu_toggle {
-        match &game_state.mode {
-            GameMode::Automap => {
-                game_state.mode = GameMode::Exploration;
-                bevy::prelude::info!(
-                    "Automap closed via menu key: new_mode = {:?}",
-                    game_state.mode
-                );
-            }
-            GameMode::MerchantInventory(merchant_state) => {
-                let resume = merchant_state.get_resume_mode();
-                bevy::prelude::info!(
-                    "Merchant inventory closed via menu key: restored mode = {:?}",
-                    resume
-                );
-                game_state.mode = resume;
-            }
-            GameMode::ContainerInventory(container_state) => {
-                let resume = container_state.get_resume_mode();
-                bevy::prelude::info!(
-                    "Container inventory closed via menu key: restored mode = {:?}",
-                    resume
-                );
-                game_state.mode = resume;
-            }
-            GameMode::TempleService(_) => {
-                game_state.mode = GameMode::Exploration;
-                bevy::prelude::info!(
-                    "Temple service closed via menu key: new_mode = {:?}",
-                    game_state.mode
-                );
-            }
-            GameMode::GameLog => {
-                game_state.mode = GameMode::Exploration;
-                bevy::prelude::info!(
-                    "Game log closed via menu key: new_mode = {:?}",
-                    game_state.mode
-                );
-            }
-            GameMode::SpellCasting(_) => {
-                game_state.exit_spell_casting();
-                bevy::prelude::info!(
-                    "Spell casting cancelled via menu key: new_mode = {:?}",
-                    game_state.mode
-                );
-            }
-            _ => {
-                toggle_menu_state(game_state);
-                bevy::prelude::info!("Menu toggled: new_mode = {:?}", game_state.mode);
+        if game_state.close_modal() {
+            bevy::prelude::info!(
+                "Modal closed via menu key: new_mode = {:?}",
+                game_state.mode
+            );
+        } else {
+            match &game_state.mode {
+                GameMode::Exploration | GameMode::Menu(_) => {
+                    toggle_menu_state(game_state);
+                    bevy::prelude::info!("Menu toggled: new_mode = {:?}", game_state.mode);
+                }
+                _ => {
+                    bevy::prelude::info!(
+                        "Menu key pressed but mode is {:?} — ignoring",
+                        game_state.mode
+                    );
+                }
             }
         }
         return true;
@@ -241,6 +210,34 @@ pub fn handle_global_mode_toggles(
                     "Game log toggle pressed but mode is {:?} — ignoring",
                     game_state.mode
                 );
+            }
+        }
+        return true;
+    }
+
+    if frame_input.character_sheet_toggle {
+        match &game_state.mode {
+            GameMode::CharacterSheet(_) => {
+                let resume = if let GameMode::CharacterSheet(cs) = &game_state.mode {
+                    cs.get_resume_mode()
+                } else {
+                    GameMode::Exploration
+                };
+                bevy::prelude::info!("Character sheet closed: restored mode = {:?}", resume);
+                game_state.mode = resume;
+            }
+            GameMode::Combat(_)
+            | GameMode::Dialogue(_)
+            | GameMode::Training(_)
+            | GameMode::MerchantInventory(_) => {
+                bevy::prelude::info!(
+                    "Character sheet key pressed but mode is {:?} — ignoring",
+                    game_state.mode
+                );
+            }
+            _ => {
+                game_state.enter_character_sheet();
+                bevy::prelude::info!("Character sheet opened: mode = {:?}", game_state.mode);
             }
         }
         return true;
@@ -511,6 +508,36 @@ mod tests {
     }
 
     #[test]
+    fn test_handle_global_mode_toggles_escape_closes_inventory_not_menu() {
+        let mut state = GameState::new();
+        state.enter_inventory();
+
+        let consumed = handle_global_mode_toggles(&mut state, menu_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::Exploration));
+        assert!(
+            !matches!(state.mode, GameMode::Menu(_)),
+            "Escape in Inventory must close the inventory screen instead of opening the game menu"
+        );
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_escape_closes_dialogue_not_menu() {
+        let mut state = GameState::new();
+        state.mode = GameMode::Dialogue(dialogue_state_for("elder_bob"));
+
+        let consumed = handle_global_mode_toggles(&mut state, menu_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::Exploration));
+        assert!(
+            !matches!(state.mode, GameMode::Menu(_)),
+            "Escape in Dialogue must close dialogue instead of opening the game menu"
+        );
+    }
+
+    #[test]
     fn test_handle_global_mode_toggles_inventory_ignored_in_menu_mode() {
         let mut state = GameState::new();
         state.enter_menu();
@@ -729,6 +756,13 @@ mod tests {
         }
     }
 
+    fn character_sheet_toggle_intent(pressed: bool) -> FrameInputIntent {
+        FrameInputIntent {
+            character_sheet_toggle: pressed,
+            ..FrameInputIntent::default()
+        }
+    }
+
     #[test]
     fn test_handle_global_mode_toggles_spell_book_opens_from_exploration() {
         let mut state = GameState::new();
@@ -738,6 +772,21 @@ mod tests {
 
         assert!(consumed);
         assert!(matches!(state.mode, GameMode::SpellBook(_)));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_escape_closes_spell_book_not_menu() {
+        let mut state = GameState::new();
+        state.enter_spellbook_with_caster_select();
+
+        let consumed = handle_global_mode_toggles(&mut state, menu_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::Exploration));
+        assert!(
+            !matches!(state.mode, GameMode::Menu(_)),
+            "Escape in SpellBook must close the spell book instead of opening the game menu"
+        );
     }
 
     #[test]
@@ -816,5 +865,112 @@ mod tests {
         } else {
             panic!("expected SpellBook mode");
         }
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_character_sheet_opens_from_exploration() {
+        let mut state = GameState::new();
+        assert!(matches!(state.mode, GameMode::Exploration));
+
+        let consumed =
+            handle_global_mode_toggles(&mut state, character_sheet_toggle_intent(true), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_character_sheet_closes_back_to_exploration() {
+        let mut state = GameState::new();
+        state.enter_character_sheet();
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+
+        let consumed =
+            handle_global_mode_toggles(&mut state, character_sheet_toggle_intent(true), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_character_sheet_ignored_in_combat() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        let mut state = GameState::new();
+        let hero = Character::new(
+            "Fighter".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+        state.enter_combat();
+        assert!(matches!(state.mode, GameMode::Combat(_)));
+
+        let consumed =
+            handle_global_mode_toggles(&mut state, character_sheet_toggle_intent(true), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::Combat(_)));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_character_sheet_ignored_in_dialogue() {
+        let mut state = GameState::new();
+        state.enter_dialogue();
+        assert!(matches!(state.mode, GameMode::Dialogue(_)));
+
+        let consumed =
+            handle_global_mode_toggles(&mut state, character_sheet_toggle_intent(true), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::Dialogue(_)));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_character_sheet_ignored_in_training() {
+        use crate::application::TrainingState;
+        let mut state = GameState::new();
+        state.mode = GameMode::Training(TrainingState::new("trainer_npc".to_string()));
+        assert!(matches!(state.mode, GameMode::Training(_)));
+
+        let consumed =
+            handle_global_mode_toggles(&mut state, character_sheet_toggle_intent(true), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::Training(_)));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_character_sheet_stores_previous_mode() {
+        let mut state = GameState::new();
+        assert!(matches!(state.mode, GameMode::Exploration));
+
+        handle_global_mode_toggles(&mut state, character_sheet_toggle_intent(true), None);
+
+        if let GameMode::CharacterSheet(ref cs) = state.mode {
+            assert!(
+                matches!(cs.get_resume_mode(), GameMode::Exploration),
+                "CharacterSheet must store Exploration as the previous mode"
+            );
+        } else {
+            panic!("expected CharacterSheet mode after character_sheet_toggle in Exploration");
+        }
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_escape_closes_character_sheet_to_exploration() {
+        let mut state = GameState::new();
+        state.enter_character_sheet();
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+
+        let consumed = handle_global_mode_toggles(&mut state, menu_toggle_intent(), None);
+
+        assert!(consumed);
+        assert!(matches!(state.mode, GameMode::Exploration));
+        assert!(
+            !matches!(state.mode, GameMode::Menu(_)),
+            "Escape in CharacterSheet must close the sheet instead of opening the game menu"
+        );
     }
 }

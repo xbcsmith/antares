@@ -3222,6 +3222,9 @@ mod map_npc_resolution_tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
         npc_db.add_npc(npc_def).unwrap();
 
@@ -3262,6 +3265,9 @@ mod map_npc_resolution_tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
         npc_db.add_npc(npc_def).unwrap();
 
@@ -3297,6 +3303,9 @@ mod map_npc_resolution_tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         let placement = NpcPlacement {
@@ -3396,6 +3405,9 @@ mod map_npc_resolution_tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         let placement = NpcPlacement {

@@ -41,6 +41,7 @@ use crate::ui_helpers::{
     compute_default_panel_height, show_standard_list_item, EditorToolbar, StandardListItemConfig,
     ToolbarAction, TwoColumnLayout,
 };
+use antares::domain::campaign::LevelUpMode;
 use antares::domain::character::{FOOD_MAX, FOOD_MIN, PARTY_MAX_SIZE};
 use antares::domain::world::npc::NpcDefinition;
 use eframe::egui;
@@ -100,6 +101,9 @@ pub struct CampaignMetadataEditBuffer {
     pub allow_multiclassing: bool,
     pub starting_level: u8,
     pub max_level: u8,
+    pub level_up_mode: LevelUpMode,
+    pub base_xp: u64,
+    pub xp_multiplier: f64,
 
     // Starting date/time (split from GameTime for ergonomic drag-value editing)
     /// Starting year (1-based)
@@ -129,6 +133,7 @@ pub struct CampaignMetadataEditBuffer {
     pub creatures_file: String,
     pub stock_templates_file: String,
     pub furniture_file: String,
+    pub levels_file: String,
 }
 
 impl CampaignMetadataEditBuffer {
@@ -154,6 +159,9 @@ impl CampaignMetadataEditBuffer {
             allow_multiclassing: m.allow_multiclassing,
             starting_level: m.starting_level,
             max_level: m.max_level,
+            level_up_mode: m.level_up_mode.clone(),
+            base_xp: m.base_xp,
+            xp_multiplier: m.xp_multiplier,
             starting_year: m.starting_time.year,
             starting_month: m.starting_time.month,
             starting_day: m.starting_time.day,
@@ -174,6 +182,7 @@ impl CampaignMetadataEditBuffer {
             creatures_file: m.creatures_file.clone(),
             stock_templates_file: m.stock_templates_file.clone(),
             furniture_file: m.furniture_file.clone(),
+            levels_file: m.levels_file.clone(),
         }
     }
 
@@ -198,6 +207,9 @@ impl CampaignMetadataEditBuffer {
         dest.allow_multiclassing = self.allow_multiclassing;
         dest.starting_level = self.starting_level;
         dest.max_level = self.max_level;
+        dest.level_up_mode = self.level_up_mode.clone();
+        dest.base_xp = self.base_xp;
+        dest.xp_multiplier = self.xp_multiplier;
         dest.starting_time = antares::domain::types::GameTime::new_full(
             self.starting_year.max(1),
             self.starting_month.clamp(1, 12),
@@ -220,6 +232,7 @@ impl CampaignMetadataEditBuffer {
         dest.creatures_file = self.creatures_file.clone();
         dest.stock_templates_file = self.stock_templates_file.clone();
         dest.furniture_file = self.furniture_file.clone();
+        dest.levels_file = self.levels_file.clone();
     }
 }
 
@@ -1041,6 +1054,30 @@ impl CampaignMetadataEditorState {
                                         }
                                     });
                                     ui.end_row();
+
+                                    // Levels File
+                                    ui.label("Levels File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.levels_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.levels_file =
+                                                    p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
                                 });
                         }
 
@@ -1326,6 +1363,70 @@ impl CampaignMetadataEditorState {
                                         .changed()
                                     {
                                         self.buffer.max_level = (max_level.max(1)) as u8;
+                                        self.has_unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+
+                                    ui.label("Leveling System:");
+                                    let current_level_up_mode = self.buffer.level_up_mode.clone();
+                                    egui::ComboBox::from_id_salt("campaign_leveling_system")
+                                        .selected_text(match current_level_up_mode {
+                                            LevelUpMode::Auto => "Auto",
+                                            LevelUpMode::NpcTrainer => "NPC Trainer",
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            if ui
+                                                .selectable_label(
+                                                    current_level_up_mode == LevelUpMode::Auto,
+                                                    "Auto",
+                                                )
+                                                .clicked()
+                                            {
+                                                self.buffer.level_up_mode = LevelUpMode::Auto;
+                                                self.has_unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
+                                            }
+                                            if ui
+                                                .selectable_label(
+                                                    current_level_up_mode == LevelUpMode::NpcTrainer,
+                                                    "NPC Trainer",
+                                                )
+                                                .clicked()
+                                            {
+                                                self.buffer.level_up_mode = LevelUpMode::NpcTrainer;
+                                                self.has_unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
+                                            }
+                                        });
+                                    ui.end_row();
+
+                                    ui.label("Base XP:");
+                                    let mut base_xp = self.buffer.base_xp as i64;
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut base_xp)
+                                                .range(1..=100_000),
+                                        )
+                                        .changed()
+                                    {
+                                        self.buffer.base_xp = base_xp.max(1) as u64;
+                                        self.has_unsaved_changes = true;
+                                        *ctx.unsaved_changes = true;
+                                    }
+                                    ui.end_row();
+
+                                    ui.label("XP Multiplier:");
+                                    let mut xp_multiplier = self.buffer.xp_multiplier;
+                                    if ui
+                                        .add(
+                                            egui::DragValue::new(&mut xp_multiplier)
+                                                .speed(0.1)
+                                                .range(0.1..=10.0),
+                                        )
+                                        .changed()
+                                    {
+                                        self.buffer.xp_multiplier = xp_multiplier.max(0.1);
                                         self.has_unsaved_changes = true;
                                         *ctx.unsaved_changes = true;
                                     }
@@ -1698,6 +1799,39 @@ mod tests {
 
     /// `from_metadata` must copy all three starting-time components into the
     /// split buffer fields.
+    #[test]
+    fn test_buffer_from_metadata_copies_leveling_fields() {
+        let meta = crate::CampaignMetadata {
+            level_up_mode: LevelUpMode::NpcTrainer,
+            base_xp: 500,
+            xp_multiplier: 2.0,
+            ..crate::CampaignMetadata::default()
+        };
+
+        let buf = CampaignMetadataEditBuffer::from_metadata(&meta);
+
+        assert_eq!(buf.level_up_mode, LevelUpMode::NpcTrainer);
+        assert_eq!(buf.base_xp, 500);
+        assert!((buf.xp_multiplier - 2.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_buffer_apply_to_writes_leveling_fields() {
+        let buf = CampaignMetadataEditBuffer {
+            level_up_mode: LevelUpMode::NpcTrainer,
+            base_xp: 500,
+            xp_multiplier: 2.0,
+            ..CampaignMetadataEditBuffer::default()
+        };
+
+        let mut dest = crate::CampaignMetadata::default();
+        buf.apply_to(&mut dest);
+
+        assert_eq!(dest.level_up_mode, LevelUpMode::NpcTrainer);
+        assert_eq!(dest.base_xp, 500);
+        assert!((dest.xp_multiplier - 2.0).abs() < f64::EPSILON);
+    }
+
     #[test]
     fn test_buffer_from_metadata_copies_starting_time() {
         let meta = crate::CampaignMetadata {

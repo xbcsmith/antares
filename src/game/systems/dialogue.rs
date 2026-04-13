@@ -1705,6 +1705,71 @@ fn execute_action(
                 );
             }
         }
+
+        DialogueAction::OpenTraining { npc_id } => {
+            use crate::application::{GameMode, TrainingState};
+            use crate::domain::campaign::LevelUpMode;
+            use crate::domain::progression::check_level_up_with_db;
+
+            // Guard: NpcTrainer mode must be configured in the campaign.
+            // If the campaign uses Auto mode, OpenTraining is a misconfiguration.
+            if game_state.campaign_config.level_up_mode != LevelUpMode::NpcTrainer {
+                warn!(
+                    "OpenTraining: action fired but campaign is not in NpcTrainer mode; ignoring"
+                );
+                return;
+            }
+
+            // Look up and validate the trainer NPC.
+            let npc = match db.npcs.get_npc(npc_id) {
+                Some(n) => n,
+                None => {
+                    warn!(
+                        "OpenTraining: NPC '{}' not found in content database",
+                        npc_id
+                    );
+                    if let Some(log) = game_log.as_mut() {
+                        log.add_system(format!("Trainer '{}' not found.", npc_id));
+                    }
+                    return;
+                }
+            };
+
+            if !npc.is_trainer {
+                warn!(
+                    "OpenTraining: NPC '{}' is not flagged as a trainer; ignoring action",
+                    npc_id
+                );
+                if let Some(log) = game_log.as_mut() {
+                    log.add_system(format!("'{}' is not a trainer.", npc.name));
+                }
+                return;
+            }
+
+            // Build the list of party member indices eligible for level-up.
+            // Eligible = alive AND has enough XP to advance (formula fallback since
+            // the LevelDatabase is not available in the dialogue execution context).
+            let eligible_member_indices: Vec<usize> = game_state
+                .party
+                .members
+                .iter()
+                .enumerate()
+                .filter(|(_, member)| member.is_alive() && check_level_up_with_db(member, None))
+                .map(|(i, _)| i)
+                .collect();
+
+            // Transition to Training mode.
+            let mut training_state = TrainingState::new(npc_id.clone());
+            training_state.eligible_member_indices = eligible_member_indices;
+
+            info!(
+                "OpenTraining: entering training mode for NPC '{}' ({} eligible member(s))",
+                npc_id,
+                training_state.eligible_member_indices.len()
+            );
+
+            game_state.mode = GameMode::Training(training_state);
+        }
     }
 }
 

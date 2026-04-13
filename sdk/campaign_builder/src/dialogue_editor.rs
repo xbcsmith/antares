@@ -1397,6 +1397,104 @@ impl DialogueEditorState {
         }
     }
 
+    /// Ensures a trainer NPC has a compliant dialogue assignment.
+    ///
+    /// If the trainer has no assigned dialogue, this creates a new standard
+    /// trainer template tree, appends it to the editor's loaded dialogue
+    /// collection, and assigns the new dialogue ID to the NPC.
+    ///
+    /// If the trainer already has an assigned dialogue, the editor loads that
+    /// tree and augments it with the standard SDK-managed trainer branch when
+    /// the dialogue does not already contain an explicit
+    /// `DialogueAction::OpenTraining { npc_id }` path for this NPC.
+    ///
+    /// Returns a status describing what action was taken.
+    pub fn ensure_trainer_dialogue_for_npc(
+        &mut self,
+        npc: &mut NpcDefinition,
+    ) -> Result<MerchantDialogueUpdate, String> {
+        if !npc.is_trainer {
+            return Ok(MerchantDialogueUpdate::Unchanged);
+        }
+
+        if let Some(dialogue_id) = npc.dialogue_id {
+            let dialogue = self
+                .dialogues
+                .iter_mut()
+                .find(|dialogue| dialogue.id == dialogue_id)
+                .ok_or_else(|| {
+                    format!(
+                        "Assigned dialogue {} for trainer '{}' was not found",
+                        dialogue_id, npc.id
+                    )
+                })?;
+
+            if dialogue.contains_open_training_for_npc(&npc.id) {
+                return Ok(MerchantDialogueUpdate::AlreadyValid);
+            }
+
+            if dialogue.ensure_standard_trainer_branch(&npc.id, &npc.name) {
+                self.has_unsaved_changes = true;
+                return Ok(MerchantDialogueUpdate::AugmentedExisting { dialogue_id });
+            }
+
+            return Err(format!(
+                "Assigned dialogue {} for trainer '{}' could not be augmented",
+                dialogue_id, npc.id
+            ));
+        }
+
+        let dialogue_id = self.next_available_dialogue_id();
+        let dialogue = DialogueTree::standard_trainer_template(dialogue_id, &npc.id, &npc.name);
+        self.dialogues.push(dialogue);
+        npc.dialogue_id = Some(dialogue_id);
+        self.has_unsaved_changes = true;
+
+        Ok(MerchantDialogueUpdate::CreatedNew { dialogue_id })
+    }
+
+    /// Removes SDK-managed trainer content from the assigned dialogue for an
+    /// NPC that is no longer a trainer.
+    ///
+    /// This cleanup is intentionally non-destructive:
+    ///
+    /// - only SDK-managed trainer nodes and choices are removed
+    /// - unrelated authored dialogue content remains intact
+    /// - the dialogue asset itself is retained
+    /// - the NPC's `dialogue_id` is not cleared automatically
+    ///
+    /// Returns a status describing what action was taken.
+    pub fn remove_trainer_dialogue_for_npc(
+        &mut self,
+        npc: &NpcDefinition,
+    ) -> Result<MerchantDialogueUpdate, String> {
+        if npc.is_trainer {
+            return Ok(MerchantDialogueUpdate::Unchanged);
+        }
+
+        let Some(dialogue_id) = npc.dialogue_id else {
+            return Ok(MerchantDialogueUpdate::Unchanged);
+        };
+
+        let dialogue = self
+            .dialogues
+            .iter_mut()
+            .find(|dialogue| dialogue.id == dialogue_id)
+            .ok_or_else(|| {
+                format!(
+                    "Assigned dialogue {} for non-trainer '{}' was not found",
+                    dialogue_id, npc.id
+                )
+            })?;
+
+        if dialogue.remove_sdk_managed_trainer_content() {
+            self.has_unsaved_changes = true;
+            Ok(MerchantDialogueUpdate::RemovedMerchantContent { dialogue_id })
+        } else {
+            Ok(MerchantDialogueUpdate::NoMerchantContentToRemove { dialogue_id })
+        }
+    }
+
     /// Finds the next available node ID for the currently selected dialogue.
     ///
     /// Returns the maximum node ID in the selected dialogue plus 1, or 1 if no nodes exist.
@@ -1795,12 +1893,12 @@ impl DialogueEditorState {
                             right_ui.add_space(5.0);
 
                             egui::ScrollArea::vertical()
-                                .max_height(300.0)
                                 .id_salt("dialogue_preview_scroll")
+                                .auto_shrink([true, false])
                                 .show(right_ui, |ui| {
                                     let mut preview_nodes: Vec<_> = dialogue.nodes.iter().collect();
                                     preview_nodes.sort_by_key(|(node_id, _)| *node_id);
-                                    for (node_id, node) in preview_nodes.iter().take(5) {
+                                    for (node_id, node) in preview_nodes.iter() {
                                         ui.group(|ui| {
                                             ui.label(
                                                 egui::RichText::new(format!("Node: {}", node_id))
@@ -1850,16 +1948,6 @@ impl DialogueEditorState {
                                             }
                                         });
                                         ui.add_space(4.0);
-                                    }
-
-                                    if dialogue.nodes.len() > 5 {
-                                        ui.label(
-                                            egui::RichText::new(format!(
-                                                "... and {} more nodes",
-                                                dialogue.nodes.len() - 5
-                                            ))
-                                            .weak(),
-                                        );
                                     }
                                 });
                         } else if !dialogue.nodes.is_empty() {

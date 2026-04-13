@@ -107,11 +107,26 @@ pub enum LockAction {
 /// let nav = LockNavState::default();
 /// assert!(nav.selected_character.is_none());
 /// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LockPromptFocus {
+    /// Focus is on the character list.
+    #[default]
+    CharacterList,
+    /// Focus is on the Pick Lock button.
+    PickLockButton,
+    /// Focus is on the Bash button.
+    BashButton,
+    /// Focus is on the Cancel button.
+    CancelButton,
+}
+
 #[derive(Resource, Default, Debug)]
 pub struct LockNavState {
     /// Currently selected party member index (0-based), or `None` when no
     /// character has been chosen yet.
     pub selected_character: Option<usize>,
+    /// Which interactive region currently has keyboard focus.
+    pub focus: LockPromptFocus,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -167,12 +182,16 @@ fn lock_prompt_ui_system(
     };
     let can_lockpick = lock_pending.can_lockpick;
 
+    let mut chosen_action: Option<(LockAction, usize)> = None;
+    let mut do_cancel = false;
+
     // Handle keyboard shortcuts before rendering.
     if let Some(ref kb) = keyboard {
         // Esc cancels the prompt.
         if kb.just_pressed(KeyCode::Escape) {
             *lock_pending = LockInteractionPending::default();
             nav_state.selected_character = None;
+            nav_state.focus = LockPromptFocus::CharacterList;
             return;
         }
 
@@ -189,21 +208,55 @@ fn lock_prompt_ui_system(
         for (idx, key) in digit_keys.iter().enumerate() {
             if kb.just_pressed(*key) && idx < member_count {
                 nav_state.selected_character = Some(idx);
+                nav_state.focus = LockPromptFocus::CharacterList;
             }
         }
 
-        // Arrow keys cycle through party members.
-        if kb.just_pressed(KeyCode::ArrowUp) && member_count > 0 {
-            nav_state.selected_character = Some(match nav_state.selected_character {
-                Some(idx) if idx > 0 => idx - 1,
-                Some(_) | None => member_count - 1,
-            });
+        // Tab cycles focus between character list and action buttons.
+        if kb.just_pressed(KeyCode::Tab) {
+            nav_state.focus = match nav_state.focus {
+                LockPromptFocus::CharacterList => LockPromptFocus::PickLockButton,
+                LockPromptFocus::PickLockButton => LockPromptFocus::BashButton,
+                LockPromptFocus::BashButton => LockPromptFocus::CancelButton,
+                LockPromptFocus::CancelButton => LockPromptFocus::CharacterList,
+            };
         }
-        if kb.just_pressed(KeyCode::ArrowDown) && member_count > 0 {
-            nav_state.selected_character = Some(match nav_state.selected_character {
-                Some(idx) if idx + 1 < member_count => idx + 1,
-                Some(_) | None => 0,
-            });
+
+        // Arrow keys cycle through party members when the character list has focus.
+        if nav_state.focus == LockPromptFocus::CharacterList {
+            if kb.just_pressed(KeyCode::ArrowUp) && member_count > 0 {
+                nav_state.selected_character = Some(match nav_state.selected_character {
+                    Some(idx) if idx > 0 => idx - 1,
+                    Some(_) | None => member_count - 1,
+                });
+            }
+            if kb.just_pressed(KeyCode::ArrowDown) && member_count > 0 {
+                nav_state.selected_character = Some(match nav_state.selected_character {
+                    Some(idx) if idx + 1 < member_count => idx + 1,
+                    Some(_) | None => 0,
+                });
+            }
+        }
+
+        if kb.just_pressed(KeyCode::Enter) || kb.just_pressed(KeyCode::Space) {
+            match nav_state.focus {
+                LockPromptFocus::PickLockButton => {
+                    if can_lockpick {
+                        if let Some(party_index) = nav_state.selected_character {
+                            chosen_action = Some((LockAction::Lockpick, party_index));
+                        }
+                    }
+                }
+                LockPromptFocus::BashButton => {
+                    if let Some(party_index) = nav_state.selected_character {
+                        chosen_action = Some((LockAction::Bash, party_index));
+                    }
+                }
+                LockPromptFocus::CancelButton => {
+                    do_cancel = true;
+                }
+                LockPromptFocus::CharacterList => {}
+            }
         }
     }
 
@@ -221,9 +274,6 @@ fn lock_prompt_ui_system(
         .map(|m| m.name.clone())
         .collect();
 
-    let mut chosen_action: Option<(LockAction, usize)> = None;
-    let mut do_cancel = false;
-
     egui::Window::new("Locked Object")
         .collapsible(false)
         .resizable(false)
@@ -236,11 +286,10 @@ fn lock_prompt_ui_system(
             ui.label("Acting character:");
             for (idx, name) in party_names.iter().enumerate() {
                 let selected = nav_state.selected_character == Some(idx);
-                if ui
-                    .selectable_label(selected, format!("[{}] {}", idx + 1, name))
-                    .clicked()
-                {
+                let response = ui.selectable_label(selected, format!("[{}] {}", idx + 1, name));
+                if response.clicked() {
                     nav_state.selected_character = Some(idx);
+                    nav_state.focus = LockPromptFocus::CharacterList;
                 }
             }
 
@@ -248,23 +297,37 @@ fn lock_prompt_ui_system(
 
             ui.horizontal(|ui| {
                 // Pick Lock — disabled when no party member has the ability.
-                ui.add_enabled_ui(can_lockpick, |ui| {
-                    if ui.button("Pick Lock  (Robber only)").clicked() {
-                        if let Some(party_index) = nav_state.selected_character {
-                            chosen_action = Some((LockAction::Lockpick, party_index));
-                        }
+                let pick_lock_response = ui.add_enabled(
+                    can_lockpick,
+                    egui::Button::new("Pick Lock  (Robber only)")
+                        .selected(nav_state.focus == LockPromptFocus::PickLockButton),
+                );
+                if pick_lock_response.clicked() {
+                    nav_state.focus = LockPromptFocus::PickLockButton;
+                    if let Some(party_index) = nav_state.selected_character {
+                        chosen_action = Some((LockAction::Lockpick, party_index));
                     }
-                });
+                }
 
                 // Bash — available to any character.
-                if ui.button("Bash").clicked() {
+                let bash_response = ui.add(
+                    egui::Button::new("Bash")
+                        .selected(nav_state.focus == LockPromptFocus::BashButton),
+                );
+                if bash_response.clicked() {
+                    nav_state.focus = LockPromptFocus::BashButton;
                     if let Some(party_index) = nav_state.selected_character {
                         chosen_action = Some((LockAction::Bash, party_index));
                     }
                 }
 
                 // Cancel.
-                if ui.button("Cancel").clicked() {
+                let cancel_response = ui.add(
+                    egui::Button::new("Cancel")
+                        .selected(nav_state.focus == LockPromptFocus::CancelButton),
+                );
+                if cancel_response.clicked() {
+                    nav_state.focus = LockPromptFocus::CancelButton;
                     do_cancel = true;
                 }
             });
@@ -278,6 +341,7 @@ fn lock_prompt_ui_system(
     if do_cancel {
         *lock_pending = LockInteractionPending::default();
         nav_state.selected_character = None;
+        nav_state.focus = LockPromptFocus::CharacterList;
         return;
     }
 
@@ -290,6 +354,7 @@ fn lock_prompt_ui_system(
         });
         *lock_pending = LockInteractionPending::default();
         nav_state.selected_character = None;
+        nav_state.focus = LockPromptFocus::CharacterList;
     }
 }
 

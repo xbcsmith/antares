@@ -435,9 +435,23 @@ pub fn autocomplete_entity_selector_generic(
         let mut text_buffer =
             load_autocomplete_buffer(ui.ctx(), buffer_id, || current_name.clone());
 
-        let response = AutocompleteInput::new(cfg.id_salt, &candidates)
-            .with_placeholder(cfg.placeholder)
-            .show(ui, &mut text_buffer);
+        let button_reserve = if is_selected {
+            ui.spacing().interact_size.x * 2.0 + ui.spacing().item_spacing.x
+        } else {
+            0.0
+        };
+        let width = (ui.available_width() - button_reserve).max(120.0);
+
+        let mut autocomplete = AutoCompleteTextEdit::new(&mut text_buffer, &candidates)
+            .highlight_matches(true)
+            .max_suggestions(10);
+        if !cfg.placeholder.is_empty() {
+            let placeholder_owned = cfg.placeholder.to_string();
+            autocomplete = autocomplete
+                .set_text_edit_properties(move |text_edit| text_edit.hint_text(placeholder_owned));
+        }
+
+        let response = ui.add_sized([width, ui.spacing().interact_size.y], autocomplete);
 
         if response.changed()
             && !text_buffer.is_empty()

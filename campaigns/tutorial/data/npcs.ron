@@ -17,6 +17,9 @@
         stock_template: Some("village_elder_stock"),
         service_catalog: None,
         economy: None,
+        is_trainer: true,
+        training_fee_base: Some(100),
+        training_fee_multiplier: Some(2.0),
     ),
     (
         id: "tutorial_elder_village2",
@@ -36,6 +39,9 @@
         stock_template: Some("village_elder_stock"),
         service_catalog: None,
         economy: None,
+        is_trainer: true,
+        training_fee_base: Some(200),
+        training_fee_multiplier: Some(2.0),
     ),
     (
         id: "tutorial_goblin_dying",
@@ -55,6 +61,9 @@
         stock_template: None,
         service_catalog: None,
         economy: None,
+        is_trainer: false,
+        training_fee_base: None,
+        training_fee_multiplier: None,
     ),
     (
         id: "tutorial_innkeeper_town",
@@ -72,6 +81,9 @@
         stock_template: Some("inn_keeper_stock_template"),
         service_catalog: None,
         economy: None,
+        is_trainer: false,
+        training_fee_base: None,
+        training_fee_multiplier: None,
     ),
     (
         id: "tutorial_innkeeper_town2",
@@ -89,6 +101,9 @@
         stock_template: Some("inn_keeper_stock_template"),
         service_catalog: None,
         economy: None,
+        is_trainer: false,
+        training_fee_base: None,
+        training_fee_multiplier: None,
     ),
     (
         id: "tutorial_merchant_town",
@@ -106,6 +121,9 @@
         stock_template: Some("town_merchant_basic"),
         service_catalog: None,
         economy: None,
+        is_trainer: false,
+        training_fee_base: None,
+        training_fee_multiplier: None,
     ),
     (
         id: "tutorial_merchant_town2",
@@ -123,6 +141,9 @@
         stock_template: Some("mountain_pass_merchant"),
         service_catalog: None,
         economy: None,
+        is_trainer: false,
+        training_fee_base: None,
+        training_fee_multiplier: None,
     ),
     (
         id: "tutorial_priest_town2",
@@ -140,6 +161,9 @@
         stock_template: Some("holy_temple_menu"),
         service_catalog: None,
         economy: None,
+        is_trainer: false,
+        training_fee_base: None,
+        training_fee_multiplier: None,
     ),
     (
         id: "tutorial_priestess_town",
@@ -157,6 +181,9 @@
         stock_template: Some("holy_temple_menu"),
         service_catalog: None,
         economy: None,
+        is_trainer: false,
+        training_fee_base: None,
+        training_fee_multiplier: None,
     ),
     (
         id: "tutorial_ranger_lost",
@@ -176,6 +203,9 @@
         stock_template: None,
         service_catalog: None,
         economy: None,
+        is_trainer: false,
+        training_fee_base: None,
+        training_fee_multiplier: None,
     ),
     (
         id: "tutorial_wizard_arcturus",
@@ -196,6 +226,9 @@
         stock_template: None,
         service_catalog: None,
         economy: None,
+        is_trainer: false,
+        training_fee_base: None,
+        training_fee_multiplier: None,
     ),
     (
         id: "tutorial_wizard_arcturus_brother",
@@ -216,5 +249,8 @@
         stock_template: None,
         service_catalog: None,
         economy: None,
+        is_trainer: false,
+        training_fee_base: None,
+        training_fee_multiplier: None,
     ),
 ]

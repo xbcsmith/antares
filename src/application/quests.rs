@@ -302,8 +302,12 @@ impl QuestSystem {
         for reward in &quest.rewards {
             match reward {
                 QuestReward::Experience(amount) => {
+                    // Scale by the campaign experience_rate so that a doubled XP
+                    // campaign awards 2× quest XP just as it awards 2× combat XP.
+                    let rate = game_state.campaign_config.experience_rate;
+                    let scaled = (*amount as f64 * rate as f64).round() as u64;
                     if let Some(ch) = game_state.party.members.get_mut(0) {
-                        ch.experience = ch.experience.saturating_add(*amount as u64);
+                        ch.experience = ch.experience.saturating_add(scaled);
                     }
                 }
                 QuestReward::Gold(amount) => {
@@ -919,5 +923,143 @@ mod tests {
         );
 
         assert!(gs.party.members[0].spells.sorcerer_spells[0].contains(&0x0501));
+    }
+
+    // ===== Phase 2: experience_rate scaling tests =====
+
+    #[test]
+    fn test_quest_experience_reward_scaled_by_experience_rate() {
+        // Quest: kill 1 monster, reward 100 XP
+        let mut db = ContentDatabase::new();
+        let mut q = Quest::new(100, "XP Quest", "Awards experience");
+        let mut stage = QuestStage::new(1, "Kill something");
+        stage.add_objective(QuestObjective::KillMonsters {
+            monster_id: 5,
+            quantity: 1,
+        });
+        q.add_stage(stage);
+        q.add_reward(QuestReward::Experience(100));
+        db.quests.add_quest(q);
+
+        let mut gs = crate::application::GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+
+        // Double XP rate
+        gs.campaign_config.experience_rate = 2.0;
+
+        let mut qs = QuestSystem::new();
+        qs.start_quest(100, &mut gs, &db)
+            .expect("start_quest failed");
+        qs.process_event(
+            &QuestProgressEvent::MonsterKilled {
+                monster_id: 5,
+                count: 1,
+            },
+            &mut gs,
+            &db,
+        );
+
+        // 100 XP * 2.0 rate = 200
+        assert_eq!(
+            gs.party.members[0].experience, 200,
+            "experience_rate = 2.0 must double quest XP (100 → 200)"
+        );
+    }
+
+    #[test]
+    fn test_quest_experience_reward_halved_by_experience_rate() {
+        let mut db = ContentDatabase::new();
+        let mut q = Quest::new(101, "Half XP Quest", "Awards experience at half rate");
+        let mut stage = QuestStage::new(1, "Kill something");
+        stage.add_objective(QuestObjective::KillMonsters {
+            monster_id: 6,
+            quantity: 1,
+        });
+        q.add_stage(stage);
+        q.add_reward(QuestReward::Experience(100));
+        db.quests.add_quest(q);
+
+        let mut gs = crate::application::GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+
+        // Half XP rate
+        gs.campaign_config.experience_rate = 0.5;
+
+        let mut qs = QuestSystem::new();
+        qs.start_quest(101, &mut gs, &db)
+            .expect("start_quest failed");
+        qs.process_event(
+            &QuestProgressEvent::MonsterKilled {
+                monster_id: 6,
+                count: 1,
+            },
+            &mut gs,
+            &db,
+        );
+
+        // 100 XP * 0.5 rate = 50
+        assert_eq!(
+            gs.party.members[0].experience, 50,
+            "experience_rate = 0.5 must halve quest XP (100 → 50)"
+        );
+    }
+
+    #[test]
+    fn test_quest_experience_reward_default_rate_unchanged() {
+        // Default experience_rate is 1.0 — quest XP should pass through unchanged.
+        let mut db = ContentDatabase::new();
+        let mut q = Quest::new(102, "Normal XP Quest", "Awards standard XP");
+        let mut stage = QuestStage::new(1, "Do task");
+        stage.add_objective(QuestObjective::KillMonsters {
+            monster_id: 7,
+            quantity: 1,
+        });
+        q.add_stage(stage);
+        q.add_reward(QuestReward::Experience(75));
+        db.quests.add_quest(q);
+
+        let mut gs = crate::application::GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+
+        // Default rate = 1.0 (no explicit assignment needed)
+        assert_eq!(gs.campaign_config.experience_rate, 1.0);
+
+        let mut qs = QuestSystem::new();
+        qs.start_quest(102, &mut gs, &db)
+            .expect("start_quest failed");
+        qs.process_event(
+            &QuestProgressEvent::MonsterKilled {
+                monster_id: 7,
+                count: 1,
+            },
+            &mut gs,
+            &db,
+        );
+
+        assert_eq!(
+            gs.party.members[0].experience, 75,
+            "default experience_rate = 1.0 must leave quest XP unchanged"
+        );
     }
 }

@@ -144,6 +144,27 @@ pub enum MerchantDialogueRepairAction {
     RebindMerchantTarget,
 }
 
+/// Trainer dialogue validation state derived from an NPC plus its assigned
+/// dialogue tree.
+///
+/// This state is used by the NPC editor to surface trainer-dialogue health,
+/// drive validation messaging, and choose the appropriate repair action without
+/// destructively modifying unrelated dialogue content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrainerDialogueValidationState {
+    /// The NPC is not a trainer and no trainer-specific issue applies.
+    NotTrainer,
+    /// The trainer has a valid assigned dialogue with an `OpenTraining` path.
+    Valid,
+    /// The trainer has no assigned dialogue tree.
+    Missing,
+    /// The NPC references a dialogue ID that does not exist in the loaded data.
+    AssignedDialogueMissing,
+    /// The assigned dialogue contains SDK-managed trainer content while the NPC
+    /// is not a trainer.
+    StaleTrainerContent,
+}
+
 /// Editor state for NPC editing.
 ///
 /// Merchant dialogue lifecycle work integrates here in later phases because the
@@ -196,6 +217,9 @@ pub struct NpcEditorState {
 
     /// Filter: Show only NPCs with quests
     pub filter_quest_givers: bool,
+
+    /// Filter: Show only trainers
+    pub filter_trainers: bool,
 
     /// Available portrait IDs (cached from directory scan)
     #[serde(skip)]
@@ -307,6 +331,12 @@ pub struct NpcEditBuffer {
     pub sprite_index: String,
     /// ID of the stock template this merchant uses (empty = no template)
     pub stock_template: String,
+    /// Whether this NPC is a trainer offering level-up services.
+    pub is_trainer: bool,
+    /// Per-NPC training fee base (gold per level); empty string = use campaign default.
+    pub training_fee_base: String,
+    /// Per-NPC training fee multiplier; empty string = use campaign default.
+    pub training_fee_multiplier: String,
 }
 
 impl Default for NpcEditorState {
@@ -327,6 +357,7 @@ impl Default for NpcEditorState {
             filter_merchants: false,
             filter_innkeepers: false,
             filter_quest_givers: false,
+            filter_trainers: false,
             available_portraits: Vec::new(),
             portrait_picker_open: false,
             available_sprite_sheets: Vec::new(),
@@ -509,6 +540,13 @@ impl NpcEditorState {
                     self.filter_quest_givers = !self.filter_quest_givers;
                 }
 
+                if ui
+                    .selectable_label(self.filter_trainers, "🎓 Trainers")
+                    .clicked()
+                {
+                    self.filter_trainers = !self.filter_trainers;
+                }
+
                 ui.separator();
 
                 if ui.button("🔄 Clear Filters").clicked() {
@@ -516,6 +554,7 @@ impl NpcEditorState {
                     self.filter_merchants = false;
                     self.filter_innkeepers = false;
                     self.filter_quest_givers = false;
+                    self.filter_trainers = false;
                 }
             });
 
@@ -600,6 +639,16 @@ impl NpcEditorState {
                 (*idx, (status, sdk_managed, validation))
             })
             .collect();
+
+        // Pre-compute trainer validation state for each NPC for the same reason.
+        let trainer_info: std::collections::HashMap<usize, TrainerDialogueValidationState> =
+            sorted_npcs
+                .iter()
+                .map(|(idx, npc)| {
+                    let validation = self.trainer_dialogue_validation_for_definition(npc);
+                    (*idx, validation)
+                })
+                .collect();
 
         TwoColumnLayout::new("npcs").show_split(
             ui,
@@ -695,6 +744,51 @@ impl NpcEditorState {
                                         .with_color(egui::Color32::from_rgb(255, 180, 0))
                                         .with_tooltip(
                                             "This non-merchant NPC still references dialogue with SDK-managed merchant content",
+                                        ),
+                                );
+                            }
+                            let trainer_validation_state = trainer_info
+                                .get(idx)
+                                .copied()
+                                .unwrap_or(TrainerDialogueValidationState::NotTrainer);
+                            if npc.is_trainer {
+                                let (trainer_badge_text, trainer_badge_color, trainer_tooltip) =
+                                    match trainer_validation_state {
+                                        TrainerDialogueValidationState::Valid => (
+                                            "🎓 Trainer",
+                                            egui::Color32::from_rgb(180, 100, 220),
+                                            "This NPC offers level-up training with a valid training dialogue.",
+                                        ),
+                                        TrainerDialogueValidationState::Missing => (
+                                            "🎓 Trainer!",
+                                            egui::Color32::from_rgb(255, 120, 120),
+                                            "This trainer has no dialogue assigned.",
+                                        ),
+                                        TrainerDialogueValidationState::AssignedDialogueMissing => (
+                                            "🎓 Trainer!",
+                                            egui::Color32::from_rgb(255, 120, 120),
+                                            "This trainer references a missing dialogue tree.",
+                                        ),
+                                        TrainerDialogueValidationState::StaleTrainerContent
+                                        | TrainerDialogueValidationState::NotTrainer => (
+                                            "🎓 Trainer",
+                                            egui::Color32::from_rgb(180, 100, 220),
+                                            "This NPC is a trainer.",
+                                        ),
+                                    };
+                                badges.push(
+                                    MetadataBadge::new(trainer_badge_text)
+                                        .with_color(trainer_badge_color)
+                                        .with_tooltip(trainer_tooltip),
+                                );
+                            } else if trainer_validation_state
+                                == TrainerDialogueValidationState::StaleTrainerContent
+                            {
+                                badges.push(
+                                    MetadataBadge::new("Stale Trainer")
+                                        .with_color(egui::Color32::from_rgb(255, 180, 0))
+                                        .with_tooltip(
+                                            "This non-trainer NPC still references dialogue with SDK-managed trainer content.",
                                         ),
                                 );
                             }
@@ -1293,6 +1387,123 @@ impl NpcEditorState {
                         });
                     }
 
+                    ui.add_space(4.0);
+                    ui.separator();
+
+                    let was_trainer = self.edit_buffer.is_trainer;
+                    ui.checkbox(&mut self.edit_buffer.is_trainer, "🎓 Is Trainer");
+
+                    if self.edit_buffer.is_trainer && !was_trainer {
+                        match self.auto_apply_trainer_dialogue_to_edit_buffer() {
+                            Ok(message) => {
+                                self.pending_status = Some(message);
+                                needs_save = true;
+                            }
+                            Err(error) => {
+                                self.validation_errors.push(error.clone());
+                                self.pending_status = Some(error);
+                            }
+                        }
+                    } else if !self.edit_buffer.is_trainer && was_trainer {
+                        match self.remove_trainer_dialogue_from_edit_buffer() {
+                            Ok(message) => {
+                                self.pending_status = Some(message);
+                                needs_save = true;
+                            }
+                            Err(error) => {
+                                self.validation_errors.push(error.clone());
+                                self.pending_status = Some(error);
+                            }
+                        }
+                    }
+
+                    if self.edit_buffer.is_trainer {
+                        let trainer_status = self.trainer_dialogue_status_for_buffer();
+                        let trainer_color = if trainer_status == "Trainer dialogue valid" {
+                            egui::Color32::from_rgb(80, 200, 120)
+                        } else if trainer_status == "No dialogue assigned" {
+                            egui::Color32::from_rgb(220, 120, 120)
+                        } else {
+                            egui::Color32::from_rgb(160, 200, 255)
+                        };
+                        ui.add_space(4.0);
+                        ui.label(
+                            egui::RichText::new(trainer_status)
+                                .color(trainer_color)
+                                .strong(),
+                        );
+
+                        ui.horizontal(|ui| {
+                            ui.label("Training Fee Base (gold per level):");
+                            ui.add(
+                                egui::TextEdit::singleline(
+                                    &mut self.edit_buffer.training_fee_base,
+                                )
+                                .id_salt("npc_edit_training_fee_base"),
+                            );
+                            ui.small("empty = campaign default");
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("Training Fee Multiplier:");
+                            ui.add(
+                                egui::TextEdit::singleline(
+                                    &mut self.edit_buffer.training_fee_multiplier,
+                                )
+                                .id_salt("npc_edit_training_fee_multiplier"),
+                            );
+                            ui.small("empty = campaign default");
+                        });
+
+                        ui.horizontal(|ui| {
+                            if ui.button("Create trainer dialogue").clicked() {
+                                match self.create_or_repair_trainer_dialogue_for_buffer() {
+                                    Ok(message) => {
+                                        self.pending_status = Some(message);
+                                        needs_save = true;
+                                    }
+                                    Err(error) => {
+                                        self.validation_errors.push(error.clone());
+                                        self.pending_status = Some(error);
+                                    }
+                                }
+                            }
+
+                            if ui.button("Repair trainer dialogue").clicked() {
+                                match self.create_or_repair_trainer_dialogue_for_buffer() {
+                                    Ok(message) => {
+                                        self.pending_status = Some(message);
+                                        needs_save = true;
+                                    }
+                                    Err(error) => {
+                                        self.validation_errors.push(error.clone());
+                                        self.pending_status = Some(error);
+                                    }
+                                }
+                            }
+
+                            if ui.button("Remove trainer branch").clicked() {
+                                match self.remove_trainer_dialogue_from_edit_buffer() {
+                                    Ok(message) => {
+                                        self.pending_status = Some(message);
+                                        needs_save = true;
+                                    }
+                                    Err(error) => {
+                                        self.validation_errors.push(error.clone());
+                                        self.pending_status = Some(error);
+                                    }
+                                }
+                            }
+                        });
+
+                        ui.small(
+                            "SDK workflow: enabling trainer creates or auto-applies a training dialogue, \
+                             existing custom dialogue is augmented where possible, and disabling trainer \
+                             removes only SDK-managed trainer content.",
+                        );
+                    }
+
+                    ui.add_space(4.0);
                     ui.checkbox(&mut self.edit_buffer.is_innkeeper, "🛏️ Is Innkeeper");
                 });
 
@@ -1333,6 +1544,26 @@ impl NpcEditorState {
                                 Err(error) => {
                                     self.validation_errors.push(error.clone());
                                     self.pending_status = Some(error);
+                                }
+                            }
+
+                            if self.validation_errors.is_empty() {
+                                let trainer_result = if self.edit_buffer.is_trainer {
+                                    self.auto_apply_trainer_dialogue_to_edit_buffer()
+                                } else {
+                                    self.remove_trainer_dialogue_from_edit_buffer()
+                                };
+
+                                match trainer_result {
+                                    Ok(message) => {
+                                        if !message.is_empty() {
+                                            self.pending_status = Some(message);
+                                        }
+                                    }
+                                    Err(error) => {
+                                        self.validation_errors.push(error.clone());
+                                        self.pending_status = Some(error);
+                                    }
                                 }
                             }
                         }
@@ -1403,6 +1634,11 @@ impl NpcEditorState {
             return false;
         }
 
+        // Trainer filter
+        if self.filter_trainers && !npc.is_trainer {
+            return false;
+        }
+
         true
     }
 
@@ -1442,6 +1678,15 @@ impl NpcEditorState {
                     .as_ref()
                     .map_or(String::new(), |s| s.sprite_index.to_string()),
                 stock_template: npc.stock_template.clone().unwrap_or_default(),
+                is_trainer: npc.is_trainer,
+                training_fee_base: npc
+                    .training_fee_base
+                    .map(|v| v.to_string())
+                    .unwrap_or_default(),
+                training_fee_multiplier: npc
+                    .training_fee_multiplier
+                    .map(|v| v.to_string())
+                    .unwrap_or_default(),
             };
             self.selected_npc = Some(idx);
             self.mode = NpcEditorMode::Edit;
@@ -1699,6 +1944,9 @@ impl NpcEditorState {
             },
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         self.merchant_dialogue_status_for_definition(&npc)
@@ -1744,6 +1992,9 @@ impl NpcEditorState {
             },
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         self.merchant_dialogue_repair_action_for_definition(&npc)
@@ -1821,6 +2072,9 @@ impl NpcEditorState {
             },
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         let update = self
@@ -1985,6 +2239,19 @@ impl NpcEditorState {
             stock_template,
             service_catalog: None::<ServiceCatalog>,
             economy: None::<NpcEconomySettings>,
+            is_trainer: self.edit_buffer.is_trainer,
+            training_fee_base: self
+                .edit_buffer
+                .training_fee_base
+                .trim()
+                .parse::<u32>()
+                .ok(),
+            training_fee_multiplier: self
+                .edit_buffer
+                .training_fee_multiplier
+                .trim()
+                .parse::<f32>()
+                .ok(),
         })
     }
 
@@ -2099,6 +2366,322 @@ impl NpcEditorState {
         ))
     }
 
+    /// Returns the trainer dialogue validation state for an NPC definition.
+    ///
+    /// Used by the list view and edit view to surface trainer-dialogue health
+    /// without destructively modifying any data.
+    fn trainer_dialogue_validation_for_definition(
+        &self,
+        npc: &NpcDefinition,
+    ) -> TrainerDialogueValidationState {
+        let assigned_dialogue = npc.dialogue_id.and_then(|dialogue_id| {
+            self.available_dialogues
+                .iter()
+                .find(|dialogue| dialogue.id == dialogue_id)
+        });
+
+        if !npc.is_trainer {
+            if assigned_dialogue.is_some_and(DialogueTree::has_sdk_managed_trainer_content) {
+                return TrainerDialogueValidationState::StaleTrainerContent;
+            }
+            return TrainerDialogueValidationState::NotTrainer;
+        }
+
+        let Some(dialogue_id) = npc.dialogue_id else {
+            return TrainerDialogueValidationState::Missing;
+        };
+
+        let Some(dialogue) = self
+            .available_dialogues
+            .iter()
+            .find(|dialogue| dialogue.id == dialogue_id)
+        else {
+            return TrainerDialogueValidationState::AssignedDialogueMissing;
+        };
+
+        if dialogue.contains_open_training_for_npc(&npc.id) {
+            TrainerDialogueValidationState::Valid
+        } else {
+            // Has an assigned dialogue but it lacks an OpenTraining action.
+            TrainerDialogueValidationState::Missing
+        }
+    }
+
+    /// Returns a human-readable trainer dialogue status string for the current
+    /// edit buffer, built into a temporary `NpcDefinition` for validation.
+    fn trainer_dialogue_status_for_buffer(&self) -> &'static str {
+        let npc = NpcDefinition {
+            id: self.edit_buffer.id.clone(),
+            name: self.edit_buffer.name.clone(),
+            description: self.edit_buffer.description.clone(),
+            portrait_id: self.edit_buffer.portrait_id.clone(),
+            dialogue_id: if self.edit_buffer.dialogue_id.trim().is_empty() {
+                None
+            } else {
+                self.edit_buffer.dialogue_id.parse::<DialogueId>().ok()
+            },
+            creature_id: if self.edit_buffer.creature_id.is_empty() {
+                None
+            } else {
+                self.edit_buffer.creature_id.parse::<CreatureId>().ok()
+            },
+            sprite: None,
+            quest_ids: self
+                .edit_buffer
+                .quest_ids
+                .iter()
+                .filter_map(|s| s.parse::<QuestId>().ok())
+                .collect(),
+            faction: if self.edit_buffer.faction.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.faction.clone())
+            },
+            is_merchant: self.edit_buffer.is_merchant,
+            is_innkeeper: self.edit_buffer.is_innkeeper,
+            is_priest: false,
+            stock_template: if self.edit_buffer.stock_template.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.stock_template.clone())
+            },
+            service_catalog: None,
+            economy: None,
+            is_trainer: self.edit_buffer.is_trainer,
+            training_fee_base: None,
+            training_fee_multiplier: None,
+        };
+
+        match self.trainer_dialogue_validation_for_definition(&npc) {
+            TrainerDialogueValidationState::NotTrainer => "Not a trainer",
+            TrainerDialogueValidationState::Valid => "Trainer dialogue valid",
+            TrainerDialogueValidationState::Missing => "No dialogue assigned",
+            TrainerDialogueValidationState::AssignedDialogueMissing => {
+                "Assigned trainer dialogue missing"
+            }
+            TrainerDialogueValidationState::StaleTrainerContent => {
+                "Non-trainer has stale trainer content"
+            }
+        }
+    }
+
+    /// Creates or repairs the trainer dialogue for the NPC in the edit buffer.
+    ///
+    /// When `is_trainer` is `false`, returns an actionable guidance message
+    /// instead of a silent no-op.
+    ///
+    /// When a stale `dialogue_id` is present (tree deleted externally), clears
+    /// it first so a fresh tree is created rather than returning an error.
+    fn create_or_repair_trainer_dialogue_for_buffer(&mut self) -> Result<String, String> {
+        if !self.edit_buffer.is_trainer {
+            return Ok(
+                "Enable '🎓 Is Trainer' to create a trainer dialogue for this NPC.".to_string(),
+            );
+        }
+
+        // Clear a stale dialogue_id (tree no longer exists) so that
+        // ensure_trainer_dialogue_for_npc creates a fresh tree instead.
+        if !self.edit_buffer.dialogue_id.trim().is_empty() {
+            if let Ok(stale_id) = self.edit_buffer.dialogue_id.parse::<DialogueId>() {
+                if !self
+                    .merchant_dialogue_editor
+                    .dialogues
+                    .iter()
+                    .any(|d| d.id == stale_id)
+                {
+                    self.edit_buffer.dialogue_id.clear();
+                }
+            }
+        }
+
+        let mut npc = NpcDefinition {
+            id: self.edit_buffer.id.clone(),
+            name: self.edit_buffer.name.clone(),
+            description: self.edit_buffer.description.clone(),
+            portrait_id: self.edit_buffer.portrait_id.clone(),
+            dialogue_id: if self.edit_buffer.dialogue_id.trim().is_empty() {
+                None
+            } else {
+                Some(
+                    self.edit_buffer
+                        .dialogue_id
+                        .parse::<DialogueId>()
+                        .map_err(|_| {
+                            "Dialogue ID must be numeric before trainer repair".to_string()
+                        })?,
+                )
+            },
+            creature_id: if self.edit_buffer.creature_id.is_empty() {
+                None
+            } else {
+                self.edit_buffer.creature_id.parse::<CreatureId>().ok()
+            },
+            sprite: None,
+            quest_ids: self
+                .edit_buffer
+                .quest_ids
+                .iter()
+                .filter_map(|s| s.parse::<QuestId>().ok())
+                .collect(),
+            faction: if self.edit_buffer.faction.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.faction.clone())
+            },
+            is_merchant: self.edit_buffer.is_merchant,
+            is_innkeeper: self.edit_buffer.is_innkeeper,
+            is_priest: false,
+            stock_template: if self.edit_buffer.stock_template.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.stock_template.clone())
+            },
+            service_catalog: None,
+            economy: None,
+            is_trainer: true,
+            training_fee_base: None,
+            training_fee_multiplier: None,
+        };
+
+        use crate::dialogue_editor::MerchantDialogueUpdate;
+        let update = self
+            .merchant_dialogue_editor
+            .ensure_trainer_dialogue_for_npc(&mut npc)?;
+
+        self.available_dialogues = self.merchant_dialogue_editor.dialogues.clone();
+        self.edit_buffer.dialogue_id = npc.dialogue_id.map(|id| id.to_string()).unwrap_or_default();
+        self.has_unsaved_changes = true;
+
+        let message = match update {
+            MerchantDialogueUpdate::Unchanged => String::new(),
+            MerchantDialogueUpdate::AlreadyValid => {
+                format!("Trainer dialogue already valid for '{}'", npc.id)
+            }
+            MerchantDialogueUpdate::CreatedNew { dialogue_id } => {
+                format!("Created trainer dialogue {} for '{}'", dialogue_id, npc.id)
+            }
+            MerchantDialogueUpdate::AugmentedExisting { dialogue_id } => {
+                format!("Repaired trainer dialogue {} for '{}'", dialogue_id, npc.id)
+            }
+            MerchantDialogueUpdate::RemovedMerchantContent { dialogue_id } => format!(
+                "Removed trainer dialogue content from {} for '{}'",
+                dialogue_id, npc.id
+            ),
+            MerchantDialogueUpdate::NoMerchantContentToRemove { dialogue_id } => format!(
+                "No SDK-managed trainer dialogue content to remove from {} for '{}'",
+                dialogue_id, npc.id
+            ),
+        };
+
+        Ok(message)
+    }
+
+    /// Removes SDK-managed trainer content from the edit buffer's assigned dialogue.
+    ///
+    /// Non-destructive: only SDK-managed trainer nodes/choices are removed;
+    /// unrelated authored content is preserved.
+    fn remove_trainer_dialogue_from_edit_buffer(&mut self) -> Result<String, String> {
+        let npc = NpcDefinition {
+            id: self.edit_buffer.id.clone(),
+            name: self.edit_buffer.name.clone(),
+            description: self.edit_buffer.description.clone(),
+            portrait_id: self.edit_buffer.portrait_id.clone(),
+            dialogue_id: if self.edit_buffer.dialogue_id.trim().is_empty() {
+                None
+            } else {
+                self.edit_buffer.dialogue_id.parse::<DialogueId>().ok()
+            },
+            creature_id: if self.edit_buffer.creature_id.is_empty() {
+                None
+            } else {
+                self.edit_buffer.creature_id.parse::<CreatureId>().ok()
+            },
+            sprite: None,
+            quest_ids: self
+                .edit_buffer
+                .quest_ids
+                .iter()
+                .filter_map(|s| s.parse::<QuestId>().ok())
+                .collect(),
+            faction: if self.edit_buffer.faction.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.faction.clone())
+            },
+            is_merchant: self.edit_buffer.is_merchant,
+            is_innkeeper: self.edit_buffer.is_innkeeper,
+            is_priest: false,
+            stock_template: if self.edit_buffer.stock_template.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.stock_template.clone())
+            },
+            service_catalog: None,
+            economy: None,
+            // Intentionally false so remove_trainer_dialogue_for_npc proceeds.
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
+        };
+
+        use crate::dialogue_editor::MerchantDialogueUpdate;
+        let update = self
+            .merchant_dialogue_editor
+            .remove_trainer_dialogue_for_npc(&npc)?;
+
+        self.available_dialogues = self.merchant_dialogue_editor.dialogues.clone();
+        self.has_unsaved_changes = true;
+
+        let message = match update {
+            MerchantDialogueUpdate::Unchanged => {
+                "Trainer cleanup not required for current NPC state".to_string()
+            }
+            MerchantDialogueUpdate::AlreadyValid => {
+                format!("Trainer dialogue already valid for '{}'", npc.id)
+            }
+            MerchantDialogueUpdate::CreatedNew { dialogue_id } => {
+                format!("Created trainer dialogue {} for '{}'", dialogue_id, npc.id)
+            }
+            MerchantDialogueUpdate::AugmentedExisting { dialogue_id } => format!(
+                "Repaired trainer dialogue {} for '{}'",
+                dialogue_id, npc.id
+            ),
+            MerchantDialogueUpdate::RemovedMerchantContent { dialogue_id } => format!(
+                "Removed SDK-managed trainer content from dialogue {} for '{}'; non-trainer dialogue content was preserved",
+                dialogue_id, npc.id
+            ),
+            MerchantDialogueUpdate::NoMerchantContentToRemove { dialogue_id } => format!(
+                "Dialogue {} for '{}' had no SDK-managed trainer content to remove",
+                dialogue_id, npc.id
+            ),
+        };
+
+        Ok(message)
+    }
+
+    /// Auto-applies a trainer dialogue to the edit buffer when the buffer's
+    /// current dialogue state is missing or incomplete.
+    ///
+    /// Called automatically when `is_trainer` is toggled on.
+    fn auto_apply_trainer_dialogue_to_edit_buffer(&mut self) -> Result<String, String> {
+        let status = self.trainer_dialogue_status_for_buffer();
+        if !self.edit_buffer.is_trainer {
+            return Ok(String::new());
+        }
+
+        if matches!(
+            status,
+            "No dialogue assigned" | "Assigned trainer dialogue missing"
+        ) {
+            return self.create_or_repair_trainer_dialogue_for_buffer();
+        }
+
+        Ok(format!(
+            "Trainer dialogue already valid for '{}'",
+            self.edit_buffer.id
+        ))
+    }
+
     fn save_npc(&mut self) -> bool {
         self.validate_edit_buffer();
         if !self.validation_errors.is_empty() {
@@ -2154,6 +2737,19 @@ impl NpcEditorState {
             is_priest: false,
             service_catalog: None,
             economy: None,
+            is_trainer: self.edit_buffer.is_trainer,
+            training_fee_base: self
+                .edit_buffer
+                .training_fee_base
+                .trim()
+                .parse::<u32>()
+                .ok(),
+            training_fee_multiplier: self
+                .edit_buffer
+                .training_fee_multiplier
+                .trim()
+                .parse::<f32>()
+                .ok(),
         };
 
         // Perform the in-memory save and remember the result
@@ -2440,6 +3036,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
 
         state.start_edit_npc(0);
@@ -2966,6 +3565,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         let mut state = NpcEditorState::new();
@@ -3011,6 +3613,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
 
         // Edit it
@@ -3044,6 +3649,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
         assert!(state.matches_filters(&npc));
     }
@@ -3069,6 +3677,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
         assert!(state.matches_filters(&npc));
 
@@ -3088,6 +3699,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
         assert!(!state.matches_filters(&npc2));
     }
@@ -3113,6 +3727,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
         assert!(state.matches_filters(&merchant));
 
@@ -3132,6 +3749,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
         assert!(!state.matches_filters(&non_merchant));
     }
@@ -3159,6 +3779,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
 
         let id2 = state.next_npc_id();
@@ -3207,6 +3830,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
 
         state.start_edit_npc(0);
@@ -3272,6 +3898,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
 
         state.mode = NpcEditorMode::Add;
@@ -3425,6 +4054,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
 
         // Start editing
@@ -3582,6 +4214,9 @@ mod tests {
             stock_template: Some("wizard_shop".to_string()),
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
         state.npcs.push(npc);
 
@@ -3653,6 +4288,9 @@ mod tests {
                 stock_template: None,
                 service_catalog: None,
                 economy: None,
+                is_trainer: false,
+                training_fee_base: None,
+                training_fee_multiplier: None,
             },
             NpcDefinition {
                 id: "npc_b".to_string(),
@@ -3670,6 +4308,9 @@ mod tests {
                 stock_template: None,
                 service_catalog: None,
                 economy: None,
+                is_trainer: false,
+                training_fee_base: None,
+                training_fee_multiplier: None,
             },
         ];
         let ron_str =
@@ -3694,6 +4335,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
         state.selected_npc = Some(0);
         state.mode = NpcEditorMode::Edit;
@@ -3803,6 +4447,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         });
 
         let missing_path = std::path::Path::new("/no/such/dir/npcs.ron");
@@ -4074,6 +4721,484 @@ mod tests {
         assert!(
             !state.available_dialogues.is_empty(),
             "a new dialogue tree must have been added to available_dialogues"
+        );
+    }
+
+    // ── Phase 7 Trainer Tests ─────────────────────────────────────────────────
+
+    /// Verifies that enabling `is_trainer` on an NPC that has no pre-assigned
+    /// dialogue automatically creates a standard trainer dialogue template and
+    /// assigns its ID to the edit buffer.
+    #[test]
+    fn test_is_trainer_toggle_auto_applies_training_dialogue() {
+        let mut state = NpcEditorState::new();
+        state.available_dialogues = Vec::new();
+        state
+            .merchant_dialogue_editor
+            .load_dialogues(state.available_dialogues.clone());
+
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "master_swordsman".to_string();
+        state.edit_buffer.name = "Master Swordsman".to_string();
+        state.edit_buffer.portrait_id = "swordsman".to_string();
+        state.edit_buffer.is_trainer = true;
+        // No dialogue_id assigned — simulates toggling "Is Trainer" on.
+
+        let result = state.auto_apply_trainer_dialogue_to_edit_buffer();
+        assert!(result.is_ok(), "auto-apply should succeed: {:?}", result);
+
+        // A dialogue must now be present.
+        assert_eq!(
+            state.available_dialogues.len(),
+            1,
+            "exactly one trainer dialogue should be created"
+        );
+
+        let generated = &state.available_dialogues[0];
+
+        // The generated dialogue must contain an OpenTraining action for this NPC.
+        assert!(
+            generated.contains_open_training_for_npc("master_swordsman"),
+            "generated dialogue must contain OpenTraining for the NPC"
+        );
+
+        // The generated dialogue must carry SDK-managed trainer metadata.
+        assert!(
+            generated.has_sdk_managed_trainer_content(),
+            "generated dialogue must be marked as SDK-managed trainer content"
+        );
+
+        // The edit buffer dialogue_id must reference the new dialogue.
+        let generated_id_str = generated.id.to_string();
+        assert_eq!(
+            state.edit_buffer.dialogue_id, generated_id_str,
+            "buffer.dialogue_id must be set to the newly created trainer dialogue id"
+        );
+    }
+
+    /// Verifies that `create_or_repair_trainer_dialogue_for_buffer` returns a
+    /// non-empty guidance message when `is_trainer == false`, instead of a
+    /// silent empty-string no-op.
+    #[test]
+    fn test_create_trainer_dialogue_returns_guidance_when_not_trainer() {
+        let mut state = NpcEditorState::new();
+        state.edit_buffer.id = "innkeeper_01".to_string();
+        state.edit_buffer.name = "Village Innkeeper".to_string();
+        state.edit_buffer.is_trainer = false;
+        state.edit_buffer.is_innkeeper = true;
+
+        let result = state.create_or_repair_trainer_dialogue_for_buffer();
+
+        assert!(result.is_ok(), "must return Ok even for non-trainers");
+        let message = result.unwrap();
+        assert!(
+            !message.is_empty(),
+            "must return a non-empty guidance message when is_trainer = false; \
+             got empty string (silent no-op)"
+        );
+        assert!(
+            message.to_lowercase().contains("trainer"),
+            "guidance message must mention 'trainer', got: {:?}",
+            message
+        );
+    }
+
+    /// Verifies that `create_or_repair_trainer_dialogue_for_buffer` generates a
+    /// dialogue tree that contains an `OpenTraining` action when `is_trainer == true`.
+    #[test]
+    fn test_create_trainer_dialogue_generates_open_training_action() {
+        let mut state = NpcEditorState::new();
+        state.available_dialogues = Vec::new();
+        state
+            .merchant_dialogue_editor
+            .load_dialogues(state.available_dialogues.clone());
+
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "trainer_arya".to_string();
+        state.edit_buffer.name = "Arya".to_string();
+        state.edit_buffer.portrait_id = "arya".to_string();
+        state.edit_buffer.is_trainer = true;
+
+        let result = state.create_or_repair_trainer_dialogue_for_buffer();
+        assert!(result.is_ok(), "create should succeed: {:?}", result);
+
+        let message = result.unwrap();
+        assert!(
+            message.contains("Created trainer dialogue"),
+            "expected 'Created trainer dialogue' status, got: {message}"
+        );
+
+        assert_eq!(
+            state.available_dialogues.len(),
+            1,
+            "exactly one dialogue should exist after creation"
+        );
+
+        let generated = &state.available_dialogues[0];
+
+        // Must contain OpenTraining for the correct NPC.
+        assert!(
+            generated.contains_open_training_for_npc("trainer_arya"),
+            "generated dialogue must contain OpenTraining for 'trainer_arya'"
+        );
+
+        // Root node must have at least two choices (seek training + goodbye).
+        let root = generated
+            .get_node(generated.root_node)
+            .expect("root node must exist");
+        assert!(
+            root.choices.len() >= 2,
+            "root node must have at least two choices (seek training + goodbye), got: {}",
+            root.choices.len()
+        );
+
+        // The buffer dialogue_id must now be set.
+        let generated_id_str = generated.id.to_string();
+        assert_eq!(
+            state.edit_buffer.dialogue_id, generated_id_str,
+            "buffer.dialogue_id must be set to the newly created trainer dialogue id"
+        );
+    }
+
+    /// Verifies that `build_npc_from_edit_buffer` round-trips `is_trainer` and
+    /// the training fee fields correctly.
+    #[test]
+    fn test_build_npc_from_edit_buffer_roundtrips_trainer_fields() {
+        let mut state = NpcEditorState::new();
+        state.edit_buffer.id = "fee_trainer".to_string();
+        state.edit_buffer.name = "Fee Trainer".to_string();
+        state.edit_buffer.portrait_id = "fee_trainer".to_string();
+        state.edit_buffer.is_trainer = true;
+        state.edit_buffer.training_fee_base = "300".to_string();
+        state.edit_buffer.training_fee_multiplier = "1.5".to_string();
+
+        let npc = state
+            .build_npc_from_edit_buffer(false)
+            .expect("build should succeed");
+
+        assert!(npc.is_trainer, "is_trainer must be true");
+        assert_eq!(
+            npc.training_fee_base,
+            Some(300),
+            "training_fee_base must be 300"
+        );
+        assert!(
+            (npc.training_fee_multiplier.unwrap() - 1.5_f32).abs() < f32::EPSILON,
+            "training_fee_multiplier must be 1.5"
+        );
+    }
+
+    /// Verifies that empty `training_fee_base` and `training_fee_multiplier`
+    /// strings produce `None` in the built NpcDefinition (meaning "use campaign
+    /// defaults").
+    #[test]
+    fn test_build_npc_from_edit_buffer_empty_fee_fields_yield_none() {
+        let mut state = NpcEditorState::new();
+        state.edit_buffer.id = "default_trainer".to_string();
+        state.edit_buffer.name = "Default Trainer".to_string();
+        state.edit_buffer.portrait_id = "default_trainer".to_string();
+        state.edit_buffer.is_trainer = true;
+        state.edit_buffer.training_fee_base = String::new();
+        state.edit_buffer.training_fee_multiplier = String::new();
+
+        let npc = state
+            .build_npc_from_edit_buffer(false)
+            .expect("build should succeed");
+
+        assert!(npc.is_trainer, "is_trainer must be true");
+        assert_eq!(
+            npc.training_fee_base, None,
+            "empty training_fee_base must yield None"
+        );
+        assert_eq!(
+            npc.training_fee_multiplier, None,
+            "empty training_fee_multiplier must yield None"
+        );
+    }
+
+    /// Verifies that `filter_trainers` hides NPCs whose `is_trainer` flag is
+    /// `false` and shows those whose flag is `true`.
+    #[test]
+    fn test_filter_trainers_hides_non_trainer_npcs() {
+        let trainer = NpcDefinition {
+            id: "trainer_npc".to_string(),
+            name: "Trainer NPC".to_string(),
+            description: String::new(),
+            portrait_id: String::new(),
+            dialogue_id: None,
+            creature_id: None,
+            sprite: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+            is_priest: false,
+            is_trainer: true,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
+            training_fee_base: None,
+            training_fee_multiplier: None,
+        };
+        let regular = NpcDefinition {
+            id: "regular_npc".to_string(),
+            name: "Regular NPC".to_string(),
+            description: String::new(),
+            portrait_id: String::new(),
+            dialogue_id: None,
+            creature_id: None,
+            sprite: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+            is_priest: false,
+            is_trainer: false,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
+            training_fee_base: None,
+            training_fee_multiplier: None,
+        };
+
+        let mut state = NpcEditorState::new();
+        state.npcs = vec![trainer.clone(), regular.clone()];
+
+        // Without filter: both should pass.
+        assert!(
+            state.matches_filters(&trainer),
+            "trainer must pass when filter_trainers is false"
+        );
+        assert!(
+            state.matches_filters(&regular),
+            "regular NPC must pass when filter_trainers is false"
+        );
+
+        // With filter: only the trainer should pass.
+        state.filter_trainers = true;
+        assert!(
+            state.matches_filters(&trainer),
+            "trainer must pass when filter_trainers is true"
+        );
+        assert!(
+            !state.matches_filters(&regular),
+            "non-trainer NPC must be hidden when filter_trainers is true"
+        );
+    }
+
+    /// Verifies that `save_npc` in Add mode correctly persists `is_trainer` and
+    /// the training fee fields to the stored NpcDefinition.
+    #[test]
+    fn test_save_npc_persists_trainer_fields() {
+        let mut state = NpcEditorState::new();
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "saved_trainer".to_string();
+        state.edit_buffer.name = "Saved Trainer".to_string();
+        state.edit_buffer.portrait_id = "saved_trainer".to_string();
+        state.edit_buffer.is_trainer = true;
+        state.edit_buffer.training_fee_base = "500".to_string();
+        state.edit_buffer.training_fee_multiplier = "2.0".to_string();
+
+        let saved = state.save_npc();
+        assert!(saved, "save_npc must succeed");
+        assert_eq!(state.npcs.len(), 1);
+
+        let npc = &state.npcs[0];
+        assert!(npc.is_trainer, "saved NPC must have is_trainer = true");
+        assert_eq!(npc.training_fee_base, Some(500));
+        assert!(
+            (npc.training_fee_multiplier.unwrap() - 2.0_f32).abs() < f32::EPSILON,
+            "training_fee_multiplier must be 2.0"
+        );
+    }
+
+    /// Verifies that `start_edit_npc` correctly populates trainer fields in the
+    /// edit buffer when loading an existing trainer NPC.
+    #[test]
+    fn test_start_edit_npc_populates_trainer_fields() {
+        let npc = NpcDefinition {
+            id: "trainer_populator".to_string(),
+            name: "Trainer Populator".to_string(),
+            description: String::new(),
+            portrait_id: "tp".to_string(),
+            dialogue_id: None,
+            creature_id: None,
+            sprite: None,
+            quest_ids: Vec::new(),
+            faction: None,
+            is_merchant: false,
+            is_innkeeper: false,
+            is_priest: false,
+            is_trainer: true,
+            stock_template: None,
+            service_catalog: None,
+            economy: None,
+            training_fee_base: Some(250),
+            training_fee_multiplier: Some(1.25),
+        };
+
+        let mut state = NpcEditorState::new();
+        state.npcs.push(npc);
+        state.start_edit_npc(0);
+
+        assert!(
+            state.edit_buffer.is_trainer,
+            "edit buffer is_trainer must be true"
+        );
+        assert_eq!(
+            state.edit_buffer.training_fee_base, "250",
+            "training_fee_base must be '250'"
+        );
+        assert_eq!(
+            state.edit_buffer.training_fee_multiplier, "1.25",
+            "training_fee_multiplier must be '1.25'"
+        );
+    }
+
+    /// Verifies that removing trainer content from a trainer template dialogue
+    /// leaves the dialogue asset intact in the available_dialogues collection
+    /// (mirrors the merchant equivalent test).
+    #[test]
+    fn test_remove_trainer_dialogue_from_generated_template_leaves_dialogue_intact() {
+        let mut state = NpcEditorState::new();
+        let dialogue = DialogueTree::standard_trainer_template(50, "trainer_zeus", "Zeus");
+        state.available_dialogues = vec![dialogue];
+        state
+            .merchant_dialogue_editor
+            .load_dialogues(state.available_dialogues.clone());
+
+        state.edit_buffer.id = "trainer_zeus".to_string();
+        state.edit_buffer.name = "Zeus".to_string();
+        state.edit_buffer.portrait_id = "zeus".to_string();
+        state.edit_buffer.dialogue_id = "50".to_string();
+        state.edit_buffer.is_trainer = false; // no longer a trainer
+
+        let message = state
+            .remove_trainer_dialogue_from_edit_buffer()
+            .expect("remove must succeed");
+        assert!(
+            !message.is_empty(),
+            "remove must return a non-empty status message"
+        );
+
+        // The dialogue asset itself must still be present.
+        assert_eq!(
+            state.available_dialogues.len(),
+            1,
+            "dialogue asset must remain after trainer content removal"
+        );
+
+        // The dialogue must no longer contain OpenTraining for this NPC.
+        assert!(
+            !state.available_dialogues[0].contains_open_training_for_npc("trainer_zeus"),
+            "OpenTraining action must have been removed"
+        );
+    }
+
+    /// Verifies that two different trainer NPCs receive distinct dialogue IDs.
+    #[test]
+    fn test_create_trainer_dialogue_id_is_unique() {
+        let mut state = NpcEditorState::new();
+        state.available_dialogues = Vec::new();
+        state
+            .merchant_dialogue_editor
+            .load_dialogues(state.available_dialogues.clone());
+
+        // First trainer NPC
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "trainer_alpha".to_string();
+        state.edit_buffer.name = "Alpha Trainer".to_string();
+        state.edit_buffer.portrait_id = "alpha".to_string();
+        state.edit_buffer.is_trainer = true;
+        state.edit_buffer.dialogue_id = String::new();
+
+        let first_result = state.create_or_repair_trainer_dialogue_for_buffer();
+        assert!(first_result.is_ok(), "first create must succeed");
+        let first_id = state.edit_buffer.dialogue_id.clone();
+        assert!(!first_id.is_empty(), "first dialogue_id must be set");
+
+        // Second trainer NPC
+        state.edit_buffer.id = "trainer_beta".to_string();
+        state.edit_buffer.name = "Beta Trainer".to_string();
+        state.edit_buffer.portrait_id = "beta".to_string();
+        state.edit_buffer.is_trainer = true;
+        state.edit_buffer.dialogue_id = String::new();
+
+        let second_result = state.create_or_repair_trainer_dialogue_for_buffer();
+        assert!(second_result.is_ok(), "second create must succeed");
+        let second_id = state.edit_buffer.dialogue_id.clone();
+        assert!(!second_id.is_empty(), "second dialogue_id must be set");
+
+        assert_ne!(
+            first_id, second_id,
+            "two trainers must receive distinct dialogue ids"
+        );
+        assert_eq!(
+            state.available_dialogues.len(),
+            2,
+            "two dialogues must exist"
+        );
+
+        let first_parsed: u16 = first_id.parse().expect("first id must be numeric");
+        let second_parsed: u16 = second_id.parse().expect("second id must be numeric");
+
+        assert!(
+            state
+                .available_dialogues
+                .iter()
+                .find(|d| d.id == first_parsed)
+                .expect("first dialogue must exist")
+                .contains_open_training_for_npc("trainer_alpha"),
+            "first dialogue must open correct trainer"
+        );
+        assert!(
+            state
+                .available_dialogues
+                .iter()
+                .find(|d| d.id == second_parsed)
+                .expect("second dialogue must exist")
+                .contains_open_training_for_npc("trainer_beta"),
+            "second dialogue must open correct trainer"
+        );
+    }
+
+    /// Verifies that `is_merchant` and `is_trainer` are fully independent — an
+    /// NPC may be both, and merchant/trainer dialogue operations do not interfere.
+    #[test]
+    fn test_merchant_and_trainer_are_independent() {
+        let mut state = NpcEditorState::new();
+        state.available_dialogues = Vec::new();
+        state
+            .merchant_dialogue_editor
+            .load_dialogues(state.available_dialogues.clone());
+
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "dual_role_npc".to_string();
+        state.edit_buffer.name = "Dual Role NPC".to_string();
+        state.edit_buffer.portrait_id = "dual".to_string();
+        state.edit_buffer.is_merchant = true;
+        state.edit_buffer.is_trainer = true;
+
+        // Create merchant dialogue first.
+        let merchant_result = state.create_or_repair_merchant_dialogue_for_buffer();
+        assert!(merchant_result.is_ok(), "merchant create must succeed");
+        let merchant_dialogue_id = state.edit_buffer.dialogue_id.clone();
+
+        // Now create trainer dialogue (should create a separate tree).
+        state.edit_buffer.dialogue_id = String::new();
+        let trainer_result = state.create_or_repair_trainer_dialogue_for_buffer();
+        assert!(trainer_result.is_ok(), "trainer create must succeed");
+        let trainer_dialogue_id = state.edit_buffer.dialogue_id.clone();
+
+        // Each operation must produce a distinct dialogue.
+        assert_ne!(
+            merchant_dialogue_id, trainer_dialogue_id,
+            "merchant and trainer dialogues must be distinct"
+        );
+        assert_eq!(
+            state.available_dialogues.len(),
+            2,
+            "two separate dialogues must exist (one merchant, one trainer)"
         );
     }
 }

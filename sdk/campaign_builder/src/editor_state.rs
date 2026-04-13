@@ -57,6 +57,9 @@ pub struct CampaignData {
 
     /// Creature definitions loaded from `data/creatures.ron`.
     pub creatures: Vec<antares::domain::visual::CreatureDefinition>,
+
+    /// Level thresholds loaded from `data/levels.ron`.
+    pub levels: Vec<antares::domain::ClassLevelThresholds>,
 }
 
 // ─── EditorRegistry ──────────────────────────────────────────────────────────
@@ -112,6 +115,9 @@ pub struct EditorRegistry {
     /// Classes editor state.
     pub classes_editor_state: classes_editor::ClassesEditorState,
 
+    /// Levels editor state.
+    pub levels_editor_state: levels_editor::LevelsEditorState,
+
     /// Races editor state.
     pub races_editor_state: races_editor::RacesEditorState,
 
@@ -152,6 +158,7 @@ impl Default for EditorRegistry {
             npc_editor_state: npc_editor::NpcEditorState::default(),
             stock_templates_editor_state: StockTemplatesEditorState::default(),
             classes_editor_state: classes_editor::ClassesEditorState::default(),
+            levels_editor_state: levels_editor::LevelsEditorState::new(),
             races_editor_state: races_editor::RacesEditorState::default(),
             characters_editor_state: characters_editor::CharactersEditorState::default(),
             _quests_search_filter: String::new(),
