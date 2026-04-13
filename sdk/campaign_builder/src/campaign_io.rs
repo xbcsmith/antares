@@ -609,6 +609,107 @@ impl CampaignBuilderApp {
         results
     }
 
+    /// Validate the campaign's level threshold database (`levels.ron`).
+    ///
+    /// This checks that each class-level entry references a defined class,
+    /// that thresholds start at 0, and that threshold values are strictly
+    /// increasing.
+    pub fn validate_level_thresholds(&self) -> Vec<validation::ValidationResult> {
+        let mut results = Vec::new();
+        let class_ids: std::collections::HashSet<&str> = self
+            .editor_registry
+            .classes_editor_state
+            .classes
+            .iter()
+            .map(|class| class.id.as_str())
+            .collect();
+
+        let mut seen_class_ids = std::collections::HashSet::new();
+
+        for thresholds in &self.campaign_data.levels {
+            if thresholds.class_id.trim().is_empty() {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::DifficultyProgression,
+                    "A levels entry has an empty class_id",
+                ));
+                continue;
+            }
+
+            if !seen_class_ids.insert(thresholds.class_id.clone()) {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::DifficultyProgression,
+                    format!("Duplicate levels entry for class '{}'", thresholds.class_id),
+                ));
+            }
+
+            if !class_ids.contains(thresholds.class_id.as_str()) {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::DifficultyProgression,
+                    format!(
+                        "Levels entry references unknown class '{}'",
+                        thresholds.class_id
+                    ),
+                ));
+            }
+
+            if thresholds.thresholds.is_empty() {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::DifficultyProgression,
+                    format!(
+                        "Levels entry for class '{}' has no thresholds defined",
+                        thresholds.class_id
+                    ),
+                ));
+                continue;
+            }
+
+            if thresholds.thresholds[0] != 0 {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::DifficultyProgression,
+                    format!(
+                        "Levels entry for class '{}' must start with 0",
+                        thresholds.class_id
+                    ),
+                ));
+            }
+
+            for window in thresholds.thresholds.windows(2) {
+                if window[1] <= window[0] {
+                    results.push(validation::ValidationResult::error(
+                        validation::ValidationCategory::DifficultyProgression,
+                        format!(
+                            "Levels thresholds for class '{}' must be strictly increasing",
+                            thresholds.class_id
+                        ),
+                    ));
+                    break;
+                }
+            }
+        }
+
+        if let Some(dir) = &self.campaign_dir {
+            let path = dir.join(&self.campaign.levels_file);
+            if path.exists() && !self.editor_registry.levels_editor_state.loaded_from_file {
+                results.push(validation::ValidationResult::warning(
+                    validation::ValidationCategory::DifficultyProgression,
+                    format!(
+                        "Levels file '{}' exists but failed to load",
+                        self.campaign.levels_file
+                    ),
+                ));
+            }
+        }
+
+        if results.is_empty() {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::DifficultyProgression,
+                "Level thresholds are valid",
+            ));
+        }
+
+        results
+    }
+
     /// Validate character IDs for uniqueness and references
     ///
     /// Returns validation errors for:
@@ -1967,6 +2068,9 @@ impl CampaignBuilderApp {
             .extend(self.validate_stock_template_refs());
         self.validation_state
             .validation_errors
+            .extend(self.validate_level_thresholds());
+        self.validation_state
+            .validation_errors
             .extend(self.validate_proficiency_ids());
 
         // Spell cross-reference validation (Phase 6)
@@ -2287,6 +2391,9 @@ impl CampaignBuilderApp {
                 allow_multiclassing: self.campaign.allow_multiclassing,
                 starting_level: self.campaign.starting_level,
                 max_level: self.campaign.max_level,
+                level_up_mode: self.campaign.level_up_mode.clone(),
+                base_xp: self.campaign.base_xp,
+                xp_multiplier: self.campaign.xp_multiplier,
                 starting_time: self.campaign.starting_time,
             };
 
@@ -3208,5 +3315,45 @@ impl CampaignBuilderApp {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_level_thresholds_reports_invalid_entries() {
+        let mut app = CampaignBuilderApp::default();
+        app.editor_registry.classes_editor_state.classes =
+            vec![antares::domain::classes::ClassDefinition::new(
+                "knight".to_string(),
+                "Knight".to_string(),
+            )];
+        app.campaign_data.levels = vec![
+            antares::domain::levels::ClassLevelThresholds {
+                class_id: "sorcerer".to_string(),
+                thresholds: vec![0, 800, 700],
+            },
+            antares::domain::levels::ClassLevelThresholds {
+                class_id: "knight".to_string(),
+                thresholds: vec![100, 200],
+            },
+        ];
+
+        let results = app.validate_level_thresholds();
+
+        assert!(results.iter().any(|result| {
+            result.category == validation::ValidationCategory::DifficultyProgression
+                && result.message.contains("unknown class")
+        }));
+        assert!(results.iter().any(|result| {
+            result.category == validation::ValidationCategory::DifficultyProgression
+                && result.message.contains("must start with 0")
+        }));
+        assert!(results.iter().any(|result| {
+            result.category == validation::ValidationCategory::DifficultyProgression
+                && result.message.contains("strictly increasing")
+        }));
     }
 }

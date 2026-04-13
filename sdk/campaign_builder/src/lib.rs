@@ -77,6 +77,7 @@ pub mod undo_redo;
 pub mod validation;
 pub mod variation_editor;
 
+use antares::domain::campaign::LevelUpMode;
 use antares::sdk::tool_config::ToolConfig;
 use logging::{category, LogLevel, Logger};
 
@@ -265,6 +266,20 @@ pub fn run() -> Result<(), eframe::Error> {
                                     );
                                 }
 
+                                // Load campaign auxiliary files that are required for validation
+                                // and editor state even when the user has not visited those tabs yet.
+                                app.editor_registry
+                                    .stock_templates_editor_state
+                                    .reset_for_new_campaign();
+                                app.campaign_data.stock_templates.clear();
+                                app.load_stock_templates();
+
+                                app.editor_registry
+                                    .levels_editor_state
+                                    .reset_for_new_campaign();
+                                app.campaign_data.levels.clear();
+                                app.load_levels();
+
                                 app.sync_obj_importer_campaign_state();
 
                                 // Initialize AssetManager if we have a campaign directory
@@ -403,6 +418,12 @@ pub struct CampaignMetadata {
     pub allow_multiclassing: bool,
     pub starting_level: u8,
     pub max_level: u8,
+    #[serde(default = "default_level_up_mode")]
+    pub level_up_mode: LevelUpMode,
+    #[serde(default = "default_base_xp")]
+    pub base_xp: u64,
+    #[serde(default = "default_xp_multiplier")]
+    pub xp_multiplier: f64,
 
     // Data file paths
     pub items_file: String,
@@ -499,6 +520,18 @@ fn default_levels_file() -> String {
     "data/levels.ron".to_string()
 }
 
+fn default_level_up_mode() -> LevelUpMode {
+    LevelUpMode::Auto
+}
+
+fn default_base_xp() -> u64 {
+    1000
+}
+
+fn default_xp_multiplier() -> f64 {
+    1.5
+}
+
 /// Default starting time: Day 1, 08:00 — campaign begins in the morning.
 pub fn default_starting_time() -> GameTime {
     GameTime::new(1, 8, 0)
@@ -527,6 +560,9 @@ impl Default for CampaignMetadata {
             allow_multiclassing: false,
             starting_level: 1,
             max_level: 20,
+            level_up_mode: LevelUpMode::Auto,
+            base_xp: 1000,
+            xp_multiplier: 1.5,
 
             items_file: "data/items.ron".to_string(),
             spells_file: "data/spells.ron".to_string(),

@@ -224,7 +224,7 @@ Custom Leveling Metrics - A new file `levels.ron` should define how many XP is r
 
 Training Level up should support two methods defined in the config.ron for the campaign Auto and NPC.
 
-Auto Level Up - Auto will just level the character up automatically when they hit the threshhold for their Class as defined in classes.ron.
+Auto Level Up - Auto will just level the character up automatically when they hit the threshhold for their Class as defined in levels.ron
 
 NPC Level Up - NPC Mode will the Might & Magic-style trainer NPC flow where the player must physically visit a training ground in town and pay a gold fee. Aquire XP, Find NPC, Speak with NPC, Trigger Trainign through Dialog, Pay NPC required amount of money to train. The Dialog System should work like the Merchant Dialog with an option "Level Up?" or something similar. The engine gets `is_trainer` flag on NPCs, training fee, and `GameMode::Training` state. The SDK NPC Editor will implement a `is_trainer` flag and a `create_training_dialog` button just like the create_merchant_dialog.
 
@@ -244,10 +244,77 @@ All the doors are facing the wrong way
 
 Show/Hide Tray ICON SDK is not working
 
-Fixed - Game log is not part of a Game Save. Loading a save game from the main menu on restart does not restore the game log. The game log should be saved and loaded with the rest of the game state.
+✅ FIXED - Game log is not part of a Game Save. Loading a save game from the main menu on restart does not restore the game log. The game log should be saved and loaded with the rest of the game state.
 
-Fixed - Players can't pickup dropped items. There is a dropped sword in Map 1 and the game logs when I walk over it but the item does not get added to my inventory. The player should be able to pickup a dropped item from an adjacent tile by pressing the E key or clicking on it with the mouse. The item should then be added to the player's inventory and removed from the ground.
+✅ FIXED - Players can't pickup dropped items. There is a dropped sword in Map 1 and the game logs when I walk over it but the item does not get added to my inventory. The player should be able to pickup a dropped item from an adjacent tile by pressing the E key or clicking on it with the mouse. The item should then be added to the player's inventory and removed from the ground.
+
+✅ FIXED - Create Merchant Dialog does not work when a new stock template is created in a session. I added innkeeper stock template and attached it to the Inn Keeper Village in map 1. And the create merchant dialog did nothing.
 
 Conditions should have a duration of until the next rest, until the end of combat, or until a certain number of turns have passed. This would allow for more strategic use of conditions and would also allow for conditions that are meant to last for a certain amount of time rather than being permanent until removed. The SDK should be updated to support setting the duration of conditions as well as the game engine. The game engine should then handle the expiration of conditions based on their duration.
 
-Fixed - Create Merchant Dialog does not work when a new stock template is created in a session. I added innkeeper stock template and attached it to the Inn Keeper Village in map 1. And the create merchant dialog did nothing.
+### Campaign Validation
+
+Campaign Builder --> Validation is still broken. It looks like the SDK is not loading the stock_templates until I go to the stock templates and EDIT and SAVE one template then they all load and Validation passes.
+
+On SDK start I get these failed validations
+
+🧙 NPCs- ❌ NPC 'tutorial_elder_village' references unknown stock template 'village_elder_stock'
+🧙 NPCs- ❌ NPC 'tutorial_elder_village2' references unknown stock template 'village_elder_stock'
+🧙 NPCs- ❌ NPC 'tutorial_innkeeper_town' references unknown stock template 'inn_keeper_stock_template'
+🧙 NPCs- ❌ NPC 'tutorial_innkeeper_town2' references unknown stock template 'inn_keeper_stock_template'
+🧙 NPCs- ❌ NPC 'tutorial_merchant_town' references unknown stock template 'town_merchant_basic'
+🧙 NPCs- ❌ NPC 'tutorial_merchant_town2' references unknown stock template 'mountain_pass_merchant'
+🧙 NPCs- ❌ NPC 'tutorial_priest_town2' references unknown stock template 'holy_temple_menu'
+🧙 NPCs- ❌ NPC 'tutorial_priestess_town' references unknown stock template 'holy_temple_menu'
+
+The `levels.ron` fils is not validated as part of the validation tasks.
+
+Validation should also check for things like if a NPC is set to be a trainer but does not have a training dialog, if a NPC is set to be a merchant but does not have a merchant dialog, if a character has starting spells that are not defined in the spells.ron file, if a character has a class that is not defined in the classes.ron file, if a map has an event that is not defined in the events.ron file, etc.
+
+✅ FIXED -
+
+### Dialogue Editor
+
+✅ FIXED - Campaign Builder --> Dialogue Editor -->Dialog Flow Preview is truncated and does not scale vertically or horizontally with the window. It is a fixed area. It should scale with the window. It should show all the nodes in the Preview.
+
+### Levels Issues
+
+✅ FIXED - Campaign Builder --> Metadata --> Edit Metadata --> Leveling System the Leveling System field does not exist It should be a dropdown with the options Auto and NPC. And it should have fields for `BASE_XP` and `XP_MULTIPLIER` that are set in the `campaign.ron` and the formula can be handled automatically like it is in `src/domain/progression.ron`
+
+✅ FIXED - Campaign Builder --> Level Editor --> Display Column displays the levels horizontally and run out of the default window. The headers do not line up with the data. They should be represented in a table per class in the Display. The table should look like the levels table from the Editor window with the Level, XP, and Delta columns. The headers should line up with the data.
+
+✅ FIXED - Campaign Builder --> Level Editor --> Add Class Editor the class id is not cleared when making a new class and the autocomplete display is not long enough causing the characters to wrap.
+
+### Duplicate Initializer Blocks
+
+Why are the initializer blocks repeated in so many files directly in the repository save_game.rs, mod.rs, campaign_loader.rs, antares.rs, campaign_integration_test.rs, validation.rs? This should be consolidated into a single function that can be called from all these places to reduce code duplication and ensure consistency across the codebase. The initializer block should be moved to a common utility module in the SDK or game engine that can be imported and used wherever needed. This will make it easier to maintain and update the initializer logic in one place rather than having to update it in multiple files. It will also reduce the chances of bugs or inconsistencies arising from having multiple copies of the same code.
+
+Files updated
+mod.rs
+
+Added level_up_mode, base_xp, xp_multiplier to SDK campaign config test initializers.
+Imported LevelUpMode in the affected test.
+campaign_packager.rs
+
+Added level_up_mode, base_xp, xp_multiplier to both inline CampaignConfig test initializers.
+validation.rs
+
+Added level_up_mode, base_xp, xp_multiplier to all inline CampaignConfig test initializers.
+save_game.rs
+
+Added LevelUpMode import for the test using the new config fields.
+campaign_integration_test.rs
+
+Added the new leveling fields to the helper CampaignConfig initializer.
+antares.rs
+
+Added the new leveling fields and fixed the LevelUpMode reference in the binary test campaign initializer.
+campaign_loader.rs
+
+Added level_up_mode, base_xp, xp_multiplier to the CampaignConfig default test initializer.
+Added the same fields to the CampaignMetadata test initializer.
+
+
+### SKill System Level Scaling
+
+Next task will be to tackle skill system level scaling. Currently the skill system does not scale with character level. We should

@@ -1281,46 +1281,69 @@ fn show_levels_preview(ui: &mut egui::Ui, entry: &ClassLevelThresholds) {
         return;
     }
 
-    ui.add_space(4.0);
-    let preview_count = entry.thresholds.len().min(10);
-    ui.label(egui::RichText::new(format!("First {} level(s):", preview_count)).strong());
+    ui.label(
+        egui::RichText::new(
+            "thresholds[0] = Level 1 (always 0). Each value is the total cumulative XP required.",
+        )
+        .weak()
+        .small(),
+    );
 
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new(format!("Showing {} levels:", entry.thresholds.len())).strong());
+
+    let scroll_height = ui.available_height().max(240.0);
     egui::ScrollArea::vertical()
-        .id_salt("levels_preview_scroll")
-        .max_height(260.0)
+        .id_salt(format!("levels_preview_scroll_{}", entry.class_id))
+        .auto_shrink([false, false])
+        .max_height(scroll_height)
         .show(ui, |ui| {
-            egui::Grid::new("levels_preview_grid")
+            egui::Grid::new(format!("levels_preview_grid_{}", entry.class_id))
                 .num_columns(3)
                 .striped(true)
                 .min_col_width(60.0)
+                .spacing([16.0, 4.0])
                 .show(ui, |ui| {
+                    // Header row
                     ui.label(egui::RichText::new("Level").strong());
                     ui.label(egui::RichText::new("XP Required").strong());
                     ui.label(egui::RichText::new("Delta").strong());
                     ui.end_row();
 
-                    for i in 0..preview_count {
-                        ui.push_id(i, |ui| {
-                            let xp = entry.thresholds[i];
-                            let delta = if i == 0 {
-                                0u64
-                            } else {
-                                xp.saturating_sub(entry.thresholds[i - 1])
-                            };
-                            ui.label(format!("{}", i + 1));
-                            ui.label(format!("{}", xp));
-                            ui.label(format!("{}", delta));
-                            ui.end_row();
-                        });
-                    }
+                    for i in 0..entry.thresholds.len() {
+                        let xp = entry.thresholds[i];
+                        let delta = if i == 0 {
+                            0u64
+                        } else {
+                            xp.saturating_sub(entry.thresholds[i - 1])
+                        };
 
-                    if entry.thresholds.len() > 10 {
-                        ui.label(
-                            egui::RichText::new(format!("… {} more", entry.thresholds.len() - 10))
-                                .weak(),
-                        );
-                        ui.label("");
-                        ui.label("");
+                        // Level column (col 0)
+                        ui.label(format!("{}", i + 1));
+
+                        // XP Required column (col 1) — styled frame to match
+                        // the edit view's DragValue appearance. push_id gives
+                        // the Frame a unique widget ID within the loop (Rule 1).
+                        // end_row() MUST be called outside push_id so it fires
+                        // on the grid's Ui, not the child scope.
+                        ui.push_id(i, |ui| {
+                            egui::Frame::new()
+                                .fill(ui.visuals().extreme_bg_color)
+                                .inner_margin(egui::Margin::symmetric(4, 2))
+                                .rounding(egui::CornerRadius::same(2))
+                                .show(ui, |ui| {
+                                    ui.label(format!("{}", xp));
+                                });
+                        });
+
+                        // Delta column (col 2)
+                        ui.label(format!("{}", delta));
+
+                        // Advance to the next row at the grid level.
+                        // Placing end_row() here (outside push_id) is critical:
+                        // calling it inside push_id's closure would target the
+                        // child Ui scope rather than the grid, causing every row
+                        // to overflow horizontally onto a single line.
                         ui.end_row();
                     }
                 });

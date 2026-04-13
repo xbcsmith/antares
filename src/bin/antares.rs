@@ -342,6 +342,7 @@ mod tests {
 
     /// Helper to create a test campaign with custom graphics config
     fn create_test_campaign(graphics: GraphicsConfig) -> Campaign {
+        use antares::domain::campaign::LevelUpMode;
         use antares::domain::types::Position;
         use antares::sdk::campaign_loader::{CampaignAssets, CampaignConfig, CampaignData};
         use std::path::PathBuf;
@@ -368,6 +369,9 @@ mod tests {
                 allow_multiclassing: false,
                 starting_level: 1,
                 max_level: 20,
+                level_up_mode: LevelUpMode::Auto,
+                base_xp: 1000,
+                xp_multiplier: 1.5,
                 starting_time: antares::domain::types::GameTime::new(1, 8, 0),
             },
             data: CampaignData {

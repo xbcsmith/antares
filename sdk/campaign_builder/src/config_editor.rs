@@ -25,7 +25,10 @@
 
 use crate::ui_helpers::{EditorToolbar, ToolbarAction};
 use antares::game::resources::grass_quality_settings::GrassPerformanceLevel;
-use antares::sdk::game_config::{CameraMode, GameConfig, LevelingConfig, ShadowQuality};
+use antares::sdk::game_config::{CameraMode, GameConfig, ShadowQuality};
+
+#[cfg(test)]
+use antares::sdk::game_config::LevelingConfig;
 use eframe::egui;
 use std::path::PathBuf;
 

@@ -86,6 +86,11 @@ cargo clippy --all-targets --all-features -D warnings → Finished (0 warnings)
 cargo nextest run --all-features                     → 4609 passed, 0 failed, 8 skipped
 ```
 
+## SDK Dialogue Editor — Preview Panel Resizing Fix
+
+- Updated `sdk/campaign_builder/src/dialogue_editor.rs` so the dialogue flow preview no longer uses a fixed 300px height.
+- The preview now adapts vertically to the window and renders every dialogue node rather than truncating after the first five.
+
 ---
 
 ## Level-Up Plan — Phase 9: Character Sheet Screen (Complete)
@@ -485,6 +490,68 @@ cargo nextest run       → 4557 passed, 8 skipped (workspace)
 
 ---
 
+## Levels Editor — Display Column Layout Fix (Complete)
+
+### Overview
+
+Fixed a layout bug in `show_levels_preview` inside
+`sdk/campaign_builder/src/levels_editor.rs` where all 200 level rows were
+rendered on a single horizontal line instead of a proper vertical table.
+
+### Root Cause
+
+The `ui.end_row()` call was placed **inside** a `push_id` closure that wrapped
+all three cells of each row:
+
+```rust
+// BROKEN — end_row() fires on the child Ui, not the grid's Ui
+ui.push_id(i, |ui| {
+    ui.label(format!("{}", i + 1));
+    ui.label(format!("{}", xp));
+    ui.label(format!("{}", delta));
+    ui.end_row();   // ← child scope; grid never advances its row pointer
+});
+```
+
+In egui's `Grid`, `end_row()` must be called on the grid's own `Ui`. Calling it
+on a child `Ui` created by `push_id` is silently ignored for row-advancement
+purposes, so every cell for all 200 levels accumulated on row 0, producing a
+single very wide horizontal line. Headers appeared to "not line up" because the
+header row ended correctly while every data row did not.
+
+### What Changed
+
+**`sdk/campaign_builder/src/levels_editor.rs` — `show_levels_preview`**
+
+- Removed `push_id` wrapping from all three cells + `end_row` of each row.
+- Added `push_id` around **only** the XP Required cell (col 1), which wraps an
+  `egui::Frame` styled with `extreme_bg_color` fill, `Margin::symmetric(4, 2)`
+  inner padding, and `CornerRadius::same(2)` rounding — matching the
+  `DragValue` box appearance from the edit view.
+- Moved `end_row()` **outside** the `push_id` closure, so it fires on the
+  grid's `Ui` and correctly advances to the next row.
+- Added the subtitle description label:
+  `"thresholds[0] = Level 1 (always 0). Each value is the total cumulative XP required."`
+- Changed `min_col_width` from `70.0` → `60.0` and added `.spacing([16.0, 4.0])`
+  so columns are easier to read without wrapping.
+
+### Pattern Reference
+
+This now matches the working pattern used in `show_edit_view`'s threshold table
+(lines ~1060–1105), where `push_id` wraps only the single `DragValue` cell and
+`end_row()` is always called at the grid level.
+
+### Quality Gates
+
+```
+cargo fmt         → clean
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run (campaign_builder) → 2332 passed, 0 failed
+```
+
+---
+
 ## Level-Up Plan — Phase 6: SDK Levels Editor Tab (Complete)
 
 ### Overview
@@ -547,8 +614,8 @@ xp_multiplier) -> bool` — main entry point with auto-load-on-first-show
   scrollable 200-row threshold table with `DragValue` + live Delta column;
   `FillFormula`, `FillFlat…`, `FillStep…` buttons; floating `egui::Window`
   modals for Flat / Step fill dialogs; `horizontal_wrapped` Save/Cancel row.
-- Preview panel: read-only first-10-levels grid shown in the right column
-  of the list view when an entry is selected.
+- Preview panel: read-only levels table shown in the right column of the list
+  view, with a proper Level / XP / Delta grid and auto-shrinking scroll area.
 
 **Tests (21 tests):**
 
@@ -2102,7 +2169,39 @@ sentinel before extending the error list).
 
 ---
 
-### 5.4 — New Tests
+### 5.4 — Startup Auto-Load Fix
+
+**File:** `sdk/campaign_builder/src/lib.rs`
+
+The SDK auto-load path for `--campaign` was not calling the same auxiliary
+load routines as the normal open-campaign flow. As a result, `npc_stock_templates.ron`
+and `levels.ron` were not loaded until the user opened their respective tabs.
+This caused false validation failures on startup.
+
+- `stock_templates_editor_state` and `levels_editor_state` are reset before
+  startup load
+- `load_stock_templates()` is now called on app launch when a campaign is
+  auto-loaded
+- `load_levels()` is now called as well so `levels.ron` is available for
+  validation and editor state
+
+---
+
+### 5.5 — Levels Validation Added
+
+**File:** `sdk/campaign_builder/src/campaign_io.rs`
+
+Added `validate_level_thresholds()` to validate `levels.ron` contents:
+
+- unknown class references
+- duplicate class entries
+- empty threshold lists
+- thresholds that do not start at 0
+- thresholds that are not strictly increasing
+
+---
+
+### 5.6 — New Tests
 
 **File:** `sdk/campaign_builder/src/validation.rs` — `mod tests`
 

@@ -39,6 +39,9 @@ fn create_test_campaign(id: &str, name: &str, version: &str) -> Campaign {
             allow_multiclassing: false,
             starting_level: 1,
             max_level: 20,
+            level_up_mode: antares::domain::campaign::LevelUpMode::Auto,
+            base_xp: 1000,
+            xp_multiplier: 1.5,
             starting_time: antares::domain::types::GameTime::new(1, 8, 0),
         },
         data: CampaignData {

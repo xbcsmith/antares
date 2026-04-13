@@ -1893,12 +1893,12 @@ impl DialogueEditorState {
                             right_ui.add_space(5.0);
 
                             egui::ScrollArea::vertical()
-                                .max_height(300.0)
                                 .id_salt("dialogue_preview_scroll")
+                                .auto_shrink([true, false])
                                 .show(right_ui, |ui| {
                                     let mut preview_nodes: Vec<_> = dialogue.nodes.iter().collect();
                                     preview_nodes.sort_by_key(|(node_id, _)| *node_id);
-                                    for (node_id, node) in preview_nodes.iter().take(5) {
+                                    for (node_id, node) in preview_nodes.iter() {
                                         ui.group(|ui| {
                                             ui.label(
                                                 egui::RichText::new(format!("Node: {}", node_id))
@@ -1948,16 +1948,6 @@ impl DialogueEditorState {
                                             }
                                         });
                                         ui.add_space(4.0);
-                                    }
-
-                                    if dialogue.nodes.len() > 5 {
-                                        ui.label(
-                                            egui::RichText::new(format!(
-                                                "... and {} more nodes",
-                                                dialogue.nodes.len() - 5
-                                            ))
-                                            .weak(),
-                                        );
                                     }
                                 });
                         } else if !dialogue.nodes.is_empty() {
