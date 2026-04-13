@@ -317,4 +317,4 @@ Added the same fields to the CampaignMetadata test initializer.
 
 ### SKill System Level Scaling
 
-Next task will be to tackle skill system level scaling. Currently the skill system does not scale with character level. We should
+Next task will be to tackle skill system level scaling. Currently the skill system does not scale with character level. We should just do an Auto Skills system to start then follow the route training went with NPC Train Skills.

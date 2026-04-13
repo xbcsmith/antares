@@ -1,5 +1,122 @@
 # Implementations
 
+## Combat Fixes — Phase 1: Defense System — Complete Implementation (Complete)
+
+### Overview
+
+The Defend action was half-implemented: `perform_defend_action` applied a
+permanent +2 AC bonus that was never reset, there was no per-combatant
+defending flag to track who was defending, and `resolve_attack` had no
+damage-reduction path for defenders. `ActiveSpells` defence buffs
+(`shield`, `power_shield`, `leather_skin`) were stored on `GameState` but
+never consulted during damage resolution. This phase completes the Defense
+system end-to-end.
+
+### What Changed
+
+#### `src/domain/combat/engine.rs`
+
+- **`use std::collections::HashSet`** — added to imports.
+- **`CombatState::defending_combatants: HashSet<usize>`** — new field
+  (with `#[serde(default)]` for save-file backward compatibility). The
+  `usize` key is the participant index (players only; monsters cannot defend).
+- **`CombatState::new`** — initialises `defending_combatants: HashSet::new()`.
+- **`advance_round`** — after DoT/HoT effects are applied, drains
+  `defending_combatants` and reverses the +2 AC bonus for each defending
+  player (`pc.ac.current = pc.ac.current.saturating_sub(2).max(pc.ac.base)`).
+  This bounds the bonus to exactly one round.
+- **`DefenseReduction` enum (private)** — `Immune` (power_shield) or
+  `Multiplier(f32)` with values 0.25–1.0.
+- **`compute_defense_reduction` (private helper)** — priority table:
+
+  | Condition                         | Result                                                 |
+  | --------------------------------- | ------------------------------------------------------ |
+  | `power_shield` active             | `Immune` (0 damage)                                    |
+  | Defending **and** `shield` active | `Multiplier(0.35)` — 65 % reduction                    |
+  | Defending only                    | `Multiplier(0.5 − endurance_bonus)`, floored at `0.25` |
+  | `shield` active (not defending)   | `Multiplier(0.80)` — 20 % reduction                    |
+  | `leather_skin` active             | `Multiplier(0.90)` — 10 % reduction                    |
+  | None                              | `Multiplier(1.0)` — no reduction                       |
+
+  Endurance modifier: each full 10 points of `endurance.current` above 10
+  subtracts 0.02 from the 0.5 base, floored at 0.25.
+
+- **`resolve_attack`** — after computing `raw_damage`, calls
+  `compute_defense_reduction`. `Immune` short-circuits with `Ok((0, None))`.
+  Any multiplier < 1.0 is applied via `((raw_damage as f32 * m).ceil() as
+i32).max(1)` (shadow-binding). The modified `raw_damage` is then passed
+  through the existing elemental resistance path unchanged.
+- **New domain tests (7)** added to `mod tests`:
+  - `test_defend_bonus_resets_after_round_end`
+  - `test_defend_reduces_incoming_damage`
+  - `test_power_shield_grants_immunity`
+  - `test_shield_reduces_damage_without_defending`
+  - `test_defend_and_shield_combo_reduces_damage_65_percent`
+  - `test_leather_skin_reduces_damage_10_percent`
+  - `test_defend_endurance_bonus_improves_reduction`
+  - `test_defend_endurance_bonus_capped_at_0_25_minimum_multiplier`
+
+#### `src/game/systems/combat.rs`
+
+- **`CombatFeedbackEffect::Defend`** — new unit variant added to the enum.
+- **`perform_defend_action`** — two changes:
+  1. Guard: AC bonus and flag insertion only happen when
+     `defending_combatants.contains(&idx)` is `false` (prevents stacking).
+  2. Monster branch: returns `Err(CombatError::CombatantNotFound)` instead of
+     applying AC to the monster (monsters cannot defend).
+- **`handle_defend_action`** — added
+  `mut feedback_writer: Option<MessageWriter<CombatFeedbackEvent>>` parameter.
+  On `Ok(())`, emits `CombatFeedbackEffect::Defend` via `emit_combat_feedback`
+  so the combat log records the action.
+- **`format_combat_log_line`** — added `CombatFeedbackEffect::Defend` arm in
+  both the with-source branch (`"{name} takes a defensive stance."`) and the
+  no-source fallback (`"{name} takes a defensive stance."`).
+- **`spawn_combat_feedback`** — added `CombatFeedbackEffect::Defend` arm that
+  shows `"Defend"` in `FEEDBACK_COLOR_STATUS` at `font_size = 15.0`.
+- **`test_defend_action_improves_ac`** (updated) — now uses two combatants
+  (player + monster) so `advance_turn` after Defend moves to turn 1 rather
+  than immediately wrapping the round. Added assertion that
+  `defending_combatants.contains(&0)` after the action.
+- **New system-level tests (2)** added to `mod tests`:
+  - `test_defend_bonus_does_not_stack`
+  - `test_monster_defend_action_returns_error`
+
+### Deliverables Checklist
+
+- [x] `defending_combatants: HashSet<usize>` added to `CombatState`
+- [x] `perform_defend_action` inserts into `defending_combatants` (guarded)
+- [x] `advance_round` clears `defending_combatants` and removes +2 AC bonus
+- [x] `compute_defense_reduction` helper implemented and used in `resolve_attack`
+- [x] `power_shield`, `shield`, `leather_skin` from `ActiveSpells` consulted
+- [x] `CombatFeedbackEffect::Defend` variant + log line added
+- [x] `spawn_combat_feedback` handles `Defend` variant
+- [x] All call sites of `resolve_attack` already passed `Option<&ActiveSpells>`
+      (no signature change required — it was already correct)
+- [x] New and updated unit tests passing (4673/4673, 8 skipped)
+- [x] `cargo fmt`, `cargo check`, `cargo clippy -D warnings` all clean
+
+### Success Criteria Verification
+
+| Criterion                                           | Status                                        |
+| --------------------------------------------------- | --------------------------------------------- |
+| Defend +2 AC bonus lasts exactly one round          | ✅ `advance_round` drains the set             |
+| Defending reduces damage ~50 % (endurance-adjusted) | ✅ `test_defend_reduces_incoming_damage`      |
+| `power_shield` grants full immunity                 | ✅ `test_power_shield_grants_immunity`        |
+| Combat log shows defensive stance message           | ✅ `CombatFeedbackEffect::Defend` arm         |
+| Choosing Defend twice does not stack AC             | ✅ `test_defend_bonus_does_not_stack`         |
+| Monster Defend returns error                        | ✅ `test_monster_defend_action_returns_error` |
+
+### Quality Gates
+
+```
+cargo fmt --all          → clean (no output)
+cargo check --all-targets --all-features → Finished 0 errors 0 warnings
+cargo clippy --all-targets --all-features -- -D warnings → Finished 0 warnings
+cargo nextest run --all-features → 4673 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Condition Duration: UntilCombatEnd and UntilRest (Complete)
 
 ### Overview

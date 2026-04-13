@@ -687,6 +687,8 @@ pub enum CombatFeedbackEffect {
         /// HP restored.
         amount: u32,
     },
+    /// The combatant chose to defend this round, taking a defensive stance.
+    Defend,
 }
 
 /// Message emitted whenever a combat action produces a visible result.
@@ -4393,21 +4395,24 @@ pub fn perform_defend_action(
         return Ok(());
     }
 
-    // Apply AC bonus to the combatant
+    // Apply AC bonus to the combatant — players only; monsters do not defend.
     match action.combatant {
         CombatantId::Player(idx) => {
             if let Some(Combatant::Player(pc)) = combat_res.state.participants.get_mut(idx) {
-                pc.ac.modify(2);
+                // Guard against stacking: only apply the bonus the first time
+                // per round.  `advance_round` drains the set and reverses the
+                // bonus, so a second Defend in the same round is a no-op here.
+                if !combat_res.state.defending_combatants.contains(&idx) {
+                    pc.ac.modify(2);
+                    combat_res.state.defending_combatants.insert(idx);
+                }
             } else {
                 return Err(CombatError::CombatantNotFound(action.combatant));
             }
         }
-        CombatantId::Monster(idx) => {
-            if let Some(Combatant::Monster(mon)) = combat_res.state.participants.get_mut(idx) {
-                mon.ac.modify(2);
-            } else {
-                return Err(CombatError::CombatantNotFound(action.combatant));
-            }
+        CombatantId::Monster(_) => {
+            // Monsters cannot choose to Defend in the current design.
+            return Err(CombatError::CombatantNotFound(action.combatant));
         }
     }
 
@@ -4447,20 +4452,32 @@ fn handle_defend_action(
     content: Option<Res<GameContent>>,
     mut global_state: ResMut<GlobalState>,
     mut turn_state: ResMut<CombatTurnStateResource>,
+    mut feedback_writer: Option<MessageWriter<CombatFeedbackEvent>>,
 ) {
     let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
 
     for action in reader.read() {
         let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
 
-        if let Err(e) = perform_defend_action(
+        match perform_defend_action(
             &mut combat_res,
             action,
             content_ref,
             &mut global_state,
             &mut turn_state,
         ) {
-            tracing::warn!("Defend action failed: {}", e);
+            Ok(()) => {
+                // Emit defensive-stance feedback so the combat log shows the action.
+                emit_combat_feedback(
+                    Some(action.combatant),
+                    action.combatant,
+                    CombatFeedbackEffect::Defend,
+                    &mut feedback_writer,
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Defend action failed: {}", e);
+            }
         }
     }
 }
@@ -5799,6 +5816,20 @@ fn format_combat_log_line(
                     ],
                 };
             }
+            CombatFeedbackEffect::Defend => {
+                return CombatLogLine {
+                    segments: vec![
+                        CombatLogSegment {
+                            text: source_name,
+                            color: source_color,
+                        },
+                        CombatLogSegment {
+                            text: " takes a defensive stance.".to_string(),
+                            color: FEEDBACK_COLOR_STATUS,
+                        },
+                    ],
+                };
+            }
         }
     }
 
@@ -5887,6 +5918,18 @@ fn format_combat_log_line(
                 CombatLogSegment {
                     text: format!(": heals {} for [{}] HP", target_name, amount),
                     color: Color::WHITE,
+                },
+            ],
+        },
+        CombatFeedbackEffect::Defend => CombatLogLine {
+            segments: vec![
+                CombatLogSegment {
+                    text: target_name,
+                    color: target_color,
+                },
+                CombatLogSegment {
+                    text: " takes a defensive stance.".to_string(),
+                    color: FEEDBACK_COLOR_STATUS,
                 },
             ],
         },
@@ -6323,6 +6366,7 @@ fn spawn_combat_feedback(
             CombatFeedbackEffect::SpellHeal { name, amount } => {
                 (format!("{}! +{}", name, amount), FEEDBACK_COLOR_HEAL)
             }
+            CombatFeedbackEffect::Defend => ("Defend".to_string(), FEEDBACK_COLOR_STATUS),
         };
 
         let font_size = match &event.effect {
@@ -6335,6 +6379,7 @@ fn spawn_combat_feedback(
                 }
             }
             CombatFeedbackEffect::SpellHeal { .. } => 18.0,
+            CombatFeedbackEffect::Defend => 15.0,
             _ => 15.0,
         };
 
@@ -8572,11 +8617,15 @@ mod tests {
 
     #[test]
     fn test_defend_action_improves_ac() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CombatPlugin);
+        // Use two combatants so that advance_turn after the Defend action moves to
+        // turn index 1 (the monster) rather than immediately wrapping around to
+        // round 2.  A round-wrap would trigger advance_round, which drains
+        // defending_combatants and reverses the +2 AC bonus before the assertions
+        // below have a chance to check it.
+        let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+        let mut gs_local = crate::game::resources::GlobalState(GameState::new());
+        let mut turn_state_local = CombatTurnStateResource::default();
 
-        let mut gs = GameState::new();
         let mut hero = Character::new(
             "Defender".to_string(),
             "human".to_string(),
@@ -8585,50 +8634,193 @@ mod tests {
             Alignment::Good,
         );
         hero.ac = crate::domain::character::AttributePair::new(10);
-        gs.party.add_member(hero.clone()).unwrap();
+
+        let monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(10, 10, 10, 10, 5, 10, 5),
+            10,
+            5,
+            vec![Attack::physical(DiceRoll::new(1, 4, 0))],
+            crate::domain::combat::monster::LootTable::default(),
+        );
 
         let mut cs = CombatState::new(Handicap::Even);
         cs.add_player(hero.clone());
-        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.add_monster(monster);
+        // Player goes first; the round will NOT end after a single advance_turn.
+        cs.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
         cs.current_turn = 0;
 
-        gs.enter_combat_with_state(cs.clone());
-        app.insert_resource(crate::game::resources::GlobalState(gs));
+        let mut cr = CombatResource::new();
+        cr.state = cs;
+        cr.player_orig_indices = vec![Some(0), None];
 
-        // Initialize CombatResource
-        {
-            let mut combat_res = app.world_mut().resource_mut::<CombatResource>();
-            combat_res.state = cs;
-            combat_res.player_orig_indices = vec![Some(0)];
+        let action = DefendAction {
+            combatant: CombatantId::Player(0),
+        };
+
+        perform_defend_action(
+            &mut cr,
+            &action,
+            &content,
+            &mut gs_local,
+            &mut turn_state_local,
+        )
+        .expect("defend failed");
+
+        // After defending, current_turn should advance to 1 (monster) — not wrap.
+        assert_eq!(
+            cr.state.current_turn, 1,
+            "current_turn must advance to the monster's turn, not wrap the round"
+        );
+
+        if let Some(Combatant::Player(pc)) = cr.state.participants.first() {
+            assert!(
+                pc.ac.current >= pc.ac.base + 2,
+                "AC must increase by 2 after defending (bonus active mid-round)"
+            );
+        } else {
+            panic!("player missing");
         }
+        assert!(
+            cr.state.defending_combatants.contains(&0),
+            "defending_combatants must contain the player index after Defend action"
+        );
+    }
 
-        // Perform defend by sending a DefendAction message and letting systems handle it
-        // Perform defend by calling helper directly with a single borrow to CombatResource
-        {
-            let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
-            let mut cr = app.world_mut().resource_mut::<CombatResource>();
-            let mut gs_local = crate::game::resources::GlobalState(GameState::new());
-            let mut turn_state_local = CombatTurnStateResource::default();
+    /// Calling `perform_defend_action` twice in the same round must not stack
+    /// the +2 AC bonus.  The second call is a no-op because the player index is
+    /// already in `defending_combatants`.
+    #[test]
+    fn test_defend_bonus_does_not_stack() {
+        let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+        let mut gs_local = crate::game::resources::GlobalState(GameState::new());
+        let mut turn_state_local = CombatTurnStateResource::default();
 
-            let action = DefendAction {
-                combatant: CombatantId::Player(0),
-            };
+        let mut hero = Character::new(
+            "Defender".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.ac = crate::domain::character::AttributePair::new(10);
 
-            perform_defend_action(
-                &mut cr,
-                &action,
-                &content,
-                &mut gs_local,
-                &mut turn_state_local,
-            )
-            .expect("defend failed");
+        // Add a second participant so a single advance_turn does NOT immediately
+        // trigger advance_round (round end would clear the flag between the two calls).
+        let monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(10, 10, 10, 10, 5, 10, 5),
+            10,
+            5,
+            vec![Attack::physical(DiceRoll::new(1, 4, 0))],
+            crate::domain::combat::monster::LootTable::default(),
+        );
 
-            if let Some(Combatant::Player(pc)) = cr.state.participants.first() {
-                assert!(pc.ac.current >= pc.ac.base + 2);
-            } else {
-                panic!("player missing");
-            }
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.add_monster(monster);
+        cs.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
+        cs.current_turn = 0;
+
+        let mut cr = CombatResource::new();
+        cr.state = cs;
+
+        let action = DefendAction {
+            combatant: CombatantId::Player(0),
+        };
+
+        // First defend — should apply +2 and set the flag.
+        perform_defend_action(
+            &mut cr,
+            &action,
+            &content,
+            &mut gs_local,
+            &mut turn_state_local,
+        )
+        .expect("first defend failed");
+
+        // The turn was advanced; reset current_turn so the second call is also
+        // treated as the player's turn (same round, different simulated trigger).
+        cr.state.current_turn = 0;
+
+        let ac_after_first = if let Some(Combatant::Player(pc)) = cr.state.participants.first() {
+            pc.ac.current
+        } else {
+            panic!("player missing");
+        };
+        assert_eq!(
+            ac_after_first, 12,
+            "AC should be base(10)+2 after first defend"
+        );
+
+        // Second defend — must be a no-op because the flag is already set.
+        perform_defend_action(
+            &mut cr,
+            &action,
+            &content,
+            &mut gs_local,
+            &mut turn_state_local,
+        )
+        .expect("second defend failed");
+
+        if let Some(Combatant::Player(pc)) = cr.state.participants.first() {
+            assert_eq!(
+                pc.ac.current, 12,
+                "AC must NOT increase beyond base+2 on a second Defend in the same round"
+            );
+        } else {
+            panic!("player missing after second defend");
         }
+    }
+
+    /// Dispatching `DefendAction` with a `CombatantId::Monster` must return
+    /// `Err(CombatError::CombatantNotFound)` because monsters cannot defend.
+    #[test]
+    fn test_monster_defend_action_returns_error() {
+        use crate::domain::combat::engine::CombatError;
+
+        let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+        let mut gs_local = crate::game::resources::GlobalState(GameState::new());
+        let mut turn_state_local = CombatTurnStateResource::default();
+
+        let monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(10, 10, 10, 10, 5, 10, 5),
+            10,
+            5,
+            vec![Attack::physical(DiceRoll::new(1, 4, 0))],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_monster(monster);
+        cs.turn_order = vec![CombatantId::Monster(0)];
+        cs.current_turn = 0;
+
+        let mut cr = CombatResource::new();
+        cr.state = cs;
+
+        let action = DefendAction {
+            combatant: CombatantId::Monster(0),
+        };
+
+        let result = perform_defend_action(
+            &mut cr,
+            &action,
+            &content,
+            &mut gs_local,
+            &mut turn_state_local,
+        );
+
+        assert!(
+            matches!(result, Err(CombatError::CombatantNotFound(_))),
+            "Defend action for a monster must return CombatError::CombatantNotFound, got {:?}",
+            result
+        );
     }
 
     #[test]

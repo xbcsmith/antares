@@ -19,6 +19,7 @@ use crate::domain::combat::types::{
 use crate::domain::items::{ItemDatabase, ItemType, WeaponClassification};
 use crate::domain::magic::types::Spell;
 use crate::domain::types::DiceRoll;
+use std::collections::HashSet;
 // Condition types referenced by fully-qualified paths where needed
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -229,6 +230,14 @@ pub struct CombatState {
     /// Copied from `CampaignConfig::unconscious_before_death` at combat start.
     #[serde(default = "default_true")]
     pub unconscious_before_death: bool,
+
+    /// Set of participant indices that are currently defending this round.
+    ///
+    /// Only player combatants (indices into `participants`) are eligible.
+    /// Inserted by `perform_defend_action` and drained at the start of each
+    /// new round by `advance_round`, which also reverses the +2 AC bonus.
+    #[serde(default)]
+    pub defending_combatants: HashSet<usize>,
 }
 
 /// Serde helper: returns `true` as the default value for fields that should
@@ -265,6 +274,7 @@ impl CombatState {
             monsters_regenerate: false,
             ambush_round_active: false,
             unconscious_before_death: true,
+            defending_combatants: HashSet::new(),
         }
     }
 
@@ -382,6 +392,17 @@ impl CombatState {
 
         // Apply DoT/HoT effects
         effects.extend(self.apply_dot_effects(condition_defs));
+
+        // Clear defending flags and reverse the +2 AC bonus that was applied
+        // when each player chose Defend this round.  The bonus is bounded to
+        // a single round: it is applied in `perform_defend_action` and removed
+        // here at the start of the next round.
+        for idx in self.defending_combatants.drain() {
+            if let Some(Combatant::Player(pc)) = self.participants.get_mut(idx) {
+                // Reverse the +2 bonus; never let ac.current fall below ac.base.
+                pc.ac.current = pc.ac.current.saturating_sub(2).max(pc.ac.base);
+            }
+        }
 
         effects
     }
@@ -603,6 +624,74 @@ pub fn calculate_turn_order(combat: &CombatState) -> Vec<CombatantId> {
     order.into_iter().map(|(id, _)| id).collect()
 }
 
+// ===== Defense Reduction =====
+
+/// Outcome of `compute_defense_reduction` — either the target is fully immune
+/// (only possible with `power_shield` active) or a damage multiplier applies.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum DefenseReduction {
+    /// Target takes zero damage this hit (power_shield).
+    Immune,
+    /// Apply this multiplier to raw damage before elemental resistance.
+    ///
+    /// A value of `1.0` means no reduction.  Values below `1.0` reduce damage;
+    /// `0.25` is the minimum non-immune multiplier.
+    Multiplier(f32),
+}
+
+/// Computes the damage-reduction multiplier for a defending target.
+///
+/// Priority order (highest to lowest):
+///
+/// | Condition                          | Multiplier / Result                     |
+/// |------------------------------------|------------------------------------------|
+/// | `power_shield` active              | `Immune` (0 damage)                      |
+/// | Defending **and** `shield` active  | `0.35` (65 % reduction)                 |
+/// | Defending only                     | `0.5` − endurance bonus, min `0.25`     |
+/// | `shield` active (not defending)    | `0.80` (20 % reduction)                 |
+/// | `leather_skin` active              | `0.90` (10 % reduction)                 |
+/// | None of the above                  | `1.0` (no reduction)                    |
+///
+/// The endurance modifier: each full 10 points of `endurance` **above 10**
+/// subtracts an additional `0.02` from the `0.5` base, floored at `0.25`.
+fn compute_defense_reduction(
+    is_defending: bool,
+    active_spells: Option<&ActiveSpells>,
+    endurance: u8,
+) -> DefenseReduction {
+    let power_shield_active = active_spells.is_some_and(|s| s.power_shield > 0);
+    let shield_active = active_spells.is_some_and(|s| s.shield > 0);
+    let leather_skin_active = active_spells.is_some_and(|s| s.leather_skin > 0);
+
+    if power_shield_active {
+        return DefenseReduction::Immune;
+    }
+
+    if is_defending && shield_active {
+        return DefenseReduction::Multiplier(0.35);
+    }
+
+    if is_defending {
+        // Base 50 % reduction, improved by endurance above 10.
+        // Each full 10 points above 10 adds an extra −0.02, capped at 0.25 min.
+        let above_ten = endurance.saturating_sub(10) as u32;
+        let steps = above_ten / 10;
+        let endurance_bonus = steps as f32 * 0.02;
+        let multiplier = (0.5_f32 - endurance_bonus).max(0.25_f32);
+        return DefenseReduction::Multiplier(multiplier);
+    }
+
+    if shield_active {
+        return DefenseReduction::Multiplier(0.80);
+    }
+
+    if leather_skin_active {
+        return DefenseReduction::Multiplier(0.90);
+    }
+
+    DefenseReduction::Multiplier(1.0)
+}
+
 /// Resolves an attack from attacker to target
 ///
 /// Returns the damage dealt and whether a special effect was applied.
@@ -697,6 +786,28 @@ pub fn resolve_attack<R: Rng>(
     };
 
     let raw_damage = (base_damage + damage_bonus).max(1);
+
+    // ── Defense reduction ─────────────────────────────────────────────────────
+    // Check whether the target is a defending player and whether active spell
+    // buffs (power_shield, shield, leather_skin) provide additional mitigation.
+    // The multiplier is applied to raw_damage before elemental resistance so
+    // that both systems stack independently.
+    let is_defending = match target_id {
+        CombatantId::Player(idx) => combat.defending_combatants.contains(&idx),
+        CombatantId::Monster(_) => false,
+    };
+    let target_endurance = match target {
+        Combatant::Player(c) => c.stats.endurance.current,
+        Combatant::Monster(_) => 10u8, // monsters never defend; endurance is irrelevant
+    };
+    let raw_damage = match compute_defense_reduction(is_defending, active_spells, target_endurance)
+    {
+        DefenseReduction::Immune => return Ok((0, None)),
+        DefenseReduction::Multiplier(m) if m < 1.0 => {
+            ((raw_damage as f32 * m).ceil() as i32).max(1)
+        }
+        DefenseReduction::Multiplier(_) => raw_damage,
+    };
 
     // Project active spell protection bonuses into effective resistance for the
     // target (players only — monsters do not carry ActiveSpells).  Resistance
@@ -3325,6 +3436,352 @@ mod tests {
                 .iter()
                 .any(|c| c.condition_id == "combat_bless"),
             "UntilCombatEnd condition must be tracked in monster active_conditions"
+        );
+    }
+
+    // ===== Defense System Tests =====
+
+    /// Defending player's AC bonus resets to base after the round ends.
+    ///
+    /// The defend action applies +2 AC for the duration of the round only.
+    /// `advance_round` (triggered by `advance_turn` when all turns are exhausted)
+    /// must drain `defending_combatants` and subtract the bonus.
+    #[test]
+    fn test_defend_bonus_resets_after_round_end() {
+        use crate::domain::character::{Alignment, AttributePair, Character, Sex};
+
+        let mut combat = CombatState::new(Handicap::Even);
+
+        let mut hero = Character::new(
+            "Defender".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.ac = AttributePair::new(10);
+
+        // Add a second (monster) participant so that one advance_turn from turn=0
+        // does NOT immediately trigger advance_round (needs two turns).
+        let monster = create_test_monster("Goblin", 5);
+        combat.add_player(hero);
+        combat.add_monster(monster);
+        combat.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
+        combat.current_turn = 0;
+
+        // Manually apply the defend bonus and set the flag (mirrors perform_defend_action).
+        combat.defending_combatants.insert(0);
+        if let Some(Combatant::Player(pc)) = combat.participants.get_mut(0) {
+            pc.ac.modify(2);
+            assert_eq!(pc.ac.current, 12, "AC should be 12 after +2 defend bonus");
+        }
+
+        // Advance turn for the player (turn 0 → 1): round NOT yet over.
+        combat.advance_turn(&[]);
+        assert_eq!(combat.current_turn, 1);
+        assert!(
+            combat.defending_combatants.contains(&0),
+            "defending flag must persist mid-round"
+        );
+        if let Some(Combatant::Player(pc)) = combat.participants.first() {
+            assert_eq!(pc.ac.current, 12, "AC bonus must remain active mid-round");
+        }
+
+        // Advance turn for the monster (turn 1 → 2 >= 2): triggers advance_round.
+        combat.advance_turn(&[]);
+        assert_eq!(
+            combat.current_turn, 0,
+            "current_turn resets to 0 on new round"
+        );
+
+        // Defending flag cleared and AC bonus reversed.
+        assert!(
+            combat.defending_combatants.is_empty(),
+            "defending_combatants must be empty after round advance"
+        );
+        if let Some(Combatant::Player(pc)) = combat.participants.first() {
+            assert_eq!(
+                pc.ac.current, pc.ac.base,
+                "AC must return to base after round end"
+            );
+        }
+    }
+
+    /// Defending reduces incoming damage by approximately 50 % (base endurance 10).
+    #[test]
+    fn test_defend_reduces_incoming_damage() {
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let mut combat = CombatState::new(Handicap::Even);
+
+        let mut attacker = create_test_character("Attacker", 10);
+        attacker.stats.accuracy.current = 20; // always hit
+        attacker.stats.might.current = 10; // 0 might bonus
+        combat.add_player(attacker);
+
+        let mut target = create_test_character("Target", 10);
+        target.stats.endurance.current = 10; // no endurance bonus → multiplier = 0.5
+        combat.add_player(target);
+
+        // Mark the target (index 1) as defending.
+        combat.defending_combatants.insert(1);
+
+        // Fixed-damage attack: 1d1+99 = 100 every time.
+        let attack = Attack::physical(DiceRoll::new(1, 1, 99));
+
+        let mut rng = StdRng::seed_from_u64(0);
+        let (damage, _) = resolve_attack(
+            &combat,
+            CombatantId::Player(0),
+            CombatantId::Player(1),
+            &attack,
+            None,
+            &mut rng,
+        )
+        .expect("resolve_attack failed");
+
+        // ceil(100 * 0.5) = 50
+        assert_eq!(
+            damage, 50,
+            "defending with endurance 10 should halve damage"
+        );
+    }
+
+    /// `power_shield` active grants complete immunity (0 damage).
+    #[test]
+    fn test_power_shield_grants_immunity() {
+        use crate::application::ActiveSpells;
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let mut combat = CombatState::new(Handicap::Even);
+
+        let mut attacker = create_test_character("Attacker", 10);
+        attacker.stats.accuracy.current = 20;
+        attacker.stats.might.current = 10;
+        combat.add_player(attacker);
+
+        let target = create_test_character("Shielded", 10);
+        combat.add_player(target);
+
+        let attack = Attack::physical(DiceRoll::new(1, 1, 99));
+
+        let mut active_spells = ActiveSpells::new();
+        active_spells.power_shield = 5; // active
+
+        let mut rng = StdRng::seed_from_u64(0);
+        let (damage, _) = resolve_attack(
+            &combat,
+            CombatantId::Player(0),
+            CombatantId::Player(1),
+            &attack,
+            Some(&active_spells),
+            &mut rng,
+        )
+        .expect("resolve_attack failed");
+
+        assert_eq!(damage, 0, "power_shield must grant full immunity");
+    }
+
+    /// `shield` active (without defending) reduces damage by 20 %.
+    #[test]
+    fn test_shield_reduces_damage_without_defending() {
+        use crate::application::ActiveSpells;
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let mut combat = CombatState::new(Handicap::Even);
+
+        let mut attacker = create_test_character("Attacker", 10);
+        attacker.stats.accuracy.current = 20;
+        attacker.stats.might.current = 10;
+        combat.add_player(attacker);
+
+        let target = create_test_character("Target", 10);
+        combat.add_player(target);
+
+        // Target is NOT defending.
+        let attack = Attack::physical(DiceRoll::new(1, 1, 99)); // 100 always
+
+        let mut active_spells = ActiveSpells::new();
+        active_spells.shield = 5; // active, but not defending
+
+        let mut rng = StdRng::seed_from_u64(0);
+        let (damage, _) = resolve_attack(
+            &combat,
+            CombatantId::Player(0),
+            CombatantId::Player(1),
+            &attack,
+            Some(&active_spells),
+            &mut rng,
+        )
+        .expect("resolve_attack failed");
+
+        // ceil(100 * 0.80) = 80
+        assert_eq!(damage, 80, "shield alone should reduce damage by 20 %");
+    }
+
+    /// Defending combined with `shield` reduces damage by 65 % (multiplier 0.35).
+    #[test]
+    fn test_defend_and_shield_combo_reduces_damage_65_percent() {
+        use crate::application::ActiveSpells;
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let mut combat = CombatState::new(Handicap::Even);
+
+        let mut attacker = create_test_character("Attacker", 10);
+        attacker.stats.accuracy.current = 20;
+        attacker.stats.might.current = 10;
+        combat.add_player(attacker);
+
+        let target = create_test_character("Target", 10);
+        combat.add_player(target);
+
+        // Target IS defending.
+        combat.defending_combatants.insert(1);
+
+        let attack = Attack::physical(DiceRoll::new(1, 1, 99)); // 100 always
+
+        let mut active_spells = ActiveSpells::new();
+        active_spells.shield = 5;
+
+        let mut rng = StdRng::seed_from_u64(0);
+        let (damage, _) = resolve_attack(
+            &combat,
+            CombatantId::Player(0),
+            CombatantId::Player(1),
+            &attack,
+            Some(&active_spells),
+            &mut rng,
+        )
+        .expect("resolve_attack failed");
+
+        // ceil(100 * 0.35) = 35
+        assert_eq!(
+            damage, 35,
+            "defend + shield should reduce damage by 65 % (multiplier 0.35)"
+        );
+    }
+
+    /// `leather_skin` active (alone) reduces damage by 10 %.
+    #[test]
+    fn test_leather_skin_reduces_damage_10_percent() {
+        use crate::application::ActiveSpells;
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let mut combat = CombatState::new(Handicap::Even);
+
+        let mut attacker = create_test_character("Attacker", 10);
+        attacker.stats.accuracy.current = 20;
+        attacker.stats.might.current = 10;
+        combat.add_player(attacker);
+
+        let target = create_test_character("Target", 10);
+        combat.add_player(target);
+
+        let attack = Attack::physical(DiceRoll::new(1, 1, 99)); // 100 always
+
+        let mut active_spells = ActiveSpells::new();
+        active_spells.leather_skin = 5;
+
+        let mut rng = StdRng::seed_from_u64(0);
+        let (damage, _) = resolve_attack(
+            &combat,
+            CombatantId::Player(0),
+            CombatantId::Player(1),
+            &attack,
+            Some(&active_spells),
+            &mut rng,
+        )
+        .expect("resolve_attack failed");
+
+        // ceil(100 * 0.90) = 90
+        assert_eq!(
+            damage, 90,
+            "leather_skin alone should reduce damage by 10 %"
+        );
+    }
+
+    /// High endurance improves the defending multiplier (each 10 above 10 = −0.02).
+    #[test]
+    fn test_defend_endurance_bonus_improves_reduction() {
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let mut combat = CombatState::new(Handicap::Even);
+
+        let mut attacker = create_test_character("Attacker", 10);
+        attacker.stats.accuracy.current = 20;
+        attacker.stats.might.current = 10;
+        combat.add_player(attacker);
+
+        let mut target = create_test_character("Target", 10);
+        // endurance 30 → 20 above 10 → 2 steps → −0.04 → multiplier = 0.46
+        target.stats.endurance.current = 30;
+        combat.add_player(target);
+
+        combat.defending_combatants.insert(1);
+
+        let attack = Attack::physical(DiceRoll::new(1, 1, 99)); // 100 always
+
+        let mut rng = StdRng::seed_from_u64(0);
+        let (damage, _) = resolve_attack(
+            &combat,
+            CombatantId::Player(0),
+            CombatantId::Player(1),
+            &attack,
+            None,
+            &mut rng,
+        )
+        .expect("resolve_attack failed");
+
+        // ceil(100 * 0.46) = ceil(46.0) = 46
+        assert_eq!(
+            damage, 46,
+            "endurance 30 should reduce defending multiplier to 0.46"
+        );
+    }
+
+    /// The endurance-based multiplier is floored at 0.25 (very high endurance).
+    #[test]
+    fn test_defend_endurance_bonus_capped_at_0_25_minimum_multiplier() {
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+
+        let mut combat = CombatState::new(Handicap::Even);
+
+        let mut attacker = create_test_character("Attacker", 10);
+        attacker.stats.accuracy.current = 20;
+        attacker.stats.might.current = 10;
+        combat.add_player(attacker);
+
+        let mut target = create_test_character("Target", 10);
+        // endurance 255 (max u8) → huge bonus, but multiplier floored at 0.25
+        target.stats.endurance.current = 255;
+        combat.add_player(target);
+
+        combat.defending_combatants.insert(1);
+
+        let attack = Attack::physical(DiceRoll::new(1, 1, 99)); // 100 always
+
+        let mut rng = StdRng::seed_from_u64(0);
+        let (damage, _) = resolve_attack(
+            &combat,
+            CombatantId::Player(0),
+            CombatantId::Player(1),
+            &attack,
+            None,
+            &mut rng,
+        )
+        .expect("resolve_attack failed");
+
+        // ceil(100 * 0.25) = 25
+        assert_eq!(
+            damage, 25,
+            "endurance bonus must not push multiplier below 0.25 minimum"
         );
     }
 }
