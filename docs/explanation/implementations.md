@@ -1,5 +1,117 @@
 # Implementations
 
+## Condition Duration: UntilCombatEnd and UntilRest (Complete)
+
+### Overview
+
+Two new `ConditionDuration` variants — `UntilCombatEnd` and `UntilRest` — have
+been added to the data-driven condition system. These variants allow designers
+to author conditions whose lifetime is tied to a game event rather than a fixed
+round or minute counter. All existing variants (`Instant`, `Rounds`, `Minutes`,
+`Permanent`) are unchanged.
+
+- **`UntilCombatEnd`** — condition is removed when the current combat resolves
+  (victory, defeat, or flee). Cleanup is triggered by
+  `CombatState::clear_combat_end_conditions`, called inside
+  `sync_combat_to_party_on_exit` just before participant data is written back to
+  the party.
+- **`UntilRest`** — condition is removed when the party takes a full,
+  non-interrupted rest. Cleanup is triggered inside `handle_rest_complete` after
+  the game-log "refreshed" message is written.
+
+### What Changed
+
+#### `src/domain/conditions.rs`
+
+- Added `UntilCombatEnd` and `UntilRest` variants to `ConditionDuration` enum
+  with doc-table explaining all variant lifetimes.
+- Updated `tick_round` doc comment to note that `UntilCombatEnd` and `UntilRest`
+  are not expired by round ticks (`_` arm covers them, returning `false`).
+- Updated `tick_minute` doc comment similarly.
+- Added `tick_combat_end(&self) -> bool` — returns `true` only for
+  `UntilCombatEnd`.
+- Added `tick_rest(&self) -> bool` — returns `true` only for `UntilRest`.
+- Added `///` doc comments with runnable examples to `new` and `with_magnitude`.
+- Added `#[cfg(test)] mod tests` with 28 unit tests covering all tick methods,
+  serde round-trips, and Copy/Clone invariants for both new variants.
+
+#### `src/domain/character.rs`
+
+- Added `tick_conditions_combat_end(&mut self)` — retains only conditions where
+  `tick_combat_end()` returns `false`.
+- Added `tick_conditions_rest(&mut self)` — retains only conditions where
+  `tick_rest()` returns `false`.
+- Both methods have `///` doc comments with runnable examples.
+- Added 8 unit tests in the existing `mod tests` block covering removal,
+  preservation, and no-op on empty lists.
+
+#### `src/domain/combat/monster.rs`
+
+- Added `tick_conditions_combat_end(&mut self)` — same semantics as the
+  character version.
+- Added 4 unit tests covering removal, preservation, and no-op.
+
+#### `src/domain/combat/engine.rs`
+
+- Added `CombatState::clear_combat_end_conditions` — iterates all participants,
+  calls `tick_conditions_combat_end` on each, then reconciles condition bitfields
+  via the existing `reconcile_character_conditions` / `reconcile_monster_conditions`
+  helpers.
+- Updated `apply_condition_to_character` — after the effect loop, a new block
+  ensures `UntilCombatEnd` and `UntilRest` conditions are always registered in
+  `active_conditions` (idempotent via `add_condition`) so the cleanup machinery
+  can find them even when the only effect is an `AttributeModifier`.
+- Updated `apply_condition_to_monster` — same addition.
+- Added 8 new unit tests covering `clear_combat_end_conditions` and the
+  apply-function tracking blocks.
+
+#### `src/game/systems/combat.rs`
+
+- Added `content: Option<Res<GameContent>>` parameter to
+  `sync_combat_to_party_on_exit` (Bevy detects it automatically).
+- Before the participant sync loop, builds `cond_defs` from the content database
+  and calls `combat_res.state.clear_combat_end_conditions(&cond_defs)`.
+
+#### `src/game/systems/rest.rs`
+
+- In `handle_rest_complete`, inside the non-interrupted rest `else` branch
+  (after writing the game-log message), builds `cond_defs` and calls
+  `member.tick_conditions_rest()` + `reconcile_character_conditions` for every
+  party member.
+
+#### `sdk/campaign_builder/src/conditions_editor.rs`
+
+- Updated `selected_text` match in the duration `ComboBox` — added arms for
+  `UntilCombatEnd` ("Until Combat End") and `UntilRest` ("Until Rest").
+- Added two new `selectable_label` entries in `show_ui` closure after "Minutes".
+- Updated `show_preview_static` duration match — added arms for the two new
+  variants.
+- Updated `build_condition_badges` `duration_label` match — added arms
+  ("CombatEnd" / "UntilRest" badge labels).
+
+#### `data/test_campaign/data/conditions.ron`
+
+- Added `combat_bless` (accuracy +3, `UntilCombatEnd`) and `exhaustion`
+  (speed −3, `UntilRest`) test fixture conditions.
+
+#### `docs/reference/architecture.md`
+
+- Added `ConditionDuration` enum definition, `ActiveCondition` struct, and
+  `ConditionDefinition` struct to section 4.3 Character, documenting the full
+  variant table and tick-routing rules.
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → No output
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings
+✅ cargo nextest run -p antares        → 4663 tests run: 4663 passed
+✅ cargo nextest run -p campaign_builder → 2332 tests run: 2332 passed
+```
+
+---
+
 ## Audit Gap Fixes — Phase 2 LevelingConfig Bridge + Phase 9 Proficiencies Section (Complete)
 
 ### Overview

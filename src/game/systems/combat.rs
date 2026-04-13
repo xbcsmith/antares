@@ -1398,6 +1398,7 @@ fn sync_party_hp_during_combat(
 fn sync_combat_to_party_on_exit(
     mut global_state: ResMut<GlobalState>,
     mut combat_res: ResMut<CombatResource>,
+    content: Option<Res<GameContent>>,
 ) {
     // Only sync when not currently in combat and when we have mapping data
     if matches!(global_state.0.mode, GameMode::Combat(_)) {
@@ -1407,6 +1408,21 @@ fn sync_combat_to_party_on_exit(
     if combat_res.player_orig_indices.is_empty() {
         return;
     }
+
+    // Expire UntilCombatEnd conditions on all participants and reconcile
+    // condition bitfields before copying data back to the party.
+    let cond_defs: Vec<crate::domain::conditions::ConditionDefinition> = content
+        .as_ref()
+        .map(|c| {
+            c.db()
+                .conditions
+                .all_conditions()
+                .into_iter()
+                .filter_map(|id| c.db().conditions.get_condition(id).cloned())
+                .collect()
+        })
+        .unwrap_or_default();
+    combat_res.state.clear_combat_end_conditions(&cond_defs);
 
     // Copy participant data back to party members for mapped players
     for (participant_idx, participant) in combat_res.state.participants.iter().enumerate() {

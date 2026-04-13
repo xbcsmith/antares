@@ -460,6 +460,46 @@ impl CombatState {
             CombatantId::Monster(idx) => self.participants.get_mut(*idx),
         }
     }
+
+    /// Removes all `UntilCombatEnd` active conditions from every participant
+    /// and reconciles status-flag bitfields so the party exits combat with a
+    /// clean condition state.
+    ///
+    /// Must be called before syncing combat state back to party members.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::combat::engine::{CombatState, Combatant};
+    /// use antares::domain::combat::types::Handicap;
+    /// use antares::domain::conditions::{ConditionDefinition, ConditionDuration};
+    ///
+    /// let mut combat = CombatState::new(Handicap::Even);
+    /// combat.clear_combat_end_conditions(&[]);
+    /// ```
+    pub fn clear_combat_end_conditions(
+        &mut self,
+        condition_defs: &[crate::domain::conditions::ConditionDefinition],
+    ) {
+        for participant in &mut self.participants {
+            match participant {
+                Combatant::Player(character) => {
+                    character.tick_conditions_combat_end();
+                    crate::domain::combat::engine::reconcile_character_conditions(
+                        character,
+                        condition_defs,
+                    );
+                }
+                Combatant::Monster(monster) => {
+                    monster.tick_conditions_combat_end();
+                    crate::domain::combat::engine::reconcile_monster_conditions(
+                        monster,
+                        condition_defs,
+                    );
+                }
+            }
+        }
+    }
 }
 
 // ===== Combat Logic Functions =====
@@ -1117,6 +1157,22 @@ pub fn apply_condition_to_character(
             }
         }
     }
+
+    // For UntilCombatEnd and UntilRest durations, always add the condition to
+    // active_conditions regardless of effect type so that the temporal cleanup
+    // machinery (clear_combat_end_conditions / tick_conditions_rest) can find and
+    // remove them.  add_condition is idempotent — it refreshes if already present.
+    if matches!(
+        cond_def.default_duration,
+        crate::domain::conditions::ConditionDuration::UntilCombatEnd
+            | crate::domain::conditions::ConditionDuration::UntilRest
+    ) {
+        let active = crate::domain::conditions::ActiveCondition::new(
+            cond_def.id.clone(),
+            cond_def.default_duration,
+        );
+        target.add_condition(active);
+    }
 }
 
 /// Apply a condition definition to a monster.
@@ -1183,6 +1239,22 @@ pub fn apply_condition_to_monster(
                 monster.add_condition(active);
             }
         }
+    }
+
+    // For UntilCombatEnd and UntilRest durations, always add the condition to
+    // active_conditions regardless of effect type so that the temporal cleanup
+    // machinery (clear_combat_end_conditions) can find and remove them.
+    // add_condition is idempotent — it refreshes if already present.
+    if matches!(
+        cond_def.default_duration,
+        crate::domain::conditions::ConditionDuration::UntilCombatEnd
+            | crate::domain::conditions::ConditionDuration::UntilRest
+    ) {
+        let active = crate::domain::conditions::ActiveCondition::new(
+            cond_def.id.clone(),
+            cond_def.default_duration,
+        );
+        monster.add_condition(active);
     }
 }
 
@@ -3027,6 +3099,232 @@ mod tests {
             avg_with < avg_without,
             "Average fire damage with protection ({avg_with:.1}) should be \
              less than without ({avg_without:.1})"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // clear_combat_end_conditions
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_clear_combat_end_conditions_removes_until_combat_end_from_player() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut combat = CombatState::new(Handicap::Even);
+        let mut pc = create_test_character("Hero", 30);
+        pc.active_conditions.push(ActiveCondition::new(
+            "combat_bless".to_string(),
+            ConditionDuration::UntilCombatEnd,
+        ));
+        pc.active_conditions.push(ActiveCondition::new(
+            "poison".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        combat.add_player(pc);
+
+        combat.clear_combat_end_conditions(&[]);
+
+        if let Combatant::Player(p) = &combat.participants[0] {
+            assert_eq!(p.active_conditions.len(), 1);
+            assert_eq!(p.active_conditions[0].condition_id, "poison");
+        } else {
+            panic!("Expected player combatant");
+        }
+    }
+
+    #[test]
+    fn test_clear_combat_end_conditions_removes_until_combat_end_from_monster() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut combat = CombatState::new(Handicap::Even);
+        let mut monster = create_test_monster("Goblin", 5);
+        monster.active_conditions.push(ActiveCondition::new(
+            "combat_bless".to_string(),
+            ConditionDuration::UntilCombatEnd,
+        ));
+        monster.active_conditions.push(ActiveCondition::new(
+            "poison".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        combat.add_monster(monster);
+
+        combat.clear_combat_end_conditions(&[]);
+
+        if let Combatant::Monster(m) = &combat.participants[0] {
+            assert_eq!(m.active_conditions.len(), 1);
+            assert_eq!(m.active_conditions[0].condition_id, "poison");
+        } else {
+            panic!("Expected monster combatant");
+        }
+    }
+
+    #[test]
+    fn test_clear_combat_end_conditions_preserves_until_rest_conditions() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut combat = CombatState::new(Handicap::Even);
+        let mut pc = create_test_character("Hero", 30);
+        pc.active_conditions.push(ActiveCondition::new(
+            "exhaustion".to_string(),
+            ConditionDuration::UntilRest,
+        ));
+        pc.active_conditions.push(ActiveCondition::new(
+            "combat_bless".to_string(),
+            ConditionDuration::UntilCombatEnd,
+        ));
+        combat.add_player(pc);
+
+        combat.clear_combat_end_conditions(&[]);
+
+        if let Combatant::Player(p) = &combat.participants[0] {
+            // UntilCombatEnd removed; UntilRest preserved
+            assert_eq!(p.active_conditions.len(), 1);
+            assert_eq!(p.active_conditions[0].condition_id, "exhaustion");
+        } else {
+            panic!("Expected player combatant");
+        }
+    }
+
+    #[test]
+    fn test_clear_combat_end_conditions_empty_participants_is_noop() {
+        let mut combat = CombatState::new(Handicap::Even);
+        // No participants — should not panic
+        combat.clear_combat_end_conditions(&[]);
+        assert!(combat.participants.is_empty());
+    }
+
+    #[test]
+    fn test_clear_combat_end_conditions_mixed_participants() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut combat = CombatState::new(Handicap::Even);
+
+        let mut pc = create_test_character("Hero", 30);
+        pc.active_conditions.push(ActiveCondition::new(
+            "combat_bless".to_string(),
+            ConditionDuration::UntilCombatEnd,
+        ));
+
+        let mut monster = create_test_monster("Goblin", 5);
+        monster.active_conditions.push(ActiveCondition::new(
+            "combat_slow".to_string(),
+            ConditionDuration::UntilCombatEnd,
+        ));
+        monster.active_conditions.push(ActiveCondition::new(
+            "poison".to_string(),
+            ConditionDuration::Permanent,
+        ));
+
+        combat.add_player(pc);
+        combat.add_monster(monster);
+
+        combat.clear_combat_end_conditions(&[]);
+
+        // Player should have no conditions left
+        if let Combatant::Player(p) = &combat.participants[0] {
+            assert!(p.active_conditions.is_empty());
+        }
+        // Monster should only have poison left
+        if let Combatant::Monster(m) = &combat.participants[1] {
+            assert_eq!(m.active_conditions.len(), 1);
+            assert_eq!(m.active_conditions[0].condition_id, "poison");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // apply_condition_to_character: UntilCombatEnd / UntilRest tracking
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_apply_condition_to_character_until_combat_end_tracked_in_active_conditions() {
+        use crate::domain::combat::engine::apply_condition_to_character;
+        use crate::domain::conditions::{ConditionDefinition, ConditionDuration, ConditionEffect};
+
+        let cond_def = ConditionDefinition {
+            id: "combat_bless".to_string(),
+            name: "Combat Bless".to_string(),
+            description: "Accuracy bonus that expires when combat ends.".to_string(),
+            effects: vec![ConditionEffect::AttributeModifier {
+                attribute: "accuracy".to_string(),
+                value: 3,
+            }],
+            default_duration: ConditionDuration::UntilCombatEnd,
+            icon_id: None,
+        };
+
+        let mut pc = create_test_character("Hero", 30);
+        let base_acc = pc.stats.accuracy.current;
+        apply_condition_to_character(&mut pc, &cond_def);
+
+        // Attribute modifier should be applied
+        assert_eq!(pc.stats.accuracy.current, base_acc + 3);
+        // And the condition must be tracked in active_conditions for cleanup
+        assert!(
+            pc.active_conditions
+                .iter()
+                .any(|c| c.condition_id == "combat_bless"),
+            "UntilCombatEnd condition must be present in active_conditions"
+        );
+    }
+
+    #[test]
+    fn test_apply_condition_to_character_until_rest_tracked_in_active_conditions() {
+        use crate::domain::combat::engine::apply_condition_to_character;
+        use crate::domain::conditions::{ConditionDefinition, ConditionDuration, ConditionEffect};
+
+        let cond_def = ConditionDefinition {
+            id: "exhaustion".to_string(),
+            name: "Exhaustion".to_string(),
+            description: "Speed penalty that lasts until rest.".to_string(),
+            effects: vec![ConditionEffect::AttributeModifier {
+                attribute: "speed".to_string(),
+                value: -3,
+            }],
+            default_duration: ConditionDuration::UntilRest,
+            icon_id: None,
+        };
+
+        let mut pc = create_test_character("Hero", 30);
+        let base_speed = pc.stats.speed.current;
+        apply_condition_to_character(&mut pc, &cond_def);
+
+        assert_eq!(pc.stats.speed.current, base_speed - 3);
+        assert!(
+            pc.active_conditions
+                .iter()
+                .any(|c| c.condition_id == "exhaustion"),
+            "UntilRest condition must be present in active_conditions"
+        );
+    }
+
+    #[test]
+    fn test_apply_condition_to_monster_until_combat_end_tracked_in_active_conditions() {
+        use crate::domain::combat::engine::apply_condition_to_monster;
+        use crate::domain::conditions::{ConditionDefinition, ConditionDuration, ConditionEffect};
+
+        let cond_def = ConditionDefinition {
+            id: "combat_bless".to_string(),
+            name: "Combat Bless".to_string(),
+            description: "Accuracy bonus that expires when combat ends.".to_string(),
+            effects: vec![ConditionEffect::AttributeModifier {
+                attribute: "accuracy".to_string(),
+                value: 2,
+            }],
+            default_duration: ConditionDuration::UntilCombatEnd,
+            icon_id: None,
+        };
+
+        let mut monster = create_test_monster("Goblin", 5);
+        let base_acc = monster.stats.accuracy.current;
+        apply_condition_to_monster(&mut monster, &cond_def);
+
+        assert_eq!(monster.stats.accuracy.current, base_acc + 2);
+        assert!(
+            monster
+                .active_conditions
+                .iter()
+                .any(|c| c.condition_id == "combat_bless"),
+            "UntilCombatEnd condition must be tracked in monster active_conditions"
         );
     }
 }

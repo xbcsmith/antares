@@ -532,6 +532,55 @@ impl Condition {
     }
 }
 
+/// Duration of a data-driven condition (used by `ActiveCondition` and `ConditionDefinition`)
+///
+/// | Variant          | Expires when…                                    |
+/// |------------------|--------------------------------------------------|
+/// | `Instant`        | Immediately after being applied (single tick)    |
+/// | `Rounds(n)`      | `n` combat rounds have elapsed                  |
+/// | `Minutes(n)`     | `n` exploration minutes have elapsed            |
+/// | `UntilCombatEnd` | The current combat ends (victory, defeat, flee)  |
+/// | `UntilRest`      | The party takes a full rest                      |
+/// | `Permanent`      | Never — must be explicitly removed               |
+///
+/// **Tick routing:**
+/// - `tick_round()` / `tick_minute()` drive the `Rounds` and `Minutes` variants.
+/// - `tick_combat_end()` fires when combat resolves; handled by
+///   `CombatState::clear_combat_end_conditions` inside
+///   `sync_combat_to_party_on_exit`.
+/// - `tick_rest()` fires after a completed, non-interrupted rest; handled by
+///   `handle_rest_complete`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConditionDuration {
+    Instant,
+    Rounds(u16),
+    Minutes(u16),
+    /// Expires when the current combat ends (victory, defeat, or flee).
+    UntilCombatEnd,
+    /// Expires when the party takes a full rest.
+    UntilRest,
+    Permanent,
+}
+
+/// An active instance of a condition on a character or monster
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActiveCondition {
+    pub condition_id: ConditionId,
+    pub duration: ConditionDuration,
+    pub magnitude: f32,
+}
+
+/// Static definition of a condition loaded from `conditions.ron`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConditionDefinition {
+    pub id: ConditionId,
+    pub name: String,
+    pub description: String,
+    pub effects: Vec<ConditionEffect>,
+    pub default_duration: ConditionDuration,
+    pub icon_id: Option<String>,
+}
+
 /// Container for items (backpack or equipped)
 pub struct Inventory {
     pub items: Vec<InventorySlot>,  // Max 255 items in backpack

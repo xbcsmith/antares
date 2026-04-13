@@ -250,7 +250,7 @@ Show/Hide Tray ICON SDK is not working
 
 ✅ FIXED - Create Merchant Dialog does not work when a new stock template is created in a session. I added innkeeper stock template and attached it to the Inn Keeper Village in map 1. And the create merchant dialog did nothing.
 
-Conditions should have a duration of until the next rest, until the end of combat, or until a certain number of turns have passed. This would allow for more strategic use of conditions and would also allow for conditions that are meant to last for a certain amount of time rather than being permanent until removed. The SDK should be updated to support setting the duration of conditions as well as the game engine. The game engine should then handle the expiration of conditions based on their duration.
+✅ FIXED - Conditions should have a duration of until the next rest, until the end of combat, or until a certain number of turns have passed. This would allow for more strategic use of conditions and would also allow for conditions that are meant to last for a certain amount of time rather than being permanent until removed. The SDK should be updated to support setting the duration of conditions as well as the game engine. The game engine should then handle the expiration of conditions based on their duration.
 
 ### Campaign Validation
 
