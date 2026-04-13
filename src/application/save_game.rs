@@ -517,6 +517,7 @@ mod tests {
 
     #[test]
     fn test_save_game_with_campaign() {
+        use crate::domain::campaign::LevelUpMode;
         use crate::domain::types::{Direction, Position};
         use crate::sdk::campaign_loader::{
             Campaign, CampaignAssets, CampaignConfig, CampaignData, Difficulty,
@@ -544,6 +545,9 @@ mod tests {
                 allow_multiclassing: false,
                 starting_level: 1,
                 max_level: 20,
+                level_up_mode: LevelUpMode::Auto,
+                base_xp: 1000,
+                xp_multiplier: 1.5,
                 starting_time: crate::domain::types::GameTime::new(1, 8, 0),
             },
             data: CampaignData {

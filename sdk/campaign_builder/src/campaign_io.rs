@@ -609,6 +609,107 @@ impl CampaignBuilderApp {
         results
     }
 
+    /// Validate the campaign's level threshold database (`levels.ron`).
+    ///
+    /// This checks that each class-level entry references a defined class,
+    /// that thresholds start at 0, and that threshold values are strictly
+    /// increasing.
+    pub fn validate_level_thresholds(&self) -> Vec<validation::ValidationResult> {
+        let mut results = Vec::new();
+        let class_ids: std::collections::HashSet<&str> = self
+            .editor_registry
+            .classes_editor_state
+            .classes
+            .iter()
+            .map(|class| class.id.as_str())
+            .collect();
+
+        let mut seen_class_ids = std::collections::HashSet::new();
+
+        for thresholds in &self.campaign_data.levels {
+            if thresholds.class_id.trim().is_empty() {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::DifficultyProgression,
+                    "A levels entry has an empty class_id",
+                ));
+                continue;
+            }
+
+            if !seen_class_ids.insert(thresholds.class_id.clone()) {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::DifficultyProgression,
+                    format!("Duplicate levels entry for class '{}'", thresholds.class_id),
+                ));
+            }
+
+            if !class_ids.contains(thresholds.class_id.as_str()) {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::DifficultyProgression,
+                    format!(
+                        "Levels entry references unknown class '{}'",
+                        thresholds.class_id
+                    ),
+                ));
+            }
+
+            if thresholds.thresholds.is_empty() {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::DifficultyProgression,
+                    format!(
+                        "Levels entry for class '{}' has no thresholds defined",
+                        thresholds.class_id
+                    ),
+                ));
+                continue;
+            }
+
+            if thresholds.thresholds[0] != 0 {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::DifficultyProgression,
+                    format!(
+                        "Levels entry for class '{}' must start with 0",
+                        thresholds.class_id
+                    ),
+                ));
+            }
+
+            for window in thresholds.thresholds.windows(2) {
+                if window[1] <= window[0] {
+                    results.push(validation::ValidationResult::error(
+                        validation::ValidationCategory::DifficultyProgression,
+                        format!(
+                            "Levels thresholds for class '{}' must be strictly increasing",
+                            thresholds.class_id
+                        ),
+                    ));
+                    break;
+                }
+            }
+        }
+
+        if let Some(dir) = &self.campaign_dir {
+            let path = dir.join(&self.campaign.levels_file);
+            if path.exists() && !self.editor_registry.levels_editor_state.loaded_from_file {
+                results.push(validation::ValidationResult::warning(
+                    validation::ValidationCategory::DifficultyProgression,
+                    format!(
+                        "Levels file '{}' exists but failed to load",
+                        self.campaign.levels_file
+                    ),
+                ));
+            }
+        }
+
+        if results.is_empty() {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::DifficultyProgression,
+                "Level thresholds are valid",
+            ));
+        }
+
+        results
+    }
+
     /// Validate character IDs for uniqueness and references
     ///
     /// Returns validation errors for:
@@ -1439,6 +1540,52 @@ impl CampaignBuilderApp {
         }
     }
 
+    /// Load level thresholds from the campaign's `levels.ron` file.
+    ///
+    /// On success, populates both `levels_editor_state.levels` and the
+    /// `campaign_data.levels` mirror list.  Logs a warning (but does not fail)
+    /// when the file is absent — an empty levels list is a valid state for
+    /// a new campaign.
+    pub fn load_levels(&mut self) {
+        if let Some(dir) = &self.campaign_dir {
+            let path = dir.join(&self.campaign.levels_file);
+            if path.exists() {
+                match self
+                    .editor_registry
+                    .levels_editor_state
+                    .load_from_file(&path)
+                {
+                    Ok(()) => {
+                        self.campaign_data.levels =
+                            self.editor_registry.levels_editor_state.levels.clone();
+                        self.logger.info(
+                            category::FILE_IO,
+                            &format!(
+                                "Loaded {} level threshold entries",
+                                self.campaign_data.levels.len()
+                            ),
+                        );
+                        // Clear the lazy-load flag so show() does not re-read
+                        // the file redundantly on the first tab render.
+                        self.editor_registry.levels_editor_state.needs_initial_load = false;
+                    }
+                    Err(e) => {
+                        self.logger
+                            .warn(category::FILE_IO, &format!("Failed to parse levels: {}", e));
+                    }
+                }
+            } else {
+                self.logger.debug(
+                    category::FILE_IO,
+                    &format!(
+                        "Levels file not found (will auto-load if created later): {}",
+                        path.display()
+                    ),
+                );
+            }
+        }
+    }
+
     /// Load monsters from RON file
     pub fn load_monsters(&mut self) {
         let monsters_file = self.campaign.monsters_file.clone();
@@ -1921,6 +2068,9 @@ impl CampaignBuilderApp {
             .extend(self.validate_stock_template_refs());
         self.validation_state
             .validation_errors
+            .extend(self.validate_level_thresholds());
+        self.validation_state
+            .validation_errors
             .extend(self.validate_proficiency_ids());
 
         // Spell cross-reference validation (Phase 6)
@@ -2241,6 +2391,9 @@ impl CampaignBuilderApp {
                 allow_multiclassing: self.campaign.allow_multiclassing,
                 starting_level: self.campaign.starting_level,
                 max_level: self.campaign.max_level,
+                level_up_mode: self.campaign.level_up_mode.clone(),
+                base_xp: self.campaign.base_xp,
+                xp_multiplier: self.campaign.xp_multiplier,
                 starting_time: self.campaign.starting_time,
             };
 
@@ -2346,6 +2499,13 @@ impl CampaignBuilderApp {
             .stock_templates_editor_state
             .reset_for_new_campaign();
         self.campaign_data.stock_templates.clear();
+
+        // Reset levels editor for the same reason.
+        self.editor_registry
+            .levels_editor_state
+            .reset_for_new_campaign();
+        self.campaign_data.levels.clear();
+
         self.campaign = CampaignMetadata::default();
 
         // Sync the campaign editor's authoritative metadata and edit buffer with
@@ -2517,6 +2677,23 @@ impl CampaignBuilderApp {
                     save_warnings.push(format!("StockTemplates: {}", e));
                 }
             }
+
+            // Save levels.ron — same guard as stock templates: only persist if
+            // the in-memory data was originally loaded from disk or was
+            // explicitly modified, to prevent overwriting a valid on-disk file
+            // with an empty default Vec before any load has occurred.
+            let levels_path = dir.join(&self.campaign.levels_file);
+            let should_save_levels = self.editor_registry.levels_editor_state.loaded_from_file
+                || self.editor_registry.levels_editor_state.has_unsaved_changes;
+            if should_save_levels {
+                if let Err(e) = self
+                    .editor_registry
+                    .levels_editor_state
+                    .save_to_file(&levels_path)
+                {
+                    save_warnings.push(format!("Levels: {}", e));
+                }
+            }
         }
 
         // Now save campaign metadata to RON format
@@ -2683,6 +2860,13 @@ impl CampaignBuilderApp {
                         .reset_for_new_campaign();
                     self.campaign_data.stock_templates.clear();
                     self.load_stock_templates();
+
+                    // Reset and load level thresholds.
+                    self.editor_registry
+                        .levels_editor_state
+                        .reset_for_new_campaign();
+                    self.campaign_data.levels.clear();
+                    self.load_levels();
 
                     // Scan asset references and mark loaded data files
                     if let Some(ref mut manager) = self.asset_manager {
@@ -3131,5 +3315,45 @@ impl CampaignBuilderApp {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_level_thresholds_reports_invalid_entries() {
+        let mut app = CampaignBuilderApp::default();
+        app.editor_registry.classes_editor_state.classes =
+            vec![antares::domain::classes::ClassDefinition::new(
+                "knight".to_string(),
+                "Knight".to_string(),
+            )];
+        app.campaign_data.levels = vec![
+            antares::domain::levels::ClassLevelThresholds {
+                class_id: "sorcerer".to_string(),
+                thresholds: vec![0, 800, 700],
+            },
+            antares::domain::levels::ClassLevelThresholds {
+                class_id: "knight".to_string(),
+                thresholds: vec![100, 200],
+            },
+        ];
+
+        let results = app.validate_level_thresholds();
+
+        assert!(results.iter().any(|result| {
+            result.category == validation::ValidationCategory::DifficultyProgression
+                && result.message.contains("unknown class")
+        }));
+        assert!(results.iter().any(|result| {
+            result.category == validation::ValidationCategory::DifficultyProgression
+                && result.message.contains("must start with 0")
+        }));
+        assert!(results.iter().any(|result| {
+            result.category == validation::ValidationCategory::DifficultyProgression
+                && result.message.contains("strictly increasing")
+        }));
     }
 }

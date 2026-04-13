@@ -13,8 +13,10 @@
 //! consume the frame.
 
 use crate::application::dialogue::RecruitmentContext;
+use crate::application::quests::QuestProgressEvent;
 use crate::application::resources::GameContent;
 use crate::application::GameState;
+use crate::domain::transactions::pickup_item;
 use crate::domain::types::{ItemId, Position};
 use crate::domain::world::{MapEvent, WallType};
 use crate::game::components::furniture::DoorState;
@@ -23,6 +25,7 @@ use crate::game::resources::LockInteractionPending;
 use crate::game::systems::dialogue::PendingRecruitmentContext;
 use crate::game::systems::events::MapEventTriggered;
 use crate::game::systems::input::get_adjacent_positions;
+use crate::game::systems::item_world_events::ItemPickedUpEvent;
 use crate::game::systems::map::{NpcMarker, TileCoord};
 use crate::game::systems::ui::GameLog;
 use bevy::prelude::*;
@@ -70,6 +73,8 @@ pub fn handle_exploration_interact(
     )>,
     game_log: &mut GameLog,
     lock_pending: &mut LockInteractionPending,
+    item_picked_up_messages: Option<&mut MessageWriter<ItemPickedUpEvent>>,
+    quest_progress_messages: Option<&mut MessageWriter<QuestProgressEvent>>,
 ) -> bool {
     let party_position = game_state.world.party_position;
     let adjacent_tiles = get_adjacent_positions(party_position);
@@ -105,6 +110,18 @@ pub fn handle_exploration_interact(
         map_event_messages,
         recruitment_context,
         npc_query,
+    ) {
+        return true;
+    }
+
+    if try_pickup_adjacent_dropped_item(
+        game_state,
+        party_position,
+        adjacent_tiles,
+        game_content,
+        game_log,
+        item_picked_up_messages,
+        quest_progress_messages,
     ) {
         return true;
     }
@@ -580,6 +597,91 @@ pub fn try_interact_npc_or_recruitable(
     false
 }
 
+/// Tries to pick up the first dropped item on the current tile or any adjacent tile.
+///
+/// Prefers the current tile first, then scans adjacent tiles in the supplied order.
+/// On success, the item is added to the first party member's inventory, removed
+/// from the ground, a pickup log line is emitted, and optional visual / quest
+/// progress messages are written.
+///
+/// Returns `true` when a dropped item was found and the interaction was consumed,
+/// regardless of whether the pickup succeeded.
+#[allow(clippy::needless_pass_by_value)]
+pub fn try_pickup_adjacent_dropped_item(
+    game_state: &mut GameState,
+    party_position: Position,
+    adjacent_tiles: [Position; 8],
+    game_content: Option<&GameContent>,
+    game_log: &mut GameLog,
+    item_picked_up_messages: Option<&mut MessageWriter<ItemPickedUpEvent>>,
+    quest_progress_messages: Option<&mut MessageWriter<QuestProgressEvent>>,
+) -> bool {
+    let Some(map) = game_state.world.get_current_map() else {
+        info!("No interactable object nearby");
+        return true;
+    };
+
+    let pickup_target = std::iter::once(party_position)
+        .chain(adjacent_tiles)
+        .find_map(|position| {
+            map.dropped_items_at(position)
+                .first()
+                .map(|item| (position, item.item_id, item.charges))
+        });
+
+    let Some((position, item_id, _charges)) = pickup_target else {
+        return false;
+    };
+
+    if game_state.party.members.is_empty() {
+        let msg = "No party member is available to pick up the item.".to_string();
+        info!("{}", msg);
+        game_log.add_exploration(msg);
+        return true;
+    }
+
+    let item_name = game_content
+        .and_then(|content| content.db().items.get_item(item_id))
+        .map(|item| item.name.clone())
+        .unwrap_or_else(|| format!("item {}", item_id));
+
+    let map_id = game_state.world.current_map;
+    match pickup_item(
+        &mut game_state.party.members[0],
+        0,
+        &mut game_state.world,
+        map_id,
+        position,
+        item_id,
+    ) {
+        Ok(_slot) => {
+            let msg = format!("Picked up {}.", item_name);
+            info!("{}", msg);
+            game_log.add_exploration(msg);
+
+            if let Some(writer) = item_picked_up_messages {
+                writer.write(ItemPickedUpEvent {
+                    item_id,
+                    map_id,
+                    tile_x: position.x,
+                    tile_y: position.y,
+                });
+            }
+
+            if let Some(writer) = quest_progress_messages {
+                writer.write(QuestProgressEvent::ItemCollected { item_id, count: 1 });
+            }
+        }
+        Err(error) => {
+            let msg = format!("Could not pick up {}: {}", item_name, error);
+            warn!("{}", msg);
+            game_log.add_exploration(msg);
+        }
+    }
+
+    true
+}
+
 /// Tries to interact with adjacent or current-tile world events.
 ///
 /// Returns `true` when an interaction-driven world event was found and routed.
@@ -762,6 +864,187 @@ mod tests {
         let handled = try_interact_plain_tile_door(&mut game_state, Position::new(5, 4));
 
         assert!(!handled);
+    }
+
+    #[test]
+    fn test_try_pickup_adjacent_dropped_item_adds_item_to_inventory_and_removes_ground_item() {
+        let mut game_state = build_game_state();
+        let drop_position = Position::new(5, 4);
+
+        if let Some(map) = game_state.world.get_current_map_mut() {
+            map.add_dropped_item(crate::domain::world::DroppedItem {
+                item_id: 4,
+                charges: 0,
+                position: drop_position,
+                map_id: 1,
+            });
+        }
+
+        let mut game_log = GameLog::default();
+
+        let handled = try_pickup_adjacent_dropped_item(
+            &mut game_state,
+            Position::new(5, 5),
+            get_adjacent_positions(Position::new(5, 5)),
+            None,
+            &mut game_log,
+            None,
+            None,
+        );
+
+        assert!(handled);
+        assert!(
+            game_state.party.members[0]
+                .inventory
+                .items
+                .iter()
+                .any(|slot| slot.item_id == 4),
+            "picked-up item should be added to the first party member inventory"
+        );
+        assert!(
+            game_state
+                .world
+                .get_current_map()
+                .unwrap()
+                .dropped_items_at(drop_position)
+                .is_empty(),
+            "picked-up item should be removed from the ground"
+        );
+    }
+
+    #[test]
+    fn test_try_pickup_adjacent_dropped_item_prefers_current_tile_before_adjacent_tile() {
+        let mut game_state = build_game_state();
+        let current_position = Position::new(5, 5);
+        let adjacent_position = Position::new(5, 4);
+
+        if let Some(map) = game_state.world.get_current_map_mut() {
+            map.add_dropped_item(crate::domain::world::DroppedItem {
+                item_id: 7,
+                charges: 0,
+                position: current_position,
+                map_id: 1,
+            });
+            map.add_dropped_item(crate::domain::world::DroppedItem {
+                item_id: 8,
+                charges: 0,
+                position: adjacent_position,
+                map_id: 1,
+            });
+        }
+
+        let mut game_log = GameLog::default();
+
+        let handled = try_pickup_adjacent_dropped_item(
+            &mut game_state,
+            current_position,
+            get_adjacent_positions(current_position),
+            None,
+            &mut game_log,
+            None,
+            None,
+        );
+
+        assert!(handled);
+        assert!(
+            game_state.party.members[0]
+                .inventory
+                .items
+                .iter()
+                .any(|slot| slot.item_id == 7),
+            "current-tile dropped item should be picked up first"
+        );
+        assert!(
+            game_state
+                .world
+                .get_current_map()
+                .unwrap()
+                .dropped_items_at(current_position)
+                .is_empty(),
+            "current-tile dropped item should be removed"
+        );
+        assert_eq!(
+            game_state
+                .world
+                .get_current_map()
+                .unwrap()
+                .dropped_items_at(adjacent_position)
+                .len(),
+            1,
+            "adjacent dropped item should remain after the first pickup"
+        );
+    }
+
+    #[test]
+    fn test_try_pickup_adjacent_dropped_item_returns_false_when_no_item_exists() {
+        let mut game_state = build_game_state();
+        let mut game_log = GameLog::default();
+
+        let handled = try_pickup_adjacent_dropped_item(
+            &mut game_state,
+            Position::new(5, 5),
+            get_adjacent_positions(Position::new(5, 5)),
+            None,
+            &mut game_log,
+            None,
+            None,
+        );
+
+        assert!(!handled);
+    }
+
+    #[test]
+    fn test_try_pickup_adjacent_dropped_item_logs_failure_when_inventory_full() {
+        let mut game_state = build_game_state();
+        let drop_position = Position::new(5, 4);
+
+        if let Some(map) = game_state.world.get_current_map_mut() {
+            map.add_dropped_item(crate::domain::world::DroppedItem {
+                item_id: 9,
+                charges: 0,
+                position: drop_position,
+                map_id: 1,
+            });
+        }
+
+        while !game_state.party.members[0].inventory.is_full() {
+            let next_item_id = (game_state.party.members[0].inventory.items.len() as u8) + 1;
+            game_state.party.members[0]
+                .inventory
+                .add_item(next_item_id, 0)
+                .unwrap();
+        }
+
+        let mut game_log = GameLog::default();
+
+        let handled = try_pickup_adjacent_dropped_item(
+            &mut game_state,
+            Position::new(5, 5),
+            get_adjacent_positions(Position::new(5, 5)),
+            None,
+            &mut game_log,
+            None,
+            None,
+        );
+
+        assert!(handled);
+        assert_eq!(
+            game_state
+                .world
+                .get_current_map()
+                .unwrap()
+                .dropped_items_at(drop_position)
+                .len(),
+            1,
+            "ground item should remain when pickup fails"
+        );
+        assert!(
+            game_log
+                .entries
+                .iter()
+                .any(|entry| entry.text.contains("Could not pick up item 9")),
+            "failure should be visible in the exploration log"
+        );
     }
 
     #[test]

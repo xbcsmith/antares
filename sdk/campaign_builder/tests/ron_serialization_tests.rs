@@ -3,6 +3,7 @@
 
 //! RON serialization round-trip tests for all major game data types.
 
+use antares::domain::campaign::LevelUpMode;
 use antares::domain::character::{AttributePair, AttributePair16, Stats};
 use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
@@ -52,6 +53,10 @@ fn test_ron_serialization() {
         proficiencies_file: "data/proficiencies.ron".to_string(),
         stock_templates_file: "data/npc_stock_templates.ron".to_string(),
         furniture_file: "data/furniture.ron".to_string(),
+        levels_file: "data/levels.ron".to_string(),
+        level_up_mode: LevelUpMode::Auto,
+        base_xp: 1000,
+        xp_multiplier: 1.5,
         starting_time: default_starting_time(),
     };
 

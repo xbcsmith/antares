@@ -5223,6 +5223,9 @@ pub fn process_combat_victory_with_rng(
     if !recipients.is_empty() && total_xp > 0 {
         let per = total_xp / recipients.len() as u64;
         let mut remainder = total_xp % recipients.len() as u64;
+        // Apply the campaign-configured experience rate multiplier.
+        // A rate of 1.0 is normal; 2.0 doubles all post-combat XP; 0.5 halves it.
+        let experience_rate = global_state.0.campaign_config.experience_rate;
 
         for &party_idx in &recipients {
             let mut award = per;
@@ -5231,19 +5234,22 @@ pub fn process_combat_victory_with_rng(
                 remainder -= 1;
             }
 
+            // Scale award by the campaign experience_rate before granting.
+            let scaled_award = (award as f64 * experience_rate as f64).round() as u64;
+
             // Award experience using domain helper (respects dead checks)
             if let Err(e) = crate::domain::progression::award_experience(
                 &mut global_state.0.party.members[party_idx],
-                award,
+                scaled_award,
             ) {
                 tracing::warn!(
                     "Failed to award {} XP to party member {}: {}",
-                    award,
+                    scaled_award,
                     party_idx,
                     e
                 );
             }
-            xp_awarded.push((party_idx, award));
+            xp_awarded.push((party_idx, scaled_award));
         }
     }
 
@@ -8148,6 +8154,186 @@ mod tests {
                 assert_eq!(gs_after.0.party.members[1].experience, 50);
                 assert_eq!(summary.total_xp, 100);
             }
+        }
+    }
+
+    /// `experience_rate = 2.0` in `CampaignConfig` must double every XP share
+    /// awarded through `process_combat_victory_with_rng`.
+    #[test]
+    fn test_victory_xp_doubled_by_experience_rate() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Two party members; experience_rate = 2.0
+        let mut gs = GameState::new();
+        gs.campaign_config.experience_rate = 2.0;
+        let p1 = Character::new(
+            "P1".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let p2 = Character::new(
+            "P2".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(p1.clone()).unwrap();
+        gs.party.add_member(p2.clone()).unwrap();
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // One dead monster with 100 XP
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(p1.clone());
+        cs.add_player(p2.clone());
+        let monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Killed".to_string(),
+            crate::domain::character::Stats::new(10, 10, 10, 10, 10, 10, 10),
+            0,
+            5,
+            vec![],
+            crate::domain::combat::monster::LootTable::new(0, 0, 0, 0, 100),
+        );
+        cs.add_monster(monster);
+        cs.status = CombatStatus::Victory;
+        cs.turn_order = vec![
+            CombatantId::Player(0),
+            CombatantId::Player(1),
+            CombatantId::Monster(2),
+        ];
+        cs.current_turn = 0;
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1), None];
+        }
+
+        {
+            use rand::rngs::StdRng;
+            use rand::SeedableRng;
+            let mut rng = StdRng::seed_from_u64(42);
+            let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+            let world = app.world_mut();
+            let mut gs_owned = world
+                .remove_resource::<crate::game::resources::GlobalState>()
+                .expect("GlobalState missing");
+            let summary = {
+                let mut cr = world.resource_mut::<CombatResource>();
+                process_combat_victory_with_rng(&mut cr, &content, &mut gs_owned, &mut rng)
+                    .expect("victory processing failed")
+            };
+            world.insert_resource(gs_owned);
+
+            let gs_after = app
+                .world()
+                .resource::<crate::game::resources::GlobalState>();
+
+            // 100 XP / 2 members = 50 base; 50 * 2.0 rate = 100 each
+            assert_eq!(
+                gs_after.0.party.members[0].experience, 100,
+                "experience_rate=2.0 must double each member's share (50→100)"
+            );
+            assert_eq!(
+                gs_after.0.party.members[1].experience, 100,
+                "experience_rate=2.0 must double each member's share (50→100)"
+            );
+            // total_xp in summary is the raw monster XP (before scaling)
+            assert_eq!(summary.total_xp, 100);
+        }
+    }
+
+    /// `experience_rate = 0.5` in `CampaignConfig` must halve every XP share
+    /// awarded through `process_combat_victory_with_rng`.
+    #[test]
+    fn test_victory_xp_halved_by_experience_rate() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Two party members; experience_rate = 0.5
+        let mut gs = GameState::new();
+        gs.campaign_config.experience_rate = 0.5;
+        let p1 = Character::new(
+            "P1".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let p2 = Character::new(
+            "P2".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(p1.clone()).unwrap();
+        gs.party.add_member(p2.clone()).unwrap();
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // One dead monster with 100 XP
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(p1.clone());
+        cs.add_player(p2.clone());
+        let monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Killed".to_string(),
+            crate::domain::character::Stats::new(10, 10, 10, 10, 10, 10, 10),
+            0,
+            5,
+            vec![],
+            crate::domain::combat::monster::LootTable::new(0, 0, 0, 0, 100),
+        );
+        cs.add_monster(monster);
+        cs.status = CombatStatus::Victory;
+        cs.turn_order = vec![
+            CombatantId::Player(0),
+            CombatantId::Player(1),
+            CombatantId::Monster(2),
+        ];
+        cs.current_turn = 0;
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1), None];
+        }
+
+        {
+            use rand::rngs::StdRng;
+            use rand::SeedableRng;
+            let mut rng = StdRng::seed_from_u64(42);
+            let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+            let world = app.world_mut();
+            let mut gs_owned = world
+                .remove_resource::<crate::game::resources::GlobalState>()
+                .expect("GlobalState missing");
+            {
+                let mut cr = world.resource_mut::<CombatResource>();
+                process_combat_victory_with_rng(&mut cr, &content, &mut gs_owned, &mut rng)
+                    .expect("victory processing failed");
+            }
+            world.insert_resource(gs_owned);
+
+            let gs_after = app
+                .world()
+                .resource::<crate::game::resources::GlobalState>();
+
+            // 100 XP / 2 members = 50 base; 50 * 0.5 rate = 25 each
+            assert_eq!(
+                gs_after.0.party.members[0].experience, 25,
+                "experience_rate=0.5 must halve each member's share (50→25)"
+            );
+            assert_eq!(
+                gs_after.0.party.members[1].experience, 25,
+                "experience_rate=0.5 must halve each member's share (50→25)"
+            );
         }
     }
 

@@ -295,6 +295,15 @@ impl Plugin for AntaresPlugin {
 
         // Lock prompt UI and lock action handler
         app.add_plugins(antares::game::systems::lock_ui::LockUiPlugin);
+
+        // Auto level-up progression system
+        app.add_plugins(antares::game::systems::progression::ProgressionPlugin);
+
+        // NPC trainer level-up UI
+        app.add_plugins(antares::game::systems::training_ui::TrainingPlugin);
+
+        // Character sheet read-only viewer
+        app.add_plugins(antares::game::systems::character_sheet_ui::CharacterSheetPlugin);
     }
 }
 
@@ -333,6 +342,7 @@ mod tests {
 
     /// Helper to create a test campaign with custom graphics config
     fn create_test_campaign(graphics: GraphicsConfig) -> Campaign {
+        use antares::domain::campaign::LevelUpMode;
         use antares::domain::types::Position;
         use antares::sdk::campaign_loader::{CampaignAssets, CampaignConfig, CampaignData};
         use std::path::PathBuf;
@@ -359,6 +369,9 @@ mod tests {
                 allow_multiclassing: false,
                 starting_level: 1,
                 max_level: 20,
+                level_up_mode: LevelUpMode::Auto,
+                base_xp: 1000,
+                xp_multiplier: 1.5,
                 starting_time: antares::domain::types::GameTime::new(1, 8, 0),
             },
             data: CampaignData {
@@ -391,6 +404,7 @@ mod tests {
                 rest: Default::default(),
                 game_log: Default::default(),
                 time: Default::default(),
+                leveling: Default::default(),
             },
         }
     }

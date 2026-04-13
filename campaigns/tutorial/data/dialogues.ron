@@ -366,6 +366,18 @@
                             managed_content: [],
                         ),
                     ),
+                    (
+                        text: "Show me your wares.",
+                        target_node: Some(7),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [
+                                MerchantChoice,
+                            ],
+                        ),
+                    ),
                 ],
                 conditions: [],
                 actions: [],
@@ -469,12 +481,32 @@
                     managed_content: [],
                 ),
             ),
+            7: (
+                id: 7,
+                text: "Of course. Here is what InnKeeper Town Square is offering.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [
+                    OpenMerchant(
+                        npc_id: "tutorial_innkeeper_town",
+                    ),
+                ],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [
+                        MerchantOpenNode,
+                    ],
+                ),
+            ),
         },
         speaker_name: Some("Innkeeper"),
         repeatable: true,
         associated_quest: None,
         sdk_metadata: (
-            managed_content: [],
+            managed_content: [
+                MerchantBranchInsertion,
+            ],
         ),
     ),
     (
@@ -1224,6 +1256,18 @@
                             managed_content: [],
                         ),
                     ),
+                    (
+                        text: "Show me your wares.",
+                        target_node: Some(7),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [
+                                MerchantChoice,
+                            ],
+                        ),
+                    ),
                 ],
                 conditions: [],
                 actions: [],
@@ -1349,12 +1393,32 @@
                     managed_content: [],
                 ),
             ),
+            7: (
+                id: 7,
+                text: "Of course. Here is what Innkeeper Mountain Pass is offering.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [
+                    OpenMerchant(
+                        npc_id: "tutorial_innkeeper_town2",
+                    ),
+                ],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [
+                        MerchantOpenNode,
+                    ],
+                ),
+            ),
         },
         speaker_name: Some("Innkeeper"),
         repeatable: true,
         associated_quest: Some(3),
         sdk_metadata: (
-            managed_content: [],
+            managed_content: [
+                MerchantBranchInsertion,
+            ],
         ),
     ),
     (
@@ -2230,6 +2294,18 @@
         },
         speaker_name: Some("Innkeeper"),
         repeatable: true,
+        associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
+    ),
+    (
+        id: 1000,
+        name: "Zhaya Recruitment Dialog",
+        root_node: 1,
+        nodes: {},
+        speaker_name: Some("Zhaya"),
+        repeatable: false,
         associated_quest: None,
         sdk_metadata: (
             managed_content: [],

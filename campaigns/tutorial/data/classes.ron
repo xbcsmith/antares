@@ -70,9 +70,9 @@
             sides: 8,
             bonus: 0,
         ),
-        spell_school: None,
+        spell_school: Some(Sorcerer),
         is_pure_caster: false,
-        spell_stat: None,
+        spell_stat: Some(Intellect),
         special_abilities: [
             "ranged_bonus",
             "precision_shot",
@@ -169,6 +169,32 @@
             "simple_weapon",
             "martial_melee",
             "light_armor",
+        ],
+    ),
+    (
+        id: "monk",
+        name: "Monk",
+        description: "Unarmed Combat Specialist from the Temples of the Astrologers",
+        hp_die: (
+            count: 1,
+            sides: 10,
+            bonus: 0,
+        ),
+        spell_school: None,
+        is_pure_caster: false,
+        spell_stat: None,
+        special_abilities: [
+            "multiple_attacks",
+        ],
+        starting_weapon_id: None,
+        starting_armor_id: None,
+        starting_items: [
+            106,
+        ],
+        proficiencies: [
+            "simple_weapon",
+            "unarmed",
+            "blunt_weapon",
         ],
     ),
 ]

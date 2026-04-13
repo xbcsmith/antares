@@ -8613,7 +8613,7 @@
                 x: 1,
                 y: 16,
             ),
-            facing: Some(South),
+            facing: Some(East),
             dialogue_override: None,
         ),
         (

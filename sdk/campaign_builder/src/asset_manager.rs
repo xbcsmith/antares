@@ -2750,6 +2750,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         manager.scan_references(&CampaignRefs {
@@ -2822,6 +2825,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         manager.scan_references(&CampaignRefs {
@@ -3157,6 +3163,9 @@ mod tests {
                 stock_template: None,
                 service_catalog: None,
                 economy: None,
+                is_trainer: false,
+                training_fee_base: None,
+                training_fee_multiplier: None,
             },
             antares::domain::world::npc::NpcDefinition {
                 id: "tutorial_merchant_town".to_string(),
@@ -3174,6 +3183,9 @@ mod tests {
                 stock_template: None,
                 service_catalog: None,
                 economy: None,
+                is_trainer: false,
+                training_fee_base: None,
+                training_fee_multiplier: None,
             },
             antares::domain::world::npc::NpcDefinition {
                 id: "tutorial_wizard_arcturus_brother".to_string(),
@@ -3191,6 +3203,9 @@ mod tests {
                 stock_template: None,
                 service_catalog: None,
                 economy: None,
+                is_trainer: false,
+                training_fee_base: None,
+                training_fee_multiplier: None,
             },
         ];
 

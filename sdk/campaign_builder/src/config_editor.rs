@@ -26,6 +26,9 @@
 use crate::ui_helpers::{EditorToolbar, ToolbarAction};
 use antares::game::resources::grass_quality_settings::GrassPerformanceLevel;
 use antares::sdk::game_config::{CameraMode, GameConfig, ShadowQuality};
+
+#[cfg(test)]
+use antares::sdk::game_config::LevelingConfig;
 use eframe::egui;
 use std::path::PathBuf;
 
@@ -73,6 +76,8 @@ pub struct ConfigEditorState {
     pub controls_automap_buffer: String,
     /// Edit buffer for spell book key binding
     pub controls_spell_book_buffer: String,
+    /// Edit buffer for character sheet key binding
+    pub controls_character_sheet_buffer: String,
 
     /// Validation errors by field name
     pub validation_errors: std::collections::HashMap<String, String>,
@@ -91,6 +96,24 @@ pub struct ConfigEditorState {
 
     /// Grass performance level setting
     pub grass_performance_level: GrassPerformanceLevel,
+
+    /// Whether the leveling section is expanded
+    pub leveling_expanded: bool,
+
+    /// Level-Up Mode: false = Auto, true = NpcTrainer
+    pub level_up_mode_is_npc: bool,
+
+    /// Edit buffer for base XP
+    pub base_xp_buffer: String,
+
+    /// Edit buffer for XP multiplier
+    pub xp_multiplier_buffer: String,
+
+    /// Edit buffer for training fee base
+    pub training_fee_base_buffer: String,
+
+    /// Edit buffer for training fee multiplier
+    pub training_fee_multiplier_buffer: String,
 }
 
 impl Default for ConfigEditorState {
@@ -112,6 +135,7 @@ impl Default for ConfigEditorState {
             controls_rest_buffer: String::new(),
             controls_automap_buffer: String::new(),
             controls_spell_book_buffer: String::new(),
+            controls_character_sheet_buffer: String::new(),
             validation_errors: std::collections::HashMap::new(),
             capturing_key_for: None,
             last_captured_key: None,
@@ -119,6 +143,12 @@ impl Default for ConfigEditorState {
             last_campaign_dir: None,
             graphics_quality_expanded: false,
             grass_performance_level: GrassPerformanceLevel::Medium,
+            leveling_expanded: false,
+            level_up_mode_is_npc: false,
+            base_xp_buffer: String::new(),
+            xp_multiplier_buffer: String::new(),
+            training_fee_base_buffer: String::new(),
+            training_fee_multiplier_buffer: String::new(),
         }
     }
 }
@@ -279,6 +309,8 @@ impl ConfigEditorState {
                 self.show_controls_section(ui, unsaved_changes);
                 ui.add_space(5.0);
                 self.show_camera_section(ui, unsaved_changes);
+                ui.add_space(5.0);
+                self.show_leveling_section(ui, unsaved_changes);
             });
     }
 
@@ -743,6 +775,17 @@ impl ConfigEditorState {
                 &mut self.capturing_key_for,
             );
 
+            // Character Sheet
+            show_key_binding_with_capture(
+                ui,
+                "Character Sheet",
+                &mut self.controls_character_sheet_buffer,
+                "character_sheet",
+                unsaved_changes,
+                &mut self.validation_errors,
+                &mut self.capturing_key_for,
+            );
+
             ui.add_space(5.0);
         });
 
@@ -933,6 +976,89 @@ impl ConfigEditorState {
         self.camera_expanded = section_open.openness > 0.0;
     }
 
+    /// Render the Leveling Settings collapsible section.
+    ///
+    /// # Arguments
+    ///
+    /// * `ui` - The egui UI context
+    /// * `unsaved_changes` - Set to `true` whenever a field is modified
+    fn show_leveling_section(&mut self, ui: &mut egui::Ui, unsaved_changes: &mut bool) {
+        let section_open = ui.collapsing("🎓 Leveling Settings", |ui| {
+            ui.add_space(5.0);
+
+            // Level-Up Mode
+            ui.horizontal(|ui| {
+                ui.label("Level-Up Mode:");
+                let auto_response = ui.radio_value(&mut self.level_up_mode_is_npc, false, "Auto");
+                let npc_response =
+                    ui.radio_value(&mut self.level_up_mode_is_npc, true, "NPC Trainer");
+                if auto_response.changed() || npc_response.changed() {
+                    self.update_config_from_buffers();
+                    *unsaved_changes = true;
+                }
+            });
+
+            ui.add_space(4.0);
+
+            // Base XP
+            ui.horizontal(|ui| {
+                ui.label("Base XP:");
+                let response = ui.text_edit_singleline(&mut self.base_xp_buffer);
+                if response.changed() {
+                    self.update_config_from_buffers();
+                    *unsaved_changes = true;
+                }
+                response.on_hover_text(
+                    "XP required to reach level 2; subsequent levels scale from this",
+                );
+            });
+
+            // XP Multiplier
+            ui.horizontal(|ui| {
+                ui.label("XP Multiplier:");
+                let response = ui.text_edit_singleline(&mut self.xp_multiplier_buffer);
+                if response.changed() {
+                    self.update_config_from_buffers();
+                    *unsaved_changes = true;
+                }
+                response.on_hover_text("Curve exponent; 1.5 = default, 1.0 = flat, 2.0 = steep");
+            });
+
+            // Training Fee fields — only when NPC Trainer is selected
+            if self.level_up_mode_is_npc {
+                ui.add_space(4.0);
+                ui.separator();
+                ui.label(egui::RichText::new("NPC Trainer Fees").strong());
+                ui.add_space(4.0);
+
+                ui.horizontal(|ui| {
+                    ui.label("Training Fee Base:");
+                    let response = ui.text_edit_singleline(&mut self.training_fee_base_buffer);
+                    if response.changed() {
+                        self.update_config_from_buffers();
+                        *unsaved_changes = true;
+                    }
+                    response.on_hover_text("Gold per level for NPC trainer");
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("Training Fee Multiplier:");
+                    let response =
+                        ui.text_edit_singleline(&mut self.training_fee_multiplier_buffer);
+                    if response.changed() {
+                        self.update_config_from_buffers();
+                        *unsaved_changes = true;
+                    }
+                    response.on_hover_text("Per-level multiplier on top of base fee");
+                });
+            }
+
+            ui.add_space(5.0);
+        });
+
+        self.leveling_expanded = section_open.openness > 0.0;
+    }
+
     /// Load configuration from a file
     ///
     /// # Arguments
@@ -1011,6 +1137,18 @@ impl ConfigEditorState {
         self.controls_rest_buffer = format_key_list(&self.game_config.controls.rest);
         self.controls_automap_buffer = format_key_list(&self.game_config.controls.automap);
         self.controls_spell_book_buffer = format_key_list(&self.game_config.controls.spell_book);
+        self.controls_character_sheet_buffer =
+            format_key_list(&self.game_config.controls.character_sheet);
+        self.level_up_mode_is_npc = self.game_config.leveling.level_up_mode
+            == antares::domain::campaign::LevelUpMode::NpcTrainer;
+        self.base_xp_buffer = self.game_config.leveling.base_xp.to_string();
+        self.xp_multiplier_buffer = self.game_config.leveling.xp_multiplier.to_string();
+        self.training_fee_base_buffer = self.game_config.leveling.training_fee_base.to_string();
+        self.training_fee_multiplier_buffer = self
+            .game_config
+            .leveling
+            .training_fee_multiplier
+            .to_string();
     }
 
     /// Update config from edit buffers
@@ -1027,6 +1165,25 @@ impl ConfigEditorState {
         self.game_config.controls.rest = parse_key_list(&self.controls_rest_buffer);
         self.game_config.controls.automap = parse_key_list(&self.controls_automap_buffer);
         self.game_config.controls.spell_book = parse_key_list(&self.controls_spell_book_buffer);
+        self.game_config.controls.character_sheet =
+            parse_key_list(&self.controls_character_sheet_buffer);
+        self.game_config.leveling.level_up_mode = if self.level_up_mode_is_npc {
+            antares::domain::campaign::LevelUpMode::NpcTrainer
+        } else {
+            antares::domain::campaign::LevelUpMode::Auto
+        };
+        if let Ok(v) = self.base_xp_buffer.trim().parse::<u64>() {
+            self.game_config.leveling.base_xp = v.max(1);
+        }
+        if let Ok(v) = self.xp_multiplier_buffer.trim().parse::<f64>() {
+            self.game_config.leveling.xp_multiplier = v.max(0.1);
+        }
+        if let Ok(v) = self.training_fee_base_buffer.trim().parse::<u32>() {
+            self.game_config.leveling.training_fee_base = v;
+        }
+        if let Ok(v) = self.training_fee_multiplier_buffer.trim().parse::<f32>() {
+            self.game_config.leveling.training_fee_multiplier = v.max(0.01);
+        }
     }
 
     /// Handle key capture events from egui input
@@ -1068,6 +1225,7 @@ impl ConfigEditorState {
                             "rest" => &mut self.controls_rest_buffer,
                             "automap" => &mut self.controls_automap_buffer,
                             "spell_book" => &mut self.controls_spell_book_buffer,
+                            "character_sheet" => &mut self.controls_character_sheet_buffer,
                             _ => return,
                         };
 
@@ -1699,6 +1857,214 @@ mod tests {
         assert_eq!(
             state.game_config.controls.spell_book, original_keys,
             "spell_book binding must survive buffer round-trip"
+        );
+    }
+
+    // ── Leveling buffer tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_leveling_buffers_default_values() {
+        let state = ConfigEditorState::new();
+        // All buffers start empty (populated on first update_edit_buffers call)
+        assert!(state.base_xp_buffer.is_empty());
+        assert!(state.xp_multiplier_buffer.is_empty());
+        assert!(state.training_fee_base_buffer.is_empty());
+        assert!(state.training_fee_multiplier_buffer.is_empty());
+        assert!(!state.level_up_mode_is_npc);
+        assert!(!state.leveling_expanded);
+    }
+
+    #[test]
+    fn test_update_edit_buffers_populates_leveling_fields() {
+        let mut state = ConfigEditorState::new();
+        // Set non-default leveling values on game_config
+        state.game_config.leveling.base_xp = 2000;
+        state.game_config.leveling.xp_multiplier = 2.0;
+        state.game_config.leveling.level_up_mode =
+            antares::domain::campaign::LevelUpMode::NpcTrainer;
+        state.game_config.leveling.training_fee_base = 750;
+        state.game_config.leveling.training_fee_multiplier = 1.5;
+
+        state.update_edit_buffers();
+
+        assert_eq!(state.base_xp_buffer, "2000");
+        assert_eq!(state.xp_multiplier_buffer, "2");
+        assert_eq!(state.training_fee_base_buffer, "750");
+        assert_eq!(state.training_fee_multiplier_buffer, "1.5");
+        assert!(state.level_up_mode_is_npc);
+    }
+
+    #[test]
+    fn test_update_edit_buffers_populates_leveling_auto_mode() {
+        let mut state = ConfigEditorState::new();
+        state.game_config.leveling.level_up_mode = antares::domain::campaign::LevelUpMode::Auto;
+        state.update_edit_buffers();
+        assert!(!state.level_up_mode_is_npc);
+    }
+
+    #[test]
+    fn test_update_config_from_buffers_parses_leveling() {
+        let mut state = ConfigEditorState::new();
+        state.base_xp_buffer = "500".to_string();
+        state.xp_multiplier_buffer = "1.2".to_string();
+        state.training_fee_base_buffer = "300".to_string();
+        state.training_fee_multiplier_buffer = "1.1".to_string();
+        state.level_up_mode_is_npc = false;
+
+        state.update_config_from_buffers();
+
+        assert_eq!(state.game_config.leveling.base_xp, 500);
+        assert!((state.game_config.leveling.xp_multiplier - 1.2).abs() < 1e-9);
+        assert_eq!(state.game_config.leveling.training_fee_base, 300);
+        assert!((state.game_config.leveling.training_fee_multiplier - 1.1).abs() < 1e-6);
+        assert_eq!(
+            state.game_config.leveling.level_up_mode,
+            antares::domain::campaign::LevelUpMode::Auto
+        );
+    }
+
+    #[test]
+    fn test_update_config_from_buffers_clamps_base_xp_min_1() {
+        let mut state = ConfigEditorState::new();
+        // Parsing "0" must be clamped to 1
+        state.base_xp_buffer = "0".to_string();
+        state.update_config_from_buffers();
+        assert_eq!(
+            state.game_config.leveling.base_xp, 1,
+            "base_xp must be clamped to minimum 1"
+        );
+    }
+
+    #[test]
+    fn test_update_config_from_buffers_clamps_xp_multiplier_min() {
+        let mut state = ConfigEditorState::new();
+        state.xp_multiplier_buffer = "0.0".to_string();
+        state.update_config_from_buffers();
+        assert!(
+            (state.game_config.leveling.xp_multiplier - 0.1).abs() < 1e-9,
+            "xp_multiplier must be clamped to minimum 0.1, got {}",
+            state.game_config.leveling.xp_multiplier
+        );
+    }
+
+    #[test]
+    fn test_update_config_from_buffers_clamps_fee_multiplier_min() {
+        let mut state = ConfigEditorState::new();
+        state.training_fee_multiplier_buffer = "0.0".to_string();
+        state.update_config_from_buffers();
+        assert!(
+            (state.game_config.leveling.training_fee_multiplier - 0.01).abs() < 1e-6,
+            "training_fee_multiplier must be clamped to minimum 0.01, got {}",
+            state.game_config.leveling.training_fee_multiplier
+        );
+    }
+
+    #[test]
+    fn test_level_up_mode_npc_round_trip() {
+        let mut state = ConfigEditorState::new();
+        // Start with NpcTrainer mode in game_config
+        state.game_config.leveling.level_up_mode =
+            antares::domain::campaign::LevelUpMode::NpcTrainer;
+        state.update_edit_buffers();
+        assert!(
+            state.level_up_mode_is_npc,
+            "level_up_mode_is_npc must be true for NpcTrainer"
+        );
+
+        // Round-trip back into config
+        state.update_config_from_buffers();
+        assert_eq!(
+            state.game_config.leveling.level_up_mode,
+            antares::domain::campaign::LevelUpMode::NpcTrainer,
+            "NpcTrainer must survive buffer round-trip"
+        );
+    }
+
+    #[test]
+    fn test_level_up_mode_auto_round_trip() {
+        let mut state = ConfigEditorState::new();
+        state.game_config.leveling.level_up_mode = antares::domain::campaign::LevelUpMode::Auto;
+        state.update_edit_buffers();
+        assert!(
+            !state.level_up_mode_is_npc,
+            "level_up_mode_is_npc must be false for Auto"
+        );
+
+        state.update_config_from_buffers();
+        assert_eq!(
+            state.game_config.leveling.level_up_mode,
+            antares::domain::campaign::LevelUpMode::Auto,
+            "Auto must survive buffer round-trip"
+        );
+    }
+
+    #[test]
+    fn test_leveling_buffers_round_trip() {
+        let mut state = ConfigEditorState::new();
+        // Set custom leveling config
+        state.game_config.leveling = LevelingConfig {
+            base_xp: 1500,
+            xp_multiplier: 1.8,
+            level_up_mode: antares::domain::campaign::LevelUpMode::NpcTrainer,
+            training_fee_base: 600,
+            training_fee_multiplier: 1.25,
+        };
+        // Populate buffers from config
+        state.update_edit_buffers();
+        // Parse buffers back into config
+        state.update_config_from_buffers();
+
+        assert_eq!(state.game_config.leveling.base_xp, 1500);
+        assert!((state.game_config.leveling.xp_multiplier - 1.8).abs() < 1e-9);
+        assert_eq!(
+            state.game_config.leveling.level_up_mode,
+            antares::domain::campaign::LevelUpMode::NpcTrainer
+        );
+        assert_eq!(state.game_config.leveling.training_fee_base, 600);
+        assert!(
+            (state.game_config.leveling.training_fee_multiplier - 1.25).abs() < 1e-6,
+            "training_fee_multiplier must survive round-trip"
+        );
+    }
+
+    // ── Character Sheet buffer tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_character_sheet_key_binding_appears_in_update_edit_buffers() {
+        let mut state = ConfigEditorState::new();
+        state.game_config.controls.character_sheet = vec!["P".to_string()];
+        state.update_edit_buffers();
+        assert_eq!(state.controls_character_sheet_buffer, "P");
+    }
+
+    #[test]
+    fn test_character_sheet_key_binding_update_config_from_buffers() {
+        let mut state = ConfigEditorState::new();
+        state.controls_character_sheet_buffer = "P, F6".to_string();
+        state.update_config_from_buffers();
+        assert_eq!(
+            state.game_config.controls.character_sheet,
+            vec!["P".to_string(), "F6".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_character_sheet_buffer_default_is_empty() {
+        let state = ConfigEditorState::default();
+        assert_eq!(state.controls_character_sheet_buffer, "");
+    }
+
+    #[test]
+    fn test_character_sheet_round_trip_buffer_conversion() {
+        let mut state = ConfigEditorState::new();
+        let original_keys = vec!["P".to_string()];
+        state.game_config.controls.character_sheet = original_keys.clone();
+        state.update_edit_buffers();
+        assert_eq!(state.controls_character_sheet_buffer, "P");
+        state.update_config_from_buffers();
+        assert_eq!(
+            state.game_config.controls.character_sheet, original_keys,
+            "character_sheet binding must survive buffer round-trip"
         );
     }
 }

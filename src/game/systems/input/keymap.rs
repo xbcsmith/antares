@@ -42,6 +42,8 @@ pub enum GameAction {
     Cast,
     /// Open the in-game Spell Book management screen.
     OpenSpellBook,
+    /// Open or close the character sheet viewer.
+    CharacterSheet,
 }
 
 /// Key mapping structure for efficient input lookups.
@@ -105,6 +107,11 @@ impl KeyMap {
         insert_action_bindings(&mut bindings, &config.game_log, GameAction::GameLog);
         insert_action_bindings(&mut bindings, &config.cast, GameAction::Cast);
         insert_action_bindings(&mut bindings, &config.spell_book, GameAction::OpenSpellBook);
+        insert_action_bindings(
+            &mut bindings,
+            &config.character_sheet,
+            GameAction::CharacterSheet,
+        );
 
         Self { bindings }
     }
@@ -407,6 +414,31 @@ mod tests {
     }
 
     #[test]
+    fn test_character_sheet_action_default_key() {
+        let config = ControlsConfig::default();
+        let key_map = KeyMap::from_controls_config(&config);
+        assert_eq!(
+            key_map.get_action(bevy::prelude::KeyCode::KeyP),
+            Some(GameAction::CharacterSheet)
+        );
+    }
+
+    #[test]
+    fn test_custom_character_sheet_key() {
+        use crate::sdk::game_config::ControlsConfig;
+        let config = ControlsConfig {
+            character_sheet: vec!["F5".to_string()],
+            ..ControlsConfig::default()
+        };
+        let key_map = KeyMap::from_controls_config(&config);
+        assert_eq!(
+            key_map.get_action(bevy::prelude::KeyCode::F5),
+            Some(GameAction::CharacterSheet)
+        );
+        assert_eq!(key_map.get_action(bevy::prelude::KeyCode::KeyP), None);
+    }
+
+    #[test]
     fn test_open_spell_book_action_default_key() {
         let config = ControlsConfig::default();
         let key_map = KeyMap::from_controls_config(&config);
@@ -496,6 +528,7 @@ mod tests {
             spell_book: vec!["F2".to_string()],
             game_log: vec!["H".to_string()],
             cast: vec!["C".to_string()],
+            character_sheet: vec!["F3".to_string()],
             movement_cooldown: 0.1,
         };
 
@@ -542,6 +575,7 @@ mod tests {
             game_log: vec!["G".to_string()],
             cast: vec!["C".to_string()],
             spell_book: vec!["B".to_string()],
+            character_sheet: vec!["P".to_string()],
             movement_cooldown: 0.2,
         };
 

@@ -2595,6 +2595,9 @@ mod tests {
             stock_template: None,
             service_catalog: None,
             economy: None,
+            is_trainer: false,
+            training_fee_base: None,
+            training_fee_multiplier: None,
         };
 
         db.add_npc(npc.clone()).expect("Failed to add NPC");

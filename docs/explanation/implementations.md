@@ -1,5 +1,1599 @@
 # Implementations
 
+## Audit Gap Fixes — Phase 2 LevelingConfig Bridge + Phase 9 Proficiencies Section (Complete)
+
+### Overview
+
+Two items identified in the post-implementation audit of `level_up_plan.md`
+were addressed:
+
+1. **Phase 2 — deferred deliverable closed**: `GameState::campaign_config` (the
+   `domain::CampaignConfig` that the progression system, combat XP award, and
+   training service read at runtime) was always initialised to
+   `CampaignConfig::default()` in `GameState::new_game`, so `level_up_mode`,
+   `base_xp`, `xp_multiplier`, `training_fee_base`, and `training_fee_multiplier`
+   were always at their default values regardless of what was in `config.ron`.
+   `max_party_level` and `permadeath` were also ignored at start-up.
+
+2. **Phase 9 — spec deviation corrected**: The plan called for a
+   **Proficiencies** section in the character sheet single view (comma-separated
+   list of proficiency IDs granted by class and race). The original
+   implementation rendered "Known Spells" instead. The section has been
+   replaced with the specified Proficiencies content.
+
+### Files Changed
+
+#### `src/application/mod.rs`
+
+- Updated `/// Campaign-level gameplay rules …` doc comment on the
+  `campaign_config` field to document the new loading behaviour.
+- In `GameState::new_game`, before `campaign` is moved into `Self`, extract:
+  - `leveling = campaign.game_config.leveling.clone()` — all five `LevelingConfig` fields
+  - `campaign_permadeath = campaign.config.permadeath`
+  - `max_party_level = (campaign.config.max_level > 0).then_some(u32::from(campaign.config.max_level))`
+- Replaced `campaign_config: CampaignConfig::default()` with a struct literal
+  that copies the five leveling fields from `leveling`, sets `permadeath` and
+  `max_party_level` from campaign metadata, and fills the rest with
+  `..CampaignConfig::default()`.
+- Added 2 integration tests that load `data/test_campaign` via `Campaign::load`:
+  - `test_new_game_propagates_leveling_config_to_campaign_config` — verifies all
+    7 bridged fields; the discriminating assertion is
+    `max_party_level == Some(20)` (default would produce `None`).
+  - `test_new_game_max_party_level_none_when_max_level_zero` — verifies that
+    `max_level == 0` maps to `None` (no cap) rather than `Some(0)`.
+
+#### `src/game/systems/character_sheet_ui.rs`
+
+- Added `use crate::application::resources::GameContent;` and
+  `use crate::sdk::database::ContentDatabase;` imports.
+- Added `content: Option<Res<GameContent>>` parameter to
+  `character_sheet_ui_system`. Because it is `Option<Res<…>>`, minimal Bevy
+  app tests that do not insert `GameContent` continue to compile and pass
+  unchanged (`None` → proficiencies section shows "None").
+- Extracted `content_db: Option<&ContentDatabase>` from the resource and
+  passed it to `render_single_view`.
+- Removed the now-redundant `level_up_mode: &LevelUpMode` parameter from
+  `render_single_view` (it was one of 7 args; adding `content_db` pushed the
+  count to 8, triggering `clippy::too_many_arguments`). Inside
+  `render_single_view` the match now reads `&campaign_config.level_up_mode`
+  directly from the already-present `campaign_config` parameter.
+- Replaced the "Known Spells" section with a **Proficiencies** section:
+  - Collects `class_def.proficiencies` via `db.classes.get_class(&character.class_id)`
+  - Merges `race_def.proficiencies` via `db.races.get_race(&character.race_id)` (deduped)
+  - Sorts alphabetically and renders as a comma-separated label
+  - Shows `"None"` (muted grey) when the content DB is absent or no proficiencies exist
+
+### Design Decisions
+
+- The `LevelingConfig` in `GameConfig` (`config.ron`) and the `CampaignConfig`
+  in the domain layer are kept as **separate structs** — `LevelingConfig` is the
+  SDK/player settings concern; `CampaignConfig` is the game-runtime concern.
+  `new_game` is the single bridge point, which is correct: it runs once at
+  game-start, and the resulting `campaign_config` is serialised into the save
+  file, ensuring the rules stay constant for the lifetime of a playthrough.
+- `max_level == 0` is treated as "no cap" (`None`) rather than "level cap of 0"
+  to prevent a malformed `campaign.ron` from locking all levelling.
+- Removing the redundant `level_up_mode` parameter eliminates duplication
+  (it was always equal to `campaign_config.level_up_mode`) and keeps the
+  function within Clippy's 7-argument limit without introducing a context struct.
+
+### Quality Gates
+
+```text
+cargo fmt --all                                      → clean
+cargo check --all-targets --all-features             → Finished (0 errors)
+cargo clippy --all-targets --all-features -D warnings → Finished (0 warnings)
+cargo nextest run --all-features                     → 4609 passed, 0 failed, 8 skipped
+```
+
+## SDK Dialogue Editor — Preview Panel Resizing Fix
+
+- Updated `sdk/campaign_builder/src/dialogue_editor.rs` so the dialogue flow preview no longer uses a fixed 300px height.
+- The preview now adapts vertically to the window and renders every dialogue node rather than truncating after the first five.
+
+---
+
+## Level-Up Plan — Phase 9: Character Sheet Screen (Complete)
+
+### Overview
+
+Phase 9 delivers a read-only, out-of-combat character stats viewer accessible
+from the exploration HUD. Pressing `P` opens the sheet; `Tab`/`Shift-Tab` or
+`←`/`→` cycles through party members in Single view; `O` toggles between the
+detailed Single panel and the compact Party Overview; `Esc` or pressing `P`
+again closes the screen and restores the prior game mode.
+
+### Files Created
+
+#### `src/application/character_sheet_state.rs`
+
+New application-state module following the `InventoryState` / `SpellBookState`
+box-wrapped previous-mode pattern:
+
+- **`CharacterSheetView`** enum — `Single` (default) / `PartyOverview`.
+- **`CharacterSheetState`** struct — `previous_mode: Box<GameMode>`,
+  `focused_index: usize`, `view: CharacterSheetView`.
+- Public methods: `new`, `get_resume_mode`, `focus_next`, `focus_prev`,
+  `toggle_view`, and `Default` (wraps `Exploration`).
+- 14 unit tests covering all methods including wrap-around navigation and
+  view toggling.
+
+#### `src/game/systems/character_sheet_ui.rs`
+
+New Bevy plugin providing three systems chained in `Update`:
+
+- **`character_sheet_input_system`** — handles Esc (close), Tab/Shift-Tab and
+  Left/Right (cycle character), O (toggle overview) while in
+  `GameMode::CharacterSheet`.
+- **`character_sheet_ui_system`** — renders two egui layouts:
+  - _Single view_: full-width window titled `"{name} — Level {level}
+{race_id} {class_id}"` with header nav buttons, Core Stats table
+    (base/current with amber modifier highlighting), Combat Stats (HP, SP,
+    AC, Spell Level), Experience (with `"✅ Ready to level up!"` in green or
+    `"🎓 Visit a trainer"` in yellow based on `LevelUpMode`), Conditions
+    badge list, Equipment slots, and known Spells.
+  - _Party Overview_: horizontal scroll area with compact per-member cards
+    (portrait placeholder, name, class, level, HP bar, SP bar, `[View]`
+    button).
+- **`character_sheet_cleanup_system`** — documented no-op stub (pure egui;
+  no Bevy entities are spawned).
+- 8 unit tests covering plugin construction, Esc close logic, navigation, view
+  toggle, and open/close round-trip.
+
+### Files Modified
+
+#### `src/application/mod.rs`
+
+- Added `pub mod character_sheet_state;`.
+- Added `GameMode::CharacterSheet(CharacterSheetState)` variant (after
+  `Training`).
+- Updated `close_modal` to handle `CharacterSheet` by calling
+  `cs_state.get_resume_mode()`.
+- Added `enter_character_sheet()` (idempotent; stores previous mode).
+- Added 4 tests: sets mode, stores previous mode, idempotent, close_modal
+  round-trip.
+
+#### `src/game/systems/input/keymap.rs`
+
+- Added `GameAction::CharacterSheet` variant.
+- Wired `config.character_sheet` binding in `KeyMap::from_controls_config`.
+- Added 2 tests: default key `P` maps to `CharacterSheet`, custom binding works.
+
+#### `src/game/systems/input/frame_input.rs`
+
+- Added `character_sheet_toggle: bool` to `FrameInputIntent` (derives
+  `Default` so it zero-initialises automatically).
+- Wired `GameAction::CharacterSheet` via `is_action_just_pressed` in
+  `decode_frame_input`.
+
+#### `src/sdk/game_config.rs`
+
+- Added `character_sheet: Vec<String>` to `ControlsConfig` with
+  `#[serde(default = "default_character_sheet_keys")]` and default `["P"]`.
+- Added validation: `character_sheet` list must not be empty.
+- Added 4 tests: default is `["P"]`, round-trip serialisation, serde default
+  when field absent, validation rejects empty list.
+
+#### `src/game/systems/input/global_toggles.rs`
+
+- Added `character_sheet_toggle` branch (after `spell_book_toggle`): opens
+  from any non-blocking mode, closes when already in `CharacterSheet`,
+  blocked in `Combat`, `Dialogue`, `Training`, `MerchantInventory`.
+- Added `character_sheet_toggle_intent` test helper.
+- Added 7 tests: open from Exploration, close back to Exploration, blocked in
+  Combat/Dialogue/Training, stores previous mode, Esc also closes via
+  `close_modal`.
+
+#### `src/game/systems/mod.rs`
+
+- Added `pub mod character_sheet_ui;`.
+
+#### `src/bin/antares.rs`
+
+- Registered `CharacterSheetPlugin` in `AntaresPlugin::build`.
+
+#### `data/test_campaign/config.ron`
+
+- Added `character_sheet: ["P"]` inside the `ControlsConfig(...)` block so
+  the test fixture deserialises cleanly after validation was tightened.
+
+#### `sdk/campaign_builder/src/config_editor.rs`
+
+- Added `controls_character_sheet_buffer: String` to `ConfigEditorState` and
+  its `Default` impl.
+- Wired in `update_edit_buffers`, `update_config_from_buffers`, and the
+  `handle_key_capture` dispatch (`"character_sheet"` arm).
+- Added `"Character Sheet"` key-binding row in `show_controls_section` after
+  the Spell Book row, using the same `show_key_binding_with_capture` helper.
+- Added 4 tests: buffer populated by `update_edit_buffers`, parsed by
+  `update_config_from_buffers`, default is empty, round-trip.
+
+### Design Decisions
+
+- **Read-only only** — no stat edits permitted; the sheet is a display-only
+  overlay that never mutates `GameState`.
+- **Pure-egui UI** — no Bevy entities are spawned, so the cleanup system is
+  a no-op stub retained for structural consistency.
+- **XP readiness message** uses `game_state.campaign_config.level_up_mode`
+  combined with `check_level_up_with_db` so it accurately reflects both Auto
+  and NpcTrainer campaigns.
+- **`character_sheet_toggle` is blocked** in `Combat`, `Dialogue`,
+  `Training`, and `MerchantInventory` to avoid disrupting active sessions.
+
+### Quality Gates
+
+All four gates passed with zero errors and zero warnings:
+
+```text
+cargo fmt --all          → clean
+cargo check --all-targets --all-features  → Finished (0 errors)
+cargo clippy --all-targets --all-features -- -D warnings  → Finished (0 warnings)
+cargo nextest run --all-features  → 4607 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Level-Up Plan — Phase 8: SDK — Config Editor `LevelUpMode` and XP Formula Settings (Complete)
+
+### Overview
+
+Phase 8 extends the SDK Campaign Builder's Config Editor with a new collapsible
+"🎓 Leveling Settings" section that exposes the five `LevelingConfig` fields
+(`level_up_mode`, `base_xp`, `xp_multiplier`, `training_fee_base`,
+`training_fee_multiplier`) to campaign authors through the visual editor UI.
+
+### Files Changed
+
+#### `src/sdk/game_config.rs`
+
+- Added `use crate::domain::campaign::LevelUpMode;` import.
+- Added `LevelingConfig` struct with five fields, serde `default` helpers, a
+  hand-written `Default` impl, and a `validate()` method that enforces:
+  - `base_xp >= 1`
+  - `xp_multiplier >= 0.1`
+  - `training_fee_multiplier >= 0.01`
+- Added `#[serde(default)] pub leveling: LevelingConfig` field to `GameConfig`.
+- Updated `GameConfig::validate()` to call `self.leveling.validate()`.
+- Added 10 new unit tests covering defaults, validation edge-cases, RON
+  round-trip, missing-field defaulting, and `GameConfig` propagation.
+
+#### `src/bin/antares.rs`
+
+- Added `leveling: Default::default()` to the `GameConfig` struct literal in the
+  test helper so the explicit initializer compiles after the new field was added.
+
+#### `sdk/campaign_builder/src/config_editor.rs`
+
+- Added `LevelingConfig` to the `antares::sdk::game_config` import.
+- Added six new fields to `ConfigEditorState`:
+  `leveling_expanded`, `level_up_mode_is_npc`, `base_xp_buffer`,
+  `xp_multiplier_buffer`, `training_fee_base_buffer`,
+  `training_fee_multiplier_buffer`.
+- Initialised all six fields to their zero/empty defaults in the `Default` impl.
+- Extended `update_edit_buffers` to populate all six fields from
+  `self.game_config.leveling.*`.
+- Extended `update_config_from_buffers` to parse and clamp all five numeric
+  fields back into `self.game_config.leveling.*` with correct minimum clamps.
+- Added `show_leveling_section` method that renders a collapsible
+  "🎓 Leveling Settings" panel containing:
+  - Radio buttons for `Auto` / `NPC Trainer` mode.
+  - Text fields for `Base XP` and `XP Multiplier` (always visible).
+  - Text fields for `Training Fee Base` and `Training Fee Multiplier`
+    (conditionally visible only when `level_up_mode_is_npc == true`).
+- Added `self.show_leveling_section(ui, unsaved_changes)` call at the end of
+  the vertical `ScrollArea` in `show`, after the camera section.
+- Added 9 new tests:
+  `test_leveling_buffers_default_values`,
+  `test_update_edit_buffers_populates_leveling_fields`,
+  `test_update_edit_buffers_populates_leveling_auto_mode`,
+  `test_update_config_from_buffers_parses_leveling`,
+  `test_update_config_from_buffers_clamps_base_xp_min_1`,
+  `test_update_config_from_buffers_clamps_xp_multiplier_min`,
+  `test_update_config_from_buffers_clamps_fee_multiplier_min`,
+  `test_level_up_mode_npc_round_trip`,
+  `test_level_up_mode_auto_round_trip`,
+  `test_leveling_buffers_round_trip`.
+
+#### `data/test_campaign/config.ron`
+
+- Added `leveling: LevelingConfig(...)` block with all five fields at their
+  default values so the test fixture deserialises cleanly with the new field.
+
+### Design Decisions
+
+- `LevelingConfig` is a **new, purpose-built config struct** rather than
+  embedding a reference to `CampaignConfig`. This keeps the SDK config layer
+  thin: it only carries the subset of settings that are relevant to the
+  `config.ron` file, keeping concerns separated from the domain
+  `CampaignConfig` which carries many additional runtime fields.
+- The `training_fee_base` and `training_fee_multiplier` rows are
+  **conditionally rendered** (`if self.level_up_mode_is_npc`) to avoid
+  confusing campaign authors with irrelevant fields when `Auto` mode is
+  selected.
+- Buffer parsing uses `trim().parse()` so that accidental leading/trailing
+  whitespace in the text field never causes a silent no-op.
+- Clamping happens inside `update_config_from_buffers` so the buffer may
+  temporarily show an out-of-range value while the author is typing, but the
+  stored config is always valid once any change is committed.
+
+### Quality Gates
+
+All four gates passed with zero errors and zero warnings:
+
+```text
+cargo fmt --all          → clean
+cargo check --all-targets --all-features  → Finished (0 errors)
+cargo clippy --all-targets --all-features -- -D warnings  → Finished (0 warnings)
+cargo nextest run --all-features  → 4569 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Level-Up Plan — Phase 7: SDK — NPC Editor Trainer Support (Complete)
+
+### Overview
+
+Phase 7 extends the SDK Campaign Builder's NPC editor with full trainer-role
+support, mirroring the complete `is_merchant` / merchant-dialogue lifecycle
+pattern for trainers. An NPC may be both a merchant and a trainer
+simultaneously; the two roles are fully independent.
+
+### What Changed
+
+#### 1. `sdk/campaign_builder/src/dialogue_editor.rs`
+
+Added two new public methods to `DialogueEditorState` that mirror the merchant
+equivalents:
+
+- **`ensure_trainer_dialogue_for_npc(&mut self, npc: &mut NpcDefinition) -> Result<MerchantDialogueUpdate, String>`**
+  — Creates a new `standard_trainer_template` when the trainer has no assigned
+  dialogue, or augments an existing dialogue tree with
+  `ensure_standard_trainer_branch` when one is already assigned. Returns a
+  `MerchantDialogueUpdate` variant describing what was done (same enum reused
+  for both roles).
+
+- **`remove_trainer_dialogue_for_npc(&mut self, npc: &NpcDefinition) -> Result<MerchantDialogueUpdate, String>`**
+  — Non-destructively removes SDK-managed trainer nodes and choices from the
+  assigned dialogue tree via `remove_sdk_managed_trainer_content`. Unrelated
+  authored dialogue content is preserved; the dialogue asset itself is retained.
+
+#### 2. `sdk/campaign_builder/src/npc_editor/mod.rs`
+
+**New enum — `TrainerDialogueValidationState`**
+
+```rust
+pub enum TrainerDialogueValidationState {
+    NotTrainer,
+    Valid,
+    Missing,
+    AssignedDialogueMissing,
+    StaleTrainerContent,
+}
+```
+
+Mirrors `MerchantDialogueValidationState` for the trainer role.
+
+**`NpcEditBuffer` — three new fields**
+
+| Field                     | Type     | Purpose                                   |
+| ------------------------- | -------- | ----------------------------------------- |
+| `is_trainer`              | `bool`   | Trainer role toggle                       |
+| `training_fee_base`       | `String` | Text buffer; empty = use campaign default |
+| `training_fee_multiplier` | `String` | Text buffer; empty = use campaign default |
+
+**`NpcEditorState` — new filter field**
+
+`pub filter_trainers: bool` added alongside `filter_merchants`,
+`filter_innkeepers`, and `filter_quest_givers`.
+
+**`Default for NpcEditorState`** — initialises `filter_trainers: false`.
+
+**`show()` filter bar**
+
+Added `🎓 Trainers` selectable-label filter chip after `📜 Quest Givers`.
+The `🔄 Clear Filters` button now also resets `filter_trainers`.
+
+**`show_list_view` — trainer badge**
+
+Pre-computes `TrainerDialogueValidationState` for every visible NPC (alongside
+the existing merchant pre-computation) to avoid borrow conflicts. Renders:
+
+- `🎓 Trainer` badge (purple) when `is_trainer == true`, colour shifts to red
+  for `Missing` / `AssignedDialogueMissing` states.
+- `Stale Trainer` badge (amber) when a non-trainer NPC's dialogue still
+  contains SDK-managed trainer content.
+
+**`show_edit_view` — Faction & Roles section**
+
+New trainer sub-section added below the merchant block and above the innkeeper
+checkbox:
+
+- `ui.checkbox(…, "🎓 Is Trainer")` toggle.
+- Checking: calls `auto_apply_trainer_dialogue_to_edit_buffer()` — creates or
+  repairs a trainer dialogue automatically.
+- Unchecking: calls `remove_trainer_dialogue_from_edit_buffer()` — removes only
+  SDK-managed trainer content.
+- When `is_trainer` is `true`:
+  - Colour-coded status label (green = valid, red = missing).
+  - `Training Fee Base (gold per level)` text field.
+  - `Training Fee Multiplier` text field.
+  - `Create trainer dialogue` button.
+  - `Repair trainer dialogue` button.
+  - `Remove trainer branch` button.
+  - SDK workflow help text.
+- Save button also applies `auto_apply_trainer_dialogue_to_edit_buffer` /
+  `remove_trainer_dialogue_from_edit_buffer` in the same way the save path
+  does for merchants.
+
+**New private methods on `NpcEditorState`**
+
+| Method                                            | Description                                                                             |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `trainer_dialogue_validation_for_definition(npc)` | Returns `TrainerDialogueValidationState` for a stored `NpcDefinition`                   |
+| `trainer_dialogue_status_for_buffer()`            | Human-readable status string for the current edit buffer                                |
+| `create_or_repair_trainer_dialogue_for_buffer()`  | Creates / augments trainer dialogue; returns guidance string when `is_trainer == false` |
+| `remove_trainer_dialogue_from_edit_buffer()`      | Non-destructively removes SDK-managed trainer content                                   |
+| `auto_apply_trainer_dialogue_to_edit_buffer()`    | Auto-creates/repairs trainer dialogue on toggle-on                                      |
+
+**`matches_filters`** — trainer filter gate added.
+
+**`start_edit_npc`** — populates `is_trainer`, `training_fee_base`, and
+`training_fee_multiplier` from the stored `NpcDefinition`.
+
+**`build_npc_from_edit_buffer`** — parses `training_fee_base` and
+`training_fee_multiplier` strings to `Option<u32>` / `Option<f32>`; propagates
+`is_trainer`.
+
+**`save_npc`** — same parse-and-propagate logic as `build_npc_from_edit_buffer`.
+
+### New Tests (10 tests in `npc_editor::tests`)
+
+| Test                                                                          | What it covers                                                                                                    |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `test_is_trainer_toggle_auto_applies_training_dialogue`                       | Enabling `is_trainer` creates a standard trainer dialogue and assigns its ID                                      |
+| `test_create_trainer_dialogue_returns_guidance_when_not_trainer`              | Returns non-empty guidance message (not silent no-op) when `is_trainer == false`                                  |
+| `test_create_trainer_dialogue_generates_open_training_action`                 | Generated tree contains `OpenTraining` action; root has ≥ 2 choices                                               |
+| `test_build_npc_from_edit_buffer_roundtrips_trainer_fields`                   | `is_trainer`, `training_fee_base` (300), `training_fee_multiplier` (1.5) survive the buffer→definition round-trip |
+| `test_build_npc_from_edit_buffer_empty_fee_fields_yield_none`                 | Empty fee strings produce `None` (campaign defaults)                                                              |
+| `test_filter_trainers_hides_non_trainer_npcs`                                 | `filter_trainers == false` passes both; `true` hides non-trainers                                                 |
+| `test_save_npc_persists_trainer_fields`                                       | `save_npc()` writes `is_trainer`, fee base (500), and multiplier (2.0) to stored NPC                              |
+| `test_start_edit_npc_populates_trainer_fields`                                | `start_edit_npc` fills buffer with `is_trainer`, `"250"`, `"1.25"`                                                |
+| `test_remove_trainer_dialogue_from_generated_template_leaves_dialogue_intact` | Dialogue asset remains after trainer content removal; `contains_open_training_for_npc` returns false              |
+| `test_create_trainer_dialogue_id_is_unique`                                   | Two trainer NPCs receive distinct dialogue IDs; each targets the correct NPC                                      |
+| `test_merchant_and_trainer_are_independent`                                   | An NPC may be both merchant and trainer; the two dialogue-creation operations produce separate trees              |
+
+### Architecture Compliance
+
+- [ ] `NpcEditBuffer` trainer fields: `is_trainer: bool`, `training_fee_base: String`, `training_fee_multiplier: String`
+- [ ] `TrainerDialogueValidationState` enum mirrors `MerchantDialogueValidationState`
+- [ ] `filter_trainers` field in `NpcEditorState`; chip in filter bar; `Clear Filters` resets it
+- [ ] `🎓` badge in list view; SDK-managed stale badge for non-trainer NPCs
+- [ ] Trainer checkbox + fee fields + dialogue buttons in edit view
+- [ ] All five trainer logic methods implemented
+- [ ] `build_npc_from_edit_buffer` and `save_npc` propagate trainer fields
+- [ ] `start_edit_npc` populates trainer fields
+- [ ] `DialogueEditorState::ensure_trainer_dialogue_for_npc` and `remove_trainer_dialogue_for_npc` added
+- [ ] `is_merchant` and `is_trainer` are fully independent
+- [ ] RON format used for all data files
+- [ ] SPDX headers present on all `.rs` files
+- [ ] No test references `campaigns/tutorial`
+
+### Quality Gates
+
+```
+cargo fmt --all         → no output (all files formatted)
+cargo check             → Finished (0 errors)
+cargo clippy -D warnings → Finished (0 warnings)
+cargo nextest run       → 4557 passed, 8 skipped (workspace)
+                          2315 passed (campaign_builder package)
+```
+
+---
+
+## Levels Editor — Display Column Layout Fix (Complete)
+
+### Overview
+
+Fixed a layout bug in `show_levels_preview` inside
+`sdk/campaign_builder/src/levels_editor.rs` where all 200 level rows were
+rendered on a single horizontal line instead of a proper vertical table.
+
+### Root Cause
+
+The `ui.end_row()` call was placed **inside** a `push_id` closure that wrapped
+all three cells of each row:
+
+```rust
+// BROKEN — end_row() fires on the child Ui, not the grid's Ui
+ui.push_id(i, |ui| {
+    ui.label(format!("{}", i + 1));
+    ui.label(format!("{}", xp));
+    ui.label(format!("{}", delta));
+    ui.end_row();   // ← child scope; grid never advances its row pointer
+});
+```
+
+In egui's `Grid`, `end_row()` must be called on the grid's own `Ui`. Calling it
+on a child `Ui` created by `push_id` is silently ignored for row-advancement
+purposes, so every cell for all 200 levels accumulated on row 0, producing a
+single very wide horizontal line. Headers appeared to "not line up" because the
+header row ended correctly while every data row did not.
+
+### What Changed
+
+**`sdk/campaign_builder/src/levels_editor.rs` — `show_levels_preview`**
+
+- Removed `push_id` wrapping from all three cells + `end_row` of each row.
+- Added `push_id` around **only** the XP Required cell (col 1), which wraps an
+  `egui::Frame` styled with `extreme_bg_color` fill, `Margin::symmetric(4, 2)`
+  inner padding, and `CornerRadius::same(2)` rounding — matching the
+  `DragValue` box appearance from the edit view.
+- Moved `end_row()` **outside** the `push_id` closure, so it fires on the
+  grid's `Ui` and correctly advances to the next row.
+- Added the subtitle description label:
+  `"thresholds[0] = Level 1 (always 0). Each value is the total cumulative XP required."`
+- Changed `min_col_width` from `70.0` → `60.0` and added `.spacing([16.0, 4.0])`
+  so columns are easier to read without wrapping.
+
+### Pattern Reference
+
+This now matches the working pattern used in `show_edit_view`'s threshold table
+(lines ~1060–1105), where `push_id` wraps only the single `DragValue` cell and
+`end_row()` is always called at the grid level.
+
+### Quality Gates
+
+```
+cargo fmt         → clean
+cargo check       → Finished (0 errors)
+cargo clippy      → Finished (0 warnings)
+cargo nextest run (campaign_builder) → 2332 passed, 0 failed
+```
+
+---
+
+## Level-Up Plan — Phase 6: SDK Levels Editor Tab (Complete)
+
+### Overview
+
+Implemented Phase 6 of the character leveling system as specified in
+`docs/explanation/level_up_plan.md`. This phase delivers a full two-column
+SDK Campaign Builder editor tab for creating and managing `levels.ron` files
+(per-class XP threshold tables). The implementation follows all SDK rules from
+`sdk/AGENTS.md` and the standard editor pattern established by
+`stock_templates_editor.rs`.
+
+Also fixed pre-existing Phase 4 regressions in the SDK test suite — all
+`NpcDefinition { … }` struct literals in `npc_editor/mod.rs`,
+`asset_manager.rs`, `campaign_io_tests.rs`, and `ron_serialization_tests.rs`
+were updated to include the `is_trainer`, `training_fee_base`, and
+`training_fee_multiplier` fields that Phase 4 added to the domain struct.
+
+### What Changed
+
+#### 1. `sdk/campaign_builder/src/levels_editor.rs` (new file)
+
+Full two-column Levels Editor.
+
+**Types:**
+
+- `LevelsEditorError` — `thiserror`-based error type (`Io`, `Parse`,
+  `Serialization`).
+- `LevelsEditorMode` — `List` / `Add` / `Edit` (default `List`).
+- `FillFlatModalState` — ephemeral state for the "Fill Flat" dialog (delta
+  buffer string).
+- `FillStepModalState` — ephemeral state for the "Fill Step" dialog (base,
+  step, breakpoint buffer strings).
+- `LevelDatabaseFile` — internal serde wrapper matching the on-disk
+  `(entries: […])` format consumed by the game engine's `LevelDatabase`
+  loader.
+- `LevelsEditorState` — top-level state struct with full `Serialize` /
+  `Deserialize` and `#[serde(skip)]` annotations on transient fields.
+
+**Methods:**
+
+- `new()` / `reset_for_new_campaign()` — lifecycle management following Rule 13.
+- `show(ui, available_classes, campaign_dir, levels_file, base_xp,
+xp_multiplier) -> bool` — main entry point with auto-load-on-first-show
+  guard.
+- `fill_formula(base_xp, xp_multiplier)` — fills 200 thresholds using
+  `base_xp × (level-1)^xp_multiplier`.
+- `fill_flat(delta)` — fills 200 thresholds as `i × delta` (cumulative flat).
+- `fill_step(base, step, breakpoint)` — fills 200 thresholds step-wise; delta
+  starts at `base` and increases by `step` every `breakpoint` transitions.
+- `load_from_file(path)` / `save_to_file(path)` — RON I/O with `loaded_from_file`
+  guard.
+
+**UI structure:**
+
+- List view: `TwoColumnLayout` (Rule 9) with `show_standard_list_item` rows
+  (Rule 15), `push_id` on every loop iteration (Rule 1), `id_salt` on every
+  `ScrollArea` (Rule 2), `horizontal_wrapped` toolbar (Rule 12), deferred
+  mutations (Rule 10).
+- Edit view: `autocomplete_class_selector` for the class ID field (Rule 14);
+  scrollable 200-row threshold table with `DragValue` + live Delta column;
+  `FillFormula`, `FillFlat…`, `FillStep…` buttons; floating `egui::Window`
+  modals for Flat / Step fill dialogs; `horizontal_wrapped` Save/Cancel row.
+- Preview panel: read-only levels table shown in the right column of the list
+  view, with a proper Level / XP / Delta grid and auto-shrinking scroll area.
+
+**Tests (21 tests):**
+
+- `test_levels_editor_state_default` — empty list, `needs_initial_load = true`
+- `test_fill_formula_level_1_is_zero`, `test_fill_formula_level_2`,
+  `test_fill_formula_200_rows`, `test_fill_formula_is_non_decreasing`
+- `test_fill_flat_delta_5000_levels_1_4`, `test_fill_flat_200_rows`
+- `test_fill_step_base_1000_step_500_breakpoint_10`,
+  `test_fill_step_200_rows`,
+  `test_fill_step_breakpoint_1_every_level_is_its_own_section`
+- `test_load_from_file_round_trip`, `test_load_from_file_missing_returns_error`,
+  `test_round_trip_multiple_classes`
+- `test_reset_for_new_campaign_clears_data`
+- `test_add_entry_populates_200_rows`
+- `test_validate_edit_buffer_empty_class_id_returns_error`,
+  `test_validate_edit_buffer_duplicate_id_in_add_mode_returns_error`,
+  `test_validate_edit_buffer_valid_returns_entry`
+- `test_next_duplicate_class_id_basic`,
+  `test_next_duplicate_class_id_increments_suffix`
+- `test_loaded_from_file_flag_lifecycle`
+
+#### 2. `sdk/campaign_builder/src/editor_state.rs`
+
+- `CampaignData`: added `pub levels: Vec<antares::domain::ClassLevelThresholds>`.
+- `EditorRegistry`: added `pub levels_editor_state: levels_editor::LevelsEditorState`
+  after `classes_editor_state`.
+- `EditorRegistry::default()`: initialised with `LevelsEditorState::new()`.
+
+#### 3. `sdk/campaign_builder/src/lib.rs`
+
+- `pub mod levels_editor;` added to module list (alphabetical order).
+- `CampaignMetadata`: added `#[serde(default = "default_levels_file")] pub
+levels_file: String` after `furniture_file`.
+- `fn default_levels_file()` added returning `"data/levels.ron"`.
+- `CampaignMetadata::default()`: set `levels_file: "data/levels.ron"`.
+- `EditorTab`: added `Levels` between `Classes` and `Races`.
+- `EditorTab::name()`: added `Levels => "Levels"` arm.
+- `tabs` array in `update()`: `EditorTab::Levels` inserted between `Classes`
+  and `Races`.
+- Central panel `match`: added `EditorTab::Levels` arm that clones the
+  class list, calls `levels_editor_state.show(…)`, and syncs
+  `campaign_data.levels` + `unsaved_changes` on change.
+
+#### 4. `sdk/campaign_builder/src/campaign_editor.rs`
+
+- `CampaignMetadataEditBuffer`: added `pub levels_file: String`.
+- `from_metadata`: copies `m.levels_file`.
+- `apply_to`: writes `dest.levels_file`.
+- Files section grid: added "Levels File:" row with `TextEdit` + Browse button
+  (identical pattern to other data-file rows).
+
+#### 5. `sdk/campaign_builder/src/campaign_io.rs`
+
+- `pub fn load_levels(&mut self)` — follows the Rule 13 standard load pattern:
+  `path.exists()` guard, logs via `self.logger`, syncs
+  `campaign_data.levels` from editor state, clears
+  `levels_editor_state.needs_initial_load` on success.
+- `do_new_campaign`: calls `levels_editor_state.reset_for_new_campaign()` and
+  `campaign_data.levels.clear()`.
+- `do_save_campaign`: saves `levels.ron` guarded by `loaded_from_file ||
+has_unsaved_changes` (same pattern as stock templates, prevents empty-vec
+  clobber).
+- `do_open_campaign`: calls `reset_for_new_campaign()` + `load_levels()` after
+  opening a campaign file.
+
+#### 6. Pre-existing Phase 4 fixes (NpcDefinition missing fields)
+
+Added `is_trainer: false, training_fee_base: None, training_fee_multiplier:
+None` to all `NpcDefinition { … }` struct literals in:
+
+- `sdk/campaign_builder/src/npc_editor/mod.rs` (22 sites)
+- `sdk/campaign_builder/src/asset_manager.rs` (5 sites)
+- `sdk/campaign_builder/tests/campaign_io_tests.rs` (9 sites)
+- `sdk/campaign_builder/tests/ron_serialization_tests.rs` (added
+  `levels_file: "data/levels.ron".to_string()` to `CampaignMetadata` literal)
+
+### Architecture Compliance
+
+- [x] Data structures match `architecture.md` — `ClassLevelThresholds` used
+      exactly as defined in `src/domain/levels.rs`
+- [x] Module placement: new file lives under `sdk/campaign_builder/src/`
+- [x] RON format used for `levels.ron` — `(entries: […])` wrapper compatible
+      with `LevelDatabase::load_from_string`
+- [x] No hardcoded magic numbers — 200-level constant documented via named
+      range literals; formula parameters flow in from `CampaignConfig`
+- [x] `serde(default)` on `CampaignMetadata::levels_file` — existing
+      `campaign.ron` files without the field continue to deserialise correctly
+- [x] All SDK egui rules followed: `push_id` in loops, `id_salt` on all
+      `ScrollArea`s, `from_id_salt` on `ComboBox`, `TwoColumnLayout` for
+      list/detail, `autocomplete_class_selector` for the reference ID field,
+      `horizontal_wrapped` on toolbar and action rows
+
+### Quality Gates
+
+```text
+✅ cargo fmt         — no output (all files formatted)
+✅ cargo check       — Finished (0 errors) — workspace root
+✅ cargo check       — Finished (0 errors) — sdk/campaign_builder
+✅ cargo clippy      — Finished (0 warnings) — workspace root
+✅ cargo clippy      — Finished (0 warnings) — sdk/campaign_builder
+✅ cargo nextest run — 4557 passed, 8 skipped — workspace root
+✅ cargo nextest run — 1733 passed, 0 skipped — sdk/campaign_builder
+```
+
+---
+
+## Modal ESC behavior, centralized modal close helper, and lock prompt navigation fix
+
+### Overview
+
+Fixed two related exploration/UI problems:
+
+- the **Locked Object** prompt now supports complete keyboard focus navigation
+  in addition to direct number-key character selection and mouse clicks
+- pressing `Esc` in modal screens now **closes that modal** instead of opening
+  the game menu
+
+This aligns the runtime behavior with the intended exploration flow:
+
+- `Esc` closes lock prompts, dialogue, inventory-style screens, and similar
+  modal overlays
+- the game menu only opens from top-level modes where opening the menu is
+  appropriate, instead of interrupting dialogue or inventory management
+
+### What Changed
+
+#### 1. `src/game/systems/lock_ui.rs`
+
+Expanded lock prompt navigation state so the lock window has an explicit notion
+of focus, not just selected character index.
+
+Added a new focus enum for the prompt:
+
+- character list
+- pick lock button
+- bash button
+- cancel button
+
+Updated the lock prompt UI so:
+
+- `Tab` cycles keyboard focus across the character list and action buttons
+- `Enter` / `Space` activates the currently focused action button
+- number keys still select a character immediately
+- arrow keys still move through the character list when the character list has focus
+- mouse clicks update both the selection and the focused region
+- `Esc` closes only the lock prompt and resets lock navigation state
+
+This fixes the broken state where you could select a character with `1`–`6`
+but could not move focus to an action button and had to escape out of the
+prompt.
+
+#### 2. `src/application/mod.rs`
+
+Added a small shared `GameState::close_modal()` helper to centralize modal-close
+behavior.
+
+The helper returns `true` when the current mode is a closeable modal and
+restores the correct prior mode, otherwise it returns `false`.
+
+Centralized close behavior now covers:
+
+- `Automap` → `Exploration`
+- `Inventory` → stored resume mode
+- `MerchantInventory` → stored resume mode
+- `ContainerInventory` → stored resume mode
+- `SpellBook` → stored resume mode
+- `SpellCasting` → stored resume mode
+- `Dialogue` → `Exploration`
+- `TempleService` → `Exploration`
+- `RestMenu` → `Exploration`
+- `GameLog` → `Exploration`
+
+This removes duplicated per-mode close logic from input handling and gives the
+application layer one canonical definition of “close the current modal”.
+
+#### 3. `src/game/systems/input/global_toggles.rs`
+
+Refactored global menu-key behavior to use `GameState::close_modal()` first,
+instead of embedding the full per-mode close logic directly in the input
+system.
+
+Updated menu-key handling so:
+
+- modal modes are closed through the shared application-layer helper
+- only `Exploration` and `Menu` use the true menu toggle path
+- other blocked/special modes are ignored instead of opening the menu
+
+This ensures the game menu appears only in appropriate top-level contexts and
+does not hijack `Esc` from modal gameplay screens, while also keeping the
+close rules centralized in one place.
+
+### Behavior After Fix
+
+- In the **Locked Object** window, you can:
+
+  - select a character with number keys
+  - press `Tab` to move focus to **Pick Lock**, **Bash**, or **Cancel**
+  - press `Enter` / `Space` to activate the focused button
+  - click characters and buttons with the mouse
+  - press `Esc` to close only the lock prompt
+
+- In other modal screens:
+
+  - `Esc` in dialogue closes dialogue
+  - `Esc` in inventory closes inventory
+  - `Esc` in merchant inventory closes merchant trading
+  - `Esc` in container inventory closes the container screen
+  - `Esc` in spell book closes the spell book
+  - `Esc` in temple service closes the temple screen
+
+- The game menu now opens only from the normal top-level menu contexts instead
+  of appearing from dialogue/inventory/modal overlays.
+
+### Test Coverage
+
+Added and updated tests covering:
+
+- `GameState::close_modal()` returns `false` in `Exploration`
+- `GameState::close_modal()` correctly closes inventory/dialogue/merchant/container/spell book/spell casting/automap/temple/rest menu/game log modes
+- closing inventory with `Esc` returns to exploration instead of opening menu
+- closing dialogue with `Esc` returns to exploration instead of opening menu
+- closing spell book with `Esc` returns to exploration instead of opening menu
+- existing merchant/container/temple/game-log escape behavior remains modal-close behavior
+
+## Dropped-item pickup interaction fix
+
+### Overview
+
+Fixed exploration dropped-item pickup so ground items are collected only through
+explicit interaction. Dropped items are no longer auto-picked up just by
+stepping onto their tile. The intended player flow is now:
+
+- press `E` / the configured interact key while standing on or adjacent to a
+  dropped item
+- or click to interact using the exploration mouse-interact path
+- the item is added to party inventory
+- the ground item is removed from the map
+- the dropped-item visual is despawned
+- item-collection quest progress is emitted
+
+### What Changed
+
+#### 1. `src/game/systems/input/exploration_interact.rs`
+
+Added explicit adjacent dropped-item handling to the exploration interaction
+pipeline.
+
+A new helper, `try_pickup_adjacent_dropped_item`, now:
+
+- checks the current tile first, then adjacent tiles
+- finds the first dropped item in FIFO order on the first matching tile
+- calls the existing domain `pickup_item()` transaction
+- adds a player-visible exploration log message on success or failure
+- emits `ItemPickedUpEvent` so the world visual is removed
+- emits `QuestProgressEvent::ItemCollected` so collect-item objectives advance
+
+The interaction ordering was updated so dropped-item pickup is attempted during
+the normal exploration interact flow, before the generic adjacent world-event
+fallback.
+
+#### 2. `src/game/systems/input.rs`
+
+Wired the exploration interaction system to pass through the optional pickup
+side-effect message writers used by the new dropped-item pickup helper:
+
+- dropped-item visual removal event writer
+- quest item-collection progress event writer
+
+This makes keyboard interact (`E`) and mouse-based interact use the same
+explicit pickup path.
+
+#### 3. `src/game/systems/events.rs`
+
+Removed the old auto-pickup-on-step path from the event system.
+
+This means:
+
+- stepping onto a dropped-item tile no longer emits a pickup request
+- the event plugin no longer owns a separate dropped-item auto-pickup message flow
+- dropped-item collection behavior is now centralized in explicit exploration
+  interaction
+
+### Behavior After Fix
+
+- A dropped sword on Map 1 can be picked up from an adjacent tile.
+- Pressing the interact key picks it up instead of merely logging proximity.
+- Mouse interaction follows the same pickup path.
+- Walking onto a dropped-item tile does not auto-pick it up.
+- The item is added to inventory and removed from `Map::dropped_items`.
+- The world marker/mesh is removed through the existing pickup event flow.
+- Collect-item quests can react to ground pickup correctly.
+
+### Test Coverage
+
+Added focused tests for the new exploration pickup helper covering:
+
+- successful adjacent pickup adds the item to inventory and removes it from the ground
+- current-tile pickup is preferred before adjacent-tile pickup
+- no dropped item nearby returns `false`
+- full inventory logs a visible failure and leaves the item on the ground
+
+Updated event-system behavior notes/tests so explicit-only dropped-item pickup
+is the documented interaction model.
+
+## Phase 4: NPC Trainer — Domain Layer (Complete)
+
+### Overview
+
+Implemented Phase 4 of the character leveling system as specified in
+`docs/explanation/level_up_plan.md`. This phase extends `NpcDefinition` with
+trainer fields, adds trainer-aware dialogue content (mirroring the existing
+merchant pattern), introduces `GameMode::Training(TrainingState)`, and provides
+the authoritative `perform_training_service` application-layer function that
+validates preconditions, deducts gold, and applies the level-up atomically.
+
+### What Changed
+
+#### 1. `src/domain/world/npc.rs` — Trainer NPC support
+
+**Three new `#[serde(default)]` fields on `NpcDefinition`:**
+
+| Field                     | Type          | Default | Description                                            |
+| ------------------------- | ------------- | ------- | ------------------------------------------------------ |
+| `is_trainer`              | `bool`        | `false` | NPC offers training level-up services                  |
+| `training_fee_base`       | `Option<u32>` | `None`  | Per-NPC override of campaign `training_fee_base`       |
+| `training_fee_multiplier` | `Option<f32>` | `None`  | Per-NPC override of campaign `training_fee_multiplier` |
+
+**New constructor** `NpcDefinition::trainer(id, name, portrait_id, fee_base)` —
+sets `is_trainer: true` and `training_fee_base: Some(fee_base)`.
+
+**New method** `training_fee_for_level(level, campaign_config) -> u32` — computes
+`floor(base * multiplier * level)`, using NPC overrides when present and falling
+back to `CampaignConfig` defaults otherwise.
+
+All existing constructors (`new`, `merchant`, `priest`, `innkeeper`) updated to
+include the three new fields defaulting to `false`/`None`. All doc-comment
+struct literals and test struct literals across the codebase updated to include
+the new fields.
+
+#### 2. `src/domain/dialogue.rs` — Trainer dialogue content
+
+**`DialogueAction::OpenTraining { npc_id }`** — new variant that transitions
+the game into `GameMode::Training` for the specified NPC.
+
+**`DialogueSdkManagedContent`** — four new trainer variants mirroring merchants:
+`TrainerTemplateTree`, `TrainerBranchInsertion`, `TrainerChoice`,
+`TrainerOpenNode`. Each has `is_trainer_marker() -> bool`.
+
+**`DialogueSdkMetadata::has_trainer_content()`** — predicate checking for any
+trainer marker.
+
+**`DialogueTree` trainer methods** (mirror the merchant equivalents):
+
+| Method                                 | Description                                             |
+| -------------------------------------- | ------------------------------------------------------- |
+| `contains_open_training_for_npc(id)`   | Searches nodes/choices for `OpenTraining` action        |
+| `has_sdk_managed_trainer_content()`    | Tree-level or node-level trainer marker check           |
+| `standard_trainer_template(id,npc,nm)` | Builds a two-node greeting → training dialogue template |
+| `ensure_standard_trainer_branch(…)`    | Idempotent branch insertion into existing dialogue      |
+| `remove_sdk_managed_trainer_content()` | Strips SDK-managed trainer nodes/choices/metadata       |
+
+**`DialogueChoice`** — `sdk_managed_trainer_choice(target)` constructor and
+`is_sdk_managed_trainer_choice()` predicate.
+
+**`DialogueNode::has_sdk_managed_trainer_content()`** — node-level check.
+
+#### 3. `src/application/mod.rs` — `GameMode::Training`
+
+**`TrainingState` struct:**
+
+| Field                     | Type             | Description                                |
+| ------------------------- | ---------------- | ------------------------------------------ |
+| `npc_id`                  | `String`         | Trainer NPC ID                             |
+| `eligible_member_indices` | `Vec<usize>`     | Party member indices eligible for level-up |
+| `selected_member_index`   | `Option<usize>`  | Currently selected member in the UI        |
+| `status_message`          | `Option<String>` | Last status/error message                  |
+
+`TrainingState::new(npc_id)` and `TrainingState::clear()` methods provided.
+
+**`GameMode::Training(TrainingState)`** variant added. `close_modal()` returns
+to `Exploration` when in this mode.
+
+#### 4. `src/application/resources.rs` — Training service
+
+**`TrainingError` enum** with four variants: `NotATrainer`, `CharacterNotEligible`,
+`InsufficientGold { need, have }`, `LevelUpFailed(ProgressionError)`.
+
+**`perform_training_service(game_state, npc_id, party_index, level_db, rng, db)`**
+— 6-parameter function (uses `db.classes` and `db.spells` internally):
+
+1. Looks up NPC → verifies `is_trainer`.
+2. Validates party member alive + XP eligible via `check_level_up_with_db`.
+3. Computes fee via `training_fee_for_level`.
+4. Checks `party.gold >= fee`.
+5. Deducts gold, calls `level_up_and_grant_spells_with_level_db`.
+6. Returns `Ok((hp_gained, spells_granted))`.
+
+#### 5. `src/game/systems/dialogue.rs` — `OpenTraining` handler
+
+`execute_action` arm for `DialogueAction::OpenTraining { npc_id }`:
+
+1. Guards that `campaign_config.level_up_mode == NpcTrainer`.
+2. Validates NPC exists and `is_trainer`.
+3. Builds `eligible_member_indices` from living members passing `check_level_up_with_db`.
+4. Transitions to `GameMode::Training(state)`.
+
+#### 6. Cross-file struct literal fixes
+
+14 struct literals across 6 files (`blueprint.rs`, `creature_binding.rs`,
+`types.rs`, `events.rs`, `database.rs`, `campaign_integration_tests.rs`)
+updated to include `is_trainer: false, training_fee_base: None,
+training_fee_multiplier: None`.
+
+### Test Coverage
+
+21 new tests across 4 modules:
+
+| Module                        | New Tests | What they cover                                                               |
+| ----------------------------- | --------- | ----------------------------------------------------------------------------- |
+| `domain::world::npc`          | 8         | Trainer constructor, fee calculation, RON backward compat, round-trip         |
+| `domain::dialogue`            | 10        | Trainer template, branch insertion/idempotency, removal, SDK markers          |
+| `application::resources`      | 5         | Training success, insufficient gold, not eligible, not a trainer, level-5 fee |
+| `domain::campaign` (existing) | 0         | Existing `training_fee_*` tests already cover config round-trip               |
+
+### Success Criteria Verification
+
+- ✅ `perform_training_service` correctly levels up the character, deducts gold, and grants spells (`test_perform_training_service_success`)
+- ✅ `GameMode::Training` is entered when a dialogue node fires `OpenTraining` (handler in `execute_action`)
+- ✅ All existing dialogue tests pass unchanged (4541 total, 0 failures)
+- ✅ `cargo nextest run` green — 4541 / 4541 passed
+
+### Design Decisions
+
+- **6-parameter `perform_training_service`** instead of the 8-parameter signature
+  in the plan: `class_db` and `spell_db` are extracted from `db: &ContentDatabase`
+  internally, keeping the function under clippy's 7-argument limit without
+  needing a `#[allow(clippy::too_many_arguments)]` suppression.
+- **`check_level_up_with_db(member, None)`** is used in the dialogue handler
+  because the `LevelDatabase` resource is not available in `execute_action`'s
+  context. The formula fallback is acceptable for the pre-filter; the actual
+  training service re-checks with the full `level_db` if provided.
+- **Trainer dialogue mirrors merchant dialogue exactly** — same SDK metadata
+  pattern, same idempotent insert/remove cycle, same template structure — to
+  maintain consistency and support future SDK editor work in Phases 6–7.
+
+---
+
+## Phase 3: Auto Level-Up Game System (Complete)
+
+### Overview
+
+Implemented Phase 3 of the character leveling system as specified in
+`docs/explanation/level_up_plan.md`. This phase wires the domain-layer
+progression functions into a Bevy ECS system (`auto_level_up_system`) and a
+`ProgressionPlugin` that runs every `Update` frame, automatically advancing
+party members to higher levels the moment their accumulated XP crosses the
+threshold — when the campaign is configured with `LevelUpMode::Auto`.
+
+### What Changed
+
+#### 1. `src/game/systems/progression.rs` — new file
+
+**`auto_level_up_system`** — Bevy system with four parameters:
+
+| Parameter      | Type                            | Purpose                                            |
+| -------------- | ------------------------------- | -------------------------------------------------- |
+| `global_state` | `ResMut<GlobalState>`           | Party members and `CampaignConfig`                 |
+| `content`      | `Option<Res<GameContent>>`      | Class DB (HP dice) and Spell DB                    |
+| `game_data`    | `Option<Res<GameDataResource>>` | Optional `LevelDatabase` for per-class XP tables   |
+| `game_log`     | `Option<ResMut<GameLog>>`       | Level-up messages written as `LogCategory::System` |
+
+System logic (in order):
+
+1. Returns early when `campaign_config.level_up_mode != LevelUpMode::Auto`.
+2. Returns early while in `GameMode::Combat(_)` — level-ups deferred to the next non-combat frame.
+3. Returns early when `GameContent` is absent (no class DB available for HP rolls).
+4. Extracts the optional `LevelDatabase` from `GameDataResource` (lifetime tied to the resource, no intermediate allocation).
+5. Copies `campaign_config.max_party_level` (`Option<u32>` is `Copy`).
+6. Iterates every party member; skips any whose `is_alive()` returns `false`.
+7. For each living member, loops calling `check_level_up_with_db` until the check fails, applying `level_up_and_grant_spells_with_level_db` each iteration (multi-level-in-one-pass support).
+8. Breaks the inner loop on `ProgressionError::MaxLevelReached` (campaign or global cap hit) or unexpected errors (logged via `tracing::warn!`).
+9. Collects log message strings and flushes them into `GameLog` after the mutable borrow of the party ends.
+
+Log entry format: `"{name} advanced to level {n}! (+{hp} HP[, {k} new spell(s)])"`.
+
+**`ProgressionPlugin`** — registers `auto_level_up_system` in the `Update`
+schedule, ordered after `consume_game_log_events` so that event-driven log
+entries from the same frame are committed before progression messages are
+appended.
+
+#### 2. `src/game/systems/mod.rs`
+
+Added `pub mod progression`.
+
+#### 3. `src/bin/antares.rs`
+
+Registered `ProgressionPlugin` in `AntaresPlugin::build`:
+
+```antares/src/bin/antares.rs#L297-299
+// Auto level-up progression system
+app.add_plugins(antares::game::systems::progression::ProgressionPlugin);
+```
+
+### Design Decisions
+
+- **`game_data` is a 4th system parameter** (beyond the three listed in the
+  plan) because `check_level_up_with_db` requires a `Option<&LevelDatabase>`
+  reference and that data lives in `GameDataResource`, not `GameContent`.
+  Without it the `max_party_level` success criterion cannot be satisfied.
+- **Borrow split**: `level_db` borrows from `game_data` (a separate Bevy
+  resource from `global_state`), so the mutable party borrow and the
+  immutable level-DB borrow do not conflict.
+- **Log entry batching**: strings are collected into a `Vec<String>` during
+  the party iteration and flushed afterwards, avoiding a simultaneous mutable
+  borrow of `game_log` and `global_state`.
+- **`level_up_and_grant_spells_with_level_db`** is used (not the simpler
+  `level_up_and_grant_spells`) so the `max_party_level` cap and the optional
+  `LevelDatabase` are both respected in one call.
+
+### Test Coverage
+
+9 unit tests in `game::systems::progression::tests`:
+
+| Test                                               | What it verifies                                                              |
+| -------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `test_auto_level_up_advances_level_and_writes_log` | Knight with 1 000 XP reaches level 2; log entry written                       |
+| `test_auto_level_up_noop_in_npc_trainer_mode`      | System is a no-op when `level_up_mode == NpcTrainer`                          |
+| `test_auto_level_up_skipped_during_combat`         | No level-up fires while `GameMode::Combat` is active                          |
+| `test_auto_level_up_skips_dead_characters`         | Dead characters (DEAD condition) are not levelled                             |
+| `test_auto_level_up_multi_level_pass`              | 6 000 XP advances a level-1 knight to level ≥ 3 in one frame; ≥ 2 log entries |
+| `test_auto_level_up_respects_max_party_level`      | `max_party_level: Some(3)` hard-caps level at 3 even with 1 000 000 XP        |
+| `test_auto_level_up_noop_without_content`          | No panic and no level change when `GameContent` resource is absent            |
+| `test_auto_level_up_uses_level_db_when_present`    | Custom table requiring 1 200 XP blocks level-up at 1 000 XP                   |
+| `test_auto_level_up_uses_level_db_threshold_met`   | Same custom table allows level-up at exactly 1 200 XP                         |
+| `test_progression_plugin_builds_without_panic`     | Plugin construction in a bare `App` does not panic                            |
+
+### Success Criteria Verification
+
+- ✅ A character that earns enough XP in combat levels up before the next exploration frame completes (`test_auto_level_up_advances_level_and_writes_log`)
+- ✅ Level-up message appears in the game log (same test, `LogCategory::System` entry contains "advanced to level 2")
+- ✅ Auto-level does not fire during combat (`test_auto_level_up_skipped_during_combat`)
+- ✅ Auto-level does not fire in `NpcTrainer` mode (`test_auto_level_up_noop_in_npc_trainer_mode`)
+- ✅ `max_party_level` cap is respected (`test_auto_level_up_respects_max_party_level`)
+- ✅ Dead characters are skipped (`test_auto_level_up_skips_dead_characters`)
+- ✅ Multi-level advance in one pass works (`test_auto_level_up_multi_level_pass`)
+
+---
+
+## Phase 2: Campaign Config — XP Curve and Level-Up Mode (Complete)
+
+### Overview
+
+Implemented Phase 2 of the character leveling system as specified in
+`docs/explanation/level_up_plan.md`. This phase wires per-campaign XP curve
+parameters and the `LevelUpMode` switch into `CampaignConfig` and propagates
+the `experience_rate` multiplier to all XP award sites (combat victory and
+quest rewards).
+
+### What Changed
+
+#### 1. `src/domain/campaign.rs` — `LevelUpMode` enum + new `CampaignConfig` fields
+
+**New `LevelUpMode` enum:**
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum LevelUpMode {
+    #[default]
+    Auto,       // Characters level up automatically when XP threshold is reached
+    NpcTrainer, // Characters must visit and pay a trainer NPC to apply levels
+}
+```
+
+**Five new fields added to `CampaignConfig`** (all `#[serde(default)]` for
+backward-compatible deserialisation of existing files):
+
+| Field                     | Type          | Default | Description                                     |
+| ------------------------- | ------------- | ------- | ----------------------------------------------- |
+| `base_xp`                 | `u64`         | 1000    | Base XP for level-2; drives the XP formula      |
+| `xp_multiplier`           | `f64`         | 1.5     | Exponent in `base_xp * (level-1)^xp_multiplier` |
+| `level_up_mode`           | `LevelUpMode` | `Auto`  | Automatic vs. trainer-gated levelling           |
+| `training_fee_base`       | `u32`         | 500     | Gold per level charged by trainer NPCs          |
+| `training_fee_multiplier` | `f32`         | 1.0     | Per-level fee scaling factor for trainer NPCs   |
+
+`CampaignConfig::default()` and all serde helper functions updated to match.
+
+#### 2. `src/domain/progression.rs` — Parametric formula + updated signatures
+
+**New public constants** (callers that have no config pass these as defaults):
+
+```rust
+pub const DEFAULT_BASE_XP: u64 = 1000;
+pub const DEFAULT_XP_MULTIPLIER: f64 = 1.5;
+```
+
+Private aliases `BASE_XP` and `XP_MULTIPLIER` preserved for internal use.
+
+**New private function `experience_for_level_parametric`:**
+
+```rust
+fn experience_for_level_parametric(level: u32, base_xp: u64, xp_multiplier: f64) -> u64
+```
+
+`experience_for_level` now delegates to this helper with the module defaults,
+keeping the public signature unchanged.
+
+**Updated `experience_for_level_class` signature (5 parameters):**
+
+```rust
+pub fn experience_for_level_class(
+    level: u32,
+    class_id: &str,
+    db: Option<&LevelDatabase>,
+    base_xp: u64,
+    xp_multiplier: f64,
+) -> u64
+```
+
+Callers without a campaign config pass `DEFAULT_BASE_XP, DEFAULT_XP_MULTIPLIER`.
+The internal callers `check_level_up_with_db` and `level_up_with_level_db`
+both updated to pass those constants.
+
+**New convenience wrapper `experience_for_level_with_config`:**
+
+```rust
+pub fn experience_for_level_with_config(
+    level: u32,
+    class_id: &str,
+    config: &CampaignConfig,
+    level_db: Option<&LevelDatabase>,
+) -> u64
+```
+
+This is the preferred call site for any system that has access to a
+`CampaignConfig`. It reads `config.base_xp` and `config.xp_multiplier` and
+delegates to `experience_for_level_class`.
+
+#### 3. `src/game/systems/combat.rs` — `experience_rate` applied in victory
+
+In `process_combat_victory_with_rng`, each per-member XP share is now scaled
+by `global_state.0.campaign_config.experience_rate` before being awarded:
+
+```rust
+let experience_rate = global_state.0.campaign_config.experience_rate;
+let scaled_award = (award as f64 * experience_rate as f64).round() as u64;
+```
+
+The scaled amount is also stored in `xp_awarded` so the `VictorySummary`
+reflects the actual XP received. `total_xp` in the summary is the raw
+pre-scaling monster XP (unchanged).
+
+#### 4. `src/application/quests.rs` — `experience_rate` applied in quest rewards
+
+In `apply_rewards`, `QuestReward::Experience(amount)` is now multiplied by
+`game_state.campaign_config.experience_rate`:
+
+```rust
+let rate = game_state.campaign_config.experience_rate;
+let scaled = (*amount as f64 * rate as f64).round() as u64;
+```
+
+No new parameters were needed — `apply_rewards` already receives `game_state`
+and `game_state.campaign_config` is accessible directly.
+
+#### 5. `data/test_campaign/config.ron` — N/A (architecture note)
+
+The `config.ron` file in each campaign directory stores `GameConfig` (engine
+settings: graphics, audio, controls). The domain `CampaignConfig` (gameplay
+rules) lives in `GameState.campaign_config` and is currently initialised from
+`CampaignConfig::default()` in `GameState::new_game`. Loading it from a
+dedicated file is deferred to a future phase. All new fields use
+`#[serde(default)]` so any future RON loading will be backward-compatible with
+files that predate these fields.
+
+### Test Coverage
+
+#### `src/domain/campaign.rs` — 8 new tests
+
+| Test                                                  | What it verifies                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `test_level_up_mode_default_is_auto`                  | `LevelUpMode::default()` == `Auto`                                             |
+| `test_level_up_mode_serialization_round_trip`         | Both `Auto` and `NpcTrainer` survive RON round-trip                            |
+| `test_training_fee_fields_round_trip`                 | `training_fee_base` and `training_fee_multiplier` survive RON round-trip       |
+| `test_base_xp_and_multiplier_round_trip`              | Fields survive RON; level-5 formula produces 8000 with `base_xp=500, mult=2.0` |
+| `test_campaign_config_new_fields_default_when_absent` | Old RON without new fields still deserialises (serde(default) works)           |
+| `test_campaign_config_new_fields_explicit_values`     | Full RON with all new fields reads back correctly                              |
+| `test_campaign_config_default` (updated)              | Default assertions extended to cover all five new fields                       |
+
+#### `src/domain/progression.rs` — 5 new tests
+
+| Test                                                            | What it verifies                                     |
+| --------------------------------------------------------------- | ---------------------------------------------------- |
+| `test_experience_for_level_with_config_default_matches_formula` | Default config produces identical results to formula |
+| `test_experience_for_level_with_config_custom_base_xp`          | `base_xp=500, mult=2.0` → level-2=500, level-5=8000  |
+| `test_experience_for_level_with_config_prefers_db_over_formula` | DB entry overrides the parametric formula            |
+| `test_experience_for_level_with_config_level_1_always_zero`     | Level-1 always returns 0 regardless of config        |
+| `test_experience_for_level_parametric_matches_known_values`     | Raw parametric values at levels 1, 2, 3, 5           |
+
+#### `src/game/systems/combat.rs` — 2 new tests
+
+| Test                                         | What it verifies                                              |
+| -------------------------------------------- | ------------------------------------------------------------- |
+| `test_victory_xp_doubled_by_experience_rate` | `experience_rate=2.0` doubles each member's XP share (50→100) |
+| `test_victory_xp_halved_by_experience_rate`  | `experience_rate=0.5` halves each member's XP share (50→25)   |
+
+#### `src/application/quests.rs` — 3 new tests
+
+| Test                                                     | What it verifies                                 |
+| -------------------------------------------------------- | ------------------------------------------------ |
+| `test_quest_experience_reward_scaled_by_experience_rate` | `experience_rate=2.0` doubles quest XP (100→200) |
+| `test_quest_experience_reward_halved_by_experience_rate` | `experience_rate=0.5` halves quest XP (100→50)   |
+| `test_quest_experience_reward_default_rate_unchanged`    | Default rate 1.0 leaves quest XP unmodified      |
+
+### Deliverables Checklist
+
+- [x] `src/domain/campaign.rs` — `LevelUpMode` enum, five new `CampaignConfig` fields
+- [x] `src/domain/progression.rs` — `experience_for_level_with_config` wrapper,
+      updated `experience_for_level_class` signature, `experience_for_level_parametric`
+      private helper, `DEFAULT_BASE_XP` / `DEFAULT_XP_MULTIPLIER` public constants
+- [x] `src/game/systems/combat.rs` — `experience_rate` applied in XP award loop
+- [x] `src/application/quests.rs` — `experience_rate` applied in `apply_rewards`
+- [x] `data/test_campaign/config.ron` — `leveling: LevelingConfig(...)` block
+      already present (added in Phase 8). The bridge from `LevelingConfig` →
+      `GameState::campaign_config` was implemented in the Audit Gap Fix above:
+      `GameState::new_game` now populates `campaign_config` from
+      `campaign.game_config.leveling` and `campaign.config` metadata.
+
+### Success Criteria Verification
+
+- ✅ `experience_rate = 0.5` halves post-combat XP (`test_victory_xp_halved_by_experience_rate`)
+- ✅ `experience_rate = 2.0` doubles post-combat XP (`test_victory_xp_doubled_by_experience_rate`)
+- ✅ `experience_rate = 2.0` doubles quest XP (`test_quest_experience_reward_scaled_by_experience_rate`)
+- ✅ `LevelUpMode::Auto` is the default (`test_level_up_mode_default_is_auto`)
+- ✅ All new `CampaignConfig` fields use `serde(default)` — old files parse without errors
+- ✅ `base_xp=500, xp_multiplier=2.0` → level-5 threshold = 8000
+- ✅ All 4492 tests pass (4476 pre-existing + 16 new, 8 skipped)
+
+### Quality Gates
+
+```
+cargo fmt --all          → clean (no output)
+cargo check              → Finished, 0 errors
+cargo clippy -D warnings → Finished, 0 warnings
+cargo nextest run        → 4492 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Phase 5: NPC Trainer — Game UI System (Complete)
+
+### Overview
+
+Implemented Phase 5 of the character leveling system as specified in
+`docs/explanation/level_up_plan.md`. This phase delivers the egui-based
+`GameMode::Training` screen that lets players spend gold at a trainer NPC to
+advance eligible party members to the next level. The system follows the
+`temple_ui.rs` pattern exactly: a plugin registers four systems in a chained
+`Update` schedule, with pure-logic helpers kept fully testable outside Bevy.
+
+### What Changed
+
+#### 1. `src/game/systems/training_ui.rs` — new file
+
+**`TrainingUiRoot` component** — marker attached to any Bevy entity spawned as
+part of the training UI. `training_cleanup_system` despawns entities carrying
+this component when the game is no longer in `Training` mode.
+
+**Three message types** (analogues of the temple events):
+
+| Message                | Direction         | Purpose                                            |
+| ---------------------- | ----------------- | -------------------------------------------------- |
+| `TrainCharacter`       | UI/input → action | Train the party member at `party_index`            |
+| `ExitTraining`         | UI/input → action | Leave the training session (→ Exploration)         |
+| `SelectTrainingMember` | UI/input → select | Change the highlighted member; `usize::MAX` clears |
+
+**`TrainingNavState` resource** — keyboard navigation state (focused list
+index + Leave-button focus flag). `Default` initialises both fields to
+`None`/`false`.
+
+**`eligible_members(training_state, party) -> Vec<(usize, &Character)>`** —
+pure helper that resolves `TrainingState::eligible_member_indices` to
+`(party_index, &Character)` tuples. Out-of-bounds indices are silently
+filtered so the UI never panics regardless of stale state.
+
+**Private UI helpers:**
+
+| Helper                       | Responsibility                                                                                |
+| ---------------------------- | --------------------------------------------------------------------------------------------- |
+| `render_training_header`     | Heading, flavour quote, party gold                                                            |
+| `render_eligible_member_row` | Per-member frame: name, class, level progression, XP / threshold, fee, Select + Train buttons |
+| `render_training_footer`     | Status message, Leave button, keyboard instructions                                           |
+
+**Five Bevy systems** registered in order:
+
+| System                      | Responsibility                                                                    |
+| --------------------------- | --------------------------------------------------------------------------------- |
+| `training_input_system`     | ESC → ExitTraining; ↑↓ cycles list; Tab toggles Leave focus; Enter/Space trains   |
+| `training_selection_system` | Applies `SelectTrainingMember` events to `TrainingState::selected_member_index`   |
+| `training_ui_system`        | Renders the egui `CentralPanel`; no-op outside `Training` mode                    |
+| `training_selection_system` | Second pass — processes UI-generated selections in the same frame                 |
+| `training_action_system`    | Calls `perform_training_service` on `TrainCharacter`; sets mode on `ExitTraining` |
+| `training_cleanup_system`   | Resets `TrainingNavState` and despawns `TrainingUiRoot` entities on mode exit     |
+
+**`TrainingPlugin`** — registers all messages, the nav resource, and the
+six-system chain in `Update`.
+
+#### 2. `src/game/systems/mod.rs`
+
+Added `pub mod training_ui`.
+
+#### 3. `src/bin/antares.rs`
+
+Registered `TrainingPlugin` in `AntaresPlugin::build` after `ProgressionPlugin`:
+
+```antares/src/bin/antares.rs#L300-303
+// NPC trainer level-up UI
+app.add_plugins(antares::game::systems::training_ui::TrainingPlugin);
+```
+
+### Design Decisions
+
+- **Temple UI as direct template** — `training_ui.rs` mirrors `temple_ui.rs`
+  structurally (plugin → events → nav resource → pure helper → private
+  helpers → systems → tests) so the codebase stays internally consistent and
+  reviewers already familiar with the temple flow can read this one immediately.
+- **Per-row XP threshold and fee** — both values are computed fresh each frame
+  inside the scroll-area loop from `experience_for_level_with_config` and
+  `NpcDefinition::training_fee_for_level`. This means the displayed values
+  stay correct after a level-up without requiring a separate invalidation step.
+- **`level_db` borrow pattern** — `game_data: Option<Res<GameDataResource>>`
+  is a distinct Bevy resource from `global_state`, so the borrow
+  `game_data.as_deref().and_then(|gd| gd.data().levels.as_ref())` never
+  conflicts with the mutable party borrow inside `perform_training_service`.
+  This reuses the exact same split established in `progression.rs`.
+- **`selected_member_index` cleared on success** — after a successful training
+  call the selection is reset to `None` so the player must explicitly re-select
+  a member before training again, preventing accidental double-spends.
+- **`training_cleanup_system` is a no-op in practice** — the training UI is
+  fully egui-based (no Bevy entity spawning), so the query over `TrainingUiRoot`
+  always yields zero results. The system still provides the correct structural
+  pattern and will correctly clean up any entities a future enhancement might spawn.
+- **`#[allow(clippy::too_many_arguments)]`** on `render_eligible_member_row` —
+  the function takes 8 parameters (threshold, fee, can_afford in addition to
+  the standard UI + index + member + highlight arguments) to keep the row
+  renderer pure and testable. A parameter struct would add verbosity without
+  improving clarity at the single call site.
+
+### Test Coverage
+
+16 unit tests in `game::systems::training_ui::tests`:
+
+| Test                                                   | What it verifies                                                                     |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `test_eligible_members_empty_list`                     | Empty `eligible_member_indices` → empty result, no panic                             |
+| `test_eligible_members_out_of_bounds_filtered`         | Out-of-bounds index silently dropped                                                 |
+| `test_eligible_members_resolves_correct_party_members` | Correct `(party_index, &Character)` tuples returned                                  |
+| `test_eligible_members_preserves_order`                | Order of `eligible_member_indices` is preserved                                      |
+| `test_eligible_members_mixed_valid_invalid`            | Only valid indices survive a mixed list                                              |
+| `test_training_nav_state_default`                      | `focused_index = None`, `focus_on_leave = false`                                     |
+| `test_training_plugin_builds`                          | Plugin registers without panicking                                                   |
+| `test_training_mode_no_eligible_members_no_panic`      | Empty list returns empty result (plan requirement 1)                                 |
+| `test_exit_training_transitions_to_exploration`        | `ExitTraining` event → `GameMode::Exploration` (plan requirement 2)                  |
+| `test_successful_training_updates_status_message`      | Level advances; `status_message` contains "advanced to level 2" (plan requirement 3) |
+| `test_training_system_noop_when_not_in_training_mode`  | No state change in Exploration mode (plan requirement 4)                             |
+| `test_exit_training_noop_when_not_in_training_mode`    | `ExitTraining` outside Training mode is silently ignored                             |
+| `test_selection_updates_selected_member_index`         | `SelectTrainingMember` updates `selected_member_index`                               |
+| `test_selection_max_clears_selected_member_index`      | `usize::MAX` clears the selection                                                    |
+| `test_training_insufficient_gold_shows_error`          | Insufficient gold → level unchanged; status mentions "insufficient"                  |
+| `test_training_plugin_registered_events_accessible`    | Nav resource accessible after plugin registration                                    |
+
+### Success Criteria Verification
+
+- ✅ Training screen renders correctly for all eligible party members
+  (egui `CentralPanel` iterates `eligible_member_indices` via `eligible_members`)
+- ✅ Gold cost per member is accurate
+  (`npc.training_fee_for_level(member.level, campaign_config)` called per row)
+- ✅ Character advances on "Train", gold is deducted, updated level visible
+  (`test_successful_training_updates_status_message`)
+- ✅ Ineligible characters (wrong XP or dead) are not listed
+  (`eligible_member_indices` is pre-populated by the dialogue system using
+  `check_level_up_with_db`; `eligible_members` filters out-of-bounds indices
+  defensively)
+- ✅ Pressing Escape transitions back to Exploration
+  (`test_exit_training_transitions_to_exploration`)
+- ✅ System is a complete no-op when mode is not Training
+  (`test_training_system_noop_when_not_in_training_mode`)
+
+---
+
+## Phase 1: Domain — `LevelDatabase` and `levels.ron` (Complete)
+
+### Overview
+
+Implemented the foundational domain layer for the character leveling system
+as specified in `docs/explanation/level_up_plan.md` Phase 1. This introduces
+explicit per-class XP threshold tables (`LevelDatabase`) loaded from
+`levels.ron`, plus database-aware variants of the core progression functions.
+All existing progression tests continue to pass unchanged.
+
+### What Changed
+
+#### 1. New file — `src/domain/levels.rs`
+
+Introduces three public types:
+
+| Type                   | Role                                                                                                        |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `LevelError`           | `thiserror` enum with `LoadError`, `ParseError`, `ClassNotFound`                                            |
+| `ClassLevelThresholds` | Per-class XP vector; `xp_for_level(level)` with cap-behaviour extrapolation                                 |
+| `LevelDatabase`        | Struct-wrapper loaded from `(entries: [...])` RON; internal `HashMap` index rebuilt after every deserialise |
+
+Key design decisions:
+
+- `#[serde(skip)]` on the internal `HashMap` index — the index is rebuilt by
+  `rebuild_index()` after every `load_from_string` / `load_from_file` call so
+  RON round-trips are lossless.
+- Cap behaviour: when a character's level exceeds the explicit table, the last
+  delta (difference between the final two entries) is repeated indefinitely —
+  levels never become impossible to reach.
+- `threshold_for_class` returns `Option<u64>` — `None` means "no entry for
+  this class; caller must use formula fallback". This is a deliberate
+  nullability contract, not an error.
+
+#### 2. `src/domain/mod.rs`
+
+Added `pub mod levels;` and re-exported `ClassLevelThresholds`, `LevelDatabase`,
+`LevelError` from the domain root.
+
+#### 3. `src/domain/progression.rs` — new public functions
+
+| Function                                                                | Description                                                                                                         |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `experience_for_level_class(level, class_id, db)`                       | Consults `LevelDatabase` first; falls back to `experience_for_level` when absent or class not found                 |
+| `check_level_up_with_db(character, db)`                                 | Uses `experience_for_level_class`; `check_level_up` is now a thin wrapper calling `check_level_up_with_db(c, None)` |
+| `level_up_with_level_db(character, class_db, level_db, max_level, rng)` | Canonical level-up implementation; enforces `max_level.unwrap_or(MAX_LEVEL)`; `level_up_from_db` delegates to this  |
+| `level_up_and_grant_spells_with_level_db(...)`                          | Full pipeline variant accepting `level_db` and `max_level`; `level_up_and_grant_spells` delegates to this           |
+
+Backward compatibility: all existing callers of `check_level_up`,
+`level_up_from_db`, and `level_up_and_grant_spells` are unaffected — those
+functions are now thin wrappers passing `None` for the new parameters.
+
+`max_party_level` enforcement lives in `level_up_with_level_db`:
+`character.level >= max_level.unwrap_or(MAX_LEVEL)` → `MaxLevelReached`.
+
+#### 4. `data/test_campaign/data/levels.ron`
+
+New test fixture with two classes whose thresholds deliberately differ from
+the formula so tests can assert the database is actually consulted:
+
+- `"knight"` level 2 → 1200 XP (formula gives 1000)
+- `"sorcerer"` level 2 → 800 XP (formula gives 1000)
+
+#### 5. `src/domain/campaign_loader.rs`
+
+- Added `pub levels: Option<LevelDatabase>` to `GameData`
+- `GameData::new()` initialises `levels: None`
+- `CampaignLoader::load_game_data` calls the new `load_levels()` helper
+- `load_levels()` looks for `campaign/data/levels.ron`; absent file → `Ok(None)`
+  (formula fallback); present file → parsed and returned as `Some(LevelDatabase)`
+
+### Test Coverage
+
+| Module                    | New Tests                                                                                                                                                                                 |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `domain::levels`          | 24 unit tests covering boundary conditions, empty tables, cap behaviour, round-trip serialisation, fixture load, error display                                                            |
+| `domain::progression`     | 18 new tests covering `experience_for_level_class`, `check_level_up_with_db`, `level_up_with_level_db` (incl. `max_party_level` enforcement and explicit thresholds), fixture integration |
+| `domain::campaign_loader` | 2 new integration tests: missing `levels.ron` returns `None`; fixture campaign loads knight/sorcerer entries correctly                                                                    |
+
+### Success Criteria Verification
+
+- ✅ `experience_for_level_class("knight", 2, Some(&db))` → `1200` (fixture value, not formula `1000`)
+- ✅ `experience_for_level_class("unknown_class", 2, Some(&db))` → formula value, no panic
+- ✅ `check_level_up_with_db` returns `true` exactly when `XP ≥ threshold`
+- ✅ `level_up_with_level_db` returns `MaxLevelReached` when `level >= max_party_level`
+- ✅ All 4476 pre-existing tests continue to pass unchanged
+
+---
+
 ## Bugfix: Game Log Not Persisted Across Save/Load (Complete)
 
 ### Overview
@@ -575,7 +2169,39 @@ sentinel before extending the error list).
 
 ---
 
-### 5.4 — New Tests
+### 5.4 — Startup Auto-Load Fix
+
+**File:** `sdk/campaign_builder/src/lib.rs`
+
+The SDK auto-load path for `--campaign` was not calling the same auxiliary
+load routines as the normal open-campaign flow. As a result, `npc_stock_templates.ron`
+and `levels.ron` were not loaded until the user opened their respective tabs.
+This caused false validation failures on startup.
+
+- `stock_templates_editor_state` and `levels_editor_state` are reset before
+  startup load
+- `load_stock_templates()` is now called on app launch when a campaign is
+  auto-loaded
+- `load_levels()` is now called as well so `levels.ron` is available for
+  validation and editor state
+
+---
+
+### 5.5 — Levels Validation Added
+
+**File:** `sdk/campaign_builder/src/campaign_io.rs`
+
+Added `validate_level_thresholds()` to validate `levels.ron` contents:
+
+- unknown class references
+- duplicate class entries
+- empty threshold lists
+- thresholds that do not start at 0
+- thresholds that are not strictly increasing
+
+---
+
+### 5.6 — New Tests
 
 **File:** `sdk/campaign_builder/src/validation.rs` — `mod tests`
 

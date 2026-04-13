@@ -41,6 +41,7 @@ pub mod item_mesh_undo_redo;
 pub mod item_mesh_workflow;
 pub mod items_editor;
 pub mod keyboard_shortcuts;
+pub mod levels_editor;
 pub mod linear_history;
 pub mod lod_editor;
 pub mod logging;
@@ -76,6 +77,7 @@ pub mod undo_redo;
 pub mod validation;
 pub mod variation_editor;
 
+use antares::domain::campaign::LevelUpMode;
 use antares::sdk::tool_config::ToolConfig;
 use logging::{category, LogLevel, Logger};
 
@@ -264,6 +266,20 @@ pub fn run() -> Result<(), eframe::Error> {
                                     );
                                 }
 
+                                // Load campaign auxiliary files that are required for validation
+                                // and editor state even when the user has not visited those tabs yet.
+                                app.editor_registry
+                                    .stock_templates_editor_state
+                                    .reset_for_new_campaign();
+                                app.campaign_data.stock_templates.clear();
+                                app.load_stock_templates();
+
+                                app.editor_registry
+                                    .levels_editor_state
+                                    .reset_for_new_campaign();
+                                app.campaign_data.levels.clear();
+                                app.load_levels();
+
                                 app.sync_obj_importer_campaign_state();
 
                                 // Initialize AssetManager if we have a campaign directory
@@ -402,6 +418,12 @@ pub struct CampaignMetadata {
     pub allow_multiclassing: bool,
     pub starting_level: u8,
     pub max_level: u8,
+    #[serde(default = "default_level_up_mode")]
+    pub level_up_mode: LevelUpMode,
+    #[serde(default = "default_base_xp")]
+    pub base_xp: u64,
+    #[serde(default = "default_xp_multiplier")]
+    pub xp_multiplier: f64,
 
     // Data file paths
     pub items_file: String,
@@ -429,6 +451,12 @@ pub struct CampaignMetadata {
     /// files that omit this field will default to `"data/furniture.ron"`.
     #[serde(default = "default_furniture_file")]
     pub furniture_file: String,
+
+    /// Relative path to the XP threshold tables RON file.
+    ///
+    /// Defaults to `"data/levels.ron"` when absent from the RON file (via `serde(default)`).
+    #[serde(default = "default_levels_file")]
+    pub levels_file: String,
 
     /// Starting game time for a new campaign (day, hour, minute).
     ///
@@ -488,6 +516,22 @@ fn default_furniture_file() -> String {
     "data/furniture.ron".to_string()
 }
 
+fn default_levels_file() -> String {
+    "data/levels.ron".to_string()
+}
+
+fn default_level_up_mode() -> LevelUpMode {
+    LevelUpMode::Auto
+}
+
+fn default_base_xp() -> u64 {
+    1000
+}
+
+fn default_xp_multiplier() -> f64 {
+    1.5
+}
+
 /// Default starting time: Day 1, 08:00 — campaign begins in the morning.
 pub fn default_starting_time() -> GameTime {
     GameTime::new(1, 8, 0)
@@ -516,6 +560,9 @@ impl Default for CampaignMetadata {
             allow_multiclassing: false,
             starting_level: 1,
             max_level: 20,
+            level_up_mode: LevelUpMode::Auto,
+            base_xp: 1000,
+            xp_multiplier: 1.5,
 
             items_file: "data/items.ron".to_string(),
             spells_file: "data/spells.ron".to_string(),
@@ -532,6 +579,7 @@ impl Default for CampaignMetadata {
             creatures_file: "data/creatures.ron".to_string(),
             stock_templates_file: "data/npc_stock_templates.ron".to_string(),
             furniture_file: "data/furniture.ron".to_string(),
+            levels_file: "data/levels.ron".to_string(),
             starting_time: default_starting_time(),
         }
     }
@@ -554,6 +602,7 @@ pub enum EditorTab {
     Maps,
     Quests,
     Classes,
+    Levels,
     Races,
     Characters,
     Dialogues,
@@ -580,6 +629,7 @@ impl EditorTab {
             EditorTab::Maps => "Maps",
             EditorTab::Quests => "Quests",
             EditorTab::Classes => "Classes",
+            EditorTab::Levels => "Levels",
             EditorTab::Races => "Races",
             EditorTab::Characters => "Characters",
             EditorTab::Dialogues => "Dialogues",
@@ -1028,6 +1078,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Maps,
                     EditorTab::Quests,
                     EditorTab::Classes,
+                    EditorTab::Levels,
                     EditorTab::Races,
                     EditorTab::Characters,
                     EditorTab::Dialogues,
@@ -1360,6 +1411,27 @@ impl eframe::App for CampaignBuilderApp {
                     &self.campaign_data.items,
                     &mut classes_ctx,
                 );
+            }
+            EditorTab::Levels => {
+                let classes = self.editor_registry.classes_editor_state.classes.clone();
+                let (base_xp, xp_multiplier) = {
+                    // Use default values — the config editor owns the authoritative values.
+                    // These are only needed for the "Fill Formula" button.
+                    (1000u64, 1.5f64)
+                };
+                let needs_save = self.editor_registry.levels_editor_state.show(
+                    ui,
+                    &classes,
+                    self.campaign_dir.as_ref(),
+                    &self.campaign.levels_file,
+                    base_xp,
+                    xp_multiplier,
+                );
+                if needs_save {
+                    self.campaign_data.levels =
+                        self.editor_registry.levels_editor_state.levels.clone();
+                    self.unsaved_changes = true;
+                }
             }
             EditorTab::Races => {
                 let mut races_ctx = EditorContext {

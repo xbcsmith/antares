@@ -1700,6 +1700,9 @@ mod tests {
             allow_multiclassing: false,
             starting_level: 1,
             max_level: 20,
+            level_up_mode: crate::domain::campaign::LevelUpMode::Auto,
+            base_xp: 1000,
+            xp_multiplier: 1.5,
             starting_time: crate::domain::types::GameTime::new(1, 8, 0),
         };
 
@@ -1745,6 +1748,9 @@ mod tests {
             allow_multiclassing: false,
             starting_level: 1,
             max_level: 20,
+            level_up_mode: crate::domain::campaign::LevelUpMode::Auto,
+            base_xp: 1000,
+            xp_multiplier: 1.5,
             starting_time: crate::domain::types::GameTime::new(1, 8, 0),
         };
 
@@ -1788,6 +1794,9 @@ mod tests {
             allow_multiclassing: false,
             starting_level: 1,
             max_level: 20,
+            level_up_mode: crate::domain::campaign::LevelUpMode::Auto,
+            base_xp: 1000,
+            xp_multiplier: 1.5,
             starting_time: crate::domain::types::GameTime::new(1, 8, 0),
         };
 
