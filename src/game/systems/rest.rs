@@ -968,6 +968,25 @@ pub fn handle_rest_complete(
                     "The party rests for the night and awakens refreshed.".to_string(),
                 );
             }
+
+            // Expire UntilRest conditions and reconcile character-condition bitfields.
+            // Call this only on a completed, non-interrupted rest.
+            let cond_defs: Vec<crate::domain::conditions::ConditionDefinition> = content
+                .as_ref()
+                .map(|c| {
+                    c.db()
+                        .conditions
+                        .all_conditions()
+                        .into_iter()
+                        .filter_map(|id| c.db().conditions.get_condition(id).cloned())
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            for member in &mut global_state.0.party.members {
+                member.tick_conditions_rest();
+                crate::domain::combat::engine::reconcile_character_conditions(member, &cond_defs);
+            }
         }
     }
 }

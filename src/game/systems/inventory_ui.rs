@@ -446,7 +446,26 @@ fn build_action_list(
         .map(|item| matches!(item.item_type, ItemType::Consumable(_)))
         .unwrap_or(false);
 
-    if is_consumable {
+    // Also offer Use for non-consumable items that have a spell_effect and charges
+    // (wands, staves, enchanted accessories).  The Use button is suppressed when
+    // the slot has 0 charges remaining so an exhausted item cannot be wasted.
+    let is_usable_charged_item = item_opt
+        .map(|item| {
+            item.spell_effect.is_some()
+                && item.max_charges > 0
+                && !matches!(item.item_type, ItemType::Consumable(_))
+        })
+        .unwrap_or(false);
+
+    // Slot charges must be > 0 for the Use button to appear on charged items.
+    let slot_has_charges = character
+        .inventory
+        .items
+        .get(selected_slot_index)
+        .map(|s| s.charges > 0)
+        .unwrap_or(false);
+
+    if is_consumable || (is_usable_charged_item && slot_has_charges) {
         actions.push(PanelAction::Use {
             party_index: focused_party_index,
             slot_index: 0, // placeholder — filled at execution time
@@ -1598,9 +1617,9 @@ fn render_character_panel(
 
         // Item silhouette
         if slot_idx < items.len() {
-            let item_type = game_content
-                .and_then(|gc| gc.db().items.get_item(items[slot_idx].item_id))
-                .map(|it| &it.item_type);
+            let item_def =
+                game_content.and_then(|gc| gc.db().items.get_item(items[slot_idx].item_id));
+            let item_type = item_def.map(|it| &it.item_type);
             paint_item_silhouette(
                 &painter,
                 cell_rect,
@@ -1608,6 +1627,28 @@ fn render_character_panel(
                 item_type,
                 ITEM_SILHOUETTE_COLOR,
             );
+
+            // Charge annotation for charged non-consumable magical items (wands,
+            // staves, enchanted accessories).  Displayed as "✨N" in the
+            // bottom-right corner of the cell, matching the ammo-quantity style.
+            let slot = &items[slot_idx];
+            let is_charged_magical = item_def
+                .map(|item| {
+                    item.spell_effect.is_some()
+                        && item.max_charges > 0
+                        && !matches!(item.item_type, ItemType::Consumable(_))
+                })
+                .unwrap_or(false);
+            if is_charged_magical && slot.charges > 0 {
+                let charge_text = format!("\u{2728}{}", slot.charges);
+                painter.text(
+                    cell_rect.right_bottom() + egui::vec2(-2.0, -2.0),
+                    egui::Align2::RIGHT_BOTTOM,
+                    &charge_text,
+                    egui::FontId::proportional(8.0),
+                    egui::Color32::from_rgb(255, 220, 100),
+                );
+            }
         }
 
         if cell_response.clicked() {
@@ -1652,6 +1693,18 @@ fn render_character_panel(
                         .map(|item| matches!(item.item_type, ItemType::Consumable(_)))
                         .unwrap_or(false);
 
+                    // Also show Use for non-consumable items with spell_effect and
+                    // charges (wands, staves, enchanted accessories).
+                    let is_usable_charged = item_opt
+                        .map(|item| {
+                            item.spell_effect.is_some()
+                                && item.max_charges > 0
+                                && !matches!(item.item_type, ItemType::Consumable(_))
+                        })
+                        .unwrap_or(false);
+                    let slot_charges = items.get(slot_idx).map(|s| s.charges).unwrap_or(0);
+                    let show_use = is_consumable || (is_usable_charged && slot_charges > 0);
+
                     // Running index used to match focused_action_index
                     let mut btn_idx: usize = 0;
 
@@ -1679,8 +1732,8 @@ fn render_character_panel(
                         btn_idx += 1;
                     }
 
-                    // ── Action: Use (consumable only, appears after Equip) ─
-                    if is_consumable {
+                    // ── Action: Use (consumable or charged magical item) ───
+                    if show_use {
                         let use_focused = focused_action_index == Some(btn_idx);
                         let use_label = egui::RichText::new("Use")
                             .color(if use_focused {
@@ -1693,11 +1746,12 @@ fn render_character_panel(
                         if use_focused {
                             use_btn = use_btn.stroke(egui::Stroke::new(2.0, ACTION_FOCUSED_COLOR));
                         }
-                        if ui
-                            .add(use_btn)
-                            .on_hover_text("Use this consumable item")
-                            .clicked()
-                        {
+                        let use_tooltip = if is_usable_charged && slot_charges > 0 {
+                            "Use this charged item"
+                        } else {
+                            "Use this consumable item"
+                        };
+                        if ui.add(use_btn).on_hover_text(use_tooltip).clicked() {
                             panel_action = Some(PanelAction::Use {
                                 party_index,
                                 slot_index: slot_idx,
@@ -2651,6 +2705,136 @@ fn handle_use_item_action_exploration(
 
             continue;
         }
+
+        // Detect charged non-consumable magical items (Branch B).
+        //
+        // `validate_item_use_slot` already verified that for non-consumables
+        // `spell_effect.is_some() && max_charges > 0 && slot.charges > 0`.
+        // So if we reach here after validation succeeded and the item is NOT
+        // a consumable, it must be a usable charged item (wand, staff, etc.).
+        let is_charged_magical: bool = {
+            let character = &global_state.0.party.members[party_index];
+            character
+                .inventory
+                .items
+                .get(slot_index)
+                .and_then(|slot| content_db.items.get_item(slot.item_id))
+                .map(|item| {
+                    item.spell_effect.is_some()
+                        && item.max_charges > 0
+                        && !matches!(item.item_type, ItemType::Consumable(_))
+                })
+                .unwrap_or(false)
+        };
+
+        if is_charged_magical {
+            // Branch B: charged non-consumable item (wand, staff, enchanted accessory).
+
+            // B-1. Capture item name and spell_id before any mutation.
+            let (item_name, spell_id_opt) = {
+                let character = &global_state.0.party.members[party_index];
+                let item = character
+                    .inventory
+                    .items
+                    .get(slot_index)
+                    .and_then(|slot| content_db.items.get_item(slot.item_id));
+                (
+                    item.map(|i| i.name.clone())
+                        .unwrap_or_else(|| "item".to_string()),
+                    item.and_then(|i| i.spell_effect),
+                )
+            };
+
+            // B-2. Defensive charge check (validate_item_use_slot should have
+            //      caught this, but guard against any race condition).
+            let slot_charges = global_state.0.party.members[party_index]
+                .inventory
+                .items
+                .get(slot_index)
+                .map(|s| s.charges)
+                .unwrap_or(0);
+            if slot_charges == 0 {
+                if let Some(ref mut writer) = game_log_writer {
+                    writer.write(GameLogEvent {
+                        text: format!("Cannot use {item_name}: no charges remaining."),
+                        category: LogCategory::Item,
+                    });
+                }
+                if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+                    inv_state.selected_slot = None;
+                }
+                nav_state.selected_slot_index = None;
+                nav_state.focused_action_index = 0;
+                nav_state.phase = NavigationPhase::SlotNavigation;
+                continue;
+            }
+
+            // B-3. Decrement the slot's charge count, or remove it on last charge.
+            {
+                let character = &mut global_state.0.party.members[party_index];
+                if slot_charges > 1 {
+                    character.inventory.items[slot_index].charges -= 1;
+                } else {
+                    let _ = character.inventory.remove_item(slot_index);
+                }
+            }
+
+            // B-4. Apply the spell effect via `cast_exploration_spell`.
+            //      This reuses the same pipeline as CastSpell scrolls and
+            //      correctly writes buff durations into `active_spells`.
+            let character_name = global_state
+                .0
+                .party
+                .members
+                .get(party_index)
+                .map(|ch| ch.name.clone())
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            let log_msg: String = if let Some(spell_id) = spell_id_opt {
+                if let Some(spell_def) = content_db.spells.get_spell(spell_id).cloned() {
+                    let spell_name = spell_def.name.clone();
+                    let mut rng = rand::rng();
+                    match cast_exploration_spell(
+                        party_index,
+                        &spell_def,
+                        ExplorationTarget::Self_,
+                        &mut global_state.0,
+                        &content_db.items,
+                        &mut rng,
+                    ) {
+                        Ok(_) => format!("{item_name} used. {character_name} casts {spell_name}."),
+                        Err(e) => format!("{item_name} used. Failed to cast {spell_name}: {e}."),
+                    }
+                } else {
+                    // Spell ID in item data is not present in the content DB —
+                    // the item was still consumed so log a generic message.
+                    format!("{item_name} used.")
+                }
+            } else {
+                // Should not reach here after is_charged_magical check, but safe.
+                format!("{item_name} used.")
+            };
+
+            // B-5. Write game log.
+            if let Some(ref mut writer) = game_log_writer {
+                writer.write(GameLogEvent {
+                    text: log_msg,
+                    category: LogCategory::Item,
+                });
+            }
+
+            // B-6. Reset navigation state.
+            if let GameMode::Inventory(ref mut inv_state) = global_state.0.mode {
+                inv_state.selected_slot = None;
+            }
+            nav_state.selected_slot_index = None;
+            nav_state.focused_action_index = 0;
+            nav_state.phase = NavigationPhase::SlotNavigation;
+
+            continue; // Skip Branch A (consumable path) below.
+        }
+
+        // Branch A: consumable item — existing path (steps 4–8 below are unchanged).
 
         // Step 4: capture item name and full ConsumableData before any mutation.
         let (item_name, consumable_data) = match resolve_consumable_for_use(
@@ -6143,6 +6327,326 @@ mod tests {
         assert!(
             gs_after.0.party.members[0].inventory.items.is_empty(),
             "scroll must be consumed even when learning fails"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 3: Charged Magical Item (wand/staff) tests
+    // ------------------------------------------------------------------
+
+    /// Helper: builds a `ContentDatabase` with a single non-consumable accessory
+    /// item (ID 20, "Wand of Power") with `max_charges = 5`.
+    ///
+    /// Pass `spell_effect = Some(id)` to create a wand that can fire a spell;
+    /// pass `None` to create an accessory without a spell effect (simulates a
+    /// plain ring or other non-usable item).
+    fn make_wand_db(
+        spell_effect: Option<crate::domain::types::SpellId>,
+    ) -> crate::sdk::database::ContentDatabase {
+        use crate::domain::items::types::{AccessoryData, AccessorySlot, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+        let wand = Item {
+            id: 20,
+            name: "Wand of Power".to_string(),
+            item_type: ItemType::Accessory(AccessoryData {
+                slot: AccessorySlot::Ring,
+                classification: None, // no proficiency requirement
+            }),
+            base_cost: 150,
+            sell_cost: 75,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect,
+            max_charges: 5,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        db.items.add_item(wand).unwrap();
+        db
+    }
+
+    /// `build_action_list` for a slot containing a charged wand (non-consumable,
+    /// `spell_effect = Some(...)`, `max_charges = 5`, `charges = 3`) must include
+    /// a `Use` action.
+    #[test]
+    fn test_build_action_list_use_present_for_charged_wand() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let content_db = make_wand_db(Some(0xA001));
+        let game_content = GameContent::new(content_db);
+
+        let mut character = Character::new(
+            "Mage".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        character.inventory.items.push(InventorySlot {
+            item_id: 20,
+            charges: 3,
+        });
+
+        let panel_names: Vec<(usize, String)> = vec![(0, "Mage".to_string())];
+        let actions = build_action_list(0, 0, &panel_names, &character, Some(&game_content));
+
+        assert!(
+            actions.iter().any(|a| matches!(a, PanelAction::Use { .. })),
+            "Use action must be present for a charged wand with charges > 0; actions: {:?}",
+            actions
+        );
+    }
+
+    /// `build_action_list` for a charged wand with `charges = 0` must NOT
+    /// include a `Use` action (exhausted items cannot be wasted with an extra Use).
+    #[test]
+    fn test_build_action_list_no_use_for_charged_wand_with_zero_charges() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let content_db = make_wand_db(Some(0xA001));
+        let game_content = GameContent::new(content_db);
+
+        let mut character = Character::new(
+            "Mage".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        character.inventory.items.push(InventorySlot {
+            item_id: 20,
+            charges: 0, // exhausted
+        });
+
+        let panel_names: Vec<(usize, String)> = vec![(0, "Mage".to_string())];
+        let actions = build_action_list(0, 0, &panel_names, &character, Some(&game_content));
+
+        assert!(
+            actions
+                .iter()
+                .all(|a| !matches!(a, PanelAction::Use { .. })),
+            "Use action must NOT appear for a wand with 0 charges; actions: {:?}",
+            actions
+        );
+    }
+
+    /// `build_action_list` for a non-consumable item without `spell_effect` (e.g.
+    /// a plain accessory) must NOT include a `Use` action regardless of charges.
+    #[test]
+    fn test_build_action_list_no_use_for_non_consumable_without_spell_effect() {
+        use crate::application::resources::GameContent;
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let content_db = make_wand_db(None); // spell_effect: None
+        let game_content = GameContent::new(content_db);
+
+        let mut character = Character::new(
+            "Fighter".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        character.inventory.items.push(InventorySlot {
+            item_id: 20,
+            charges: 5, // charges present but no spell_effect
+        });
+
+        let panel_names: Vec<(usize, String)> = vec![(0, "Fighter".to_string())];
+        let actions = build_action_list(0, 0, &panel_names, &character, Some(&game_content));
+
+        assert!(
+            actions
+                .iter()
+                .all(|a| !matches!(a, PanelAction::Use { .. })),
+            "Use action must NOT appear for an accessory without spell_effect; actions: {:?}",
+            actions
+        );
+    }
+
+    /// Using a wand with 3 charges decrements charges to 2 and writes a log
+    /// entry containing the item name and "used".
+    #[test]
+    fn test_exploration_use_wand_applies_spell_effect() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        // Spell 0xA001 is not present in the DB; the code still consumes the
+        // charge and writes a generic "{item} used." message.
+        let db = make_wand_db(Some(0xA001));
+        let mut game_state = GameState::new();
+        let mut hero = Character::new(
+            "Caster".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        hero.inventory.items.push(InventorySlot {
+            item_id: 20,
+            charges: 3,
+        });
+        game_state.party.add_member(hero).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = make_exploration_use_app(game_state, db);
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+        app.update();
+
+        // Slot should still be present but with one fewer charge.
+        let gs = app.world().resource::<GlobalState>();
+        assert_eq!(
+            gs.0.party.members[0].inventory.items.len(),
+            1,
+            "slot should still be present after decrementing one charge"
+        );
+        assert_eq!(
+            gs.0.party.members[0].inventory.items[0].charges, 2,
+            "charges should be decremented from 3 to 2 after use"
+        );
+
+        // Log must confirm the use.
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.entries()
+                .iter()
+                .any(|e| e.text.contains("Wand of Power") && e.text.contains("used")),
+            "GameLog must contain item name and 'used'; entries: {:?}",
+            log.entries().iter().map(|e| &e.text).collect::<Vec<_>>()
+        );
+    }
+
+    /// A wand with exactly 1 charge has its inventory slot removed entirely
+    /// after the use (no zero-charge ghost slot left behind).
+    #[test]
+    fn test_exploration_use_wand_removes_slot_on_last_charge() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let db = make_wand_db(Some(0xA001));
+        let mut game_state = GameState::new();
+        let mut hero = Character::new(
+            "Caster".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        hero.inventory.items.push(InventorySlot {
+            item_id: 20,
+            charges: 1, // last charge
+        });
+        game_state.party.add_member(hero).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = make_exploration_use_app(game_state, db);
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert_eq!(
+            gs.0.party.members[0].inventory.items.len(),
+            0,
+            "slot must be removed from inventory after last charge is consumed"
+        );
+    }
+
+    /// Using a wand writes exactly one `GameLog` entry that contains both the
+    /// item name and the word "used".
+    #[test]
+    fn test_exploration_use_wand_writes_game_log() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let db = make_wand_db(Some(0xA001));
+        let mut game_state = GameState::new();
+        let mut hero = Character::new(
+            "Caster".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        hero.inventory.items.push(InventorySlot {
+            item_id: 20,
+            charges: 2,
+        });
+        game_state.party.add_member(hero).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = make_exploration_use_app(game_state, db);
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+        app.update();
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.entries()
+                .iter()
+                .any(|e| e.text.contains("Wand of Power") && e.text.contains("used")),
+            "GameLog must contain item name and 'used'; entries: {:?}",
+            log.entries().iter().map(|e| &e.text).collect::<Vec<_>>()
+        );
+    }
+
+    /// A charged item with `charges = 0` must write a "no charges remaining"
+    /// error to `GameLog` and must not apply any effect or remove the slot.
+    #[test]
+    fn test_exploration_use_wand_zero_charges_writes_error_log() {
+        use crate::domain::character::{Alignment, Character, InventorySlot, Sex};
+
+        let db = make_wand_db(Some(0xA001));
+        let mut game_state = GameState::new();
+        let mut hero = Character::new(
+            "Caster".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        hero.inventory.items.push(InventorySlot {
+            item_id: 20,
+            charges: 0, // exhausted
+        });
+        game_state.party.add_member(hero).unwrap();
+        game_state.enter_inventory();
+
+        let mut app = make_exploration_use_app(game_state, db);
+        app.world_mut().write_message(UseItemExplorationAction {
+            party_index: 0,
+            slot_index: 0,
+        });
+        app.update();
+        app.update();
+
+        let log = app.world().resource::<GameLog>();
+        assert!(
+            log.entries().iter().any(|e| e.text.contains("no charges")),
+            "GameLog must contain 'no charges' when wand is exhausted; entries: {:?}",
+            log.entries().iter().map(|e| &e.text).collect::<Vec<_>>()
+        );
+        // Slot must not have been removed.
+        let gs = app.world().resource::<GlobalState>();
+        assert_eq!(
+            gs.0.party.members[0].inventory.items.len(),
+            1,
+            "inventory slot must remain intact when use is rejected"
         );
     }
 }

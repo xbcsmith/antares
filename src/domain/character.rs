@@ -1251,6 +1251,72 @@ impl Character {
         self.active_conditions.retain_mut(|c| !c.tick_minute());
     }
 
+    /// Removes all conditions that expire at the end of combat.
+    ///
+    /// Should be called via [`crate::domain::combat::engine::CombatState::clear_combat_end_conditions`]
+    /// before syncing combatant state back to party members so that
+    /// [`ConditionDuration::UntilCombatEnd`](crate::domain::conditions::ConditionDuration::UntilCombatEnd)
+    /// conditions do not persist into exploration.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Character, Sex, Alignment};
+    /// use antares::domain::conditions::{ActiveCondition, ConditionDuration};
+    ///
+    /// let mut c = Character::new(
+    ///     "Hero".to_string(), "human".to_string(), "knight".to_string(),
+    ///     Sex::Male, Alignment::Good,
+    /// );
+    /// c.active_conditions.push(ActiveCondition::new(
+    ///     "combat_bless".to_string(),
+    ///     ConditionDuration::UntilCombatEnd,
+    /// ));
+    /// c.active_conditions.push(ActiveCondition::new(
+    ///     "poison".to_string(),
+    ///     ConditionDuration::Permanent,
+    /// ));
+    /// c.tick_conditions_combat_end();
+    /// assert_eq!(c.active_conditions.len(), 1);
+    /// assert_eq!(c.active_conditions[0].condition_id, "poison");
+    /// ```
+    pub fn tick_conditions_combat_end(&mut self) {
+        self.active_conditions.retain(|c| !c.tick_combat_end());
+    }
+
+    /// Removes all conditions that expire when the party rests.
+    ///
+    /// Should be called inside [`crate::game::systems::rest::handle_rest_complete`]
+    /// after a successful non-interrupted rest so that
+    /// [`ConditionDuration::UntilRest`](crate::domain::conditions::ConditionDuration::UntilRest)
+    /// conditions are cleaned up and the condition bitfields are reconciled.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Character, Sex, Alignment};
+    /// use antares::domain::conditions::{ActiveCondition, ConditionDuration};
+    ///
+    /// let mut c = Character::new(
+    ///     "Hero".to_string(), "human".to_string(), "knight".to_string(),
+    ///     Sex::Male, Alignment::Good,
+    /// );
+    /// c.active_conditions.push(ActiveCondition::new(
+    ///     "exhaustion".to_string(),
+    ///     ConditionDuration::UntilRest,
+    /// ));
+    /// c.active_conditions.push(ActiveCondition::new(
+    ///     "poison".to_string(),
+    ///     ConditionDuration::Permanent,
+    /// ));
+    /// c.tick_conditions_rest();
+    /// assert_eq!(c.active_conditions.len(), 1);
+    /// assert_eq!(c.active_conditions[0].condition_id, "poison");
+    /// ```
+    pub fn tick_conditions_rest(&mut self) {
+        self.active_conditions.retain(|c| !c.tick_rest());
+    }
+
     /// Applies a timed attribute boost and records it for later reversal.
     ///
     /// Calls [`crate::domain::items::types::normalize_duration`] on
@@ -2650,6 +2716,135 @@ mod tests {
         assert_eq!(spell_list[4].len(), 0);
         assert_eq!(spell_list[5].len(), 0);
         assert_eq!(spell_list[6].len(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // tick_conditions_combat_end
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_tick_conditions_combat_end_removes_until_combat_end_conditions() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+        let mut c = make_hero();
+        c.active_conditions.push(ActiveCondition::new(
+            "combat_bless".to_string(),
+            ConditionDuration::UntilCombatEnd,
+        ));
+        c.active_conditions.push(ActiveCondition::new(
+            "poison".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        c.tick_conditions_combat_end();
+        assert_eq!(c.active_conditions.len(), 1);
+        assert_eq!(c.active_conditions[0].condition_id, "poison");
+    }
+
+    #[test]
+    fn test_tick_conditions_combat_end_preserves_permanent_conditions() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+        let mut c = make_hero();
+        c.active_conditions.push(ActiveCondition::new(
+            "poison".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        c.active_conditions.push(ActiveCondition::new(
+            "sleep".to_string(),
+            ConditionDuration::Rounds(3),
+        ));
+        c.tick_conditions_combat_end();
+        assert_eq!(c.active_conditions.len(), 2);
+    }
+
+    #[test]
+    fn test_tick_conditions_combat_end_empty_active_conditions_is_noop() {
+        let mut c = make_hero();
+        assert!(c.active_conditions.is_empty());
+        c.tick_conditions_combat_end();
+        assert!(c.active_conditions.is_empty());
+    }
+
+    #[test]
+    fn test_tick_conditions_combat_end_removes_multiple_until_combat_end() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+        let mut c = make_hero();
+        c.active_conditions.push(ActiveCondition::new(
+            "combat_bless".to_string(),
+            ConditionDuration::UntilCombatEnd,
+        ));
+        c.active_conditions.push(ActiveCondition::new(
+            "combat_haste".to_string(),
+            ConditionDuration::UntilCombatEnd,
+        ));
+        c.active_conditions.push(ActiveCondition::new(
+            "poison".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        c.tick_conditions_combat_end();
+        assert_eq!(c.active_conditions.len(), 1);
+        assert_eq!(c.active_conditions[0].condition_id, "poison");
+    }
+
+    // -----------------------------------------------------------------------
+    // tick_conditions_rest
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_tick_conditions_rest_removes_until_rest_conditions() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+        let mut c = make_hero();
+        c.active_conditions.push(ActiveCondition::new(
+            "exhaustion".to_string(),
+            ConditionDuration::UntilRest,
+        ));
+        c.active_conditions.push(ActiveCondition::new(
+            "poison".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        c.tick_conditions_rest();
+        assert_eq!(c.active_conditions.len(), 1);
+        assert_eq!(c.active_conditions[0].condition_id, "poison");
+    }
+
+    #[test]
+    fn test_tick_conditions_rest_preserves_permanent_and_round_conditions() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+        let mut c = make_hero();
+        c.active_conditions.push(ActiveCondition::new(
+            "poison".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        c.active_conditions.push(ActiveCondition::new(
+            "bless".to_string(),
+            ConditionDuration::Rounds(5),
+        ));
+        c.tick_conditions_rest();
+        assert_eq!(c.active_conditions.len(), 2);
+    }
+
+    #[test]
+    fn test_tick_conditions_rest_empty_active_conditions_is_noop() {
+        let mut c = make_hero();
+        assert!(c.active_conditions.is_empty());
+        c.tick_conditions_rest();
+        assert!(c.active_conditions.is_empty());
+    }
+
+    #[test]
+    fn test_tick_conditions_rest_does_not_remove_until_combat_end() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+        let mut c = make_hero();
+        c.active_conditions.push(ActiveCondition::new(
+            "combat_bless".to_string(),
+            ConditionDuration::UntilCombatEnd,
+        ));
+        c.active_conditions.push(ActiveCondition::new(
+            "exhaustion".to_string(),
+            ConditionDuration::UntilRest,
+        ));
+        c.tick_conditions_rest();
+        // Only UntilRest removed; UntilCombatEnd preserved
+        assert_eq!(c.active_conditions.len(), 1);
+        assert_eq!(c.active_conditions[0].condition_id, "combat_bless");
     }
 }
 

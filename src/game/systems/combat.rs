@@ -53,6 +53,7 @@
 //! let _ = start_encounter(&mut gs, &content, &monster_group, CombatEventType::Normal);
 //! ```
 use crate::game::systems::mouse_input;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use crate::application::resources::GameContent;
@@ -611,14 +612,21 @@ pub struct ItemSelectionPanel {
 
 /// Marker component for an individual item button inside the item selection panel
 ///
-/// Stores the `item_id` and remaining `charges` for display convenience.
+/// Stores the `item_id`, remaining `charges`, and the `inventory_index` (slot
+/// position in the character's inventory) needed to dispatch `UseItemAction`.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct ItemButton {
     /// Identifier of the item this button will use
     pub item_id: crate::domain::types::ItemId,
     /// Charges remaining in this inventory slot
     pub charges: u8,
+    /// Slot index in the character's inventory (passed to `UseItemAction`)
+    pub inventory_index: usize,
 }
+
+/// Marker component for the "Cancel" button in the item selection panel.
+#[derive(Component)]
+pub struct ItemCancelButton;
 
 /// Marker component for victory summary UI root
 #[derive(Component, Debug, Clone, Copy)]
@@ -687,6 +695,8 @@ pub enum CombatFeedbackEffect {
         /// HP restored.
         amount: u32,
     },
+    /// The combatant chose to defend this round, taking a defensive stance.
+    Defend,
 }
 
 /// Message emitted whenever a combat action produces a visible result.
@@ -841,6 +851,75 @@ pub struct PendingSpellCast {
     pub data: Option<(CombatantId, crate::domain::types::SpellId)>,
 }
 
+/// Tracks whether the item selection panel is open and for which combatant.
+///
+/// Set to `Some(actor)` when the player selects the Item action.
+/// Cleared to `None` when an item is selected, Escape is pressed, or combat ends.
+///
+/// `focused_index` is the keyboard-cursor position within the displayed item list.
+/// `usable_slot_indices` is populated by `update_item_selection_panel` with the
+/// inventory slot indices (in display order) of combat-usable items.
+/// `confirm_requested` is set to `true` by the keyboard Enter handler so that
+/// `handle_item_button_interaction` can process the keyboard-confirm in one place.
+#[derive(Resource, Default)]
+pub struct ItemPanelState {
+    /// The CombatantId of the player whose inventory is being shown.
+    pub user: Option<CombatantId>,
+    /// Index of the currently focused item button (for keyboard navigation).
+    pub focused_index: usize,
+    /// Ordered list of inventory slot indices that are combat-usable.
+    ///
+    /// Populated by `update_item_selection_panel` each time the panel opens so
+    /// the keyboard-confirm path can locate the focused slot without querying
+    /// UI entities.
+    pub usable_slot_indices: Vec<usize>,
+    /// Set to `true` by the keyboard Enter handler; consumed by
+    /// `handle_item_button_interaction` to trigger a programmatic item use.
+    pub confirm_requested: bool,
+}
+
+/// Tracks an item that has been selected from the panel but needs a monster target.
+///
+/// When an offensive item (one with `spell_effect`) is chosen from the item
+/// panel, this resource is populated so the existing target-selection keyboard/
+/// mouse flow can emit a `UseItemAction` instead of an `AttackAction`.
+#[derive(Resource, Default)]
+pub struct PendingItemUse {
+    /// `(user, inventory_index)` once an item requiring target selection is
+    /// chosen, `None` otherwise.
+    pub data: Option<(CombatantId, usize)>,
+    /// Set by `combat_input_system` when the player confirms a monster target
+    /// while `data` is `Some`; consumed by `handle_item_button_interaction` to
+    /// emit `UseItemAction` without adding a `MessageWriter` to the big system.
+    pub confirmed_target: Option<usize>,
+}
+
+/// Bundled `SystemParam` for spell-panel state in `combat_input_system`.
+///
+/// Groups `SpellPanelState` and `PendingSpellCast` into a single system
+/// parameter so `combat_input_system` stays within Bevy's 16-parameter
+/// system function limit.
+#[derive(SystemParam)]
+pub struct SpellCombatState<'w> {
+    /// State of the spell selection panel.
+    pub panel: ResMut<'w, SpellPanelState>,
+    /// Tracks a pending spell cast awaiting monster target confirmation.
+    pub pending: ResMut<'w, PendingSpellCast>,
+}
+
+/// Bundled `SystemParam` for item-panel state in `combat_input_system`.
+///
+/// Groups `ItemPanelState` and `PendingItemUse` into a single system
+/// parameter so `combat_input_system` stays within Bevy's 16-parameter
+/// system function limit.
+#[derive(SystemParam)]
+pub struct ItemCombatState<'w> {
+    /// State of the item selection panel.
+    pub panel: ResMut<'w, ItemPanelState>,
+    /// Tracks a pending item use awaiting monster target confirmation.
+    pub pending: ResMut<'w, PendingItemUse>,
+}
+
 /// One coloured text segment inside a combat log line.
 #[derive(Debug, Clone)]
 pub struct CombatLogSegment {
@@ -983,6 +1062,8 @@ impl Plugin for CombatPlugin {
             .insert_resource(RangedAttackPending::default())
             .insert_resource(SpellPanelState::default())
             .insert_resource(PendingSpellCast::default())
+            .insert_resource(ItemPanelState::default())
+            .insert_resource(PendingItemUse::default())
             // Monster-turn delay: start finished so the very first EnemyTurn
             // frame arms it (see execute_monster_turn for the reset logic).
             .insert_resource({
@@ -1105,6 +1186,15 @@ impl Plugin for CombatPlugin {
                 handle_spell_button_interaction.after(update_spell_selection_panel),
             )
             .add_systems(Update, cleanup_spell_panel_on_combat_exit)
+            .add_systems(
+                Update,
+                update_item_selection_panel.after(combat_input_system),
+            )
+            .add_systems(
+                Update,
+                handle_item_button_interaction.after(update_item_selection_panel),
+            )
+            .add_systems(Update, cleanup_item_panel_on_combat_exit)
             .add_systems(Update, update_combat_ui)
             .add_systems(
                 Update,
@@ -1398,6 +1488,7 @@ fn sync_party_hp_during_combat(
 fn sync_combat_to_party_on_exit(
     mut global_state: ResMut<GlobalState>,
     mut combat_res: ResMut<CombatResource>,
+    content: Option<Res<GameContent>>,
 ) {
     // Only sync when not currently in combat and when we have mapping data
     if matches!(global_state.0.mode, GameMode::Combat(_)) {
@@ -1407,6 +1498,21 @@ fn sync_combat_to_party_on_exit(
     if combat_res.player_orig_indices.is_empty() {
         return;
     }
+
+    // Expire UntilCombatEnd conditions on all participants and reconcile
+    // condition bitfields before copying data back to the party.
+    let cond_defs: Vec<crate::domain::conditions::ConditionDefinition> = content
+        .as_ref()
+        .map(|c| {
+            c.db()
+                .conditions
+                .all_conditions()
+                .into_iter()
+                .filter_map(|id| c.db().conditions.get_condition(id).cloned())
+                .collect()
+        })
+        .unwrap_or_default();
+    combat_res.state.clear_combat_end_conditions(&cond_defs);
 
     // Copy participant data back to party members for mapped players
     for (participant_idx, participant) in combat_res.state.participants.iter().enumerate() {
@@ -2420,6 +2526,393 @@ fn cleanup_spell_panel_on_combat_exit(
     }
 }
 
+/// System: Spawn or despawn the item selection panel based on `ItemPanelState`.
+///
+/// - When `item_panel_state.user` is `None`, despawns any existing panel.
+/// - When a panel is already open, does nothing (idempotent on already-open state).
+/// - Otherwise, resolves the user's character from `CombatResource`, iterates
+///   their inventory filtering to combat-usable items via
+///   `validate_item_use_slot`, and spawns a `Node` panel entity with one
+///   `ItemButton` child per usable slot.
+///
+/// The panel mirrors the layout and styling of `update_spell_selection_panel`.
+#[allow(clippy::too_many_arguments)]
+fn update_item_selection_panel(
+    mut commands: Commands,
+    mut item_panel_state: ResMut<ItemPanelState>,
+    combat_res: Res<CombatResource>,
+    content: Option<Res<GameContent>>,
+    existing_panel: Query<Entity, With<ItemSelectionPanel>>,
+) {
+    // ── Despawn if panel should be closed ────────────────────────────────────
+    if item_panel_state.user.is_none() {
+        for entity in existing_panel.iter() {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+
+    // ── Already open — nothing to do ────────────────────────────────────────
+    if !existing_panel.is_empty() {
+        return;
+    }
+
+    // ── Resolve user data ────────────────────────────────────────────────────
+    let Some(user) = item_panel_state.user else {
+        return;
+    };
+    let CombatantId::Player(user_idx) = user else {
+        return;
+    };
+    let Some(Combatant::Player(pc)) = combat_res.state.participants.get(user_idx) else {
+        return;
+    };
+    let character = pc.as_ref();
+
+    let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+    let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
+
+    // ── Collect all combat-usable item slots ─────────────────────────────────
+    // Each entry is (slot_index, item_id, charges, item_name, is_consumable).
+    let mut usable_slots: Vec<(usize, crate::domain::types::ItemId, u8, String, bool)> = Vec::new();
+    for (idx, slot) in character.inventory.items.iter().enumerate() {
+        if crate::domain::combat::item_usage::validate_item_use_slot(
+            character,
+            idx,
+            content_ref.db(),
+            true,
+        )
+        .is_ok()
+        {
+            let item_name = content_ref
+                .db()
+                .items
+                .get_item(slot.item_id)
+                .map(|i| i.name.clone())
+                .unwrap_or_else(|| format!("Item #{}", slot.item_id));
+            let is_consumable = content_ref
+                .db()
+                .items
+                .get_item(slot.item_id)
+                .map(|i| {
+                    matches!(
+                        i.item_type,
+                        crate::domain::items::types::ItemType::Consumable(_)
+                    )
+                })
+                .unwrap_or(true);
+            usable_slots.push((idx, slot.item_id, slot.charges, item_name, is_consumable));
+        }
+    }
+
+    // Update the panel state's slot index cache for keyboard navigation.
+    item_panel_state.usable_slot_indices = usable_slots.iter().map(|s| s.0).collect();
+    item_panel_state.focused_index = item_panel_state
+        .focused_index
+        .min(usable_slots.len().saturating_sub(1));
+
+    // ── Spawn the panel ──────────────────────────────────────────────────────
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: SPELL_PANEL_LEFT,
+                top: SPELL_PANEL_TOP,
+                width: Val::Px(300.0),
+                max_height: Val::Px(380.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(10.0)),
+                row_gap: Val::Px(4.0),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.08, 0.16, 0.08, 0.97)),
+            BorderRadius::all(Val::Px(8.0)),
+            ItemSelectionPanel { user },
+        ))
+        .with_children(|panel| {
+            // Title
+            panel.spawn((
+                Text::new(format!("{} — Select Item", character.name)),
+                TextFont {
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.9, 1.0, 0.9)),
+            ));
+
+            if usable_slots.is_empty() {
+                panel.spawn((
+                    Text::new("No usable items."),
+                    TextFont {
+                        font_size: 12.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.6, 0.6, 0.6)),
+                ));
+            } else {
+                for (slot_idx, item_id, charges, item_name, is_consumable) in &usable_slots {
+                    // Choose icon: 🧪 for consumables, ✨ for charged magical items
+                    let icon = if *is_consumable { "🧪" } else { "✨" };
+                    let label = if *charges > 0 {
+                        format!("{} {} (x{})", icon, item_name, charges)
+                    } else {
+                        format!("{} {}", icon, item_name)
+                    };
+
+                    panel
+                        .spawn((
+                            Button,
+                            Node {
+                                width: Val::Percent(100.0),
+                                padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+                                justify_content: JustifyContent::FlexStart,
+                                ..default()
+                            },
+                            BackgroundColor(ACTION_BUTTON_COLOR),
+                            BorderRadius::all(Val::Px(4.0)),
+                            ItemButton {
+                                item_id: *item_id,
+                                charges: *charges,
+                                inventory_index: *slot_idx,
+                            },
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new(label),
+                                TextFont {
+                                    font_size: 11.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
+                }
+            }
+
+            // Cancel button
+            panel
+                .spawn((
+                    Button,
+                    Node {
+                        width: Val::Percent(100.0),
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+                        justify_content: JustifyContent::Center,
+                        margin: UiRect {
+                            top: Val::Px(6.0),
+                            ..default()
+                        },
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.35, 0.15, 0.15)),
+                    BorderRadius::all(Val::Px(4.0)),
+                    ItemCancelButton,
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        Text::new("✖ Cancel"),
+                        TextFont {
+                            font_size: 11.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+        });
+}
+
+/// Internal helper: given a chosen item button (from mouse or keyboard), decide
+/// whether to dispatch `UseItemAction` immediately (self-targeting consumables)
+/// or enter monster target-selection mode (offensive spell_effect items).
+///
+/// Closes the item panel in both cases.
+#[allow(clippy::too_many_arguments)]
+fn dispatch_item_button(
+    user: CombatantId,
+    inventory_index: usize,
+    item_id: crate::domain::types::ItemId,
+    content: &GameContent,
+    item_panel_state: &mut ItemPanelState,
+    pending_item: &mut PendingItemUse,
+    target_sel: &mut TargetSelection,
+    action_menu_state: &mut ActionMenuState,
+    use_item_writer: &mut Option<MessageWriter<UseItemAction>>,
+) {
+    // Determine whether the item requires monster target selection.
+    // Items with a `spell_effect` that targets a single monster need targeting;
+    // all consumable effects self-target.
+    let needs_monster_target = content
+        .db()
+        .items
+        .get_item(item_id)
+        .and_then(|item| item.spell_effect)
+        .and_then(|spell_id| content.db().spells.get_spell(spell_id))
+        .map(|spell| {
+            matches!(
+                spell.target,
+                crate::domain::magic::types::SpellTarget::SingleMonster
+            )
+        })
+        .unwrap_or(false);
+
+    // Close the item panel regardless of path.
+    item_panel_state.user = None;
+    item_panel_state.focused_index = 0;
+    item_panel_state.confirm_requested = false;
+
+    if needs_monster_target {
+        // Enter target-selection mode — the UseItemAction is emitted on confirm.
+        pending_item.data = Some((user, inventory_index));
+        target_sel.0 = Some(user);
+        action_menu_state.active_target_index = Some(0);
+    } else {
+        // Self-targeting item — dispatch immediately with user as target.
+        if let Some(ref mut w) = use_item_writer {
+            w.write(UseItemAction {
+                user,
+                inventory_index,
+                target: user,
+            });
+        }
+    }
+}
+
+/// System: Handle interactions with item selection panel buttons.
+///
+/// Processes both mouse clicks on `ItemButton` / `ItemCancelButton` entities
+/// and keyboard-confirm signals (`ItemPanelState::confirm_requested`).
+///
+/// Clicking or keyboard-confirming an `ItemButton`:
+/// - Consumable self-target effects (`HealHp`, `RestoreSp`, `CureCondition`,
+///   `BoostAttribute`, `BoostResistance`, `Resurrect`, food): dispatches
+///   `UseItemAction` with `target = user` immediately.
+/// - Items with a `spell_effect` (offensive charged items / scrolls): enters
+///   monster target-selection mode via `PendingItemUse`.
+///
+/// Clicking `ItemCancelButton` closes the panel without dispatching.
+#[allow(clippy::too_many_arguments)]
+fn handle_item_button_interaction(
+    item_buttons: Query<(&Interaction, &ItemButton), Changed<Interaction>>,
+    cancel_buttons: Query<&Interaction, (Changed<Interaction>, With<ItemCancelButton>)>,
+    mut item_panel_state: ResMut<ItemPanelState>,
+    mut pending_item: ResMut<PendingItemUse>,
+    mut target_sel: ResMut<TargetSelection>,
+    mut action_menu_state: ResMut<ActionMenuState>,
+    combat_res: Res<CombatResource>,
+    content: Option<Res<GameContent>>,
+    mut use_item_writer: Option<MessageWriter<UseItemAction>>,
+) {
+    // ── Pending target confirmation (set by combat_input_system) ─────────────
+    // This fires when the player confirmed a monster target via keyboard while
+    // an offensive item was pending.  The item panel is already closed at this
+    // point, so we check before the `item_panel_state.user` early-return guard.
+    if let Some(pidx) = pending_item.confirmed_target.take() {
+        if let Some((item_user, inv_idx)) = pending_item.data.take() {
+            if let Some(ref mut w) = use_item_writer {
+                w.write(UseItemAction {
+                    user: item_user,
+                    inventory_index: inv_idx,
+                    target: CombatantId::Monster(pidx),
+                });
+            }
+        }
+        return;
+    }
+
+    // ── Cancel button ────────────────────────────────────────────────────────
+    for interaction in cancel_buttons.iter() {
+        if *interaction == Interaction::Pressed {
+            item_panel_state.user = None;
+            item_panel_state.focused_index = 0;
+            item_panel_state.confirm_requested = false;
+            return;
+        }
+    }
+
+    let Some(user) = item_panel_state.user else {
+        return;
+    };
+
+    let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+    let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
+
+    // ── Keyboard-confirm path ────────────────────────────────────────────────
+    if item_panel_state.confirm_requested {
+        item_panel_state.confirm_requested = false;
+        let focused = item_panel_state.focused_index;
+        let slot_indices = item_panel_state.usable_slot_indices.clone();
+        if let Some(&inv_idx) = slot_indices.get(focused) {
+            // Resolve slot to get item_id
+            let CombatantId::Player(user_idx) = user else {
+                return;
+            };
+            let item_id = combat_res
+                .state
+                .participants
+                .get(user_idx)
+                .and_then(|p| match p {
+                    Combatant::Player(pc) => pc.inventory.items.get(inv_idx),
+                    _ => None,
+                })
+                .map(|slot| slot.item_id);
+            if let Some(item_id) = item_id {
+                dispatch_item_button(
+                    user,
+                    inv_idx,
+                    item_id,
+                    content_ref,
+                    &mut item_panel_state,
+                    &mut pending_item,
+                    &mut target_sel,
+                    &mut action_menu_state,
+                    &mut use_item_writer,
+                );
+            }
+        }
+        return;
+    }
+
+    // ── Mouse-click path ─────────────────────────────────────────────────────
+    for (interaction, item_btn) in item_buttons.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        dispatch_item_button(
+            user,
+            item_btn.inventory_index,
+            item_btn.item_id,
+            content_ref,
+            &mut item_panel_state,
+            &mut pending_item,
+            &mut target_sel,
+            &mut action_menu_state,
+            &mut use_item_writer,
+        );
+
+        break; // Process only one button click per frame
+    }
+}
+
+/// System: Clean up item panel state when combat ends.
+///
+/// Resets `ItemPanelState` and `PendingItemUse` to defaults so no stale data
+/// carries over into the next encounter.
+fn cleanup_item_panel_on_combat_exit(
+    global_state: Res<GlobalState>,
+    mut item_panel_state: ResMut<ItemPanelState>,
+    mut pending_item: ResMut<PendingItemUse>,
+) {
+    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        item_panel_state.user = None;
+        item_panel_state.focused_index = 0;
+        item_panel_state.usable_slot_indices.clear();
+        item_panel_state.confirm_requested = false;
+        pending_item.data = None;
+        pending_item.confirmed_target = None;
+    }
+}
+
 /// System: Update combat UI to reflect current combat state
 ///
 /// Updates enemy HP bars, turn order display, and action menu visibility.
@@ -2674,8 +3167,19 @@ const ACTION_BUTTON_ORDER: [ActionButtonType; COMBAT_ACTION_COUNT] = COMBAT_ACTI
 ///   `RangedAttackAction` instead of an `AttackAction`.
 /// * `spell_panel_state` - Mutable reference to `SpellPanelState`; set to
 ///   `Some(actor)` when `Cast` is dispatched to open the spell selection panel.
+/// * `item_panel_state` - Mutable reference to `ItemPanelState`; set to
+///   `Some(actor)` when `Item` is dispatched to open the item selection panel.
 /// * `defend_writer` - Optional message writer for `DefendAction`.
 /// * `flee_writer` - Optional message writer for `FleeAction`.
+///
+/// | Button           | Effect                                          |
+/// |------------------|-------------------------------------------------|
+/// | Attack           | Enter target-selection mode (melee)             |
+/// | RangedAttack     | Enter target-selection mode (ranged)            |
+/// | Defend           | Write `DefendAction` immediately                |
+/// | Cast             | Open `SpellPanelState` for spell selection      |
+/// | Item             | Open `ItemPanelState` for item selection        |
+/// | Flee             | Write `FleeAction` immediately                  |
 #[allow(clippy::too_many_arguments)]
 fn dispatch_combat_action(
     button_type: ActionButtonType,
@@ -2684,6 +3188,7 @@ fn dispatch_combat_action(
     action_menu_state: &mut ActionMenuState,
     ranged_pending: &mut RangedAttackPending,
     spell_panel_state: &mut SpellPanelState,
+    item_panel_state: &mut ItemPanelState,
     defend_writer: &mut Option<MessageWriter<DefendAction>>,
     flee_writer: &mut Option<MessageWriter<FleeAction>>,
 ) {
@@ -2715,7 +3220,9 @@ fn dispatch_combat_action(
             spell_panel_state.caster = Some(actor);
         }
         ActionButtonType::Item => {
-            // Item submenu — handled by separate systems
+            item_panel_state.user = Some(actor);
+            item_panel_state.focused_index = 0;
+            item_panel_state.confirm_requested = false;
         }
     }
 }
@@ -2836,8 +3343,8 @@ fn combat_input_system(
     mut ranged_pending: ResMut<RangedAttackPending>,
     turn_state: Res<CombatTurnStateResource>,
     mut action_menu_state: ResMut<ActionMenuState>,
-    mut spell_panel_state: ResMut<SpellPanelState>,
-    mut pending_spell: ResMut<PendingSpellCast>,
+    mut spell_state: SpellCombatState<'_>,
+    mut item_state: ItemCombatState<'_>,
 ) {
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
         return;
@@ -2905,7 +3412,8 @@ fn combat_input_system(
                     &mut target_sel,
                     &mut action_menu_state,
                     &mut ranged_pending,
-                    &mut spell_panel_state,
+                    &mut spell_state.panel,
+                    &mut item_state.panel,
                     &mut defend_writer,
                     &mut flee_writer,
                 );
@@ -2952,7 +3460,15 @@ fn combat_input_system(
                         target_idx,
                     );
                     if let Some(pidx) = participant_idx {
-                        if let Some((spell_caster, spell_id)) = pending_spell.data.take() {
+                        if item_state.pending.data.is_some() {
+                            // Store confirmed monster target; handle_item_button_interaction
+                            // will emit UseItemAction on its next run.
+                            item_state.pending.confirmed_target = Some(pidx);
+                            target_sel.0 = None;
+                            action_menu_state.active_target_index = None;
+                        } else if let Some((spell_caster, spell_id)) =
+                            spell_state.pending.data.take()
+                        {
                             // Confirm spell cast targeting the selected monster
                             confirm_spell_target(
                                 spell_caster,
@@ -2976,11 +3492,38 @@ fn combat_input_system(
                     }
                 }
             } else if kb.just_pressed(KeyCode::Escape) {
-                // Cancel target selection — also clear ranged pending flag and pending spell.
+                // Cancel target selection — clear all pending actions and flags.
                 target_sel.0 = None;
                 action_menu_state.active_target_index = None;
                 ranged_pending.0 = false;
-                pending_spell.data = None;
+                spell_state.pending.data = None;
+                item_state.pending.data = None;
+                item_state.pending.confirmed_target = None;
+            }
+        } else if item_state.panel.user.is_some() {
+            // ---- Item-panel keyboard handling ----
+            let item_count = item_state.panel.usable_slot_indices.len();
+            if kb.just_pressed(KeyCode::Escape) {
+                item_state.panel.user = None;
+                item_state.panel.focused_index = 0;
+                item_state.panel.confirm_requested = false;
+            } else if kb.just_pressed(KeyCode::ArrowUp) {
+                if item_count > 0 {
+                    let new_idx = item_state
+                        .panel
+                        .focused_index
+                        .checked_sub(1)
+                        .unwrap_or(item_count.saturating_sub(1));
+                    item_state.panel.focused_index = new_idx;
+                }
+            } else if kb.just_pressed(KeyCode::ArrowDown) {
+                if item_count > 0 {
+                    item_state.panel.focused_index =
+                        (item_state.panel.focused_index + 1) % item_count;
+                }
+            } else if kb.just_pressed(KeyCode::Enter) && item_count > 0 {
+                // Signal handle_item_button_interaction to process the focused item.
+                item_state.panel.confirm_requested = true;
             }
         } else {
             // ---- Action-menu keyboard handling ----
@@ -3002,9 +3545,11 @@ fn combat_input_system(
                 execute_selected_action = true;
                 action_menu_state.confirmed = false;
             } else if kb.just_pressed(KeyCode::Escape) {
-                // Close spell panel if open, otherwise no-op.
-                if spell_panel_state.caster.is_some() {
-                    spell_panel_state.caster = None;
+                // Close spell or item panel if open, otherwise no-op.
+                if spell_state.panel.caster.is_some() {
+                    spell_state.panel.caster = None;
+                } else if item_state.panel.user.is_some() {
+                    item_state.panel.user = None;
                 }
             }
         }
@@ -3043,7 +3588,8 @@ fn combat_input_system(
                         &mut target_sel,
                         &mut action_menu_state,
                         &mut ranged_pending,
-                        &mut spell_panel_state,
+                        &mut spell_state.panel,
+                        &mut item_state.panel,
                         &mut defend_writer,
                         &mut flee_writer,
                     );
@@ -3055,7 +3601,8 @@ fn combat_input_system(
                     &mut target_sel,
                     &mut action_menu_state,
                     &mut ranged_pending,
-                    &mut spell_panel_state,
+                    &mut spell_state.panel,
+                    &mut item_state.panel,
                     &mut defend_writer,
                     &mut flee_writer,
                 );
@@ -4377,21 +4924,24 @@ pub fn perform_defend_action(
         return Ok(());
     }
 
-    // Apply AC bonus to the combatant
+    // Apply AC bonus to the combatant — players only; monsters do not defend.
     match action.combatant {
         CombatantId::Player(idx) => {
             if let Some(Combatant::Player(pc)) = combat_res.state.participants.get_mut(idx) {
-                pc.ac.modify(2);
+                // Guard against stacking: only apply the bonus the first time
+                // per round.  `advance_round` drains the set and reverses the
+                // bonus, so a second Defend in the same round is a no-op here.
+                if !combat_res.state.defending_combatants.contains(&idx) {
+                    pc.ac.modify(2);
+                    combat_res.state.defending_combatants.insert(idx);
+                }
             } else {
                 return Err(CombatError::CombatantNotFound(action.combatant));
             }
         }
-        CombatantId::Monster(idx) => {
-            if let Some(Combatant::Monster(mon)) = combat_res.state.participants.get_mut(idx) {
-                mon.ac.modify(2);
-            } else {
-                return Err(CombatError::CombatantNotFound(action.combatant));
-            }
+        CombatantId::Monster(_) => {
+            // Monsters cannot choose to Defend in the current design.
+            return Err(CombatError::CombatantNotFound(action.combatant));
         }
     }
 
@@ -4431,20 +4981,32 @@ fn handle_defend_action(
     content: Option<Res<GameContent>>,
     mut global_state: ResMut<GlobalState>,
     mut turn_state: ResMut<CombatTurnStateResource>,
+    mut feedback_writer: Option<MessageWriter<CombatFeedbackEvent>>,
 ) {
     let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
 
     for action in reader.read() {
         let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
 
-        if let Err(e) = perform_defend_action(
+        match perform_defend_action(
             &mut combat_res,
             action,
             content_ref,
             &mut global_state,
             &mut turn_state,
         ) {
-            tracing::warn!("Defend action failed: {}", e);
+            Ok(()) => {
+                // Emit defensive-stance feedback so the combat log shows the action.
+                emit_combat_feedback(
+                    Some(action.combatant),
+                    action.combatant,
+                    CombatFeedbackEffect::Defend,
+                    &mut feedback_writer,
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Defend action failed: {}", e);
+            }
         }
     }
 }
@@ -5783,6 +6345,20 @@ fn format_combat_log_line(
                     ],
                 };
             }
+            CombatFeedbackEffect::Defend => {
+                return CombatLogLine {
+                    segments: vec![
+                        CombatLogSegment {
+                            text: source_name,
+                            color: source_color,
+                        },
+                        CombatLogSegment {
+                            text: " takes a defensive stance.".to_string(),
+                            color: FEEDBACK_COLOR_STATUS,
+                        },
+                    ],
+                };
+            }
         }
     }
 
@@ -5871,6 +6447,18 @@ fn format_combat_log_line(
                 CombatLogSegment {
                     text: format!(": heals {} for [{}] HP", target_name, amount),
                     color: Color::WHITE,
+                },
+            ],
+        },
+        CombatFeedbackEffect::Defend => CombatLogLine {
+            segments: vec![
+                CombatLogSegment {
+                    text: target_name,
+                    color: target_color,
+                },
+                CombatLogSegment {
+                    text: " takes a defensive stance.".to_string(),
+                    color: FEEDBACK_COLOR_STATUS,
                 },
             ],
         },
@@ -6307,6 +6895,7 @@ fn spawn_combat_feedback(
             CombatFeedbackEffect::SpellHeal { name, amount } => {
                 (format!("{}! +{}", name, amount), FEEDBACK_COLOR_HEAL)
             }
+            CombatFeedbackEffect::Defend => ("Defend".to_string(), FEEDBACK_COLOR_STATUS),
         };
 
         let font_size = match &event.effect {
@@ -6319,6 +6908,7 @@ fn spawn_combat_feedback(
                 }
             }
             CombatFeedbackEffect::SpellHeal { .. } => 18.0,
+            CombatFeedbackEffect::Defend => 15.0,
             _ => 15.0,
         };
 
@@ -6722,6 +7312,18 @@ mod tests {
             pending_spell.data.is_none(),
             "PendingSpellCast should start None"
         );
+
+        // ItemPanelState and PendingItemUse resources should be registered
+        let item_panel = app.world().resource::<ItemPanelState>();
+        assert!(
+            item_panel.user.is_none(),
+            "ItemPanelState should start None"
+        );
+        let pending_item = app.world().resource::<PendingItemUse>();
+        assert!(
+            pending_item.data.is_none(),
+            "PendingItemUse should start None"
+        );
     }
 
     #[test]
@@ -6732,6 +7334,7 @@ mod tests {
         let mut action_menu_state = ActionMenuState::default();
         let mut ranged_pending = RangedAttackPending::default();
         let mut spell_panel_state = SpellPanelState::default();
+        let mut item_panel_state = ItemPanelState::default();
         let mut defend_writer: Option<MessageWriter<DefendAction>> = None;
         let mut flee_writer: Option<MessageWriter<FleeAction>> = None;
 
@@ -6744,6 +7347,7 @@ mod tests {
             &mut action_menu_state,
             &mut ranged_pending,
             &mut spell_panel_state,
+            &mut item_panel_state,
             &mut defend_writer,
             &mut flee_writer,
         );
@@ -6767,6 +7371,7 @@ mod tests {
         let mut action_menu_state = ActionMenuState::default();
         let mut ranged_pending = RangedAttackPending::default();
         let mut spell_panel_state = SpellPanelState::default();
+        let mut item_panel_state = ItemPanelState::default();
         let mut defend_writer: Option<MessageWriter<DefendAction>> = None;
         let mut flee_writer: Option<MessageWriter<FleeAction>> = None;
 
@@ -6779,6 +7384,7 @@ mod tests {
             &mut action_menu_state,
             &mut ranged_pending,
             &mut spell_panel_state,
+            &mut item_panel_state,
             &mut defend_writer,
             &mut flee_writer,
         );
@@ -6786,6 +7392,11 @@ mod tests {
         assert!(
             spell_panel_state.caster.is_none(),
             "Item action should not set spell_panel_state.caster"
+        );
+        assert_eq!(
+            item_panel_state.user,
+            Some(actor),
+            "Item action should set item_panel_state.user"
         );
     }
 
@@ -8556,11 +9167,15 @@ mod tests {
 
     #[test]
     fn test_defend_action_improves_ac() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CombatPlugin);
+        // Use two combatants so that advance_turn after the Defend action moves to
+        // turn index 1 (the monster) rather than immediately wrapping around to
+        // round 2.  A round-wrap would trigger advance_round, which drains
+        // defending_combatants and reverses the +2 AC bonus before the assertions
+        // below have a chance to check it.
+        let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+        let mut gs_local = crate::game::resources::GlobalState(GameState::new());
+        let mut turn_state_local = CombatTurnStateResource::default();
 
-        let mut gs = GameState::new();
         let mut hero = Character::new(
             "Defender".to_string(),
             "human".to_string(),
@@ -8569,50 +9184,193 @@ mod tests {
             Alignment::Good,
         );
         hero.ac = crate::domain::character::AttributePair::new(10);
-        gs.party.add_member(hero.clone()).unwrap();
+
+        let monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(10, 10, 10, 10, 5, 10, 5),
+            10,
+            5,
+            vec![Attack::physical(DiceRoll::new(1, 4, 0))],
+            crate::domain::combat::monster::LootTable::default(),
+        );
 
         let mut cs = CombatState::new(Handicap::Even);
         cs.add_player(hero.clone());
-        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.add_monster(monster);
+        // Player goes first; the round will NOT end after a single advance_turn.
+        cs.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
         cs.current_turn = 0;
 
-        gs.enter_combat_with_state(cs.clone());
-        app.insert_resource(crate::game::resources::GlobalState(gs));
+        let mut cr = CombatResource::new();
+        cr.state = cs;
+        cr.player_orig_indices = vec![Some(0), None];
 
-        // Initialize CombatResource
-        {
-            let mut combat_res = app.world_mut().resource_mut::<CombatResource>();
-            combat_res.state = cs;
-            combat_res.player_orig_indices = vec![Some(0)];
+        let action = DefendAction {
+            combatant: CombatantId::Player(0),
+        };
+
+        perform_defend_action(
+            &mut cr,
+            &action,
+            &content,
+            &mut gs_local,
+            &mut turn_state_local,
+        )
+        .expect("defend failed");
+
+        // After defending, current_turn should advance to 1 (monster) — not wrap.
+        assert_eq!(
+            cr.state.current_turn, 1,
+            "current_turn must advance to the monster's turn, not wrap the round"
+        );
+
+        if let Some(Combatant::Player(pc)) = cr.state.participants.first() {
+            assert!(
+                pc.ac.current >= pc.ac.base + 2,
+                "AC must increase by 2 after defending (bonus active mid-round)"
+            );
+        } else {
+            panic!("player missing");
         }
+        assert!(
+            cr.state.defending_combatants.contains(&0),
+            "defending_combatants must contain the player index after Defend action"
+        );
+    }
 
-        // Perform defend by sending a DefendAction message and letting systems handle it
-        // Perform defend by calling helper directly with a single borrow to CombatResource
-        {
-            let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
-            let mut cr = app.world_mut().resource_mut::<CombatResource>();
-            let mut gs_local = crate::game::resources::GlobalState(GameState::new());
-            let mut turn_state_local = CombatTurnStateResource::default();
+    /// Calling `perform_defend_action` twice in the same round must not stack
+    /// the +2 AC bonus.  The second call is a no-op because the player index is
+    /// already in `defending_combatants`.
+    #[test]
+    fn test_defend_bonus_does_not_stack() {
+        let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+        let mut gs_local = crate::game::resources::GlobalState(GameState::new());
+        let mut turn_state_local = CombatTurnStateResource::default();
 
-            let action = DefendAction {
-                combatant: CombatantId::Player(0),
-            };
+        let mut hero = Character::new(
+            "Defender".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.ac = crate::domain::character::AttributePair::new(10);
 
-            perform_defend_action(
-                &mut cr,
-                &action,
-                &content,
-                &mut gs_local,
-                &mut turn_state_local,
-            )
-            .expect("defend failed");
+        // Add a second participant so a single advance_turn does NOT immediately
+        // trigger advance_round (round end would clear the flag between the two calls).
+        let monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(10, 10, 10, 10, 5, 10, 5),
+            10,
+            5,
+            vec![Attack::physical(DiceRoll::new(1, 4, 0))],
+            crate::domain::combat::monster::LootTable::default(),
+        );
 
-            if let Some(Combatant::Player(pc)) = cr.state.participants.first() {
-                assert!(pc.ac.current >= pc.ac.base + 2);
-            } else {
-                panic!("player missing");
-            }
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.add_monster(monster);
+        cs.turn_order = vec![CombatantId::Player(0), CombatantId::Monster(1)];
+        cs.current_turn = 0;
+
+        let mut cr = CombatResource::new();
+        cr.state = cs;
+
+        let action = DefendAction {
+            combatant: CombatantId::Player(0),
+        };
+
+        // First defend — should apply +2 and set the flag.
+        perform_defend_action(
+            &mut cr,
+            &action,
+            &content,
+            &mut gs_local,
+            &mut turn_state_local,
+        )
+        .expect("first defend failed");
+
+        // The turn was advanced; reset current_turn so the second call is also
+        // treated as the player's turn (same round, different simulated trigger).
+        cr.state.current_turn = 0;
+
+        let ac_after_first = if let Some(Combatant::Player(pc)) = cr.state.participants.first() {
+            pc.ac.current
+        } else {
+            panic!("player missing");
+        };
+        assert_eq!(
+            ac_after_first, 12,
+            "AC should be base(10)+2 after first defend"
+        );
+
+        // Second defend — must be a no-op because the flag is already set.
+        perform_defend_action(
+            &mut cr,
+            &action,
+            &content,
+            &mut gs_local,
+            &mut turn_state_local,
+        )
+        .expect("second defend failed");
+
+        if let Some(Combatant::Player(pc)) = cr.state.participants.first() {
+            assert_eq!(
+                pc.ac.current, 12,
+                "AC must NOT increase beyond base+2 on a second Defend in the same round"
+            );
+        } else {
+            panic!("player missing after second defend");
         }
+    }
+
+    /// Dispatching `DefendAction` with a `CombatantId::Monster` must return
+    /// `Err(CombatError::CombatantNotFound)` because monsters cannot defend.
+    #[test]
+    fn test_monster_defend_action_returns_error() {
+        use crate::domain::combat::engine::CombatError;
+
+        let content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+        let mut gs_local = crate::game::resources::GlobalState(GameState::new());
+        let mut turn_state_local = CombatTurnStateResource::default();
+
+        let monster = crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(10, 10, 10, 10, 5, 10, 5),
+            10,
+            5,
+            vec![Attack::physical(DiceRoll::new(1, 4, 0))],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_monster(monster);
+        cs.turn_order = vec![CombatantId::Monster(0)];
+        cs.current_turn = 0;
+
+        let mut cr = CombatResource::new();
+        cr.state = cs;
+
+        let action = DefendAction {
+            combatant: CombatantId::Monster(0),
+        };
+
+        let result = perform_defend_action(
+            &mut cr,
+            &action,
+            &content,
+            &mut gs_local,
+            &mut turn_state_local,
+        );
+
+        assert!(
+            matches!(result, Err(CombatError::CombatantNotFound(_))),
+            "Defend action for a monster must return CombatError::CombatantNotFound, got {:?}",
+            result
+        );
     }
 
     #[test]
@@ -12724,5 +13482,294 @@ mod tests {
             summary.boss_defeated,
             "VictorySummary::boss_defeated must be true for a Boss encounter"
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Phase 2: Item Selection Panel tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// `dispatch_combat_action(Item)` sets `item_panel_state.user = Some(actor)`.
+    #[test]
+    fn test_dispatch_item_sets_item_panel_user() {
+        use crate::domain::combat::types::CombatantId;
+
+        let mut target_sel = TargetSelection::default();
+        let mut action_menu_state = ActionMenuState::default();
+        let mut ranged_pending = RangedAttackPending::default();
+        let mut spell_panel_state = SpellPanelState::default();
+        let mut item_panel_state = ItemPanelState::default();
+        let mut defend_writer: Option<MessageWriter<DefendAction>> = None;
+        let mut flee_writer: Option<MessageWriter<FleeAction>> = None;
+
+        let actor = CombatantId::Player(2);
+
+        dispatch_combat_action(
+            ActionButtonType::Item,
+            actor,
+            &mut target_sel,
+            &mut action_menu_state,
+            &mut ranged_pending,
+            &mut spell_panel_state,
+            &mut item_panel_state,
+            &mut defend_writer,
+            &mut flee_writer,
+        );
+
+        assert_eq!(
+            item_panel_state.user,
+            Some(actor),
+            "dispatch_combat_action(Item) should set item_panel_state.user"
+        );
+        assert_eq!(
+            item_panel_state.focused_index, 0,
+            "focused_index should reset to 0 on open"
+        );
+        assert!(
+            !item_panel_state.confirm_requested,
+            "confirm_requested should be false on open"
+        );
+        assert!(
+            target_sel.0.is_none(),
+            "Item should not enter target-selection mode directly"
+        );
+    }
+
+    /// With `item_panel_state.user = None`, `update_item_selection_panel`
+    /// must not spawn any `ItemSelectionPanel` entity.
+    #[test]
+    fn test_item_panel_not_open_when_user_is_none() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Leave ItemPanelState at default (user = None).
+        app.insert_resource(GlobalState(GameState::new()));
+        app.update();
+
+        let panel_count = app
+            .world_mut()
+            .query::<&ItemSelectionPanel>()
+            .iter(app.world())
+            .count();
+        assert_eq!(
+            panel_count, 0,
+            "No ItemSelectionPanel entity should exist when user is None"
+        );
+    }
+
+    /// Pressing Escape while the item panel is open must close the panel.
+    #[test]
+    fn test_item_panel_escape_closes_panel() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Set up a valid combat state so the input system doesn't bail early.
+        {
+            let mut gs = GameState::new();
+            gs.mode = crate::application::GameMode::Combat(
+                crate::domain::combat::engine::CombatState::new(Handicap::Even),
+            );
+            app.insert_resource(GlobalState(gs));
+        }
+        {
+            let mut ts = app.world_mut().resource_mut::<CombatTurnStateResource>();
+            ts.0 = CombatTurnState::PlayerTurn;
+        }
+        // Open the item panel
+        {
+            let mut ips = app.world_mut().resource_mut::<ItemPanelState>();
+            ips.user = Some(CombatantId::Player(0));
+        }
+
+        // Simulate Escape key press
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Escape);
+        }
+
+        app.update();
+
+        let ips = app.world().resource::<ItemPanelState>();
+        assert!(
+            ips.user.is_none(),
+            "Escape should close the item panel (user = None)"
+        );
+    }
+
+    /// Clicking the Cancel button in the item panel closes the panel without
+    /// dispatching a UseItemAction.
+    #[test]
+    fn test_item_panel_closes_on_cancel() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        app.insert_resource(GlobalState(GameState::new()));
+        // Open the item panel by setting user
+        {
+            let mut ips = app.world_mut().resource_mut::<ItemPanelState>();
+            ips.user = Some(CombatantId::Player(0));
+        }
+
+        // Simulate a Pressed interaction on an ItemCancelButton entity
+        app.world_mut()
+            .spawn((ItemCancelButton, Interaction::Pressed));
+
+        app.update();
+
+        let ips = app.world().resource::<ItemPanelState>();
+        assert!(
+            ips.user.is_none(),
+            "Cancel button should close the item panel (user = None)"
+        );
+    }
+
+    /// Selecting a self-targeting item button dispatches a UseItemAction with
+    /// correct fields and closes the item panel.
+    #[test]
+    fn test_item_panel_dispatches_use_item_action() {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Set up content DB with a healing potion
+        let mut content = GameContent::new(ContentDatabase::new());
+        let potion = Item {
+            id: 99,
+            name: "Test Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::HealHp(10),
+                is_combat_usable: true,
+                duration_minutes: None,
+            }),
+            base_cost: 5,
+            sell_cost: 2,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        content.0.items.add_item(potion).unwrap();
+        app.insert_resource(content);
+        app.insert_resource(GlobalState(GameState::new()));
+
+        // Set the item panel open for player 0
+        {
+            let mut ips = app.world_mut().resource_mut::<ItemPanelState>();
+            ips.user = Some(CombatantId::Player(0));
+            // Provide the usable slot index directly (as if update_item_selection_panel ran)
+            ips.usable_slot_indices = vec![0];
+        }
+
+        // Spawn a pressed ItemButton entity
+        app.world_mut().spawn((
+            ItemButton {
+                item_id: 99,
+                charges: 1,
+                inventory_index: 0,
+            },
+            Interaction::Pressed,
+        ));
+
+        app.update();
+
+        // Panel should be closed after selecting an item
+        let ips = app.world().resource::<ItemPanelState>();
+        assert!(
+            ips.user.is_none(),
+            "item panel should be closed after selecting an item"
+        );
+    }
+
+    /// Full integration: party member with a healing potion heals HP via
+    /// `perform_use_item_action_with_rng` (the domain function backing the
+    /// `UseItemAction` handler).
+    #[test]
+    fn test_combat_item_use_heals_party_member() {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        // Set up content DB with a healing potion
+        let mut content = GameContent::new(ContentDatabase::new());
+        let potion = Item {
+            id: 77,
+            name: "Healing Potion".to_string(),
+            item_type: ItemType::Consumable(ConsumableData {
+                effect: ConsumableEffect::HealHp(20),
+                is_combat_usable: true,
+                duration_minutes: None,
+            }),
+            base_cost: 20,
+            sell_cost: 10,
+            alignment_restriction: None,
+            constant_bonus: None,
+            temporary_bonus: None,
+            spell_effect: None,
+            max_charges: 0,
+            is_cursed: false,
+            icon_path: None,
+            tags: vec![],
+            mesh_descriptor_override: None,
+            mesh_id: None,
+        };
+        content.0.items.add_item(potion).unwrap();
+
+        // Set up combat state with a wounded player
+        let mut combat_res = CombatResource::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp.base = 50;
+        hero.hp.current = 20;
+        hero.inventory.add_item(77, 1).unwrap();
+        combat_res.state.add_player(hero);
+        combat_res.state.turn_order = vec![CombatantId::Player(0)];
+        combat_res.state.current_turn = 0;
+
+        let mut global_state = GlobalState(GameState::new());
+        let mut turn_state = CombatTurnStateResource::default();
+        let mut rng = rand::rng();
+
+        let action = UseItemAction {
+            user: CombatantId::Player(0),
+            inventory_index: 0,
+            target: CombatantId::Player(0),
+        };
+
+        perform_use_item_action_with_rng(
+            &mut combat_res,
+            &action,
+            &content,
+            &mut global_state,
+            &mut turn_state,
+            &mut rng,
+        )
+        .expect("perform_use_item_action_with_rng must succeed");
+
+        // Hero should be healed
+        if let Some(Combatant::Player(pc)) = combat_res.state.get_combatant(&CombatantId::Player(0))
+        {
+            assert!(
+                pc.hp.current > 20,
+                "Hero HP should have increased after healing potion: got {}",
+                pc.hp.current
+            );
+        } else {
+            panic!("Hero not found in combat state after item use");
+        }
     }
 }

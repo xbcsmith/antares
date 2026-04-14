@@ -718,6 +718,8 @@ impl ConditionsEditorState {
                         ConditionDuration::Instant => ui.label("Instant"),
                         ConditionDuration::Rounds(n) => ui.label(format!("{} rounds", n)),
                         ConditionDuration::Minutes(n) => ui.label(format!("{} minutes", n)),
+                        ConditionDuration::UntilCombatEnd => ui.label("Until Combat End"),
+                        ConditionDuration::UntilRest => ui.label("Until Rest"),
                         ConditionDuration::Permanent => ui.label("Permanent"),
                     };
 
@@ -839,6 +841,8 @@ impl ConditionsEditorState {
                                 ConditionDuration::Instant => "Instant".to_owned(),
                                 ConditionDuration::Rounds(n) => format!("Rounds({})", n),
                                 ConditionDuration::Minutes(n) => format!("Minutes({})", n),
+                                ConditionDuration::UntilCombatEnd => "Until Combat End".to_owned(),
+                                ConditionDuration::UntilRest => "Until Rest".to_owned(),
                                 ConditionDuration::Permanent => "Permanent".to_owned(),
                             })
                             .show_ui(ui, |ui| {
@@ -897,6 +901,32 @@ impl ConditionsEditorState {
                                     )
                                 {
                                     new_cond.default_duration = ConditionDuration::Minutes(1);
+                                }
+                                // UntilCombatEnd
+                                if ui
+                                    .selectable_label(
+                                        matches!(
+                                            new_cond.default_duration,
+                                            ConditionDuration::UntilCombatEnd
+                                        ),
+                                        "Until Combat End",
+                                    )
+                                    .clicked()
+                                {
+                                    new_cond.default_duration = ConditionDuration::UntilCombatEnd;
+                                }
+                                // UntilRest
+                                if ui
+                                    .selectable_label(
+                                        matches!(
+                                            new_cond.default_duration,
+                                            ConditionDuration::UntilRest
+                                        ),
+                                        "Until Rest",
+                                    )
+                                    .clicked()
+                                {
+                                    new_cond.default_duration = ConditionDuration::UntilRest;
                                 }
                             });
                         // If Rounds or Minutes selected, show a numeric editor
@@ -1609,6 +1639,8 @@ fn build_condition_badges(condition: &ConditionDefinition) -> Vec<MetadataBadge>
         ConditionDuration::Instant => "Instant".to_string(),
         ConditionDuration::Rounds(n) => format!("{}r", n),
         ConditionDuration::Minutes(n) => format!("{}m", n),
+        ConditionDuration::UntilCombatEnd => "CombatEnd".to_string(),
+        ConditionDuration::UntilRest => "UntilRest".to_string(),
         ConditionDuration::Permanent => "Permanent".to_string(),
     };
     badges.push(

@@ -487,6 +487,23 @@ impl Monster {
         self.active_conditions.retain_mut(|c| !c.tick_minute());
     }
 
+    /// Removes all conditions that expire at the end of combat.
+    ///
+    /// Should be called via
+    /// [`crate::domain::combat::engine::CombatState::clear_combat_end_conditions`]
+    /// before syncing monster state at combat exit so that
+    /// [`ConditionDuration::UntilCombatEnd`](crate::domain::conditions::ConditionDuration::UntilCombatEnd)
+    /// conditions do not persist beyond the encounter boundary.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// // See unit tests in the tests module for a full worked example.
+    /// ```
+    pub fn tick_conditions_combat_end(&mut self) {
+        self.active_conditions.retain(|c| !c.tick_combat_end());
+    }
+
     /// Calculates the total modifier from active conditions for a given attribute
     pub fn get_condition_modifier(
         &self,
@@ -862,5 +879,83 @@ mod tests {
 
         monster.set_visual(42);
         assert_eq!(monster.creature_id, Some(42));
+    }
+
+    // -----------------------------------------------------------------------
+    // tick_conditions_combat_end
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_tick_conditions_combat_end_removes_until_combat_end_conditions() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+        let stats = Stats::new(10, 8, 6, 10, 8, 7, 5);
+        let attacks = vec![Attack::physical(DiceRoll::new(1, 6, 0))];
+        let loot = LootTable::none();
+        let mut m = Monster::new(1, "Goblin".to_string(), stats, 20, 5, attacks, loot);
+        m.active_conditions.push(ActiveCondition::new(
+            "combat_bless".to_string(),
+            ConditionDuration::UntilCombatEnd,
+        ));
+        m.active_conditions.push(ActiveCondition::new(
+            "poison".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        m.tick_conditions_combat_end();
+        assert_eq!(m.active_conditions.len(), 1);
+        assert_eq!(m.active_conditions[0].condition_id, "poison");
+    }
+
+    #[test]
+    fn test_tick_conditions_combat_end_preserves_permanent_conditions() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+        let stats = Stats::new(10, 8, 6, 10, 8, 7, 5);
+        let attacks = vec![Attack::physical(DiceRoll::new(1, 6, 0))];
+        let loot = LootTable::none();
+        let mut m = Monster::new(1, "Goblin".to_string(), stats, 20, 5, attacks, loot);
+        m.active_conditions.push(ActiveCondition::new(
+            "poison".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        m.active_conditions.push(ActiveCondition::new(
+            "sleep".to_string(),
+            ConditionDuration::Rounds(3),
+        ));
+        m.tick_conditions_combat_end();
+        assert_eq!(m.active_conditions.len(), 2);
+    }
+
+    #[test]
+    fn test_tick_conditions_combat_end_empty_active_conditions_is_noop() {
+        let stats = Stats::new(10, 8, 6, 10, 8, 7, 5);
+        let attacks = vec![Attack::physical(DiceRoll::new(1, 6, 0))];
+        let loot = LootTable::none();
+        let mut m = Monster::new(1, "Goblin".to_string(), stats, 20, 5, attacks, loot);
+        assert!(m.active_conditions.is_empty());
+        m.tick_conditions_combat_end();
+        assert!(m.active_conditions.is_empty());
+    }
+
+    #[test]
+    fn test_tick_conditions_combat_end_removes_multiple_until_combat_end() {
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+        let stats = Stats::new(10, 8, 6, 10, 8, 7, 5);
+        let attacks = vec![Attack::physical(DiceRoll::new(1, 6, 0))];
+        let loot = LootTable::none();
+        let mut m = Monster::new(1, "Goblin".to_string(), stats, 20, 5, attacks, loot);
+        m.active_conditions.push(ActiveCondition::new(
+            "combat_bless".to_string(),
+            ConditionDuration::UntilCombatEnd,
+        ));
+        m.active_conditions.push(ActiveCondition::new(
+            "combat_haste".to_string(),
+            ConditionDuration::UntilCombatEnd,
+        ));
+        m.active_conditions.push(ActiveCondition::new(
+            "poison".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        m.tick_conditions_combat_end();
+        assert_eq!(m.active_conditions.len(), 1);
+        assert_eq!(m.active_conditions[0].condition_id, "poison");
     }
 }

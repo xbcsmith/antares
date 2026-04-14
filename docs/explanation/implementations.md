@@ -1,5 +1,500 @@
 # Implementations
 
+## Combat Fixes — Phase 3: Out-of-Combat Item Use — Charged Magical Items (Complete)
+
+### Overview
+
+Non-consumable items with `spell_effect` and charges (wands, staves, enchanted
+accessories) were not usable from the exploration inventory. The Use button was
+gated on `ItemType::Consumable` only, the handler had no branch for charged
+non-consumables, and the inventory grid showed no visual distinction between
+charged magical items and plain equipment.
+
+This phase extends three areas of `src/game/systems/inventory_ui.rs` to fully
+support the out-of-combat charged item use flow, while leaving every existing
+consumable path untouched.
+
+### What Changed
+
+#### `src/game/systems/inventory_ui.rs`
+
+##### 3.1 — `build_action_list` (Use button gate extended)
+
+The `if is_consumable` guard that gates the `PanelAction::Use` push was
+replaced with a combined condition:
+
+```rust
+let is_usable_charged_item = item_opt
+    .map(|item| {
+        item.spell_effect.is_some()
+            && item.max_charges > 0
+            && !matches!(item.item_type, ItemType::Consumable(_))
+    })
+    .unwrap_or(false);
+
+let slot_has_charges = character
+    .inventory.items.get(selected_slot_index)
+    .map(|s| s.charges > 0)
+    .unwrap_or(false);
+
+if is_consumable || (is_usable_charged_item && slot_has_charges) {
+    actions.push(PanelAction::Use { … });
+}
+```
+
+A wand with `charges = 0` therefore never produces a Use action.
+
+##### 3.2 — `render_character_panel` action strip
+
+The inline action strip inside `render_character_panel` had its own `is_consumable`
+check duplicated independently of `build_action_list`. The same combined guard
+(`show_use = is_consumable || (is_usable_charged && slot_charges > 0)`) was
+applied to keep keyboard navigation counts and visual button counts consistent.
+
+The hover tooltip changes from `"Use this consumable item"` to
+`"Use this charged item"` for charged magical items.
+
+##### 3.3 — Slot grid charge annotation
+
+After painting each item silhouette in the inventory grid, a charge counter is
+now overlaid on charged non-consumable items:
+
+- Condition: `item.spell_effect.is_some() && item.max_charges > 0 && !Consumable`
+  and `slot.charges > 0`.
+- Rendered as `"✨N"` (U+2728 + charge count) in the bottom-right corner of the
+  cell at 8 pt proportional font, colour `rgb(255, 220, 100)` (gold).
+- Matches the ammo-quantity annotation style used elsewhere.
+
+##### 3.4 — `handle_use_item_action_exploration` — Branch B
+
+After the existing `validate_item_use_slot` check (which already accepts charged
+non-consumables with `spell_effect` when `in_combat = false`), a new Branch B
+block was inserted before the original `resolve_consumable_for_use` call:
+
+```
+is_charged_magical = spell_effect.is_some() && max_charges > 0 && !Consumable
+```
+
+**Branch B steps:**
+
+1. Capture `item_name` and `spell_id_opt` (owned) before mutation.
+2. Defensive charges check — writes `"Cannot use {name}: no charges remaining."`
+   and resets nav state if `slot.charges == 0` (should not normally reach here).
+3. Decrement `slot.charges` by 1, or call `inventory.remove_item(slot_index)` on
+   last charge — identical semantics to the consumable path.
+4. Apply the spell effect via `cast_exploration_spell(party_index, spell, Self_,
+&mut game_state, &item_db, &mut rng)`. This reuses the existing exploration
+   spell pipeline, which correctly writes buff durations into `active_spells`
+   (section 3.3 — ActiveSpells write-back is already handled; verified by code
+   review of `cast_exploration_spell` → `apply_spell_effect` → `apply_buff_spell`).
+5. Write game log: `"{item_name} used. {character_name} casts {spell_name}."` on
+   success; `"… Failed to cast {spell_name}: {err}."` on error; `"{item_name}
+used."` when the spell ID is not in the content DB.
+6. Reset `InventoryNavigationState` to `SlotNavigation` phase (same as Branch A).
+7. `continue` — skip Branch A.
+
+The original consumable path (Branch A, steps 4–8) is unchanged.
+
+##### 3.5 — ActiveSpells write-back verified
+
+`cast_exploration_spell` receives `&mut game_state` and internally calls
+`apply_spell_effect`, which calls `apply_buff_spell` → writes to
+`game_state.active_spells`. No additional threading was required.
+
+### Architecture Compliance
+
+- `validate_item_use_slot` from `crate::domain::combat::item_usage` remains the
+  single source of truth for item use eligibility — no duplicated validation logic.
+- `cast_exploration_spell` from `crate::domain::magic::exploration_casting` is
+  reused for the spell-application step, keeping all spell dispatch logic in the
+  domain layer.
+- No `unwrap()` without justification; all `Option` paths guarded with `map` /
+  `unwrap_or`.
+- `ItemType`, `ConsumableEffect`, `SpellId` type aliases used consistently.
+
+### Test Coverage
+
+Seven new tests in `mod tests`:
+
+| Test                                                                    | What it verifies                                                |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `test_build_action_list_use_present_for_charged_wand`                   | wand with `charges = 3` gets a Use action                       |
+| `test_build_action_list_no_use_for_charged_wand_with_zero_charges`      | wand with `charges = 0` gets no Use action                      |
+| `test_build_action_list_no_use_for_non_consumable_without_spell_effect` | accessory without `spell_effect` gets no Use action             |
+| `test_exploration_use_wand_applies_spell_effect`                        | charge decremented from 3 to 2; log contains item name + "used" |
+| `test_exploration_use_wand_removes_slot_on_last_charge`                 | inventory slot removed when `charges = 1`                       |
+| `test_exploration_use_wand_writes_game_log`                             | exactly one GameLog entry with item name and "used"             |
+| `test_exploration_use_wand_zero_charges_writes_error_log`               | defensive 0-charge path logs "no charges"; slot preserved       |
+
+All existing `test_exploration_use_*` tests continue to pass.
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → No output (all files formatted)
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings
+✅ cargo nextest run → 4686 passed; 0 failed; 8 skipped
+```
+
+---
+
+## Combat Fixes — Phase 2: In-Combat Item Use — Item Selection Panel (Complete)
+
+### Overview
+
+The `ActionButtonType::Item` branch in `dispatch_combat_action` was a no-op
+comment. `ItemSelectionPanel` and `ItemButton` components were defined but
+never spawned, and no `update_item_selection_panel` system was registered.
+This phase wires the entire item-use path from button click through to
+`UseItemAction` dispatch, including keyboard navigation and monster
+target-selection for offensive items.
+
+### What Changed
+
+#### `src/game/systems/combat.rs`
+
+- **`ItemButton`** — added `inventory_index: usize` field (slot index passed
+  to `UseItemAction`).
+- **`ItemCancelButton`** — new `#[derive(Component)]` marker for the Cancel
+  button inside the item panel.
+- **`ItemPanelState`** — new `#[derive(Resource, Default)]` tracking:
+  - `user: Option<CombatantId>` — which player's inventory is shown.
+  - `focused_index: usize` — keyboard cursor position.
+  - `usable_slot_indices: Vec<usize>` — ordered slot indices of combat-usable
+    items (populated by `update_item_selection_panel`).
+  - `confirm_requested: bool` — set by the keyboard Enter handler; consumed
+    by `handle_item_button_interaction`.
+- **`PendingItemUse`** — new `#[derive(Resource, Default)]` tracking:
+  - `data: Option<(CombatantId, usize)>` — user + inventory slot for
+    offensive items awaiting monster target selection.
+  - `confirmed_target: Option<usize>` — set by `combat_input_system` when
+    Enter confirms a monster; consumed by `handle_item_button_interaction`
+    to emit `UseItemAction` without adding a `MessageWriter` param to the
+    already-full input system.
+- **`SpellCombatState`** — new `#[derive(SystemParam)]` bundling
+  `ResMut<SpellPanelState>` + `ResMut<PendingSpellCast>`.
+- **`ItemCombatState`** — new `#[derive(SystemParam)]` bundling
+  `ResMut<ItemPanelState>` + `ResMut<PendingItemUse>`.
+
+  Both SystemParam structs keep `combat_input_system` at exactly Bevy's
+  16-parameter system-function limit.
+
+- **`CombatPlugin::build`** — registers `ItemPanelState` and `PendingItemUse`
+  resources, and adds three new systems:
+
+  - `update_item_selection_panel.after(combat_input_system)`
+  - `handle_item_button_interaction.after(update_item_selection_panel)`
+  - `cleanup_item_panel_on_combat_exit`
+
+- **`dispatch_combat_action`** — `ActionButtonType::Item` arm now sets
+  `item_panel_state.user = Some(actor)` and resets focus/confirm flags.
+  Added `item_panel_state: &mut ItemPanelState` parameter.
+
+- **`combat_input_system`** — updated signature (stays at 16 params via
+  `SpellCombatState` + `ItemCombatState` bundles):
+
+  - Item-panel keyboard branch (`else if item_state.panel.user.is_some()`):
+    Escape closes panel; ArrowUp/Down cycle `focused_index`; Enter sets
+    `confirm_requested`.
+  - Target-confirm Enter path: when `item_state.pending.data.is_some()`,
+    stores `confirmed_target` and clears target selection (rather than
+    emitting directly, avoiding the need for a 17th param).
+  - Escape in action-menu mode: also closes the item panel.
+  - All three `dispatch_combat_action` call sites pass `&mut item_state.panel`.
+
+- **`update_item_selection_panel`** — spawns an `ItemSelectionPanel` node
+  with one `ItemButton` child per combat-usable inventory slot (filtered via
+  `validate_item_use_slot`). Displays 🧪 for consumables, ✨ for charged
+  magical items with charge counts. Includes a "✖ Cancel" `ItemCancelButton`.
+  Populates `item_panel_state.usable_slot_indices` for keyboard navigation.
+  Despawns any existing panel when `item_panel_state.user` is `None`.
+
+- **`dispatch_item_button`** — private helper deciding the dispatch path for
+  a chosen item (mouse or keyboard):
+
+  - Items whose `spell_effect` spell has `SpellTarget::SingleMonster` enter
+    monster target-selection mode (`pending_item.data`, `target_sel`).
+  - All other items (consumables, self-targeting effects) dispatch
+    `UseItemAction { target: user }` immediately.
+  - Closes the item panel in both cases.
+
+- **`handle_item_button_interaction`** — processes:
+
+  1. `pending_item.confirmed_target` — emits `UseItemAction` targeting the
+     confirmed monster (set by keyboard target-confirm path).
+  2. `ItemCancelButton` `Pressed` — closes panel.
+  3. `item_panel_state.confirm_requested` — keyboard Enter confirm via
+     `dispatch_item_button`.
+  4. `ItemButton` `Pressed` — mouse click via `dispatch_item_button`.
+
+- **`cleanup_item_panel_on_combat_exit`** — resets `ItemPanelState` and
+  `PendingItemUse` when combat ends.
+
+### Architecture Compliance
+
+- Uses existing `UseItemAction`, `CombatantId`, `ItemId` type aliases.
+- `validate_item_use_slot` from `crate::domain::combat::item_usage` is the
+  single source of truth for combat-usable item filtering.
+- Panel layout and styling mirrors `update_spell_selection_panel` exactly
+  (`SPELL_PANEL_LEFT`, `SPELL_PANEL_TOP`, `ACTION_BUTTON_COLOR`).
+- No `unwrap()` without justification; all `Option` paths are guarded.
+
+### Test Coverage
+
+Eight new tests in `mod tests`:
+
+| Test                                          | What it verifies                                         |
+| --------------------------------------------- | -------------------------------------------------------- |
+| `test_dispatch_item_sets_item_panel_user`     | `dispatch_combat_action(Item)` opens panel, resets flags |
+| `test_item_panel_not_open_when_user_is_none`  | No `ItemSelectionPanel` entity spawned when user is None |
+| `test_item_panel_escape_closes_panel`         | Escape key closes the panel via keyboard path            |
+| `test_item_panel_closes_on_cancel`            | `ItemCancelButton` Pressed closes panel                  |
+| `test_item_panel_dispatches_use_item_action`  | Pressing an `ItemButton` closes the panel                |
+| `test_combat_item_use_heals_party_member`     | Full domain integration: HP increases after potion       |
+| `test_dispatch_item_does_not_set_spell_panel` | Item action does not touch `spell_panel_state`           |
+| `test_combat_plugin_registers_messages`       | `ItemPanelState` and `PendingItemUse` registered         |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → No output (all files formatted)
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings
+✅ cargo nextest run → 4679 passed; 0 failed; 8 skipped
+```
+
+---
+
+## Combat Fixes — Phase 1: Defense System — Complete Implementation (Complete)
+
+### Overview
+
+The Defend action was half-implemented: `perform_defend_action` applied a
+permanent +2 AC bonus that was never reset, there was no per-combatant
+defending flag to track who was defending, and `resolve_attack` had no
+damage-reduction path for defenders. `ActiveSpells` defence buffs
+(`shield`, `power_shield`, `leather_skin`) were stored on `GameState` but
+never consulted during damage resolution. This phase completes the Defense
+system end-to-end.
+
+### What Changed
+
+#### `src/domain/combat/engine.rs`
+
+- **`use std::collections::HashSet`** — added to imports.
+- **`CombatState::defending_combatants: HashSet<usize>`** — new field
+  (with `#[serde(default)]` for save-file backward compatibility). The
+  `usize` key is the participant index (players only; monsters cannot defend).
+- **`CombatState::new`** — initialises `defending_combatants: HashSet::new()`.
+- **`advance_round`** — after DoT/HoT effects are applied, drains
+  `defending_combatants` and reverses the +2 AC bonus for each defending
+  player (`pc.ac.current = pc.ac.current.saturating_sub(2).max(pc.ac.base)`).
+  This bounds the bonus to exactly one round.
+- **`DefenseReduction` enum (private)** — `Immune` (power_shield) or
+  `Multiplier(f32)` with values 0.25–1.0.
+- **`compute_defense_reduction` (private helper)** — priority table:
+
+  | Condition                         | Result                                                 |
+  | --------------------------------- | ------------------------------------------------------ |
+  | `power_shield` active             | `Immune` (0 damage)                                    |
+  | Defending **and** `shield` active | `Multiplier(0.35)` — 65 % reduction                    |
+  | Defending only                    | `Multiplier(0.5 − endurance_bonus)`, floored at `0.25` |
+  | `shield` active (not defending)   | `Multiplier(0.80)` — 20 % reduction                    |
+  | `leather_skin` active             | `Multiplier(0.90)` — 10 % reduction                    |
+  | None                              | `Multiplier(1.0)` — no reduction                       |
+
+  Endurance modifier: each full 10 points of `endurance.current` above 10
+  subtracts 0.02 from the 0.5 base, floored at 0.25.
+
+- **`resolve_attack`** — after computing `raw_damage`, calls
+  `compute_defense_reduction`. `Immune` short-circuits with `Ok((0, None))`.
+  Any multiplier < 1.0 is applied via `((raw_damage as f32 * m).ceil() as
+i32).max(1)` (shadow-binding). The modified `raw_damage` is then passed
+  through the existing elemental resistance path unchanged.
+- **New domain tests (7)** added to `mod tests`:
+  - `test_defend_bonus_resets_after_round_end`
+  - `test_defend_reduces_incoming_damage`
+  - `test_power_shield_grants_immunity`
+  - `test_shield_reduces_damage_without_defending`
+  - `test_defend_and_shield_combo_reduces_damage_65_percent`
+  - `test_leather_skin_reduces_damage_10_percent`
+  - `test_defend_endurance_bonus_improves_reduction`
+  - `test_defend_endurance_bonus_capped_at_0_25_minimum_multiplier`
+
+#### `src/game/systems/combat.rs`
+
+- **`CombatFeedbackEffect::Defend`** — new unit variant added to the enum.
+- **`perform_defend_action`** — two changes:
+  1. Guard: AC bonus and flag insertion only happen when
+     `defending_combatants.contains(&idx)` is `false` (prevents stacking).
+  2. Monster branch: returns `Err(CombatError::CombatantNotFound)` instead of
+     applying AC to the monster (monsters cannot defend).
+- **`handle_defend_action`** — added
+  `mut feedback_writer: Option<MessageWriter<CombatFeedbackEvent>>` parameter.
+  On `Ok(())`, emits `CombatFeedbackEffect::Defend` via `emit_combat_feedback`
+  so the combat log records the action.
+- **`format_combat_log_line`** — added `CombatFeedbackEffect::Defend` arm in
+  both the with-source branch (`"{name} takes a defensive stance."`) and the
+  no-source fallback (`"{name} takes a defensive stance."`).
+- **`spawn_combat_feedback`** — added `CombatFeedbackEffect::Defend` arm that
+  shows `"Defend"` in `FEEDBACK_COLOR_STATUS` at `font_size = 15.0`.
+- **`test_defend_action_improves_ac`** (updated) — now uses two combatants
+  (player + monster) so `advance_turn` after Defend moves to turn 1 rather
+  than immediately wrapping the round. Added assertion that
+  `defending_combatants.contains(&0)` after the action.
+- **New system-level tests (2)** added to `mod tests`:
+  - `test_defend_bonus_does_not_stack`
+  - `test_monster_defend_action_returns_error`
+
+### Deliverables Checklist
+
+- [x] `defending_combatants: HashSet<usize>` added to `CombatState`
+- [x] `perform_defend_action` inserts into `defending_combatants` (guarded)
+- [x] `advance_round` clears `defending_combatants` and removes +2 AC bonus
+- [x] `compute_defense_reduction` helper implemented and used in `resolve_attack`
+- [x] `power_shield`, `shield`, `leather_skin` from `ActiveSpells` consulted
+- [x] `CombatFeedbackEffect::Defend` variant + log line added
+- [x] `spawn_combat_feedback` handles `Defend` variant
+- [x] All call sites of `resolve_attack` already passed `Option<&ActiveSpells>`
+      (no signature change required — it was already correct)
+- [x] New and updated unit tests passing (4673/4673, 8 skipped)
+- [x] `cargo fmt`, `cargo check`, `cargo clippy -D warnings` all clean
+
+### Success Criteria Verification
+
+| Criterion                                           | Status                                        |
+| --------------------------------------------------- | --------------------------------------------- |
+| Defend +2 AC bonus lasts exactly one round          | ✅ `advance_round` drains the set             |
+| Defending reduces damage ~50 % (endurance-adjusted) | ✅ `test_defend_reduces_incoming_damage`      |
+| `power_shield` grants full immunity                 | ✅ `test_power_shield_grants_immunity`        |
+| Combat log shows defensive stance message           | ✅ `CombatFeedbackEffect::Defend` arm         |
+| Choosing Defend twice does not stack AC             | ✅ `test_defend_bonus_does_not_stack`         |
+| Monster Defend returns error                        | ✅ `test_monster_defend_action_returns_error` |
+
+### Quality Gates
+
+```
+cargo fmt --all          → clean (no output)
+cargo check --all-targets --all-features → Finished 0 errors 0 warnings
+cargo clippy --all-targets --all-features -- -D warnings → Finished 0 warnings
+cargo nextest run --all-features → 4673 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Condition Duration: UntilCombatEnd and UntilRest (Complete)
+
+### Overview
+
+Two new `ConditionDuration` variants — `UntilCombatEnd` and `UntilRest` — have
+been added to the data-driven condition system. These variants allow designers
+to author conditions whose lifetime is tied to a game event rather than a fixed
+round or minute counter. All existing variants (`Instant`, `Rounds`, `Minutes`,
+`Permanent`) are unchanged.
+
+- **`UntilCombatEnd`** — condition is removed when the current combat resolves
+  (victory, defeat, or flee). Cleanup is triggered by
+  `CombatState::clear_combat_end_conditions`, called inside
+  `sync_combat_to_party_on_exit` just before participant data is written back to
+  the party.
+- **`UntilRest`** — condition is removed when the party takes a full,
+  non-interrupted rest. Cleanup is triggered inside `handle_rest_complete` after
+  the game-log "refreshed" message is written.
+
+### What Changed
+
+#### `src/domain/conditions.rs`
+
+- Added `UntilCombatEnd` and `UntilRest` variants to `ConditionDuration` enum
+  with doc-table explaining all variant lifetimes.
+- Updated `tick_round` doc comment to note that `UntilCombatEnd` and `UntilRest`
+  are not expired by round ticks (`_` arm covers them, returning `false`).
+- Updated `tick_minute` doc comment similarly.
+- Added `tick_combat_end(&self) -> bool` — returns `true` only for
+  `UntilCombatEnd`.
+- Added `tick_rest(&self) -> bool` — returns `true` only for `UntilRest`.
+- Added `///` doc comments with runnable examples to `new` and `with_magnitude`.
+- Added `#[cfg(test)] mod tests` with 28 unit tests covering all tick methods,
+  serde round-trips, and Copy/Clone invariants for both new variants.
+
+#### `src/domain/character.rs`
+
+- Added `tick_conditions_combat_end(&mut self)` — retains only conditions where
+  `tick_combat_end()` returns `false`.
+- Added `tick_conditions_rest(&mut self)` — retains only conditions where
+  `tick_rest()` returns `false`.
+- Both methods have `///` doc comments with runnable examples.
+- Added 8 unit tests in the existing `mod tests` block covering removal,
+  preservation, and no-op on empty lists.
+
+#### `src/domain/combat/monster.rs`
+
+- Added `tick_conditions_combat_end(&mut self)` — same semantics as the
+  character version.
+- Added 4 unit tests covering removal, preservation, and no-op.
+
+#### `src/domain/combat/engine.rs`
+
+- Added `CombatState::clear_combat_end_conditions` — iterates all participants,
+  calls `tick_conditions_combat_end` on each, then reconciles condition bitfields
+  via the existing `reconcile_character_conditions` / `reconcile_monster_conditions`
+  helpers.
+- Updated `apply_condition_to_character` — after the effect loop, a new block
+  ensures `UntilCombatEnd` and `UntilRest` conditions are always registered in
+  `active_conditions` (idempotent via `add_condition`) so the cleanup machinery
+  can find them even when the only effect is an `AttributeModifier`.
+- Updated `apply_condition_to_monster` — same addition.
+- Added 8 new unit tests covering `clear_combat_end_conditions` and the
+  apply-function tracking blocks.
+
+#### `src/game/systems/combat.rs`
+
+- Added `content: Option<Res<GameContent>>` parameter to
+  `sync_combat_to_party_on_exit` (Bevy detects it automatically).
+- Before the participant sync loop, builds `cond_defs` from the content database
+  and calls `combat_res.state.clear_combat_end_conditions(&cond_defs)`.
+
+#### `src/game/systems/rest.rs`
+
+- In `handle_rest_complete`, inside the non-interrupted rest `else` branch
+  (after writing the game-log message), builds `cond_defs` and calls
+  `member.tick_conditions_rest()` + `reconcile_character_conditions` for every
+  party member.
+
+#### `sdk/campaign_builder/src/conditions_editor.rs`
+
+- Updated `selected_text` match in the duration `ComboBox` — added arms for
+  `UntilCombatEnd` ("Until Combat End") and `UntilRest` ("Until Rest").
+- Added two new `selectable_label` entries in `show_ui` closure after "Minutes".
+- Updated `show_preview_static` duration match — added arms for the two new
+  variants.
+- Updated `build_condition_badges` `duration_label` match — added arms
+  ("CombatEnd" / "UntilRest" badge labels).
+
+#### `data/test_campaign/data/conditions.ron`
+
+- Added `combat_bless` (accuracy +3, `UntilCombatEnd`) and `exhaustion`
+  (speed −3, `UntilRest`) test fixture conditions.
+
+#### `docs/reference/architecture.md`
+
+- Added `ConditionDuration` enum definition, `ActiveCondition` struct, and
+  `ConditionDefinition` struct to section 4.3 Character, documenting the full
+  variant table and tick-routing rules.
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → No output
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings
+✅ cargo nextest run -p antares        → 4663 tests run: 4663 passed
+✅ cargo nextest run -p campaign_builder → 2332 tests run: 2332 passed
+```
+
+---
+
 ## Audit Gap Fixes — Phase 2 LevelingConfig Bridge + Phase 9 Proficiencies Section (Complete)
 
 ### Overview
