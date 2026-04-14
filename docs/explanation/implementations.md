@@ -1,5 +1,132 @@
 # Implementations
 
+## Combat Fixes — Phase 2: In-Combat Item Use — Item Selection Panel (Complete)
+
+### Overview
+
+The `ActionButtonType::Item` branch in `dispatch_combat_action` was a no-op
+comment. `ItemSelectionPanel` and `ItemButton` components were defined but
+never spawned, and no `update_item_selection_panel` system was registered.
+This phase wires the entire item-use path from button click through to
+`UseItemAction` dispatch, including keyboard navigation and monster
+target-selection for offensive items.
+
+### What Changed
+
+#### `src/game/systems/combat.rs`
+
+- **`ItemButton`** — added `inventory_index: usize` field (slot index passed
+  to `UseItemAction`).
+- **`ItemCancelButton`** — new `#[derive(Component)]` marker for the Cancel
+  button inside the item panel.
+- **`ItemPanelState`** — new `#[derive(Resource, Default)]` tracking:
+  - `user: Option<CombatantId>` — which player's inventory is shown.
+  - `focused_index: usize` — keyboard cursor position.
+  - `usable_slot_indices: Vec<usize>` — ordered slot indices of combat-usable
+    items (populated by `update_item_selection_panel`).
+  - `confirm_requested: bool` — set by the keyboard Enter handler; consumed
+    by `handle_item_button_interaction`.
+- **`PendingItemUse`** — new `#[derive(Resource, Default)]` tracking:
+  - `data: Option<(CombatantId, usize)>` — user + inventory slot for
+    offensive items awaiting monster target selection.
+  - `confirmed_target: Option<usize>` — set by `combat_input_system` when
+    Enter confirms a monster; consumed by `handle_item_button_interaction`
+    to emit `UseItemAction` without adding a `MessageWriter` param to the
+    already-full input system.
+- **`SpellCombatState`** — new `#[derive(SystemParam)]` bundling
+  `ResMut<SpellPanelState>` + `ResMut<PendingSpellCast>`.
+- **`ItemCombatState`** — new `#[derive(SystemParam)]` bundling
+  `ResMut<ItemPanelState>` + `ResMut<PendingItemUse>`.
+
+  Both SystemParam structs keep `combat_input_system` at exactly Bevy's
+  16-parameter system-function limit.
+
+- **`CombatPlugin::build`** — registers `ItemPanelState` and `PendingItemUse`
+  resources, and adds three new systems:
+
+  - `update_item_selection_panel.after(combat_input_system)`
+  - `handle_item_button_interaction.after(update_item_selection_panel)`
+  - `cleanup_item_panel_on_combat_exit`
+
+- **`dispatch_combat_action`** — `ActionButtonType::Item` arm now sets
+  `item_panel_state.user = Some(actor)` and resets focus/confirm flags.
+  Added `item_panel_state: &mut ItemPanelState` parameter.
+
+- **`combat_input_system`** — updated signature (stays at 16 params via
+  `SpellCombatState` + `ItemCombatState` bundles):
+
+  - Item-panel keyboard branch (`else if item_state.panel.user.is_some()`):
+    Escape closes panel; ArrowUp/Down cycle `focused_index`; Enter sets
+    `confirm_requested`.
+  - Target-confirm Enter path: when `item_state.pending.data.is_some()`,
+    stores `confirmed_target` and clears target selection (rather than
+    emitting directly, avoiding the need for a 17th param).
+  - Escape in action-menu mode: also closes the item panel.
+  - All three `dispatch_combat_action` call sites pass `&mut item_state.panel`.
+
+- **`update_item_selection_panel`** — spawns an `ItemSelectionPanel` node
+  with one `ItemButton` child per combat-usable inventory slot (filtered via
+  `validate_item_use_slot`). Displays 🧪 for consumables, ✨ for charged
+  magical items with charge counts. Includes a "✖ Cancel" `ItemCancelButton`.
+  Populates `item_panel_state.usable_slot_indices` for keyboard navigation.
+  Despawns any existing panel when `item_panel_state.user` is `None`.
+
+- **`dispatch_item_button`** — private helper deciding the dispatch path for
+  a chosen item (mouse or keyboard):
+
+  - Items whose `spell_effect` spell has `SpellTarget::SingleMonster` enter
+    monster target-selection mode (`pending_item.data`, `target_sel`).
+  - All other items (consumables, self-targeting effects) dispatch
+    `UseItemAction { target: user }` immediately.
+  - Closes the item panel in both cases.
+
+- **`handle_item_button_interaction`** — processes:
+
+  1. `pending_item.confirmed_target` — emits `UseItemAction` targeting the
+     confirmed monster (set by keyboard target-confirm path).
+  2. `ItemCancelButton` `Pressed` — closes panel.
+  3. `item_panel_state.confirm_requested` — keyboard Enter confirm via
+     `dispatch_item_button`.
+  4. `ItemButton` `Pressed` — mouse click via `dispatch_item_button`.
+
+- **`cleanup_item_panel_on_combat_exit`** — resets `ItemPanelState` and
+  `PendingItemUse` when combat ends.
+
+### Architecture Compliance
+
+- Uses existing `UseItemAction`, `CombatantId`, `ItemId` type aliases.
+- `validate_item_use_slot` from `crate::domain::combat::item_usage` is the
+  single source of truth for combat-usable item filtering.
+- Panel layout and styling mirrors `update_spell_selection_panel` exactly
+  (`SPELL_PANEL_LEFT`, `SPELL_PANEL_TOP`, `ACTION_BUTTON_COLOR`).
+- No `unwrap()` without justification; all `Option` paths are guarded.
+
+### Test Coverage
+
+Eight new tests in `mod tests`:
+
+| Test                                          | What it verifies                                         |
+| --------------------------------------------- | -------------------------------------------------------- |
+| `test_dispatch_item_sets_item_panel_user`     | `dispatch_combat_action(Item)` opens panel, resets flags |
+| `test_item_panel_not_open_when_user_is_none`  | No `ItemSelectionPanel` entity spawned when user is None |
+| `test_item_panel_escape_closes_panel`         | Escape key closes the panel via keyboard path            |
+| `test_item_panel_closes_on_cancel`            | `ItemCancelButton` Pressed closes panel                  |
+| `test_item_panel_dispatches_use_item_action`  | Pressing an `ItemButton` closes the panel                |
+| `test_combat_item_use_heals_party_member`     | Full domain integration: HP increases after potion       |
+| `test_dispatch_item_does_not_set_spell_panel` | Item action does not touch `spell_panel_state`           |
+| `test_combat_plugin_registers_messages`       | `ItemPanelState` and `PendingItemUse` registered         |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → No output (all files formatted)
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings
+✅ cargo nextest run → 4679 passed; 0 failed; 8 skipped
+```
+
+---
+
 ## Combat Fixes — Phase 1: Defense System — Complete Implementation (Complete)
 
 ### Overview
