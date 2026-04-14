@@ -1,5 +1,124 @@
 # Implementations
 
+## SDK CLI Consolidation — Phase 1: Delete Dead Weight and Scaffold (Complete)
+
+### Overview
+
+`src/bin/` previously contained 10 separate binaries with inconsistent CLI
+patterns (raw `env::args`, `clap`, or no args at all), duplicated helpers, and
+one completed one-time migration tool (`update_tutorial_maps`) that had no
+further use. Phase 1 deletes that dead weight, scaffolds the new `antares-sdk`
+unified binary, and migrates the two smallest `clap`-based tools as a
+proof-of-concept.
+
+### What Changed
+
+#### Deleted
+
+| File                              | Reason                                                                                                                  |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `src/bin/update_tutorial_maps.rs` | Completed one-time migration tool; created `.bak` files and hardcoded visual metadata for 5 tutorial maps. Job is done. |
+| `src/bin/name_gen.rs`             | Logic migrated to `src/sdk/cli/names.rs`.                                                                               |
+| `src/bin/campaign_validator.rs`   | Logic migrated to `src/sdk/cli/campaign_validator.rs`.                                                                  |
+
+#### `Cargo.toml`
+
+- Removed `[[bin]]` entries for `update_tutorial_maps`, `name_gen`, and
+  `campaign_validator`.
+- Added `[[bin]]` entry for `antares-sdk` → `src/bin/antares_sdk.rs`.
+
+#### New: `src/sdk/cli/mod.rs`
+
+Module scaffold declaring the two Phase 1 submodules:
+
+```rust
+pub mod campaign_validator;
+pub mod names;
+```
+
+#### New: `src/sdk/cli/names.rs`
+
+Migrated from `src/bin/name_gen.rs`. Public surface:
+
+- `ThemeArg` — `clap::ValueEnum` mapping to `NameTheme`
+- `NamesArgs` — `clap::Args` struct (derives `Args`, not `Parser`, for
+  embedding in the parent `Cli` enum)
+- `pub fn run(args: NamesArgs) -> Result<(), Box<dyn Error>>` — entry point
+
+All existing tests (`test_theme_arg_conversion`) moved here plus three new
+tests: `test_run_returns_ok_for_all_themes`, `test_run_with_lore_returns_ok`,
+`test_run_zero_names_returns_ok`.
+
+#### New: `src/sdk/cli/campaign_validator.rs`
+
+Migrated from `src/bin/campaign_validator.rs`. Public surface:
+
+- `CampaignArgs` — `clap::Args` with a nested `#[command(subcommand)]`
+- `CampaignSubcommand` — `clap::Subcommand` enum (currently only `Validate`)
+- `CampaignValidateArgs` — `clap::Args` for `campaign validate` flags
+- `pub fn run(args: CampaignArgs) -> Result<(), Box<dyn Error>>` — entry point
+
+Private helpers (`validate_all_campaigns`, `validate_single_campaign`,
+`validate_campaign_comprehensive`, `print_report`, `print_json_report`) are
+identical in behaviour to the original binary. Validation failures still call
+`std::process::exit(1)` to preserve identical exit-code semantics.
+
+All existing tests moved here plus two new structural tests:
+`test_campaign_args_validate_subcommand_fields` and
+`test_campaign_validate_args_with_path`.
+
+#### New: `src/bin/antares_sdk.rs`
+
+Thin entry point containing only the top-level `clap` dispatch:
+
+```text
+antares-sdk names [FLAGS]
+antares-sdk campaign validate [FLAGS] [CAMPAIGN_DIR]
+```
+
+Tests verify the `--help` code path, default arg parsing, full-flag parsing,
+and all campaign validate variants (single path, `--all`, optional flags).
+
+#### Modified: `src/sdk/mod.rs`
+
+Added `pub mod cli;` to expose the new CLI submodule tree as
+`antares::sdk::cli`.
+
+### Architecture Compliance
+
+- All new files live under `src/sdk/cli/` per the proposed file structure in
+  `docs/explanation/sdk_cli_consolidation_plan.md` Section "Proposed File
+  Structure".
+- `src/bin/antares_sdk.rs` contains only the `clap` enum and dispatch; all
+  logic lives in `src/sdk/cli/`.
+- SPDX headers on all new files (2026).
+- `pub fn run(...)` pattern used consistently for uniform entry-point
+  signatures across subcommands.
+- No `unwrap()` without justification; `process::exit` used only at CLI
+  boundary for validation failures (acceptable pattern for CLI binaries).
+
+### Quality Gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 4697 passed, 8 skipped, 0 failed  (+11 new tests)
+```
+
+### Success Criteria Verification
+
+- [x] `update_tutorial_maps` binary is gone (file deleted, `[[bin]]` removed)
+- [x] `antares-sdk names` works identically to the old `name_gen` binary
+- [x] `antares-sdk campaign validate` works identically to the old
+      `campaign_validator` binary
+- [x] All existing tests from migrated binaries pass in their new locations
+- [x] Smoke test: `test_antares_sdk_help_renders_without_panic` verifies CLI
+      structure is valid (same path as `antares-sdk --help`)
+- [x] All four quality gates pass
+
+---
+
 ## Combat Fixes — Phase 3: Out-of-Combat Item Use — Charged Magical Items (Complete)
 
 ### Overview

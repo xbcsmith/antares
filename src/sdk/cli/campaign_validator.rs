@@ -1,86 +1,168 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Campaign Validator CLI
+//! `antares-sdk campaign` — Campaign-level validation tools.
 //!
-//! Comprehensive validation tool for Antares campaigns. Validates campaign
-//! structure, metadata, content references, and data integrity.
+//! Migrated from `src/bin/campaign_validator.rs`. Exposes [`run`] as the
+//! single entry point called by `src/bin/antares_sdk.rs`.
 //!
-//! # Usage
+//! # Subcommands
 //!
-//! ```bash
-//! # Validate a campaign
-//! campaign_validator campaigns/my_campaign
+//! | Subcommand | Description                               |
+//! |------------|-------------------------------------------|
+//! | `validate` | Validate one or all campaign directories  |
 //!
-//! # Validate all campaigns in a directory
-//! campaign_validator --all campaigns/
+//! # Examples
 //!
-//! # Verbose output
-//! campaign_validator -v campaigns/my_campaign
+//! ```no_run
+//! use antares::sdk::cli::campaign_validator::{
+//!     run, CampaignArgs, CampaignSubcommand, CampaignValidateArgs,
+//! };
+//! use std::path::PathBuf;
 //!
-//! # JSON output
-//! campaign_validator --json campaigns/my_campaign
+//! let args = CampaignArgs {
+//!     command: CampaignSubcommand::Validate(CampaignValidateArgs {
+//!         campaign: Some(PathBuf::from("campaigns/tutorial")),
+//!         all: false,
+//!         campaigns_dir: PathBuf::from("campaigns"),
+//!         verbose: false,
+//!         json: false,
+//!         errors_only: false,
+//!     }),
+//! };
+//! // run(args).unwrap();
 //! ```
 
-use antares::sdk::campaign_loader::{Campaign, CampaignLoader, ValidationReport};
-use antares::sdk::dialogue_editor::validate_dialogue;
-use antares::sdk::quest_editor::validate_quest;
-use antares::sdk::validation::Validator;
-use clap::Parser;
+use crate::sdk::campaign_loader::{Campaign, CampaignLoader, ValidationReport};
+use crate::sdk::dialogue_editor::validate_dialogue;
+use crate::sdk::quest_editor::validate_quest;
+use crate::sdk::validation::Validator;
+use clap::{Args, Subcommand};
 use std::path::PathBuf;
-use std::process;
 
-#[derive(Parser, Debug)]
-#[command(name = "campaign_validator")]
-#[command(about = "Validate Antares campaigns", long_about = None)]
-struct Args {
-    /// Campaign directory to validate
-    #[arg(value_name = "CAMPAIGN_DIR")]
-    campaign: Option<PathBuf>,
-
-    /// Validate all campaigns in directory
-    #[arg(short, long)]
-    all: bool,
-
-    /// Campaigns directory (when using --all)
-    #[arg(short = 'd', long, default_value = "campaigns")]
-    campaigns_dir: PathBuf,
-
-    /// Verbose output
-    #[arg(short, long)]
-    verbose: bool,
-
-    /// Output as JSON
-    #[arg(short, long)]
-    json: bool,
-
-    /// Only show errors (hide warnings)
-    #[arg(short = 'e', long)]
-    errors_only: bool,
+/// Arguments for the `antares-sdk campaign` subcommand group.
+///
+/// This struct acts as the dispatcher for nested campaign subcommands. Pass it
+/// to [`run`] to execute the chosen subcommand.
+#[derive(Args, Debug)]
+#[command(about = "Campaign-level validation tools")]
+pub struct CampaignArgs {
+    /// The campaign subcommand to execute.
+    #[command(subcommand)]
+    pub command: CampaignSubcommand,
 }
 
-fn main() {
-    let args = Args::parse();
+/// Available subcommands under `antares-sdk campaign`.
+#[derive(Subcommand, Debug)]
+pub enum CampaignSubcommand {
+    /// Validate a campaign directory for correctness and completeness.
+    ///
+    /// Supply a single `CAMPAIGN_DIR` to validate one campaign, or use
+    /// `--all` to validate every campaign found in `--campaigns-dir`.
+    Validate(CampaignValidateArgs),
+}
 
+/// Arguments for `antares-sdk campaign validate`.
+#[derive(Args, Debug)]
+#[command(
+    about = "Validate an Antares campaign",
+    long_about = "Validates campaign structure, metadata, content references, and data integrity.\n\
+                  Supply a single CAMPAIGN_DIR, or use --all to validate every campaign in a directory."
+)]
+pub struct CampaignValidateArgs {
+    /// Campaign directory to validate.
+    #[arg(value_name = "CAMPAIGN_DIR")]
+    pub campaign: Option<PathBuf>,
+
+    /// Validate all campaigns found in `--campaigns-dir`.
+    #[arg(short, long)]
+    pub all: bool,
+
+    /// Root directory that contains all campaigns (used with `--all`).
+    #[arg(short = 'd', long, default_value = "campaigns")]
+    pub campaigns_dir: PathBuf,
+
+    /// Verbose output — print detailed progress and content statistics.
+    #[arg(short, long)]
+    pub verbose: bool,
+
+    /// Emit results as JSON instead of human-readable text.
+    #[arg(short, long)]
+    pub json: bool,
+
+    /// Only show errors; suppress warnings from the output.
+    #[arg(short = 'e', long)]
+    pub errors_only: bool,
+}
+
+/// Run the `campaign` subcommand with the given arguments.
+///
+/// Dispatches to the appropriate handler based on the chosen
+/// [`CampaignSubcommand`].
+///
+/// # Errors
+///
+/// Returns `Err` when arguments are structurally invalid (e.g. neither
+/// `--all` nor a campaign path is provided). Validation failures are
+/// signalled via [`std::process::exit(1)`] to preserve identical exit-code
+/// behaviour with the original standalone `campaign_validator` binary.
+///
+/// # Examples
+///
+/// ```no_run
+/// use antares::sdk::cli::campaign_validator::{
+///     run, CampaignArgs, CampaignSubcommand, CampaignValidateArgs,
+/// };
+/// use std::path::PathBuf;
+///
+/// let args = CampaignArgs {
+///     command: CampaignSubcommand::Validate(CampaignValidateArgs {
+///         campaign: Some(PathBuf::from("campaigns/tutorial")),
+///         all: false,
+///         campaigns_dir: PathBuf::from("campaigns"),
+///         verbose: false,
+///         json: false,
+///         errors_only: false,
+///     }),
+/// };
+/// // run(args).unwrap();
+/// ```
+pub fn run(args: CampaignArgs) -> Result<(), Box<dyn std::error::Error>> {
+    match args.command {
+        CampaignSubcommand::Validate(validate_args) => run_validate(validate_args),
+    }
+}
+
+/// Execute the `validate` subcommand.
+///
+/// Exits the process with code 1 if validation finds errors. This preserves
+/// the behaviour of the original standalone binary and ensures shell scripts
+/// can detect failures with `$?`.
+fn run_validate(args: CampaignValidateArgs) -> Result<(), Box<dyn std::error::Error>> {
     if args.all {
         validate_all_campaigns(&args);
     } else if let Some(ref campaign_path) = args.campaign {
         validate_single_campaign(campaign_path, &args);
     } else {
         eprintln!("Error: Must specify campaign path or --all flag");
-        eprintln!("Usage: campaign_validator <CAMPAIGN_DIR> or campaign_validator --all");
-        process::exit(1);
+        eprintln!("Usage: antares-sdk campaign validate <CAMPAIGN_DIR>");
+        eprintln!("   or: antares-sdk campaign validate --all");
+        std::process::exit(1);
     }
+    Ok(())
 }
 
-fn validate_all_campaigns(args: &Args) {
+/// Validate every campaign found in `args.campaigns_dir` and print a summary.
+///
+/// Exits with code 1 if any campaign contains errors.
+fn validate_all_campaigns(args: &CampaignValidateArgs) {
     let loader = CampaignLoader::new(&args.campaigns_dir);
 
     let campaigns = match loader.list_campaigns() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error listing campaigns: {}", e);
-            process::exit(1);
+            std::process::exit(1);
         }
     };
 
@@ -130,11 +212,14 @@ fn validate_all_campaigns(args: &Args) {
     println!("Total warnings: {}", total_warnings);
 
     if total_errors > 0 {
-        process::exit(1);
+        std::process::exit(1);
     }
 }
 
-fn validate_single_campaign(path: &PathBuf, args: &Args) {
+/// Validate a single campaign at `path` and print a report.
+///
+/// Exits with code 1 if the campaign is invalid.
+fn validate_single_campaign(path: &PathBuf, args: &CampaignValidateArgs) {
     let report = validate_campaign_comprehensive(path, args.verbose);
 
     if args.json {
@@ -144,10 +229,15 @@ fn validate_single_campaign(path: &PathBuf, args: &Args) {
     }
 
     if !report.is_valid {
-        process::exit(1);
+        std::process::exit(1);
     }
 }
 
+/// Run all five validation passes against the campaign at `path`.
+///
+/// Returns a [`ValidationReport`] summarising all errors and warnings
+/// discovered. Never panics; load failures are captured as errors in the
+/// report.
 fn validate_campaign_comprehensive(path: &PathBuf, verbose: bool) -> ValidationReport {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
@@ -208,7 +298,7 @@ fn validate_campaign_comprehensive(path: &PathBuf, verbose: bool) -> ValidationR
 
     let stats = db.stats();
 
-    // Check for empty content
+    // Check for empty / missing content
     if stats.map_count == 0 {
         errors.push("No maps defined - campaign cannot be played".to_string());
     }
@@ -228,14 +318,14 @@ fn validate_campaign_comprehensive(path: &PathBuf, verbose: bool) -> ValidationR
         Ok(validation_errors) => {
             for error in validation_errors {
                 match error.severity() {
-                    antares::sdk::validation::Severity::Error => {
+                    crate::sdk::validation::Severity::Error => {
                         errors.push(error.to_string());
                     }
-                    antares::sdk::validation::Severity::Warning => {
+                    crate::sdk::validation::Severity::Warning => {
                         warnings.push(error.to_string());
                     }
-                    antares::sdk::validation::Severity::Info => {
-                        // Info messages are not errors or warnings, skip them
+                    crate::sdk::validation::Severity::Info => {
+                        // Info messages are not surfaced in validation reports.
                     }
                 }
             }
@@ -278,6 +368,7 @@ fn validate_campaign_comprehensive(path: &PathBuf, verbose: bool) -> ValidationR
     }
 }
 
+/// Print a human-readable validation report to stdout.
 fn print_report(report: &ValidationReport, errors_only: bool) {
     if report.is_valid {
         println!("\n✓ Campaign is VALID");
@@ -304,6 +395,7 @@ fn print_report(report: &ValidationReport, errors_only: bool) {
     }
 }
 
+/// Serialise a validation report as pretty-printed JSON to stdout.
 fn print_json_report(report: &ValidationReport) {
     let json = serde_json::json!({
         "is_valid": report.is_valid,
@@ -313,13 +405,18 @@ fn print_json_report(report: &ValidationReport) {
         "warning_count": report.warnings.len(),
     });
 
-    println!("{}", serde_json::to_string_pretty(&json).unwrap());
+    // SAFETY: the Value is constructed from primitives (bool, Vec<String>,
+    // usize) that are always JSON-serialisable.
+    let output = serde_json::to_string_pretty(&json)
+        .expect("serde_json Value built from primitives must serialise");
+    println!("{}", output);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// A valid empty report has no errors and no warnings.
     #[test]
     fn test_validation_report_valid() {
         let report = ValidationReport {
@@ -333,6 +430,7 @@ mod tests {
         assert_eq!(report.warnings.len(), 0);
     }
 
+    /// A report with errors must be marked invalid.
     #[test]
     fn test_validation_report_with_errors() {
         let report = ValidationReport {
@@ -349,6 +447,7 @@ mod tests {
         assert_eq!(report.warnings.len(), 1);
     }
 
+    /// A report may be valid while still carrying warnings.
     #[test]
     fn test_validation_report_warnings_only() {
         let report = ValidationReport {
@@ -362,6 +461,7 @@ mod tests {
         assert_eq!(report.warnings.len(), 1);
     }
 
+    /// The JSON output structure must contain all required fields.
     #[test]
     fn test_print_json_report_structure() {
         let report = ValidationReport {
@@ -385,6 +485,7 @@ mod tests {
         assert_eq!(json["warnings"][0], "Test warning");
     }
 
+    /// An empty report is valid.
     #[test]
     fn test_empty_report_is_valid() {
         let report = ValidationReport {
@@ -398,6 +499,7 @@ mod tests {
         assert!(report.warnings.is_empty());
     }
 
+    /// Multiple errors are preserved in order.
     #[test]
     fn test_report_with_multiple_errors() {
         let errors = vec![
@@ -417,6 +519,7 @@ mod tests {
         assert_eq!(report.errors, errors);
     }
 
+    /// The JSON report must serialise without error and contain all keys.
     #[test]
     fn test_json_output_format() {
         let report = ValidationReport {
@@ -433,16 +536,62 @@ mod tests {
             "warning_count": report.warnings.len(),
         });
 
-        // Verify JSON can be serialized
+        // Verify JSON can be serialised
         let json_string = serde_json::to_string(&json);
         assert!(json_string.is_ok());
 
-        // Verify structure
+        // Verify all expected keys are present
         assert!(json.is_object());
         assert!(json.get("is_valid").is_some());
         assert!(json.get("errors").is_some());
         assert!(json.get("warnings").is_some());
         assert!(json.get("error_count").is_some());
         assert!(json.get("warning_count").is_some());
+    }
+
+    /// `CampaignArgs` must have its `command` field set to a `Validate` variant.
+    #[test]
+    fn test_campaign_args_validate_subcommand_fields() {
+        let validate_args = CampaignValidateArgs {
+            campaign: None,
+            all: true,
+            campaigns_dir: PathBuf::from("campaigns"),
+            verbose: false,
+            json: false,
+            errors_only: false,
+        };
+
+        // Verify the subcommand is constructible and the fields are accessible.
+        let args = CampaignArgs {
+            command: CampaignSubcommand::Validate(validate_args),
+        };
+
+        match args.command {
+            CampaignSubcommand::Validate(ref v) => {
+                assert!(v.all);
+                assert_eq!(v.campaigns_dir, PathBuf::from("campaigns"));
+                assert!(!v.verbose);
+                assert!(!v.json);
+                assert!(!v.errors_only);
+            }
+        }
+    }
+
+    /// `CampaignValidateArgs` with a specific campaign path stores it correctly.
+    #[test]
+    fn test_campaign_validate_args_with_path() {
+        let args = CampaignValidateArgs {
+            campaign: Some(PathBuf::from("campaigns/tutorial")),
+            all: false,
+            campaigns_dir: PathBuf::from("campaigns"),
+            verbose: true,
+            json: true,
+            errors_only: false,
+        };
+
+        assert_eq!(args.campaign, Some(PathBuf::from("campaigns/tutorial")));
+        assert!(!args.all);
+        assert!(args.verbose);
+        assert!(args.json);
     }
 }
