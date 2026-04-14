@@ -185,4 +185,30 @@
         default_duration: Permanent,
         icon_id: Some("icon_dead"),
     ),
+    (
+        id: "combat_bless",
+        name: "Combat Bless",
+        description: "Accuracy bonus that expires when combat ends.",
+        effects: [
+            AttributeModifier(
+                attribute: "accuracy",
+                value: 3,
+            ),
+        ],
+        default_duration: UntilCombatEnd,
+        icon_id: Some("icon_bless"),
+    ),
+    (
+        id: "exhaustion",
+        name: "Exhaustion",
+        description: "Speed penalty that lasts until the party rests.",
+        effects: [
+            AttributeModifier(
+                attribute: "speed",
+                value: -3,
+            ),
+        ],
+        default_duration: UntilRest,
+        icon_id: None,
+    ),
 ]
