@@ -1,5 +1,144 @@
 # Implementations
 
+## Combat Fixes — Phase 3: Out-of-Combat Item Use — Charged Magical Items (Complete)
+
+### Overview
+
+Non-consumable items with `spell_effect` and charges (wands, staves, enchanted
+accessories) were not usable from the exploration inventory. The Use button was
+gated on `ItemType::Consumable` only, the handler had no branch for charged
+non-consumables, and the inventory grid showed no visual distinction between
+charged magical items and plain equipment.
+
+This phase extends three areas of `src/game/systems/inventory_ui.rs` to fully
+support the out-of-combat charged item use flow, while leaving every existing
+consumable path untouched.
+
+### What Changed
+
+#### `src/game/systems/inventory_ui.rs`
+
+##### 3.1 — `build_action_list` (Use button gate extended)
+
+The `if is_consumable` guard that gates the `PanelAction::Use` push was
+replaced with a combined condition:
+
+```rust
+let is_usable_charged_item = item_opt
+    .map(|item| {
+        item.spell_effect.is_some()
+            && item.max_charges > 0
+            && !matches!(item.item_type, ItemType::Consumable(_))
+    })
+    .unwrap_or(false);
+
+let slot_has_charges = character
+    .inventory.items.get(selected_slot_index)
+    .map(|s| s.charges > 0)
+    .unwrap_or(false);
+
+if is_consumable || (is_usable_charged_item && slot_has_charges) {
+    actions.push(PanelAction::Use { … });
+}
+```
+
+A wand with `charges = 0` therefore never produces a Use action.
+
+##### 3.2 — `render_character_panel` action strip
+
+The inline action strip inside `render_character_panel` had its own `is_consumable`
+check duplicated independently of `build_action_list`. The same combined guard
+(`show_use = is_consumable || (is_usable_charged && slot_charges > 0)`) was
+applied to keep keyboard navigation counts and visual button counts consistent.
+
+The hover tooltip changes from `"Use this consumable item"` to
+`"Use this charged item"` for charged magical items.
+
+##### 3.3 — Slot grid charge annotation
+
+After painting each item silhouette in the inventory grid, a charge counter is
+now overlaid on charged non-consumable items:
+
+- Condition: `item.spell_effect.is_some() && item.max_charges > 0 && !Consumable`
+  and `slot.charges > 0`.
+- Rendered as `"✨N"` (U+2728 + charge count) in the bottom-right corner of the
+  cell at 8 pt proportional font, colour `rgb(255, 220, 100)` (gold).
+- Matches the ammo-quantity annotation style used elsewhere.
+
+##### 3.4 — `handle_use_item_action_exploration` — Branch B
+
+After the existing `validate_item_use_slot` check (which already accepts charged
+non-consumables with `spell_effect` when `in_combat = false`), a new Branch B
+block was inserted before the original `resolve_consumable_for_use` call:
+
+```
+is_charged_magical = spell_effect.is_some() && max_charges > 0 && !Consumable
+```
+
+**Branch B steps:**
+
+1. Capture `item_name` and `spell_id_opt` (owned) before mutation.
+2. Defensive charges check — writes `"Cannot use {name}: no charges remaining."`
+   and resets nav state if `slot.charges == 0` (should not normally reach here).
+3. Decrement `slot.charges` by 1, or call `inventory.remove_item(slot_index)` on
+   last charge — identical semantics to the consumable path.
+4. Apply the spell effect via `cast_exploration_spell(party_index, spell, Self_,
+&mut game_state, &item_db, &mut rng)`. This reuses the existing exploration
+   spell pipeline, which correctly writes buff durations into `active_spells`
+   (section 3.3 — ActiveSpells write-back is already handled; verified by code
+   review of `cast_exploration_spell` → `apply_spell_effect` → `apply_buff_spell`).
+5. Write game log: `"{item_name} used. {character_name} casts {spell_name}."` on
+   success; `"… Failed to cast {spell_name}: {err}."` on error; `"{item_name}
+used."` when the spell ID is not in the content DB.
+6. Reset `InventoryNavigationState` to `SlotNavigation` phase (same as Branch A).
+7. `continue` — skip Branch A.
+
+The original consumable path (Branch A, steps 4–8) is unchanged.
+
+##### 3.5 — ActiveSpells write-back verified
+
+`cast_exploration_spell` receives `&mut game_state` and internally calls
+`apply_spell_effect`, which calls `apply_buff_spell` → writes to
+`game_state.active_spells`. No additional threading was required.
+
+### Architecture Compliance
+
+- `validate_item_use_slot` from `crate::domain::combat::item_usage` remains the
+  single source of truth for item use eligibility — no duplicated validation logic.
+- `cast_exploration_spell` from `crate::domain::magic::exploration_casting` is
+  reused for the spell-application step, keeping all spell dispatch logic in the
+  domain layer.
+- No `unwrap()` without justification; all `Option` paths guarded with `map` /
+  `unwrap_or`.
+- `ItemType`, `ConsumableEffect`, `SpellId` type aliases used consistently.
+
+### Test Coverage
+
+Seven new tests in `mod tests`:
+
+| Test                                                                    | What it verifies                                                |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `test_build_action_list_use_present_for_charged_wand`                   | wand with `charges = 3` gets a Use action                       |
+| `test_build_action_list_no_use_for_charged_wand_with_zero_charges`      | wand with `charges = 0` gets no Use action                      |
+| `test_build_action_list_no_use_for_non_consumable_without_spell_effect` | accessory without `spell_effect` gets no Use action             |
+| `test_exploration_use_wand_applies_spell_effect`                        | charge decremented from 3 to 2; log contains item name + "used" |
+| `test_exploration_use_wand_removes_slot_on_last_charge`                 | inventory slot removed when `charges = 1`                       |
+| `test_exploration_use_wand_writes_game_log`                             | exactly one GameLog entry with item name and "used"             |
+| `test_exploration_use_wand_zero_charges_writes_error_log`               | defensive 0-charge path logs "no charges"; slot preserved       |
+
+All existing `test_exploration_use_*` tests continue to pass.
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → No output (all files formatted)
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings
+✅ cargo nextest run → 4686 passed; 0 failed; 8 skipped
+```
+
+---
+
 ## Combat Fixes — Phase 2: In-Combat Item Use — Item Selection Panel (Complete)
 
 ### Overview
