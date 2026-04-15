@@ -45,6 +45,10 @@ enum Commands {
     Names(cli::names::NamesArgs),
     /// Campaign-level validation tools.
     Campaign(cli::campaign_validator::CampaignArgs),
+    /// Map creation and validation tools.
+    Map(cli::map_validator::MapArgs),
+    /// Generate placeholder terrain and tree textures.
+    Textures(cli::texture_generator::TexturesArgs),
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -52,6 +56,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Names(args) => cli::names::run(args),
         Commands::Campaign(args) => cli::campaign_validator::run(args),
+        Commands::Map(args) => cli::map_validator::run(args),
+        Commands::Textures(args) => cli::texture_generator::run(args),
     }
 }
 
@@ -79,6 +85,16 @@ mod tests {
         assert!(
             subcommand_names.contains(&"campaign"),
             "campaign subcommand must be registered; found: {:?}",
+            subcommand_names
+        );
+        assert!(
+            subcommand_names.contains(&"map"),
+            "map subcommand must be registered; found: {:?}",
+            subcommand_names
+        );
+        assert!(
+            subcommand_names.contains(&"textures"),
+            "textures subcommand must be registered; found: {:?}",
             subcommand_names
         );
     }
@@ -179,6 +195,113 @@ mod tests {
                 }
             },
             _ => panic!("expected Campaign command"),
+        }
+    }
+
+    /// `antares-sdk map validate map_1.ron` must parse the file path and
+    /// default to no `--campaign-dir`.
+    #[test]
+    fn test_cli_parses_map_validate_with_file() {
+        use antares::sdk::cli::map_validator::MapSubcommand;
+        use std::path::PathBuf;
+
+        let result = Cli::try_parse_from(["antares-sdk", "map", "validate", "map_1.ron"]);
+        assert!(
+            result.is_ok(),
+            "should parse map validate with file: {:?}",
+            result.err()
+        );
+        match result.unwrap().command {
+            Commands::Map(args) => match args.command {
+                MapSubcommand::Validate(v) => {
+                    assert_eq!(v.files, vec![PathBuf::from("map_1.ron")]);
+                    assert!(v.campaign_dir.is_none());
+                }
+            },
+            _ => panic!("expected Map command"),
+        }
+    }
+
+    /// `antares-sdk map validate --campaign-dir campaigns/tutorial map_1.ron`
+    /// must set `campaign_dir`.
+    #[test]
+    fn test_cli_parses_map_validate_with_campaign_dir() {
+        use antares::sdk::cli::map_validator::MapSubcommand;
+        use std::path::PathBuf;
+
+        let result = Cli::try_parse_from([
+            "antares-sdk",
+            "map",
+            "validate",
+            "--campaign-dir",
+            "campaigns/tutorial",
+            "map_1.ron",
+            "map_2.ron",
+        ]);
+        assert!(
+            result.is_ok(),
+            "should parse map validate with campaign-dir: {:?}",
+            result.err()
+        );
+        match result.unwrap().command {
+            Commands::Map(args) => match args.command {
+                MapSubcommand::Validate(v) => {
+                    assert_eq!(v.campaign_dir, Some(PathBuf::from("campaigns/tutorial")));
+                    assert_eq!(v.files.len(), 2);
+                }
+            },
+            _ => panic!("expected Map command"),
+        }
+    }
+
+    /// `antares-sdk textures generate` must parse with the default output dir.
+    #[test]
+    fn test_cli_parses_textures_generate_with_defaults() {
+        use antares::sdk::cli::texture_generator::TexturesSubcommand;
+        use std::path::PathBuf;
+
+        let result = Cli::try_parse_from(["antares-sdk", "textures", "generate"]);
+        assert!(
+            result.is_ok(),
+            "should parse textures generate: {:?}",
+            result.err()
+        );
+        match result.unwrap().command {
+            Commands::Textures(args) => match args.command {
+                TexturesSubcommand::Generate(g) => {
+                    assert_eq!(g.output_dir, PathBuf::from("assets/textures"));
+                }
+            },
+            _ => panic!("expected Textures command"),
+        }
+    }
+
+    /// `antares-sdk textures generate --output-dir /tmp/out` must override
+    /// the default output directory.
+    #[test]
+    fn test_cli_parses_textures_generate_with_output_dir() {
+        use antares::sdk::cli::texture_generator::TexturesSubcommand;
+        use std::path::PathBuf;
+
+        let result = Cli::try_parse_from([
+            "antares-sdk",
+            "textures",
+            "generate",
+            "--output-dir",
+            "/tmp/out",
+        ]);
+        assert!(
+            result.is_ok(),
+            "should parse textures generate --output-dir: {:?}",
+            result.err()
+        );
+        match result.unwrap().command {
+            Commands::Textures(args) => match args.command {
+                TexturesSubcommand::Generate(g) => {
+                    assert_eq!(g.output_dir, PathBuf::from("/tmp/out"));
+                }
+            },
+            _ => panic!("expected Textures command"),
         }
     }
 

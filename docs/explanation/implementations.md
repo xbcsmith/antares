@@ -1,5 +1,163 @@
 # Implementations
 
+## SDK CLI Consolidation — Phase 2: Migrate One-Shot Tools (Complete)
+
+### Overview
+
+Phase 2 migrates the two remaining standalone one-shot tool binaries
+(`validate_map.rs` and `generate_terrain_textures.rs`) into the unified
+`antares-sdk` CLI under the `map validate` and `textures generate`
+subcommands respectively. Both binaries are deleted; all logic and tests
+move into `src/sdk/cli/`.
+
+### What Changed
+
+#### Deleted
+
+| File                                   | Reason                                                |
+| -------------------------------------- | ----------------------------------------------------- |
+| `src/bin/validate_map.rs`              | Logic migrated to `src/sdk/cli/map_validator.rs`.     |
+| `src/bin/generate_terrain_textures.rs` | Logic migrated to `src/sdk/cli/texture_generator.rs`. |
+
+#### `Cargo.toml`
+
+- Removed `[[bin]]` entries for `validate_map` and
+  `generate_terrain_textures`.
+
+#### New: `src/sdk/cli/map_validator.rs`
+
+Migrated from `src/bin/validate_map.rs`. Public surface:
+
+- `MapArgs` — `clap::Args` group dispatcher (nested `#[command(subcommand)]`)
+- `MapSubcommand` — `clap::Subcommand` enum (currently only `Validate`)
+- `MapValidateArgs` — `clap::Args` for `map validate`; key fields:
+  - `files: Vec<PathBuf>` — one or more RON map file paths (positional,
+    required)
+  - `campaign_dir: Option<PathBuf>` — `--campaign-dir <DIR>`; when provided,
+    valid monster/item IDs are loaded from
+    `<campaign-dir>/data/monsters.ron` and `<campaign-dir>/data/items.ron`;
+    when omitted, ID validation is skipped entirely with a warning to stderr
+- `pub fn run(args: MapArgs) -> Result<(), Box<dyn Error>>` — entry point
+
+Key improvements over the original binary:
+
+1. **Replaced hardcoded data paths** — the original loaded IDs from a
+   compile-time `CARGO_MANIFEST_DIR` path. The new code accepts
+   `--campaign-dir` at runtime; no compile-time assumption.
+2. **Fixed event summary** — the original `match` lumped `Furniture`,
+   `Container`, `DroppedItem`, `LockedDoor`, `LockedContainer`, `EnterInn`,
+   and `RecruitableCharacter` into either the `signs` or `dialogues` bucket.
+   The new `print_map_summary` uses a **separate named counter for every
+   `MapEvent` variant** so the breakdown is always accurate.
+3. **Optional ID validation** — when `--campaign-dir` is absent the
+   validator proceeds without ID checks rather than falling back to a
+   hardcoded default list, which was misleading.
+
+Tests added (21 new):
+
+- CLI arg construction and field defaults
+- `load_ids` behaviour with `None`, missing files, and test-campaign fixture
+- `validate_structure` for zero ID, zero dimensions, oversized maps, valid maps
+- `validate_content` for OOB events, invalid monster IDs, invalid item IDs,
+  skipped ID checks when IDs are `None`
+- `validate_gameplay` for empty maps and non-empty maps
+- `print_map_summary` smoke test covering all 13 event variants
+- `is_position_valid` boundary cases
+
+#### New: `src/sdk/cli/texture_generator.rs`
+
+Migrated from `src/bin/generate_terrain_textures.rs`. **No antares library
+imports** — the module is entirely self-contained (only `image` + `std`).
+Public surface:
+
+- `TexturesArgs` — `clap::Args` group dispatcher
+- `TexturesSubcommand` — `clap::Subcommand` enum (currently only `Generate`)
+- `TexturesGenerateArgs` — `clap::Args` for `textures generate`; key field:
+  - `output_dir: PathBuf` — `--output-dir <DIR>` (default: `assets/textures`
+    relative to the current working directory)
+- `FoliageShape` — public enum for foliage mask selection
+- `FoliageTextureSpec` — public struct describing per-shape generation params
+- Public generation functions: `generate_bark_texture`,
+  `generate_foliage_texture`, `generate_grass_blade_texture`,
+  `generate_tree_textures`
+- `pub fn run(args: TexturesArgs) -> Result<(), Box<dyn Error>>` — entry point
+
+Key improvement: output is now written to `--output-dir/{terrain,grass,trees}/`
+relative to the specified (or default) directory, instead of being hardcoded
+to `CARGO_MANIFEST_DIR/assets/textures/`.
+
+All original tests (63) were migrated from the binary; 3 new CLI tests were
+added: `test_textures_generate_args_default_output_dir`,
+`test_textures_generate_args_custom_output_dir`,
+`test_textures_args_generate_subcommand`. The integration test
+`test_run_generate_writes_expected_files` verifies that all 17 expected output
+files are written to a `tempdir`.
+
+#### Modified: `src/sdk/cli/mod.rs`
+
+Added `pub mod map_validator;` and `pub mod texture_generator;`.
+
+#### Modified: `src/bin/antares_sdk.rs`
+
+- Added `Map(cli::map_validator::MapArgs)` and
+  `Textures(cli::texture_generator::TexturesArgs)` to the `Commands` enum.
+- Added dispatch arms in `main()`.
+- Added 4 new CLI parse tests:
+  `test_cli_parses_map_validate_with_file`,
+  `test_cli_parses_map_validate_with_campaign_dir`,
+  `test_cli_parses_textures_generate_with_defaults`,
+  `test_cli_parses_textures_generate_with_output_dir`.
+- Updated `test_antares_sdk_help_renders_without_panic` to assert both `map`
+  and `textures` subcommands are registered.
+
+### New `antares-sdk` UX
+
+```text
+antares-sdk map validate map_1.ron map_2.ron
+antares-sdk map validate --campaign-dir campaigns/tutorial map_1.ron
+antares-sdk textures generate
+antares-sdk textures generate --output-dir /tmp/textures
+```
+
+### Architecture Compliance
+
+- `src/sdk/cli/map_validator.rs` and `src/sdk/cli/texture_generator.rs` live
+  under `src/sdk/cli/` per the proposed file structure in
+  `docs/explanation/sdk_cli_consolidation_plan.md` Appendix B.
+- `src/bin/antares_sdk.rs` remains a thin dispatch layer; all logic lives in
+  `src/sdk/cli/`.
+- `texture_generator.rs` contains zero antares domain imports (self-contained
+  image generation).
+- SPDX headers on all new/modified files (2026).
+- `pub fn run(...)` pattern used consistently.
+- No `unwrap()` without justification; `process::exit(1)` used only at the
+  CLI boundary for validation/write failures (acceptable pattern for CLI tools).
+
+### Quality Gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 4725 passed, 8 skipped, 0 failed  (+28 new tests)
+```
+
+### Success Criteria Verification
+
+- [x] `antares-sdk map validate` loads monster/item IDs dynamically from
+      `--campaign-dir` when provided
+- [x] `antares-sdk map validate` skips ID validation (with warning) when
+      `--campaign-dir` is omitted — no fallback hardcoded list
+- [x] `antares-sdk textures generate --output-dir /tmp/test` writes all 17
+      expected files to the specified directory
+- [x] Event summary uses a named counter for **all 13** `MapEvent` variants
+- [x] `validate_map` and `generate_terrain_textures` binaries are fully
+      removed; `[[bin]]` entries deleted from `Cargo.toml`
+- [x] All existing tests from both migrated binaries pass in their new locations
+- [x] All four quality gates pass
+
+---
+
 ## SDK CLI Consolidation — Phase 1: Delete Dead Weight and Scaffold (Complete)
 
 ### Overview

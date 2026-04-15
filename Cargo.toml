@@ -57,16 +57,8 @@ name = "item_editor"
 path = "src/bin/item_editor.rs"
 
 [[bin]]
-name = "generate_terrain_textures"
-path = "src/bin/generate_terrain_textures.rs"
-
-[[bin]]
 name = "map_builder"
 path = "src/bin/map_builder.rs"
-
-[[bin]]
-name = "validate_map"
-path = "src/bin/validate_map.rs"
 
 [dev-dependencies]
 tempfile = "3.23"

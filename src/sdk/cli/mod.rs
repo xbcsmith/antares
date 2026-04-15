@@ -28,4 +28,6 @@
 //! ```
 
 pub mod campaign_validator;
+pub mod map_validator;
 pub mod names;
+pub mod texture_generator;
