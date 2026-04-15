@@ -1,5 +1,173 @@
 # Implementations
 
+## SDK CLI Consolidation — Phase 3: Migrate Interactive Editors (Complete)
+
+### Overview
+
+Phase 3 migrates the four interactive REPL-style editor binaries
+(`class_editor.rs`, `race_editor.rs`, `item_editor.rs`, and `map_builder.rs`)
+into the unified `antares-sdk` CLI. Each becomes a subcommand under the
+`antares-sdk` binary. Shared helper code is extracted into a new
+`src/sdk/cli/editor_helpers.rs` library module, eliminating all duplication
+across editors.
+
+### What Changed
+
+#### New: `src/sdk/cli/editor_helpers.rs`
+
+Extracted from `src/bin/editor_common.rs`. Replaces the per-binary
+`#[path = "editor_common.rs"] mod editor_common;` include pattern with a
+proper library module. Public surface:
+
+- `STANDARD_PROFICIENCY_IDS: &[&str]` — canonical proficiency IDs
+- `STANDARD_ITEM_TAGS: &[&str]` — canonical item tag identifiers
+- `truncate(s, max_len) -> String` — appends `...` if string exceeds length
+- `filter_valid_proficiencies(candidates) -> Vec<String>` — validates against standard IDs
+- `filter_valid_tags(candidates) -> Vec<String>` — validates against standard tags
+- `read_line(prompt) -> String` — prints prompt, flushes stdout, reads one stdin line
+- `input_multistring_values(prompt, label) -> Vec<String>` — interactive multi-line input loop
+- `parse_multistring_input(input) -> Vec<String>` — `#[cfg(test)]`-only helper
+
+15 tests covering all functions.
+
+#### New: `src/sdk/cli/class_editor.rs`
+
+Migrated from `src/bin/class_editor.rs`. Public surface:
+
+- `ClassArgs` — `clap::Args` with `file: PathBuf` (default: `data/classes.ron`)
+- `pub fn run(args: ClassArgs) -> Result<(), Box<dyn Error>>` — entry point
+
+Key changes:
+
+- No longer uses `#[path]` include; imports helpers from `editor_helpers`
+- `self.read_input()` / `self.input_multistring_values()` replaced with
+  free-standing `read_line()` / `input_multistring_values()` from `editor_helpers`
+- `ClassDatabase::load_from_file()` used for consistent parsing (unchanged
+  from original)
+- All 5 tests migrated; `parse_multistring_input` sourced from `editor_helpers`
+
+#### New: `src/sdk/cli/race_editor.rs`
+
+Migrated from `src/bin/race_editor.rs`. Public surface:
+
+- `RaceArgs` — `clap::Args` with `file: PathBuf` (default: `data/races.ron`)
+- `pub fn run(args: RaceArgs) -> Result<(), Box<dyn Error>>` — entry point
+
+Key fixes applied:
+
+1. **`RaceDatabase::load_from_file()`** used instead of raw `ron::from_str()`
+   for consistency with the class editor pattern.
+2. **RON serialization normalized** to `struct_names(true)` matching the
+   class editor's serialization config for project-wide consistency.
+3. All shared helpers (`read_line`, `input_multistring_values`,
+   `filter_valid_proficiencies`, `filter_valid_tags`, `STANDARD_PROFICIENCY_IDS`,
+   `STANDARD_ITEM_TAGS`) imported from `editor_helpers`.
+
+All 9 tests migrated.
+
+#### New: `src/sdk/cli/item_editor.rs`
+
+Migrated from `src/bin/item_editor.rs`. Public surface:
+
+- `ItemArgs` — `clap::Args` with `file: PathBuf` (default: `data/items.ron`)
+- `pub fn run(args: ItemArgs) -> Result<(), Box<dyn Error>>` — entry point
+
+Key changes:
+
+- `self.read_input()` replaced with `read_line()` from `editor_helpers`
+- `self.input_multistring_values()` replaced with `input_multistring_values()`
+  from `editor_helpers`
+- Numeric helper methods (`read_u8`, `read_u16`, `read_u32`, `read_i8`,
+  `read_optional_u16`, `read_bool`, `read_dice_roll`) converted to associated
+  functions (no `&self`) calling `read_line()` directly
+- `#[allow(deprecated)]` annotations retained on `Item` construction pending
+  Game Cleanup Plan Phase 1.3 food field migration
+
+All 17 tests migrated.
+
+#### New: `src/sdk/cli/map_builder.rs`
+
+Migrated from `src/bin/map_builder.rs`. Public surface:
+
+- `MapBuilder` — builder state struct with `pub fn new()` and `Default` impl
+- `pub fn run_build() -> Result<(), Box<dyn Error>>` — starts the `rustyline`
+  REPL (replaces `main()`)
+- `pub fn parse_terrain(s) -> TerrainType` — parses terrain name strings
+- `pub fn parse_wall(s) -> WallType` — parses wall type name strings
+- `pub fn print_help()` — prints interactive help text
+
+Key changes:
+
+- **`npc` command removed entirely** — it only printed a deprecation notice;
+  use the campaign builder and NPC database system instead
+- Entry point is `run_build()`, not `main()`
+- Uses `crate::domain::...` imports throughout
+
+All 8 tests migrated; `test_default_builder_has_no_map` added.
+
+#### Modified: `src/sdk/cli/map_validator.rs`
+
+- `MapSubcommand::Build` variant added to the existing `Validate` variant:
+
+  ```text
+  Build    — Interactive map builder REPL
+  Validate — Validate one or more RON map files
+  ```
+
+- `run()` dispatches `Build` to `map_builder::run_build()`
+- Existing `Validate` tests updated to handle the new non-exhaustive match arm
+
+#### Modified: `src/sdk/cli/mod.rs`
+
+Added `pub mod class_editor;`, `pub mod race_editor;`, `pub mod item_editor;`,
+`pub mod map_builder;`, and `pub mod editor_helpers;`. Module layout table
+updated.
+
+#### Modified: `src/bin/antares_sdk.rs`
+
+- Added `Class(cli::class_editor::ClassArgs)`, `Race(cli::race_editor::RaceArgs)`,
+  and `Item(cli::item_editor::ItemArgs)` to the `Commands` enum.
+- Added dispatch arms in `main()` for all three new subcommands.
+- `test_antares_sdk_help_renders_without_panic` updated to assert `class`,
+  `race`, and `item` subcommands are registered.
+- 5 new CLI parse tests added:
+  - `test_cli_parses_class_with_default_file`
+  - `test_cli_parses_class_with_explicit_file`
+  - `test_cli_parses_race_with_default_file`
+  - `test_cli_parses_item_with_default_file`
+  - `test_cli_parses_map_build`
+
+### New `antares-sdk` UX
+
+```text
+antares-sdk class                                    # edit data/classes.ron
+antares-sdk class campaigns/tutorial/data/classes.ron
+antares-sdk race                                     # edit data/races.ron
+antares-sdk race campaigns/tutorial/data/races.ron
+antares-sdk item                                     # edit data/items.ron
+antares-sdk item campaigns/tutorial/data/items.ron
+antares-sdk map build                                # interactive map builder REPL
+```
+
+### Architecture Compliance
+
+- All data structures match `architecture.md` exactly — no modifications
+- RON format used for all data files
+- Module placement follows `src/sdk/cli/` pattern established in Phase 1–2
+- No dead code — every public function is either a CLI entry point, a REPL
+  method, or a test helper
+
+### Quality Gates
+
+All four gates pass with zero errors and zero warnings:
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — `Finished` with 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --all-features` — **4784 tests run: 4784 passed**
+
+---
+
 ## SDK CLI Consolidation — Phase 2: Migrate One-Shot Tools (Complete)
 
 ### Overview

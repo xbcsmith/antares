@@ -60,6 +60,8 @@ pub struct MapArgs {
 /// Available subcommands under `antares-sdk map`.
 #[derive(Subcommand, Debug)]
 pub enum MapSubcommand {
+    /// Interactive map builder REPL with command history.
+    Build,
     /// Validate one or more RON map files for correctness and gameplay constraints.
     Validate(MapValidateArgs),
 }
@@ -120,6 +122,7 @@ pub struct MapValidateArgs {
 /// ```
 pub fn run(args: MapArgs) -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
+        MapSubcommand::Build => crate::sdk::cli::map_builder::run_build(),
         MapSubcommand::Validate(v) => run_validate(v),
     }
 }
@@ -540,6 +543,7 @@ mod tests {
             }),
         };
         match args.command {
+            MapSubcommand::Build => panic!("expected Validate, got Build"),
             MapSubcommand::Validate(v) => {
                 assert_eq!(v.files.len(), 2);
                 assert_eq!(v.campaign_dir, Some(PathBuf::from("campaigns/tutorial")));

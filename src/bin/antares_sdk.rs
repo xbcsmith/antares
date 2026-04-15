@@ -45,8 +45,14 @@ enum Commands {
     Names(cli::names::NamesArgs),
     /// Campaign-level validation tools.
     Campaign(cli::campaign_validator::CampaignArgs),
+    /// Interactive class definition editor (REPL).
+    Class(cli::class_editor::ClassArgs),
+    /// Interactive item definition editor (REPL).
+    Item(cli::item_editor::ItemArgs),
     /// Map creation and validation tools.
     Map(cli::map_validator::MapArgs),
+    /// Interactive race definition editor (REPL).
+    Race(cli::race_editor::RaceArgs),
     /// Generate placeholder terrain and tree textures.
     Textures(cli::texture_generator::TexturesArgs),
 }
@@ -56,7 +62,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Names(args) => cli::names::run(args),
         Commands::Campaign(args) => cli::campaign_validator::run(args),
+        Commands::Class(args) => cli::class_editor::run(args),
+        Commands::Item(args) => cli::item_editor::run(args),
         Commands::Map(args) => cli::map_validator::run(args),
+        Commands::Race(args) => cli::race_editor::run(args),
         Commands::Textures(args) => cli::texture_generator::run(args),
     }
 }
@@ -88,8 +97,23 @@ mod tests {
             subcommand_names
         );
         assert!(
+            subcommand_names.contains(&"class"),
+            "class subcommand must be registered; found: {:?}",
+            subcommand_names
+        );
+        assert!(
+            subcommand_names.contains(&"item"),
+            "item subcommand must be registered; found: {:?}",
+            subcommand_names
+        );
+        assert!(
             subcommand_names.contains(&"map"),
             "map subcommand must be registered; found: {:?}",
+            subcommand_names
+        );
+        assert!(
+            subcommand_names.contains(&"race"),
+            "race subcommand must be registered; found: {:?}",
             subcommand_names
         );
         assert!(
@@ -217,6 +241,7 @@ mod tests {
                     assert_eq!(v.files, vec![PathBuf::from("map_1.ron")]);
                     assert!(v.campaign_dir.is_none());
                 }
+                MapSubcommand::Build => panic!("expected Validate subcommand, not Build"),
             },
             _ => panic!("expected Map command"),
         }
@@ -249,6 +274,7 @@ mod tests {
                     assert_eq!(v.campaign_dir, Some(PathBuf::from("campaigns/tutorial")));
                     assert_eq!(v.files.len(), 2);
                 }
+                MapSubcommand::Build => panic!("expected Validate subcommand, not Build"),
             },
             _ => panic!("expected Map command"),
         }
@@ -273,6 +299,103 @@ mod tests {
                 }
             },
             _ => panic!("expected Textures command"),
+        }
+    }
+
+    /// `antares-sdk class` with no args must parse using the default file path.
+    #[test]
+    fn test_cli_parses_class_with_default_file() {
+        use std::path::PathBuf;
+
+        let result = Cli::try_parse_from(["antares-sdk", "class"]);
+        assert!(
+            result.is_ok(),
+            "should parse 'class' with defaults: {:?}",
+            result.err()
+        );
+        match result.unwrap().command {
+            Commands::Class(args) => {
+                assert_eq!(args.file, PathBuf::from("data/classes.ron"));
+            }
+            _ => panic!("expected Class command"),
+        }
+    }
+
+    /// `antares-sdk class path/to/classes.ron` must use the provided path.
+    #[test]
+    fn test_cli_parses_class_with_explicit_file() {
+        use std::path::PathBuf;
+
+        let result = Cli::try_parse_from(["antares-sdk", "class", "custom/classes.ron"]);
+        assert!(
+            result.is_ok(),
+            "should parse 'class' with explicit file: {:?}",
+            result.err()
+        );
+        match result.unwrap().command {
+            Commands::Class(args) => {
+                assert_eq!(args.file, PathBuf::from("custom/classes.ron"));
+            }
+            _ => panic!("expected Class command"),
+        }
+    }
+
+    /// `antares-sdk race` with no args must parse using the default file path.
+    #[test]
+    fn test_cli_parses_race_with_default_file() {
+        use std::path::PathBuf;
+
+        let result = Cli::try_parse_from(["antares-sdk", "race"]);
+        assert!(
+            result.is_ok(),
+            "should parse 'race' with defaults: {:?}",
+            result.err()
+        );
+        match result.unwrap().command {
+            Commands::Race(args) => {
+                assert_eq!(args.file, PathBuf::from("data/races.ron"));
+            }
+            _ => panic!("expected Race command"),
+        }
+    }
+
+    /// `antares-sdk item` with no args must parse using the default file path.
+    #[test]
+    fn test_cli_parses_item_with_default_file() {
+        use std::path::PathBuf;
+
+        let result = Cli::try_parse_from(["antares-sdk", "item"]);
+        assert!(
+            result.is_ok(),
+            "should parse 'item' with defaults: {:?}",
+            result.err()
+        );
+        match result.unwrap().command {
+            Commands::Item(args) => {
+                assert_eq!(args.file, PathBuf::from("data/items.ron"));
+            }
+            _ => panic!("expected Item command"),
+        }
+    }
+
+    /// `antares-sdk map build` must parse as the Build sub-subcommand with no
+    /// additional arguments.
+    #[test]
+    fn test_cli_parses_map_build() {
+        use antares::sdk::cli::map_validator::MapSubcommand;
+
+        let result = Cli::try_parse_from(["antares-sdk", "map", "build"]);
+        assert!(
+            result.is_ok(),
+            "should parse 'map build': {:?}",
+            result.err()
+        );
+        match result.unwrap().command {
+            Commands::Map(args) => match args.command {
+                MapSubcommand::Build => {}
+                _ => panic!("expected Map Build subcommand"),
+            },
+            _ => panic!("expected Map command"),
         }
     }
 
