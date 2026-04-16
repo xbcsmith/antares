@@ -39,8 +39,18 @@ use std::path::PathBuf;
 )]
 pub struct RaceArgs {
     /// Path to the races RON file.
+    ///
+    /// Defaults to `data/races.ron`. Ignored when `--campaign` is provided.
     #[arg(default_value = "data/races.ron", value_name = "FILE")]
     pub file: PathBuf,
+
+    /// Campaign directory. When provided, opens `<DIR>/data/races.ron`
+    /// instead of the positional FILE argument.
+    ///
+    /// Example: `antares-sdk race --campaign campaigns/tutorial`
+    /// is equivalent to: `antares-sdk race campaigns/tutorial/data/races.ron`
+    #[arg(long, value_name = "DIR")]
+    pub campaign: Option<PathBuf>,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -53,11 +63,17 @@ pub struct RaceArgs {
 ///
 /// Returns `Err` if the file cannot be loaded (e.g. invalid RON syntax).
 pub fn run(args: RaceArgs) -> Result<(), Box<dyn std::error::Error>> {
+    // Resolve the target file: --campaign takes precedence over the positional FILE.
+    let file = match args.campaign {
+        Some(campaign_dir) => campaign_dir.join("data").join("races.ron"),
+        None => args.file,
+    };
+
     println!("========================================");
     println!("    ANTARES RACE EDITOR v0.2.0          ");
     println!("========================================");
 
-    let mut editor = RaceEditor::load(args.file)?;
+    let mut editor = RaceEditor::load(file)?;
     editor.run();
 
     println!("\nThank you for using Antares Race Editor!");
@@ -759,6 +775,60 @@ mod tests {
     use crate::sdk::cli::editor_helpers::{
         filter_valid_proficiencies, filter_valid_tags, parse_multistring_input, truncate,
     };
+
+    /// `--campaign <DIR>` must set the campaign field.
+    #[test]
+    fn test_race_args_campaign_flag() {
+        use clap::Parser;
+        use std::path::PathBuf;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            args: RaceArgs,
+        }
+
+        let result = TestCli::try_parse_from(["test", "--campaign", "campaigns/tutorial"]);
+        assert!(
+            result.is_ok(),
+            "RaceArgs should parse --campaign: {:?}",
+            result.err()
+        );
+        let args = result.unwrap().args;
+        assert_eq!(
+            args.campaign,
+            Some(PathBuf::from("campaigns/tutorial")),
+            "--campaign should be set to the provided directory"
+        );
+        assert_eq!(
+            args.file,
+            PathBuf::from("data/races.ron"),
+            "file should remain at its default when --campaign is used"
+        );
+    }
+
+    /// Default RaceArgs should have no campaign and the standard file path.
+    #[test]
+    fn test_race_args_defaults() {
+        use clap::Parser;
+        use std::path::PathBuf;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            args: RaceArgs,
+        }
+
+        let result = TestCli::try_parse_from(["test"]);
+        assert!(
+            result.is_ok(),
+            "RaceArgs should parse with no arguments: {:?}",
+            result.err()
+        );
+        let args = result.unwrap().args;
+        assert_eq!(args.file, PathBuf::from("data/races.ron"));
+        assert!(args.campaign.is_none(), "campaign should default to None");
+    }
 
     #[test]
     fn test_truncate() {

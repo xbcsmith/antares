@@ -15,10 +15,16 @@
 //! antares-sdk campaign validate campaigns/tutorial
 //! antares-sdk campaign validate --all
 //! antares-sdk campaign validate --all -d campaigns/
+//! antares-sdk --verbose campaign validate campaigns/tutorial
+//! antares-sdk --quiet names --theme fantasy --number 100
+//! antares-sdk class --campaign campaigns/tutorial
+//! antares-sdk race  --campaign campaigns/tutorial
+//! antares-sdk item  --campaign campaigns/tutorial
 //! ```
 
 use antares::sdk::cli;
 use clap::{Parser, Subcommand};
+use tracing_subscriber::EnvFilter;
 
 /// Antares RPG SDK command-line tools.
 ///
@@ -34,6 +40,20 @@ use clap::{Parser, Subcommand};
     version
 )]
 struct Cli {
+    /// Enable verbose (debug-level) logging for all subcommands.
+    ///
+    /// When set, the tracing subscriber is initialised at `DEBUG` level.
+    /// When both `--verbose` and `--quiet` are supplied, `--verbose` wins.
+    #[arg(long)]
+    verbose: bool,
+
+    /// Suppress all informational output; only errors are shown.
+    ///
+    /// When set, the tracing subscriber is initialised at `ERROR` level.
+    /// When both `--verbose` and `--quiet` are supplied, `--verbose` wins.
+    #[arg(long)]
+    quiet: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -57,8 +77,35 @@ enum Commands {
     Textures(cli::texture_generator::TexturesArgs),
 }
 
+/// Initialise the `tracing` subscriber for the `antares-sdk` process.
+///
+/// The log level is chosen based on the `--verbose` / `--quiet` flags:
+///
+/// | Flag        | Effective level |
+/// |-------------|-----------------|
+/// | `--verbose` | `DEBUG`         |
+/// | `--quiet`   | `ERROR`         |
+/// | *(neither)* | `INFO`          |
+///
+/// When both flags are supplied, `--verbose` wins. Uses `try_init` internally
+/// so that unit-test executables that register their own subscriber do not
+/// panic.
+fn init_tracing(verbose: bool, quiet: bool) {
+    let level = if verbose {
+        "debug"
+    } else if quiet {
+        "error"
+    } else {
+        "info"
+    };
+
+    let filter = EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+    init_tracing(cli.verbose, cli.quiet);
     match cli.command {
         Commands::Names(args) => cli::names::run(args),
         Commands::Campaign(args) => cli::campaign_validator::run(args),
@@ -74,6 +121,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+    use std::path::PathBuf;
 
     /// Verify the `antares-sdk --help` path works without panicking.
     ///
@@ -177,7 +225,6 @@ mod tests {
     #[test]
     fn test_cli_parses_campaign_validate_with_path() {
         use antares::sdk::cli::campaign_validator::CampaignSubcommand;
-        use std::path::PathBuf;
 
         let result =
             Cli::try_parse_from(["antares-sdk", "campaign", "validate", "campaigns/tutorial"]);
@@ -227,7 +274,6 @@ mod tests {
     #[test]
     fn test_cli_parses_map_validate_with_file() {
         use antares::sdk::cli::map_validator::MapSubcommand;
-        use std::path::PathBuf;
 
         let result = Cli::try_parse_from(["antares-sdk", "map", "validate", "map_1.ron"]);
         assert!(
@@ -252,7 +298,6 @@ mod tests {
     #[test]
     fn test_cli_parses_map_validate_with_campaign_dir() {
         use antares::sdk::cli::map_validator::MapSubcommand;
-        use std::path::PathBuf;
 
         let result = Cli::try_parse_from([
             "antares-sdk",
@@ -284,7 +329,6 @@ mod tests {
     #[test]
     fn test_cli_parses_textures_generate_with_defaults() {
         use antares::sdk::cli::texture_generator::TexturesSubcommand;
-        use std::path::PathBuf;
 
         let result = Cli::try_parse_from(["antares-sdk", "textures", "generate"]);
         assert!(
@@ -305,8 +349,6 @@ mod tests {
     /// `antares-sdk class` with no args must parse using the default file path.
     #[test]
     fn test_cli_parses_class_with_default_file() {
-        use std::path::PathBuf;
-
         let result = Cli::try_parse_from(["antares-sdk", "class"]);
         assert!(
             result.is_ok(),
@@ -324,8 +366,6 @@ mod tests {
     /// `antares-sdk class path/to/classes.ron` must use the provided path.
     #[test]
     fn test_cli_parses_class_with_explicit_file() {
-        use std::path::PathBuf;
-
         let result = Cli::try_parse_from(["antares-sdk", "class", "custom/classes.ron"]);
         assert!(
             result.is_ok(),
@@ -343,8 +383,6 @@ mod tests {
     /// `antares-sdk race` with no args must parse using the default file path.
     #[test]
     fn test_cli_parses_race_with_default_file() {
-        use std::path::PathBuf;
-
         let result = Cli::try_parse_from(["antares-sdk", "race"]);
         assert!(
             result.is_ok(),
@@ -362,8 +400,6 @@ mod tests {
     /// `antares-sdk item` with no args must parse using the default file path.
     #[test]
     fn test_cli_parses_item_with_default_file() {
-        use std::path::PathBuf;
-
         let result = Cli::try_parse_from(["antares-sdk", "item"]);
         assert!(
             result.is_ok(),
@@ -404,7 +440,6 @@ mod tests {
     #[test]
     fn test_cli_parses_textures_generate_with_output_dir() {
         use antares::sdk::cli::texture_generator::TexturesSubcommand;
-        use std::path::PathBuf;
 
         let result = Cli::try_parse_from([
             "antares-sdk",
@@ -457,6 +492,160 @@ mod tests {
                 }
             },
             _ => panic!("expected Campaign command"),
+        }
+    }
+
+    // ── Phase 4: --verbose / --quiet / --campaign tests ──────────────────────
+
+    /// `antares-sdk --verbose campaign validate --all` must set the top-level
+    /// `verbose` flag to `true` while leaving `quiet` at its default (`false`).
+    #[test]
+    fn test_cli_top_level_verbose_flag() {
+        let result =
+            Cli::try_parse_from(["antares-sdk", "--verbose", "campaign", "validate", "--all"]);
+        assert!(
+            result.is_ok(),
+            "should parse --verbose before subcommand: {:?}",
+            result.err()
+        );
+        let cli = result.unwrap();
+        assert!(cli.verbose, "--verbose must be true");
+        assert!(!cli.quiet, "--quiet must remain false");
+    }
+
+    /// `antares-sdk --quiet names` must set the top-level `quiet` flag to
+    /// `true` while leaving `verbose` at its default (`false`).
+    #[test]
+    fn test_cli_top_level_quiet_flag() {
+        let result = Cli::try_parse_from(["antares-sdk", "--quiet", "names"]);
+        assert!(
+            result.is_ok(),
+            "should parse --quiet before subcommand: {:?}",
+            result.err()
+        );
+        let cli = result.unwrap();
+        assert!(cli.quiet, "--quiet must be true");
+        assert!(!cli.verbose, "--verbose must remain false");
+    }
+
+    /// `antares-sdk --verbose --quiet names` must parse without error; both
+    /// flags can be set simultaneously (`init_tracing` gives `--verbose`
+    /// priority).
+    #[test]
+    fn test_cli_verbose_and_quiet_together() {
+        let result = Cli::try_parse_from(["antares-sdk", "--verbose", "--quiet", "names"]);
+        assert!(
+            result.is_ok(),
+            "should allow --verbose --quiet together: {:?}",
+            result.err()
+        );
+        let cli = result.unwrap();
+        assert!(cli.verbose);
+        assert!(cli.quiet);
+    }
+
+    /// `antares-sdk names --quiet` sets only the *subcommand-level* quiet flag;
+    /// the top-level `Cli::quiet` must remain `false`.
+    #[test]
+    fn test_cli_subcommand_quiet_does_not_affect_top_level() {
+        let result = Cli::try_parse_from(["antares-sdk", "names", "--quiet"]);
+        assert!(
+            result.is_ok(),
+            "should parse names --quiet: {:?}",
+            result.err()
+        );
+        let cli = result.unwrap();
+        assert!(
+            !cli.quiet,
+            "top-level --quiet must not be set by a subcommand flag"
+        );
+        match cli.command {
+            Commands::Names(args) => {
+                assert!(args.quiet, "names subcommand --quiet must be set");
+            }
+            _ => panic!("expected Names command"),
+        }
+    }
+
+    /// When no logging flags are given the top-level defaults are both `false`.
+    #[test]
+    fn test_cli_defaults_verbose_quiet_false() {
+        let result = Cli::try_parse_from(["antares-sdk", "names"]);
+        assert!(result.is_ok());
+        let cli = result.unwrap();
+        assert!(!cli.verbose, "verbose must default to false");
+        assert!(!cli.quiet, "quiet must default to false");
+    }
+
+    /// `antares-sdk class --campaign campaigns/tutorial` must populate the
+    /// `campaign` field on `ClassArgs` and preserve the default `file`.
+    #[test]
+    fn test_cli_parses_class_with_campaign_flag() {
+        let result =
+            Cli::try_parse_from(["antares-sdk", "class", "--campaign", "campaigns/tutorial"]);
+        assert!(
+            result.is_ok(),
+            "should parse class --campaign: {:?}",
+            result.err()
+        );
+        match result.unwrap().command {
+            Commands::Class(args) => {
+                assert_eq!(
+                    args.campaign,
+                    Some(PathBuf::from("campaigns/tutorial")),
+                    "--campaign must be forwarded to ClassArgs"
+                );
+                assert_eq!(args.file, PathBuf::from("data/classes.ron"));
+            }
+            _ => panic!("expected Class command"),
+        }
+    }
+
+    /// `antares-sdk race --campaign campaigns/tutorial` must populate the
+    /// `campaign` field on `RaceArgs` and preserve the default `file`.
+    #[test]
+    fn test_cli_parses_race_with_campaign_flag() {
+        let result =
+            Cli::try_parse_from(["antares-sdk", "race", "--campaign", "campaigns/tutorial"]);
+        assert!(
+            result.is_ok(),
+            "should parse race --campaign: {:?}",
+            result.err()
+        );
+        match result.unwrap().command {
+            Commands::Race(args) => {
+                assert_eq!(
+                    args.campaign,
+                    Some(PathBuf::from("campaigns/tutorial")),
+                    "--campaign must be forwarded to RaceArgs"
+                );
+                assert_eq!(args.file, PathBuf::from("data/races.ron"));
+            }
+            _ => panic!("expected Race command"),
+        }
+    }
+
+    /// `antares-sdk item --campaign campaigns/tutorial` must populate the
+    /// `campaign` field on `ItemArgs` and preserve the default `file`.
+    #[test]
+    fn test_cli_parses_item_with_campaign_flag() {
+        let result =
+            Cli::try_parse_from(["antares-sdk", "item", "--campaign", "campaigns/tutorial"]);
+        assert!(
+            result.is_ok(),
+            "should parse item --campaign: {:?}",
+            result.err()
+        );
+        match result.unwrap().command {
+            Commands::Item(args) => {
+                assert_eq!(
+                    args.campaign,
+                    Some(PathBuf::from("campaigns/tutorial")),
+                    "--campaign must be forwarded to ItemArgs"
+                );
+                assert_eq!(args.file, PathBuf::from("data/items.ron"));
+            }
+            _ => panic!("expected Item command"),
         }
     }
 }

@@ -37,8 +37,18 @@ use std::path::PathBuf;
 )]
 pub struct ClassArgs {
     /// Path to the classes RON file.
+    ///
+    /// Defaults to `data/classes.ron`. Ignored when `--campaign` is provided.
     #[arg(default_value = "data/classes.ron", value_name = "FILE")]
     pub file: PathBuf,
+
+    /// Campaign directory. When provided, opens `<DIR>/data/classes.ron`
+    /// instead of the positional FILE argument.
+    ///
+    /// Example: `antares-sdk class --campaign campaigns/tutorial`
+    /// is equivalent to: `antares-sdk class campaigns/tutorial/data/classes.ron`
+    #[arg(long, value_name = "DIR")]
+    pub campaign: Option<PathBuf>,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -51,11 +61,17 @@ pub struct ClassArgs {
 ///
 /// Returns `Err` if the file cannot be loaded (e.g. invalid RON syntax).
 pub fn run(args: ClassArgs) -> Result<(), Box<dyn std::error::Error>> {
+    // Resolve the target file: --campaign takes precedence over the positional FILE.
+    let file = match args.campaign {
+        Some(campaign_dir) => campaign_dir.join("data").join("classes.ron"),
+        None => args.file,
+    };
+
     println!("╔════════════════════════════════════════╗");
     println!("║    ANTARES CLASS EDITOR v0.1.0         ║");
     println!("╚════════════════════════════════════════╝");
 
-    let mut editor = ClassEditor::load(args.file)?;
+    let mut editor = ClassEditor::load(file)?;
     editor.run();
 
     println!("\nThank you for using Antares Class Editor!");
@@ -681,10 +697,38 @@ mod tests {
             "ClassArgs should parse with no arguments: {:?}",
             result.err()
         );
+        let args = result.unwrap().args;
         assert_eq!(
-            result.unwrap().args.file,
+            args.file,
             PathBuf::from("data/classes.ron"),
             "default file should be data/classes.ron"
+        );
+        assert!(args.campaign.is_none(), "campaign should default to None");
+    }
+
+    /// `--campaign <DIR>` must set the campaign field and leave file at its default.
+    #[test]
+    fn test_class_args_campaign_flag() {
+        use clap::Parser;
+        use std::path::PathBuf;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            args: ClassArgs,
+        }
+
+        let result = TestCli::try_parse_from(["test", "--campaign", "campaigns/tutorial"]);
+        assert!(
+            result.is_ok(),
+            "ClassArgs should parse --campaign: {:?}",
+            result.err()
+        );
+        let args = result.unwrap().args;
+        assert_eq!(
+            args.campaign,
+            Some(PathBuf::from("campaigns/tutorial")),
+            "--campaign should be set to the provided directory"
         );
     }
 }

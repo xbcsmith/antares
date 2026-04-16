@@ -1,5 +1,182 @@
 # Implementations
 
+## SDK CLI Consolidation — Phase 4: Cleanup and Polish (Complete)
+
+### Overview
+
+Phase 4 finalises the `antares-sdk` CLI consolidation by removing the last
+old standalone binaries, adding ergonomic `--campaign` shortcuts to the
+interactive editors, wiring `tracing-subscriber` into the entry point, and
+delivering the full documentation and integration-test suite.
+
+### What Changed
+
+#### 4.1 — Deleted Old `src/bin/` Files
+
+The following files were deleted; all functionality is now in `src/sdk/cli/`:
+
+| Deleted File               | Replaced By                     |
+| -------------------------- | ------------------------------- |
+| `src/bin/class_editor.rs`  | `src/sdk/cli/class_editor.rs`   |
+| `src/bin/race_editor.rs`   | `src/sdk/cli/race_editor.rs`    |
+| `src/bin/item_editor.rs`   | `src/sdk/cli/item_editor.rs`    |
+| `src/bin/map_builder.rs`   | `src/sdk/cli/map_builder.rs`    |
+| `src/bin/editor_common.rs` | `src/sdk/cli/editor_helpers.rs` |
+
+#### 4.1 — `Cargo.toml` Final State
+
+Only two `[[bin]]` entries remain:
+
+```toml
+[[bin]]
+name = "antares"
+path = "src/bin/antares.rs"
+
+[[bin]]
+name = "antares-sdk"
+path = "src/bin/antares_sdk.rs"
+```
+
+Entries for `class_editor`, `race_editor`, `item_editor`, and `map_builder`
+have been removed.
+
+#### 4.2 — `--campaign <DIR>` Flag Added to Editors
+
+`ClassArgs`, `RaceArgs`, and `ItemArgs` each gained an optional `--campaign`
+flag. When provided, the editor opens `<DIR>/data/<type>s.ron` instead of the
+positional `FILE` argument:
+
+```bash
+# Old way (still works)
+antares-sdk class campaigns/tutorial/data/classes.ron
+
+# New shorthand
+antares-sdk class --campaign campaigns/tutorial
+```
+
+Resolution logic in each `run()` function:
+
+```rust
+let file = match args.campaign {
+    Some(campaign_dir) => campaign_dir.join("data").join("classes.ron"),
+    None => args.file,
+};
+```
+
+Files modified:
+
+- `src/sdk/cli/class_editor.rs` — `ClassArgs` + `run()`
+- `src/sdk/cli/race_editor.rs` — `RaceArgs` + `run()`
+- `src/sdk/cli/item_editor.rs` — `ItemArgs` + `run()` + doc example updated
+
+#### 4.3 — `--verbose` and `--quiet` Top-Level Flags
+
+`src/bin/antares_sdk.rs` gained two top-level flags on the `Cli` struct and
+a new `init_tracing()` function:
+
+| Flag        | Tracing level initialised |
+| ----------- | ------------------------- |
+| `--verbose` | `DEBUG`                   |
+| `--quiet`   | `ERROR`                   |
+| _(neither)_ | `INFO`                    |
+
+`--verbose` takes priority when both flags are set. Uses `try_init()` so
+unit-test executables that register their own subscriber do not panic.
+
+Example:
+
+```bash
+antares-sdk --verbose campaign validate campaigns/tutorial
+antares-sdk --quiet names --theme fantasy --number 100
+```
+
+> The `names` subcommand retains its own `--quiet` flag (suppresses the
+> header banner). These two `--quiet` flags are completely independent:
+> the top-level one controls logging; the subcommand one controls output
+> formatting.
+
+#### 4.4 — Documentation Updated
+
+| File                                          | Change                                                                                                 |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `docs/tutorials/name_generator_quickstart.md` | All `cargo run --bin antares-name-gen` references replaced with `cargo run --bin antares-sdk -- names` |
+| `docs/how-to/sdk_cli_usage.md`                | **New file** — complete reference for all `antares-sdk` subcommands                                    |
+| `docs/explanation/implementations.md`         | This entry                                                                                             |
+
+#### 4.5 — Integration Tests
+
+**New file: `tests/antares_sdk_binary_tests.rs`**
+
+Uses `std::process::Command` with `env!("CARGO_BIN_EXE_antares_sdk")` to
+invoke the compiled binary directly. Tests cover:
+
+- `antares-sdk --help` exits 0
+- Help output lists every subcommand (`names`, `campaign`, `class`, `race`, `item`, `map`, `textures`)
+- Help output documents `--verbose` and `--quiet` flags
+- Every subcommand's `--help` exits 0 with no stderr output
+- Every sub-subcommand's `--help` exits 0 (`map validate`, `map build`, `campaign validate`, `textures generate`)
+- `class --help`, `race --help`, `item --help` mention `--campaign` flag
+
+**New unit tests in `src/bin/antares_sdk.rs`** (10 new tests):
+
+- `test_cli_top_level_verbose_flag`
+- `test_cli_top_level_quiet_flag`
+- `test_cli_verbose_and_quiet_together`
+- `test_cli_subcommand_quiet_does_not_affect_top_level`
+- `test_cli_defaults_verbose_quiet_false`
+- `test_cli_parses_class_with_campaign_flag`
+- `test_cli_parses_race_with_campaign_flag`
+- `test_cli_parses_item_with_campaign_flag`
+
+**New unit tests in `src/sdk/cli/class_editor.rs`** (1 new test):
+
+- `test_class_args_campaign_flag`
+
+**New unit tests in `src/sdk/cli/race_editor.rs`** (2 new tests):
+
+- `test_race_args_campaign_flag`
+- `test_race_args_defaults`
+
+**New unit tests in `src/sdk/cli/item_editor.rs`** (2 new tests):
+
+- `test_item_args_campaign_flag`
+- `test_item_args_defaults`
+
+### New `antares-sdk` UX (Final)
+
+```
+antares-sdk [--verbose] [--quiet] <COMMAND>
+
+Commands:
+  names       Generate fantasy character names
+  campaign    Campaign-level validation tools
+  class       Interactive class editor (--campaign supported)
+  item        Interactive item editor (--campaign supported)
+  map         Map creation and validation tools
+  race        Interactive race editor (--campaign supported)
+  textures    Generate placeholder terrain textures
+```
+
+### Architecture Compliance
+
+- [x] Only 2 binaries: `antares` and `antares-sdk`
+- [x] All old `src/bin/` files deleted; no dead `[[bin]]` entries
+- [x] All tools accessed via `antares-sdk <subcommand>`
+- [x] RON format used for all data files
+- [x] `tracing` / `tracing-subscriber` used for logging (not `eprintln!`)
+- [x] No architectural deviations
+
+### Quality Gates
+
+```
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → all tests pass
+```
+
+---
+
 ## SDK CLI Consolidation — Phase 3: Migrate Interactive Editors (Complete)
 
 ### Overview

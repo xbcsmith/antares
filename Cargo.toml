@@ -44,21 +44,5 @@ path = "src/bin/antares.rs"
 name = "antares-sdk"
 path = "src/bin/antares_sdk.rs"
 
-[[bin]]
-name = "class_editor"
-path = "src/bin/class_editor.rs"
-
-[[bin]]
-name = "race_editor"
-path = "src/bin/race_editor.rs"
-
-[[bin]]
-name = "item_editor"
-path = "src/bin/item_editor.rs"
-
-[[bin]]
-name = "map_builder"
-path = "src/bin/map_builder.rs"
-
 [dev-dependencies]
 tempfile = "3.23"

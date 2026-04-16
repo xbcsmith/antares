@@ -46,9 +46,18 @@ use std::path::PathBuf;
 pub struct ItemArgs {
     /// Path to the items RON file to edit.
     ///
-    /// The file is created if it does not exist.
+    /// The file is created if it does not exist. Ignored when `--campaign` is
+    /// provided.
     #[arg(default_value = "data/items.ron")]
     pub file: PathBuf,
+
+    /// Campaign directory. When provided, opens `<DIR>/data/items.ron`
+    /// instead of the positional FILE argument.
+    ///
+    /// Example: `antares-sdk item --campaign campaigns/tutorial`
+    /// is equivalent to: `antares-sdk item campaigns/tutorial/data/items.ron`
+    #[arg(long, value_name = "DIR")]
+    pub campaign: Option<PathBuf>,
 }
 
 /// Entry point for the item editor subcommand.
@@ -69,11 +78,17 @@ pub struct ItemArgs {
 ///
 /// let args = ItemArgs {
 ///     file: PathBuf::from("data/items.ron"),
+///     campaign: None,
 /// };
 /// run(args).expect("item editor should run");
 /// ```
 pub fn run(args: ItemArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let mut editor = ItemEditor::load(args.file)?;
+    // Resolve the target file: --campaign takes precedence over the positional FILE.
+    let file = match args.campaign {
+        Some(campaign_dir) => campaign_dir.join("data").join("items.ron"),
+        None => args.file,
+    };
+    let mut editor = ItemEditor::load(file)?;
     editor.run();
     Ok(())
 }
@@ -1770,5 +1785,59 @@ mod tests {
             filtered,
             vec!["large_weapon".to_string(), "heavy_armor".to_string()]
         );
+    }
+
+    /// `--campaign <DIR>` must set the campaign field.
+    #[test]
+    fn test_item_args_campaign_flag() {
+        use clap::Parser;
+        use std::path::PathBuf;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            args: ItemArgs,
+        }
+
+        let result = TestCli::try_parse_from(["test", "--campaign", "campaigns/tutorial"]);
+        assert!(
+            result.is_ok(),
+            "ItemArgs should parse --campaign: {:?}",
+            result.err()
+        );
+        let args = result.unwrap().args;
+        assert_eq!(
+            args.campaign,
+            Some(PathBuf::from("campaigns/tutorial")),
+            "--campaign should be set to the provided directory"
+        );
+        assert_eq!(
+            args.file,
+            PathBuf::from("data/items.ron"),
+            "file should remain at its default when --campaign is used"
+        );
+    }
+
+    /// Default ItemArgs should have no campaign and the standard file path.
+    #[test]
+    fn test_item_args_defaults() {
+        use clap::Parser;
+        use std::path::PathBuf;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            args: ItemArgs,
+        }
+
+        let result = TestCli::try_parse_from(["test"]);
+        assert!(
+            result.is_ok(),
+            "ItemArgs should parse with no arguments: {:?}",
+            result.err()
+        );
+        let args = result.unwrap().args;
+        assert_eq!(args.file, PathBuf::from("data/items.ron"));
+        assert!(args.campaign.is_none(), "campaign should default to None");
     }
 }
