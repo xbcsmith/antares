@@ -5,7 +5,7 @@ item definitions for Antares RPG.
 
 ## Overview
 
-The Item Editor is an interactive command-line tool for creating and editing
+The `antares-sdk item` subcommand is an interactive command-line tool for creating and editing
 game items including weapons, armor, accessories, consumables, ammunition, and
 quest items. It saves data in RON (Rusty Object Notation) format.
 
@@ -16,13 +16,13 @@ quest items. It saves data in RON (Rusty Object Notation) format.
 Edit items in the default `data/items.ron` file:
 
 ```bash
-cargo run --bin item_editor
+cargo run --bin antares-sdk -- item
 ```
 
 Or use the compiled binary:
 
 ```bash
-./target/release/item_editor
+./target/release/antares-sdk item
 ```
 
 ### Custom File Location
@@ -30,7 +30,13 @@ Or use the compiled binary:
 Edit items in a specific file:
 
 ```bash
-cargo run --bin item_editor -- campaigns/my_campaign/data/items.ron
+cargo run --bin antares-sdk -- item campaigns/my_campaign/data/items.ron
+```
+
+Or using the `--campaign` flag:
+
+```bash
+cargo run --bin antares-sdk -- item --campaign campaigns/my_campaign
 ```
 
 ### Creating New Item Files
@@ -38,7 +44,7 @@ cargo run --bin item_editor -- campaigns/my_campaign/data/items.ron
 The editor will create a new file if it doesn't exist:
 
 ```bash
-cargo run --bin item_editor -- campaigns/new_campaign/data/items.ron
+cargo run --bin antares-sdk -- item --campaign campaigns/new_campaign
 ```
 
 The editor automatically creates parent directories as needed.
@@ -468,10 +474,10 @@ doesn't exist, but verify the directory structure is correct.
 
 **Problem**: Manually edited file won't load
 
-**Solution**: Use `campaign_validator` to check syntax:
+**Solution**: Use `antares-sdk campaign validate` to check syntax:
 
 ```bash
-cargo run --bin campaign_validator -- campaigns/my_campaign
+cargo run --bin antares-sdk -- campaign validate campaigns/my_campaign
 ```
 
 ### Duplicate Item IDs
@@ -499,9 +505,9 @@ Ensure write permissions are set.
 Validate items after editing:
 
 ```bash
-cargo run --bin item_editor
+cargo run --bin antares-sdk -- item
 # Make changes...
-cargo run --bin campaign_validator -- campaigns/my_campaign
+cargo run --bin antares-sdk -- campaign validate campaigns/my_campaign
 ```
 
 ### With Map Builder
@@ -510,10 +516,10 @@ Items referenced in maps must exist:
 
 ```bash
 # Edit items first
-cargo run --bin item_editor
+cargo run --bin antares-sdk -- item
 
 # Then edit maps
-cargo run --bin map_builder
+cargo run --bin antares-sdk -- map build
 ```
 
 ### With Class Editor
@@ -522,10 +528,10 @@ Ensure class restrictions match available classes:
 
 ```bash
 # Check classes
-cargo run --bin class_editor -- data/classes.ron
+cargo run --bin antares-sdk -- class data/classes.ron
 
 # Update item restrictions
-cargo run --bin item_editor -- data/items.ron
+cargo run --bin antares-sdk -- item data/items.ron
 ```
 
 ## Advanced Usage
@@ -537,7 +543,7 @@ For creating many similar items, consider:
 1. Create one template item in the editor
 2. Save and exit
 3. Manually copy/edit the RON file for variations
-4. Validate with `campaign_validator`
+4. Validate with `antares-sdk campaign validate`
 
 ### Custom Spell Effects
 
@@ -555,11 +561,11 @@ Use separate item files per campaign:
 
 ```bash
 # Core game items
-cargo run --bin item_editor -- data/items.ron
+cargo run --bin antares-sdk -- item data/items.ron
 
 # Campaign-specific items
-cargo run --bin item_editor -- campaigns/desert_quest/data/items.ron
-cargo run --bin item_editor -- campaigns/ice_realm/data/items.ron
+cargo run --bin antares-sdk -- item --campaign campaigns/desert_quest
+cargo run --bin antares-sdk -- item --campaign campaigns/ice_realm
 ```
 
 ## See Also

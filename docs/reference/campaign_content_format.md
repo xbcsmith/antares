@@ -190,7 +190,7 @@ The `starts_in_party` field controls party membership at game start:
 - Campaign validation will fail if more than 6 characters have `starts_in_party: true`
 - This constraint is checked when:
   - Loading a campaign with `CampaignLoader`
-  - Running `campaign_validator` tool
+  - Running `antares-sdk campaign validate` tool
   - Initializing a new game with `GameState::initialize_roster()`
 
 #### Example
@@ -342,11 +342,11 @@ Validation:
 
 ## Validation
 
-Use the `campaign_validator` tool to check campaign content:
+Use the `antares-sdk campaign validate` subcommand to check campaign content:
 
 ```bash
 # Validate a campaign
-cargo run --bin campaign_validator -- campaigns/my_campaign
+cargo run --bin antares-sdk -- campaign validate campaigns/my_campaign
 
 # Example output:
 ✓ Campaign structure valid

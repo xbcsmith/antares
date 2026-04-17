@@ -1,5 +1,651 @@
 # Implementations
 
+## SDK CLI Consolidation — Phase 4: Cleanup and Polish (Complete)
+
+### Overview
+
+Phase 4 finalises the `antares-sdk` CLI consolidation by removing the last
+old standalone binaries, adding ergonomic `--campaign` shortcuts to the
+interactive editors, wiring `tracing-subscriber` into the entry point, and
+delivering the full documentation and integration-test suite.
+
+### What Changed
+
+#### 4.1 — Deleted Old `src/bin/` Files
+
+The following files were deleted; all functionality is now in `src/sdk/cli/`:
+
+| Deleted File               | Replaced By                     |
+| -------------------------- | ------------------------------- |
+| `src/bin/class_editor.rs`  | `src/sdk/cli/class_editor.rs`   |
+| `src/bin/race_editor.rs`   | `src/sdk/cli/race_editor.rs`    |
+| `src/bin/item_editor.rs`   | `src/sdk/cli/item_editor.rs`    |
+| `src/bin/map_builder.rs`   | `src/sdk/cli/map_builder.rs`    |
+| `src/bin/editor_common.rs` | `src/sdk/cli/editor_helpers.rs` |
+
+#### 4.1 — `Cargo.toml` Final State
+
+Only two `[[bin]]` entries remain:
+
+```toml
+[[bin]]
+name = "antares"
+path = "src/bin/antares.rs"
+
+[[bin]]
+name = "antares-sdk"
+path = "src/bin/antares_sdk.rs"
+```
+
+Entries for `class_editor`, `race_editor`, `item_editor`, and `map_builder`
+have been removed.
+
+#### 4.2 — `--campaign <DIR>` Flag Added to Editors
+
+`ClassArgs`, `RaceArgs`, and `ItemArgs` each gained an optional `--campaign`
+flag. When provided, the editor opens `<DIR>/data/<type>s.ron` instead of the
+positional `FILE` argument:
+
+```bash
+# Old way (still works)
+antares-sdk class campaigns/tutorial/data/classes.ron
+
+# New shorthand
+antares-sdk class --campaign campaigns/tutorial
+```
+
+Resolution logic in each `run()` function:
+
+```rust
+let file = match args.campaign {
+    Some(campaign_dir) => campaign_dir.join("data").join("classes.ron"),
+    None => args.file,
+};
+```
+
+Files modified:
+
+- `src/sdk/cli/class_editor.rs` — `ClassArgs` + `run()`
+- `src/sdk/cli/race_editor.rs` — `RaceArgs` + `run()`
+- `src/sdk/cli/item_editor.rs` — `ItemArgs` + `run()` + doc example updated
+
+#### 4.3 — `--verbose` and `--quiet` Top-Level Flags
+
+`src/bin/antares_sdk.rs` gained two top-level flags on the `Cli` struct and
+a new `init_tracing()` function:
+
+| Flag        | Tracing level initialised |
+| ----------- | ------------------------- |
+| `--verbose` | `DEBUG`                   |
+| `--quiet`   | `ERROR`                   |
+| _(neither)_ | `INFO`                    |
+
+`--verbose` takes priority when both flags are set. Uses `try_init()` so
+unit-test executables that register their own subscriber do not panic.
+
+Example:
+
+```bash
+antares-sdk --verbose campaign validate campaigns/tutorial
+antares-sdk --quiet names --theme fantasy --number 100
+```
+
+> The `names` subcommand retains its own `--quiet` flag (suppresses the
+> header banner). These two `--quiet` flags are completely independent:
+> the top-level one controls logging; the subcommand one controls output
+> formatting.
+
+#### 4.4 — Documentation Updated
+
+| File                                                        | Change                                                                                                 |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `docs/tutorials/name_generator_quickstart.md`               | All `cargo run --bin antares-name-gen` references replaced with `cargo run --bin antares-sdk -- names` |
+| `docs/how-to/sdk_cli_usage.md`                              | **New file** — complete reference for all `antares-sdk` subcommands                                    |
+| `docs/explanation/implementations.md`                       | This entry                                                                                             |
+
+#### 4.4 (follow-up) — Stale Docs Sweep
+
+Phase 4.4 originally updated only three files. A follow-up pass identified and
+updated **12 additional documentation files** that still referenced the deleted
+standalone binaries. All old binary names are now replaced with their
+`antares-sdk` subcommand equivalents throughout the entire `docs/` tree.
+
+| File                                                        | Old Reference(s) Fixed                                    |
+| ----------------------------------------------------------- | --------------------------------------------------------- |
+| `docs/how-to/use_name_generator.md`                         | All `antares-name-gen` → `antares-sdk names`               |
+| `docs/how-to/using_sdk_tools.md`                            | All 5 old binaries → `antares-sdk` subcommands             |
+| `docs/how-to/using_map_builder.md`                          | `map_builder`, `validate_map` → `antares-sdk map build/validate` |
+| `docs/how-to/using_item_editor.md`                          | `item_editor`, `campaign_validator` → `antares-sdk` subcommands |
+| `docs/how-to/creating_maps.md`                              | `validate_map` → `antares-sdk map validate`               |
+| `docs/how-to/add_classes_races.md`                          | `campaign_validator` → `antares-sdk campaign validate`    |
+| `docs/how-to/create_characters.md`                          | `campaign_validator` → `antares-sdk campaign validate`    |
+| `docs/how-to/creating_and_validating_campaigns.md`          | All `campaign_validator` → `antares-sdk campaign validate` |
+| `docs/explanation/modding_guide.md`                         | `campaign_validator` → `antares-sdk campaign validate`; `--package` → `tar -czf` |
+| `docs/tutorials/creating_campaigns.md`                      | Old binary paths → `antares-sdk` subcommands; `--package` → `tar -czf` |
+| `docs/tutorials/getting_started_campaign_creation.md`       | All `campaign_validator` → `antares-sdk campaign validate` |
+| `docs/reference/architecture.md`                            | `src/bin/` listing updated; inline tool references updated  |
+| `docs/reference/map_ron_format.md`                          | `validate_map` → `antares-sdk map validate`               |
+| `docs/reference/campaign_content_format.md`                 | `campaign_validator` → `antares-sdk campaign validate`    |
+
+#### 4.5 — Integration Tests
+
+**New file: `tests/antares_sdk_binary_tests.rs`**
+
+Uses `std::process::Command` with `env!("CARGO_BIN_EXE_antares_sdk")` to
+invoke the compiled binary directly. Tests cover:
+
+- `antares-sdk --help` exits 0
+- Help output lists every subcommand (`names`, `campaign`, `class`, `race`, `item`, `map`, `textures`)
+- Help output documents `--verbose` and `--quiet` flags
+- Every subcommand's `--help` exits 0 with no stderr output
+- Every sub-subcommand's `--help` exits 0 (`map validate`, `map build`, `campaign validate`, `textures generate`)
+- `class --help`, `race --help`, `item --help` mention `--campaign` flag
+
+**New unit tests in `src/bin/antares_sdk.rs`** (10 new tests):
+
+- `test_cli_top_level_verbose_flag`
+- `test_cli_top_level_quiet_flag`
+- `test_cli_verbose_and_quiet_together`
+- `test_cli_subcommand_quiet_does_not_affect_top_level`
+- `test_cli_defaults_verbose_quiet_false`
+- `test_cli_parses_class_with_campaign_flag`
+- `test_cli_parses_race_with_campaign_flag`
+- `test_cli_parses_item_with_campaign_flag`
+
+**New unit tests in `src/sdk/cli/class_editor.rs`** (1 new test):
+
+- `test_class_args_campaign_flag`
+
+**New unit tests in `src/sdk/cli/race_editor.rs`** (2 new tests):
+
+- `test_race_args_campaign_flag`
+- `test_race_args_defaults`
+
+**New unit tests in `src/sdk/cli/item_editor.rs`** (2 new tests):
+
+- `test_item_args_campaign_flag`
+- `test_item_args_defaults`
+
+### New `antares-sdk` UX (Final)
+
+```
+antares-sdk [--verbose] [--quiet] <COMMAND>
+
+Commands:
+  names       Generate fantasy character names
+  campaign    Campaign-level validation tools
+  class       Interactive class editor (--campaign supported)
+  item        Interactive item editor (--campaign supported)
+  map         Map creation and validation tools
+  race        Interactive race editor (--campaign supported)
+  textures    Generate placeholder terrain textures
+```
+
+### Architecture Compliance
+
+- [x] Only 2 binaries: `antares` and `antares-sdk`
+- [x] All old `src/bin/` files deleted; no dead `[[bin]]` entries
+- [x] All tools accessed via `antares-sdk <subcommand>`
+- [x] RON format used for all data files
+- [x] `tracing` / `tracing-subscriber` used for logging (not `eprintln!`)
+- [x] No architectural deviations
+
+### Quality Gates
+
+```
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → all tests pass
+```
+
+---
+
+## SDK CLI Consolidation — Phase 3: Migrate Interactive Editors (Complete)
+
+### Overview
+
+Phase 3 migrates the four interactive REPL-style editor binaries
+(`class_editor.rs`, `race_editor.rs`, `item_editor.rs`, and `map_builder.rs`)
+into the unified `antares-sdk` CLI. Each becomes a subcommand under the
+`antares-sdk` binary. Shared helper code is extracted into a new
+`src/sdk/cli/editor_helpers.rs` library module, eliminating all duplication
+across editors.
+
+### What Changed
+
+#### New: `src/sdk/cli/editor_helpers.rs`
+
+Extracted from `src/bin/editor_common.rs`. Replaces the per-binary
+`#[path = "editor_common.rs"] mod editor_common;` include pattern with a
+proper library module. Public surface:
+
+- `STANDARD_PROFICIENCY_IDS: &[&str]` — canonical proficiency IDs
+- `STANDARD_ITEM_TAGS: &[&str]` — canonical item tag identifiers
+- `truncate(s, max_len) -> String` — appends `...` if string exceeds length
+- `filter_valid_proficiencies(candidates) -> Vec<String>` — validates against standard IDs
+- `filter_valid_tags(candidates) -> Vec<String>` — validates against standard tags
+- `read_line(prompt) -> String` — prints prompt, flushes stdout, reads one stdin line
+- `input_multistring_values(prompt, label) -> Vec<String>` — interactive multi-line input loop
+- `parse_multistring_input(input) -> Vec<String>` — `#[cfg(test)]`-only helper
+
+15 tests covering all functions.
+
+#### New: `src/sdk/cli/class_editor.rs`
+
+Migrated from `src/bin/class_editor.rs`. Public surface:
+
+- `ClassArgs` — `clap::Args` with `file: PathBuf` (default: `data/classes.ron`)
+- `pub fn run(args: ClassArgs) -> Result<(), Box<dyn Error>>` — entry point
+
+Key changes:
+
+- No longer uses `#[path]` include; imports helpers from `editor_helpers`
+- `self.read_input()` / `self.input_multistring_values()` replaced with
+  free-standing `read_line()` / `input_multistring_values()` from `editor_helpers`
+- `ClassDatabase::load_from_file()` used for consistent parsing (unchanged
+  from original)
+- All 5 tests migrated; `parse_multistring_input` sourced from `editor_helpers`
+
+#### New: `src/sdk/cli/race_editor.rs`
+
+Migrated from `src/bin/race_editor.rs`. Public surface:
+
+- `RaceArgs` — `clap::Args` with `file: PathBuf` (default: `data/races.ron`)
+- `pub fn run(args: RaceArgs) -> Result<(), Box<dyn Error>>` — entry point
+
+Key fixes applied:
+
+1. **`RaceDatabase::load_from_file()`** used instead of raw `ron::from_str()`
+   for consistency with the class editor pattern.
+2. **RON serialization normalized** to `struct_names(true)` matching the
+   class editor's serialization config for project-wide consistency.
+3. All shared helpers (`read_line`, `input_multistring_values`,
+   `filter_valid_proficiencies`, `filter_valid_tags`, `STANDARD_PROFICIENCY_IDS`,
+   `STANDARD_ITEM_TAGS`) imported from `editor_helpers`.
+
+All 9 tests migrated.
+
+#### New: `src/sdk/cli/item_editor.rs`
+
+Migrated from `src/bin/item_editor.rs`. Public surface:
+
+- `ItemArgs` — `clap::Args` with `file: PathBuf` (default: `data/items.ron`)
+- `pub fn run(args: ItemArgs) -> Result<(), Box<dyn Error>>` — entry point
+
+Key changes:
+
+- `self.read_input()` replaced with `read_line()` from `editor_helpers`
+- `self.input_multistring_values()` replaced with `input_multistring_values()`
+  from `editor_helpers`
+- Numeric helper methods (`read_u8`, `read_u16`, `read_u32`, `read_i8`,
+  `read_optional_u16`, `read_bool`, `read_dice_roll`) converted to associated
+  functions (no `&self`) calling `read_line()` directly
+- `#[allow(deprecated)]` annotations retained on `Item` construction pending
+  Game Cleanup Plan Phase 1.3 food field migration
+
+All 17 tests migrated.
+
+#### New: `src/sdk/cli/map_builder.rs`
+
+Migrated from `src/bin/map_builder.rs`. Public surface:
+
+- `MapBuilder` — builder state struct with `pub fn new()` and `Default` impl
+- `pub fn run_build() -> Result<(), Box<dyn Error>>` — starts the `rustyline`
+  REPL (replaces `main()`)
+- `pub fn parse_terrain(s) -> TerrainType` — parses terrain name strings
+- `pub fn parse_wall(s) -> WallType` — parses wall type name strings
+- `pub fn print_help()` — prints interactive help text
+
+Key changes:
+
+- **`npc` command removed entirely** — it only printed a deprecation notice;
+  use the campaign builder and NPC database system instead
+- Entry point is `run_build()`, not `main()`
+- Uses `crate::domain::...` imports throughout
+
+All 8 tests migrated; `test_default_builder_has_no_map` added.
+
+#### Modified: `src/sdk/cli/map_validator.rs`
+
+- `MapSubcommand::Build` variant added to the existing `Validate` variant:
+
+  ```text
+  Build    — Interactive map builder REPL
+  Validate — Validate one or more RON map files
+  ```
+
+- `run()` dispatches `Build` to `map_builder::run_build()`
+- Existing `Validate` tests updated to handle the new non-exhaustive match arm
+
+#### Modified: `src/sdk/cli/mod.rs`
+
+Added `pub mod class_editor;`, `pub mod race_editor;`, `pub mod item_editor;`,
+`pub mod map_builder;`, and `pub mod editor_helpers;`. Module layout table
+updated.
+
+#### Modified: `src/bin/antares_sdk.rs`
+
+- Added `Class(cli::class_editor::ClassArgs)`, `Race(cli::race_editor::RaceArgs)`,
+  and `Item(cli::item_editor::ItemArgs)` to the `Commands` enum.
+- Added dispatch arms in `main()` for all three new subcommands.
+- `test_antares_sdk_help_renders_without_panic` updated to assert `class`,
+  `race`, and `item` subcommands are registered.
+- 5 new CLI parse tests added:
+  - `test_cli_parses_class_with_default_file`
+  - `test_cli_parses_class_with_explicit_file`
+  - `test_cli_parses_race_with_default_file`
+  - `test_cli_parses_item_with_default_file`
+  - `test_cli_parses_map_build`
+
+### New `antares-sdk` UX
+
+```text
+antares-sdk class                                    # edit data/classes.ron
+antares-sdk class campaigns/tutorial/data/classes.ron
+antares-sdk race                                     # edit data/races.ron
+antares-sdk race campaigns/tutorial/data/races.ron
+antares-sdk item                                     # edit data/items.ron
+antares-sdk item campaigns/tutorial/data/items.ron
+antares-sdk map build                                # interactive map builder REPL
+```
+
+### Architecture Compliance
+
+- All data structures match `architecture.md` exactly — no modifications
+- RON format used for all data files
+- Module placement follows `src/sdk/cli/` pattern established in Phase 1–2
+- No dead code — every public function is either a CLI entry point, a REPL
+  method, or a test helper
+
+### Quality Gates
+
+All four gates pass with zero errors and zero warnings:
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — `Finished` with 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --all-features` — **4784 tests run: 4784 passed**
+
+---
+
+## SDK CLI Consolidation — Phase 2: Migrate One-Shot Tools (Complete)
+
+### Overview
+
+Phase 2 migrates the two remaining standalone one-shot tool binaries
+(`validate_map.rs` and `generate_terrain_textures.rs`) into the unified
+`antares-sdk` CLI under the `map validate` and `textures generate`
+subcommands respectively. Both binaries are deleted; all logic and tests
+move into `src/sdk/cli/`.
+
+### What Changed
+
+#### Deleted
+
+| File                                   | Reason                                                |
+| -------------------------------------- | ----------------------------------------------------- |
+| `src/bin/validate_map.rs`              | Logic migrated to `src/sdk/cli/map_validator.rs`.     |
+| `src/bin/generate_terrain_textures.rs` | Logic migrated to `src/sdk/cli/texture_generator.rs`. |
+
+#### `Cargo.toml`
+
+- Removed `[[bin]]` entries for `validate_map` and
+  `generate_terrain_textures`.
+
+#### New: `src/sdk/cli/map_validator.rs`
+
+Migrated from `src/bin/validate_map.rs`. Public surface:
+
+- `MapArgs` — `clap::Args` group dispatcher (nested `#[command(subcommand)]`)
+- `MapSubcommand` — `clap::Subcommand` enum (currently only `Validate`)
+- `MapValidateArgs` — `clap::Args` for `map validate`; key fields:
+  - `files: Vec<PathBuf>` — one or more RON map file paths (positional,
+    required)
+  - `campaign_dir: Option<PathBuf>` — `--campaign-dir <DIR>`; when provided,
+    valid monster/item IDs are loaded from
+    `<campaign-dir>/data/monsters.ron` and `<campaign-dir>/data/items.ron`;
+    when omitted, ID validation is skipped entirely with a warning to stderr
+- `pub fn run(args: MapArgs) -> Result<(), Box<dyn Error>>` — entry point
+
+Key improvements over the original binary:
+
+1. **Replaced hardcoded data paths** — the original loaded IDs from a
+   compile-time `CARGO_MANIFEST_DIR` path. The new code accepts
+   `--campaign-dir` at runtime; no compile-time assumption.
+2. **Fixed event summary** — the original `match` lumped `Furniture`,
+   `Container`, `DroppedItem`, `LockedDoor`, `LockedContainer`, `EnterInn`,
+   and `RecruitableCharacter` into either the `signs` or `dialogues` bucket.
+   The new `print_map_summary` uses a **separate named counter for every
+   `MapEvent` variant** so the breakdown is always accurate.
+3. **Optional ID validation** — when `--campaign-dir` is absent the
+   validator proceeds without ID checks rather than falling back to a
+   hardcoded default list, which was misleading.
+
+Tests added (21 new):
+
+- CLI arg construction and field defaults
+- `load_ids` behaviour with `None`, missing files, and test-campaign fixture
+- `validate_structure` for zero ID, zero dimensions, oversized maps, valid maps
+- `validate_content` for OOB events, invalid monster IDs, invalid item IDs,
+  skipped ID checks when IDs are `None`
+- `validate_gameplay` for empty maps and non-empty maps
+- `print_map_summary` smoke test covering all 13 event variants
+- `is_position_valid` boundary cases
+
+#### New: `src/sdk/cli/texture_generator.rs`
+
+Migrated from `src/bin/generate_terrain_textures.rs`. **No antares library
+imports** — the module is entirely self-contained (only `image` + `std`).
+Public surface:
+
+- `TexturesArgs` — `clap::Args` group dispatcher
+- `TexturesSubcommand` — `clap::Subcommand` enum (currently only `Generate`)
+- `TexturesGenerateArgs` — `clap::Args` for `textures generate`; key field:
+  - `output_dir: PathBuf` — `--output-dir <DIR>` (default: `assets/textures`
+    relative to the current working directory)
+- `FoliageShape` — public enum for foliage mask selection
+- `FoliageTextureSpec` — public struct describing per-shape generation params
+- Public generation functions: `generate_bark_texture`,
+  `generate_foliage_texture`, `generate_grass_blade_texture`,
+  `generate_tree_textures`
+- `pub fn run(args: TexturesArgs) -> Result<(), Box<dyn Error>>` — entry point
+
+Key improvement: output is now written to `--output-dir/{terrain,grass,trees}/`
+relative to the specified (or default) directory, instead of being hardcoded
+to `CARGO_MANIFEST_DIR/assets/textures/`.
+
+All original tests (63) were migrated from the binary; 3 new CLI tests were
+added: `test_textures_generate_args_default_output_dir`,
+`test_textures_generate_args_custom_output_dir`,
+`test_textures_args_generate_subcommand`. The integration test
+`test_run_generate_writes_expected_files` verifies that all 17 expected output
+files are written to a `tempdir`.
+
+#### Modified: `src/sdk/cli/mod.rs`
+
+Added `pub mod map_validator;` and `pub mod texture_generator;`.
+
+#### Modified: `src/bin/antares_sdk.rs`
+
+- Added `Map(cli::map_validator::MapArgs)` and
+  `Textures(cli::texture_generator::TexturesArgs)` to the `Commands` enum.
+- Added dispatch arms in `main()`.
+- Added 4 new CLI parse tests:
+  `test_cli_parses_map_validate_with_file`,
+  `test_cli_parses_map_validate_with_campaign_dir`,
+  `test_cli_parses_textures_generate_with_defaults`,
+  `test_cli_parses_textures_generate_with_output_dir`.
+- Updated `test_antares_sdk_help_renders_without_panic` to assert both `map`
+  and `textures` subcommands are registered.
+
+### New `antares-sdk` UX
+
+```text
+antares-sdk map validate map_1.ron map_2.ron
+antares-sdk map validate --campaign-dir campaigns/tutorial map_1.ron
+antares-sdk textures generate
+antares-sdk textures generate --output-dir /tmp/textures
+```
+
+### Architecture Compliance
+
+- `src/sdk/cli/map_validator.rs` and `src/sdk/cli/texture_generator.rs` live
+  under `src/sdk/cli/` per the proposed file structure in
+  `docs/explanation/sdk_cli_consolidation_plan.md` Appendix B.
+- `src/bin/antares_sdk.rs` remains a thin dispatch layer; all logic lives in
+  `src/sdk/cli/`.
+- `texture_generator.rs` contains zero antares domain imports (self-contained
+  image generation).
+- SPDX headers on all new/modified files (2026).
+- `pub fn run(...)` pattern used consistently.
+- No `unwrap()` without justification; `process::exit(1)` used only at the
+  CLI boundary for validation/write failures (acceptable pattern for CLI tools).
+
+### Quality Gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 4725 passed, 8 skipped, 0 failed  (+28 new tests)
+```
+
+### Success Criteria Verification
+
+- [x] `antares-sdk map validate` loads monster/item IDs dynamically from
+      `--campaign-dir` when provided
+- [x] `antares-sdk map validate` skips ID validation (with warning) when
+      `--campaign-dir` is omitted — no fallback hardcoded list
+- [x] `antares-sdk textures generate --output-dir /tmp/test` writes all 17
+      expected files to the specified directory
+- [x] Event summary uses a named counter for **all 13** `MapEvent` variants
+- [x] `validate_map` and `generate_terrain_textures` binaries are fully
+      removed; `[[bin]]` entries deleted from `Cargo.toml`
+- [x] All existing tests from both migrated binaries pass in their new locations
+- [x] All four quality gates pass
+
+---
+
+## SDK CLI Consolidation — Phase 1: Delete Dead Weight and Scaffold (Complete)
+
+### Overview
+
+`src/bin/` previously contained 10 separate binaries with inconsistent CLI
+patterns (raw `env::args`, `clap`, or no args at all), duplicated helpers, and
+one completed one-time migration tool (`update_tutorial_maps`) that had no
+further use. Phase 1 deletes that dead weight, scaffolds the new `antares-sdk`
+unified binary, and migrates the two smallest `clap`-based tools as a
+proof-of-concept.
+
+### What Changed
+
+#### Deleted
+
+| File                              | Reason                                                                                                                  |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `src/bin/update_tutorial_maps.rs` | Completed one-time migration tool; created `.bak` files and hardcoded visual metadata for 5 tutorial maps. Job is done. |
+| `src/bin/name_gen.rs`             | Logic migrated to `src/sdk/cli/names.rs`.                                                                               |
+| `src/bin/campaign_validator.rs`   | Logic migrated to `src/sdk/cli/campaign_validator.rs`.                                                                  |
+
+#### `Cargo.toml`
+
+- Removed `[[bin]]` entries for `update_tutorial_maps`, `name_gen`, and
+  `campaign_validator`.
+- Added `[[bin]]` entry for `antares-sdk` → `src/bin/antares_sdk.rs`.
+
+#### New: `src/sdk/cli/mod.rs`
+
+Module scaffold declaring the two Phase 1 submodules:
+
+```rust
+pub mod campaign_validator;
+pub mod names;
+```
+
+#### New: `src/sdk/cli/names.rs`
+
+Migrated from `src/bin/name_gen.rs`. Public surface:
+
+- `ThemeArg` — `clap::ValueEnum` mapping to `NameTheme`
+- `NamesArgs` — `clap::Args` struct (derives `Args`, not `Parser`, for
+  embedding in the parent `Cli` enum)
+- `pub fn run(args: NamesArgs) -> Result<(), Box<dyn Error>>` — entry point
+
+All existing tests (`test_theme_arg_conversion`) moved here plus three new
+tests: `test_run_returns_ok_for_all_themes`, `test_run_with_lore_returns_ok`,
+`test_run_zero_names_returns_ok`.
+
+#### New: `src/sdk/cli/campaign_validator.rs`
+
+Migrated from `src/bin/campaign_validator.rs`. Public surface:
+
+- `CampaignArgs` — `clap::Args` with a nested `#[command(subcommand)]`
+- `CampaignSubcommand` — `clap::Subcommand` enum (currently only `Validate`)
+- `CampaignValidateArgs` — `clap::Args` for `campaign validate` flags
+- `pub fn run(args: CampaignArgs) -> Result<(), Box<dyn Error>>` — entry point
+
+Private helpers (`validate_all_campaigns`, `validate_single_campaign`,
+`validate_campaign_comprehensive`, `print_report`, `print_json_report`) are
+identical in behaviour to the original binary. Validation failures still call
+`std::process::exit(1)` to preserve identical exit-code semantics.
+
+All existing tests moved here plus two new structural tests:
+`test_campaign_args_validate_subcommand_fields` and
+`test_campaign_validate_args_with_path`.
+
+#### New: `src/bin/antares_sdk.rs`
+
+Thin entry point containing only the top-level `clap` dispatch:
+
+```text
+antares-sdk names [FLAGS]
+antares-sdk campaign validate [FLAGS] [CAMPAIGN_DIR]
+```
+
+Tests verify the `--help` code path, default arg parsing, full-flag parsing,
+and all campaign validate variants (single path, `--all`, optional flags).
+
+#### Modified: `src/sdk/mod.rs`
+
+Added `pub mod cli;` to expose the new CLI submodule tree as
+`antares::sdk::cli`.
+
+### Architecture Compliance
+
+- All new files live under `src/sdk/cli/` per the proposed file structure in
+  `docs/explanation/sdk_cli_consolidation_plan.md` Section "Proposed File
+  Structure".
+- `src/bin/antares_sdk.rs` contains only the `clap` enum and dispatch; all
+  logic lives in `src/sdk/cli/`.
+- SPDX headers on all new files (2026).
+- `pub fn run(...)` pattern used consistently for uniform entry-point
+  signatures across subcommands.
+- No `unwrap()` without justification; `process::exit` used only at CLI
+  boundary for validation failures (acceptable pattern for CLI binaries).
+
+### Quality Gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 4697 passed, 8 skipped, 0 failed  (+11 new tests)
+```
+
+### Success Criteria Verification
+
+- [x] `update_tutorial_maps` binary is gone (file deleted, `[[bin]]` removed)
+- [x] `antares-sdk names` works identically to the old `name_gen` binary
+- [x] `antares-sdk campaign validate` works identically to the old
+      `campaign_validator` binary
+- [x] All existing tests from migrated binaries pass in their new locations
+- [x] Smoke test: `test_antares_sdk_help_renders_without_panic` verifies CLI
+      structure is valid (same path as `antares-sdk --help`)
+- [x] All four quality gates pass
+
+---
+
 ## Combat Fixes — Phase 3: Out-of-Combat Item Use — Charged Magical Items (Complete)
 
 ### Overview

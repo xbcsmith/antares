@@ -1,72 +1,63 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Interactive Map Builder Tool
+//! `antares-sdk map build` — Interactive map builder REPL.
 //!
-//! **DEPRECATED**: NPC functionality has been removed. Use the campaign builder
-//! and NPC database system instead. This tool now only supports basic map creation
-//! and event placement.
+//! Migrated from `src/bin/map_builder.rs`. The `npc` subcommand has been
+//! removed (it only printed a deprecation notice). Use the campaign builder
+//! and NPC database system for NPC placement instead.
 //!
-//! A command-line tool for creating and editing Antares RPG maps.
+//! # Entry Point
 //!
-//! # Features
-//!
-//! - Create new maps with specified dimensions
-//! - Load and edit existing map RON files
-//! - Set individual tiles or fill regions
-//! - Add events (encounters, treasures, teleports, etc.)
-//! - Real-time ASCII visualization
-//! - Inline validation feedback
-//! - Save maps in RON format
-//!
-//! # Usage
-//!
-//! ```bash
-//! cargo run --bin map_builder
-//! ```
+//! Call [`run_build`] to start the interactive REPL.
 //!
 //! # Commands
 //!
-//! - `new <id> <width> <height>` - Create new map
-//! - `load <path>` - Load existing map
-//! - `set <x> <y> <terrain> [wall]` - Set tile
-//! - `fill <x1> <y1> <x2> <y2> <terrain> [wall]` - Fill region
-//! - `event <x> <y> <type> <data>` - Add event
-//! - `show` - Display map
-//! - `info` - Show map info
-//! - `save <path>` - Save map
-//! - `help` - Show help
-//! - `quit` - Exit builder
-//!
-//! # Architecture Reference
-//!
-//! See `docs/reference/architecture.md` Section 4.2 (Map structures).
-//! See `docs/reference/map_ron_format.md` for RON format specification.
+//! - `new <id> <width> <height>` — Create new map
+//! - `load <path>` — Load existing map RON file
+//! - `set <x> <y> <terrain> [wall]` — Set single tile
+//! - `fill <x1> <y1> <x2> <y2> <terrain> [wall]` — Fill rectangular region
+//! - `bulk <terrain_csv> <wall> <blocked>` — Bulk-update tiles by terrain
+//! - `event <x> <y> <type> <data>` — Add event
+//! - `show` — Display map (ASCII art)
+//! - `info` — Show map dimensions and event count
+//! - `auto [on|off]` — Toggle auto-show after edits
+//! - `save <path>` — Save map to RON file
+//! - `help` — Show help
+//! - `quit` / `exit` — Exit builder
 
-use antares::domain::types::{MapId, Position};
-use antares::domain::world::{Map, MapEvent, TerrainType, Tile, WallType};
+use crate::domain::types::{MapId, Position};
+use crate::domain::world::{Map, MapEvent, TerrainType, Tile, WallType};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::fs;
 use std::io;
 
-/// Map builder context
-struct MapBuilder {
+// ──────────────────────────────────────────────────────────────────────────────
+// Map builder context
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Interactive map builder state.
+///
+/// Holds an optional in-progress [`Map`] and the auto-show flag. Construct
+/// via [`MapBuilder::new`] then drive by calling [`MapBuilder::process_command`]
+/// in a REPL loop.
+pub struct MapBuilder {
     map: Option<Map>,
     auto_show: bool,
 }
 
 impl MapBuilder {
-    /// Creates a new map builder
-    fn new() -> Self {
+    /// Creates a new map builder with no map loaded and auto-show enabled.
+    pub fn new() -> Self {
         Self {
             map: None,
             auto_show: true,
         }
     }
 
-    /// Creates a new map with the specified dimensions
-    fn create_map(&mut self, id: MapId, width: u32, height: u32) {
+    /// Creates a new map with the specified dimensions.
+    pub fn create_map(&mut self, id: MapId, width: u32, height: u32) {
         if width == 0 || height == 0 {
             println!("❌ Error: Width and height must be greater than 0");
             return;
@@ -90,8 +81,8 @@ impl MapBuilder {
         }
     }
 
-    /// Loads a map from a RON file
-    fn load_map(&mut self, path: &str) -> io::Result<()> {
+    /// Loads a map from a RON file.
+    pub fn load_map(&mut self, path: &str) -> io::Result<()> {
         let contents = fs::read_to_string(path)?;
         let map: Map = ron::from_str(&contents).map_err(|e| {
             io::Error::new(
@@ -110,8 +101,8 @@ impl MapBuilder {
         Ok(())
     }
 
-    /// Sets a single tile
-    fn set_tile(&mut self, x: i32, y: i32, terrain: TerrainType, wall: WallType) {
+    /// Sets a single tile at the given coordinates.
+    pub fn set_tile(&mut self, x: i32, y: i32, terrain: TerrainType, wall: WallType) {
         let Some(ref mut map) = self.map else {
             println!("❌ Error: No map loaded. Use 'new' or 'load' first.");
             return;
@@ -133,8 +124,8 @@ impl MapBuilder {
         }
     }
 
-    /// Fills a rectangular region with the specified terrain and wall
-    fn fill_tiles(
+    /// Fills a rectangular region with the specified terrain and wall type.
+    pub fn fill_tiles(
         &mut self,
         x1: i32,
         y1: i32,
@@ -173,20 +164,23 @@ impl MapBuilder {
         }
     }
 
-    /// Bulk updates tiles that match any terrain in a comma-separated list.
+    /// Bulk-updates tiles whose current terrain is in `terrains_csv`.
     ///
-    /// Example:
-    ///   bulk Ground,Grass,Forest None false
+    /// `terrains_csv` is a comma-separated list of [`TerrainType`] names
+    /// (case-insensitive). All matching tiles have their `wall_type` and
+    /// `blocked` flag overwritten with the given values.
     ///
-    /// This updates only tiles whose current `terrain` is in the provided CSV,
-    /// setting their `wall_type` and `blocked` flag to the provided values.
-    fn bulk_set_for_terrains(&mut self, terrains_csv: &str, wall: WallType, blocked: bool) {
+    /// # Example command
+    ///
+    /// ```text
+    /// bulk Ground,Grass,Forest None false
+    /// ```
+    pub fn bulk_set_for_terrains(&mut self, terrains_csv: &str, wall: WallType, blocked: bool) {
         let Some(ref mut map) = self.map else {
             println!("❌ Error: No map loaded. Use 'new' or 'load' first.");
             return;
         };
 
-        // Parse terrains CSV into TerrainType vector (using parse_terrain for robustness)
         let terrains: Vec<TerrainType> = terrains_csv
             .split(',')
             .map(|s| parse_terrain(s.trim()))
@@ -216,8 +210,8 @@ impl MapBuilder {
         }
     }
 
-    /// Adds an event at the specified position
-    fn add_event(&mut self, x: i32, y: i32, event: MapEvent) {
+    /// Adds an event at the specified position.
+    pub fn add_event(&mut self, x: i32, y: i32, event: MapEvent) {
         let Some(ref mut map) = self.map else {
             println!("❌ Error: No map loaded. Use 'new' or 'load' first.");
             return;
@@ -237,19 +231,16 @@ impl MapBuilder {
         }
     }
 
-    /// Displays the map as ASCII art
-    fn show_map(&self) {
+    /// Displays the current map as ASCII art.
+    pub fn show_map(&self) {
         let Some(ref map) = self.map else {
             println!("❌ Error: No map loaded. Use 'new' or 'load' first.");
             return;
         };
 
         println!("\n╔═══ Map {} ({}x{}) ═══╗", map.id, map.width, map.height);
-
-        // X-axis label
         println!("     X-AXIS →");
 
-        // Top border with X coordinates
         print!("   ");
         for x in 0..map.width {
             print!("{}", (x % 10));
@@ -289,7 +280,6 @@ impl MapBuilder {
             println!();
         }
 
-        // Y-axis label
         println!("↑");
         println!("Y");
         println!("A");
@@ -299,8 +289,8 @@ impl MapBuilder {
         println!();
     }
 
-    /// Shows map information
-    fn show_info(&self) {
+    /// Shows map dimensions and event count.
+    pub fn show_info(&self) {
         let Some(ref map) = self.map else {
             println!("❌ Error: No map loaded. Use 'new' or 'load' first.");
             return;
@@ -315,8 +305,8 @@ impl MapBuilder {
         println!();
     }
 
-    /// Saves the map to a RON file
-    fn save_map(&self, path: &str) -> io::Result<()> {
+    /// Saves the current map to a RON file.
+    pub fn save_map(&self, path: &str) -> io::Result<()> {
         let Some(ref map) = self.map else {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "No map loaded"));
         };
@@ -326,12 +316,14 @@ impl MapBuilder {
 
         fs::write(path, ron_string)?;
         println!("✅ Saved map to {}", path);
-
         Ok(())
     }
 
-    /// Processes a command and returns true if the program should continue
-    fn process_command(&mut self, line: &str) -> bool {
+    /// Processes a REPL command line.
+    ///
+    /// Returns `true` if the REPL should continue, `false` if the user
+    /// requested to quit.
+    pub fn process_command(&mut self, line: &str) -> bool {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.is_empty() {
             return true;
@@ -351,7 +343,6 @@ impl MapBuilder {
                         return true;
                     }
                 };
-
                 let width: u32 = match parts[2].parse() {
                     Ok(w) => w,
                     Err(_) => {
@@ -359,7 +350,6 @@ impl MapBuilder {
                         return true;
                     }
                 };
-
                 let height: u32 = match parts[3].parse() {
                     Ok(h) => h,
                     Err(_) => {
@@ -367,7 +357,6 @@ impl MapBuilder {
                         return true;
                     }
                 };
-
                 self.create_map(id, width, height);
             }
             "load" => {
@@ -384,7 +373,6 @@ impl MapBuilder {
                     println!("Usage: set <x> <y> <terrain> [wall]");
                     return true;
                 }
-
                 let x: i32 = match parts[1].parse() {
                     Ok(x) => x,
                     Err(_) => {
@@ -392,7 +380,6 @@ impl MapBuilder {
                         return true;
                     }
                 };
-
                 let y: i32 = match parts[2].parse() {
                     Ok(y) => y,
                     Err(_) => {
@@ -400,14 +387,12 @@ impl MapBuilder {
                         return true;
                     }
                 };
-
                 let terrain = parse_terrain(parts[3]);
                 let wall = if parts.len() == 5 {
                     parse_wall(parts[4])
                 } else {
                     WallType::None
                 };
-
                 self.set_tile(x, y, terrain, wall);
             }
             "fill" => {
@@ -415,7 +400,6 @@ impl MapBuilder {
                     println!("Usage: fill <x1> <y1> <x2> <y2> <terrain> [wall]");
                     return true;
                 }
-
                 let x1: i32 = match parts[1].parse() {
                     Ok(x) => x,
                     Err(_) => {
@@ -423,7 +407,6 @@ impl MapBuilder {
                         return true;
                     }
                 };
-
                 let y1: i32 = match parts[2].parse() {
                     Ok(y) => y,
                     Err(_) => {
@@ -431,7 +414,6 @@ impl MapBuilder {
                         return true;
                     }
                 };
-
                 let x2: i32 = match parts[3].parse() {
                     Ok(x) => x,
                     Err(_) => {
@@ -439,7 +421,6 @@ impl MapBuilder {
                         return true;
                     }
                 };
-
                 let y2: i32 = match parts[4].parse() {
                     Ok(y) => y,
                     Err(_) => {
@@ -447,25 +428,19 @@ impl MapBuilder {
                         return true;
                     }
                 };
-
                 let terrain = parse_terrain(parts[5]);
                 let wall = if parts.len() == 7 {
                     parse_wall(parts[6])
                 } else {
                     WallType::None
                 };
-
                 self.fill_tiles(x1, y1, x2, y2, terrain, wall);
             }
-
             "bulk" => {
-                // Usage: bulk <terrain_csv> <wall> <blocked>
-                // Example: bulk Ground,Grass,Forest None false
                 if parts.len() != 4 {
                     println!("Usage: bulk <terrain_csv> <wall> <blocked>");
                     return true;
                 }
-
                 let terrains_csv = parts[1];
                 let wall = parse_wall(parts[2]);
                 let blocked = match parts[3].to_lowercase().as_str() {
@@ -476,7 +451,6 @@ impl MapBuilder {
                         return true;
                     }
                 };
-
                 self.bulk_set_for_terrains(terrains_csv, wall, blocked);
             }
             "event" => {
@@ -484,7 +458,6 @@ impl MapBuilder {
                     println!("Usage: event <x> <y> <type> <data>");
                     return true;
                 }
-
                 let x: i32 = match parts[1].parse() {
                     Ok(v) => v,
                     Err(_) => {
@@ -492,7 +465,6 @@ impl MapBuilder {
                         return true;
                     }
                 };
-
                 let y: i32 = match parts[2].parse() {
                     Ok(v) => v,
                     Err(_) => {
@@ -500,7 +472,6 @@ impl MapBuilder {
                         return true;
                     }
                 };
-
                 let event_type = parts[3];
                 let data = parts[4..].join(" ");
 
@@ -513,7 +484,7 @@ impl MapBuilder {
                         facing: None,
                         proximity_facing: false,
                         rotation_speed: None,
-                        combat_event_type: antares::domain::combat::types::CombatEventType::Normal,
+                        combat_event_type: crate::domain::combat::types::CombatEventType::Normal,
                     },
                     "treasure" => MapEvent::Treasure {
                         name: format!("Treasure at ({}, {})", x, y),
@@ -543,10 +514,6 @@ impl MapBuilder {
 
                 self.add_event(x, y, event);
             }
-            "npc" => {
-                println!("❌ NPC command is deprecated. Use the campaign builder and NPC database instead.");
-                println!("   See docs/how-to/npc_externalization.md for migration guide.");
-            }
             "show" => {
                 self.show_map();
             }
@@ -556,7 +523,6 @@ impl MapBuilder {
                     println!("Current: {}", if self.auto_show { "ON" } else { "OFF" });
                     return true;
                 }
-
                 match parts[1] {
                     "on" => {
                         self.auto_show = true;
@@ -566,9 +532,7 @@ impl MapBuilder {
                         self.auto_show = false;
                         println!("✅ Auto-show disabled");
                     }
-                    _ => {
-                        println!("Usage: auto [on|off]");
-                    }
+                    _ => println!("Usage: auto [on|off]"),
                 }
             }
             "info" => {
@@ -602,8 +566,20 @@ impl MapBuilder {
     }
 }
 
-/// Parses terrain type from string
-fn parse_terrain(s: &str) -> TerrainType {
+impl Default for MapBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Free-standing helpers
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Parses a terrain type name (case-insensitive) into a [`TerrainType`].
+///
+/// Unrecognised names default to [`TerrainType::Ground`] with a warning.
+pub fn parse_terrain(s: &str) -> TerrainType {
     match s.to_lowercase().as_str() {
         "ground" => TerrainType::Ground,
         "grass" => TerrainType::Grass,
@@ -621,8 +597,10 @@ fn parse_terrain(s: &str) -> TerrainType {
     }
 }
 
-/// Parses wall type from string
-fn parse_wall(s: &str) -> WallType {
+/// Parses a wall type name (case-insensitive) into a [`WallType`].
+///
+/// Unrecognised names default to [`WallType::None`] with a warning.
+pub fn parse_wall(s: &str) -> WallType {
     match s.to_lowercase().as_str() {
         "none" => WallType::None,
         "normal" | "wall" => WallType::Normal,
@@ -635,10 +613,10 @@ fn parse_wall(s: &str) -> WallType {
     }
 }
 
-/// Prints help information
-fn print_help() {
+/// Prints the interactive help text to stdout.
+pub fn print_help() {
     println!("\n╔═══ Map Builder Commands ═══╗");
-    println!("bulk <terrains_csv> <wall> <blocked> - Update tiles whose terrain is in comma-separated list, set wall type and blocked flag (e.g. bulk Ground,Grass None false)");
+    println!("bulk <terrains_csv> <wall> <blocked> - Update tiles whose terrain is in comma-separated list");
     println!("\n📋 Map Creation:");
     println!("  new <id> <width> <height>     Create new map (id must be a number)");
     println!("  load <path>                    Load existing map RON file");
@@ -672,7 +650,20 @@ fn print_help() {
     println!();
 }
 
-fn main() {
+// ──────────────────────────────────────────────────────────────────────────────
+// Public entry point
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Run the interactive map builder REPL.
+///
+/// Starts `rustyline` with command history (stored in `data/.map_builder_history`),
+/// then loops processing commands until the user types `quit` or `exit`.
+///
+/// # Errors
+///
+/// Returns `Err` only if `rustyline` fails to initialise (which is not
+/// expected in normal operation).
+pub fn run_build() -> Result<(), Box<dyn std::error::Error>> {
     println!("╔═══════════════════════════════════════╗");
     println!("║   Antares RPG - Map Builder v1.0     ║");
     println!("╚═══════════════════════════════════════╝");
@@ -681,9 +672,8 @@ fn main() {
     println!("Use ↑/↓ arrow keys for command history.\n");
 
     let mut builder = MapBuilder::new();
-    let mut rl = DefaultEditor::new().expect("Failed to create readline editor");
+    let mut rl = DefaultEditor::new()?;
 
-    // Try to load history from file (ignore if it doesn't exist)
     let history_file = "data/.map_builder_history";
     let _ = rl.load_history(history_file);
 
@@ -692,10 +682,7 @@ fn main() {
             Ok(line) => {
                 let line = line.trim();
                 if !line.is_empty() {
-                    // Add to history
                     let _ = rl.add_history_entry(line);
-
-                    // Process command
                     if !builder.process_command(line) {
                         break;
                     }
@@ -716,10 +703,14 @@ fn main() {
         }
     }
 
-    // Save history on exit
     let _ = rl.save_history(history_file);
     println!("Goodbye!");
+    Ok(())
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Tests
+// ──────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -800,7 +791,6 @@ mod tests {
         let mut builder = MapBuilder::new();
         builder.create_map(1, 5, 5);
 
-        // Prepare tiles: (1,1) Forest Normal (and blocked true), (2,2) Ground Normal (blocked true)
         builder.set_tile(1, 1, TerrainType::Forest, WallType::Normal);
         if let Some(ref mut map) = builder.map {
             map.get_tile_mut(Position::new(1, 1)).unwrap().blocked = true;
@@ -811,13 +801,11 @@ mod tests {
             map.get_tile_mut(Position::new(2, 2)).unwrap().blocked = true;
         }
 
-        // A tile that should remain unchanged: Stone
         builder.set_tile(3, 3, TerrainType::Stone, WallType::Normal);
         if let Some(ref mut map) = builder.map {
             map.get_tile_mut(Position::new(3, 3)).unwrap().blocked = true;
         }
 
-        // Run bulk change for Ground and Forest -> set wall None, blocked false
         builder.bulk_set_for_terrains("Ground,Forest", WallType::None, false);
 
         let map = builder.map.as_ref().unwrap();
@@ -832,5 +820,12 @@ mod tests {
         let t33 = map.get_tile(Position::new(3, 3)).unwrap();
         assert_eq!(t33.wall_type, WallType::Normal);
         assert!(t33.blocked);
+    }
+
+    #[test]
+    fn test_default_builder_has_no_map() {
+        let builder = MapBuilder::default();
+        assert!(builder.map.is_none());
+        assert!(builder.auto_show);
     }
 }
