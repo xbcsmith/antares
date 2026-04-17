@@ -1,23 +1,13 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Item Editor CLI
+//! `antares-sdk item` — Interactive item definition editor.
+//!
+//! Migrated from `src/bin/item_editor.rs`. Exposes [`run`] as the single entry
+//! point called by `src/bin/antares_sdk.rs`.
 //!
 //! Interactive command-line tool for creating and editing item definitions.
 //! Supports weapons, armor, accessories, consumables, ammunition, and quest items.
-//!
-//! # Usage
-//!
-//! ```bash
-//! # Create/edit items in default location
-//! item_editor
-//!
-//! # Edit specific file
-//! item_editor data/items.ron
-//!
-//! # Create new items file
-//! item_editor campaigns/my_campaign/data/items.ron
-//! ```
 //!
 //! # Features
 //!
@@ -30,22 +20,80 @@
 //! - Input validation
 //! - Pretty-printed RON output
 
-#[path = "editor_common.rs"]
-mod editor_common;
-use editor_common::{filter_valid_tags, STANDARD_ITEM_TAGS};
-
-use antares::domain::items::{
+use crate::domain::items::{
     AccessoryData, AccessorySlot, AlignmentRestriction, AmmoData, AmmoType, ArmorClassification,
     ArmorData, AttributeType, Bonus, BonusAttribute, ConsumableData, ConsumableEffect, Item,
     ItemType, MagicItemClassification, QuestData, WeaponClassification, WeaponData,
 };
-use antares::domain::types::{DiceRoll, ItemId};
+use crate::domain::types::{DiceRoll, ItemId};
+use crate::sdk::cli::editor_helpers::{
+    filter_valid_tags, input_multistring_values, read_line, STANDARD_ITEM_TAGS,
+};
+use clap::Args;
 use std::fs;
-use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process;
 
-/// Main application state
+/// Arguments for the `antares-sdk item` subcommand.
+///
+/// Controls which items RON file is opened for interactive editing.
+#[derive(Args, Debug)]
+#[command(
+    about = "Interactively create and edit item definitions",
+    long_about = "Interactive menu-driven editor for creating and editing item definitions.\n\
+                  Supports weapons, armor, accessories, consumables, ammunition, and quest items.\n\
+                  Reads and writes RON format files."
+)]
+pub struct ItemArgs {
+    /// Path to the items RON file to edit.
+    ///
+    /// The file is created if it does not exist. Ignored when `--campaign` is
+    /// provided.
+    #[arg(default_value = "data/items.ron")]
+    pub file: PathBuf,
+
+    /// Campaign directory. When provided, opens `<DIR>/data/items.ron`
+    /// instead of the positional FILE argument.
+    ///
+    /// Example: `antares-sdk item --campaign campaigns/tutorial`
+    /// is equivalent to: `antares-sdk item campaigns/tutorial/data/items.ron`
+    #[arg(long, value_name = "DIR")]
+    pub campaign: Option<PathBuf>,
+}
+
+/// Entry point for the item editor subcommand.
+///
+/// Loads (or creates) an items RON file at `args.file`, presents an
+/// interactive menu-driven editor, and saves changes when the user
+/// chooses "Save & Exit".
+///
+/// # Errors
+///
+/// Returns an error if the file exists but cannot be read or parsed as RON.
+///
+/// # Examples
+///
+/// ```no_run
+/// use antares::sdk::cli::item_editor::{run, ItemArgs};
+/// use std::path::PathBuf;
+///
+/// let args = ItemArgs {
+///     file: PathBuf::from("data/items.ron"),
+///     campaign: None,
+/// };
+/// run(args).expect("item editor should run");
+/// ```
+pub fn run(args: ItemArgs) -> Result<(), Box<dyn std::error::Error>> {
+    // Resolve the target file: --campaign takes precedence over the positional FILE.
+    let file = match args.campaign {
+        Some(campaign_dir) => campaign_dir.join("data").join("items.ron"),
+        None => args.file,
+    };
+    let mut editor = ItemEditor::load(file)?;
+    editor.run();
+    Ok(())
+}
+
+/// Main application state for the item editor.
 struct ItemEditor {
     items: Vec<Item>,
     file_path: PathBuf,
@@ -53,7 +101,7 @@ struct ItemEditor {
 }
 
 impl ItemEditor {
-    /// Creates a new editor with loaded items from file
+    /// Creates a new editor with loaded items from file.
     fn load(path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let items = if path.exists() {
             println!("Loading items from: {}", path.display());
@@ -73,12 +121,12 @@ impl ItemEditor {
         })
     }
 
-    /// Main menu loop
+    /// Main menu loop.
     fn run(&mut self) {
         loop {
             self.show_menu();
 
-            let choice = self.read_input("Choice: ");
+            let choice = read_line("Choice: ");
 
             match choice.trim() {
                 "1" => self.list_items(),
@@ -104,7 +152,7 @@ impl ItemEditor {
         }
     }
 
-    /// Displays the main menu
+    /// Displays the main menu.
     fn show_menu(&self) {
         println!("\n╔════════════════════════════════════════╗");
         println!("║       ANTARES ITEM EDITOR              ║");
@@ -126,7 +174,7 @@ impl ItemEditor {
         println!();
     }
 
-    /// Lists all items
+    /// Lists all items.
     fn list_items(&self) {
         if self.items.is_empty() {
             println!("📦 No items defined yet.");
@@ -157,7 +205,8 @@ impl ItemEditor {
         }
     }
 
-    /// Adds a new item
+    /// Adds a new item.
+    #[allow(deprecated)]
     fn add_item(&mut self) {
         println!("\n════════════════════════════════════════");
         println!("  ADD NEW ITEM");
@@ -168,7 +217,7 @@ impl ItemEditor {
         println!("  Auto-assigned ID: {}", id);
 
         // Get basic info
-        let name = self.read_input("Item name: ").trim().to_string();
+        let name = read_line("Item name: ").trim().to_string();
         if name.is_empty() {
             println!("❌ Name cannot be empty.");
             return;
@@ -183,7 +232,7 @@ impl ItemEditor {
         println!("  [5] Ammunition");
         println!("  [6] Quest Item");
 
-        let type_choice = self.read_input("Type: ");
+        let type_choice = read_line("Type: ");
         let item_type = match type_choice.trim() {
             "1" => self.create_weapon(),
             "2" => self.create_armor(),
@@ -198,8 +247,8 @@ impl ItemEditor {
         };
 
         // Get costs
-        let base_cost = self.read_u32("Base cost (gold): ", 0);
-        let sell_cost = self.read_u32("Sell cost (gold): ", base_cost / 2);
+        let base_cost = Self::read_u32("Base cost (gold): ", 0);
+        let sell_cost = Self::read_u32("Sell cost (gold): ", base_cost / 2);
 
         // Item tags (proficiency system now handles restrictions)
         let tags = self.input_item_tags();
@@ -209,17 +258,17 @@ impl ItemEditor {
         let temporary_bonus = self.select_bonus("Temporary bonus (on use)", true);
 
         // Spell effect (optional)
-        let spell_effect = self.read_optional_u16("Spell effect ID (0 for none): ");
+        let spell_effect = Self::read_optional_u16("Spell effect ID (0 for none): ");
 
         // Max charges
         let max_charges = if spell_effect.is_some() || temporary_bonus.is_some() {
-            self.read_u16("Max charges: ", 0)
+            Self::read_u16("Max charges: ", 0)
         } else {
             0
         };
 
         // Cursed?
-        let is_cursed = self.read_bool("Is cursed? (y/n): ");
+        let is_cursed = Self::read_bool("Is cursed? (y/n): ");
 
         // Alignment restriction
         let alignment_restriction = self.select_alignment_restriction();
@@ -230,7 +279,6 @@ impl ItemEditor {
             item_type,
             base_cost,
             sell_cost,
-
             alignment_restriction,
             constant_bonus,
             temporary_bonus,
@@ -250,13 +298,13 @@ impl ItemEditor {
         println!("✅ Item added successfully!");
     }
 
-    /// Creates weapon data
+    /// Creates weapon data.
     fn create_weapon(&self) -> ItemType {
         println!("\n  Weapon Configuration:");
 
-        let damage = self.read_dice_roll("Damage dice (format: 1d8 or 2d6+1): ");
-        let bonus = self.read_i8("To-hit/damage bonus: ", 0);
-        let hands_required = self.read_u8("Hands required (1 or 2): ", 1);
+        let damage = Self::read_dice_roll("Damage dice (format: 1d8 or 2d6+1): ");
+        let bonus = Self::read_i8("To-hit/damage bonus: ", 0);
+        let hands_required = Self::read_u8("Hands required (1 or 2): ", 1);
         let classification = self.select_weapon_classification();
 
         ItemType::Weapon(WeaponData {
@@ -267,12 +315,12 @@ impl ItemEditor {
         })
     }
 
-    /// Creates armor data
+    /// Creates armor data.
     fn create_armor(&self) -> ItemType {
         println!("\n  Armor Configuration:");
 
-        let ac_bonus = self.read_u8("AC bonus: ", 0);
-        let weight = self.read_u8("Weight (pounds): ", 0);
+        let ac_bonus = Self::read_u8("AC bonus: ", 0);
+        let weight = Self::read_u8("Weight (pounds): ", 0);
         let classification = self.select_armor_classification();
 
         ItemType::Armor(ArmorData {
@@ -282,7 +330,7 @@ impl ItemEditor {
         })
     }
 
-    /// Creates accessory data
+    /// Creates accessory data.
     fn create_accessory(&self) -> ItemType {
         println!("\n  Accessory Type:");
         println!("    [1] Ring");
@@ -290,7 +338,7 @@ impl ItemEditor {
         println!("    [3] Belt");
         println!("    [4] Cloak");
 
-        let choice = self.read_input("  Slot: ");
+        let choice = read_line("  Slot: ");
         let slot = match choice.trim() {
             "1" => AccessorySlot::Ring,
             "2" => AccessorySlot::Amulet,
@@ -307,7 +355,7 @@ impl ItemEditor {
         })
     }
 
-    /// Creates consumable data
+    /// Creates consumable data.
     fn create_consumable(&self) -> ItemType {
         println!("\n  Consumable Effect:");
         println!("    [1] Heal HP");
@@ -316,27 +364,27 @@ impl ItemEditor {
         println!("    [4] Boost Attribute");
         println!("    [5] Food (Rations)");
 
-        let choice = self.read_input("  Effect: ");
+        let choice = read_line("  Effect: ");
         let effect = match choice.trim() {
             "1" => {
-                let amount = self.read_u16("HP to heal: ", 10);
+                let amount = Self::read_u16("HP to heal: ", 10);
                 ConsumableEffect::HealHp(amount)
             }
             "2" => {
-                let amount = self.read_u16("SP to restore: ", 10);
+                let amount = Self::read_u16("SP to restore: ", 10);
                 ConsumableEffect::RestoreSp(amount)
             }
             "3" => {
-                let flags = self.read_u8("Condition flags to clear (0-255): ", 0);
+                let flags = Self::read_u8("Condition flags to clear (0-255): ", 0);
                 ConsumableEffect::CureCondition(flags)
             }
             "4" => {
                 let attr = self.select_attribute_type();
-                let boost = self.read_i8("Boost amount: ", 1);
+                let boost = Self::read_i8("Boost amount: ", 1);
                 ConsumableEffect::BoostAttribute(attr, boost)
             }
             "5" => {
-                let ration_value = self.read_u8(
+                let ration_value = Self::read_u8(
                     "Ration value (1 = feeds one character per rest, e.g. 3 for Trail Ration): ",
                     1,
                 );
@@ -350,7 +398,7 @@ impl ItemEditor {
             println!("ℹ️  Food items are not usable in combat.");
             false
         } else {
-            self.read_bool("Usable in combat? (y/n): ")
+            Self::read_bool("Usable in combat? (y/n): ")
         };
 
         ItemType::Consumable(ConsumableData {
@@ -360,14 +408,14 @@ impl ItemEditor {
         })
     }
 
-    /// Creates ammo data
+    /// Creates ammo data.
     fn create_ammo(&self) -> ItemType {
         println!("\n  Ammunition Type:");
         println!("    [1] Arrow");
         println!("    [2] Bolt");
         println!("    [3] Stone");
 
-        let choice = self.read_input("  Type: ");
+        let choice = read_line("  Type: ");
         let ammo_type = match choice.trim() {
             "1" => AmmoType::Arrow,
             "2" => AmmoType::Bolt,
@@ -375,7 +423,7 @@ impl ItemEditor {
             _ => AmmoType::Arrow,
         };
 
-        let quantity = self.read_u16("Quantity per bundle: ", 20);
+        let quantity = Self::read_u16("Quantity per bundle: ", 20);
 
         ItemType::Ammo(AmmoData {
             ammo_type,
@@ -383,12 +431,12 @@ impl ItemEditor {
         })
     }
 
-    /// Creates quest item data
+    /// Creates quest item data.
     fn create_quest_item(&self) -> ItemType {
         println!("\n  Quest Item Configuration:");
 
-        let quest_id = self.read_input("Quest ID: ").trim().to_string();
-        let is_key_item = self.read_bool("Is key item (cannot drop/sell)? (y/n): ");
+        let quest_id = read_line("Quest ID: ").trim().to_string();
+        let is_key_item = Self::read_bool("Is key item (cannot drop/sell)? (y/n): ");
 
         ItemType::Quest(QuestData {
             quest_id,
@@ -396,7 +444,7 @@ impl ItemEditor {
         })
     }
 
-    /// Selects an attribute type
+    /// Selects an attribute type.
     fn select_attribute_type(&self) -> AttributeType {
         println!("    Attribute:");
         println!("      [1] Might");
@@ -407,7 +455,7 @@ impl ItemEditor {
         println!("      [6] Accuracy");
         println!("      [7] Luck");
 
-        let choice = self.read_input("    Choice: ");
+        let choice = read_line("    Choice: ");
         match choice.trim() {
             "1" => AttributeType::Might,
             "2" => AttributeType::Intellect,
@@ -422,7 +470,7 @@ impl ItemEditor {
 
     // Disablement functions removed - proficiency system now handles restrictions
 
-    /// Selects weapon classification
+    /// Selects weapon classification.
     fn select_weapon_classification(&self) -> WeaponClassification {
         println!("\n  Weapon Classification:");
         println!("    [1] Simple (clubs, daggers, staffs - anyone can use)");
@@ -431,7 +479,7 @@ impl ItemEditor {
         println!("    [4] Blunt (maces, hammers - clerics)");
         println!("    [5] Unarmed (fists, martial arts)");
 
-        let choice = self.read_input("  Classification: ");
+        let choice = read_line("  Classification: ");
         match choice.trim() {
             "1" => WeaponClassification::Simple,
             "2" => WeaponClassification::MartialMelee,
@@ -442,7 +490,7 @@ impl ItemEditor {
         }
     }
 
-    /// Selects armor classification
+    /// Selects armor classification.
     fn select_armor_classification(&self) -> ArmorClassification {
         println!("\n  Armor Classification:");
         println!("    [1] Light (leather, padded)");
@@ -453,7 +501,7 @@ impl ItemEditor {
         println!("    [6] Helmet (headgear)");
         println!("    [7] Boots (footwear)");
 
-        let choice = self.read_input("  Classification: ");
+        let choice = read_line("  Classification: ");
         match choice.trim() {
             "1" => ArmorClassification::Light,
             "2" => ArmorClassification::Medium,
@@ -466,7 +514,7 @@ impl ItemEditor {
         }
     }
 
-    /// Selects magic item classification (for accessories)
+    /// Selects magic item classification (for accessories).
     fn select_magic_item_classification(&self) -> Option<MagicItemClassification> {
         println!("\n  Magic Item Classification:");
         println!("    [1] None (mundane accessory)");
@@ -474,7 +522,7 @@ impl ItemEditor {
         println!("    [3] Divine (holy symbols, divine scrolls - clerics)");
         println!("    [4] Universal (potions, rings - anyone)");
 
-        let choice = self.read_input("  Classification: ");
+        let choice = read_line("  Classification: ");
         match choice.trim() {
             "1" => None,
             "2" => Some(MagicItemClassification::Arcane),
@@ -484,14 +532,14 @@ impl ItemEditor {
         }
     }
 
-    /// Selects alignment restriction
+    /// Selects alignment restriction.
     fn select_alignment_restriction(&self) -> Option<AlignmentRestriction> {
         println!("\n  Alignment Restriction:");
         println!("    [1] None (any alignment can use)");
         println!("    [2] Good only");
         println!("    [3] Evil only");
 
-        let choice = self.read_input("  Restriction: ");
+        let choice = read_line("  Restriction: ");
         match choice.trim() {
             "1" => None,
             "2" => Some(AlignmentRestriction::GoodOnly),
@@ -500,10 +548,10 @@ impl ItemEditor {
         }
     }
 
-    /// Selects a bonus (optional)
+    /// Selects a bonus (optional).
     fn select_bonus(&self, label: &str, optional: bool) -> Option<Bonus> {
         if optional {
-            let add = self.read_bool(&format!("\n  Add {}? (y/n): ", label));
+            let add = Self::read_bool(&format!("\n  Add {}? (y/n): ", label));
             if !add {
                 return None;
             }
@@ -525,7 +573,7 @@ impl ItemEditor {
         println!("    [13] Magic Resistance");
         println!("    [14] Armor Class");
 
-        let choice = self.read_input("  Attribute: ");
+        let choice = read_line("  Attribute: ");
         let attribute = match choice.trim() {
             "1" => BonusAttribute::Might,
             "2" => BonusAttribute::Intellect,
@@ -544,12 +592,12 @@ impl ItemEditor {
             _ => BonusAttribute::Might,
         };
 
-        let value = self.read_i8("  Value: ", 1);
+        let value = Self::read_i8("  Value: ", 1);
 
         Some(Bonus { attribute, value })
     }
 
-    /// Inputs item tags with validation
+    /// Inputs item tags with validation.
     fn input_item_tags(&self) -> Vec<String> {
         println!("\n╔════════════════════════════════════════╗");
         println!("║        ITEM TAGS SELECTION             ║");
@@ -563,11 +611,13 @@ impl ItemEditor {
         println!("  • requires_strength  - Items requiring high strength");
 
         println!("\n📝 Tags are used for race restrictions (incompatible_item_tags).");
-        println!("   Example: A halfling with 'large_weapon' incompatible cannot use items tagged 'large_weapon'.");
+        println!(
+            "   Example: A halfling with 'large_weapon' incompatible cannot use items tagged 'large_weapon'."
+        );
         println!("\nEnter item tags (one per line, or leave empty):");
         println!("   Example: large_weapon");
 
-        let tags = self.input_multistring_values("", "Tag: ");
+        let tags = input_multistring_values("", "Tag: ");
 
         if tags.is_empty() {
             return Vec::new();
@@ -581,7 +631,7 @@ impl ItemEditor {
             }
             println!("⚠️  Warning: '{}' is not a standard item tag", tag);
             println!("   Standard tags: {}", STANDARD_ITEM_TAGS.join(", "));
-            let confirm = self.read_input(&format!("   Include '{}' anyway? (y/n): ", tag));
+            let confirm = read_line(&format!("   Include '{}' anyway? (y/n): ", tag));
             if confirm.trim().eq_ignore_ascii_case("y") {
                 valid_tags.push(tag.clone());
             }
@@ -594,7 +644,7 @@ impl ItemEditor {
         valid_tags
     }
 
-    /// Edits an existing item
+    /// Edits an existing item.
     fn edit_item(&mut self) {
         if self.items.is_empty() {
             println!("📦 No items to edit.");
@@ -604,7 +654,7 @@ impl ItemEditor {
         self.list_items();
 
         let idx = loop {
-            let input = self.read_input("\nEnter item index to edit (or 'c' to cancel): ");
+            let input = read_line("\nEnter item index to edit (or 'c' to cancel): ");
             if input.trim().eq_ignore_ascii_case("c") {
                 return;
             }
@@ -660,11 +710,11 @@ impl ItemEditor {
             println!("  s. Save and return");
             println!("  c. Cancel (discard changes)");
 
-            let choice = self.read_input("\nChoice: ");
+            let choice = read_line("\nChoice: ");
 
             match choice.trim() {
                 "1" => {
-                    let new_name = self.read_input("New name: ");
+                    let new_name = read_line("New name: ");
                     if !new_name.trim().is_empty() {
                         self.items[idx].name = new_name.trim().to_string();
                         self.modified = true;
@@ -674,13 +724,13 @@ impl ItemEditor {
                     }
                 }
                 "2" => {
-                    let cost = self.read_u32("New base cost (gold): ", item.base_cost);
+                    let cost = Self::read_u32("New base cost (gold): ", item.base_cost);
                     self.items[idx].base_cost = cost;
                     self.modified = true;
                     println!("✅ Base cost updated");
                 }
                 "3" => {
-                    let cost = self.read_u32("New sell cost (gold): ", item.sell_cost);
+                    let cost = Self::read_u32("New sell cost (gold): ", item.sell_cost);
                     self.items[idx].sell_cost = cost;
                     self.modified = true;
                     println!("✅ Sell cost updated");
@@ -702,13 +752,13 @@ impl ItemEditor {
                 }
                 "7" => {
                     let charges =
-                        self.read_u16("New max charges (0 for non-magical): ", item.max_charges);
+                        Self::read_u16("New max charges (0 for non-magical): ", item.max_charges);
                     self.items[idx].max_charges = charges;
                     self.modified = true;
                     println!("✅ Max charges updated");
                 }
                 "8" => {
-                    let cursed = self.read_bool("Is cursed? (y/n): ");
+                    let cursed = Self::read_bool("Is cursed? (y/n): ");
                     self.items[idx].is_cursed = cursed;
                     self.modified = true;
                     println!("✅ Cursed status updated");
@@ -718,7 +768,7 @@ impl ItemEditor {
                     return;
                 }
                 "c" | "C" => {
-                    let confirm = self.read_input("⚠️  Discard all changes? (yes/no): ");
+                    let confirm = read_line("⚠️  Discard all changes? (yes/no): ");
                     if confirm.trim().eq_ignore_ascii_case("yes") {
                         println!("Changes discarded");
                         return;
@@ -729,7 +779,7 @@ impl ItemEditor {
         }
     }
 
-    /// Edit item classification (type-specific properties)
+    /// Edit item classification (type-specific properties).
     fn edit_item_classification(&mut self, idx: usize) {
         let item = &self.items[idx];
 
@@ -754,7 +804,7 @@ impl ItemEditor {
                 println!("  4. Hands Required");
                 println!("  c. Cancel");
 
-                let choice = self.read_input("\nChoice: ");
+                let choice = read_line("\nChoice: ");
                 match choice.trim() {
                     "1" => {
                         let classification = self.select_weapon_classification();
@@ -765,7 +815,7 @@ impl ItemEditor {
                         }
                     }
                     "2" => {
-                        let damage = self.read_dice_roll("New damage (e.g., 1d8+2): ");
+                        let damage = Self::read_dice_roll("New damage (e.g., 1d8+2): ");
                         if let ItemType::Weapon(ref mut weapon_data) = self.items[idx].item_type {
                             weapon_data.damage = damage;
                             self.modified = true;
@@ -773,7 +823,7 @@ impl ItemEditor {
                         }
                     }
                     "3" => {
-                        let bonus = self.read_i8("New bonus (can be negative): ", data.bonus);
+                        let bonus = Self::read_i8("New bonus (can be negative): ", data.bonus);
                         if let ItemType::Weapon(ref mut weapon_data) = self.items[idx].item_type {
                             weapon_data.bonus = bonus;
                             self.modified = true;
@@ -781,7 +831,8 @@ impl ItemEditor {
                         }
                     }
                     "4" => {
-                        let hands = self.read_u8("New hands required (1-2): ", data.hands_required);
+                        let hands =
+                            Self::read_u8("New hands required (1-2): ", data.hands_required);
                         if (1..=2).contains(&hands) {
                             if let ItemType::Weapon(ref mut weapon_data) = self.items[idx].item_type
                             {
@@ -806,7 +857,7 @@ impl ItemEditor {
                 println!("  2. AC Bonus");
                 println!("  c. Cancel");
 
-                let choice = self.read_input("\nChoice: ");
+                let choice = read_line("\nChoice: ");
                 match choice.trim() {
                     "1" => {
                         let classification = self.select_armor_classification();
@@ -817,7 +868,7 @@ impl ItemEditor {
                         }
                     }
                     "2" => {
-                        let ac_bonus = self.read_u8("New AC bonus: ", data.ac_bonus);
+                        let ac_bonus = Self::read_u8("New AC bonus: ", data.ac_bonus);
                         if let ItemType::Armor(ref mut armor_data) = self.items[idx].item_type {
                             armor_data.ac_bonus = ac_bonus;
                             self.modified = true;
@@ -837,7 +888,7 @@ impl ItemEditor {
                 println!("  2. Magic Item Classification");
                 println!("  c. Cancel");
 
-                let choice = self.read_input("\nChoice: ");
+                let choice = read_line("\nChoice: ");
                 match choice.trim() {
                     "1" => {
                         println!("\nSelect accessory slot:");
@@ -846,7 +897,7 @@ impl ItemEditor {
                         println!("  3. Belt");
                         println!("  4. Cloak");
 
-                        let slot_choice = self.read_input("Choice: ");
+                        let slot_choice = read_line("Choice: ");
                         let slot = match slot_choice.trim() {
                             "1" => AccessorySlot::Ring,
                             "2" => AccessorySlot::Amulet,
@@ -885,7 +936,7 @@ impl ItemEditor {
                 println!("  2. Combat Usable");
                 println!("  c. Cancel");
 
-                let choice = self.read_input("\nChoice: ");
+                let choice = read_line("\nChoice: ");
                 match choice.trim() {
                     "1" => {
                         println!("\nSelect consumable effect:");
@@ -895,18 +946,18 @@ impl ItemEditor {
                         println!("  4. Boost Attribute");
                         println!("  5. Food (Rations)");
 
-                        let effect_choice = self.read_input("Choice: ");
+                        let effect_choice = read_line("Choice: ");
                         let effect = match effect_choice.trim() {
                             "1" => {
-                                let amount = self.read_u16("HP to heal: ", 20);
+                                let amount = Self::read_u16("HP to heal: ", 20);
                                 ConsumableEffect::HealHp(amount)
                             }
                             "2" => {
-                                let amount = self.read_u16("SP to restore: ", 10);
+                                let amount = Self::read_u16("SP to restore: ", 10);
                                 ConsumableEffect::RestoreSp(amount)
                             }
                             "3" => {
-                                let flags = self.read_u8("Condition flags to clear (0-255): ", 0);
+                                let flags = Self::read_u8("Condition flags to clear (0-255): ", 0);
                                 ConsumableEffect::CureCondition(flags)
                             }
                             "4" => {
@@ -918,7 +969,7 @@ impl ItemEditor {
                                 println!("  5. Speed");
                                 println!("  6. Accuracy");
                                 println!("  7. Luck");
-                                let attr_choice = self.read_input("Choice: ");
+                                let attr_choice = read_line("Choice: ");
                                 let attr = match attr_choice.trim() {
                                     "1" => AttributeType::Might,
                                     "2" => AttributeType::Intellect,
@@ -932,11 +983,11 @@ impl ItemEditor {
                                         return;
                                     }
                                 };
-                                let boost = self.read_i8("Boost amount (can be negative): ", 1);
+                                let boost = Self::read_i8("Boost amount (can be negative): ", 1);
                                 ConsumableEffect::BoostAttribute(attr, boost)
                             }
                             "5" => {
-                                let ration_value = self.read_u8(
+                                let ration_value = Self::read_u8(
                                     "Ration value (1 = feeds one character per rest): ",
                                     1,
                                 );
@@ -967,7 +1018,7 @@ impl ItemEditor {
                         }
                     }
                     "2" => {
-                        let usable = self.read_bool("Combat usable? (y/n): ");
+                        let usable = Self::read_bool("Combat usable? (y/n): ");
                         if let ItemType::Consumable(ref mut cons_data) = self.items[idx].item_type {
                             cons_data.is_combat_usable = usable;
                             self.modified = true;
@@ -987,7 +1038,7 @@ impl ItemEditor {
                 println!("  2. Quantity");
                 println!("  c. Cancel");
 
-                let choice = self.read_input("\nChoice: ");
+                let choice = read_line("\nChoice: ");
                 match choice.trim() {
                     "1" => {
                         println!("\nSelect ammo type:");
@@ -995,7 +1046,7 @@ impl ItemEditor {
                         println!("  2. Bolt");
                         println!("  3. Stone");
 
-                        let type_choice = self.read_input("Choice: ");
+                        let type_choice = read_line("Choice: ");
                         let ammo_type = match type_choice.trim() {
                             "1" => AmmoType::Arrow,
                             "2" => AmmoType::Bolt,
@@ -1013,7 +1064,7 @@ impl ItemEditor {
                         }
                     }
                     "2" => {
-                        let quantity = self.read_u16("New quantity: ", data.quantity);
+                        let quantity = Self::read_u16("New quantity: ", data.quantity);
                         if let ItemType::Ammo(ref mut ammo_data) = self.items[idx].item_type {
                             ammo_data.quantity = quantity;
                             self.modified = true;
@@ -1027,12 +1078,12 @@ impl ItemEditor {
             ItemType::Quest(_) => {
                 println!("\nQuest items have no editable classification properties.");
                 println!("Press Enter to continue...");
-                self.read_input("");
+                read_line("");
             }
         }
     }
 
-    /// Format classification for display
+    /// Formats classification for display.
     fn format_classification(&self, item_type: &ItemType) -> String {
         match item_type {
             ItemType::Weapon(data) => format!("Weapon - {:?}", data.classification),
@@ -1046,14 +1097,14 @@ impl ItemEditor {
         }
     }
 
-    /// Deletes an item
+    /// Deletes an item.
     fn delete_item(&mut self) {
         if self.items.is_empty() {
             println!("📦 No items to delete.");
             return;
         }
 
-        let id_str = self.read_input("Enter item ID to delete: ");
+        let id_str = read_line("Enter item ID to delete: ");
         let id: ItemId = match id_str.trim().parse() {
             Ok(id) => id,
             Err(_) => {
@@ -1071,7 +1122,7 @@ impl ItemEditor {
         };
 
         let item_name = self.items[index].name.clone();
-        let confirm = self.read_bool(&format!("Delete \"{}\"? (y/n): ", item_name));
+        let confirm = Self::read_bool(&format!("Delete \"{}\"? (y/n): ", item_name));
 
         if confirm {
             self.items.remove(index);
@@ -1082,14 +1133,14 @@ impl ItemEditor {
         }
     }
 
-    /// Previews an item
+    /// Previews an item.
     fn preview_item(&self) {
         if self.items.is_empty() {
             println!("📦 No items to preview.");
             return;
         }
 
-        let id_str = self.read_input("Enter item ID to preview: ");
+        let id_str = read_line("Enter item ID to preview: ");
         let id: ItemId = match id_str.trim().parse() {
             Ok(id) => id,
             Err(_) => {
@@ -1190,10 +1241,10 @@ impl ItemEditor {
         }
 
         println!("\n  Press Enter to return...");
-        self.read_input("");
+        read_line("");
     }
 
-    /// Saves items to file
+    /// Saves items to file.
     fn save(&self) -> bool {
         println!("\n💾 Saving to {}...", self.file_path.display());
 
@@ -1236,75 +1287,41 @@ impl ItemEditor {
         true
     }
 
-    /// Confirms exit without saving
+    /// Confirms exit without saving.
     fn confirm_exit(&self) -> bool {
         if self.modified {
             println!("\n⚠️  You have unsaved changes!");
-            self.read_bool("Discard changes and exit? (y/n): ")
+            Self::read_bool("Discard changes and exit? (y/n): ")
         } else {
             true
         }
     }
 
-    /// Gets next available item ID
+    /// Gets next available item ID.
     fn next_item_id(&self) -> ItemId {
         self.items.iter().map(|item| item.id).max().unwrap_or(0) + 1
     }
 
-    // ===== Input Helpers =====
+    // ===== Input Helpers (associated functions — no &self needed) =====
 
-    fn read_input(&self, prompt: &str) -> String {
-        print!("{}", prompt);
-        io::stdout().flush().unwrap();
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
-        input
+    fn read_u8(prompt: &str, default: u8) -> u8 {
+        read_line(prompt).trim().parse().unwrap_or(default)
     }
 
-    /// Inputs multiple string values (one per line).
-    ///
-    /// This helper allows entering multiple values in an interactive CLI:
-    ///  - Prompts with `label` repeatedly
-    ///  - Pressing Enter on a blank line finishes input
-    fn input_multistring_values(&self, prompt: &str, label: &str) -> Vec<String> {
-        if !prompt.is_empty() {
-            println!("\n{}", prompt);
-        }
-        println!("(Enter values one per line. Press Enter on an empty line to finish.)");
-        let mut values: Vec<String> = Vec::new();
-        loop {
-            let input = self.read_input(label);
-            let trimmed = input.trim();
-            if trimmed.is_empty() {
-                break;
-            }
-            values.push(trimmed.to_string());
-        }
-        values
+    fn read_u16(prompt: &str, default: u16) -> u16 {
+        read_line(prompt).trim().parse().unwrap_or(default)
     }
 
-    fn read_u8(&self, prompt: &str, default: u8) -> u8 {
-        let input = self.read_input(prompt);
-        input.trim().parse().unwrap_or(default)
+    fn read_u32(prompt: &str, default: u32) -> u32 {
+        read_line(prompt).trim().parse().unwrap_or(default)
     }
 
-    fn read_u16(&self, prompt: &str, default: u16) -> u16 {
-        let input = self.read_input(prompt);
-        input.trim().parse().unwrap_or(default)
+    fn read_i8(prompt: &str, default: i8) -> i8 {
+        read_line(prompt).trim().parse().unwrap_or(default)
     }
 
-    fn read_u32(&self, prompt: &str, default: u32) -> u32 {
-        let input = self.read_input(prompt);
-        input.trim().parse().unwrap_or(default)
-    }
-
-    fn read_i8(&self, prompt: &str, default: i8) -> i8 {
-        let input = self.read_input(prompt);
-        input.trim().parse().unwrap_or(default)
-    }
-
-    fn read_optional_u16(&self, prompt: &str) -> Option<u16> {
-        let input = self.read_input(prompt);
+    fn read_optional_u16(prompt: &str) -> Option<u16> {
+        let input = read_line(prompt);
         match input.trim().parse::<u16>() {
             Ok(0) => None,
             Ok(val) => Some(val),
@@ -1312,13 +1329,13 @@ impl ItemEditor {
         }
     }
 
-    fn read_bool(&self, prompt: &str) -> bool {
-        let input = self.read_input(prompt);
+    fn read_bool(prompt: &str) -> bool {
+        let input = read_line(prompt);
         matches!(input.trim().to_lowercase().as_str(), "y" | "yes")
     }
 
-    fn read_dice_roll(&self, prompt: &str) -> DiceRoll {
-        let input = self.read_input(prompt);
+    fn read_dice_roll(prompt: &str) -> DiceRoll {
+        let input = read_line(prompt);
         let input = input.trim();
 
         // Parse format: 1d8, 2d6+1, etc.
@@ -1344,31 +1361,10 @@ impl ItemEditor {
     }
 }
 
-// `filter_valid_tags` and `STANDARD_ITEM_TAGS` are imported from `editor_common`.
-
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-
-    let file_path = if args.len() > 1 {
-        PathBuf::from(&args[1])
-    } else {
-        PathBuf::from("data/items.ron")
-    };
-
-    let mut editor = match ItemEditor::load(file_path) {
-        Ok(editor) => editor,
-        Err(e) => {
-            eprintln!("❌ Failed to load items: {}", e);
-            process::exit(1);
-        }
-    };
-
-    editor.run();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sdk::cli::editor_helpers::filter_valid_tags;
 
     #[test]
     fn test_next_item_id_empty() {
@@ -1381,6 +1377,7 @@ mod tests {
         assert_eq!(editor.next_item_id(), 1);
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_next_item_id_with_items() {
         let editor = ItemEditor {
@@ -1396,7 +1393,6 @@ mod tests {
                     }),
                     base_cost: 100,
                     sell_cost: 50,
-
                     alignment_restriction: None,
                     constant_bonus: None,
                     temporary_bonus: None,
@@ -1418,7 +1414,6 @@ mod tests {
                     }),
                     base_cost: 50,
                     sell_cost: 25,
-
                     alignment_restriction: None,
                     constant_bonus: None,
                     temporary_bonus: None,
@@ -1611,10 +1606,11 @@ mod tests {
 
     /// When editing a consumable and choosing effect "5" (Food), the updated
     /// item must have `is_combat_usable = false` regardless of its prior value.
+    #[allow(deprecated)]
     #[test]
     fn test_edit_consumable_is_food_clears_combat_usable() {
         // Simulate an item that was previously a healing potion (combat-usable).
-        let mut item = antares::domain::items::Item {
+        let mut item = Item {
             id: 99,
             name: "Potion of Healing".to_string(),
             item_type: ItemType::Consumable(ConsumableData {
@@ -1656,6 +1652,7 @@ mod tests {
         }
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_item_with_alignment_restriction() {
         let item = Item {
@@ -1669,7 +1666,6 @@ mod tests {
             }),
             base_cost: 500,
             sell_cost: 250,
-
             alignment_restriction: Some(AlignmentRestriction::GoodOnly),
             constant_bonus: None,
             temporary_bonus: None,
@@ -1689,6 +1685,7 @@ mod tests {
         assert_eq!(item.name, "Holy Sword");
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_item_with_tags() {
         let item = Item {
@@ -1702,7 +1699,6 @@ mod tests {
             }),
             base_cost: 150,
             sell_cost: 75,
-
             alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
@@ -1720,6 +1716,7 @@ mod tests {
         assert!(item.tags.contains(&"large_weapon".to_string()));
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_item_cursed() {
         let item = Item {
@@ -1731,7 +1728,6 @@ mod tests {
             }),
             base_cost: 100,
             sell_cost: 0,
-
             alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
@@ -1748,6 +1744,7 @@ mod tests {
         assert!(item.is_accessory());
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_item_with_charges() {
         let item = Item {
@@ -1759,7 +1756,6 @@ mod tests {
             }),
             base_cost: 500,
             sell_cost: 250,
-
             alignment_restriction: None,
             constant_bonus: None,
             temporary_bonus: None,
@@ -1789,5 +1785,59 @@ mod tests {
             filtered,
             vec!["large_weapon".to_string(), "heavy_armor".to_string()]
         );
+    }
+
+    /// `--campaign <DIR>` must set the campaign field.
+    #[test]
+    fn test_item_args_campaign_flag() {
+        use clap::Parser;
+        use std::path::PathBuf;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            args: ItemArgs,
+        }
+
+        let result = TestCli::try_parse_from(["test", "--campaign", "campaigns/tutorial"]);
+        assert!(
+            result.is_ok(),
+            "ItemArgs should parse --campaign: {:?}",
+            result.err()
+        );
+        let args = result.unwrap().args;
+        assert_eq!(
+            args.campaign,
+            Some(PathBuf::from("campaigns/tutorial")),
+            "--campaign should be set to the provided directory"
+        );
+        assert_eq!(
+            args.file,
+            PathBuf::from("data/items.ron"),
+            "file should remain at its default when --campaign is used"
+        );
+    }
+
+    /// Default ItemArgs should have no campaign and the standard file path.
+    #[test]
+    fn test_item_args_defaults() {
+        use clap::Parser;
+        use std::path::PathBuf;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            args: ItemArgs,
+        }
+
+        let result = TestCli::try_parse_from(["test"]);
+        assert!(
+            result.is_ok(),
+            "ItemArgs should parse with no arguments: {:?}",
+            result.err()
+        );
+        let args = result.unwrap().args;
+        assert_eq!(args.file, PathBuf::from("data/items.ron"));
+        assert!(args.campaign.is_none(), "campaign should default to None");
     }
 }

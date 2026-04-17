@@ -505,7 +505,7 @@ visual: (
 
 ### CLI Tools
 
-- **Map Validator**: `cargo run --bin validate_map data/maps/your_map.ron`
+- **Map Validator**: `cargo run --bin antares-sdk -- map validate data/maps/your_map.ron`
 - **Campaign Validator**: `cargo run --bin validate_campaign campaigns/your_campaign/`
 
 ### SDK Tools

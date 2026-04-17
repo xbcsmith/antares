@@ -18,13 +18,13 @@ The name generator provides thematic names inspired by celestial bodies, particu
 Generate 5 fantasy names (default):
 
 ```bash
-cargo run --bin antares-name-gen
+cargo run --bin antares-sdk -- names
 ```
 
 ### Generate Star-Themed Names
 
 ```bash
-cargo run --bin antares-name-gen --theme star -n 10
+cargo run --bin antares-sdk -- names --theme star -n 10
 ```
 
 Output example:
@@ -50,7 +50,7 @@ Provider: Random Generation
 Add backstory descriptions to each name:
 
 ```bash
-cargo run --bin antares-name-gen --theme antares --lore -n 3
+cargo run --bin antares-sdk -- names --theme antares --lore -n 3
 ```
 
 Output example:
@@ -74,7 +74,7 @@ Provider: Random Generation
 Perfect for guardian or protector characters:
 
 ```bash
-cargo run --bin antares-name-gen --theme arcturus --lore -n 5
+cargo run --bin antares-sdk -- names --theme arcturus --lore -n 5
 ```
 
 ### Quiet Mode (For Scripting)
@@ -82,7 +82,7 @@ cargo run --bin antares-name-gen --theme arcturus --lore -n 5
 Generate names without headers for use in scripts:
 
 ```bash
-cargo run --bin antares-name-gen --theme fantasy -n 100 --quiet > npc_names.txt
+cargo run --bin antares-sdk -- names --theme fantasy -n 100 --quiet > npc_names.txt
 ```
 
 This creates a simple list:
@@ -181,7 +181,7 @@ Characteristics:
 - Combinations like: Thalion, Kormendor, Malric, Velwen
 
 ```bash
-cargo run --bin antares-name-gen --theme fantasy -n 10
+cargo run --bin antares-sdk -- names --theme fantasy -n 10
 ```
 
 ### Star Theme
@@ -194,7 +194,7 @@ Characteristics:
 - Combinations like: Antarion, Vegaar, Rigelix, Siriuseth
 
 ```bash
-cargo run --bin antares-name-gen --theme star -n 10
+cargo run --bin antares-sdk -- names --theme star -n 10
 ```
 
 ### Antares Theme
@@ -208,7 +208,7 @@ Characteristics:
 - Combinations like: Crimsonus, Scorpiusar, Marsheart, RedEclipse
 
 ```bash
-cargo run --bin antares-name-gen --theme antares -n 10
+cargo run --bin antares-sdk -- names --theme antares -n 10
 ```
 
 ### Arcturus Theme
@@ -222,7 +222,7 @@ Characteristics:
 - Combinations like: Guardianar, Bearwatcher, Sentinelix, Arcturon
 
 ```bash
-cargo run --bin antares-name-gen --theme arcturus -n 10
+cargo run --bin antares-sdk -- names --theme arcturus -n 10
 ```
 
 ## Common Use Cases
@@ -233,13 +233,13 @@ Generate varied NPC names for a town or city:
 
 ```bash
 # Generate 30 generic names
-cargo run --bin antares-name-gen --theme fantasy -n 30 --quiet > town_npcs.txt
+cargo run --bin antares-sdk -- names --theme fantasy -n 30 --quiet > town_npcs.txt
 
 # Generate 10 guard names (guardian theme)
-cargo run --bin antares-name-gen --theme arcturus -n 10 --quiet > town_guards.txt
+cargo run --bin antares-sdk -- names --theme arcturus -n 10 --quiet > town_guards.txt
 
 # Generate 5 wizard names (star theme)
-cargo run --bin antares-name-gen --theme star -n 5 --lore > town_wizards.txt
+cargo run --bin antares-sdk -- names --theme star -n 5 --lore > town_wizards.txt
 ```
 
 ### 2. Creating Pre-Generated Characters
@@ -247,7 +247,7 @@ cargo run --bin antares-name-gen --theme star -n 5 --lore > town_wizards.txt
 Generate characters with backstories for players to choose from:
 
 ```bash
-cargo run --bin antares-name-gen --theme star -n 6 --lore > pregen_characters.txt
+cargo run --bin antares-sdk -- names --theme star -n 6 --lore > pregen_characters.txt
 ```
 
 ### 3. Enemy NPC Names
@@ -256,10 +256,10 @@ Generate antagonist names:
 
 ```bash
 # Aggressive warrior enemies
-cargo run --bin antares-name-gen --theme antares -n 10 --lore
+cargo run --bin antares-sdk -- names --theme antares -n 10 --lore
 
 # Boss-level enemies with titles
-cargo run --bin antares-name-gen --theme antares -n 5 --lore
+cargo run --bin antares-sdk -- names --theme antares -n 5 --lore
 ```
 
 ### 4. Integration with Character Editor
@@ -289,7 +289,7 @@ fn on_generate_name_button_clicked(&mut self, race_id: &str) {
 ### Command-Line Options
 
 ```
-antares-name-gen [OPTIONS]
+antares-sdk names [OPTIONS]
 
 Options:
   -n, --number <NUMBER>    Number of names to generate [default: 5]
@@ -305,19 +305,19 @@ Options:
 
 ```bash
 # Default: 5 fantasy names
-antares-name-gen
+cargo run --bin antares-sdk -- names
 
 # 10 star-themed names
-antares-name-gen -n 10 -t star
+cargo run --bin antares-sdk -- names -n 10 -t star
 
 # 3 Antares names with lore
-antares-name-gen -n 3 -t antares -l
+cargo run --bin antares-sdk -- names -n 3 -t antares -l
 
 # 100 names for scripting
-antares-name-gen -n 100 -q > names.txt
+cargo run --bin antares-sdk -- names -n 100 -q > names.txt
 
 # Mix and match
-antares-name-gen --number 15 --theme arcturus --lore --quiet
+cargo run --bin antares-sdk -- names --number 15 --theme arcturus --lore --quiet
 ```
 
 ## Tips and Best Practices
@@ -336,7 +336,7 @@ Generate more names or mix themes:
 
 ```bash
 # Generate 50 names for better variety
-cargo run --bin antares-name-gen -n 50 --theme star
+cargo run --bin antares-sdk -- names -n 50 --theme star
 ```
 
 ### Want More Control
@@ -345,7 +345,7 @@ The generator uses randomization. Run it multiple times until you find names you
 
 ```bash
 # Keep running until satisfied
-cargo run --bin antares-name-gen -n 10 --theme antares
+cargo run --bin antares-sdk -- names -n 10 --theme antares
 ```
 
 ### Need Different Naming Style

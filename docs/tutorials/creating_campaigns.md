@@ -55,10 +55,7 @@ cd cursed_village
 
 ```bash
 cd antares
-cargo build --release --bin class_editor
-cargo build --release --bin race_editor
-cargo build --release --bin item_editor
-cargo build --release --bin validate_campaign
+cargo build --release --bin antares-sdk
 ```
 
 These CLI editors make content creation easier than writing RON by hand. The validator ensures your campaign is properly structured.
@@ -129,7 +126,7 @@ Edit `campaign.ron`:
 ### Using the Class Editor (Recommended)
 
 ```bash
-../../target/release/class_editor data/classes.ron
+cargo run --bin antares-sdk -- class data/classes.ron
 ```
 
 Follow the prompts to add two classes:
@@ -203,7 +200,7 @@ Create `data/classes.ron` (now using proficiency system):
 ### Using the Race Editor (Recommended)
 
 ```bash
-../../target/release/race_editor data/races.ron
+cargo run --bin antares-sdk -- race data/races.ron
 ```
 
 **Human**:
@@ -274,7 +271,7 @@ Edit `data/races.ron`:
 ### Using the Item Editor (Recommended)
 
 ```bash
-../../target/release/item_editor data/items.ron
+cargo run --bin antares-sdk -- item data/items.ron
 ```
 
 Create these items:
@@ -783,7 +780,7 @@ Create `data/maps/cursed_crypt.ron`:
 ### Run the Campaign Validator
 
 ```bash
-../../target/release/campaign_validator campaigns/cursed_village
+cargo run --bin antares-sdk -- campaign validate campaigns/cursed_village
 ```
 
 **Expected Output**:
@@ -946,7 +943,7 @@ You've created your first Antares campaign! 🎉
 Share your campaign with others by packaging it:
 
 ```bash
-../../target/release/campaign_validator --package campaigns/cursed_village cursed_village_v1.0.tar.gz
+tar -czf cursed_village_v1.0.tar.gz campaigns/cursed_village
 ```
 
 For more advanced campaign creation techniques, see the **Modding Guide**.

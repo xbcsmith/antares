@@ -121,15 +121,8 @@ src/
 │   ├── tool_config.rs
 │   └── validation.rs
 └── bin/                         # CLI binaries
-    ├── antares.rs
-    ├── campaign_validator.rs
-    ├── class_editor.rs
-    ├── item_editor.rs
-    ├── map_builder.rs
-    ├── name_gen.rs
-    ├── race_editor.rs
-    ├── update_tutorial_maps.rs
-    └── validate_map.rs
+    ├── antares.rs               # The game binary
+    └── antares_sdk.rs           # Unified SDK tool (names, class, race, item, map, campaign, textures)
 
 sdk/campaign_builder/            # Separate workspace member (eframe/egui GUI SDK)
 ├── Cargo.toml
@@ -2157,7 +2150,7 @@ The menu system provides in-game access to save/load, settings, and game control
 #### 6.3 SDK Tooling
 
 - **Library SDK (`src/sdk`)**: Reusable loading/validation/packaging APIs
-- **CLI SDK Tools (`src/bin`)**: Validators and focused editors (`campaign_validator`, `class_editor`, `item_editor`, etc.)
+- **CLI SDK Tools (`src/bin/antares_sdk.rs`)**: Unified `antares-sdk` binary with subcommands for validation and content editing (`campaign validate`, `class`, `item`, `race`, `map`, etc.)
 - **GUI Campaign Builder (`sdk/campaign_builder`)**: eframe/egui visual editor with multi-tab campaign editing workflow
 - **Validation Frameworks**: Both runtime SDK validation (`src/sdk/validation.rs`) and builder-side validation categories/results
 - **Campaign Management**: Campaign metadata loading, content database assembly, and packaging support
@@ -2693,9 +2686,7 @@ Location: `docs/explanation/phase5_manual_test_checklist.md` (24 test scenarios,
 cargo test --all-features
 
 # Manual testing
-cargo build --release --bin class_editor
-cargo build --release --bin race_editor
-cargo build --release --bin item_editor
+cargo build --release --bin antares-sdk
 # Follow manual test checklist procedures
 ```
 
@@ -2717,11 +2708,11 @@ The Antares SDK is split into two cooperating parts:
 1. **Core SDK library (`src/sdk`)** for campaign loading, content databases, validation, formatting, and templates.
 2. **Campaign Builder GUI (`sdk/campaign_builder`)** for end-to-end visual content authoring using eframe/egui.
 
-CLI tools remain available via `src/bin` for validation and focused editing workflows.
+All CLI tools are available via the unified `antares-sdk` binary (`src/bin/antares_sdk.rs`) with subcommands for validation and focused editing workflows.
 
 #### 8.2 Content Editors
 
-**Item Editor** (`cargo run --bin item_editor`)
+**Item Editor** (`cargo run --bin antares-sdk -- item`)
 
 - Create and edit all item types (Weapon, Armor, Accessory, Consumable, Ammo, Quest)
 - Set classifications and proficiency requirements
@@ -2729,7 +2720,7 @@ CLI tools remain available via `src/bin` for validation and focused editing work
 - Manage tags for race restrictions
 - Real-time validation with detailed error messages
 
-**Class Editor** (`cargo run --bin class_editor`)
+**Class Editor** (`cargo run --bin antares-sdk -- class`)
 
 - Define character classes with stat growth patterns
 - Set proficiency requirements and restrictions
@@ -2737,7 +2728,7 @@ CLI tools remain available via `src/bin` for validation and focused editing work
 - Define special abilities and level progression
 - Export/import class definitions
 
-**Race Editor** (`cargo run --bin race_editor`)
+**Race Editor** (`cargo run --bin antares-sdk -- race`)
 
 - Create races with stat modifiers
 - Set resistances and special abilities
@@ -2745,7 +2736,7 @@ CLI tools remain available via `src/bin` for validation and focused editing work
 - Configure proficiency bonuses
 - Visual validation of racial traits
 
-**Map Builder** (`cargo run --bin map_builder`)
+**Map Builder** (`cargo run --bin antares-sdk -- map build`)
 
 - Visual map editing with live preview
 - Place events, NPCs, treasures, and encounters
@@ -2771,7 +2762,7 @@ CLI tools remain available via `src/bin` for validation and focused editing work
 
 #### 8.3 Validation Framework
 
-**Campaign Validator** (`cargo run --bin campaign_validator`)
+**Campaign Validator** (`cargo run --bin antares-sdk -- campaign validate`)
 
 - Comprehensive cross-reference validation
 - Check for missing dependencies and broken links
@@ -2779,7 +2770,7 @@ CLI tools remain available via `src/bin` for validation and focused editing work
 - Generate detailed validation reports
 - Support for campaign-specific content
 
-**Map Validator** (`cargo run --bin validate_map`)
+**Map Validator** (`cargo run --bin antares-sdk -- map validate`)
 
 - Validate map structure and connectivity
 - Check event references and NPC placement
@@ -2789,7 +2780,7 @@ CLI tools remain available via `src/bin` for validation and focused editing work
 
 #### 8.4 Utility Tools
 
-**Name Generator** (`cargo run --bin name_gen`)
+**Name Generator** (`cargo run --bin antares-sdk -- names`)
 
 - Generate character names based on race
 - Support for custom name pools

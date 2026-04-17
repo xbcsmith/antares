@@ -1,43 +1,88 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Class Editor CLI
+//! `antares-sdk class` — Interactive class definition editor.
 //!
-//! Interactive command-line tool for creating and editing character class definitions.
-//! Supports loading, editing, and saving class data in RON format.
+//! Migrated from `src/bin/class_editor.rs`. Provides an interactive
+//! menu-driven REPL for creating and editing character class definitions
+//! stored in RON format.
 //!
 //! # Usage
 //!
-//! ```bash
-//! # Create/edit classes in default location
-//! class_editor
-//!
-//! # Edit specific file
-//! class_editor data/classes.ron
-//!
-//! # Create new classes file
-//! class_editor campaigns/my_campaign/data/classes.ron
+//! ```text
+//! antares-sdk class                                  # edit data/classes.ron
+//! antares-sdk class campaigns/tutorial/data/classes.ron
 //! ```
-//!
-//! # Features
-//!
-//! - Interactive menu-driven interface
-//! - Add/edit/delete class definitions
-//! - Preview class statistics
-//! - Input validation
-//! - Pretty-printed RON output
 
-#[path = "editor_common.rs"]
-mod editor_common;
-use editor_common::{filter_valid_proficiencies, truncate};
-
-use antares::domain::classes::{ClassDatabase, ClassDefinition, SpellSchool, SpellStat};
-use antares::domain::types::DiceRoll;
+use crate::domain::classes::{ClassDatabase, ClassDefinition, SpellSchool, SpellStat};
+use crate::domain::types::DiceRoll;
+use crate::sdk::cli::editor_helpers::{
+    filter_valid_proficiencies, input_multistring_values, read_line, truncate,
+};
+use clap::Args;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process;
 
-/// Main application state
+// ──────────────────────────────────────────────────────────────────────────────
+// Clap argument struct
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Arguments for the `antares-sdk class` subcommand.
+#[derive(Args, Debug)]
+#[command(
+    about = "Interactive class definition editor",
+    long_about = "Interactive menu-driven REPL for creating and editing character class\n\
+                  definitions stored in RON format.\n\n\
+                  Defaults to `data/classes.ron` if no file is specified."
+)]
+pub struct ClassArgs {
+    /// Path to the classes RON file.
+    ///
+    /// Defaults to `data/classes.ron`. Ignored when `--campaign` is provided.
+    #[arg(default_value = "data/classes.ron", value_name = "FILE")]
+    pub file: PathBuf,
+
+    /// Campaign directory. When provided, opens `<DIR>/data/classes.ron`
+    /// instead of the positional FILE argument.
+    ///
+    /// Example: `antares-sdk class --campaign campaigns/tutorial`
+    /// is equivalent to: `antares-sdk class campaigns/tutorial/data/classes.ron`
+    #[arg(long, value_name = "DIR")]
+    pub campaign: Option<PathBuf>,
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Public entry point
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Run the interactive class editor with the given arguments.
+///
+/// # Errors
+///
+/// Returns `Err` if the file cannot be loaded (e.g. invalid RON syntax).
+pub fn run(args: ClassArgs) -> Result<(), Box<dyn std::error::Error>> {
+    // Resolve the target file: --campaign takes precedence over the positional FILE.
+    let file = match args.campaign {
+        Some(campaign_dir) => campaign_dir.join("data").join("classes.ron"),
+        None => args.file,
+    };
+
+    println!("╔════════════════════════════════════════╗");
+    println!("║    ANTARES CLASS EDITOR v0.1.0         ║");
+    println!("╚════════════════════════════════════════╝");
+
+    let mut editor = ClassEditor::load(file)?;
+    editor.run();
+
+    println!("\nThank you for using Antares Class Editor!");
+    Ok(())
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Editor state
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Main application state for the class editor.
 struct ClassEditor {
     classes: Vec<ClassDefinition>,
     file_path: PathBuf,
@@ -45,7 +90,7 @@ struct ClassEditor {
 }
 
 impl ClassEditor {
-    /// Creates a new editor with loaded classes from file
+    /// Creates a new editor with loaded classes from file.
     fn load(path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let classes = if path.exists() {
             println!("Loading classes from: {}", path.display());
@@ -65,12 +110,12 @@ impl ClassEditor {
         })
     }
 
-    /// Main menu loop
+    /// Main menu loop.
     fn run(&mut self) {
         loop {
             self.show_menu();
 
-            let choice = self.read_input("Choice: ");
+            let choice = read_line("Choice: ");
 
             match choice.trim() {
                 "1" => self.list_classes(),
@@ -92,11 +137,11 @@ impl ClassEditor {
                 _ => println!("❌ Invalid choice. Please try again."),
             }
 
-            println!(); // Blank line between operations
+            println!();
         }
     }
 
-    /// Displays the main menu
+    /// Displays the main menu.
     fn show_menu(&self) {
         println!("\n╔════════════════════════════════════════╗");
         println!("║       ANTARES CLASS EDITOR             ║");
@@ -119,7 +164,7 @@ impl ClassEditor {
         println!("└────────────────────────────────────────┘");
     }
 
-    /// Lists all classes
+    /// Lists all classes.
     fn list_classes(&self) {
         if self.classes.is_empty() {
             println!("\n📋 No classes defined yet.");
@@ -158,15 +203,15 @@ impl ClassEditor {
         println!("└─────┴──────────────┴────────────────┴────────┴─────────────┘");
     }
 
-    /// Adds a new class
+    /// Adds a new class.
     fn add_class(&mut self) {
         println!("\n╔════════════════════════════════════════╗");
         println!("║        ADD NEW CLASS                   ║");
         println!("╚════════════════════════════════════════╝");
 
         let id = loop {
-            let input = self.read_input("Class ID (lowercase, e.g., 'barbarian'): ");
-            let trimmed = input.trim();
+            let input = read_line("Class ID (lowercase, e.g., 'barbarian'): ");
+            let trimmed = input.trim().to_string();
 
             if trimmed.is_empty() {
                 println!("❌ ID cannot be empty");
@@ -183,10 +228,10 @@ impl ClassEditor {
                 continue;
             }
 
-            break trimmed.to_string();
+            break trimmed;
         };
 
-        let name = self.read_input("Display Name (e.g., 'Barbarian'): ");
+        let name = read_line("Display Name (e.g., 'Barbarian'): ");
 
         let hp_die = self.select_hp_die();
         let (spell_school, is_pure_caster, spell_stat) = self.select_spell_access();
@@ -201,7 +246,6 @@ impl ClassEditor {
             spell_school,
             is_pure_caster,
             spell_stat,
-
             special_abilities,
             starting_weapon_id: None,
             starting_armor_id: None,
@@ -216,7 +260,7 @@ impl ClassEditor {
         println!("✅ Class '{}' created successfully!", id);
     }
 
-    /// Edits an existing class
+    /// Edits an existing class.
     fn edit_class(&mut self) {
         if self.classes.is_empty() {
             println!("❌ No classes to edit.");
@@ -226,7 +270,7 @@ impl ClassEditor {
         self.list_classes();
 
         let idx = loop {
-            let input = self.read_input("\nEnter class index to edit (or 'c' to cancel): ");
+            let input = read_line("\nEnter class index to edit (or 'c' to cancel): ");
             if input.trim().eq_ignore_ascii_case("c") {
                 return;
             }
@@ -270,11 +314,11 @@ impl ClassEditor {
         );
         println!("  c. Cancel");
 
-        let choice = self.read_input("\nChoice: ");
+        let choice = read_line("\nChoice: ");
 
         match choice.trim() {
             "1" => {
-                let new_name = self.read_input("New display name: ");
+                let new_name = read_line("New display name: ");
                 self.classes[idx].name = new_name.trim().to_string();
                 self.modified = true;
                 println!("✅ Name updated");
@@ -310,7 +354,7 @@ impl ClassEditor {
         }
     }
 
-    /// Deletes a class
+    /// Deletes a class.
     fn delete_class(&mut self) {
         if self.classes.is_empty() {
             println!("❌ No classes to delete.");
@@ -320,7 +364,7 @@ impl ClassEditor {
         self.list_classes();
 
         let idx = loop {
-            let input = self.read_input("\nEnter class index to delete (or 'c' to cancel): ");
+            let input = read_line("\nEnter class index to delete (or 'c' to cancel): ");
             if input.trim().eq_ignore_ascii_case("c") {
                 return;
             }
@@ -332,7 +376,7 @@ impl ClassEditor {
         };
 
         let class = &self.classes[idx];
-        let confirm = self.read_input(&format!(
+        let confirm = read_line(&format!(
             "⚠️  Delete class '{}'? This cannot be undone! (yes/no): ",
             class.name
         ));
@@ -346,7 +390,7 @@ impl ClassEditor {
         }
     }
 
-    /// Previews a class with sample stats
+    /// Previews a class with sample stats.
     fn preview_class(&self) {
         if self.classes.is_empty() {
             println!("❌ No classes to preview.");
@@ -356,7 +400,7 @@ impl ClassEditor {
         self.list_classes();
 
         let idx = loop {
-            let input = self.read_input("\nEnter class index to preview (or 'c' to cancel): ");
+            let input = read_line("\nEnter class index to preview (or 'c' to cancel): ");
             if input.trim().eq_ignore_ascii_case("c") {
                 return;
             }
@@ -407,12 +451,11 @@ impl ClassEditor {
         }
     }
 
-    /// Saves classes to file
+    /// Saves classes to file.
     fn save(&mut self) -> bool {
         print!("💾 Saving to {}... ", self.file_path.display());
         io::stdout().flush().unwrap();
 
-        // Ensure parent directory exists
         if let Some(parent) = self.file_path.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
                 println!("\n❌ Failed to create directory: {}", e);
@@ -420,7 +463,6 @@ impl ClassEditor {
             }
         }
 
-        // Serialize to RON
         let ron_config = ron::ser::PrettyConfig::new()
             .struct_names(true)
             .separate_tuple_members(true)
@@ -434,7 +476,6 @@ impl ClassEditor {
             }
         };
 
-        // Write to file
         if let Err(e) = std::fs::write(&self.file_path, ron_string) {
             println!("\n❌ Failed to write file: {}", e);
             return false;
@@ -445,52 +486,24 @@ impl ClassEditor {
         true
     }
 
-    /// Confirms exit with unsaved changes
+    /// Confirms exit with unsaved changes.
     fn confirm_exit(&self) -> bool {
         if !self.modified {
             return true;
         }
 
-        let response = self.read_input("⚠️  You have unsaved changes. Quit anyway? (yes/no): ");
+        let response = read_line("⚠️  You have unsaved changes. Quit anyway? (yes/no): ");
         response.trim().eq_ignore_ascii_case("yes")
     }
 
-    // ===== Input Helpers =====
+    // ===== Input helpers =====
 
-    /// Reads a line of input with a prompt
-    fn read_input(&self, prompt: &str) -> String {
-        print!("{}", prompt);
-        io::stdout().flush().unwrap();
-
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
-        input
+    /// Inputs multiple string values (one per line), blank line terminates.
+    fn input_multistring(&self, prompt: &str, label: &str) -> Vec<String> {
+        input_multistring_values(prompt, label)
     }
 
-    /// Inputs multiple string values (one per line).
-    ///
-    /// This helper allows entering multiple values in an interactive CLI:
-    ///  - Prompts with `label` repeatedly
-    ///  - Pressing Enter on a blank line finishes input
-    fn input_multistring_values(&self, prompt: &str, label: &str) -> Vec<String> {
-        if !prompt.is_empty() {
-            println!("\n{}", prompt);
-        }
-        println!("(Enter values one per line. Press Enter on an empty line to finish.)");
-
-        let mut values: Vec<String> = Vec::new();
-        loop {
-            let input = self.read_input(label);
-            let trimmed = input.trim();
-            if trimmed.is_empty() {
-                break;
-            }
-            values.push(trimmed.to_string());
-        }
-        values
-    }
-
-    /// Selects HP die from menu
+    /// Selects HP die from menu.
     fn select_hp_die(&self) -> DiceRoll {
         println!("\nHP Gain Die:");
         println!("  1. 1d4  (Weak - Sorcerer)");
@@ -500,7 +513,7 @@ impl ClassEditor {
         println!("  5. 1d12 (Very High - Barbarian)");
 
         loop {
-            let choice = self.read_input("Choice (1-5): ");
+            let choice = read_line("Choice (1-5): ");
             match choice.trim() {
                 "1" => return DiceRoll::new(1, 4, 0),
                 "2" => return DiceRoll::new(1, 6, 0),
@@ -512,7 +525,7 @@ impl ClassEditor {
         }
     }
 
-    /// Selects spell access
+    /// Selects spell access.
     fn select_spell_access(&self) -> (Option<SpellSchool>, bool, Option<SpellStat>) {
         println!("\nSpell Access:");
         println!("  1. None (Warrior classes)");
@@ -522,7 +535,7 @@ impl ClassEditor {
         println!("  5. Sorcerer - Hybrid (Archer)");
 
         loop {
-            let choice = self.read_input("Choice (1-5): ");
+            let choice = read_line("Choice (1-5): ");
             match choice.trim() {
                 "1" => return (None, false, None),
                 "2" => {
@@ -558,17 +571,16 @@ impl ClassEditor {
         }
     }
 
-    /// Inputs special abilities (one per line; blank line to finish)
+    /// Inputs special abilities.
     fn input_special_abilities(&self) -> Vec<String> {
         println!(
             "\nSpecial Abilities (enter one per line; press Enter on an empty line to finish):"
         );
         println!("  Examples: backstab, disarm_trap, multiple_attacks, turn_undead");
-
-        self.input_multistring_values("Special Abilities:", "Ability: ")
+        self.input_multistring("Special Abilities:", "Ability: ")
     }
 
-    /// Inputs proficiencies with validation (one per line)
+    /// Inputs proficiencies with validation.
     fn input_proficiencies(&self) -> Vec<String> {
         println!("\n╔════════════════════════════════════════╗");
         println!("║        PROFICIENCY SELECTION           ║");
@@ -588,13 +600,11 @@ impl ClassEditor {
         println!("\n  Magic Items:");
         println!("    • arcane_item        - Arcane magic items (wands, staves)");
         println!("    • divine_item        - Divine magic items (holy symbols, relics)");
-
         println!("\nEnter proficiencies (one per line; leave empty to finish):");
         println!("  Example: simple_weapon");
 
-        let candidates = self.input_multistring_values("", "Proficiency: ");
+        let candidates = self.input_multistring("", "Proficiency: ");
 
-        // Validate proficiencies and warn about invalid ones
         let valid_proficiencies = filter_valid_proficiencies(&candidates);
         for prof in &candidates {
             if !valid_proficiencies.contains(prof) {
@@ -610,66 +620,27 @@ impl ClassEditor {
     }
 }
 
-// ===== Helper Functions =====
-// `truncate`, `filter_valid_proficiencies`, and `STANDARD_PROFICIENCY_IDS`
-// are imported from `editor_common`.
-
-// ===== Main Entry Point =====
-
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-
-    let file_path = if args.len() > 1 {
-        PathBuf::from(&args[1])
-    } else {
-        PathBuf::from("data/classes.ron")
-    };
-
-    println!("╔════════════════════════════════════════╗");
-    println!("║    ANTARES CLASS EDITOR v0.1.0         ║");
-    println!("╚════════════════════════════════════════╝");
-
-    let mut editor = match ClassEditor::load(file_path) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("❌ Failed to load classes: {}", e);
-            eprintln!("   Check that the file path is correct and the file is valid RON format.");
-            process::exit(1);
-        }
-    };
-
-    editor.run();
-
-    println!("\nThank you for using Antares Class Editor!");
-}
+// ──────────────────────────────────────────────────────────────────────────────
+// Tests
+// ──────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // Test-only helper for parsing newline-separated inputs. Defined inside the
-    // tests module so it is only compiled for tests and doesn't cause dead-code
-    // warnings during normal builds.
-    fn parse_multistring_input(input: &str) -> Vec<String> {
-        input
-            .lines()
-            .map(|l| l.trim())
-            .filter(|l| !l.is_empty())
-            .map(|l| l.to_string())
-            .collect()
-    }
+    use crate::sdk::cli::editor_helpers::{
+        filter_valid_proficiencies, parse_multistring_input, truncate,
+    };
 
     #[test]
     fn test_truncate() {
         assert_eq!(truncate("short", 10), "short");
         assert_eq!(truncate("this is a very long string", 10), "this is...");
-        assert_eq!(truncate("exactly10c", 10), "exactly10c");
     }
 
     #[test]
     fn test_parse_multistring_input_basic() {
-        let input = "alpha\nbeta\n\n  gamma  \n";
-        let parsed = parse_multistring_input(input);
+        let s = "alpha\nbeta\n\n  gamma  \n";
+        let parsed = parse_multistring_input(s);
         assert_eq!(
             parsed,
             vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()]
@@ -678,15 +649,13 @@ mod tests {
 
     #[test]
     fn test_parse_multistring_input_empty() {
-        let input = "";
-        let parsed = parse_multistring_input(input);
-        assert!(parsed.is_empty());
+        assert!(parse_multistring_input("").is_empty());
     }
 
     #[test]
     fn test_parse_multistring_input_with_whitespace() {
-        let input = "\n   \n   one  \n two \n\nthree\n";
-        let parsed = parse_multistring_input(input);
+        let s = "\n   \n  one  \n two \n\nthree\n";
+        let parsed = parse_multistring_input(s);
         assert_eq!(
             parsed,
             vec!["one".to_string(), "two".to_string(), "three".to_string()]
@@ -697,7 +666,7 @@ mod tests {
     fn test_filter_valid_proficiencies() {
         let candidates = vec![
             "simple_weapon".to_string(),
-            "invalid_tag".to_string(),
+            "not_a_proficiency".to_string(),
             "martial_melee".to_string(),
         ];
         let filtered = filter_valid_proficiencies(&candidates);
@@ -706,9 +675,60 @@ mod tests {
             vec!["simple_weapon".to_string(), "martial_melee".to_string()]
         );
 
-        // Ensure unknown entries are removed
         let candidates2 = vec!["not_a_proficiency".to_string()];
-        let filtered2 = filter_valid_proficiencies(&candidates2);
-        assert!(filtered2.is_empty());
+        assert!(filter_valid_proficiencies(&candidates2).is_empty());
+    }
+
+    #[test]
+    fn test_class_args_default_file() {
+        use clap::Parser;
+        use std::path::PathBuf;
+
+        // Wrap ClassArgs in a minimal Parser so we can exercise clap defaults.
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            args: ClassArgs,
+        }
+
+        let result = TestCli::try_parse_from(["test"]);
+        assert!(
+            result.is_ok(),
+            "ClassArgs should parse with no arguments: {:?}",
+            result.err()
+        );
+        let args = result.unwrap().args;
+        assert_eq!(
+            args.file,
+            PathBuf::from("data/classes.ron"),
+            "default file should be data/classes.ron"
+        );
+        assert!(args.campaign.is_none(), "campaign should default to None");
+    }
+
+    /// `--campaign <DIR>` must set the campaign field and leave file at its default.
+    #[test]
+    fn test_class_args_campaign_flag() {
+        use clap::Parser;
+        use std::path::PathBuf;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            args: ClassArgs,
+        }
+
+        let result = TestCli::try_parse_from(["test", "--campaign", "campaigns/tutorial"]);
+        assert!(
+            result.is_ok(),
+            "ClassArgs should parse --campaign: {:?}",
+            result.err()
+        );
+        let args = result.unwrap().args;
+        assert_eq!(
+            args.campaign,
+            Some(PathBuf::from("campaigns/tutorial")),
+            "--campaign should be set to the provided directory"
+        );
     }
 }

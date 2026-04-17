@@ -468,7 +468,7 @@ dialogue_id: Some(999)
 
 Validation notes:
 
-- The SDK validator checks that every `is_innkeeper: true` NPC has a `dialogue_id` configured. Use `cargo run --bin campaign_validator -- <campaign_path>` to validate your campaign before packaging.
+- The SDK validator checks that every `is_innkeeper: true` NPC has a `dialogue_id` configured. Use `cargo run --bin antares-sdk -- campaign validate <campaign_path>` to validate your campaign before packaging.
 - The validator will flag missing dialogue IDs as errors.
 
 ---
@@ -764,7 +764,7 @@ Or: 2 × Ogres (1000 XP each)
 Use the campaign packager:
 
 ```bash
-campaign_validator --package campaigns/my_campaign my_campaign_v1.0.tar.gz
+tar -czf my_campaign_v1.0.tar.gz campaigns/my_campaign
 ```
 
 ### README Template

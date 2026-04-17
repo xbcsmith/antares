@@ -3,14 +3,15 @@
 **Target Audience**: Campaign creators, content designers
 **Difficulty**: Beginner to Intermediate
 
-This guide covers all the command-line tools in the Antares SDK for creating and managing campaign content.
+This guide covers the `antares-sdk` command-line tool and its subcommands for
+creating and managing campaign content.
 
 ---
 
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Building the Tools](#building-the-tools)
+2. [Building the Tool](#building-the-tool)
 3. [Class Editor](#class-editor)
 4. [Race Editor](#race-editor)
 5. [Item Editor](#item-editor)
@@ -23,38 +24,35 @@ This guide covers all the command-line tools in the Antares SDK for creating and
 
 ## Overview
 
-The Antares SDK provides five command-line tools for campaign creation:
+The Antares SDK is a single binary, `antares-sdk`, with subcommands for every
+campaign-creation task:
 
-| Tool | Purpose | Input/Output |
-|------|---------|--------------|
-| `class_editor` | Create and edit character classes | `data/classes.ron` |
-| `race_editor` | Create and edit playable races | `data/races.ron` |
-| `item_editor` | Create and edit items | `data/items.ron` |
-| `map_builder` | Create and edit maps | `data/maps/*.ron` |
-| `campaign_validator` | Validate and package campaigns | Campaign directory |
+| Subcommand | Purpose | Input/Output |
+|---|---|---|
+| `antares-sdk class [FILE]` | Create and edit character classes | `data/classes.ron` |
+| `antares-sdk race [FILE]` | Create and edit playable races | `data/races.ron` |
+| `antares-sdk item [FILE]` | Create and edit items | `data/items.ron` |
+| `antares-sdk map build` | Create and edit maps | `data/maps/*.ron` |
+| `antares-sdk campaign validate <CAMPAIGN_DIR>` | Validate campaign content | Campaign directory |
 
-All tools work with RON (Rusty Object Notation) format files.
+All subcommands work with RON (Rusty Object Notation) format files.
 
 ---
 
-## Building the Tools
+## Building the Tool
 
-### Build All Tools
+### Build the Binary
 
 ```bash
-cargo build --release --bins
+cargo build --release --bin antares-sdk
 ```
 
-Binaries will be in `target/release/`.
+The binary will be at `target/release/antares-sdk`.
 
-### Build Individual Tools
+### Run Without Installing (Development)
 
 ```bash
-cargo build --release --bin class_editor
-cargo build --release --bin race_editor
-cargo build --release --bin item_editor
-cargo build --release --bin map_builder
-cargo build --release --bin campaign_validator
+cargo run --bin antares-sdk -- <subcommand> [args]
 ```
 
 ### Add to PATH (Optional)
@@ -63,8 +61,8 @@ cargo build --release --bin campaign_validator
 # Linux/Mac
 export PATH=$PATH:$(pwd)/target/release
 
-# Or copy to system location
-sudo cp target/release/{class_editor,race_editor,item_editor,map_builder,campaign_validator} /usr/local/bin/
+# Or copy to a system location
+sudo cp target/release/antares-sdk /usr/local/bin/
 ```
 
 ---
@@ -76,20 +74,37 @@ sudo cp target/release/{class_editor,race_editor,item_editor,map_builder,campaig
 ### Basic Usage
 
 ```bash
-class_editor data/classes.ron
+antares-sdk class data/classes.ron
+```
+
+During development, before installing the binary:
+
+```bash
+cargo run --bin antares-sdk -- class data/classes.ron
 ```
 
 ### Creating a New Classes File
 
 ```bash
-class_editor data/classes.ron
-# File doesn't exist - creates new file
+antares-sdk class data/classes.ron
+# File does not exist - creates new file
 ```
 
 ### Editing Existing Classes
 
 ```bash
-class_editor campaigns/my_campaign/data/classes.ron
+antares-sdk class campaigns/my_campaign/data/classes.ron
+```
+
+### Campaign Shorthand
+
+Use `--campaign <DIR>` to open the classes file from within a campaign
+directory without specifying the full path:
+
+```bash
+antares-sdk class --campaign campaigns/my_campaign
+# Equivalent to:
+antares-sdk class campaigns/my_campaign/data/classes.ron
 ```
 
 ### Interface
@@ -191,7 +206,23 @@ Saved successfully!
 ### Basic Usage
 
 ```bash
-race_editor data/races.ron
+antares-sdk race data/races.ron
+```
+
+During development, before installing the binary:
+
+```bash
+cargo run --bin antares-sdk -- race data/races.ron
+```
+
+### Campaign Shorthand
+
+Use `--campaign <DIR>` to open the races file from within a campaign directory:
+
+```bash
+antares-sdk race --campaign campaigns/my_campaign
+# Equivalent to:
+antares-sdk race campaigns/my_campaign/data/races.ron
 ```
 
 ### Interface
@@ -287,7 +318,23 @@ Saved successfully!
 ### Basic Usage
 
 ```bash
-item_editor data/items.ron
+antares-sdk item data/items.ron
+```
+
+During development, before installing the binary:
+
+```bash
+cargo run --bin antares-sdk -- item data/items.ron
+```
+
+### Campaign Shorthand
+
+Use `--campaign <DIR>` to open the items file from within a campaign directory:
+
+```bash
+antares-sdk item --campaign campaigns/my_campaign
+# Equivalent to:
+antares-sdk item campaigns/my_campaign/data/items.ron
 ```
 
 ### Interface
@@ -456,10 +503,16 @@ Bonuses:
 ### Basic Usage
 
 ```bash
-map_builder data/maps/my_map.ron
+antares-sdk map build data/maps/my_map.ron
 ```
 
-See `docs/how-to/using_map_builder.md` for detailed map builder guide.
+During development, before installing the binary:
+
+```bash
+cargo run --bin antares-sdk -- map build data/maps/my_map.ron
+```
+
+See `docs/how-to/using_map_builder.md` for a detailed map builder guide.
 
 ### Quick Reference
 
@@ -472,8 +525,8 @@ See `docs/how-to/using_map_builder.md` for detailed map builder guide.
 - Validate map structure
 
 **Map Requirements**:
-- Width and height (10×10 to 200×200)
-- Tile array (width × height tiles)
+- Width and height (10x10 to 200x200)
+- Tile array (width x height tiles)
 - Starting position
 - Environment (Outdoor, Indoor, Underground)
 
@@ -481,30 +534,45 @@ See `docs/how-to/using_map_builder.md` for detailed map builder guide.
 
 ## Campaign Validator
 
-**Purpose**: Validate campaign content and package for distribution.
+**Purpose**: Validate campaign content for distribution.
 
 ### Basic Usage
 
-**Validate Campaign**:
+**Validate a Campaign**:
 ```bash
-campaign_validator campaigns/my_campaign
+antares-sdk campaign validate campaigns/my_campaign
+```
+
+During development, before installing the binary:
+
+```bash
+cargo run --bin antares-sdk -- campaign validate campaigns/my_campaign
 ```
 
 **Validate All Campaigns**:
 ```bash
-campaign_validator --all
+antares-sdk campaign validate --all
 ```
 
-**Package Campaign**:
+**Packaging**:
+
+The `--package` flag from the old standalone `campaign_validator` binary has
+been removed. To package a validated campaign for distribution, use `tar`
+directly after validation:
+
 ```bash
-campaign_validator --package campaigns/my_campaign output.tar.gz
+# Validate first
+antares-sdk campaign validate campaigns/my_campaign
+
+# Then package manually
+tar -czf my_campaign_v1.0.tar.gz -C campaigns my_campaign
 ```
 
 ### Validation Output
 
 ```
 Loading campaign from: campaigns/my_campaign
-✓ Loaded campaign: My Campaign v1.0.0
+Loaded campaign: My Campaign v1.0.0
 
 Content Summary:
   Classes: 5
@@ -515,7 +583,7 @@ Content Summary:
   Maps: 15
 
 Running validation...
-✓ No errors found
+No errors found
 
 Campaign is valid!
 ```
@@ -546,28 +614,23 @@ Error: DuplicateId { entity_type: "item", id: 15 }
 ```
 Fix: Change one of the duplicate IDs to a unique value.
 
-### Packaging
+### Package Structure
 
-The packager creates a `.tar.gz` archive containing:
-- Campaign metadata
-- All content files
-- README and documentation
-- SHA256 checksums
+When manually packaging a validated campaign, the archive should contain:
 
-**Package Structure**:
 ```
 my_campaign_v1.0.tar.gz
-├── campaign.ron
-├── README.md
-├── data/
-│   ├── classes.ron
-│   ├── races.ron
-│   ├── items.ron
-│   ├── monsters.ron
-│   ├── spells.ron
-│   └── maps/
-│       └── *.ron
-└── MANIFEST.json
++-- campaign.ron
++-- README.md
++-- data/
+|   +-- classes.ron
+|   +-- races.ron
+|   +-- items.ron
+|   +-- monsters.ron
+|   +-- spells.ron
+|   +-- maps/
+|       +-- *.ron
++-- MANIFEST.json
 ```
 
 ---
@@ -581,15 +644,15 @@ my_campaign_v1.0.tar.gz
 mkdir -p campaigns/new_campaign/data/maps
 
 # 2. Create classes
-class_editor campaigns/new_campaign/data/classes.ron
+antares-sdk class campaigns/new_campaign/data/classes.ron
 # Add 3-5 classes, save
 
 # 3. Create races
-race_editor campaigns/new_campaign/data/races.ron
+antares-sdk race campaigns/new_campaign/data/races.ron
 # Add 2-4 races, save
 
 # 4. Create items
-item_editor campaigns/new_campaign/data/items.ron
+antares-sdk item campaigns/new_campaign/data/items.ron
 # Add weapons, armor, consumables, save
 
 # 5. Create monsters (manual - use text editor)
@@ -599,29 +662,29 @@ item_editor campaigns/new_campaign/data/items.ron
 # Edit campaigns/new_campaign/data/spells.ron
 
 # 7. Create maps
-map_builder campaigns/new_campaign/data/maps/town.ron
-map_builder campaigns/new_campaign/data/maps/dungeon.ron
+antares-sdk map build campaigns/new_campaign/data/maps/town.ron
+antares-sdk map build campaigns/new_campaign/data/maps/dungeon.ron
 # Design maps, save
 
 # 8. Create campaign metadata (manual)
 # Edit campaigns/new_campaign/campaign.ron
 
 # 9. Validate
-campaign_validator campaigns/new_campaign
+antares-sdk campaign validate campaigns/new_campaign
 
 # 10. Package for distribution
-campaign_validator --package campaigns/new_campaign new_campaign_v1.0.tar.gz
+tar -czf new_campaign_v1.0.tar.gz -C campaigns new_campaign
 ```
 
 ### Workflow 2: Add Content to Existing Campaign
 
 ```bash
 # 1. Add new items
-item_editor campaigns/existing/data/items.ron
+antares-sdk item campaigns/existing/data/items.ron
 # Add items, save
 
 # 2. Validate changes
-campaign_validator campaigns/existing
+antares-sdk campaign validate campaigns/existing
 
 # 3. Test in game
 # (Launch Antares and playtest)
@@ -631,14 +694,14 @@ campaign_validator campaigns/existing
 
 ```bash
 # 1. Edit items for balance
-item_editor campaigns/my_campaign/data/items.ron
+antares-sdk item campaigns/my_campaign/data/items.ron
 # Adjust damage, value, etc.
 
 # 2. Edit monsters for balance (manual)
 # Adjust HP, AC, XP values
 
 # 3. Validate
-campaign_validator campaigns/my_campaign
+antares-sdk campaign validate campaigns/my_campaign
 
 # 4. Playtest and iterate
 ```
@@ -647,17 +710,17 @@ campaign_validator campaigns/my_campaign
 
 ```bash
 # 1. Run validator
-campaign_validator campaigns/broken_campaign
+antares-sdk campaign validate campaigns/broken_campaign
 
 # 2. Note errors
 # Example: "MissingItem { item_id: 42 }"
 
 # 3. Fix errors
-item_editor campaigns/broken_campaign/data/items.ron
+antares-sdk item campaigns/broken_campaign/data/items.ron
 # Add missing item ID 42
 
 # 4. Re-validate
-campaign_validator campaigns/broken_campaign
+antares-sdk campaign validate campaigns/broken_campaign
 
 # 5. Repeat until clean
 ```
@@ -668,12 +731,17 @@ campaign_validator campaigns/broken_campaign
 
 ### Tool Won't Start
 
-**Problem**: `bash: class_editor: command not found`
+**Problem**: `bash: antares-sdk: command not found`
 
-**Solution**: Build the tool first:
+**Solution**: Build the binary first:
 ```bash
-cargo build --release --bin class_editor
-./target/release/class_editor
+cargo build --release --bin antares-sdk
+./target/release/antares-sdk
+```
+
+Or run via `cargo run` without installing:
+```bash
+cargo run --bin antares-sdk -- <subcommand> [args]
 ```
 
 ### File Parse Errors
@@ -685,11 +753,11 @@ cargo build --release --bin class_editor
 - Unclosed parentheses or braces
 - Typos in field names
 
-Use the validator to identify the exact location.
+Use `antares-sdk campaign validate` to identify the exact location.
 
 ### Changes Not Saving
 
-**Problem**: Edits don't appear in game
+**Problem**: Edits do not appear in game
 
 **Solution**:
 1. Ensure you pressed `s` to save in the editor
@@ -714,7 +782,7 @@ Use the validator to identify the exact location.
 1. Verify item ID matches between `items.ron` and map events
 2. Check item is marked `identified: true`
 3. Ensure disablement bits allow your class to use it
-4. Validate campaign to check for errors
+4. Run `antares-sdk campaign validate` to check for errors
 
 ---
 
@@ -729,7 +797,7 @@ Use the validator to identify the exact location.
 ### Incremental Development
 
 - **Start Small**: Create 1-2 of each content type first
-- **Validate Early**: Run validator after each major change
+- **Validate Early**: Run `antares-sdk campaign validate` after each major change
 - **Playtest Often**: Test in-game frequently
 - **Iterate**: Refine based on feedback
 
@@ -748,34 +816,26 @@ Use the validator to identify the exact location.
 
 ## Advanced Usage
 
-### Scripting with Tools
+### Scripting with the SDK
 
 You can automate content creation with shell scripts:
 
 ```bash
 #!/bin/bash
-# Create 10 similar items programmatically
-
-for i in {1..10}; do
-  cat >> data/items.ron << EOF
-    $i: (
-        id: $i,
-        name: "Item $i",
-        item_type: Weapon((damage: (1, 6), ...)),
-        ...
-    ),
-EOF
+# Append 10 stub item definitions programmatically
+for i in $(seq 1 10); do
+  printf '    %d: (\n        id: %d,\n        name: "Item %d",\n        ...\n    ),\n'     "$i" "$i" "$i" >> data/items.ron
 done
 ```
 
 ### Batch Validation
 
-Validate multiple campaigns:
+Validate multiple campaigns at once:
 
 ```bash
 for campaign in campaigns/*/; do
   echo "Validating $campaign..."
-  campaign_validator "$campaign"
+  antares-sdk campaign validate "$campaign"
 done
 ```
 
@@ -793,6 +853,7 @@ cp data/items.ron data/items_template.ron
 
 ## See Also
 
+- **SDK CLI Usage Reference**: `docs/how-to/sdk_cli_usage.md`
 - **SDK API Reference**: `docs/reference/sdk_api.md`
 - **Campaign Tutorial**: `docs/tutorials/creating_campaigns.md`
 - **Map Builder Guide**: `docs/how-to/using_map_builder.md`
@@ -800,5 +861,5 @@ cp data/items.ron data/items_template.ron
 
 ---
 
-**Last Updated**: 2024
-**SDK Version**: 0.1.0
+**Last Updated**: 2025
+**SDK Version**: 0.2.0

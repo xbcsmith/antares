@@ -195,7 +195,7 @@ The Campaign Builder validates your definitions and warns about:
 After creating custom classes or races, validate your campaign:
 
 ```bash
-cargo run --bin campaign_validator -- campaigns/my_campaign
+cargo run --bin antares-sdk -- campaign validate campaigns/my_campaign
 ```
 
 The validator checks:

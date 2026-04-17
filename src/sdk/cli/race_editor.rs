@@ -1,46 +1,90 @@
-// SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Race Editor CLI
+//! `antares-sdk race` — Interactive race definition editor.
 //!
-//! Interactive command-line tool for creating and editing character race definitions.
-//! Supports loading, editing, and saving race data in RON format.
+//! Migrated from `src/bin/race_editor.rs`. Provides an interactive
+//! menu-driven REPL for creating and editing character race definitions
+//! stored in RON format.
 //!
 //! # Usage
 //!
-//! ```bash
-//! # Create/edit races in default location
-//! race_editor
-//!
-//! # Edit specific file
-//! race_editor data/races.ron
-//!
-//! # Create new races file
-//! race_editor campaigns/my_campaign/data/races.ron
+//! ```text
+//! antares-sdk race                                   # edit data/races.ron
+//! antares-sdk race campaigns/tutorial/data/races.ron
 //! ```
-//!
-//! # Features
-//!
-//! - Interactive menu-driven interface
-//! - Add/edit/delete race definitions
-//! - Configure stat modifiers
-//! - Set resistances and special abilities
-//! - Input validation
-//! - Pretty-printed RON output
 
-#[path = "editor_common.rs"]
-mod editor_common;
-use editor_common::{
-    filter_valid_proficiencies, filter_valid_tags, truncate, STANDARD_ITEM_TAGS,
-    STANDARD_PROFICIENCY_IDS,
+use crate::domain::races::{
+    RaceDatabase, RaceDefinition, Resistances, SizeCategory, StatModifiers,
 };
-
-use antares::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
+use crate::sdk::cli::editor_helpers::{
+    filter_valid_proficiencies, filter_valid_tags, input_multistring_values, read_line, truncate,
+    STANDARD_ITEM_TAGS, STANDARD_PROFICIENCY_IDS,
+};
+use clap::Args;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process;
 
-/// Main application state
+// ──────────────────────────────────────────────────────────────────────────────
+// Clap argument struct
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Arguments for the `antares-sdk race` subcommand.
+#[derive(Args, Debug)]
+#[command(
+    about = "Interactive race definition editor",
+    long_about = "Interactive menu-driven REPL for creating and editing character race\n\
+                  definitions stored in RON format.\n\n\
+                  Defaults to `data/races.ron` if no file is specified."
+)]
+pub struct RaceArgs {
+    /// Path to the races RON file.
+    ///
+    /// Defaults to `data/races.ron`. Ignored when `--campaign` is provided.
+    #[arg(default_value = "data/races.ron", value_name = "FILE")]
+    pub file: PathBuf,
+
+    /// Campaign directory. When provided, opens `<DIR>/data/races.ron`
+    /// instead of the positional FILE argument.
+    ///
+    /// Example: `antares-sdk race --campaign campaigns/tutorial`
+    /// is equivalent to: `antares-sdk race campaigns/tutorial/data/races.ron`
+    #[arg(long, value_name = "DIR")]
+    pub campaign: Option<PathBuf>,
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Public entry point
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Run the interactive race editor with the given arguments.
+///
+/// # Errors
+///
+/// Returns `Err` if the file cannot be loaded (e.g. invalid RON syntax).
+pub fn run(args: RaceArgs) -> Result<(), Box<dyn std::error::Error>> {
+    // Resolve the target file: --campaign takes precedence over the positional FILE.
+    let file = match args.campaign {
+        Some(campaign_dir) => campaign_dir.join("data").join("races.ron"),
+        None => args.file,
+    };
+
+    println!("========================================");
+    println!("    ANTARES RACE EDITOR v0.2.0          ");
+    println!("========================================");
+
+    let mut editor = RaceEditor::load(file)?;
+    editor.run();
+
+    println!("\nThank you for using Antares Race Editor!");
+    Ok(())
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Editor state
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Main application state for the race editor.
 struct RaceEditor {
     races: Vec<RaceDefinition>,
     file_path: PathBuf,
@@ -48,12 +92,15 @@ struct RaceEditor {
 }
 
 impl RaceEditor {
-    /// Creates a new editor with loaded races from file
+    /// Creates a new editor with loaded races from file.
+    ///
+    /// Uses [`RaceDatabase::load_from_file`] for consistent parsing behaviour
+    /// with the class editor (rather than raw `ron::from_str`).
     fn load(path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let races = if path.exists() {
             println!("Loading races from: {}", path.display());
-            let contents = std::fs::read_to_string(&path)?;
-            let mut vec: Vec<RaceDefinition> = ron::from_str(&contents)?;
+            let db = RaceDatabase::load_from_file(&path)?;
+            let mut vec: Vec<RaceDefinition> = db.all_races().cloned().collect();
             vec.sort_by(|a, b| a.id.cmp(&b.id));
             vec
         } else {
@@ -68,12 +115,12 @@ impl RaceEditor {
         })
     }
 
-    /// Main menu loop
+    /// Main menu loop.
     fn run(&mut self) {
         loop {
             self.show_menu();
 
-            let choice = self.read_input("Choice: ");
+            let choice = read_line("Choice: ");
 
             match choice.trim() {
                 "1" => self.list_races(),
@@ -95,11 +142,11 @@ impl RaceEditor {
                 _ => println!("Invalid choice. Please try again."),
             }
 
-            println!(); // Blank line between operations
+            println!();
         }
     }
 
-    /// Displays the main menu
+    /// Displays the main menu.
     fn show_menu(&self) {
         println!("\n========================================");
         println!("       ANTARES RACE EDITOR              ");
@@ -122,7 +169,7 @@ impl RaceEditor {
         println!("----------------------------------------");
     }
 
-    /// Lists all races
+    /// Lists all races.
     fn list_races(&self) {
         if self.races.is_empty() {
             println!("\nNo races defined yet.");
@@ -161,15 +208,15 @@ impl RaceEditor {
         println!("+-----+--------------+----------------+-----------------------+--------+");
     }
 
-    /// Adds a new race
+    /// Adds a new race.
     fn add_race(&mut self) {
         println!("\n========================================");
         println!("        ADD NEW RACE                    ");
         println!("========================================");
 
         let id = loop {
-            let input = self.read_input("Race ID (lowercase, e.g., 'halfelf'): ");
-            let trimmed = input.trim();
+            let input = read_line("Race ID (lowercase, e.g., 'halfelf'): ");
+            let trimmed = input.trim().to_string();
 
             if trimmed.is_empty() {
                 println!("ID cannot be empty");
@@ -186,15 +233,14 @@ impl RaceEditor {
                 continue;
             }
 
-            break trimmed.to_string();
+            break trimmed;
         };
 
-        let name = self.read_input("Display Name (e.g., 'Half-Elf'): ");
-        let description = self.read_input("Description: ");
+        let name = read_line("Display Name (e.g., 'Half-Elf'): ");
+        let description = read_line("Description: ");
         let stat_modifiers = self.input_stat_modifiers();
         let resistances = self.input_resistances();
         let size = self.input_size_category();
-
         let special_abilities = self.input_special_abilities();
         let proficiencies = self.input_proficiencies();
         let incompatible_item_tags = self.input_incompatible_tags();
@@ -218,7 +264,7 @@ impl RaceEditor {
         println!("Race '{}' created successfully!", id);
     }
 
-    /// Edits an existing race
+    /// Edits an existing race.
     fn edit_race(&mut self) {
         if self.races.is_empty() {
             println!("No races to edit.");
@@ -228,7 +274,7 @@ impl RaceEditor {
         self.list_races();
 
         let idx = loop {
-            let input = self.read_input("\nEnter race index to edit (or 'c' to cancel): ");
+            let input = read_line("\nEnter race index to edit (or 'c' to cancel): ");
             if input.trim().eq_ignore_ascii_case("c") {
                 return;
             }
@@ -272,17 +318,17 @@ impl RaceEditor {
         );
         println!("  c. Cancel");
 
-        let choice = self.read_input("\nChoice: ");
+        let choice = read_line("\nChoice: ");
 
         match choice.trim() {
             "1" => {
-                let new_name = self.read_input("New display name: ");
+                let new_name = read_line("New display name: ");
                 self.races[idx].name = new_name.trim().to_string();
                 self.modified = true;
                 println!("Name updated");
             }
             "2" => {
-                let new_desc = self.read_input("New description: ");
+                let new_desc = read_line("New description: ");
                 self.races[idx].description = new_desc.trim().to_string();
                 self.modified = true;
                 println!("Description updated");
@@ -328,7 +374,7 @@ impl RaceEditor {
         }
     }
 
-    /// Deletes a race
+    /// Deletes a race.
     fn delete_race(&mut self) {
         if self.races.is_empty() {
             println!("No races to delete.");
@@ -338,7 +384,7 @@ impl RaceEditor {
         self.list_races();
 
         let idx = loop {
-            let input = self.read_input("\nEnter race index to delete (or 'c' to cancel): ");
+            let input = read_line("\nEnter race index to delete (or 'c' to cancel): ");
             if input.trim().eq_ignore_ascii_case("c") {
                 return;
             }
@@ -350,7 +396,7 @@ impl RaceEditor {
         };
 
         let race = &self.races[idx];
-        let confirm = self.read_input(&format!(
+        let confirm = read_line(&format!(
             "Delete race '{}'? This cannot be undone! (yes/no): ",
             race.name
         ));
@@ -364,7 +410,7 @@ impl RaceEditor {
         }
     }
 
-    /// Previews a race with detailed information
+    /// Previews a race with detailed information.
     fn preview_race(&self) {
         if self.races.is_empty() {
             println!("No races to preview.");
@@ -374,7 +420,7 @@ impl RaceEditor {
         self.list_races();
 
         let idx = loop {
-            let input = self.read_input("\nEnter race index to preview (or 'c' to cancel): ");
+            let input = read_line("\nEnter race index to preview (or 'c' to cancel): ");
             if input.trim().eq_ignore_ascii_case("c") {
                 return;
             }
@@ -414,8 +460,6 @@ impl RaceEditor {
         println!("    Poison:      {:3}%", race.resistances.poison);
         println!("    Psychic:     {:3}%", race.resistances.psychic);
 
-        // Disablement system removed - proficiency system now handles restrictions
-
         if race.special_abilities.is_empty() {
             println!("\n  Special Abilities: None");
         } else {
@@ -443,7 +487,6 @@ impl RaceEditor {
             }
         }
 
-        // Show sample character with average stats
         println!("\n  Sample Starting Character (base stats 10):");
         println!(
             "    Might:       {}",
@@ -475,12 +518,14 @@ impl RaceEditor {
         );
     }
 
-    /// Saves races to file
+    /// Saves races to file.
+    ///
+    /// RON serialization is normalized to match the class editor:
+    /// `struct_names(true)` for consistency across all editor outputs.
     fn save(&mut self) -> bool {
         print!("Saving to {}... ", self.file_path.display());
         io::stdout().flush().unwrap();
 
-        // Ensure parent directory exists
         if let Some(parent) = self.file_path.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
                 println!("\nFailed to create directory: {}", e);
@@ -488,9 +533,9 @@ impl RaceEditor {
             }
         }
 
-        // Serialize to RON
+        // Normalized to match the class editor serialization config.
         let ron_config = ron::ser::PrettyConfig::new()
-            .struct_names(false)
+            .struct_names(true)
             .separate_tuple_members(true)
             .enumerate_arrays(false);
 
@@ -502,7 +547,6 @@ impl RaceEditor {
             }
         };
 
-        // Write to file
         if let Err(e) = std::fs::write(&self.file_path, ron_string) {
             println!("\nFailed to write file: {}", e);
             return false;
@@ -513,46 +557,24 @@ impl RaceEditor {
         true
     }
 
-    /// Confirms exit with unsaved changes
+    /// Confirms exit with unsaved changes.
     fn confirm_exit(&self) -> bool {
         if !self.modified {
             return true;
         }
 
-        let response = self.read_input("You have unsaved changes. Quit anyway? (yes/no): ");
+        let response = read_line("You have unsaved changes. Quit anyway? (yes/no): ");
         response.trim().eq_ignore_ascii_case("yes")
     }
 
-    // ===== Input Helpers =====
+    // ===== Input helpers =====
 
-    /// Reads a line of input with a prompt
-    fn read_input(&self, prompt: &str) -> String {
-        print!("{}", prompt);
-        io::stdout().flush().unwrap();
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
-        input
+    /// Inputs multiple string values (one per line), blank line terminates.
+    fn input_multistring(&self, prompt: &str, label: &str) -> Vec<String> {
+        input_multistring_values(prompt, label)
     }
 
-    /// Inputs multiple string values (one per line), empty line terminates.
-    fn input_multistring_values(&self, prompt: &str, label: &str) -> Vec<String> {
-        if !prompt.is_empty() {
-            println!("\n{}", prompt);
-        }
-        println!("(Enter values one per line. Press Enter on an empty line to finish.)");
-        let mut values: Vec<String> = Vec::new();
-        loop {
-            let input = self.read_input(label);
-            let trimmed = input.trim();
-            if trimmed.is_empty() {
-                break;
-            }
-            values.push(trimmed.to_string());
-        }
-        values
-    }
-
-    /// Inputs stat modifiers
+    /// Inputs stat modifiers.
     fn input_stat_modifiers(&self) -> StatModifiers {
         println!("\nStat Modifiers (range: -10 to +10):");
         println!("  Enter modifiers for each stat (press Enter for 0)");
@@ -568,10 +590,10 @@ impl RaceEditor {
         }
     }
 
-    /// Reads a single stat modifier
+    /// Reads a single stat modifier.
     fn read_stat_modifier(&self, stat_name: &str) -> i8 {
         loop {
-            let input = self.read_input(&format!("  {}: ", stat_name));
+            let input = read_line(&format!("  {}: ", stat_name));
             let trimmed = input.trim();
 
             if trimmed.is_empty() {
@@ -586,7 +608,7 @@ impl RaceEditor {
         }
     }
 
-    /// Inputs resistances
+    /// Inputs resistances.
     fn input_resistances(&self) -> Resistances {
         println!("\nElemental Resistances (range: 0 to 100):");
         println!("  Enter resistance % for each element (press Enter for 0)");
@@ -603,10 +625,10 @@ impl RaceEditor {
         }
     }
 
-    /// Reads a single resistance value
+    /// Reads a single resistance value.
     fn read_resistance(&self, element: &str) -> u8 {
         loop {
-            let input = self.read_input(&format!("  {}: ", element));
+            let input = read_line(&format!("  {}: ", element));
             let trimmed = input.trim();
 
             if trimmed.is_empty() {
@@ -621,7 +643,7 @@ impl RaceEditor {
         }
     }
 
-    /// Inputs size category
+    /// Inputs size category.
     fn input_size_category(&self) -> SizeCategory {
         println!("\nSize Category:");
         println!("  1. Small (gnomes, halflings)");
@@ -629,7 +651,7 @@ impl RaceEditor {
         println!("  3. Large (half-giants, ogres)");
 
         loop {
-            let input = self.read_input("Choice (1-3, default 2): ");
+            let input = read_line("Choice (1-3, default 2): ");
             let trimmed = input.trim();
 
             if trimmed.is_empty() {
@@ -645,15 +667,15 @@ impl RaceEditor {
         }
     }
 
-    /// Inputs special abilities (one per line; blank line finishes)
+    /// Inputs special abilities.
     fn input_special_abilities(&self) -> Vec<String> {
         println!(
             "\nSpecial Abilities (enter one per line; press Enter on an empty line to finish):"
         );
-        self.input_multistring_values("Special Abilities:", "Ability: ")
+        self.input_multistring("Special Abilities:", "Ability: ")
     }
 
-    /// Inputs proficiencies with validation (one per line; blank line finishes)
+    /// Inputs proficiencies with validation.
     fn input_proficiencies(&self) -> Vec<String> {
         println!("\n========================================");
         println!("        PROFICIENCY SELECTION           ");
@@ -673,23 +695,21 @@ impl RaceEditor {
         println!("\n  Magic Items:");
         println!("    • arcane_item        - Arcane magic items (wands, staves)");
         println!("    • divine_item        - Divine magic items (holy symbols, relics)");
-
         println!("\nEnter proficiencies (one per line; leave empty to finish):");
         println!("  Example: simple_weapon");
 
-        let candidates = self.input_multistring_values("", "Proficiency: ");
+        let candidates = self.input_multistring("", "Proficiency: ");
 
         if candidates.is_empty() {
             return Vec::new();
         }
 
-        // Validate proficiencies and warn about invalid ones (reuse filter helper)
         let mut valid_proficiencies = filter_valid_proficiencies(&candidates);
         for prof in &candidates {
             if !STANDARD_PROFICIENCY_IDS.contains(&prof.as_str()) {
                 println!("⚠️  Warning: '{}' is not a standard proficiency ID", prof);
                 println!("   Standard IDs: {}", STANDARD_PROFICIENCY_IDS.join(", "));
-                let confirm = self.read_input(&format!("   Include '{}' anyway? (y/n): ", prof));
+                let confirm = read_line(&format!("   Include '{}' anyway? (y/n): ", prof));
                 if confirm.trim().eq_ignore_ascii_case("y") {
                     valid_proficiencies.push(prof.clone());
                 }
@@ -703,7 +723,7 @@ impl RaceEditor {
         valid_proficiencies
     }
 
-    /// Inputs incompatible item tags with validation (one per line; blank finishes)
+    /// Inputs incompatible item tags with validation.
     fn input_incompatible_tags(&self) -> Vec<String> {
         println!("\n========================================");
         println!("   INCOMPATIBLE ITEM TAGS SELECTION     ");
@@ -715,24 +735,22 @@ impl RaceEditor {
         println!("  • elven_crafted      - Elven-crafted items");
         println!("  • dwarven_crafted    - Dwarven-crafted items");
         println!("  • requires_strength  - Items requiring high strength");
-
         println!("\nRaces with incompatible tags cannot use items with those tags.");
         println!("Example: A halfling might have 'large_weapon' incompatible.");
         println!("\nEnter incompatible tags (one per line; leave empty to finish):");
 
-        let tags = self.input_multistring_values("", "Tag: ");
+        let tags = self.input_multistring("", "Tag: ");
 
         if tags.is_empty() {
             return Vec::new();
         }
 
-        // Validate tags using filter helper, confirm unknowns
         let mut valid_tags = filter_valid_tags(&tags);
         for tag in &tags {
             if !STANDARD_ITEM_TAGS.contains(&tag.as_str()) {
                 println!("⚠️  Warning: '{}' is not a standard item tag", tag);
                 println!("   Standard tags: {}", STANDARD_ITEM_TAGS.join(", "));
-                let confirm = self.read_input(&format!("   Include '{}' anyway? (y/n): ", tag));
+                let confirm = read_line(&format!("   Include '{}' anyway? (y/n): ", tag));
                 if confirm.trim().eq_ignore_ascii_case("y") {
                     valid_tags.push(tag.clone());
                 }
@@ -747,43 +765,70 @@ impl RaceEditor {
     }
 }
 
-// ===== Helper Functions =====
-// `truncate`, `filter_valid_proficiencies`, `filter_valid_tags`,
-// `STANDARD_PROFICIENCY_IDS`, and `STANDARD_ITEM_TAGS` are imported
-// from `editor_common`.
-
-// ===== Main Entry Point =====
-
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-
-    let file_path = if args.len() > 1 {
-        PathBuf::from(&args[1])
-    } else {
-        PathBuf::from("data/races.ron")
-    };
-
-    println!("========================================");
-    println!("    ANTARES RACE EDITOR v0.2.0          ");
-    println!("========================================");
-
-    let mut editor = match RaceEditor::load(file_path) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("Failed to load races: {}", e);
-            eprintln!("   Check that the file path is correct and the file is valid RON format.");
-            process::exit(1);
-        }
-    };
-
-    editor.run();
-
-    println!("\nThank you for using Antares Race Editor!");
-}
+// ──────────────────────────────────────────────────────────────────────────────
+// Tests
+// ──────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sdk::cli::editor_helpers::{
+        filter_valid_proficiencies, filter_valid_tags, parse_multistring_input, truncate,
+    };
+
+    /// `--campaign <DIR>` must set the campaign field.
+    #[test]
+    fn test_race_args_campaign_flag() {
+        use clap::Parser;
+        use std::path::PathBuf;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            args: RaceArgs,
+        }
+
+        let result = TestCli::try_parse_from(["test", "--campaign", "campaigns/tutorial"]);
+        assert!(
+            result.is_ok(),
+            "RaceArgs should parse --campaign: {:?}",
+            result.err()
+        );
+        let args = result.unwrap().args;
+        assert_eq!(
+            args.campaign,
+            Some(PathBuf::from("campaigns/tutorial")),
+            "--campaign should be set to the provided directory"
+        );
+        assert_eq!(
+            args.file,
+            PathBuf::from("data/races.ron"),
+            "file should remain at its default when --campaign is used"
+        );
+    }
+
+    /// Default RaceArgs should have no campaign and the standard file path.
+    #[test]
+    fn test_race_args_defaults() {
+        use clap::Parser;
+        use std::path::PathBuf;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            args: RaceArgs,
+        }
+
+        let result = TestCli::try_parse_from(["test"]);
+        assert!(
+            result.is_ok(),
+            "RaceArgs should parse with no arguments: {:?}",
+            result.err()
+        );
+        let args = result.unwrap().args;
+        assert_eq!(args.file, PathBuf::from("data/races.ron"));
+        assert!(args.campaign.is_none(), "campaign should default to None");
+    }
 
     #[test]
     fn test_truncate() {
@@ -817,17 +862,6 @@ mod tests {
         assert_eq!(resistances.psychic, 0);
     }
 
-    // Test-only helper: moved here so it exists only in test builds and won't trigger
-    // dead-code warnings in non-test builds.
-    fn parse_multistring_input(input: &str) -> Vec<String> {
-        input
-            .lines()
-            .map(|l| l.trim())
-            .filter(|l| !l.is_empty())
-            .map(|l| l.to_string())
-            .collect()
-    }
-
     #[test]
     fn test_filter_valid_proficiencies() {
         let candidates = vec![
@@ -841,10 +875,8 @@ mod tests {
             vec!["simple_weapon".to_string(), "martial_melee".to_string()]
         );
 
-        // unknown items are excluded
         let candidates2 = vec!["not_a_proficiency".to_string()];
-        let filtered2 = filter_valid_proficiencies(&candidates2);
-        assert!(filtered2.is_empty());
+        assert!(filter_valid_proficiencies(&candidates2).is_empty());
     }
 
     #[test]
@@ -866,9 +898,7 @@ mod tests {
 
     #[test]
     fn test_parse_multistring_input_empty() {
-        let s = "";
-        let parsed = parse_multistring_input(s);
-        assert!(parsed.is_empty());
+        assert!(parse_multistring_input("").is_empty());
     }
 
     #[test]

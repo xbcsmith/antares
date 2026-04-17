@@ -15,23 +15,23 @@ A fantasy character name generator for creating NPCs and characters in your Anta
 
 ### Install
 
-The tool is included with Antares. Build it once:
+The tool is included with the `antares-sdk` binary. Build it once:
 
 ```bash
-cargo build --bin antares-name-gen
+cargo build --bin antares-sdk
 ```
 
 ### Generate Your First Names
 
 ```bash
 # Generate 5 names (default)
-cargo run --bin antares-name-gen
+cargo run --bin antares-sdk -- names
 
 # Generate 10 star-themed names
-cargo run --bin antares-name-gen -n 10 --theme star
+cargo run --bin antares-sdk -- names --number 10 --theme star
 
 # Generate names with backstories
-cargo run --bin antares-name-gen -n 5 --theme antares --lore
+cargo run --bin antares-sdk -- names --number 5 --theme antares --lore
 ```
 
 ### Example Output
@@ -97,7 +97,7 @@ cargo run --example name_generator_example
 Generate 20 generic NPC names:
 
 ```bash
-cargo run --bin antares-name-gen -n 20 --theme fantasy --quiet > npcs.txt
+cargo run --bin antares-sdk -- names --number 20 --theme fantasy --quiet > npcs.txt
 ```
 
 ### Create Pre-Generated Characters
@@ -105,7 +105,7 @@ cargo run --bin antares-name-gen -n 20 --theme fantasy --quiet > npcs.txt
 Generate characters with backstories:
 
 ```bash
-cargo run --bin antares-name-gen -n 6 --theme star --lore > characters.txt
+cargo run --bin antares-sdk -- names --number 6 --theme star --lore > characters.txt
 ```
 
 ### Generate Guard Names
@@ -113,7 +113,7 @@ cargo run --bin antares-name-gen -n 6 --theme star --lore > characters.txt
 Use the Arcturus (guardian) theme:
 
 ```bash
-cargo run --bin antares-name-gen -n 10 --theme arcturus
+cargo run --bin antares-sdk -- names --number 10 --theme arcturus
 ```
 
 ### Generate Enemy Names
@@ -121,35 +121,35 @@ cargo run --bin antares-name-gen -n 10 --theme arcturus
 Use the Antares (warrior) theme:
 
 ```bash
-cargo run --bin antares-name-gen -n 10 --theme antares --lore
+cargo run --bin antares-sdk -- names --number 10 --theme antares --lore
 ```
 
 ## Theme Selection Guide
 
-| Theme     | Best For                          | Example Names           |
-|-----------|-----------------------------------|-------------------------|
-| Fantasy   | Generic NPCs, townspeople         | Thalion, Kormendor      |
-| Star      | Astronomers, mystics, celestial   | Antarion, Vegaar        |
-| Antares   | Warriors, aggressive characters   | Crimsonus, Scorpiusar   |
-| Arcturus  | Guardians, protectors, wise elders| Guardianar, Sentinelix  |
+| Theme    | Best For                           | Example Names          |
+| -------- | ---------------------------------- | ---------------------- |
+| Fantasy  | Generic NPCs, townspeople          | Thalion, Kormendor     |
+| Star     | Astronomers, mystics, celestial    | Antarion, Vegaar       |
+| Antares  | Warriors, aggressive characters    | Crimsonus, Scorpiusar  |
+| Arcturus | Guardians, protectors, wise elders | Guardianar, Sentinelix |
 
 ## CLI Options
 
 ```
-antares-name-gen [OPTIONS]
+antares-sdk names [OPTIONS]
 
 Options:
-  -n, --number <N>    Number of names (default: 5)
-  -t, --theme <THEME> Theme: fantasy, star, antares, arcturus (default: fantasy)
-  -l, --lore          Include lore descriptions
-  -q, --quiet         Names only (no header)
-  -h, --help          Show help
-  -V, --version       Show version
+  -n, --number <N>       Number of names to generate [default: 5]
+  -t, --theme <THEME>    Theme: fantasy, star, antares, arcturus [default: fantasy]
+  -l, --lore             Include lore descriptions
+  -q, --quiet            Names only, no header
+  -h, --help             Show help
 ```
 
 ## Next Steps
 
 - **Full Guide**: See `docs/how-to/use_name_generator.md` for detailed usage
+- **All SDK Tools**: See `docs/how-to/sdk_cli_usage.md` for the complete subcommand reference
 - **API Docs**: Run `cargo doc --open` and search for `name_generator`
 - **Examples**: Check `examples/name_generator_example.rs` for code samples
 
@@ -158,25 +158,28 @@ Options:
 **Problem**: Names feel too similar
 
 **Solution**: Generate more names for better variety:
+
 ```bash
-cargo run --bin antares-name-gen -n 50 --theme star
+cargo run --bin antares-sdk -- names --number 50 --theme star
 ```
 
 **Problem**: Want a specific style not covered by themes
 
-**Solution**: Use Fantasy theme as a base and manually edit the output, or run multiple times until you find names you like.
+**Solution**: Use Fantasy theme as a base and manually edit the output, or run
+multiple times until you find names you like.
 
 ## Tips
 
 1. **Mix themes** for diverse NPCs in a single campaign
-2. **Use quiet mode** (`-q`) for scripting and bulk generation
+2. **Use quiet mode** (`--quiet`) for scripting and bulk generation
 3. **Save outputs** to text files for future reference
-4. **Generate extras** - make more names than you need
+4. **Generate extras** — make more names than you need
 5. **Combine with lore** for quick NPC backstories during session prep
 
 ## Help
 
 For more information:
-- CLI help: `cargo run --bin antares-name-gen -- --help`
+
+- CLI help: `cargo run --bin antares-sdk -- names --help`
 - API docs: `cargo doc --open`
 - Implementation details: `docs/explanation/implementations.md`

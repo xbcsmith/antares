@@ -508,7 +508,7 @@ Run the campaign validator to check for errors:
 
 ```bash
 # From the antares directory
-campaign_validator campaigns/my_first_campaign
+antares-sdk campaign validate campaigns/my_first_campaign
 ```
 
 **Expected Output**:
@@ -602,7 +602,7 @@ cd test_install
 tar -xzf ../my_first_adventure_v1.0.0.tar.gz
 
 # Validate the extracted campaign
-campaign_validator my_first_campaign
+antares-sdk campaign validate my_first_campaign
 ```
 
 ---
@@ -703,10 +703,10 @@ data/dialogues.ron   # Optional: Dialogues
 ### Common Commands
 ```bash
 # Validate campaign
-campaign_validator campaigns/my_campaign
+antares-sdk campaign validate campaigns/my_campaign
 
 # Validate with verbose output
-campaign_validator -v campaigns/my_campaign
+antares-sdk campaign validate -v campaigns/my_campaign
 
 # Package campaign
 tar -czf my_campaign_v1.0.0.tar.gz my_campaign/
@@ -741,6 +741,6 @@ Having trouble? Check these resources:
 
 1. **Documentation**: `/docs/` directory
 2. **Examples**: `/campaigns/example/`
-3. **Validation**: Use `campaign_validator -v` for detailed output
+3. **Validation**: Use `antares-sdk campaign validate -v` for detailed output
 
 Happy campaign creating!
