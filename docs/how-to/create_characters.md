@@ -408,7 +408,7 @@ Create a balanced party of 6 characters covering different roles:
 Validate character definitions:
 
 ```bash
-cargo run --bin campaign_validator -- campaigns/my_campaign
+cargo run --bin antares-sdk -- campaign validate campaigns/my_campaign
 ```
 
 The validator checks:

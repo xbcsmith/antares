@@ -97,11 +97,35 @@ antares-sdk --quiet names --theme fantasy --number 100
 
 #### 4.4 — Documentation Updated
 
-| File                                          | Change                                                                                                 |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `docs/tutorials/name_generator_quickstart.md` | All `cargo run --bin antares-name-gen` references replaced with `cargo run --bin antares-sdk -- names` |
-| `docs/how-to/sdk_cli_usage.md`                | **New file** — complete reference for all `antares-sdk` subcommands                                    |
-| `docs/explanation/implementations.md`         | This entry                                                                                             |
+| File                                                        | Change                                                                                                 |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `docs/tutorials/name_generator_quickstart.md`               | All `cargo run --bin antares-name-gen` references replaced with `cargo run --bin antares-sdk -- names` |
+| `docs/how-to/sdk_cli_usage.md`                              | **New file** — complete reference for all `antares-sdk` subcommands                                    |
+| `docs/explanation/implementations.md`                       | This entry                                                                                             |
+
+#### 4.4 (follow-up) — Stale Docs Sweep
+
+Phase 4.4 originally updated only three files. A follow-up pass identified and
+updated **12 additional documentation files** that still referenced the deleted
+standalone binaries. All old binary names are now replaced with their
+`antares-sdk` subcommand equivalents throughout the entire `docs/` tree.
+
+| File                                                        | Old Reference(s) Fixed                                    |
+| ----------------------------------------------------------- | --------------------------------------------------------- |
+| `docs/how-to/use_name_generator.md`                         | All `antares-name-gen` → `antares-sdk names`               |
+| `docs/how-to/using_sdk_tools.md`                            | All 5 old binaries → `antares-sdk` subcommands             |
+| `docs/how-to/using_map_builder.md`                          | `map_builder`, `validate_map` → `antares-sdk map build/validate` |
+| `docs/how-to/using_item_editor.md`                          | `item_editor`, `campaign_validator` → `antares-sdk` subcommands |
+| `docs/how-to/creating_maps.md`                              | `validate_map` → `antares-sdk map validate`               |
+| `docs/how-to/add_classes_races.md`                          | `campaign_validator` → `antares-sdk campaign validate`    |
+| `docs/how-to/create_characters.md`                          | `campaign_validator` → `antares-sdk campaign validate`    |
+| `docs/how-to/creating_and_validating_campaigns.md`          | All `campaign_validator` → `antares-sdk campaign validate` |
+| `docs/explanation/modding_guide.md`                         | `campaign_validator` → `antares-sdk campaign validate`; `--package` → `tar -czf` |
+| `docs/tutorials/creating_campaigns.md`                      | Old binary paths → `antares-sdk` subcommands; `--package` → `tar -czf` |
+| `docs/tutorials/getting_started_campaign_creation.md`       | All `campaign_validator` → `antares-sdk campaign validate` |
+| `docs/reference/architecture.md`                            | `src/bin/` listing updated; inline tool references updated  |
+| `docs/reference/map_ron_format.md`                          | `validate_map` → `antares-sdk map validate`               |
+| `docs/reference/campaign_content_format.md`                 | `campaign_validator` → `antares-sdk campaign validate`    |
 
 #### 4.5 — Integration Tests
 

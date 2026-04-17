@@ -19,7 +19,7 @@ The Map Builder is a command-line tool that provides an interactive REPL interfa
 Ensure you have Rust and Cargo installed, then build the project:
 
 ```bash
-cargo build --bin map_builder
+cargo build --bin antares-sdk
 ```
 
 ## Starting the Map Builder
@@ -27,7 +27,7 @@ cargo build --bin map_builder
 Run the tool from the project root:
 
 ```bash
-cargo run --bin map_builder
+cargo run --bin antares-sdk -- map build
 ```
 
 You'll see the welcome screen:
@@ -86,27 +86,20 @@ Add a water feature:
 ✅ Set tile at (10, 0) to Ground/Door
 ```
 
-### Step 5: Add an NPC
-
-```
-> npc 1 5 5 Guard Welcome to the town!
-✅ Added NPC 'Guard' (ID: 1) at (5, 5)
-```
-
-### Step 6: Add a Treasure Event
+### Step 5: Add a Treasure Event
 
 ```
 > event 15 15 treasure 10 11 12
 ✅ Added event at (15, 15)
 ```
 
-### Step 7: View Your Map
+### Step 6: View Your Map
 
 ```
 > show
 ```
 
-### Step 8: Save the Map
+### Step 7: Save the Map
 
 ```
 > save data/maps/my_first_map.ron
@@ -263,23 +256,9 @@ Creates a trap event.
 
 ### NPCs
 
-#### npc <id> <x> <y> <name> <dialogue...>
-
-Adds an NPC at the specified position.
-
-```
-> npc 1 10 10 Merchant Buy something from my shop!
-✅ Added NPC 'Merchant' (ID: 1) at (10, 10)
-```
-
-**Parameters:**
-
-- `id`: NPC identifier (must be unique)
-- `x`, `y`: NPC position
-- `name`: NPC name (no spaces)
-- `dialogue`: Dialogue text (can contain spaces)
-
-**Warning:** If you add an NPC with a duplicate ID, the tool will show a warning but still add it.
+NPC placements are defined directly in the map RON file under the
+`npc_placements` field, or managed through the Campaign Builder UI.
+The interactive REPL does not include an `npc` command.
 
 ### Viewing
 
@@ -389,7 +368,6 @@ Example session:
 > fill 0 0 0 29 ground normal
 > fill 29 0 29 29 ground normal
 > set 15 0 ground door
-> npc 1 15 15 Mayor Welcome to our town!
 > event 10 10 sign Town Square
 > save data/maps/town.ron
 ```
@@ -472,7 +450,7 @@ The tool performs basic validation:
 For comprehensive validation, use the `validate_map` tool after saving:
 
 ```bash
-cargo run --bin validate_map -- data/maps/my_map.ron
+cargo run --bin antares-sdk -- map validate data/maps/my_map.ron
 ```
 
 ## Monster and Item IDs
@@ -536,7 +514,7 @@ After creating your maps:
 1. **Validate** - Run `validate_map` to check for errors:
 
    ```bash
-   cargo run --bin validate_map -- data/maps/your_map.ron
+   cargo run --bin antares-sdk -- map validate data/maps/your_map.ron
    ```
 
 2. **Test in-game** - Load the map in the game and playtest it

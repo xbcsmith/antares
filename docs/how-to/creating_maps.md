@@ -58,7 +58,7 @@ Copy this minimal valid map:
 Run the validation tool:
 
 ```bash
-cargo run --bin validate_map data/maps/my_first_map.ron
+cargo run --bin antares-sdk -- map validate data/maps/my_first_map.ron
 ```
 
 If successful, you'll see:
@@ -423,7 +423,7 @@ exits: [
 1. **Validate syntax**:
 
    ```bash
-   cargo run --bin validate_map data/maps/your_map.ron
+   cargo run --bin antares-sdk -- map validate data/maps/your_map.ron
    ```
 
 2. **Check for common issues**:
@@ -644,9 +644,9 @@ events: [
 - **Architecture**: [`docs/reference/architecture.md`](../reference/architecture.md) Section 4.2
 - **Character Definitions**: [`docs/how-to/character_definitions.md`](character_definitions.md)
 - **Proficiency System**: [`docs/reference/architecture.md`](../reference/architecture.md) Section 4.4
-- **Validation Tool**: `src/bin/validate_map.rs`
+- **Validation Tool**: `src/sdk/cli/map_validator.rs`
 - **Map Editor Tools**:
-  - CLI Map Validator: `cargo run --bin validate_map`
+  - CLI Map Validator: `cargo run --bin antares-sdk -- map validate`
   - SDK Map Editor: Campaign Builder UI
 
 ---

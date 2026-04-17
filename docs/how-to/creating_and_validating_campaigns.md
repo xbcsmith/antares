@@ -225,7 +225,7 @@ Map(
 Validate your campaign structure and content:
 
 ```bash
-campaign_validator campaigns/my_campaign
+antares-sdk campaign validate campaigns/my_campaign
 ```
 
 **Expected Output**:
@@ -256,7 +256,7 @@ No issues found!
 For more detailed output:
 
 ```bash
-campaign_validator -v campaigns/my_campaign
+antares-sdk campaign validate -v campaigns/my_campaign
 ```
 
 This shows progress through each validation stage with detailed statistics.
@@ -352,7 +352,7 @@ Add items in `data/items.ron`.
 To validate all campaigns in a directory:
 
 ```bash
-campaign_validator --all
+antares-sdk campaign validate --all
 ```
 
 **Output**:
@@ -375,7 +375,7 @@ Total warnings: 1
 ### Custom Campaigns Directory
 
 ```bash
-campaign_validator --all -d /path/to/campaigns
+antares-sdk campaign validate --all -d /path/to/campaigns
 ```
 
 ---
@@ -400,9 +400,9 @@ jobs:
         with:
           toolchain: stable
       - name: Build validator
-        run: cargo build --release --bin campaign_validator
+        run: cargo build --release --bin antares-sdk
       - name: Validate campaigns
-        run: ./target/release/campaign_validator --all campaigns/
+        run: ./target/release/antares-sdk campaign validate --all campaigns/
 ```
 
 **GitLab CI** (`.gitlab-ci.yml`):
@@ -411,8 +411,8 @@ jobs:
 validate-campaigns:
   stage: test
   script:
-    - cargo build --release --bin campaign_validator
-    - ./target/release/campaign_validator --all campaigns/
+    - cargo build --release --bin antares-sdk
+    - ./target/release/antares-sdk campaign validate --all campaigns/
 ```
 
 ### Pre-commit Hook
@@ -422,7 +422,7 @@ Create `.git/hooks/pre-commit`:
 ```bash
 #!/bin/bash
 echo "Validating campaign..."
-campaign_validator campaigns/my_campaign || exit 1
+antares-sdk campaign validate campaigns/my_campaign || exit 1
 echo "Validation passed!"
 ```
 
@@ -437,7 +437,7 @@ chmod +x .git/hooks/pre-commit
 Get machine-readable output:
 
 ```bash
-campaign_validator --json campaigns/my_campaign > validation_report.json
+antares-sdk campaign validate --json campaigns/my_campaign > validation_report.json
 ```
 
 **Output**:
@@ -456,13 +456,13 @@ campaign_validator --json campaigns/my_campaign > validation_report.json
 
 ```bash
 # Check if valid
-campaign_validator --json campaigns/my_campaign | jq '.is_valid'
+antares-sdk campaign validate --json campaigns/my_campaign | jq '.is_valid'
 
 # Get error count
-campaign_validator --json campaigns/my_campaign | jq '.error_count'
+antares-sdk campaign validate --json campaigns/my_campaign | jq '.error_count'
 
 # List all errors
-campaign_validator --json campaigns/my_campaign | jq '.errors[]'
+antares-sdk campaign validate --json campaigns/my_campaign | jq '.errors[]'
 ```
 
 ---
@@ -558,18 +558,18 @@ engine_version: "0.1.0",
 1. **After Each Content Addition**: Quick validation
 
    ```bash
-   campaign_validator campaigns/my_campaign
+   antares-sdk campaign validate campaigns/my_campaign
    ```
 
 2. **Before Committing**: Full validation
 
    ```bash
-   campaign_validator -v campaigns/my_campaign
+   antares-sdk campaign validate -v campaigns/my_campaign
    ```
 
 3. **Before Release**: All campaigns
    ```bash
-   campaign_validator --all
+   antares-sdk campaign validate --all
    ```
 
 ### Debug Validation Issues
@@ -577,7 +577,7 @@ engine_version: "0.1.0",
 **Errors Only Mode** (hide warnings):
 
 ```bash
-campaign_validator -e campaigns/my_campaign
+antares-sdk campaign validate -e campaigns/my_campaign
 ```
 
 **Focus on Specific Issues**:
@@ -666,7 +666,7 @@ ron-validate campaigns/my_campaign/data/*.ron
 **Large Campaigns**: Use errors-only mode
 
 ```bash
-campaign_validator -e campaigns/my_campaign
+antares-sdk campaign validate -e campaigns/my_campaign
 ```
 
 **Batch Validation**: Validate changed campaigns only
@@ -693,22 +693,22 @@ campaign_validator -e campaigns/my_campaign
 
 ```bash
 # Validate single campaign
-campaign_validator campaigns/my_campaign
+antares-sdk campaign validate campaigns/my_campaign
 
 # Validate all campaigns
-campaign_validator --all
+antares-sdk campaign validate --all
 
 # Verbose output
-campaign_validator -v campaigns/my_campaign
+antares-sdk campaign validate -v campaigns/my_campaign
 
 # JSON output
-campaign_validator --json campaigns/my_campaign
+antares-sdk campaign validate --json campaigns/my_campaign
 
 # Errors only
-campaign_validator -e campaigns/my_campaign
+antares-sdk campaign validate -e campaigns/my_campaign
 
 # Custom campaigns directory
-campaign_validator --all -d /path/to/campaigns
+antares-sdk campaign validate --all -d /path/to/campaigns
 ```
 
 ### Exit Codes
