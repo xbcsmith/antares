@@ -1,5 +1,104 @@
 # Implementations
 
+## Campaign Test Fixture Consolidation (Complete)
+
+### Overview
+
+The `CampaignConfig`, `CampaignData`, and `CampaignAssets` struct initializers
+were repeated verbatim across seven source files. Every time a new field was
+added to these structs the same boilerplate had to be updated in all seven
+places, creating a maintenance burden and a source of bugs.
+
+This task consolidates those initialisers into a single canonical location.
+
+### What Changed
+
+#### `src/sdk/campaign_loader.rs` — `Default` impls
+
+Three new `Default` implementations were added (using the `default_*` free
+functions already present in the file):
+
+- `impl Default for CampaignConfig` — uses `starting_map: 1`,
+  `starting_position: Position::new(0, 0)`, `starting_gold: 100`,
+  `starting_food: 50`, and the existing `default_*` helpers for all other
+  fields.
+- `impl Default for CampaignData` — all fields delegate to their existing
+  `default_*` functions (`data/items.ron`, `data/spells.ron`, …).
+- `impl Default for CampaignAssets` — all fields delegate to their existing
+  `default_*` functions (`assets/tilesets`, `assets/audio`, …).
+
+Callers can now use struct-update syntax to override only the fields relevant
+to their test:
+
+```rust
+let config = CampaignConfig {
+    starting_innkeeper: "my_inn".to_string(),
+    ..CampaignConfig::default()
+};
+```
+
+#### `src/sdk/campaign_loader.rs` — `test_fixtures` module
+
+A `#[cfg(test)] pub(crate) mod test_fixtures` module was added containing
+`pub(crate) fn make_test_campaign() -> Campaign`. This function builds a
+complete `Campaign` from the three new `Default` impls plus
+`GameConfig::default()` and fixed metadata strings (`id: "test"`,
+`name: "Test Campaign"`, `version: "1.0.0"`, etc.).
+
+Any unit test within the `antares` crate can now call:
+
+```rust
+let campaign = crate::sdk::campaign_loader::test_fixtures::make_test_campaign();
+// override fields as needed:
+let campaign = Campaign { id: "custom".to_string(), ..make_test_campaign() };
+```
+
+#### `tests/common/mod.rs` (new file)
+
+A `tests/common/mod.rs` file was created for integration tests. It exposes:
+
+```rust
+pub fn make_test_campaign(id: &str, name: &str, version: &str) -> Campaign
+```
+
+This function mirrors the unit-test helper but is accessible from all files
+under `tests/`.
+
+#### Call-site updates
+
+The following files were updated to replace their inline struct literals:
+
+| File | Change |
+|---|---|
+| `src/sdk/validation.rs` | 3 × `CampaignConfig { … }` → `CampaignConfig { starting_innkeeper: "…", ..CampaignConfig::default() }` |
+| `src/sdk/campaign_packager.rs` | 2 × full `Campaign { … }` → `test_fixtures::make_test_campaign()` |
+| `src/application/mod.rs` | 3 × full `Campaign { … }` → `test_fixtures::make_test_campaign()` (with one field override via `mut`) |
+| `src/application/save_game.rs` | 1 × full `Campaign { … }` → `test_fixtures::make_test_campaign()` |
+| `src/bin/antares.rs` | `create_test_campaign` body → `CampaignConfig::default()`, `CampaignData::default()`, `CampaignAssets::default()` |
+| `src/sdk/campaign_loader.rs` | 2 × own test initialisers → struct-update syntax |
+| `tests/campaign_integration_test.rs` | `create_test_campaign` body → `common::make_test_campaign(…)` |
+
+### Why This Matters
+
+- **Single source of truth**: Adding a new field to `CampaignConfig` now
+  requires updating only `CampaignConfig::default()` in one place.
+- **Consistent defaults**: All test campaigns use the same baseline values,
+  eliminating silent divergence between test suites.
+- **Reduced noise**: Test functions now express only the fields that matter for
+  the behaviour under test, making tests easier to read and maintain.
+
+### Quality Gates
+
+All four quality gates pass:
+
+```text
+cargo fmt         → clean
+cargo check       → Finished, 0 errors
+cargo clippy      → Finished, 0 warnings
+cargo nextest run → 4761 passed, 0 failed
+```
+
+
 ## SDK CLI Consolidation — Phase 4: Cleanup and Polish (Complete)
 
 ### Overview

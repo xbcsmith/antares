@@ -240,7 +240,7 @@ Month Year Date in Game Engine View looks horrible.
 
 Trees are still horrible. Grass sucks as well. Is tree bark textures being applied? You can not tell one tree from the next. Oak, Pine, Palm, Dead all look the same. Foliage particularly Bushes clip tree trunks. And seems like editing them in the SDK does nothing to change their appearance.
 
-All the doors are facing the wrong way
+✅ FIXED - All the doors are facing the wrong way
 
 Show/Hide Tray ICON SDK is not working
 
@@ -289,31 +289,7 @@ Validation should also check for things like if a NPC is set to be a trainer but
 
 Why are the initializer blocks repeated in so many files directly in the repository save_game.rs, mod.rs, campaign_loader.rs, antares.rs, campaign_integration_test.rs, validation.rs? This should be consolidated into a single function that can be called from all these places to reduce code duplication and ensure consistency across the codebase. The initializer block should be moved to a common utility module in the SDK or game engine that can be imported and used wherever needed. This will make it easier to maintain and update the initializer logic in one place rather than having to update it in multiple files. It will also reduce the chances of bugs or inconsistencies arising from having multiple copies of the same code.
 
-Files updated
-mod.rs
-
-Added level_up_mode, base_xp, xp_multiplier to SDK campaign config test initializers.
-Imported LevelUpMode in the affected test.
-campaign_packager.rs
-
-Added level_up_mode, base_xp, xp_multiplier to both inline CampaignConfig test initializers.
-validation.rs
-
-Added level_up_mode, base_xp, xp_multiplier to all inline CampaignConfig test initializers.
-save_game.rs
-
-Added LevelUpMode import for the test using the new config fields.
-campaign_integration_test.rs
-
-Added the new leveling fields to the helper CampaignConfig initializer.
-antares.rs
-
-Added the new leveling fields and fixed the LevelUpMode reference in the binary test campaign initializer.
-campaign_loader.rs
-
-Added level_up_mode, base_xp, xp_multiplier to the CampaignConfig default test initializer.
-Added the same fields to the CampaignMetadata test initializer.
-
+✅ FIXED -
 
 ### SKill System Level Scaling
 

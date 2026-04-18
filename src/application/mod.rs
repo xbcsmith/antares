@@ -3361,57 +3361,7 @@ mod tests {
         db.characters = char_db;
 
         // Create campaign with starting inn
-        let campaign = crate::sdk::campaign_loader::Campaign {
-            id: "test".to_string(),
-            name: "Test".to_string(),
-            version: "1.0.0".to_string(),
-            author: "Test".to_string(),
-            description: "Test".to_string(),
-            engine_version: "0.1.0".to_string(),
-            required_features: vec![],
-            config: crate::sdk::campaign_loader::CampaignConfig {
-                starting_map: 1,
-                starting_position: crate::domain::types::Position::new(0, 0),
-                starting_direction: crate::domain::types::Direction::North,
-                starting_gold: 100,
-                starting_food: 50,
-                starting_innkeeper: "tutorial_innkeeper_town".to_string(),
-                max_party_size: 6,
-                max_roster_size: 20,
-                difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
-                permadeath: false,
-                allow_multiclassing: false,
-                starting_level: 1,
-                max_level: 20,
-                level_up_mode: crate::domain::campaign::LevelUpMode::Auto,
-                base_xp: 1000,
-                xp_multiplier: 1.5,
-                starting_time: crate::domain::types::GameTime::new(1, 8, 0),
-            },
-            data: crate::sdk::campaign_loader::CampaignData {
-                items: "items.ron".to_string(),
-                spells: "spells.ron".to_string(),
-                monsters: "monsters.ron".to_string(),
-                classes: "classes.ron".to_string(),
-                races: "races.ron".to_string(),
-                maps: "maps".to_string(),
-                quests: "quests.ron".to_string(),
-                dialogues: "dialogues.ron".to_string(),
-                characters: "characters.ron".to_string(),
-                creatures: "creatures.ron".to_string(),
-                furniture: "data/furniture.ron".to_string(),
-            },
-            assets: crate::sdk::campaign_loader::CampaignAssets {
-                tilesets: "tilesets".to_string(),
-                audio: "audio".to_string(),
-                music: "music".to_string(),
-                sounds: "sounds".to_string(),
-                images: "images".to_string(),
-                fonts: "fonts".to_string(),
-            },
-            root_path: std::path::PathBuf::from("test"),
-            game_config: crate::sdk::game_config::GameConfig::default(),
-        };
+        let campaign = crate::sdk::campaign_loader::test_fixtures::make_test_campaign();
 
         let mut state = GameState::new();
         state.campaign = Some(campaign);
@@ -3530,57 +3480,7 @@ mod tests {
         char_db.add_character(npc).unwrap();
         db.characters = char_db;
 
-        let campaign = crate::sdk::campaign_loader::Campaign {
-            id: "test".to_string(),
-            name: "Test".to_string(),
-            version: "1.0.0".to_string(),
-            author: "Test".to_string(),
-            description: "Test".to_string(),
-            engine_version: "0.1.0".to_string(),
-            required_features: vec![],
-            config: crate::sdk::campaign_loader::CampaignConfig {
-                starting_map: 1,
-                starting_position: crate::domain::types::Position::new(0, 0),
-                starting_direction: crate::domain::types::Direction::North,
-                starting_gold: 100,
-                starting_food: 50,
-                starting_innkeeper: "tutorial_innkeeper_town".to_string(),
-                max_party_size: 6,
-                max_roster_size: 20,
-                difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
-                permadeath: false,
-                allow_multiclassing: false,
-                starting_level: 1,
-                max_level: 20,
-                level_up_mode: crate::domain::campaign::LevelUpMode::Auto,
-                base_xp: 1000,
-                xp_multiplier: 1.5,
-                starting_time: crate::domain::types::GameTime::new(1, 8, 0),
-            },
-            data: crate::sdk::campaign_loader::CampaignData {
-                items: "items.ron".to_string(),
-                spells: "spells.ron".to_string(),
-                monsters: "monsters.ron".to_string(),
-                classes: "classes.ron".to_string(),
-                races: "races.ron".to_string(),
-                maps: "maps".to_string(),
-                quests: "quests.ron".to_string(),
-                dialogues: "dialogues.ron".to_string(),
-                characters: "characters.ron".to_string(),
-                creatures: "creatures.ron".to_string(),
-                furniture: "data/furniture.ron".to_string(),
-            },
-            assets: crate::sdk::campaign_loader::CampaignAssets {
-                tilesets: "tilesets".to_string(),
-                audio: "audio".to_string(),
-                music: "music".to_string(),
-                sounds: "sounds".to_string(),
-                images: "images".to_string(),
-                fonts: "fonts".to_string(),
-            },
-            root_path: std::path::PathBuf::from("test"),
-            game_config: crate::sdk::game_config::GameConfig::default(),
-        };
+        let campaign = crate::sdk::campaign_loader::test_fixtures::make_test_campaign();
 
         let mut state = GameState::new();
         state.campaign = Some(campaign);
@@ -5981,8 +5881,6 @@ mod tests {
 
     #[test]
     fn test_current_inn_id_no_inn_on_map_with_campaign_fallback() {
-        use crate::domain::campaign::LevelUpMode;
-
         let mut state = GameState::new();
         // Create a map with no inn events
         let map = crate::domain::world::Map::new(
@@ -5996,57 +5894,9 @@ mod tests {
         state.world.current_map = 1;
 
         // Set up a campaign with a starting innkeeper
-        state.campaign = Some(crate::sdk::campaign_loader::Campaign {
-            id: "test".to_string(),
-            name: "Test".to_string(),
-            version: "1.0.0".to_string(),
-            author: "Test".to_string(),
-            description: "Test".to_string(),
-            engine_version: "0.1.0".to_string(),
-            required_features: Vec::new(),
-            config: crate::sdk::campaign_loader::CampaignConfig {
-                starting_map: 1,
-                starting_position: crate::domain::types::Position::new(0, 0),
-                starting_direction: crate::domain::types::Direction::North,
-                starting_gold: 0,
-                starting_food: 0,
-                starting_innkeeper: "default_innkeeper".to_string(),
-                max_party_size: 6,
-                max_roster_size: 20,
-                difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
-                permadeath: false,
-                allow_multiclassing: false,
-                starting_level: 1,
-                max_level: 20,
-                level_up_mode: LevelUpMode::Auto,
-                base_xp: 1000,
-                xp_multiplier: 1.5,
-                starting_time: crate::domain::types::GameTime::new(1, 8, 0),
-            },
-            data: crate::sdk::campaign_loader::CampaignData {
-                items: "data/items.ron".to_string(),
-                spells: "data/spells.ron".to_string(),
-                monsters: "data/monsters.ron".to_string(),
-                classes: "data/classes.ron".to_string(),
-                races: "data/races.ron".to_string(),
-                maps: "data/maps".to_string(),
-                quests: "data/quests.ron".to_string(),
-                dialogues: "data/dialogues.ron".to_string(),
-                characters: "data/characters.ron".to_string(),
-                creatures: "data/creatures.ron".to_string(),
-                furniture: "data/furniture.ron".to_string(),
-            },
-            assets: crate::sdk::campaign_loader::CampaignAssets {
-                tilesets: "assets/tilesets".to_string(),
-                audio: "assets/audio".to_string(),
-                music: "assets/music".to_string(),
-                sounds: "assets/sounds".to_string(),
-                images: "assets/images".to_string(),
-                fonts: "assets/fonts".to_string(),
-            },
-            root_path: std::path::PathBuf::new(),
-            game_config: crate::sdk::game_config::GameConfig::default(),
-        });
+        let mut campaign = crate::sdk::campaign_loader::test_fixtures::make_test_campaign();
+        campaign.config.starting_innkeeper = "default_innkeeper".to_string();
+        state.campaign = Some(campaign);
 
         // Should fall back to campaign starting innkeeper
         assert_eq!(

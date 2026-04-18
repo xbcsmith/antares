@@ -334,7 +334,7 @@ pub struct GraphicsConfigResource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use antares::sdk::game_config::{CameraConfig, ControlsConfig, GameConfig, GraphicsConfig};
+    use antares::sdk::game_config::{GameConfig, GraphicsConfig};
     use std::sync::Mutex;
 
     // Serialize tests that modify the process environment to avoid races when tests run in parallel.
@@ -342,10 +342,7 @@ mod tests {
 
     /// Helper to create a test campaign with custom graphics config
     fn create_test_campaign(graphics: GraphicsConfig) -> Campaign {
-        use antares::domain::campaign::LevelUpMode;
-        use antares::domain::types::Position;
         use antares::sdk::campaign_loader::{CampaignAssets, CampaignConfig, CampaignData};
-        use std::path::PathBuf;
 
         Campaign {
             id: "test_campaign".to_string(),
@@ -355,56 +352,13 @@ mod tests {
             description: "Test campaign for graphics config".to_string(),
             engine_version: "0.1.0".to_string(),
             required_features: vec![],
-            config: CampaignConfig {
-                starting_map: 1,
-                starting_position: Position::new(0, 0),
-                starting_direction: antares::domain::types::Direction::North,
-                starting_gold: 100,
-                starting_food: 50,
-                starting_innkeeper: "tutorial_innkeeper_town".to_string(),
-                max_party_size: 6,
-                max_roster_size: 20,
-                difficulty: antares::sdk::campaign_loader::Difficulty::Normal,
-                permadeath: false,
-                allow_multiclassing: false,
-                starting_level: 1,
-                max_level: 20,
-                level_up_mode: LevelUpMode::Auto,
-                base_xp: 1000,
-                xp_multiplier: 1.5,
-                starting_time: antares::domain::types::GameTime::new(1, 8, 0),
-            },
-            data: CampaignData {
-                items: "data/items.ron".to_string(),
-                spells: "data/spells.ron".to_string(),
-                monsters: "data/monsters.ron".to_string(),
-                classes: "data/classes.ron".to_string(),
-                races: "data/races.ron".to_string(),
-                maps: "data/maps".to_string(),
-                quests: "data/quests.ron".to_string(),
-                dialogues: "data/dialogues.ron".to_string(),
-                characters: "data/characters.ron".to_string(),
-                creatures: "data/creatures.ron".to_string(),
-                furniture: "data/furniture.ron".to_string(),
-            },
-            assets: CampaignAssets {
-                tilesets: "assets/tilesets".to_string(),
-                audio: "assets/audio".to_string(),
-                music: "assets/music".to_string(),
-                sounds: "assets/sounds".to_string(),
-                images: "assets/images".to_string(),
-                fonts: "assets/fonts".to_string(),
-            },
+            config: CampaignConfig::default(),
+            data: CampaignData::default(),
+            assets: CampaignAssets::default(),
             root_path: PathBuf::from("test_campaign"),
             game_config: GameConfig {
                 graphics,
-                audio: Default::default(),
-                controls: ControlsConfig::default(),
-                camera: CameraConfig::default(),
-                rest: Default::default(),
-                game_log: Default::default(),
-                time: Default::default(),
-                leveling: Default::default(),
+                ..GameConfig::default()
             },
         }
     }

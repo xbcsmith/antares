@@ -8064,10 +8064,10 @@
                 12,
             ],
             time_condition: None,
-            facing: None,
+            facing: Some(South),
             proximity_facing: false,
             rotation_speed: None,
-            combat_event_type: Normal,
+            combat_event_type: Ambush,
         ),
         (
             x: 7,
@@ -8115,15 +8115,18 @@
         (
             x: 10,
             y: 13,
-        ): Treasure(
+        ): Container(
+            id: "container_10013",
             name: "Large Treasure Chest",
             description: "A large and ornate chest containing valuable loot.",
-            loot: [
-                15,
-                25,
-                33,
-                40,
+            items: [
+                (
+                    item_id: 42,
+                    charges: 0,
+                ),
             ],
+            gold: 100,
+            gems: 5,
         ),
         (
             x: 11,
@@ -8185,10 +8188,10 @@
                 6,
             ],
             time_condition: None,
-            facing: None,
+            facing: Some(West),
             proximity_facing: false,
             rotation_speed: None,
-            combat_event_type: Normal,
+            combat_event_type: Ambush,
         ),
         (
             x: 19,
@@ -8221,7 +8224,7 @@
                 x: 2,
                 y: 2,
             ),
-            facing: None,
+            facing: Some(South),
             dialogue_override: None,
         ),
     ],
