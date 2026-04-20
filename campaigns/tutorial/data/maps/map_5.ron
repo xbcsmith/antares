@@ -6020,6 +6020,18 @@
             map_id: 6,
         ),
         (
+            x: 2,
+            y: 14,
+        ): Teleport(
+            name: "Astronomers Gate",
+            description: "Gate to the Astronomers Temple",
+            destination: (
+                x: 35,
+                y: 39,
+            ),
+            map_id: 7,
+        ),
+        (
             x: 4,
             y: 4,
         ): Sign(
@@ -6120,10 +6132,10 @@
             name: "Portal to Dark Forrest",
             description: "A portal that transports the party to Dark Forrest (map 4) at (10,19).",
             destination: (
-                x: 10,
-                y: 19,
+                x: 8,
+                y: 18,
             ),
-            map_id: 4,
+            map_id: 2,
         ),
     },
     allow_random_encounters: true,

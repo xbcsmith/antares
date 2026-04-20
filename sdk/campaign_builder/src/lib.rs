@@ -1361,6 +1361,7 @@ impl eframe::App for CampaignBuilderApp {
                     conditions: &self.campaign_data.conditions,
                     npcs: &self.editor_registry.npc_editor_state.npcs,
                     furniture_definitions: &self.campaign_data.furniture_definitions,
+                    characters: &self.editor_registry.characters_editor_state.characters,
                     display_config: &self.tool_config.display,
                 };
                 let mut maps_ctx = EditorContext {

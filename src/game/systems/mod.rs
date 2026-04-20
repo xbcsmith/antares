@@ -50,5 +50,6 @@ pub mod temple_ui;
 pub mod terrain_materials;
 pub mod time;
 pub mod training_ui;
+pub mod trap_notification_ui;
 pub mod ui;
 pub mod ui_helpers;

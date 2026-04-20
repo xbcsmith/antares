@@ -498,57 +498,7 @@ mod tests {
 
     #[test]
     fn test_package_manifest_creation() {
-        let campaign = Campaign {
-            id: "test".to_string(),
-            name: "Test Campaign".to_string(),
-            version: "1.0.0".to_string(),
-            author: "Test".to_string(),
-            description: "Test".to_string(),
-            engine_version: "0.1.0".to_string(),
-            required_features: Vec::new(),
-            config: crate::sdk::campaign_loader::CampaignConfig {
-                starting_map: 1,
-                starting_position: crate::domain::types::Position::new(0, 0),
-                starting_direction: crate::domain::types::Direction::North,
-                starting_gold: 100,
-                starting_food: 50,
-                starting_innkeeper: "tutorial_innkeeper_town".to_string(),
-                max_party_size: 6,
-                max_roster_size: 20,
-                difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
-                permadeath: false,
-                allow_multiclassing: false,
-                starting_level: 1,
-                max_level: 20,
-                level_up_mode: crate::domain::campaign::LevelUpMode::Auto,
-                base_xp: 1000,
-                xp_multiplier: 1.5,
-                starting_time: crate::domain::types::GameTime::new(1, 8, 0),
-            },
-            data: crate::sdk::campaign_loader::CampaignData {
-                items: "data/items.ron".to_string(),
-                spells: "data/spells.ron".to_string(),
-                monsters: "data/monsters.ron".to_string(),
-                classes: "data/classes.ron".to_string(),
-                races: "data/races.ron".to_string(),
-                maps: "data/maps".to_string(),
-                quests: "data/quests.ron".to_string(),
-                dialogues: "data/dialogues.ron".to_string(),
-                characters: "data/characters.ron".to_string(),
-                creatures: "data/creatures.ron".to_string(),
-                furniture: "data/furniture.ron".to_string(),
-            },
-            assets: crate::sdk::campaign_loader::CampaignAssets {
-                tilesets: "assets/tilesets".to_string(),
-                audio: "assets/audio".to_string(),
-                music: "assets/music".to_string(),
-                sounds: "assets/sounds".to_string(),
-                images: "assets/images".to_string(),
-                fonts: "assets/fonts".to_string(),
-            },
-            root_path: PathBuf::new(),
-            game_config: crate::sdk::game_config::GameConfig::default(),
-        };
+        let campaign = crate::sdk::campaign_loader::test_fixtures::make_test_campaign();
 
         let manifest = PackageManifest::new(&campaign);
         assert_eq!(manifest.campaign_id, "test");
@@ -561,57 +511,7 @@ mod tests {
 
     #[test]
     fn test_manifest_add_file() {
-        let campaign = Campaign {
-            id: "test".to_string(),
-            name: "Test".to_string(),
-            version: "1.0.0".to_string(),
-            author: "Test".to_string(),
-            description: "Test".to_string(),
-            engine_version: "0.1.0".to_string(),
-            required_features: Vec::new(),
-            config: crate::sdk::campaign_loader::CampaignConfig {
-                starting_map: 1,
-                starting_position: crate::domain::types::Position::new(0, 0),
-                starting_direction: crate::domain::types::Direction::North,
-                starting_gold: 100,
-                starting_food: 50,
-                starting_innkeeper: "tutorial_innkeeper_town".to_string(),
-                max_party_size: 6,
-                max_roster_size: 20,
-                difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
-                permadeath: false,
-                allow_multiclassing: false,
-                starting_level: 1,
-                max_level: 20,
-                level_up_mode: crate::domain::campaign::LevelUpMode::Auto,
-                base_xp: 1000,
-                xp_multiplier: 1.5,
-                starting_time: crate::domain::types::GameTime::new(1, 8, 0),
-            },
-            data: crate::sdk::campaign_loader::CampaignData {
-                items: "data/items.ron".to_string(),
-                spells: "data/spells.ron".to_string(),
-                monsters: "data/monsters.ron".to_string(),
-                classes: "data/classes.ron".to_string(),
-                races: "data/races.ron".to_string(),
-                maps: "data/maps".to_string(),
-                quests: "data/quests.ron".to_string(),
-                dialogues: "data/dialogues.ron".to_string(),
-                characters: "data/characters.ron".to_string(),
-                creatures: "data/creatures.ron".to_string(),
-                furniture: "data/furniture.ron".to_string(),
-            },
-            assets: crate::sdk::campaign_loader::CampaignAssets {
-                tilesets: "assets/tilesets".to_string(),
-                audio: "assets/audio".to_string(),
-                music: "assets/music".to_string(),
-                sounds: "assets/sounds".to_string(),
-                images: "assets/images".to_string(),
-                fonts: "assets/fonts".to_string(),
-            },
-            root_path: PathBuf::new(),
-            game_config: crate::sdk::game_config::GameConfig::default(),
-        };
+        let campaign = crate::sdk::campaign_loader::test_fixtures::make_test_campaign();
 
         let mut manifest = PackageManifest::new(&campaign);
         manifest.add_file("test.txt".to_string(), "abc123".to_string(), 100);

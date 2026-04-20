@@ -621,15 +621,18 @@ fn apply_service_effect(character: &mut Character, service_id: &str) {
         }
         "cure_all" => {
             character.conditions.clear();
+            character.active_conditions.clear();
         }
         "resurrect" => {
             character.conditions.clear();
+            character.active_conditions.clear();
             character.hp.current = 1;
         }
         "rest" => {
             character.hp.current = character.hp.base;
             character.sp.current = character.sp.base;
             character.conditions.clear();
+            character.active_conditions.clear();
         }
         // Unrecognised service ID: no-op
         _ => {}

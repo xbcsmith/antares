@@ -1687,23 +1687,8 @@ mod tests {
         let validator = Validator::new(&db);
 
         let config = crate::sdk::campaign_loader::CampaignConfig {
-            starting_map: 1,
-            starting_position: crate::domain::types::Position::new(0, 0),
-            starting_direction: crate::domain::types::Direction::North,
-            starting_gold: 100,
-            starting_food: 50,
             starting_innkeeper: "missing_inn".to_string(),
-            max_party_size: 6,
-            max_roster_size: 20,
-            difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
-            permadeath: false,
-            allow_multiclassing: false,
-            starting_level: 1,
-            max_level: 20,
-            level_up_mode: crate::domain::campaign::LevelUpMode::Auto,
-            base_xp: 1000,
-            xp_multiplier: 1.5,
-            starting_time: crate::domain::types::GameTime::new(1, 8, 0),
+            ..crate::sdk::campaign_loader::CampaignConfig::default()
         };
 
         let errors = validator.validate_campaign_config(&config);
@@ -1735,23 +1720,8 @@ mod tests {
         let validator = Validator::new(&db);
 
         let config = crate::sdk::campaign_loader::CampaignConfig {
-            starting_map: 1,
-            starting_position: crate::domain::types::Position::new(0, 0),
-            starting_direction: crate::domain::types::Direction::North,
-            starting_gold: 100,
-            starting_food: 50,
             starting_innkeeper: "not_inn".to_string(),
-            max_party_size: 6,
-            max_roster_size: 20,
-            difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
-            permadeath: false,
-            allow_multiclassing: false,
-            starting_level: 1,
-            max_level: 20,
-            level_up_mode: crate::domain::campaign::LevelUpMode::Auto,
-            base_xp: 1000,
-            xp_multiplier: 1.5,
-            starting_time: crate::domain::types::GameTime::new(1, 8, 0),
+            ..crate::sdk::campaign_loader::CampaignConfig::default()
         };
 
         let errors = validator.validate_campaign_config(&config);
@@ -1781,23 +1751,8 @@ mod tests {
         let validator = Validator::new(&db);
 
         let config = crate::sdk::campaign_loader::CampaignConfig {
-            starting_map: 1,
-            starting_position: crate::domain::types::Position::new(0, 0),
-            starting_direction: crate::domain::types::Direction::North,
-            starting_gold: 100,
-            starting_food: 50,
             starting_innkeeper: "inn_good".to_string(),
-            max_party_size: 6,
-            max_roster_size: 20,
-            difficulty: crate::sdk::campaign_loader::Difficulty::Normal,
-            permadeath: false,
-            allow_multiclassing: false,
-            starting_level: 1,
-            max_level: 20,
-            level_up_mode: crate::domain::campaign::LevelUpMode::Auto,
-            base_xp: 1000,
-            xp_multiplier: 1.5,
-            starting_time: crate::domain::types::GameTime::new(1, 8, 0),
+            ..crate::sdk::campaign_loader::CampaignConfig::default()
         };
 
         let errors = validator.validate_campaign_config(&config);

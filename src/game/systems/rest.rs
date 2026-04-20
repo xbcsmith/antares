@@ -984,6 +984,12 @@ pub fn handle_rest_complete(
                 .unwrap_or_default();
 
             for member in &mut global_state.0.party.members {
+                // Fatal characters (dead, stone, eradicated) must not have their
+                // conditions ticked or reconciled during rest — their state can only
+                // be changed by explicit revival services.
+                if member.conditions.is_fatal() {
+                    continue;
+                }
                 member.tick_conditions_rest();
                 crate::domain::combat::engine::reconcile_character_conditions(member, &cond_defs);
             }
@@ -1875,5 +1881,50 @@ mod tests {
             // that would be a bug for a 12-hour rest.
             panic!("Expected Resting mode, got {:?}", gs.0.mode);
         }
+    }
+
+    ///  must not clear the DEAD condition or alter HP
+    /// for a party member who is fatal (dead, stone, etc.).
+    #[test]
+    fn test_handle_rest_complete_skips_fatal_members() {
+        use crate::domain::character::{Condition, Party};
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut party = Party::new();
+
+        let mut dead_hero = Character::new(
+            "Dead Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        dead_hero.hp.base = 20;
+        dead_hero.hp.current = 0;
+        dead_hero.conditions.add(Condition::DEAD);
+        dead_hero.add_condition(ActiveCondition::new(
+            "dead".to_string(),
+            ConditionDuration::Permanent,
+        ));
+        party.add_member(dead_hero).unwrap();
+
+        // Simulate what handle_rest_complete does: tick + reconcile, but skip
+        // fatal members. With the is_fatal() guard in place the dead member is
+        // left completely untouched.
+        for member in &mut party.members {
+            if member.conditions.is_fatal() {
+                continue;
+            }
+            member.tick_conditions_rest();
+        }
+
+        assert!(
+            party.members[0].conditions.is_fatal(),
+            "DEAD condition must be preserved after rest"
+        );
+        assert_eq!(
+            party.members[0].hp.current, 0,
+            "HP must remain 0 for dead character after rest"
+        );
     }
 }

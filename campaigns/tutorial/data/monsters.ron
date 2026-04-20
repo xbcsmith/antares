@@ -1428,4 +1428,195 @@
         active_conditions: [],
         has_acted: false,
     ),
+    (
+        id: 134,
+        name: "Ogre Mage",
+        stats: (
+            might: (
+                base: 21,
+                current: 21,
+            ),
+            intellect: (
+                base: 15,
+                current: 15,
+            ),
+            personality: (
+                base: 4,
+                current: 4,
+            ),
+            endurance: (
+                base: 16,
+                current: 16,
+            ),
+            speed: (
+                base: 12,
+                current: 12,
+            ),
+            accuracy: (
+                base: 14,
+                current: 14,
+            ),
+            luck: (
+                base: 5,
+                current: 5,
+            ),
+        ),
+        hp: (
+            base: 100,
+            current: 100,
+        ),
+        ac: (
+            base: 16,
+            current: 16,
+        ),
+        attacks: [
+            (
+                damage: (
+                    count: 2,
+                    sides: 8,
+                    bonus: 3,
+                ),
+                attack_type: Electricity,
+                special_effect: Some(Poison),
+                is_ranged: false,
+            ),
+            (
+                damage: (
+                    count: 1,
+                    sides: 12,
+                    bonus: 0,
+                ),
+                attack_type: Physical,
+                special_effect: None,
+                is_ranged: false,
+            ),
+        ],
+        flee_threshold: 15,
+        special_attack_threshold: 20,
+        resistances: (
+            physical: false,
+            fire: true,
+            cold: true,
+            electricity: true,
+            energy: true,
+            paralysis: true,
+            fear: true,
+            sleep: true,
+        ),
+        can_regenerate: true,
+        can_advance: true,
+        is_undead: false,
+        magic_resistance: 10,
+        loot: (
+            gold_min: 100,
+            gold_max: 500,
+            gems_min: 5,
+            gems_max: 25,
+            items: [
+                (0.5, 4),
+                (0.5, 21),
+            ],
+            experience: 500,
+        ),
+        creature_id: Some(20),
+        conditions: Normal,
+        active_conditions: [],
+        has_acted: false,
+    ),
+    (
+        id: 135,
+        name: "Mummy",
+        stats: (
+            might: (
+                base: 15,
+                current: 15,
+            ),
+            intellect: (
+                base: 8,
+                current: 8,
+            ),
+            personality: (
+                base: 4,
+                current: 4,
+            ),
+            endurance: (
+                base: 16,
+                current: 16,
+            ),
+            speed: (
+                base: 12,
+                current: 12,
+            ),
+            accuracy: (
+                base: 15,
+                current: 15,
+            ),
+            luck: (
+                base: 4,
+                current: 4,
+            ),
+        ),
+        hp: (
+            base: 150,
+            current: 150,
+        ),
+        ac: (
+            base: 20,
+            current: 20,
+        ),
+        attacks: [
+            (
+                damage: (
+                    count: 2,
+                    sides: 8,
+                    bonus: 2,
+                ),
+                attack_type: Physical,
+                special_effect: Some(Drain),
+                is_ranged: false,
+            ),
+            (
+                damage: (
+                    count: 3,
+                    sides: 8,
+                    bonus: 0,
+                ),
+                attack_type: Cold,
+                special_effect: None,
+                is_ranged: false,
+            ),
+        ],
+        flee_threshold: 30,
+        special_attack_threshold: 80,
+        resistances: (
+            physical: false,
+            fire: false,
+            cold: true,
+            electricity: true,
+            energy: true,
+            paralysis: true,
+            fear: true,
+            sleep: true,
+        ),
+        can_regenerate: true,
+        can_advance: true,
+        is_undead: true,
+        magic_resistance: 90,
+        loot: (
+            gold_min: 500,
+            gold_max: 2000,
+            gems_min: 5,
+            gems_max: 20,
+            items: [
+                (0.6, 12),
+                (0.4, 41),
+                (0.3, 30),
+            ],
+            experience: 1500,
+        ),
+        creature_id: Some(31),
+        conditions: Normal,
+        active_conditions: [],
+        has_acted: false,
+    ),
 ]

@@ -8,66 +8,15 @@
 
 use antares::application::save_game::{CampaignReference, SaveGame, SaveGameManager};
 use antares::application::GameState;
-use antares::domain::types::{Direction, Position};
-use antares::sdk::campaign_loader::{
-    Campaign, CampaignAssets, CampaignConfig, CampaignData, Difficulty,
-};
-use std::path::PathBuf;
+use antares::domain::types::Position;
+use antares::sdk::campaign_loader::{Campaign, Difficulty};
 use tempfile::TempDir;
+
+mod common;
 
 /// Helper function to create a test campaign
 fn create_test_campaign(id: &str, name: &str, version: &str) -> Campaign {
-    Campaign {
-        id: id.to_string(),
-        name: name.to_string(),
-        version: version.to_string(),
-        author: "Test Author".to_string(),
-        description: "A test campaign for integration testing".to_string(),
-        engine_version: env!("CARGO_PKG_VERSION").to_string(),
-        required_features: vec![],
-        config: CampaignConfig {
-            starting_map: 1,
-            starting_position: Position { x: 5, y: 10 },
-            starting_direction: Direction::North,
-            starting_gold: 500,
-            starting_food: 100,
-            starting_innkeeper: "tutorial_innkeeper_town".to_string(),
-            max_party_size: 6,
-            max_roster_size: 20,
-            difficulty: Difficulty::Normal,
-            permadeath: false,
-            allow_multiclassing: false,
-            starting_level: 1,
-            max_level: 20,
-            level_up_mode: antares::domain::campaign::LevelUpMode::Auto,
-            base_xp: 1000,
-            xp_multiplier: 1.5,
-            starting_time: antares::domain::types::GameTime::new(1, 8, 0),
-        },
-        data: CampaignData {
-            items: "data/items.ron".to_string(),
-            spells: "data/spells.ron".to_string(),
-            monsters: "data/monsters.ron".to_string(),
-            classes: "data/classes.ron".to_string(),
-            races: "data/races.ron".to_string(),
-            maps: "maps".to_string(),
-            quests: "data/quests.ron".to_string(),
-            dialogues: "data/dialogues.ron".to_string(),
-            characters: "data/characters.ron".to_string(),
-            creatures: "data/creatures.ron".to_string(),
-            furniture: "data/furniture.ron".to_string(),
-        },
-        assets: CampaignAssets {
-            tilesets: "assets/tilesets".to_string(),
-            audio: "assets/audio".to_string(),
-            music: "assets/music".to_string(),
-            sounds: "assets/sounds".to_string(),
-            images: "assets/images".to_string(),
-            fonts: "assets/fonts".to_string(),
-        },
-        root_path: PathBuf::from(format!("campaigns/{}", id)),
-        game_config: antares::sdk::game_config::GameConfig::default(),
-    }
+    common::make_test_campaign(id, name, version)
 }
 
 #[test]
@@ -97,7 +46,7 @@ fn test_game_state_with_campaign() {
     assert_eq!(loaded_campaign.version, "1.0.0");
 
     // Verify starting gold from campaign config.
-    assert_eq!(game_state.party.gold, 500);
+    assert_eq!(game_state.party.gold, 100);
 }
 
 #[test]
@@ -111,7 +60,7 @@ fn test_campaign_starting_conditions_applied() {
     game_state.party.gold = game_state.campaign.as_ref().unwrap().config.starting_gold;
 
     // Check starting gold.
-    assert_eq!(game_state.party.gold, 500);
+    assert_eq!(game_state.party.gold, 100);
 
     // Game state should be in exploration mode
     assert_eq!(game_state.mode, antares::application::GameMode::Exploration);
@@ -233,8 +182,8 @@ fn test_multiple_campaigns_save_load() {
     assert!(loaded2.campaign.is_none());
 
     // Verify different starting conditions were preserved
-    assert_eq!(loaded1.party.gold, 500);
-    assert_eq!(loaded2.party.gold, 500);
+    assert_eq!(loaded1.party.gold, 100);
+    assert_eq!(loaded2.party.gold, 100);
 }
 
 #[test]
@@ -317,7 +266,7 @@ fn test_campaign_data_paths() {
     assert_eq!(campaign.data.monsters, "data/monsters.ron");
     assert_eq!(campaign.data.classes, "data/classes.ron");
     assert_eq!(campaign.data.races, "data/races.ron");
-    assert_eq!(campaign.data.maps, "maps");
+    assert_eq!(campaign.data.maps, "data/maps");
     assert_eq!(campaign.data.quests, "data/quests.ron");
     assert_eq!(campaign.data.dialogues, "data/dialogues.ron");
 }

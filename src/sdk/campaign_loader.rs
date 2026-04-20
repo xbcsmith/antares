@@ -404,6 +404,67 @@ fn default_fonts_path() -> String {
     "assets/fonts".to_string()
 }
 
+/// Provides default values matching the serde `default_*` helpers so that
+/// tests and callers can use struct-update syntax (`..CampaignConfig::default()`).
+impl Default for CampaignConfig {
+    fn default() -> Self {
+        Self {
+            starting_map: 1,
+            starting_position: Position::new(0, 0),
+            starting_direction: Direction::North,
+            starting_gold: 100,
+            starting_food: 50,
+            starting_innkeeper: default_starting_innkeeper(),
+            max_party_size: default_max_party_size(),
+            max_roster_size: default_max_roster_size(),
+            difficulty: Difficulty::default(),
+            permadeath: false,
+            allow_multiclassing: false,
+            starting_level: default_starting_level(),
+            max_level: default_max_level(),
+            level_up_mode: default_level_up_mode(),
+            base_xp: default_base_xp(),
+            xp_multiplier: default_xp_multiplier(),
+            starting_time: default_starting_time(),
+        }
+    }
+}
+
+/// Provides default values matching the serde `default_*` helpers so that
+/// tests and callers can use struct-update syntax (`..CampaignData::default()`).
+impl Default for CampaignData {
+    fn default() -> Self {
+        Self {
+            items: default_items_path(),
+            spells: default_spells_path(),
+            monsters: default_monsters_path(),
+            classes: default_classes_path(),
+            races: default_races_path(),
+            maps: default_maps_path(),
+            quests: default_quests_path(),
+            dialogues: default_dialogues_path(),
+            characters: default_characters_path(),
+            creatures: default_creatures_path(),
+            furniture: default_furniture_path(),
+        }
+    }
+}
+
+/// Provides default values matching the serde `default_*` helpers so that
+/// tests and callers can use struct-update syntax (`..CampaignAssets::default()`).
+impl Default for CampaignAssets {
+    fn default() -> Self {
+        Self {
+            tilesets: default_tilesets_path(),
+            audio: default_audio_path(),
+            music: default_music_path(),
+            sounds: default_sounds_path(),
+            images: default_images_path(),
+            fonts: default_fonts_path(),
+        }
+    }
+}
+
 impl Campaign {
     /// Load a campaign from a directory
     ///
@@ -865,29 +926,41 @@ impl ValidationReport {
 }
 
 #[cfg(test)]
+pub(crate) mod test_fixtures {
+    //! Canonical test builders to avoid repeating initializers across test modules.
+
+    use super::*;
+    use crate::sdk::game_config::GameConfig;
+    use std::path::PathBuf;
+
+    /// Builds a minimal but complete `Campaign` for unit tests.
+    pub(crate) fn make_test_campaign() -> Campaign {
+        Campaign {
+            id: "test".to_string(),
+            name: "Test Campaign".to_string(),
+            version: "1.0.0".to_string(),
+            author: "Test Author".to_string(),
+            description: "A test campaign".to_string(),
+            engine_version: env!("CARGO_PKG_VERSION").to_string(),
+            required_features: vec![],
+            config: CampaignConfig::default(),
+            data: CampaignData::default(),
+            assets: CampaignAssets::default(),
+            root_path: PathBuf::from("test"),
+            game_config: GameConfig::default(),
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_campaign_config_defaults() {
         let config = CampaignConfig {
-            starting_map: 1,
             starting_position: Position::new(10, 10),
-            starting_direction: Direction::North,
-            starting_gold: 100,
-            starting_food: 50,
-            starting_innkeeper: default_starting_innkeeper(),
-            max_party_size: default_max_party_size(),
-            max_roster_size: default_max_roster_size(),
-            difficulty: Difficulty::default(),
-            permadeath: false,
-            allow_multiclassing: false,
-            starting_level: default_starting_level(),
-            max_level: default_max_level(),
-            level_up_mode: default_level_up_mode(),
-            base_xp: default_base_xp(),
-            xp_multiplier: default_xp_multiplier(),
-            starting_time: default_starting_time(),
+            ..CampaignConfig::default()
         };
 
         assert_eq!(config.level_up_mode, LevelUpMode::Auto);
@@ -937,23 +1010,8 @@ mod tests {
         use crate::domain::types::GameTime;
 
         let original = CampaignConfig {
-            starting_map: 1,
-            starting_position: Position::new(0, 0),
-            starting_direction: Direction::North,
-            starting_gold: 0,
-            starting_food: 0,
-            starting_innkeeper: default_starting_innkeeper(),
-            max_party_size: default_max_party_size(),
-            max_roster_size: default_max_roster_size(),
-            difficulty: Difficulty::default(),
-            permadeath: false,
-            allow_multiclassing: false,
-            starting_level: 1,
-            max_level: 20,
-            level_up_mode: default_level_up_mode(),
-            base_xp: default_base_xp(),
-            xp_multiplier: default_xp_multiplier(),
             starting_time: GameTime::new(3, 22, 30),
+            ..CampaignConfig::default()
         };
 
         let ron_str = ron::ser::to_string_pretty(&original, ron::ser::PrettyConfig::default())

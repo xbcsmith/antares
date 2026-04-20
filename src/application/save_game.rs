@@ -517,63 +517,7 @@ mod tests {
 
     #[test]
     fn test_save_game_with_campaign() {
-        use crate::domain::campaign::LevelUpMode;
-        use crate::domain::types::{Direction, Position};
-        use crate::sdk::campaign_loader::{
-            Campaign, CampaignAssets, CampaignConfig, CampaignData, Difficulty,
-        };
-
-        let campaign = Campaign {
-            id: "test".to_string(),
-            name: "Test Campaign".to_string(),
-            version: "1.0.0".to_string(),
-            author: "Test Author".to_string(),
-            description: "Test Description".to_string(),
-            engine_version: "0.1.0".to_string(),
-            required_features: vec![],
-            config: CampaignConfig {
-                starting_map: 1,
-                starting_position: Position { x: 0, y: 0 },
-                starting_direction: Direction::North,
-                starting_gold: 100,
-                starting_food: 50,
-                starting_innkeeper: "tutorial_innkeeper_town".to_string(),
-                max_party_size: 6,
-                max_roster_size: 20,
-                difficulty: Difficulty::Normal,
-                permadeath: false,
-                allow_multiclassing: false,
-                starting_level: 1,
-                max_level: 20,
-                level_up_mode: LevelUpMode::Auto,
-                base_xp: 1000,
-                xp_multiplier: 1.5,
-                starting_time: crate::domain::types::GameTime::new(1, 8, 0),
-            },
-            data: CampaignData {
-                items: "items.ron".to_string(),
-                spells: "spells.ron".to_string(),
-                monsters: "monsters.ron".to_string(),
-                classes: "classes.ron".to_string(),
-                races: "races.ron".to_string(),
-                maps: "maps".to_string(),
-                quests: "quests.ron".to_string(),
-                dialogues: "dialogues.ron".to_string(),
-                characters: "characters.ron".to_string(),
-                creatures: "creatures.ron".to_string(),
-                furniture: "data/furniture.ron".to_string(),
-            },
-            assets: CampaignAssets {
-                tilesets: "tilesets".to_string(),
-                audio: "audio".to_string(),
-                music: "music".to_string(),
-                sounds: "sounds".to_string(),
-                images: "images".to_string(),
-                fonts: "fonts".to_string(),
-            },
-            root_path: PathBuf::from("test_campaign"),
-            game_config: crate::sdk::game_config::GameConfig::default(),
-        };
+        let campaign = crate::sdk::campaign_loader::test_fixtures::make_test_campaign();
 
         let mut game_state = GameState::new();
         game_state.campaign = Some(campaign);

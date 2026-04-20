@@ -203,16 +203,27 @@ impl Plugin for MapManagerPlugin {
             .add_systems(Startup, init_map_lock_states_system)
             // Process explicit map change requests first, then let the marker
             // spawner observe the changed world state and spawn/despawn accordingly.
+            // The explicit visual-despawn handlers run before apply_deferred so their
+            // commands are flushed to the world before the passive cleanup systems
+            // query for stale entities — preventing a double-despawn warning.
             .add_systems(
                 Update,
                 (
                     map_change_handler,
                     spawn_map_markers,
-                    handle_despawn_recruitable_visual,
-                    handle_despawn_encounter_visual,
-                    cleanup_recruitable_visuals,
-                    cleanup_encounter_visuals,
-                    cleanup_locked_door_markers,
+                    (
+                        (
+                            handle_despawn_recruitable_visual,
+                            handle_despawn_encounter_visual,
+                        ),
+                        ApplyDeferred,
+                        (
+                            cleanup_recruitable_visuals,
+                            cleanup_encounter_visuals,
+                            cleanup_locked_door_markers,
+                        ),
+                    )
+                        .chain(),
                 ),
             );
     }

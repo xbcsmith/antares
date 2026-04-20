@@ -198,77 +198,123 @@ fn handle_events(
                     });
                 }
             }
-            MapEvent::Trap { damage, effect, .. } => {
+            MapEvent::Trap {
+                damage,
+                effect,
+                name,
+                description,
+            } => {
                 let trap_damage = *damage;
+                let trap_name = name.clone();
+                let trap_description = description.clone();
+                let trap_effect = effect.clone();
 
-                // Apply damage to every living party member and log per-character.
-                for member in &mut global_state.0.party.members {
-                    if member.is_alive() {
-                        let old_hp = member.hp.current;
-                        member.hp.modify(-(trap_damage as i32));
-                        let actual = old_hp.saturating_sub(member.hp.current);
-
-                        if member.hp.current == 0 {
-                            member
-                                .conditions
-                                .add(crate::domain::character::Condition::DEAD);
-                        }
-
-                        let per_char_msg =
-                            format!("{} takes {} damage from trap!", member.name, actual);
-                        tracing::warn!("{}", per_char_msg);
-                        if let Some(ref mut writer) = game_log_writer {
-                            writer.write(GameLogEvent {
-                                text: per_char_msg,
-                                category: LogCategory::Combat,
-                            });
-                        }
-                    }
-                }
-
-                // Apply status effect if present.
-                if let Some(ref effect_name) = effect {
-                    let flag = crate::application::map_effect_to_condition(effect_name);
-                    if flag != crate::domain::character::Condition::FINE {
-                        for member in &mut global_state.0.party.members {
-                            if member.is_alive() {
-                                member.conditions.add(flag);
-                            }
-                        }
-                        let effect_msg = format!("The trap inflicts {}!", effect_name);
-                        tracing::warn!("{}", effect_msg);
-                        if let Some(ref mut writer) = game_log_writer {
-                            writer.write(GameLogEvent {
-                                text: effect_msg,
-                                category: LogCategory::Combat,
-                            });
-                        }
-                    }
-                }
-
-                // Summary log entry.
-                let msg = format!("Trapped! Took {} damage.", trap_damage);
-                tracing::warn!("{}", msg);
-                if let Some(ref mut writer) = game_log_writer {
-                    writer.write(GameLogEvent {
-                        text: msg,
-                        category: LogCategory::Combat,
-                    });
-                }
-
-                // Check for party wipe — all members dead.
-                if global_state.0.party.living_count() == 0 {
-                    tracing::error!("Party wiped by trap!");
-                    global_state.0.mode = crate::application::GameMode::GameOver;
+                // Levitate buff negates all trap effects — the party floats over
+                // pit traps and ground-based hazards entirely.
+                if global_state.0.active_spells.levitate > 0 {
+                    tracing::info!("Trap avoided — party is levitating.");
+                    let msg = format!("{}: Trap avoided! (Levitating)", trap_name);
                     if let Some(ref mut writer) = game_log_writer {
                         writer.write(GameLogEvent {
-                            text: "The entire party has perished!".to_string(),
+                            text: msg,
+                            category: LogCategory::Exploration,
+                        });
+                    }
+                    global_state.0.mode = crate::application::GameMode::TrapNotification(
+                        crate::application::TrapNotificationState::new_avoided(
+                            trap_name,
+                            trap_description,
+                        ),
+                    );
+                } else {
+                    // Apply trap damage to all living party members and collect
+                    // per-member results for the notification popup.
+                    let mut member_results: Vec<crate::application::TrapMemberResult> = Vec::new();
+
+                    for member in &mut global_state.0.party.members {
+                        if member.is_alive() {
+                            let old_hp = member.hp.current;
+                            member.hp.modify(-(trap_damage as i32));
+                            let actual = old_hp.saturating_sub(member.hp.current);
+                            let died = member.hp.current == 0;
+                            if died {
+                                member
+                                    .conditions
+                                    .add(crate::domain::character::Condition::DEAD);
+                            }
+
+                            let per_char_msg =
+                                format!("{} takes {} damage from trap!", member.name, actual);
+                            tracing::warn!("{}", per_char_msg);
+                            if let Some(ref mut writer) = game_log_writer {
+                                writer.write(GameLogEvent {
+                                    text: per_char_msg,
+                                    category: LogCategory::Combat,
+                                });
+                            }
+
+                            member_results.push(crate::application::TrapMemberResult {
+                                name: member.name.clone(),
+                                damage_taken: actual,
+                                died,
+                            });
+                        }
+                    }
+
+                    // Apply status effect if present.
+                    if let Some(ref effect_name) = trap_effect {
+                        let flag = crate::application::map_effect_to_condition(effect_name);
+                        if flag != crate::domain::character::Condition::FINE {
+                            for member in &mut global_state.0.party.members {
+                                if member.is_alive() {
+                                    member.conditions.add(flag);
+                                }
+                            }
+                            let effect_msg = format!("The trap inflicts {}!", effect_name);
+                            tracing::warn!("{}", effect_msg);
+                            if let Some(ref mut writer) = game_log_writer {
+                                writer.write(GameLogEvent {
+                                    text: effect_msg,
+                                    category: LogCategory::Combat,
+                                });
+                            }
+                        }
+                    }
+
+                    // Summary log entry.
+                    let msg = format!("Trapped! Took {} damage.", trap_damage);
+                    tracing::warn!("{}", msg);
+                    if let Some(ref mut writer) = game_log_writer {
+                        writer.write(GameLogEvent {
+                            text: msg,
                             category: LogCategory::Combat,
                         });
                     }
+
+                    // Check for party wipe — all members dead -> GameOver.
+                    // If survivors remain, show the trap notification popup.
+                    if global_state.0.party.living_count() == 0 && !member_results.is_empty() {
+                        tracing::error!("Party wiped by trap!");
+                        global_state.0.mode = crate::application::GameMode::GameOver;
+                        if let Some(ref mut writer) = game_log_writer {
+                            writer.write(GameLogEvent {
+                                text: "The entire party has perished!".to_string(),
+                                category: LogCategory::Combat,
+                            });
+                        }
+                    } else if !member_results.is_empty() {
+                        global_state.0.mode = crate::application::GameMode::TrapNotification(
+                            crate::application::TrapNotificationState::new_triggered(
+                                trap_name,
+                                trap_description,
+                                member_results,
+                                trap_effect,
+                            ),
+                        );
+                    }
                 }
 
-                // Remove trap event from map (one-time).
+                // Remove trap event from map (one-time) regardless of levitate.
                 if let Some(map) = global_state.0.world.get_current_map_mut() {
                     map.remove_event(trigger.position);
                 }
@@ -3049,6 +3095,65 @@ mod trap_treasure_tests {
             gs.0.party.members[1].conditions.has(Condition::DEAD),
             "Bob should have DEAD condition"
         );
+    }
+
+    // ── Test: non-lethal trap sets TrapNotification mode ───────────────
+
+    /// When a trap damages but does not kill all party members, the mode
+    /// must transition to `GameMode::TrapNotification` so the UI can display
+    /// the damage report.
+    #[test]
+    fn test_trap_sets_trap_notification_mode_when_survivors_remain() {
+        let mut map = Map::new(1, "NotifMap".to_string(), "Test".to_string(), 10, 10);
+        let pos = event_pos();
+        let trap = MapEvent::Trap {
+            name: "Arrow Trap".to_string(),
+            description: "Arrows fly from the walls.".to_string(),
+            damage: 5,
+            effect: None,
+        };
+        map.add_event(pos, trap.clone());
+
+        let mut game_state = GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(pos);
+        game_state.mode = GameMode::Exploration;
+
+        game_state
+            .party
+            .add_member(make_character("Alice", 30))
+            .unwrap();
+        game_state
+            .party
+            .add_member(make_character("Bob", 30))
+            .unwrap();
+
+        let mut app = build_trap_treasure_app(game_state);
+
+        fire_event(&mut app, trap, pos);
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, GameMode::TrapNotification(_)),
+            "Mode should be TrapNotification after non-lethal trap, got {:?}",
+            gs.0.mode
+        );
+
+        // Verify the notification contains per-member results.
+        if let GameMode::TrapNotification(ref state) = gs.0.mode {
+            assert_eq!(
+                state.member_results.len(),
+                2,
+                "Should have results for both members"
+            );
+            assert_eq!(state.member_results[0].damage_taken, 5);
+            assert_eq!(state.member_results[1].damage_taken, 5);
+            assert!(!state.member_results[0].died);
+            assert!(!state.member_results[1].died);
+            assert_eq!(state.trap_name, "Arrow Trap");
+        }
     }
 
     // ── Test 4: Treasure distributes loot to party inventories ──────────
