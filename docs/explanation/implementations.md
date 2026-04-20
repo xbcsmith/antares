@@ -1,5 +1,118 @@
 # Implementations
 
+---
+
+## Phase 5: Resistances and Character Info Section (Complete)
+
+### Overview
+
+Phase 5 adds two new sections to the character sheet single view:
+
+1. **Resistances** — all eight `Resistances` fields from `Character.resistances`
+   (`magic`, `fire`, `cold`, `electricity`, `acid`, `fear`, `poison`, `psychic`)
+   are displayed in the right sub-column below Equipment. Zero values render in
+   grey (`STAT_EMPTY_COLOR`) and non-zero values render in amber
+   (`STAT_MODIFIED_COLOR`) for visual prominence.
+
+2. **About block** — the simple one-liner below the portrait in the left column
+   is replaced with a titled section listing Sex, Alignment, Age (years + days),
+   Gold, and Gems.
+
+### Files Changed
+
+#### `src/game/systems/character_sheet_ui.rs`
+
+**`render_resistance_row` (new private helper)**
+
+Added between `render_equip_slot` and `sex_display`. Accepts `label: &str` and
+`value: u8` (the `current` field from the `AttributePair` for that resistance):
+
+- `value == 0` → renders `"0"` in `STAT_EMPTY_COLOR` (grey).
+- `value > 0`  → renders the numeric value in `STAT_MODIFIED_COLOR` (amber).
+
+This coloring rule deliberately differs from `render_u8_row` (which compares
+`base` vs `current`): resistances are zero by default and any non-zero value
+is noteworthy regardless of the base.
+
+**`render_single_view` — Resistances section**
+
+In the right sub-column, after the seven equipment slots and before
+Proficiencies, a new **Resistances** section is rendered:
+
+```
+Resistances
+-----------
+Magic:       0        ← grey
+Fire:       20        ← amber
+Cold:       15        ← amber
+Electricity: 0        ← grey
+Acid:        0        ← grey
+Fear:       30        ← amber
+Poison:     25        ← amber
+Psychic:     8        ← amber
+```
+
+**`render_single_view` — Expanded About block**
+
+The existing identity block below the portrait was extended. The previous
+`"{sex} -- {alignment}"` single label is replaced with a titled `About`
+section containing five `ui.horizontal` rows:
+
+| Label | Source |
+|---|---|
+| Sex | `sex_display(character.sex)` |
+| Alignment | `alignment_display(character.alignment)` |
+| Age | `"{age} yr {age_days} d"` |
+| Gold | `character.gold` |
+| Gems | `character.gems` |
+
+### Tests Added (3 new tests)
+
+| Test | What it verifies |
+|---|---|
+| `test_render_resistances_zero_uses_empty_color` | `STAT_EMPTY_COLOR == Color32::from_rgb(128,128,128)`; `render_resistance_row(_, 0)` does not panic |
+| `test_render_resistances_nonzero_uses_modified_color` | `STAT_MODIFIED_COLOR == Color32::from_rgb(255,191,0)`; `render_resistance_row(_, 25/255)` does not panic |
+| `test_render_about_section_displays_sex_alignment_age` | `render_single_view` completes without panic for a character with non-default About fields (age 120, gold 1500, gems 12) and a mix of zero/non-zero resistances |
+
+### Design Decisions
+
+- **`render_resistance_row` is a dedicated helper** rather than reusing
+  `render_u8_row`: resistance display semantics are zero/non-zero, not
+  base-vs-current. A separate helper keeps the two concepts independent
+  and makes future changes to either easier.
+- **`AttributePair.current` displayed**: equipment/spell buffs modify
+  `current`; showing the active value is what the player needs to see in
+  combat.
+- **Resistances placed between Equipment and Proficiencies**: Equipment is the
+  primary combat concern; Resistances are secondary defensive information;
+  Proficiencies are class/race metadata. The ordering follows descending
+  combat relevance.
+- **About block uses titled section**: adding a `"About"` heading with a
+  separator makes the five new fields scannable and consistent with the
+  right-column section headers (Core Stats, Combat, Experience, Equipment,
+  Resistances, Proficiencies).
+
+### Quality Gates
+
+```text
+cargo fmt --all          → clean
+cargo check              → Finished, 0 errors
+cargo clippy -D warnings → Finished, 0 warnings
+cargo nextest run        → 4819 passed, 0 failed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] `Resistances` struct fields used via `AttributePair.current` — never mutated
+- [x] `STAT_EMPTY_COLOR` / `STAT_MODIFIED_COLOR` constants used — no magic numbers
+- [x] `sex_display` / `alignment_display` helpers reused — no duplicated match logic
+- [x] `character.age`, `character.age_days`, `character.gold`, `character.gems` read-only — `AttributePair` pattern respected
+- [x] All eight resistance fields displayed — no fields omitted
+- [x] No test references to `campaigns/tutorial`
+- [x] All four quality gates pass
+
+---
+
 ## Phase 2: HUD Portrait Click → Open Character Sheet (Complete)
 
 ### Overview

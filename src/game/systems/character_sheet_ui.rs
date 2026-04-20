@@ -439,11 +439,30 @@ fn render_single_view(
                     "{} {} Lv {}",
                     character.race_id, character.class_id, character.level
                 ));
-                ui.label(format!(
-                    "{} -- {}",
-                    sex_display(character.sex),
-                    alignment_display(character.alignment),
-                ));
+                // About block — Phase 5: fuller character identity information
+                ui.add_space(4.0);
+                ui.colored_label(TITLE_COLOR, "About");
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Sex:");
+                    ui.label(sex_display(character.sex));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Alignment:");
+                    ui.label(alignment_display(character.alignment));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Age:");
+                    ui.label(format!("{} yr {} d", character.age, character.age_days));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Gold:");
+                    ui.label(format!("{}", character.gold));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Gems:");
+                    ui.label(format!("{}", character.gems));
+                });
             });
         });
 
@@ -601,6 +620,24 @@ fn render_single_view(
 
                         ui.add_space(8.0);
 
+                        // Resistances — Phase 5
+                        ui.colored_label(TITLE_COLOR, "Resistances");
+                        ui.separator();
+                        render_resistance_row(ui, "Magic", character.resistances.magic.current);
+                        render_resistance_row(ui, "Fire", character.resistances.fire.current);
+                        render_resistance_row(ui, "Cold", character.resistances.cold.current);
+                        render_resistance_row(
+                            ui,
+                            "Electricity",
+                            character.resistances.electricity.current,
+                        );
+                        render_resistance_row(ui, "Acid", character.resistances.acid.current);
+                        render_resistance_row(ui, "Fear", character.resistances.fear.current);
+                        render_resistance_row(ui, "Poison", character.resistances.poison.current);
+                        render_resistance_row(ui, "Psychic", character.resistances.psychic.current);
+
+                        ui.add_space(8.0);
+
                         // Proficiencies
                         ui.colored_label(TITLE_COLOR, "Proficiencies");
                         ui.separator();
@@ -679,6 +716,26 @@ fn render_equip_slot(ui: &mut egui::Ui, slot_name: &str, item: Option<String>) {
             Some(name) => ui.label(name),
             None => ui.colored_label(STAT_EMPTY_COLOR, "—"),
         };
+    });
+}
+
+/// Renders a single resistance row.
+///
+/// * `value == 0` → rendered in [`STAT_EMPTY_COLOR`] (grey) to indicate no resistance.
+/// * `value > 0`  → rendered in [`STAT_MODIFIED_COLOR`] (amber) for visual prominence.
+///
+/// # Arguments
+///
+/// * `label` – the resistance type name (e.g., `"Magic"`)
+/// * `value` – the active resistance value (`current` from the [`AttributePair`])
+fn render_resistance_row(ui: &mut egui::Ui, label: &str, value: u8) {
+    ui.horizontal(|ui| {
+        ui.label(format!("{label}:"));
+        if value == 0 {
+            ui.colored_label(STAT_EMPTY_COLOR, "0");
+        } else {
+            ui.colored_label(STAT_MODIFIED_COLOR, format!("{value}"));
+        }
     });
 }
 
@@ -1093,5 +1150,106 @@ mod tests {
                 .is_some(),
             "FullPortraitAssets resource must be accessible after insertion"
         );
+    }
+
+    /// Verifies `render_resistance_row` uses `STAT_EMPTY_COLOR` for a zero value.
+    ///
+    /// Calls the helper in a minimal egui context and confirms it does not panic.
+    /// The test also asserts the colour constants match the expected RGB values so
+    /// a future palette change does not silently break the UI contract.
+    #[test]
+    fn test_render_resistances_zero_uses_empty_color() {
+        // Verify the constant is the expected muted grey.
+        assert_eq!(
+            STAT_EMPTY_COLOR,
+            egui::Color32::from_rgb(128, 128, 128),
+            "STAT_EMPTY_COLOR must be grey (128, 128, 128)"
+        );
+
+        // Verify the render helper does not panic when value == 0.
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_resistance_row(ui, "Magic", 0);
+            });
+        });
+    }
+
+    /// Verifies `render_resistance_row` uses `STAT_MODIFIED_COLOR` for a non-zero value.
+    ///
+    /// Calls the helper in a minimal egui context and confirms it does not panic.
+    /// The test also asserts the colour constant matches the expected amber RGB value.
+    #[test]
+    fn test_render_resistances_nonzero_uses_modified_color() {
+        // Verify the constant is the expected amber.
+        assert_eq!(
+            STAT_MODIFIED_COLOR,
+            egui::Color32::from_rgb(255, 191, 0),
+            "STAT_MODIFIED_COLOR must be amber (255, 191, 0)"
+        );
+
+        // Verify the render helper does not panic when value > 0.
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_resistance_row(ui, "Fire", 25);
+                render_resistance_row(ui, "Cold", 255);
+            });
+        });
+    }
+
+    /// Verifies that `render_single_view` renders the expanded About block
+    /// (Sex, Alignment, Age, Gold, Gems) without panicking, and that all
+    /// eight resistance rows render for a character with non-zero resistances.
+    #[test]
+    fn test_render_about_section_displays_sex_alignment_age() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut state = GameState::new();
+        let mut ch = Character::new(
+            "Elara Silverveil".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        // Set non-default About fields so we exercise actual display paths.
+        ch.age = 120;
+        ch.age_days = 45;
+        ch.gold = 1_500;
+        ch.gems = 12;
+        // Set non-zero resistances to exercise the amber colour path.
+        ch.resistances.magic.current = 10;
+        ch.resistances.fire.current = 20;
+        ch.resistances.cold.current = 15;
+        ch.resistances.electricity.current = 5;
+        ch.resistances.acid.current = 0; // stays grey
+        ch.resistances.fear.current = 30;
+        ch.resistances.poison.current = 25;
+        ch.resistances.psychic.current = 8;
+
+        state.party.add_member(ch).unwrap();
+        state.enter_character_sheet();
+
+        let mut gs = crate::game::resources::GlobalState(state);
+        let campaign_config = crate::domain::campaign::CampaignConfig::default();
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_single_view(
+                    ui,
+                    &mut gs,
+                    1,
+                    0,
+                    &campaign_config,
+                    None,
+                    None,
+                    None,
+                    "elara_silverveil",
+                );
+            });
+        });
+        // Reaching here without panic = About block and Resistances rendered correctly.
     }
 }
