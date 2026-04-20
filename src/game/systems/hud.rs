@@ -351,6 +351,34 @@ pub struct PortraitAssets {
     /// Campaign ID this resource is currently populated for (to avoid re-loading)
     pub loaded_for_campaign: Option<String>,
 }
+/// Resource holding loaded full-length portrait image handles for the active campaign.
+///
+/// Full-length (head-to-feet) portraits are stored at:
+/// `<campaign_root>/assets/portraits/full/<portrait_id>.png`
+///
+/// Indexed by normalized filename stem (lowercased, spaces -> underscores).
+/// Populated by [`ensure_full_portraits_loaded`].  When a character has no
+/// full portrait, callers should fall back to [`get_portrait_color`].
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::hud::FullPortraitAssets;
+///
+/// let assets = FullPortraitAssets::default();
+/// assert!(assets.handles_by_name.is_empty());
+/// assert!(assets.loaded_for_campaign.is_none());
+/// ```
+#[derive(Resource, Default)]
+pub struct FullPortraitAssets {
+    /// Maps filename stem (normalized: lowercase, underscores) -> Image handle.
+    /// Keys are normalized filename stems (e.g., "aldric", "warrior_f", "10").
+    pub handles_by_name: HashMap<String, Handle<Image>>,
+    /// Optional fallback image handle used when a specific portrait cannot be loaded.
+    pub fallback: Option<Handle<Image>>,
+    /// Campaign ID this resource is currently populated for (to avoid re-loading).
+    pub loaded_for_campaign: Option<String>,
+}
 
 /// Dynamic image handle used by the HUD mini map widget.
 ///
@@ -396,6 +424,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(PortraitAssets::default())
             .init_resource::<Assets<Image>>()
+            .init_resource::<FullPortraitAssets>()
             .add_systems(
                 Startup,
                 (
@@ -420,6 +449,7 @@ impl Plugin for HudPlugin {
                 Update,
                 (
                     ensure_portraits_loaded,
+                    ensure_full_portraits_loaded,
                     update_mini_map,
                     update_compass,
                     update_clock,
@@ -1844,6 +1874,183 @@ fn ensure_portraits_loaded(
     debug!(
         "ensure_portraits_loaded: loaded {} portraits for campaign '{}'",
         portraits.handles_by_name.len(),
+        campaign.id
+    );
+}
+
+/// Ensures full-length portrait assets are loaded for the active campaign.
+///
+/// Scans `<campaign_root>/assets/portraits/full/` for PNG/JPG/JPEG files and
+/// loads each via the `AssetServer`, storing handles in [`FullPortraitAssets`]
+/// keyed by the normalized filename stem (lowercase, spaces -> `_`).
+///
+/// # Behavior
+///
+/// * If no campaign is loaded, returns immediately.
+/// * If the `full/` sub-directory does not exist, returns immediately without
+///   marking the resource as loaded (so it will retry next frame).
+/// * If the directory is empty, marks the resource as loaded with an empty map.
+/// * Skips files that are not PNG, JPG, or JPEG.
+/// * Skips re-loading when `loaded_for_campaign` already matches the active campaign.
+fn ensure_full_portraits_loaded(
+    global_state: Res<GlobalState>,
+    asset_server: Option<Res<AssetServer>>,
+    mut full_portraits: ResMut<FullPortraitAssets>,
+) {
+    // Only proceed when campaign is loaded
+    let campaign = match &global_state.0.campaign {
+        Some(c) => c,
+        None => return,
+    };
+    debug!(
+        "ensure_full_portraits_loaded: campaign id = {}",
+        campaign.id
+    );
+
+    // If there's no AssetServer resource available yet, skip and retry next frame.
+    let asset_server = match asset_server {
+        Some(a) => a,
+        None => {
+            debug!(
+                "ensure_full_portraits_loaded: no AssetServer available; skipping for campaign {}",
+                campaign.id
+            );
+            return;
+        }
+    };
+
+    // If we've already loaded full portraits for this campaign, nothing to do
+    if let Some(loaded_id) = &full_portraits.loaded_for_campaign {
+        if loaded_id == &campaign.id {
+            return;
+        }
+    }
+
+    let portraits_dir = campaign.root_path.join("assets/portraits/full");
+
+    // Early-return without marking loaded when the directory does not exist.
+    // This allows retrying on the next frame in case assets mount later.
+    if !portraits_dir.exists() {
+        debug!(
+            "ensure_full_portraits_loaded: full portraits dir '{}' does not exist for campaign '{}'; will retry next frame",
+            portraits_dir.display(),
+            campaign.id
+        );
+        return;
+    }
+
+    if let Ok(entries) = std::fs::read_dir(&portraits_dir) {
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                let ext = ext.to_lowercase();
+                if ext == "png" || ext == "jpg" || ext == "jpeg" {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        debug!(
+                            "ensure_full_portraits_loaded: found full portrait file: {}",
+                            path.display()
+                        );
+
+                        let relative_path = match path.strip_prefix(&campaign.root_path) {
+                            Ok(p) => p.to_path_buf(),
+                            Err(_) => match (
+                                std::fs::canonicalize(&path),
+                                std::fs::canonicalize(&campaign.root_path),
+                            ) {
+                                (Ok(abs_path), Ok(abs_root)) => abs_path
+                                    .strip_prefix(&abs_root)
+                                    .map(|p| p.to_path_buf())
+                                    .unwrap_or_else(|_| {
+                                        std::path::PathBuf::from(
+                                            path.file_name()
+                                                .and_then(|n| n.to_str())
+                                                .unwrap_or_default(),
+                                        )
+                                    }),
+                                _ => std::path::PathBuf::from(
+                                    path.file_name()
+                                        .and_then(|n| n.to_str())
+                                        .unwrap_or_default(),
+                                ),
+                            },
+                        };
+
+                        let rel_str = relative_path
+                            .components()
+                            .map(|c| c.as_os_str().to_string_lossy())
+                            .collect::<Vec<_>>()
+                            .join("/");
+
+                        debug!(
+                            "ensure_full_portraits_loaded: loading via relative asset path '{}' (abs={})",
+                            rel_str,
+                            path.display()
+                        );
+
+                        let mut handle: Handle<Image> = asset_server.load(rel_str.clone());
+
+                        debug!(
+                            "ensure_full_portraits_loaded: after load(): handle id={:?}, load_state={:?}",
+                            handle.id(),
+                            asset_server.get_load_state(handle.id())
+                        );
+
+                        if handle == Handle::default() {
+                            warn!(
+                                "ensure_full_portraits_loaded: AssetServer returned default handle for '{}' (campaign='{}'); attempting load_override",
+                                rel_str, campaign.id
+                            );
+                            let override_handle: Handle<Image> =
+                                asset_server.load_override(rel_str.clone());
+
+                            debug!(
+                                "ensure_full_portraits_loaded: after load_override(): handle id={:?}, load_state={:?}",
+                                override_handle.id(),
+                                asset_server.get_load_state(override_handle.id())
+                            );
+
+                            if override_handle != Handle::default() {
+                                handle = override_handle;
+                            } else {
+                                warn!(
+                                    "ensure_full_portraits_loaded: failed to load full portrait '{}' for campaign '{}'; skipping",
+                                    rel_str, campaign.id
+                                );
+                                continue;
+                            }
+                        }
+
+                        if handle != Handle::default() {
+                            let key = stem.to_lowercase().replace(' ', "_");
+                            full_portraits
+                                .handles_by_name
+                                .insert(key.clone(), handle.clone());
+                            debug!(
+                                "ensure_full_portraits_loaded: indexed '{}' as key '{}' (handle id={:?})",
+                                path.display(),
+                                key,
+                                handle.id()
+                            );
+                        } else {
+                            warn!(
+                                "ensure_full_portraits_loaded: skipping indexing of full portrait '{}' (default handle)",
+                                rel_str
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    full_portraits.loaded_for_campaign = Some(campaign.id.clone());
+    debug!(
+        "ensure_full_portraits_loaded: loaded {} full portraits for campaign '{}'",
+        full_portraits.handles_by_name.len(),
         campaign.id
     );
 }
@@ -4612,5 +4819,88 @@ mod portrait_click_tests {
             matches!(state.mode, GameMode::Combat(_)),
             "closing sheet from combat must return to combat"
         );
+    }
+}
+
+// ===== Full Portrait Tests =====
+
+#[cfg(test)]
+mod full_portrait_tests {
+    use super::*;
+
+    /// Inline helper that mirrors the scanning logic in `ensure_full_portraits_loaded`.
+    ///
+    /// Reads `dir`, filters image files (png/jpg/jpeg), and returns
+    /// `(normalized_key, path)` pairs.
+    fn scan_full_portraits_dir(dir: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
+        let mut results = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.filter_map(Result::ok) {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                        let ext = ext.to_lowercase();
+                        if ext == "png" || ext == "jpg" || ext == "jpeg" {
+                            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                                let key = stem.to_lowercase().replace(' ', "_");
+                                results.push((key, path));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        results
+    }
+
+    #[test]
+    fn test_full_portrait_assets_default_is_empty() {
+        let assets = FullPortraitAssets::default();
+        assert!(assets.handles_by_name.is_empty());
+        assert!(assets.fallback.is_none());
+        assert!(assets.loaded_for_campaign.is_none());
+    }
+
+    #[test]
+    fn test_ensure_full_portraits_loaded_graceful_on_missing_directory() {
+        // Calling scan on a non-existent path must not panic and must return empty.
+        let missing = std::path::Path::new("/tmp/antares_test_nonexistent_full_portraits_dir");
+        let results = scan_full_portraits_dir(missing);
+        assert!(results.is_empty(), "expected empty results for missing dir");
+    }
+
+    #[test]
+    fn test_ensure_full_portraits_loaded_graceful_on_empty_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let results = scan_full_portraits_dir(tmp.path());
+        assert!(
+            results.is_empty(),
+            "expected empty results for empty directory"
+        );
+    }
+
+    #[test]
+    fn test_ensure_full_portraits_loaded_indexes_png_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("aldric.png"), b"fakepng").unwrap();
+
+        let results = scan_full_portraits_dir(tmp.path());
+        assert_eq!(results.len(), 1, "expected exactly one entry");
+        assert_eq!(
+            results[0].0, "aldric",
+            "key must be normalized filename stem"
+        );
+    }
+
+    #[test]
+    fn test_ensure_full_portraits_loaded_skips_non_image_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("warrior.png"), b"fakepng").unwrap();
+        std::fs::write(tmp.path().join("README.md"), b"markdown").unwrap();
+        std::fs::write(tmp.path().join("data.ron"), b"ron_data").unwrap();
+
+        let results = scan_full_portraits_dir(tmp.path());
+        assert_eq!(results.len(), 1, "only image files should be indexed");
+        assert_eq!(results[0].0, "warrior");
     }
 }

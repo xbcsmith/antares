@@ -13520,3 +13520,123 @@ cargo check       → Finished, 0 errors
 cargo clippy      → Finished, 0 warnings
 cargo nextest run → 4808 passed, 0 failed
 ```
+
+## Phase 3: Full-Length Portrait Asset Loading (Complete)
+
+### Overview
+
+Phase 3 adds a second portrait resource, `FullPortraitAssets`, and a matching
+loader system `ensure_full_portraits_loaded`.  Full-length (head-to-feet)
+portraits live at `<campaign_root>/assets/portraits/full/<portrait_id>.png` and
+are indexed by the same normalized key convention as head portraits (lowercase
+filename stem, spaces replaced by `_`).  When no full portrait file exists the
+HUD sheet falls back to the deterministic color placeholder from
+`get_portrait_color`.
+
+The `full/` sub-directory is optional; the loader silently skips loading (and
+retries each frame) when the directory does not yet exist, so campaigns that
+have not produced full portraits compile and run without errors.
+
+### Changes
+
+#### `src/game/systems/hud.rs`
+
+**Change 1 — `FullPortraitAssets` resource**
+
+New `#[derive(Resource, Default)]` struct inserted immediately after
+`PortraitAssets`:
+
+```antares/src/game/systems/hud.rs#L354-382
+/// Resource holding loaded full-length portrait image handles for the active campaign.
+///
+/// Full-length (head-to-feet) portraits are stored at:
+/// `<campaign_root>/assets/portraits/full/<portrait_id>.png`
+///
+/// Indexed by normalized filename stem (lowercased, spaces -> underscores).
+/// Populated by [`ensure_full_portraits_loaded`].  When a character has no
+/// full portrait, callers should fall back to [`get_portrait_color`].
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::hud::FullPortraitAssets;
+///
+/// let assets = FullPortraitAssets::default();
+/// assert!(assets.handles_by_name.is_empty());
+/// assert!(assets.loaded_for_campaign.is_none());
+/// ```
+#[derive(Resource, Default)]
+pub struct FullPortraitAssets {
+    /// Maps filename stem (normalized: lowercase, underscores) -> Image handle.
+    /// Keys are normalized filename stems (e.g., "aldric", "warrior_f", "10").
+    pub handles_by_name: HashMap<String, Handle<Image>>,
+    /// Optional fallback image handle used when a specific portrait cannot be loaded.
+    pub fallback: Option<Handle<Image>>,
+    /// Campaign ID this resource is currently populated for (to avoid re-loading).
+    pub loaded_for_campaign: Option<String>,
+}
+```
+
+**Change 2 — `HudPlugin::build` updated**
+
+- `.init_resource::<FullPortraitAssets>()` added after
+  `.init_resource::<Assets<Image>>()`.
+- `ensure_full_portraits_loaded` added to the `.run_if(not_in_combat)` system
+  set alongside `ensure_portraits_loaded`.
+
+**Change 3 — `ensure_full_portraits_loaded` system**
+
+New system added immediately after `ensure_portraits_loaded` that:
+
+- Returns immediately when no campaign is active.
+- Returns immediately (without marking `loaded_for_campaign`) when the `full/`
+  sub-directory does not exist, so the system retries on the next frame.
+- Reads PNG/JPG/JPEG files from `<campaign_root>/assets/portraits/full/`,
+  normalizes each filename stem, and inserts handles into
+  `FullPortraitAssets::handles_by_name`.
+- Marks `loaded_for_campaign` once the scan completes (even if the directory
+  is empty), preventing redundant re-scans.
+- Mirrors the path-stripping and `load_override` fallback logic of
+  `ensure_portraits_loaded` for consistency.
+
+#### `data/test_campaign/assets/portraits/full/.gitkeep`
+
+New empty fixture directory added so the test campaign includes a `full/`
+sub-directory.  Tests that exercise `scan_full_portraits_dir` on an empty
+directory use `tempfile::tempdir()` for isolation.
+
+### Tests Added (5 new tests in `mod full_portrait_tests`)
+
+| Test | What it verifies |
+|------|-----------------|
+| `test_full_portrait_assets_default_is_empty` | `FullPortraitAssets::default()` has empty map, no fallback, no campaign |
+| `test_ensure_full_portraits_loaded_graceful_on_missing_directory` | No panic when directory does not exist; empty result |
+| `test_ensure_full_portraits_loaded_graceful_on_empty_directory` | No panic on empty directory; empty result |
+| `test_ensure_full_portraits_loaded_indexes_png_file` | Single PNG file produces one entry with normalized key |
+| `test_ensure_full_portraits_loaded_skips_non_image_files` | `.md` and `.ron` files are not indexed |
+
+Tests use an inline `scan_full_portraits_dir` helper (same pattern as
+`test_scan_portraits_dir_filters_images` in the existing `tests` module) to
+avoid exercising Bevy's `AssetServer` in unit tests.
+
+### Architecture Compliance
+
+- `FullPortraitAssets` follows the same `Resource + Default` pattern as
+  `PortraitAssets` (Section 4 of architecture.md).
+- Type aliases and constants unchanged — no raw `u32` or magic numbers
+  introduced.
+- `full/` directory convention is additive and does not break existing
+  `PortraitAssets` behaviour.
+- No `unwrap()` without justification; all filesystem errors are handled
+  gracefully with `debug!` or `warn!` logs.
+- Test data uses `data/test_campaign`, not `campaigns/tutorial` (Implementation
+  Rule 5).
+
+### Quality Gates
+
+```text
+cargo fmt         → clean
+cargo check       → Finished, 0 errors
+cargo clippy      → Finished, 0 warnings
+cargo nextest run → 4813 passed, 0 failed
+```
