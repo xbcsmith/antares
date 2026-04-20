@@ -21,6 +21,7 @@ use crate::domain::conditions::ActiveCondition;
 use crate::domain::types::{Direction, Position};
 use crate::game::components::inventory::{CharacterEntity, PartyEntities};
 use crate::game::resources::GlobalState;
+use crate::game::systems::mouse_input;
 use crate::game::systems::ui_helpers::{
     create_blank_rgba_image, text_style, BODY_FONT_SIZE, LABEL_FONT_SIZE,
 };
@@ -410,6 +411,7 @@ impl Plugin for HudPlugin {
             // damage.  The exploration-only overlays (compass, clock, portraits) stay
             // gated so they don't render on top of the combat HUD.
             .add_systems(Update, update_hud)
+            .add_systems(Update, handle_portrait_click_system)
             .add_systems(Update, update_automap_visibility)
             .add_systems(Update, bind_mini_map_canvas_image)
             .add_systems(Update, bind_automap_canvas_image)
@@ -553,6 +555,8 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                             BackgroundColor(PORTRAIT_PLACEHOLDER_COLOR),
                             BorderRadius::all(Val::Px(4.0)),
                             ImageNode::default(),
+                            Button,
+                            Interaction::None,
                             CharacterPortrait { party_index },
                         ));
 
@@ -767,6 +771,86 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                     ));
                 });
         });
+}
+
+// ── Portrait click ────────────────────────────────────────────────────────────────────────────────
+
+/// Returns `true` when a HUD portrait click should open or switch the character
+/// sheet for the given game mode.
+///
+/// Allowed modes are those where the player can pause to inspect a character
+/// without conflicting with modal UI:
+///
+/// * Exploration, Automap, Inventory, SpellBook, GameLog — standard navigation
+/// * Combat — read-only view; Esc returns to the active combat turn
+/// * CharacterSheet — already open; click updates the focused member in-place
+///
+/// Blocked in `Dialogue`, `Training`, `MerchantInventory`,
+/// `ContainerInventory`, and `TempleService` where digit-key or click input
+/// conflicts with existing UI elements.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::GameMode;
+/// use antares::game::systems::hud::portrait_click_allowed;
+///
+/// assert!(portrait_click_allowed(&GameMode::Exploration));
+/// assert!(!portrait_click_allowed(&GameMode::GameOver));
+/// ```
+pub fn portrait_click_allowed(mode: &GameMode) -> bool {
+    matches!(
+        mode,
+        GameMode::Exploration
+            | GameMode::Automap
+            | GameMode::Inventory(_)
+            | GameMode::SpellBook(_)
+            | GameMode::GameLog
+            | GameMode::Combat(_)
+            | GameMode::CharacterSheet(_)
+    )
+}
+
+/// Opens or switches the character sheet when a HUD portrait is clicked.
+///
+/// Activates from `Exploration`, `Automap`, `Inventory`, `SpellBook`,
+/// `GameLog`, `Combat`, and `CharacterSheet` modes.  Blocked in `Dialogue`,
+/// `Training`, `MerchantInventory`, `ContainerInventory`, and `TempleService`
+/// where click input conflicts with existing UI.
+///
+/// Registered **without** the `not_in_combat` guard so portrait clicks fire
+/// during combat frames as well.  Because [`GameState::enter_character_sheet_at`]
+/// stores the full previous mode inside `CharacterSheetState::previous_mode`,
+/// pressing Esc while viewing the sheet from combat correctly returns the player
+/// to the active combat turn.
+fn handle_portrait_click_system(
+    portrait_query: Query<(&CharacterPortrait, Ref<Interaction>)>,
+    mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
+    mut global_state: ResMut<GlobalState>,
+) {
+    let mouse_just_pressed = mouse_input::mouse_just_pressed(mouse_buttons.as_deref());
+
+    for (portrait, interaction_ref) in portrait_query.iter() {
+        if mouse_input::is_activated(
+            &interaction_ref,
+            interaction_ref.is_changed(),
+            mouse_just_pressed,
+        ) {
+            if portrait_click_allowed(&global_state.0.mode) {
+                global_state
+                    .0
+                    .enter_character_sheet_at(portrait.party_index);
+                info!(
+                    "Portrait clicked: opening sheet at party_index = {}, mode = {:?}",
+                    portrait.party_index, global_state.0.mode
+                );
+            } else {
+                info!("Portrait click ignored: mode is {:?}", global_state.0.mode);
+            }
+            // Only process the first activated portrait per frame.
+            break;
+        }
+    }
 }
 
 /// Updates HUD elements based on current party state
@@ -4355,5 +4439,178 @@ mod clock_tests {
         let tip_offset =
             mini_map_pixel_offset((center_x + 1) as u32, (center_y + 1) as u32, image_size);
         assert_eq!(&data[tip_offset..tip_offset + 4], &MINI_MAP_PLAYER);
+    }
+}
+
+// ===== Portrait Click Tests =====
+
+#[cfg(test)]
+mod portrait_click_tests {
+    use super::*;
+    use crate::application::{GameMode, GameState};
+    use crate::domain::character::{Alignment, Character, Sex};
+
+    fn two_member_state() -> GameState {
+        let mut state = GameState::new();
+        for name in ["Alpha", "Beta"] {
+            let hero = Character::new(
+                name.to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            state.party.add_member(hero).unwrap();
+        }
+        state
+    }
+
+    fn combat_state() -> GameState {
+        let mut state = GameState::new();
+        let hero = Character::new(
+            "Fighter".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+        state.enter_combat();
+        state
+    }
+
+    // ── portrait_click_allowed ───────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_portrait_click_allowed_exploration() {
+        assert!(portrait_click_allowed(&GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_portrait_click_allowed_automap() {
+        assert!(portrait_click_allowed(&GameMode::Automap));
+    }
+
+    #[test]
+    fn test_portrait_click_allowed_game_log() {
+        assert!(portrait_click_allowed(&GameMode::GameLog));
+    }
+
+    #[test]
+    fn test_portrait_click_not_allowed_game_over() {
+        assert!(!portrait_click_allowed(&GameMode::GameOver));
+    }
+
+    // ── handle_portrait_click_opens_sheet ─────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_handle_portrait_click_opens_sheet_in_exploration() {
+        let mut state = two_member_state();
+        assert!(matches!(state.mode, GameMode::Exploration));
+        assert!(portrait_click_allowed(&state.mode));
+
+        state.enter_character_sheet_at(0);
+
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+        if let GameMode::CharacterSheet(ref cs) = state.mode {
+            assert_eq!(cs.focused_index, 0);
+            assert!(matches!(cs.get_resume_mode(), GameMode::Exploration));
+        }
+    }
+
+    #[test]
+    fn test_handle_portrait_click_opens_sheet_in_combat() {
+        let mut state = combat_state();
+        assert!(matches!(state.mode, GameMode::Combat(_)));
+        assert!(portrait_click_allowed(&state.mode));
+
+        state.enter_character_sheet_at(0);
+
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+        if let GameMode::CharacterSheet(ref cs) = state.mode {
+            assert_eq!(cs.focused_index, 0);
+            // Resume mode must be the combat state so Esc returns to combat.
+            assert!(matches!(cs.get_resume_mode(), GameMode::Combat(_)));
+        }
+    }
+
+    #[test]
+    fn test_handle_portrait_click_ignored_in_dialogue() {
+        let mut state = two_member_state();
+        state.enter_dialogue();
+        assert!(matches!(state.mode, GameMode::Dialogue(_)));
+        // Must be blocked
+        assert!(!portrait_click_allowed(&state.mode));
+        // Mode unchanged after a simulated click attempt
+        assert!(matches!(state.mode, GameMode::Dialogue(_)));
+    }
+
+    #[test]
+    fn test_handle_portrait_click_ignored_in_training() {
+        use crate::application::TrainingState;
+        let mut state = two_member_state();
+        state.mode = GameMode::Training(TrainingState::new("trainer_npc".to_string()));
+        assert!(!portrait_click_allowed(&state.mode));
+        assert!(matches!(state.mode, GameMode::Training(_)));
+    }
+
+    #[test]
+    fn test_handle_portrait_click_selects_correct_party_index() {
+        let mut state = two_member_state();
+        assert!(portrait_click_allowed(&state.mode));
+
+        state.enter_character_sheet_at(1);
+
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+        if let GameMode::CharacterSheet(ref cs) = state.mode {
+            assert_eq!(cs.focused_index, 1);
+        }
+    }
+
+    #[test]
+    fn test_handle_portrait_click_when_already_in_sheet_updates_index() {
+        let mut state = two_member_state();
+        // Open at index 0.
+        state.enter_character_sheet_at(0);
+        assert!(portrait_click_allowed(&state.mode));
+
+        // Click portrait 1 while sheet is already open.
+        state.enter_character_sheet_at(1);
+
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+        if let GameMode::CharacterSheet(ref cs) = state.mode {
+            assert_eq!(cs.focused_index, 1);
+            // Resume mode must still be Exploration (no re-wrapping).
+            assert!(matches!(cs.get_resume_mode(), GameMode::Exploration));
+        }
+    }
+
+    #[test]
+    fn test_close_sheet_from_combat_returns_to_combat() {
+        let mut state = combat_state();
+        assert!(matches!(state.mode, GameMode::Combat(_)));
+
+        // Simulate portrait click while in combat.
+        state.enter_character_sheet_at(0);
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+
+        // Verify previous_mode is Combat.
+        let resume = if let GameMode::CharacterSheet(ref cs) = state.mode {
+            cs.get_resume_mode()
+        } else {
+            panic!("expected CharacterSheet mode");
+        };
+        assert!(
+            matches!(resume, GameMode::Combat(_)),
+            "resume mode must be Combat, got {:?}",
+            resume
+        );
+
+        // Simulate Esc: restore previous mode.
+        state.mode = resume;
+        assert!(
+            matches!(state.mode, GameMode::Combat(_)),
+            "closing sheet from combat must return to combat"
+        );
     }
 }

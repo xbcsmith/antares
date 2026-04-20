@@ -1,5 +1,70 @@
 # Implementations
 
+## Phase 2: HUD Portrait Click → Open Character Sheet (Complete)
+
+### Overview
+
+Clicking any HUD party portrait opens the character sheet focused on that party
+member. The feature works from all standard navigation modes **and from within
+active combat** — pressing Esc while viewing the sheet from combat returns the
+player to the active combat turn. Clicking is silently ignored in modal screens
+that own the pointer (`Dialogue`, `Training`, `MerchantInventory`,
+`ContainerInventory`, `TempleService`).
+
+### Changes
+
+#### `src/game/systems/hud.rs`
+
+- Added `use crate::game::systems::mouse_input;` import.
+- In `setup_hud`, added `Button` and `Interaction::None` to the
+  `CharacterPortrait` entity bundle so Bevy's interaction pipeline tracks
+  hover/press events on each portrait node.
+- Added `pub fn portrait_click_allowed(mode: &GameMode) -> bool` — a pure
+  predicate that returns `true` for `Exploration`, `Automap`, `Inventory`,
+  `SpellBook`, `GameLog`, `Combat`, and `CharacterSheet` modes, and `false`
+  for all blocking modal modes.
+- Added `fn handle_portrait_click_system` — a Bevy system that:
+  - Queries `(&CharacterPortrait, Ref<Interaction>)` for all portrait entities.
+  - Calls `mouse_input::mouse_just_pressed` + `mouse_input::is_activated` (the
+    shared activation model used by combat, menu, and dialogue systems).
+  - If activated and the mode is allowed, calls
+    `global_state.0.enter_character_sheet_at(portrait.party_index)`.
+  - Breaks after the first activated portrait (only one sheet can open per frame).
+- Registered `handle_portrait_click_system` in `HudPlugin::build` with
+  `.add_systems(Update, handle_portrait_click_system)` — **without**
+  `not_in_combat` so clicks fire during active combat turns.
+- Added `mod portrait_click_tests` with 11 pure-logic tests (no Bevy App):
+  `test_portrait_click_allowed_exploration`,
+  `test_portrait_click_allowed_automap`,
+  `test_portrait_click_allowed_game_log`,
+  `test_portrait_click_not_allowed_game_over`,
+  `test_handle_portrait_click_opens_sheet_in_exploration`,
+  `test_handle_portrait_click_opens_sheet_in_combat`,
+  `test_handle_portrait_click_ignored_in_dialogue`,
+  `test_handle_portrait_click_ignored_in_training`,
+  `test_handle_portrait_click_selects_correct_party_index`,
+  `test_handle_portrait_click_when_already_in_sheet_updates_index`,
+  `test_close_sheet_from_combat_returns_to_combat`.
+
+### Design Decisions
+
+- **`portrait_click_allowed` is `pub`**: Exposed for doc-tests and potential
+  reuse by future portrait-click extensions (e.g., right-click context menus).
+- **Allow-list over block-list**: Explicitly enumerating the allowed modes is
+  safer than listing blocked modes, since new modes added in the future are
+  blocked by default.
+- **`CharacterSheet` in the allowed list**: Clicking a different portrait while
+  the sheet is already open calls `enter_character_sheet_at` which updates
+  `focused_index` in-place without re-wrapping the resume mode. This means
+  switching members via portrait click always preserves the original return mode.
+- **No `not_in_combat` guard**: The system runs every frame including combat
+  frames. `enter_character_sheet_at` stores the full `Combat(_)` state as
+  `previous_mode`, so Esc correctly returns to the active combat turn without
+  any extra bookkeeping.
+- **Shared `mouse_input` helpers**: Uses the same `mouse_just_pressed` +
+  `is_activated` model as combat, menu, and dialogue to keep click semantics
+  identical across all Bevy UI screens.
+
 ## Phase 1: Configurable Number-Key Character Selection (Complete)
 
 ### Overview
@@ -13370,3 +13435,88 @@ Added `GameState::enter_character_sheet_at(index: usize)`:
 - [x] RON data files unchanged
 - [x] No test references to `campaigns/tutorial`
 - [x] All four quality gates pass
+
+## Phase 2 — Character Sheet: Portrait Click Opens Character Sheet (Complete)
+
+### Overview
+
+Phase 2 wires the HUD portrait buttons to open the character sheet when
+clicked.  Clicking any portrait in the bottom HUD strip opens
+`GameMode::CharacterSheet` focused on that party member.  The click is allowed
+in all modes where a UI focus conflict would not occur, and is blocked in
+`Dialogue`, `Training`, `MerchantInventory`, `ContainerInventory`, and
+`TempleService`.
+
+### Changes
+
+#### `src/game/systems/hud.rs`
+
+**Change 1 — New import**
+
+Added `use crate::game::systems::mouse_input;` after the `GlobalState` import
+so the shared mouse activation helpers are available in the HUD module.
+
+**Change 2 — `Button` + `Interaction::None` on `CharacterPortrait` spawn**
+
+The portrait entity inside `setup_hud` now includes `Button` and
+`Interaction::None` so Bevy's interaction system tracks mouse hover/press
+events for that node.
+
+**Change 3 — `portrait_click_allowed` + `handle_portrait_click_system`**
+
+Two functions inserted immediately before `fn update_hud`:
+
+- `pub fn portrait_click_allowed(mode: &GameMode) -> bool` — pure predicate
+  that returns `true` for `Exploration`, `Automap`, `Inventory(_)`,
+  `SpellBook(_)`, `GameLog`, `Combat(_)`, and `CharacterSheet(_)`.  `pub` so
+  doc-tests and external tests can call it directly.
+
+- `fn handle_portrait_click_system(...)` — Bevy system that iterates portrait
+  entities, detects activation via `mouse_input::is_activated`, guards on
+  `portrait_click_allowed`, and calls
+  `global_state.0.enter_character_sheet_at(portrait.party_index)`.
+
+The system uses the same dual-path activation model (changed
+`Interaction::Pressed` OR hovered + `just_pressed`) as every other Bevy UI
+system in Antares, routed through the shared `mouse_input` helpers.
+
+**Change 4 — System registration in `HudPlugin::build`**
+
+`.add_systems(Update, handle_portrait_click_system)` added **without** a
+`run_if(not_in_combat)` guard so portrait clicks fire during combat frames too.
+`enter_character_sheet_at` stores the full `Combat(_)` state in
+`CharacterSheetState::previous_mode`, so pressing Esc from the sheet correctly
+returns to the active combat turn.
+
+### Tests Added (11 new tests in `mod portrait_click_tests`)
+
+| Test | What it verifies |
+|------|-----------------|
+| `test_portrait_click_allowed_exploration` | Exploration is allowed |
+| `test_portrait_click_allowed_automap` | Automap is allowed |
+| `test_portrait_click_allowed_game_log` | GameLog is allowed |
+| `test_portrait_click_not_allowed_game_over` | GameOver is blocked |
+| `test_handle_portrait_click_opens_sheet_in_exploration` | Sheet opens at correct index from Exploration |
+| `test_handle_portrait_click_opens_sheet_in_combat` | Sheet opens from Combat; resume mode is Combat |
+| `test_handle_portrait_click_ignored_in_dialogue` | Dialogue blocks click |
+| `test_handle_portrait_click_ignored_in_training` | Training blocks click |
+| `test_handle_portrait_click_selects_correct_party_index` | Correct `focused_index` set |
+| `test_handle_portrait_click_when_already_in_sheet_updates_index` | Re-click updates index without re-wrapping resume mode |
+| `test_close_sheet_from_combat_returns_to_combat` | Esc from sheet opened during combat restores combat mode |
+
+### Architecture Compliance
+
+- `GameMode` variants used exactly as defined in `src/application/mod.rs`
+- `enter_character_sheet_at` called on `GameState` — no direct mutation of `mode`
+- `mouse_input` helpers used consistently — no ad-hoc `just_pressed` logic
+- No `unwrap()` calls; no new error types needed (function is infallible)
+- All tests are pure logic tests — no Bevy `App` needed
+
+### Quality Gates
+
+```text
+cargo fmt         → clean
+cargo check       → Finished, 0 errors
+cargo clippy      → Finished, 0 warnings
+cargo nextest run → 4808 passed, 0 failed
+```
