@@ -54,6 +54,7 @@ pub fn movement_blocked_for_mode(mode: &GameMode) -> bool {
             | GameMode::RestMenu
             | GameMode::GameLog
             | GameMode::SpellCasting(_)
+            | GameMode::TrapNotification(_)
     )
 }
 
@@ -253,5 +254,18 @@ mod tests {
     #[test]
     fn test_input_blocked_for_mode_game_log_true() {
         assert!(input_blocked_for_mode(&GameMode::GameLog));
+    }
+
+    #[test]
+    fn test_movement_blocked_for_trap_notification() {
+        use crate::application::TrapNotificationState;
+        let mode = GameMode::TrapNotification(TrapNotificationState::new_avoided(
+            "Test Trap".to_string(),
+            String::new(),
+        ));
+        assert!(
+            movement_blocked_for_mode(&mode),
+            "Movement must be blocked while the trap notification is showing"
+        );
     }
 }

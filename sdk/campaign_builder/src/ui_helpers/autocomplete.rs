@@ -1003,6 +1003,63 @@ pub fn autocomplete_npc_selector(
     changed
 }
 
+/// Shows an autocomplete input for selecting a recruitable character by name.
+///
+/// Returns `true` if the selection changed.
+///
+/// The `selected_character_id` is the bare character definition ID string
+/// (e.g. `"old_gareth"`).  The widget displays `"{name} (ID: {id})"` in the
+/// dropdown and writes back only the raw ID on selection.
+pub fn autocomplete_character_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_character_id: &mut String,
+    characters: &[antares::domain::character_definition::CharacterDefinition],
+) -> bool {
+    let candidates_list = extract_character_candidates(characters);
+    let candidates: Vec<String> = candidates_list
+        .iter()
+        .map(|(display, _)| display.clone())
+        .collect();
+    let current_display = if selected_character_id.is_empty() {
+        String::new()
+    } else {
+        characters
+            .iter()
+            .find(|c| c.id == *selected_character_id)
+            .map(|c| format!("{} (ID: {})", c.name, c.id))
+            .unwrap_or_else(|| selected_character_id.clone())
+    };
+    let is_selected = !selected_character_id.is_empty();
+    let cell = std::cell::RefCell::new(std::mem::take(selected_character_id));
+    let cfg = AutocompleteSelectorConfig {
+        id_salt,
+        buffer_tag: "character",
+        label,
+        placeholder: "Start typing character name or ID...",
+    };
+    let changed = autocomplete_entity_selector_generic(
+        ui,
+        &cfg,
+        candidates,
+        current_display,
+        is_selected,
+        |text| {
+            for (display, char_id) in extract_character_candidates(characters) {
+                if display == text {
+                    *cell.borrow_mut() = char_id;
+                    return true;
+                }
+            }
+            false
+        },
+        || cell.borrow_mut().clear(),
+    );
+    *selected_character_id = cell.into_inner();
+    changed
+}
+
 /// Generic multi-entity autocomplete list selector.
 ///
 /// Core implementation shared by `autocomplete_item_list_selector`,
@@ -1414,9 +1471,48 @@ pub fn autocomplete_class_selector(
     changed
 }
 
-/// Shows an autocomplete input for adding monsters to a list.
+/// Encounter monster list selector with per-type count controls.
 ///
-/// Returns `true` if a monster was added to the list.
+/// Unlike the generic list selector, this widget allows **multiple instances**
+/// of the same monster type in a single encounter (e.g. four Skeletons).
+/// Monsters are displayed grouped by type; each row shows the name, the
+/// current count, and ➕ / ➖ buttons to increment or decrement that count.
+/// An autocomplete field below the list lets the user add a new monster type
+/// (or an extra copy of an existing one) by name.
+///
+/// The underlying `Vec<MonsterId>` stores one entry per monster instance, so
+/// three Skeletons are represented as three copies of the Skeleton ID.
+/// Display grouping is derived from that flat list on every frame.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI context
+/// * `id_salt` - Unique identifier for this widget instance
+/// * `label` - Label shown above the monster list group
+/// * `selected_monsters` - Mutable reference to the encounter's monster list;
+///   duplicates represent multiple monsters of the same type
+/// * `monsters` - Slice of all available [`MonsterDefinition`]s
+///
+/// # Returns
+///
+/// Returns `true` if the list changed during this frame.
+///
+/// # Examples
+///
+/// ```no_run
+/// use campaign_builder::ui_helpers::autocomplete_monster_list_selector;
+/// use antares::domain::types::MonsterId;
+///
+/// fn show_encounter_editor(
+///     ui: &mut egui::Ui,
+///     selected: &mut Vec<MonsterId>,
+///     monsters: &[antares::domain::combat::database::MonsterDefinition],
+/// ) {
+///     if autocomplete_monster_list_selector(ui, "my_encounter", "Monsters", selected, monsters) {
+///         println!("Monster list changed");
+///     }
+/// }
+/// ```
 pub fn autocomplete_monster_list_selector(
     ui: &mut egui::Ui,
     id_salt: &str,
@@ -1424,29 +1520,109 @@ pub fn autocomplete_monster_list_selector(
     selected_monsters: &mut Vec<antares::domain::types::MonsterId>,
     monsters: &[antares::domain::combat::database::MonsterDefinition],
 ) -> bool {
-    let candidates: Vec<String> = monsters.iter().map(|m| m.name.clone()).collect();
-    let cfg = AutocompleteListSelectorConfig {
-        id_salt,
-        buffer_tag: "monster_add",
-        label,
-        add_label: "Add monster:",
-        placeholder: "Start typing monster name...",
-    };
-    autocomplete_list_selector_generic(
-        ui,
-        &cfg,
-        selected_monsters,
-        |monster_id| {
-            monsters
+    let mut changed = false;
+
+    ui.group(|ui| {
+        ui.label(label);
+
+        // Build an ordered list of unique monster IDs with per-type counts,
+        // preserving first-seen order so the display is stable across frames.
+        let mut order: Vec<antares::domain::types::MonsterId> = Vec::new();
+        let mut counts: std::collections::HashMap<antares::domain::types::MonsterId, usize> =
+            std::collections::HashMap::new();
+        for &mid in selected_monsters.iter() {
+            *counts.entry(mid).or_insert(0) += 1;
+            if !order.contains(&mid) {
+                order.push(mid);
+            }
+        }
+
+        let mut add_one: Option<antares::domain::types::MonsterId> = None;
+        let mut remove_one: Option<antares::domain::types::MonsterId> = None;
+
+        for &mid in &order {
+            let count = counts[&mid];
+            let name = monsters
                 .iter()
-                .find(|m| m.id == *monster_id)
-                .map(|m| m.name.clone())
-                .unwrap_or_else(|| format!("Unknown monster (ID: {})", monster_id))
-        },
-        candidates,
-        |text| monsters.iter().find(|m| m.name == text).map(|m| m.id),
-        |text| monsters.iter().find(|m| m.name == text).map(|m| m.id),
-    )
+                .find(|m| m.id == mid)
+                .map(|m| m.name.as_str())
+                .unwrap_or("Unknown");
+
+            ui.push_id(mid, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(format!("{} \u{00d7}{}", name, count));
+                    if ui
+                        .small_button("\u{2795}")
+                        .on_hover_text("Add another of this monster")
+                        .clicked()
+                    {
+                        add_one = Some(mid);
+                    }
+                    if ui
+                        .small_button("\u{2796}")
+                        .on_hover_text("Remove one of this monster")
+                        .clicked()
+                    {
+                        remove_one = Some(mid);
+                    }
+                });
+            });
+        }
+
+        if let Some(mid) = add_one {
+            selected_monsters.push(mid);
+            changed = true;
+        }
+
+        if let Some(mid) = remove_one {
+            // Remove the last occurrence so the count decrements consistently.
+            if let Some(pos) = selected_monsters.iter().rposition(|&m| m == mid) {
+                selected_monsters.remove(pos);
+                changed = true;
+            }
+        }
+
+        ui.separator();
+
+        // Autocomplete input to add a new monster type, or an extra copy of an
+        // existing one. Unlike other list selectors this intentionally allows
+        // duplicate IDs — every add pushes unconditionally onto the vec.
+        let candidates: Vec<String> = monsters.iter().map(|m| m.name.clone()).collect();
+        let buffer_id = make_autocomplete_id(ui, "monster_add", id_salt);
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, String::new);
+
+        ui.horizontal(|ui| {
+            ui.label("Add monster:");
+            let response = AutocompleteInput::new(&format!("{}_add", id_salt), &candidates)
+                .with_placeholder("Start typing monster name...")
+                .show(ui, &mut text_buffer);
+
+            let tb = text_buffer.trim().to_string();
+
+            if response.changed() && !tb.is_empty() {
+                if let Some(mid) = monsters.iter().find(|m| m.name == tb).map(|m| m.id) {
+                    selected_monsters.push(mid);
+                    changed = true;
+                    text_buffer.clear();
+                }
+            }
+
+            if response.has_focus()
+                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                && !tb.is_empty()
+            {
+                if let Some(mid) = monsters.iter().find(|m| m.name == tb).map(|m| m.id) {
+                    selected_monsters.push(mid);
+                    changed = true;
+                }
+                text_buffer.clear();
+            }
+        });
+
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+    });
+
+    changed
 }
 
 /// Portrait selector widget with autocomplete functionality
@@ -2122,6 +2298,38 @@ pub fn extract_npc_candidates(maps: &[antares::domain::world::Map]) -> Vec<(Stri
         }
     }
     candidates
+}
+
+/// Extracts character candidates from a list of character definitions.
+///
+/// Returns `(display, id)` pairs where display is `"{name} (ID: {id})"`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::Alignment;
+/// use antares::domain::character::Sex;
+/// use antares::domain::character_definition::CharacterDefinition;
+///
+/// let characters = vec![CharacterDefinition::new(
+///     "old_gareth".to_string(),
+///     "Old Gareth".to_string(),
+///     "dwarf".to_string(),
+///     "fighter".to_string(),
+///     Sex::Male,
+///     Alignment::Neutral,
+/// )];
+/// let candidates = extract_character_candidates(&characters);
+/// assert_eq!(candidates.len(), 1);
+/// assert_eq!(candidates[0].1, "old_gareth");
+/// ```
+pub fn extract_character_candidates(
+    characters: &[antares::domain::character_definition::CharacterDefinition],
+) -> Vec<(String, String)> {
+    characters
+        .iter()
+        .map(|c| (format!("{} (ID: {})", c.name, c.id), c.id.clone()))
+        .collect()
 }
 
 /// Extracts portrait candidates from the campaign's portrait assets directory.

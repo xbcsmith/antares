@@ -391,4 +391,58 @@
             y: 16,
         )),
     ),
+    (
+        id: 8,
+        name: "The Ancient Relic",
+        description: "Find the Ancient Relic â\u{80}\u{94} a small jade icosahedron lost for centuries â\u{80}\u{94} and return it to Jyeshtha at the Astronomers Temple.",
+        stages: [
+            (
+                stage_number: 1,
+                name: "Seek the Ancient Relic",
+                description: "Search the world for the jade icosahedron known as the Ancient Relic.",
+                objectives: [
+                    CollectItems(
+                        item_id: 210,
+                        quantity: 1,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+            (
+                stage_number: 2,
+                name: "Return the Relic",
+                description: "Return the Ancient Relic to Jyeshtha at the Astronomers Temple.",
+                objectives: [
+                    TalkToNpc(
+                        npc_id: "tutorial_mystic_astronomer",
+                        map_id: 7,
+                    ),
+                    DeliverItem(
+                        item_id: 210,
+                        npc_id: "tutorial_mystic_astronomer",
+                        quantity: 1,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+        ],
+        rewards: [
+            Experience(750),
+            Gold(300),
+            Items([
+                (31, 1),
+            ]),
+        ],
+        min_level: Some(3),
+        max_level: Some(255),
+        required_quests: [],
+        repeatable: false,
+        is_main_quest: false,
+        quest_giver_npc: Some("tutorial_mystic_astronomer"),
+        quest_giver_map: Some(7),
+        quest_giver_position: Some((
+            x: 13,
+            y: 10,
+        )),
+    ),
 ]

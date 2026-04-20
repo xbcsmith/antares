@@ -1,5 +1,365 @@
 # Implementations
 
+## Trap Notification Pop-Up (Complete)
+
+### Overview
+
+Implemented a trap-triggered notification pop-up (`GameMode::TrapNotification`)
+so players receive a visible damage report whenever a trap fires, instead of only
+seeing silent entries in the small game-log panel.
+
+### Changes
+
+#### `src/application/mod.rs`
+
+- Added `TrapMemberResult` struct — per-character outcome (name, damage taken, died flag).
+- Added `TrapNotificationState` struct with `new_avoided()` and `new_triggered()` constructors.
+- Added `GameMode::TrapNotification(TrapNotificationState)` variant to the `GameMode` enum.
+- Extended `close_modal()` with the new `TrapNotification(_)` arm (returns to `Exploration`).
+- Rewrote the `EventResult::Trap` arm in `move_party_and_handle_events` to:
+  - Set `TrapNotification(avoided)` when Levitate is active.
+  - Collect per-member damage results and set `TrapNotification(triggered)` when
+    at least one member survives.
+  - Still transitions to `GameMode::GameOver` on a full party wipe.
+- Updated `test_levitate_buff_skips_trap_damage` assertion: mode is now
+  `TrapNotification(avoided=true)` rather than `Exploration`.
+- Added four new unit tests covering the new state constructors, mode transition,
+  and `close_modal` dismissal.
+
+#### `src/game/systems/events.rs`
+
+- Rewrote the `MapEvent::Trap` arm in `handle_events` to mirror the logic above,
+  including levitate avoidance, per-member results, `TrapNotification` mode
+  transition, and game-log entries for each path.
+- Added `test_trap_sets_trap_notification_mode_when_survivors_remain` integration
+  test exercising two-member party damage and state inspection.
+
+#### `src/game/systems/input/mode_guards.rs`
+
+- Added `GameMode::TrapNotification(_)` to `movement_blocked_for_mode` so the
+  player cannot move while the pop-up is open.
+- Added `test_movement_blocked_for_trap_notification` unit test.
+
+#### `src/game/systems/mod.rs`
+
+- Declared `pub mod trap_notification_ui;`.
+
+#### `src/game/systems/trap_notification_ui.rs` (new)
+
+- `TrapNotificationPlugin` — registers the two systems under `Update`.
+- `trap_notification_input_system` — Escape / Enter / Space dismisses the modal.
+- `trap_notification_ui_system` — renders a centred egui `Window` with the trap
+  name, optional description, per-member damage table, condition badges, and an
+  **OK — Continue** button. Uses `Option<EguiContexts>` to be safe in headless
+  tests.
+- Seven unit tests covering plugin registration, keyboard dismissal (no-op and
+  active), state constructors, and the died flag.
+
+#### `src/bin/antares.rs`
+
+- Registered `TrapNotificationPlugin` after `TemplePlugin`.
+
+### Design decisions
+
+- `TrapNotification` stores a complete `TrapNotificationState` snapshot rather than
+  borrowing live party data, so the UI can render it without accessing mutable game
+  state during the same frame.
+- The `avoided` flag repurposes the same `Window` for the Levitate case, keeping UI
+  code in one place.
+- `Option<EguiContexts>` is used as the system parameter (same pattern as
+  `fullscreen_game_log_ui_system`) so the system gracefully no-ops in headless tests.
+- Tests avoid `bevy::input::InputPlugin` and instead manually insert
+  `ButtonInput::<KeyCode>` to prevent the `First`-schedule clear from wiping
+  `just_pressed` before the `Update` system sees it.
+
+## Encounter Editor: Allow Duplicate Monster IDs — Bug Fix (Complete)
+
+### Overview
+
+Fixed a bug in the encounter editor where it was impossible to add more than one
+instance of the same monster type (e.g., four Skeletons) to a single encounter.
+Once a Skeleton was added, all subsequent attempts to add another Skeleton through
+the UI were silently ignored.
+
+### Root Cause
+
+`autocomplete_monster_list_selector` in
+`sdk/campaign_builder/src/ui_helpers/autocomplete.rs` delegated directly to
+`autocomplete_list_selector_generic`, which guards every insertion with
+`if !selected.contains(&new_item)`. This duplicate-prevention logic is correct
+for entity selectors where each entity should appear at most once, but is wrong
+for encounter monster lists where multiple instances of the same type are a core
+game mechanic.
+
+### Fix
+
+`autocomplete_monster_list_selector` was replaced with a purpose-built,
+count-based widget (`sdk/campaign_builder/src/ui_helpers/autocomplete.rs`).
+
+**Key design decisions:**
+- The underlying `Vec<MonsterId>` retains its flat, one-entry-per-instance
+  representation (three Skeletons = three copies of the Skeleton ID). No data
+  model change was required.
+- The display groups entries by type and shows a `×N` count alongside ➕ / ➖
+  buttons for incrementing or decrementing the per-type count within the same
+  frame.
+- The autocomplete "Add monster" field at the bottom pushes unconditionally onto
+  the `Vec`, allowing both new types and extra copies of existing ones to be
+  added by name.
+
+### Files Changed
+
+- `sdk/campaign_builder/src/ui_helpers/autocomplete.rs` — replaced
+  `autocomplete_monster_list_selector` implementation
+- `sdk/campaign_builder/src/map_editor.rs` — added two regression tests
+
+### Tests Added
+
+- `map_editor::tests::test_encounter_allows_duplicate_monster_ids_in_to_map_event`
+  — verifies that `to_map_event` preserves duplicate `MonsterId` values in
+  `monster_group`
+- `map_editor::tests::test_encounter_duplicate_monsters_round_trip_via_from_map_event`
+  — verifies that duplicate IDs survive a `to_map_event` → `from_map_event`
+  round-trip intact
+
+
+## Dead Character Shows OK Status After Rest — Bug Fix (Complete)
+
+### Overview
+
+After a full rest, party members who were dead (DEAD / STONE / ERADICATED)
+were incorrectly displayed with "OK" status and 0 HP. The root cause was a
+three-part desync between the condition bitflags stored in `Character.conditions`
+and the active-condition list stored in `Character.active_conditions`.
+
+### Root Causes
+
+1. **`handle_rest_complete` ticked fatal characters** — the loop that calls
+   `tick_conditions_rest()` and `reconcile_character_conditions()` ran on
+   *every* party member, including those whose `conditions.is_fatal()` is
+   `true`. All other rest helpers (`rest_party`, `rest_party_hour`,
+   `apply_starvation_damage`) already guarded against this with
+   `is_fatal()` checks.
+
+2. **`reconcile_character_conditions` had no fatal guard** — when the
+   content DB defined "dead" as a `StatusEffect` and `active_conditions`
+   was empty (or out of sync), reconciliation removed the DEAD bitflag
+   entirely, leaving `conditions.0 = FINE` while HP stayed at 0.
+
+3. **Service effects (`cure_all`, `resurrect`, `rest`) cleared condition
+   bitflags but not `active_conditions`** — after `conditions.clear()`
+   the bitflags were zeroed, but the next call to `reconcile_character_conditions`
+   would re-read `active_conditions` and re-set the DEAD flag, undoing the
+   resurrection.
+
+### What Changed
+
+#### `src/game/systems/rest.rs` — `handle_rest_complete`
+
+Added an `is_fatal()` guard at the top of the condition-tick loop in the
+non-interrupted rest branch. Fatal members are skipped with `continue` so
+their condition bitflags and HP are never touched by the rest system.
+
+#### `src/domain/combat/engine.rs` — `reconcile_character_conditions`
+
+Added a belt-and-suspenders `is_fatal()` early-return at the very top of
+the function. Even if a future caller forgets the guard, reconciliation will
+never silently clear a fatal condition.
+
+#### `src/domain/transactions.rs` — `apply_service_effect`
+
+Added `character.active_conditions.clear()` alongside every
+`character.conditions.clear()` in the `cure_all`, `resurrect`, and
+`rest` match arms. Clearing both ensures the next reconcile call does not
+re-apply stale active conditions.
+
+#### `src/game/systems/dialogue.rs` — `apply_service_effect_inline`
+
+Same fix as `transactions.rs`: `active_conditions.clear()` added to the
+`cure_all`, `resurrect`, and `rest` arms (the `rest` arm was already
+present in this file).
+
+### New Tests (2)
+
+| Test | File | What it verifies |
+|------|------|-----------------|
+| `test_handle_rest_complete_skips_fatal_members` | `src/game/systems/rest.rs` | A dead party member's DEAD condition and 0 HP are unchanged after running the rest-complete condition loop with the `is_fatal()` guard in place. |
+| `test_reconcile_character_conditions_noop_for_fatal` | `src/domain/combat/engine.rs` | Calling `reconcile_character_conditions` with empty condition definitions on a dead character does not clear the DEAD flag. |
+
+### Architecture Compliance
+
+- No data structure changes; only system/engine logic modified.
+- All existing tests continue to pass (4,765 total, 0 failed).
+- No `campaigns/tutorial` references introduced.
+- Test data uses inline `Character::new` / `Party::new` — no external
+  fixture files required.
+
+## Combat Bug Fix: Unconscious Player Skip in advance_turn / advance_round (Complete)
+
+### Overview
+
+Two root causes conspired to leave the action menu permanently open whenever a
+player character became unconscious (HP == 0, `UNCONSCIOUS` condition) during
+their turn:
+
+1. `advance_round` only recalculated the turn order inside the
+   `ambush_round_active` branch (round 2 transition). For every other round
+   boundary the stale `turn_order` Vec still contained slots for characters
+   who had become unconscious mid-round.
+
+2. `advance_turn` simply incremented `current_turn` with no check that the
+   combatant at the new index could actually act. When it landed on an
+   unconscious player the game system set `CombatTurnState::PlayerTurn`, the
+   action menu opened, every action returned `CombatantCannotAct`, and the
+   error-recovery path in `handle_attack_action` restored the state back to
+   `PlayerTurn` — creating an infinite loop.
+
+### What Changed
+
+#### `src/domain/combat/engine.rs` — `advance_round`
+
+Removed the `calculate_turn_order` + `current_turn = 0` assignment from inside
+the `ambush_round_active` branch. The ambush branch now only clears the flag
+and resets the handicap to `Even`. At the **end** of `advance_round`,
+`calculate_turn_order` and `current_turn = 0` are called **unconditionally**,
+so every new round gets a fresh turn order that excludes combatants whose
+`is_alive()` is `false`.
+
+#### `src/domain/combat/engine.rs` — `advance_turn`
+
+Added an empty-turn-order guard (returns immediately with no effects if
+`turn_order` is empty). After the mandatory `current_turn` increment and
+optional `advance_round` call, a **bounded skip loop** (capped at
+`turn_order.len()` iterations) steps past any combatant whose `can_act()`
+returns `false` (unconscious, paralyzed, dead, stoned). If the loop wraps
+around and no active combatant is found, `current_turn` is reset to 0 without
+firing another `advance_round` — `check_combat_end` will terminate the fight
+on the caller's next check.
+
+### New Tests (2)
+
+| Test | What it verifies |
+|------|-----------------|
+| `test_advance_turn_skips_unconscious_player` | A player who becomes unconscious (HP 0 + `UNCONSCIOUS` flag) mid-round is skipped by `advance_turn`; the monster becomes the current combatant. |
+| `test_advance_round_drops_unconscious_characters` | After advancing past the end of a round, the new round's `turn_order` contains only alive combatants — the unconscious player is excluded. |
+
+### Architecture Compliance
+
+- Data structures unchanged; only `advance_turn` and `advance_round` logic
+  modified.
+- No magic numbers introduced; loop cap uses `turn_order.len()`.
+- `tracing::debug!` used (not `println!`) for skip-loop diagnostics.
+- All test data uses `create_test_character` / `create_test_monster` helpers
+  from within `mod tests` — no `campaigns/tutorial` references.
+
+### Quality Gates
+
+```text
+cargo fmt --all          → no output
+cargo check              → Finished, 0 errors
+cargo clippy -D warnings → Finished, 0 warnings
+cargo nextest run        → 4763 passed, 0 failed
+```
+
+## Campaign Test Fixture Consolidation (Complete)
+
+### Overview
+
+The `CampaignConfig`, `CampaignData`, and `CampaignAssets` struct initializers
+were repeated verbatim across seven source files. Every time a new field was
+added to these structs the same boilerplate had to be updated in all seven
+places, creating a maintenance burden and a source of bugs.
+
+This task consolidates those initialisers into a single canonical location.
+
+### What Changed
+
+#### `src/sdk/campaign_loader.rs` — `Default` impls
+
+Three new `Default` implementations were added (using the `default_*` free
+functions already present in the file):
+
+- `impl Default for CampaignConfig` — uses `starting_map: 1`,
+  `starting_position: Position::new(0, 0)`, `starting_gold: 100`,
+  `starting_food: 50`, and the existing `default_*` helpers for all other
+  fields.
+- `impl Default for CampaignData` — all fields delegate to their existing
+  `default_*` functions (`data/items.ron`, `data/spells.ron`, …).
+- `impl Default for CampaignAssets` — all fields delegate to their existing
+  `default_*` functions (`assets/tilesets`, `assets/audio`, …).
+
+Callers can now use struct-update syntax to override only the fields relevant
+to their test:
+
+```rust
+let config = CampaignConfig {
+    starting_innkeeper: "my_inn".to_string(),
+    ..CampaignConfig::default()
+};
+```
+
+#### `src/sdk/campaign_loader.rs` — `test_fixtures` module
+
+A `#[cfg(test)] pub(crate) mod test_fixtures` module was added containing
+`pub(crate) fn make_test_campaign() -> Campaign`. This function builds a
+complete `Campaign` from the three new `Default` impls plus
+`GameConfig::default()` and fixed metadata strings (`id: "test"`,
+`name: "Test Campaign"`, `version: "1.0.0"`, etc.).
+
+Any unit test within the `antares` crate can now call:
+
+```rust
+let campaign = crate::sdk::campaign_loader::test_fixtures::make_test_campaign();
+// override fields as needed:
+let campaign = Campaign { id: "custom".to_string(), ..make_test_campaign() };
+```
+
+#### `tests/common/mod.rs` (new file)
+
+A `tests/common/mod.rs` file was created for integration tests. It exposes:
+
+```rust
+pub fn make_test_campaign(id: &str, name: &str, version: &str) -> Campaign
+```
+
+This function mirrors the unit-test helper but is accessible from all files
+under `tests/`.
+
+#### Call-site updates
+
+The following files were updated to replace their inline struct literals:
+
+| File | Change |
+|---|---|
+| `src/sdk/validation.rs` | 3 × `CampaignConfig { … }` → `CampaignConfig { starting_innkeeper: "…", ..CampaignConfig::default() }` |
+| `src/sdk/campaign_packager.rs` | 2 × full `Campaign { … }` → `test_fixtures::make_test_campaign()` |
+| `src/application/mod.rs` | 3 × full `Campaign { … }` → `test_fixtures::make_test_campaign()` (with one field override via `mut`) |
+| `src/application/save_game.rs` | 1 × full `Campaign { … }` → `test_fixtures::make_test_campaign()` |
+| `src/bin/antares.rs` | `create_test_campaign` body → `CampaignConfig::default()`, `CampaignData::default()`, `CampaignAssets::default()` |
+| `src/sdk/campaign_loader.rs` | 2 × own test initialisers → struct-update syntax |
+| `tests/campaign_integration_test.rs` | `create_test_campaign` body → `common::make_test_campaign(…)` |
+
+### Why This Matters
+
+- **Single source of truth**: Adding a new field to `CampaignConfig` now
+  requires updating only `CampaignConfig::default()` in one place.
+- **Consistent defaults**: All test campaigns use the same baseline values,
+  eliminating silent divergence between test suites.
+- **Reduced noise**: Test functions now express only the fields that matter for
+  the behaviour under test, making tests easier to read and maintain.
+
+### Quality Gates
+
+All four quality gates pass:
+
+```text
+cargo fmt         → clean
+cargo check       → Finished, 0 errors
+cargo clippy      → Finished, 0 warnings
+cargo nextest run → 4761 passed, 0 failed
+```
+
+
 ## SDK CLI Consolidation — Phase 4: Cleanup and Polish (Complete)
 
 ### Overview
@@ -12692,4 +13052,76 @@ level, SP cost, gem cost, context label, and full `description` string from
 - [x] Both `data/test_campaign/config.ron` and `campaigns/tutorial/config.ron` updated
 - [x] All four quality gates pass with zero warnings
 - [x] No test references to `campaigns/tutorial` — all fixtures use `data/test_campaign`
+- [x] No architectural deviations from architecture.md
+
+
+---
+
+## Map Editor -- Recruitable Character Autocomplete Selector (Complete)
+
+### Overview
+
+The Campaign Builder's Map Editor "Recruitable Character" event type previously
+used a plain `text_edit_singleline` for the Character ID field.  This made it
+easy to enter an invalid or misspelled ID because there was no guidance about
+which character definitions exist.  This task replaces that bare text input
+with an autocomplete dropdown backed by the loaded `CharacterDefinition` list,
+exactly mirroring the pattern already used by `NpcDialogue` with
+`autocomplete_npc_selector`.
+
+### What Changed
+
+#### `sdk/campaign_builder/src/ui_helpers/autocomplete.rs`
+
+- **`extract_character_candidates`** (new public function): accepts
+  `&[CharacterDefinition]` and returns `Vec<(String, String)>` of
+  `(display, id)` pairs where the display label is `"{name} (ID: {id})"`.
+  Follows the same pattern as `extract_npc_candidates`.
+- **`autocomplete_character_selector`** (new public function): thin wrapper
+  around `autocomplete_entity_selector_generic` that drives the dropdown with
+  `extract_character_candidates`.  Writes back only the raw `CharacterDefinitionId`
+  string on selection.  Both functions are re-exported via `pub use autocomplete::*`
+  in `ui_helpers/mod.rs` without any `mod.rs` change.
+
+#### `sdk/campaign_builder/src/map_editor.rs`
+
+- **`MapEditorRefs`**: added `pub characters: &'a [CharacterDefinition]` field.
+- **`MapInspectorData`**: added `pub characters: &'a [CharacterDefinition]` field.
+- **`show_editor`**: passes `characters: refs.characters` when constructing
+  `MapInspectorData`.
+- **`show_event_editor`**: gains `#[allow(clippy::too_many_arguments)]` and a
+  new `characters: &[CharacterDefinition]` parameter; the parameter is threaded
+  through from `show_inspector_panel`.
+- **`show_inspector_panel`** call site: passes `data.characters` to
+  `show_event_editor`.
+- **`EventType::RecruitableCharacter` branch**: the original plain-text
+  "Character ID:" row is replaced by `autocomplete_character_selector`
+  (writes `event_editor.recruit_character_id` and syncs
+  `recruit_character_id_input_buffer`).  A second "Or enter Character ID
+  manually:" text input is kept beneath the dropdown for free-form entry.
+- **Tests** (`test_inspector_panel_runs_with_event`,
+  `test_event_editor_renders_before_visual_properties_section`): both
+  `MapInspectorData` literals updated with `characters: &[]`.
+
+#### `sdk/campaign_builder/src/lib.rs`
+
+- **`EditorTab::Maps` branch**: `MapEditorRefs` literal updated with
+  `characters: &self.editor_registry.characters_editor_state.characters`.
+
+### Quality Gates
+
+- cargo fmt         -- no output (all files formatted)
+- cargo check       -- Finished with 0 errors, 0 warnings
+- cargo clippy      -- Finished with 0 warnings
+- cargo nextest run -- 4761 passed, 8 skipped, 0 failed
+
+### Architecture Compliance
+
+- [x] `CharacterDefinitionId` type alias used -- no raw `String` for IDs
+- [x] Follows `autocomplete_npc_selector` pattern exactly -- consistent widget design
+- [x] `MapEditorRefs` / `MapInspectorData` struct additions follow existing field ordering
+- [x] `#[allow(clippy::too_many_arguments)]` used appropriately -- function is a necessary aggregation point
+- [x] Both test `MapInspectorData` constructors updated -- no compile-time regressions
+- [x] `lib.rs` wires live `characters_editor_state.characters` -- real data at runtime
+- [x] No test references to `campaigns/tutorial` -- all fixtures use `data/test_campaign`
 - [x] No architectural deviations from architecture.md

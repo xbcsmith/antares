@@ -212,7 +212,7 @@ Out of combat use item system is not implemented. There is no way for a characte
 
 Write a plan with a phased approach to implementing the combat fixes in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Combat Fixes Implementation Plan](./combat_fixes_implementation_plan.md)
+✅ COMPLETED - [Combat Fixes Implementation Plan](./combat_fixes_implementation_plan.md)
 
 ## Character Leveling
 
@@ -232,7 +232,7 @@ SDK will get a new Levels Editor Tab that will follow the two column layout patt
 
 Write a plan with a phased approach to implement these features. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Level Up Plan](./level_up_plan.md)
+✅ COMPLETED - [Level Up Plan](./level_up_plan.md)
 
 ## Notes
 
@@ -240,7 +240,7 @@ Month Year Date in Game Engine View looks horrible.
 
 Trees are still horrible. Grass sucks as well. Is tree bark textures being applied? You can not tell one tree from the next. Oak, Pine, Palm, Dead all look the same. Foliage particularly Bushes clip tree trunks. And seems like editing them in the SDK does nothing to change their appearance.
 
-All the doors are facing the wrong way
+✅ FIXED - All the doors are facing the wrong way
 
 Show/Hide Tray ICON SDK is not working
 
@@ -287,34 +287,54 @@ Validation should also check for things like if a NPC is set to be a trainer but
 
 ### Duplicate Initializer Blocks
 
-Why are the initializer blocks repeated in so many files directly in the repository save_game.rs, mod.rs, campaign_loader.rs, antares.rs, campaign_integration_test.rs, validation.rs? This should be consolidated into a single function that can be called from all these places to reduce code duplication and ensure consistency across the codebase. The initializer block should be moved to a common utility module in the SDK or game engine that can be imported and used wherever needed. This will make it easier to maintain and update the initializer logic in one place rather than having to update it in multiple files. It will also reduce the chances of bugs or inconsistencies arising from having multiple copies of the same code.
+✅ FIXED -Why are the initializer blocks repeated in so many files directly in the repository save_game.rs, mod.rs, campaign_loader.rs, antares.rs, campaign_integration_test.rs, validation.rs? This should be consolidated into a single function that can be called from all these places to reduce code duplication and ensure consistency across the codebase. The initializer block should be moved to a common utility module in the SDK or game engine that can be imported and used wherever needed. This will make it easier to maintain and update the initializer logic in one place rather than having to update it in multiple files. It will also reduce the chances of bugs or inconsistencies arising from having multiple copies of the same code.
 
-Files updated
-mod.rs
 
-Added level_up_mode, base_xp, xp_multiplier to SDK campaign config test initializers.
-Imported LevelUpMode in the affected test.
-campaign_packager.rs
 
-Added level_up_mode, base_xp, xp_multiplier to both inline CampaignConfig test initializers.
-validation.rs
+### SDK Editor Issues
 
-Added level_up_mode, base_xp, xp_multiplier to all inline CampaignConfig test initializers.
-save_game.rs
+✅ FIXED - Campaign Builder --> Map Editor --> Highlight Large map 40x40 and the Map Preview is truncated on both sides. The map preview should scale to the size of the Preview Column.
 
-Added LevelUpMode import for the test using the new config fields.
-campaign_integration_test.rs
+✅ FIXED - Campaign Builder --> Map Editor --> Place Event --> Recruitable Character the Character ID does not autocomplete.
 
-Added the new leveling fields to the helper CampaignConfig initializer.
-antares.rs
-
-Added the new leveling fields and fixed the LevelUpMode reference in the binary test campaign initializer.
-campaign_loader.rs
-
-Added level_up_mode, base_xp, xp_multiplier to the CampaignConfig default test initializer.
-Added the same fields to the CampaignMetadata test initializer.
-
+Campaign Builder --> Map Editor --> Place Event --> Encounter There is no way to set the number of monsters of the same type in the encounter editor. Once a skeleton is added you can not add more Skeletons through the UI. You should be able to add multiple monsters of the same type to an Encounter
 
 ### SKill System Level Scaling
 
 Next task will be to tackle skill system level scaling. Currently the skill system does not scale with character level. We should just do an Auto Skills system to start then follow the route training went with NPC Train Skills.
+
+### Dialogues and Quests
+
+Node 1 (opening): "I have felt your approach for some time now. I am Zhaya, a seeker of truth. My training brought me here to this temple, where the stars speak of a great Astrologer. You appear to be adventurers of purpose. Perhaps our paths are meant to cross."
+
+Choices:
+
+- "Tell us about yourself." → Node 2
+- "We need a companion. Join us!" → Node 3 (RecruitToParty)
+- "Meet us at the inn if you want." → Node 4 (recruit_to_inn)
+- "Forgive us. We must move on." → ends dialogue
+
+Node 2 (her backstory): She left her monastery years ago because she saw signs in the night sky pointing outward rather than inward, contrary to what her people believed. She's searching for an Astrologer whose knowledge spans the heavens, and she senses darkness gathering around these lands that threatens them. She hints that the party might be able to help her find what she seeks.
+
+Now we need a dialogue for Jyeshtha the Astronmer "The Mystic leader of the Astronomers Temple". He can be found in the center of the Astronomers Temple. He is a traveler of time and space. He is Nuetral towards the party. He will give the party a quest to find the Ancient Relic (a small jade 20 sided icosahedron) that allows site over long distances and into different worlds. He does not have infromation on its last know whereabouts. We also need to add this quest to [@quests.ron](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/campaigns/tutorial/data/quests.ron) with rewards of XP, gold, and gems.
+
+✅ COMPLETED -
+
+## Character Sheet
+
+Clicking on a character HUD portrait or Pressing the Characters number (1-6) should bring up a character sheet with XP, stats, conditions, equipment, etc... so that we can tell how close we are to gaining a new level. Once a character sheet is open your should be able to change characters by selecting there number. The Character sheet should have a full length portrait of the Character (Head to Feet) that lives in the campaigns assets.
+
+Write a plan with a phased approach to add Character Sheets to the game engine. THINK HARD and follow the rules in @PLAN.md
+
+
+✅ PLAN WRITTEN - [Character Sheet Plan](./character_sheet_implementation_plan.md)
+
+## Combat Issues
+
+✅ FIXED - Unconcious Characters are allowed to attack several times until a different action is picked. Unconcious Characters should be removed from the round until they are revived or combat ends.
+
+✅ FIXED - When a trap is triggered there is no indication in the game that it happened other than character damage. Traps do not appear in the game log or on screen. When a trap is triggered there should be a dialogue pop up on the screen that shows what type of trap was triggered and how much damage each party member took or the type of condition applied.
+
+✅ FIXED - Dead characters status says OK but they have no HP after resting.
+
+Character marching order. There is no way to adjust marching order and the game engine loads the characters in random orders everytime you start the game. Marching order should be left to right. There should be a way to reorder the party marching order.

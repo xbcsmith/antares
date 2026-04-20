@@ -320,38 +320,79 @@ impl CombatState {
         }
     }
 
-    /// Advances to the next turn
+    /// Advances to the next turn, automatically skipping combatants that cannot
+    /// act (unconscious, paralyzed, dead, etc.).
     ///
-    /// Returns any effects (damage/healing) that occurred if a new round started
+    /// Returns any effects (damage/healing) that occurred if a new round started.
     pub fn advance_turn(
         &mut self,
         condition_defs: &[crate::domain::conditions::ConditionDefinition],
     ) -> Vec<(CombatantId, i16)> {
-        self.current_turn += 1;
-        if self.current_turn >= self.turn_order.len() {
-            self.current_turn = 0;
-            return self.advance_round(condition_defs);
+        if self.turn_order.is_empty() {
+            return Vec::new();
         }
-        Vec::new()
+
+        // Mandatory advance: move to the next slot in the turn order.
+        self.current_turn += 1;
+        let effects = if self.current_turn >= self.turn_order.len() {
+            self.current_turn = 0;
+            // advance_round recalculates turn_order and resets current_turn = 0.
+            self.advance_round(condition_defs)
+        } else {
+            Vec::new()
+        };
+
+        // Skip any combatants that cannot act (unconscious, paralyzed, dead, etc.).
+        // turn_order.len() is computed AFTER the potential advance_round call so
+        // that it reflects a freshly recalculated order.  We cap at that length to
+        // prevent an infinite loop when all combatants are incapacitated (combat
+        // should already be over via check_combat_end at that point).
+        let total = self.turn_order.len();
+        for _ in 0..total {
+            let can_act = self
+                .turn_order
+                .get(self.current_turn)
+                .and_then(|id| self.get_combatant(id))
+                .map(|c| c.can_act())
+                .unwrap_or(false);
+
+            if can_act {
+                break;
+            }
+
+            tracing::debug!(
+                "advance_turn: skipping incapacitated combatant at turn index {}",
+                self.current_turn
+            );
+
+            self.current_turn += 1;
+            if self.current_turn >= self.turn_order.len() {
+                // Wrapped without finding an active combatant.  Reset to 0 but do
+                // not fire another advance_round — if we are here, check_combat_end
+                // should terminate the fight on the caller's next check.
+                self.current_turn = 0;
+            }
+        }
+
+        effects
     }
 
-    /// Advances to the next round
+    /// Advances to the next round.
+    ///
+    /// Ticks conditions, applies DoT/HoT effects, clears defending bonuses, and
+    /// unconditionally recalculates the turn order so that combatants who became
+    /// unconscious or dead during the previous round are excluded.
     fn advance_round(
         &mut self,
         condition_defs: &[crate::domain::conditions::ConditionDefinition],
     ) -> Vec<(CombatantId, i16)> {
         self.round += 1;
 
-        // Ambush only suppresses player actions in round 1.
-        // At the start of round 2 clear the flag and reset to Even handicap so
-        // that the remainder of the fight is not permanently skewed.
+        // Ambush: clear the flag and switch to Even handicap so the unconditional
+        // turn-order recalculation below picks up the new sort order.
         if self.round == 2 && self.ambush_round_active {
             self.ambush_round_active = false;
             self.handicap = Handicap::Even;
-            // Recalculate turn order under the new (even) handicap so speed
-            // ties are resolved fairly from this round onward.
-            self.turn_order = crate::domain::combat::engine::calculate_turn_order(self);
-            self.current_turn = 0;
         }
 
         let mut effects = Vec::new();
@@ -403,6 +444,14 @@ impl CombatState {
                 pc.ac.current = pc.ac.current.saturating_sub(2).max(pc.ac.base);
             }
         }
+
+        // Recalculate turn order for the new round so that:
+        // - characters who became unconscious/dead during the previous round
+        //   (is_alive() == false) are excluded;
+        // - characters who were revived (hp.current > 0 again) are included;
+        // - the current handicap (potentially just updated above) is applied.
+        self.turn_order = crate::domain::combat::engine::calculate_turn_order(self);
+        self.current_turn = 0;
 
         effects
     }
@@ -1450,6 +1499,14 @@ pub fn reconcile_character_conditions(
 ) {
     use crate::domain::character::Condition;
     use crate::domain::conditions::ConditionEffect;
+
+    // Fatal conditions (DEAD, STONE, ERADICATED) can only be cleared by explicit
+    // revival functions (revive_from_dead, resurrect service, etc.).
+    // Never reconcile them away — if active_conditions is out of sync that must
+    // be fixed at the source, not silently overridden here.
+    if target.conditions.is_fatal() {
+        return;
+    }
 
     // Build the set of flags to consider from condition definitions
     let mut flags_to_consider: u8 = 0;
@@ -3782,6 +3839,137 @@ mod tests {
         assert_eq!(
             damage, 25,
             "endurance bonus must not push multiplier below 0.25 minimum"
+        );
+    }
+    /// `advance_turn` must automatically skip a player who became unconscious
+    /// during the round (HP == 0, UNCONSCIOUS condition).
+    #[test]
+    fn test_advance_turn_skips_unconscious_player() {
+        let mut combat = CombatState::new(Handicap::Even);
+
+        let mut player = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Give the player enough HP to be alive at combat start so they appear
+        // in the initial turn order.
+        player.hp.base = 10;
+        player.hp.current = 10;
+
+        // Use a monster with lower speed so the player appears first in the order
+        // under Handicap::Even, giving us a predictable starting position.
+        let monster = create_test_monster("Goblin", 8);
+
+        combat.add_player(player);
+        combat.add_monster(monster);
+        start_combat(&mut combat);
+
+        // Two combatants means turn_order has two entries.
+        assert_eq!(combat.turn_order.len(), 2);
+
+        // Make the player unconscious mid-round: drop HP to 0 and set the flag.
+        if let Some(Combatant::Player(pc)) = combat.participants.get_mut(0) {
+            pc.hp.current = 0;
+            pc.conditions
+                .add(crate::domain::character::Condition::UNCONSCIOUS);
+        }
+
+        // Advance from whoever goes first. After the advance, the unconscious
+        // player must NOT be current_turn; the monster (who can act) should be.
+        let _effects = combat.advance_turn(&[]);
+
+        let current = combat
+            .turn_order
+            .get(combat.current_turn)
+            .copied()
+            .expect("current_turn must be valid");
+
+        assert!(
+            matches!(current, CombatantId::Monster(_)),
+            "advance_turn must skip the unconscious player and land on the monster, got {:?}",
+            current
+        );
+    }
+
+    /// At the start of each new round the turn order is recalculated, dropping
+    /// characters who became unconscious during the previous round.
+    #[test]
+    fn test_advance_round_drops_unconscious_characters() {
+        let mut combat = CombatState::new(Handicap::Even);
+
+        let mut player = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        player.hp.base = 10;
+        player.hp.current = 10;
+
+        let monster = create_test_monster("Goblin", 8);
+
+        combat.add_player(player);
+        combat.add_monster(monster);
+        start_combat(&mut combat);
+
+        assert_eq!(
+            combat.turn_order.len(),
+            2,
+            "both combatants must start in turn order"
+        );
+
+        // Make the player unconscious during the round.
+        if let Some(Combatant::Player(pc)) = combat.participants.get_mut(0) {
+            pc.hp.current = 0;
+            pc.conditions
+                .add(crate::domain::character::Condition::UNCONSCIOUS);
+        }
+
+        // Advance past the end of the round to trigger advance_round.
+        // With 2 combatants we need 2 advance_turn calls to wrap.
+        let _ = combat.advance_turn(&[]);
+        let _ = combat.advance_turn(&[]);
+
+        // The new round's turn_order must only contain the living monster.
+        assert_eq!(
+            combat.turn_order.len(),
+            1,
+            "unconscious player must be removed from turn order at round boundary"
+        );
+        assert!(
+            matches!(combat.turn_order[0], CombatantId::Monster(_)),
+            "only the monster should remain in turn order"
+        );
+    }
+
+    /// `reconcile_character_conditions` must be a no-op for fatal characters,
+    /// even when the condition definitions could theoretically clear the DEAD flag.
+    #[test]
+    fn test_reconcile_character_conditions_noop_for_fatal() {
+        use crate::domain::character::Condition;
+
+        let mut character = Character::new(
+            "Dead Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        character.hp.base = 20;
+        character.hp.current = 0;
+        character.conditions.add(Condition::DEAD);
+        // active_conditions is intentionally empty — simulating a desync.
+
+        // Passing empty condition_defs: even so, the DEAD flag must not be removed.
+        reconcile_character_conditions(&mut character, &[]);
+
+        assert!(
+            character.conditions.is_fatal(),
+            "reconcile must not clear the DEAD flag for a fatal character"
         );
     }
 }
