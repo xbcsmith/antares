@@ -13640,3 +13640,82 @@ cargo check       → Finished, 0 errors
 cargo clippy      → Finished, 0 warnings
 cargo nextest run → 4813 passed, 0 failed
 ```
+
+## Phase 4: Full-Length Portrait Rendering in the Character Sheet (Complete)
+
+### Overview
+
+Phase 4 wires the `FullPortraitAssets` resource (from Phase 3) into the
+character sheet UI, replacing the previous two-column stats layout with a
+**left-portrait + right-stats** design.  When a full-length portrait PNG exists
+for the focused character it is rendered at 170 × 280 px in the left column.
+When absent, a deterministic coloured placeholder with the character's initials
+is shown instead.  The hint bar was updated to document the Phase 1 `[1-6]`
+number-key navigation.
+
+### Changes
+
+#### `src/game/systems/character_sheet_ui.rs`
+
+**New imports**
+
+```rust
+use crate::game::systems::hud::{get_portrait_color, FullPortraitAssets};
+use bevy_egui::EguiTextureHandle;
+```
+
+**New private helpers** (added before `render_party_overview`):
+
+- `sex_display(sex: Sex) -> &'static str` — converts `Sex` enum to display string.
+- `alignment_display(alignment: Alignment) -> &'static str` — converts `Alignment`
+  enum to display string.
+
+**`character_sheet_ui_system`** — new system parameter and pre-`ctx_mut` block:
+
+- `full_portraits: Option<Res<FullPortraitAssets>>` added to the parameter list.
+- Before calling `contexts.ctx_mut()`, the focused character's portrait key is
+  resolved (lowercased `portrait_id` if set, otherwise lowercased `name`), and
+  a matching handle is registered with egui via
+  `contexts.add_image(EguiTextureHandle::Weak(h.id()))`.  This must precede
+  `ctx_mut()` because both operations require `&mut EguiContexts`.
+- The resulting `Option<egui::TextureId>` and `&portrait_key` are forwarded to
+  `render_single_view`.
+- Hint bar updated: `[1-6] Select` added between `[Shift+Tab/←] Prev` and
+  `[O] Toggle View`.
+
+**`render_single_view`** — signature and layout redesigned:
+
+- Parameter `global_state` changed from `&mut ResMut<GlobalState>` to
+  `&mut GlobalState` for testability (call site uses auto-deref coercion).
+- Two new parameters: `full_portrait_id: Option<egui::TextureId>` and
+  `portrait_key: &str`.
+- `#[allow(clippy::too_many_arguments)]` added (9-parameter render helper).
+- Layout redesigned to **left-portrait (180 px) + right-stats** columns:
+  - **Left column** (`allocate_ui(vec2(180.0, 0.0))`):
+    - If `full_portrait_id.is_some()`: renders image at 170 × 280 px via
+      `egui::Image::new(SizedTexture::new(tid, vec2(170.0, 280.0)))`.
+    - Otherwise: `allocate_exact_size(vec2(170.0, 280.0))` then
+      `painter().rect_filled` with `get_portrait_color(portrait_key)` converted
+      to `egui::Color32`, overlaid with the character's initials in white at
+      `FontId::proportional(48.0)`.
+    - Identity block below portrait: name (bold, `TITLE_COLOR`), race/class/level,
+      sex and alignment via the new helper functions.
+  - **Right column** (remaining width): the existing Core Stats | Conditions and
+    Combat | XP | Equipment | Proficiencies two-sub-column layout, unchanged.
+
+### Tests Added
+
+| Test | What it verifies |
+|---|---|
+| `test_render_single_view_placeholder_when_no_full_portrait` | No panic when `full_portrait_id = None`; placeholder path executes safely |
+| `test_render_single_view_hint_bar_contains_1_6_select` | Hint bar with `[1-6] Select` renders without panic |
+| `test_character_sheet_ui_system_accepts_full_portrait_assets_resource` | System accepts `FullPortraitAssets` resource; world resource is accessible after insertion |
+
+### Quality Gates
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --all` | ✅ clean |
+| `cargo check --all-targets --all-features` | ✅ 0 errors |
+| `cargo clippy --all-targets --all-features -- -D warnings` | ✅ 0 warnings |
+| `cargo nextest run --all-features` | ✅ 4816 passed, 0 failed |
