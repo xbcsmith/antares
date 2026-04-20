@@ -50,6 +50,7 @@ use crate::domain::campaign::LevelUpMode;
 use crate::domain::progression::experience_for_level_with_config;
 use crate::game::resources::game_data::GameDataResource;
 use crate::game::resources::GlobalState;
+use crate::game::systems::input::{GameAction, InputConfigResource};
 use crate::sdk::database::ContentDatabase;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -114,8 +115,10 @@ impl Plugin for CharacterSheetPlugin {
 /// - **Tab** (no shift) / **→** — focus next party member (Single view).
 /// - **Shift+Tab** / **←**     — focus previous party member (Single view).
 /// - **O**             — toggle between Single and Party Overview.
+/// - **1–6**           — jump directly to that party member (Single view, configurable).
 pub fn character_sheet_input_system(
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
+    input_config: Option<Res<InputConfigResource>>,
     mut global_state: ResMut<GlobalState>,
 ) {
     if !matches!(global_state.0.mode, GameMode::CharacterSheet(_)) {
@@ -180,6 +183,22 @@ pub fn character_sheet_input_system(
     } else if kb.just_pressed(KeyCode::ArrowLeft) {
         if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
             cs.focus_prev(party_size);
+        }
+    }
+
+    // ── Digit keys (1–6): configurable character select while sheet is open ──
+    if let Some(ref icr) = input_config {
+        for i in 0..6_usize {
+            if icr
+                .key_map
+                .is_action_just_pressed(GameAction::SelectCharacter(i), kb)
+            {
+                let clamped = i.min(party_size.saturating_sub(1));
+                if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                    cs.focused_index = clamped;
+                }
+                return;
+            }
         }
     }
 }
@@ -763,5 +782,53 @@ mod tests {
         let closed = state.close_modal();
         assert!(closed);
         assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_character_sheet_input_configured_digit_key_switches_focused_index() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::game::systems::input::{GameAction, KeyMap};
+        use crate::sdk::game_config::ControlsConfig;
+        use bevy::prelude::ButtonInput;
+
+        // Build a 3-member party so index 2 is valid.
+        let mut state = GameState::new();
+        for name in ["Alpha", "Beta", "Gamma"] {
+            let hero = Character::new(
+                name.to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            state.party.add_member(hero).unwrap();
+        }
+        state.enter_character_sheet();
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+
+        // Default config: "3" is bound to SelectCharacter(2).
+        let config = ControlsConfig::default();
+        let key_map = KeyMap::from_controls_config(&config);
+        let mut kb = ButtonInput::<KeyCode>::default();
+        kb.press(KeyCode::Digit3);
+
+        let party_size = state.party.members.len();
+
+        // Simulate the digit-key branch of character_sheet_input_system.
+        for i in 0..6_usize {
+            if key_map.is_action_just_pressed(GameAction::SelectCharacter(i), &kb) {
+                let clamped = i.min(party_size.saturating_sub(1));
+                if let GameMode::CharacterSheet(ref mut cs) = state.mode {
+                    cs.focused_index = clamped;
+                }
+                break;
+            }
+        }
+
+        if let GameMode::CharacterSheet(ref cs) = state.mode {
+            assert_eq!(cs.focused_index, 2);
+        } else {
+            panic!("expected CharacterSheet mode");
+        }
     }
 }

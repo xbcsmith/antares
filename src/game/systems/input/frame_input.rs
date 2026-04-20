@@ -63,6 +63,10 @@ pub struct FrameInputIntent {
     pub spell_book_toggle: bool,
     /// Whether the character sheet toggle was requested this frame.
     pub character_sheet_toggle: bool,
+    /// 0-based party index selected this frame via a configured digit key (1-6).
+    ///
+    /// `None` when no character-select key was pressed this frame.
+    pub character_select: Option<usize>,
 }
 
 impl FrameInputIntent {
@@ -184,6 +188,9 @@ pub fn decode_frame_input(
             .is_action_just_pressed(GameAction::OpenSpellBook, keyboard_input),
         character_sheet_toggle: key_map
             .is_action_just_pressed(GameAction::CharacterSheet, keyboard_input),
+        character_select: (0..6_usize).find(|&i| {
+            key_map.is_action_just_pressed(GameAction::SelectCharacter(i), keyboard_input)
+        }),
     }
 }
 
@@ -222,6 +229,7 @@ mod tests {
         assert!(!intent.cast);
         assert!(!intent.spell_book_toggle);
         assert!(!intent.character_sheet_toggle);
+        assert!(intent.character_select.is_none());
     }
 
     #[test]
@@ -395,5 +403,69 @@ mod tests {
         let intent = decode_frame_input(&key_map, &keyboard, &mouse, Some(&window));
 
         assert!(!intent.mouse_center_interact);
+    }
+
+    #[test]
+    fn test_frame_input_intent_default_character_select_is_none() {
+        let intent = FrameInputIntent::default();
+        assert!(intent.character_select.is_none());
+    }
+
+    #[test]
+    fn test_decode_frame_input_character_select_1_fires_on_digit1() {
+        let key_map = default_key_map();
+        let mut keyboard = ButtonInput::<KeyCode>::default();
+        let mouse = ButtonInput::<MouseButton>::default();
+
+        keyboard.press(KeyCode::Digit1);
+
+        let intent = decode_frame_input(&key_map, &keyboard, &mouse, None);
+
+        assert_eq!(intent.character_select, Some(0));
+    }
+
+    #[test]
+    fn test_decode_frame_input_character_select_6_fires_on_digit6() {
+        let key_map = default_key_map();
+        let mut keyboard = ButtonInput::<KeyCode>::default();
+        let mouse = ButtonInput::<MouseButton>::default();
+
+        keyboard.press(KeyCode::Digit6);
+
+        let intent = decode_frame_input(&key_map, &keyboard, &mouse, None);
+
+        assert_eq!(intent.character_select, Some(5));
+    }
+
+    #[test]
+    fn test_decode_frame_input_custom_character_select_key() {
+        let config = crate::sdk::game_config::ControlsConfig {
+            character_select_3: vec!["F9".to_string()],
+            ..crate::sdk::game_config::ControlsConfig::default()
+        };
+        let key_map = KeyMap::from_controls_config(&config);
+        let mut keyboard = ButtonInput::<KeyCode>::default();
+        let mouse = ButtonInput::<MouseButton>::default();
+
+        keyboard.press(KeyCode::F9);
+
+        let intent = decode_frame_input(&key_map, &keyboard, &mouse, None);
+
+        // F9 is bound to character_select_3, which is index 2
+        assert_eq!(intent.character_select, Some(2));
+    }
+
+    #[test]
+    fn test_decode_frame_input_no_character_select_when_no_digit_pressed() {
+        let key_map = default_key_map();
+        let mut keyboard = ButtonInput::<KeyCode>::default();
+        let mouse = ButtonInput::<MouseButton>::default();
+
+        // Press a non-digit key
+        keyboard.press(KeyCode::KeyW);
+
+        let intent = decode_frame_input(&key_map, &keyboard, &mouse, None);
+
+        assert!(intent.character_select.is_none());
     }
 }

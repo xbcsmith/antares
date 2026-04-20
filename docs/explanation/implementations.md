@@ -1,5 +1,128 @@
 # Implementations
 
+## Phase 1: Configurable Number-Key Character Selection (Complete)
+
+### Overview
+
+Adds configurable digit-key (1–6) selection to open and switch characters in
+the Character Sheet viewer. Pressing `1` in Exploration opens the sheet focused
+on party member 0; pressing `3` while the sheet is already open switches to
+member 2. All bindings are configurable via `config.ron` and can be rebound to
+any key supported by `parse_key_code`.
+
+### Changes
+
+#### `src/game/systems/input/keymap.rs`
+
+- Added `SelectCharacter(usize)` variant to `GameAction` (0-based party index
+  stored inside the variant). Derives `Copy + Hash` are preserved because
+  `usize: Copy + Hash`.
+- `KeyMap::from_controls_config` now registers six `SelectCharacter(0..5)`
+  bindings using the new `character_select_1`–`character_select_6` fields from
+  `ControlsConfig`.
+- Updated two exhaustive `ControlsConfig` struct literals
+  (`test_key_map_custom_config`, `test_key_map_multiple_keys_per_action`) with
+  `..ControlsConfig::default()` so they compile after the six new fields were added.
+- Updated one exhaustive literal in `src/game/systems/input.rs`
+  (`test_controls_config_validation_negative_cooldown`) for the same reason.
+- Added three new tests: `test_game_action_select_character_variants_exist`,
+  `test_select_character_1_key_maps_to_index_0`,
+  `test_select_character_6_key_maps_to_index_5`.
+
+#### `src/sdk/game_config.rs`
+
+- Added six new `#[serde(default)]` fields to `ControlsConfig`:
+  `character_select_1` … `character_select_6` (default keys `"1"`–`"6"`).
+- Added six private default functions `default_character_select_N_keys()`.
+- Extended `impl Default for ControlsConfig` with the six new fields.
+- Extended `ControlsConfig::validate` to reject empty key lists for all six
+  fields.
+- Added three new tests: `test_controls_config_character_select_defaults`,
+  `test_controls_validation_empty_character_select_key_fails`,
+  `test_controls_config_character_select_defaults_when_missing_from_ron`.
+
+#### `src/game/systems/input/frame_input.rs`
+
+- Added `pub character_select: Option<usize>` to `FrameInputIntent`
+  (default `None`; `Option<usize>: Copy` preserves the `Copy` derive).
+- `decode_frame_input` resolves `character_select` via a `(0..6).find(…)` scan
+  over `SelectCharacter(i)` bindings.
+- Updated `test_frame_input_intent_default_has_no_actions` to also assert
+  `character_select.is_none()`.
+- Added four new tests: `test_frame_input_intent_default_character_select_is_none`,
+  `test_decode_frame_input_character_select_1_fires_on_digit1`,
+  `test_decode_frame_input_character_select_6_fires_on_digit6`,
+  `test_decode_frame_input_custom_character_select_key`,
+  `test_decode_frame_input_no_character_select_when_no_digit_pressed`.
+
+#### `src/game/systems/input/global_toggles.rs`
+
+- Added a `character_select` block after the `character_sheet_toggle` block.
+- Allowed modes: all modes except `Combat`, `Dialogue`, `Training`,
+  `MerchantInventory` (where digit-key input conflicts with other UI).
+- Calls `GameState::enter_character_sheet_at(index)` for both opening the sheet
+  and updating `focused_index` in-place when already open.
+- Added helper `character_select_intent(index)` and four new tests:
+  `test_handle_global_mode_toggles_character_select_opens_sheet_at_index`,
+  `test_handle_global_mode_toggles_character_select_ignored_in_combat`,
+  `test_handle_global_mode_toggles_character_select_switches_index_when_in_sheet`,
+  `test_handle_global_mode_toggles_character_select_clamps_to_party_size`.
+
+#### `src/application/mod.rs`
+
+- Added `GameState::enter_character_sheet_at(index: usize)`.
+  - If already in `CharacterSheet`: updates `focused_index` in-place (preserves
+    stored resume mode).
+  - Otherwise: creates `CharacterSheetState::new(prev_mode)`, sets
+    `focused_index = index.min(party_size.saturating_sub(1))`, assigns
+    `GameMode::CharacterSheet`.
+  - Clamping is always safe: empty party yields index 0.
+- Added four new tests: `test_enter_character_sheet_at_sets_focused_index`,
+  `test_enter_character_sheet_at_clamps_to_party_size`,
+  `test_enter_character_sheet_at_when_already_open_updates_index`,
+  `test_enter_character_sheet_at_empty_party_uses_index_zero`.
+
+#### `src/game/systems/character_sheet_ui.rs`
+
+- `character_sheet_input_system` now accepts `input_config: Option<Res<InputConfigResource>>`.
+- After the arrow-key block (Single view only), iterates
+  `SelectCharacter(0..5)` via `is_action_just_pressed` and clamps to party
+  size, updating `focused_index` in-place.
+- Added import `use crate::game::systems::input::{GameAction, InputConfigResource};`.
+- Added one new test: `test_character_sheet_input_configured_digit_key_switches_focused_index`.
+
+#### `data/test_campaign/config.ron`
+
+- Added `character_select_1: ["1"]` … `character_select_6: ["6"]` to the
+  `controls` block so `ControlsConfig::validate` passes on campaign load.
+
+#### `campaigns/tutorial/config.ron`
+
+- Added the six `character_select_*` keys plus missing fields (`rest`,
+  `character_sheet`, `leveling`, `time`) to keep the live campaign config in
+  sync with the schema.
+
+### Design Decisions
+
+- **`Option<usize>` not a boolean array**: A single `Option<usize>` in
+  `FrameInputIntent` cleanly encodes "at most one select per frame" without
+  allocating. The `(0..6).find(…)` scan stops at the first matching key, so
+  simultaneously holding two digit keys picks the lower index.
+- **Both `global_toggles` and `character_sheet_input_system` handle in-sheet
+  switching**: The global toggle handler is responsible for mode transitions and
+  must handle the already-open case to avoid calling `enter_character_sheet`
+  (which is a no-op when already open). The `character_sheet_input_system`
+  handler is the dedicated in-sheet navigation layer and mirrors the same
+  behaviour. Both are idempotent — they set `focused_index` to the same clamped
+  value — so double-firing on one frame is safe.
+- **Blocked in `Combat | Dialogue | Training | MerchantInventory`**: Digit keys
+  have UI roles in those modes (combat target selection, dialogue choice
+  numbering). Phase 2 adds portrait-click access to the sheet from Combat.
+- **`#[serde(default)]` on all new config fields**: Existing `config.ron` files
+  that omit the new fields continue to deserialise without error and receive the
+  standard 1–6 key bindings.
+
+
 ## Trap Notification Pop-Up (Complete)
 
 ### Overview
@@ -13125,3 +13248,125 @@ exactly mirroring the pattern already used by `NpcDialogue` with
 - [x] `lib.rs` wires live `characters_editor_state.characters` -- real data at runtime
 - [x] No test references to `campaigns/tutorial` -- all fixtures use `data/test_campaign`
 - [x] No architectural deviations from architecture.md
+
+---
+
+## Phase 1 – Character Sheet: SelectCharacter Key Bindings (Complete)
+
+### Overview
+
+Added six `SelectCharacter(usize)` input bindings (digit keys 1–6) so the
+player can jump directly to a party member's character sheet from anywhere that
+reads keyboard input. This is the first increment of the Character Sheet
+feature — it wires the key-mapping layer without yet touching any UI rendering.
+
+### Changes
+
+#### `src/sdk/game_config.rs`
+
+- Added six new `Vec<String>` fields to `ControlsConfig`:
+  `character_select_1` through `character_select_6`.
+- Each field carries a `#[serde(default = "…")]` attribute and a corresponding
+  private `default_character_select_N_keys()` function returning `["N"]`.
+- `impl Default for ControlsConfig` initialises all six fields via their
+  default functions.
+- `ControlsConfig::validate` now loops over the six new fields and returns
+  `ConfigError::ValidationError` if any list is empty.
+- Three new tests added:
+  - `test_controls_config_character_select_defaults` — asserts all six defaults.
+  - `test_controls_validation_empty_character_select_key_fails` — asserts
+    validation rejects an empty list for each of the six fields individually.
+  - `test_controls_config_character_select_defaults_when_missing_from_ron` —
+    asserts serde defaults kick in when the fields are absent from the RON file.
+
+#### `src/game/systems/input/keymap.rs`
+
+- Added `SelectCharacter(usize)` variant to `GameAction` (after `CharacterSheet`).
+- `KeyMap::from_controls_config` now calls `insert_action_bindings` for all six
+  `character_select_N` config fields, mapping them to `SelectCharacter(0..=5)`.
+- Fixed two existing exhaustive struct-literal tests
+  (`test_key_map_custom_config`, `test_key_map_multiple_keys_per_action`) by
+  appending `..ControlsConfig::default()` so they remain valid after the six
+  new config fields were added.
+- Three new tests added:
+  - `test_game_action_select_character_variants_exist` — verifies distinct
+    `SelectCharacter` indices compare correctly.
+  - `test_select_character_1_key_maps_to_index_0` — asserts `Digit1` maps to
+    `SelectCharacter(0)` via the default config.
+  - `test_select_character_6_key_maps_to_index_5` — asserts `Digit6` maps to
+    `SelectCharacter(5)` via the default config.
+
+#### `src/game/systems/input.rs`
+
+- Fixed one exhaustive `ControlsConfig` struct literal in
+  `test_controls_config_validation_negative_cooldown` by appending
+  `..ControlsConfig::default()`.
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md exactly — no new domain types introduced
+- [x] `GameAction` variant follows existing naming convention
+- [x] Type alias `usize` used for 0-based party index (consistent with party slice indexing)
+- [x] Default key strings use RON-compatible names (`"1"` … `"6"`)
+- [x] `serde(default)` pattern is consistent with all other optional `ControlsConfig` fields
+- [x] No test references to `campaigns/tutorial` — all fixtures use `data/test_campaign`
+- [x] All four quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`
+- [x] No architectural deviations from architecture.md
+
+---
+
+## Phase 1 Character-Select Input (Complete)
+
+**Task**: Wire `GameAction::SelectCharacter(usize)` (already defined in
+`keymap.rs`) all the way through to a live `GameMode::CharacterSheet` transition
+via digit keys `1`–`6`.
+
+### Files changed
+
+#### `src/application/mod.rs`
+
+Added `GameState::enter_character_sheet_at(index: usize)`:
+
+- If already in `CharacterSheet` mode: updates `focused_index` to the clamped
+  index in-place, preserving the stored resume mode (enables digit-key "switch
+  character" while the sheet is already open).
+- Otherwise: clones the current mode as `previous_mode`, creates a
+  `CharacterSheetState` with `focused_index` clamped to `0..party_size`, and
+  sets `GameMode::CharacterSheet`.
+- Empty-party guard: index is always `0` when `party.members.len() == 0`.
+
+#### `src/game/systems/input/frame_input.rs`
+
+- Added `pub character_select: Option<usize>` to `FrameInputIntent` (last field,
+  `None` when no digit key was pressed this frame).
+- Added `character_select` to `decode_frame_input`: iterates `0..6`, calls
+  `is_action_just_pressed(GameAction::SelectCharacter(i), …)` — first match wins.
+- Updated `test_frame_input_intent_default_has_no_actions` to also assert
+  `intent.character_select.is_none()`.
+- Added 5 new tests: default `None`, Digit1 → `Some(0)`, Digit6 → `Some(5)`,
+  custom F9 binding, no digit pressed → `None`.
+
+#### `src/game/systems/input/global_toggles.rs`
+
+- Added `character_select` branch in `handle_global_mode_toggles`, placed after
+  the `character_sheet_toggle` block and before the final `false` return.
+  - Blocked in `Combat`, `Dialogue`, `Training`, `MerchantInventory` modes (logs
+    and returns `true` without changing mode).
+  - All other modes: calls `game_state.enter_character_sheet_at(index)`.
+- Added 4 new tests: open sheet at index, ignored in combat, switch index when
+  already in sheet, clamp to party size.
+
+### Test results
+
+- All 9 new tests pass.
+- Full suite: 4792 tests run, 4792 passed, 0 failed.
+
+### Architecture Compliance
+
+- [x] No new domain types — reuses `CharacterSheetState::focused_index`
+- [x] `enter_character_sheet_at` follows the same pattern as `enter_character_sheet`
+- [x] Clamping consistent with `ContainerInventoryState::switch_character` and
+  `MerchantInventoryState::switch_character`
+- [x] RON data files unchanged
+- [x] No test references to `campaigns/tutorial`
+- [x] All four quality gates pass
