@@ -8097,8 +8097,8 @@
             name: "Mountain Pass Portal",
             description: "Portal to the Mountain Pass",
             destination: (
-                x: 19,
-                y: 11,
+                x: 18,
+                y: 6,
             ),
             map_id: 5,
         ),

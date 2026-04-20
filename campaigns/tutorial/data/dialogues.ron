@@ -2303,10 +2303,347 @@
         id: 1000,
         name: "Zhaya Recruitment Dialog",
         root_node: 1,
-        nodes: {},
+        nodes: {
+            1: (
+                id: 1,
+                text: "*opens eyes slowly* I have felt your approach for some time now. You have found the Astronomers Temple... few travelers come this far with purpose. I am Zhaya. I have journeyed from distant mountain monasteries following a sign written in the stars themselves. What brings you to this sacred place?",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "We are searching for capable companions for a perilous quest.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Tell us about yourself.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "We were just passing through. Farewell.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            2: (
+                id: 2,
+                text: "A perilous quest... *rises from meditation, studying you carefully* I have kept vigil at this temple for seven days seeking a sign. Perhaps you are it. I search for the one true Astrologer — one who reads fate as it is written, not as we wish it to be. My path has grown cold here. Perhaps yours leads where the stars are pointing me.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Join us, Zhaya. Your skills and purpose are welcome.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [
+                            RecruitToParty(
+                                character_id: "tutorial_monk",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "We would be glad to have you. Meet us at the inn?",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [
+                            TriggerEvent(
+                                event_name: "recruit_character_to_inn",
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "We need to think on it. Perhaps another time.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            3: (
+                id: 3,
+                text: "I was raised among the mountain monasteries of the Eastern Peaks — an order that trains body and spirit as one. After years of discipline I began to dream of the Astrologer\'s Path, a celestial map leading to a great truth. My elders thought me obsessed. I thought them afraid. So I left, following the stars east and south until they brought me to this temple — carved with the very symbols from my dreams.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "You sound exactly like the sort of person we need.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "A fascinating search. We will leave you to it.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            4: (
+                id: 4,
+                text: "Then I stand with you. My fists, my training, and my purpose — all walk this path alongside yours. Let us go.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            5: (
+                id: 5,
+                text: "The inn — yes. I will secure my belongings and meet you there when you are ready. May the stars light your path until then.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+        },
         speaker_name: Some("Zhaya"),
         repeatable: false,
         associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
+    ),
+    (
+        id: 1001,
+        name: "Jyeshtha Dialogue",
+        root_node: 1,
+        nodes: {
+            1: (
+                id: 1,
+                text: "*opens his eyes slowly, their gaze deep and distant* You have arrived. I am Jyeshtha â\u{80}\u{94} keeper of this temple, wanderer of the paths between worlds. I have watched your approach across many timelines. There is something I must ask of you.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "What would you ask of us?",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Tell us of this temple.",
+                        target_node: Some(3),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "We cannot stay long. Farewell.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            2: (
+                id: 2,
+                text: "Long ago a relic was fashioned by the first astronomers â\u{80}\u{94} a small jade icosahedron, twenty-faced, that grants sight over great distances and into other worlds entirely. It was lost when the old order scattered. I have spent decades searching the stars for its location, yet the relic resists my sight. I need someone willing to walk the physical world where my gaze cannot reach â\u{80}\u{94} to find it and return it here.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "We will search for this relic.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [
+                            StartQuest(
+                                quest_id: 8,
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Where should we begin looking?",
+                        target_node: Some(5),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "This sounds beyond us.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            3: (
+                id: 3,
+                text: "This temple was raised when the first astronomers mapped the paths between worlds. The stones are aligned with constellations that no longer appear in your sky â\u{80}\u{94} because those stars belong to realms adjacent to this one. I have walked many of those paths. But a relic I seek eludes even me.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "What relic do you seek?",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "Fascinating. We will leave you to your studies.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            4: (
+                id: 4,
+                text: "*bows his head* My gratitude, travelers. The stars have already begun to shift in anticipation of your search. I can offer no map â\u{80}\u{94} only this certainty: the relic exists, and it is meant to be found. When you hold it in your hands, you will know. Return to me when it is done.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            5: (
+                id: 5,
+                text: "I wish I could tell you. The relic was last held by a traveling scholar, but those records are centuries old. I have reached across time and seen only fragments â\u{80}\u{94} a cold stone floor, the sound of water, darkness. Beyond that the vision fails. You must follow your own instincts, speak with those who carry long memories, and search where the old roads lead.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Then we will begin searching.",
+                        target_node: Some(4),
+                        conditions: [],
+                        actions: [
+                            StartQuest(
+                                quest_id: 8,
+                            ),
+                        ],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                    (
+                        text: "We are not ready for such a task.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+        },
+        speaker_name: Some("Jyeshtha"),
+        repeatable: false,
+        associated_quest: Some(8),
         sdk_metadata: (
             managed_content: [],
         ),

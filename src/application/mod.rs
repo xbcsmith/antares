@@ -104,6 +104,14 @@ pub enum GameMode {
     /// member.  The UI should display a "Game Over" screen with options to
     /// load a save or quit.
     GameOver,
+    /// Trap-triggered notification pop-up.
+    ///
+    /// Entered immediately after a trap fires (whether it damaged the party or
+    /// was avoided via Levitate).  The player must press **Escape** or click
+    /// **OK — Continue** to return to [`GameMode::Exploration`].  Movement and
+    /// interaction are blocked while this mode is active so the player reads
+    /// the full damage report.
+    TrapNotification(TrapNotificationState),
     /// Exploration-mode spell casting flow.
     ///
     /// Entered when a player opens the spell menu outside of combat (default
@@ -353,6 +361,133 @@ impl TempleServiceState {
     pub fn clear(&mut self) {
         self.selected_member_index = None;
         self.status_message = None;
+    }
+}
+
+// ===== Trap Notification State =====
+
+/// The outcome of a trap event for one party member.
+///
+/// Stored inside [`TrapNotificationState`] to give the UI a complete damage
+/// report for each character that was alive when the trap fired.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::TrapMemberResult;
+///
+/// let result = TrapMemberResult { name: "Aldric".to_string(), damage_taken: 15, died: false };
+/// assert_eq!(result.damage_taken, 15);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrapMemberResult {
+    /// Character name.
+    pub name: String,
+    /// HP damage actually dealt (0 if the member was already dead at trap time).
+    pub damage_taken: u16,
+    /// `true` if this trap hit reduced the member's HP to zero.
+    pub died: bool,
+}
+
+/// State for the trap-triggered notification pop-up.
+///
+/// Stored inside [`GameMode::TrapNotification`] while the player is reading
+/// the damage report.  The player must dismiss the pop-up (Escape or OK) to
+/// return to [`GameMode::Exploration`].
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::{TrapNotificationState, TrapMemberResult};
+///
+/// let state = TrapNotificationState::new_triggered(
+///     "Pit Trap".to_string(),
+///     "A hidden pit.".to_string(),
+///     vec![TrapMemberResult { name: "Aldric".to_string(), damage_taken: 10, died: false }],
+///     None,
+/// );
+/// assert!(!state.avoided);
+/// assert_eq!(state.member_results.len(), 1);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrapNotificationState {
+    /// Display name of the trap event.
+    pub trap_name: String,
+    /// Optional flavour description shown under the title.
+    pub trap_description: String,
+    /// Per-member outcome (empty when the trap was avoided via Levitate).
+    pub member_results: Vec<TrapMemberResult>,
+    /// Status-effect name applied by the trap (e.g. `"poison"`), if any.
+    pub effect: Option<String>,
+    /// `true` when the Levitate buff completely negated the trap.
+    pub avoided: bool,
+}
+
+impl TrapNotificationState {
+    /// Creates a notification state for a trap that was completely avoided.
+    ///
+    /// Used when the Levitate buff is active and the party floated over the trap.
+    ///
+    /// # Arguments
+    ///
+    /// * `trap_name` - Display name of the trap
+    /// * `trap_description` - Flavour description of the trap
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::TrapNotificationState;
+    ///
+    /// let state = TrapNotificationState::new_avoided("Pit Trap".to_string(), "A deep pit.".to_string());
+    /// assert!(state.avoided);
+    /// assert!(state.member_results.is_empty());
+    /// ```
+    pub fn new_avoided(trap_name: String, trap_description: String) -> Self {
+        Self {
+            trap_name,
+            trap_description,
+            member_results: Vec::new(),
+            effect: None,
+            avoided: true,
+        }
+    }
+
+    /// Creates a notification state for a trap that successfully damaged the party.
+    ///
+    /// # Arguments
+    ///
+    /// * `trap_name` - Display name of the trap
+    /// * `trap_description` - Flavour description of the trap
+    /// * `member_results` - Per-member damage outcomes
+    /// * `effect` - Optional status effect name applied to survivors
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{TrapNotificationState, TrapMemberResult};
+    ///
+    /// let state = TrapNotificationState::new_triggered(
+    ///     "Spike Trap".to_string(),
+    ///     "Sharp spikes!".to_string(),
+    ///     vec![TrapMemberResult { name: "Merlin".to_string(), damage_taken: 5, died: false }],
+    ///     Some("poison".to_string()),
+    /// );
+    /// assert!(!state.avoided);
+    /// assert_eq!(state.effect, Some("poison".to_string()));
+    /// ```
+    pub fn new_triggered(
+        trap_name: String,
+        trap_description: String,
+        member_results: Vec<TrapMemberResult>,
+        effect: Option<String>,
+    ) -> Self {
+        Self {
+            trap_name,
+            trap_description,
+            member_results,
+            effect,
+            avoided: false,
+        }
     }
 }
 
@@ -1671,16 +1806,31 @@ impl GameState {
                 // pit traps and ground-based hazards entirely.
                 if self.active_spells.levitate > 0 {
                     tracing::info!("Trap avoided — party is levitating.");
+                    self.mode = GameMode::TrapNotification(TrapNotificationState::new_avoided(
+                        "Trap".to_string(),
+                        String::new(),
+                    ));
                 } else {
-                    // Apply trap damage to all living party members.
+                    // Apply trap damage to all living party members and collect
+                    // per-member results for the notification popup.
+                    let mut member_results: Vec<TrapMemberResult> = Vec::new();
+
                     for member in &mut self.party.members {
                         if member.is_alive() {
+                            let old_hp = member.hp.current;
                             member.hp.modify(-(damage as i32));
-                            if member.hp.current == 0 {
+                            let actual = old_hp.saturating_sub(member.hp.current);
+                            let died = member.hp.current == 0;
+                            if died {
                                 member
                                     .conditions
                                     .add(crate::domain::character::Condition::DEAD);
                             }
+                            member_results.push(TrapMemberResult {
+                                name: member.name.clone(),
+                                damage_taken: actual,
+                                died,
+                            });
                         }
                     }
 
@@ -1697,8 +1847,16 @@ impl GameState {
                     }
 
                     // Check for party wipe.
-                    if self.party.living_count() == 0 {
+                    if self.party.living_count() == 0 && !member_results.is_empty() {
                         self.mode = GameMode::GameOver;
+                    } else {
+                        self.mode =
+                            GameMode::TrapNotification(TrapNotificationState::new_triggered(
+                                "Trap".to_string(),
+                                String::new(),
+                                member_results,
+                                effect,
+                            ));
                     }
                 }
             }
@@ -1892,6 +2050,10 @@ impl GameState {
                 true
             }
             GameMode::GameLog => {
+                self.mode = GameMode::Exploration;
+                true
+            }
+            GameMode::TrapNotification(_) => {
                 self.mode = GameMode::Exploration;
                 true
             }
@@ -5727,10 +5889,11 @@ mod tests {
             state.party.members[0].hp.current, 50,
             "party should take no trap damage while levitating"
         );
-        // Mode must remain Exploration (no game over).
+        // Mode must be TrapNotification (avoided) so the player sees the feedback.
         assert!(
-            matches!(state.mode, crate::application::GameMode::Exploration),
-            "game mode must remain Exploration"
+            matches!(state.mode, GameMode::TrapNotification(ref s) if s.avoided),
+            "game mode must be TrapNotification(avoided) after levitate skips trap, got {:?}",
+            state.mode
         );
     }
 
@@ -5818,6 +5981,90 @@ mod tests {
             state.party.members[0].hp.current, 40,
             "trap must deal 10 damage when levitate is not active"
         );
+    }
+
+    #[test]
+    fn test_trap_notification_state_new_avoided() {
+        let s =
+            TrapNotificationState::new_avoided("Pit Trap".to_string(), "A deep pit.".to_string());
+        assert!(s.avoided);
+        assert!(s.member_results.is_empty());
+        assert!(s.effect.is_none());
+        assert_eq!(s.trap_name, "Pit Trap");
+    }
+
+    #[test]
+    fn test_trap_notification_state_new_triggered() {
+        let results = vec![TrapMemberResult {
+            name: "Aldric".to_string(),
+            damage_taken: 10,
+            died: false,
+        }];
+        let s = TrapNotificationState::new_triggered(
+            "Spike Trap".to_string(),
+            "Spikes!".to_string(),
+            results.clone(),
+            Some("poison".to_string()),
+        );
+        assert!(!s.avoided);
+        assert_eq!(s.member_results, results);
+        assert_eq!(s.effect, Some("poison".to_string()));
+    }
+
+    #[test]
+    fn test_trap_event_sets_trap_notification_mode_when_party_survives() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        hero.hp = crate::domain::character::AttributePair16::new(50);
+        state.party.add_member(hero).unwrap();
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        let trap_pos = Position::new(1, 0);
+        map.add_event(
+            trap_pos,
+            MapEvent::Trap {
+                name: "Pit Trap".to_string(),
+                description: "A hidden pit.".to_string(),
+                damage: 10,
+                effect: None,
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let result =
+            state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        assert!(result.is_ok());
+
+        assert!(
+            matches!(state.mode, GameMode::TrapNotification(_)),
+            "Mode should be TrapNotification after a non-lethal trap, got {:?}",
+            state.mode
+        );
+    }
+
+    #[test]
+    fn test_close_modal_closes_trap_notification_to_exploration() {
+        let mut state = GameState::new();
+        state.mode = GameMode::TrapNotification(TrapNotificationState::new_avoided(
+            "Test Trap".to_string(),
+            String::new(),
+        ));
+
+        assert!(state.close_modal());
+        assert!(matches!(state.mode, GameMode::Exploration));
     }
 
     #[test]

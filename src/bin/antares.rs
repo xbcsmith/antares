@@ -304,6 +304,9 @@ impl Plugin for AntaresPlugin {
 
         // Character sheet read-only viewer
         app.add_plugins(antares::game::systems::character_sheet_ui::CharacterSheetPlugin);
+
+        // Trap notification pop-up
+        app.add_plugins(antares::game::systems::trap_notification_ui::TrapNotificationPlugin);
     }
 }
 

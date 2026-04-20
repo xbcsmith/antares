@@ -8027,7 +8027,7 @@
             description: "A sign directing travelers to the town exit.",
             text: "Exit to town.",
             time_condition: None,
-            facing: None,
+            facing: Some(East),
         ),
         (
             x: 2,
@@ -8110,7 +8110,7 @@
             description: "A wooden sign indicating the way to the mountain pass.",
             text: "To the Mountain Pass",
             time_condition: None,
-            facing: None,
+            facing: Some(North),
         ),
         (
             x: 10,
@@ -8136,7 +8136,7 @@
             description: "A sign pointing the way to the Ancient Ruins.",
             text: "To Ancient Ruins",
             time_condition: None,
-            facing: None,
+            facing: Some(South),
         ),
         (
             x: 12,
@@ -8213,7 +8213,7 @@
             description: "A sign pointing the way to the Wizard\'s Cave.",
             text: "To the Wizard\'s Cave",
             time_condition: None,
-            facing: None,
+            facing: Some(West),
         ),
     },
     allow_random_encounters: true,

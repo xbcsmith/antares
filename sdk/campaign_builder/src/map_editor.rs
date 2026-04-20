@@ -3257,6 +3257,7 @@ pub struct MapEditorRefs<'a> {
     pub conditions: &'a [antares::domain::conditions::ConditionDefinition],
     pub npcs: &'a [NpcDefinition],
     pub furniture_definitions: &'a [antares::domain::world::furniture::FurnitureDefinition],
+    pub characters: &'a [antares::domain::character_definition::CharacterDefinition],
     pub display_config: &'a DisplayConfig,
 }
 
@@ -3268,6 +3269,7 @@ pub struct MapInspectorData<'a> {
     pub conditions: &'a [antares::domain::conditions::ConditionDefinition],
     pub npcs: &'a [NpcDefinition],
     pub furniture_definitions: &'a [antares::domain::world::furniture::FurnitureDefinition],
+    pub characters: &'a [antares::domain::character_definition::CharacterDefinition],
 }
 
 impl MapsEditorState {
@@ -3928,6 +3930,7 @@ impl MapsEditorState {
                                         conditions: refs.conditions,
                                         npcs: refs.npcs,
                                         furniture_definitions: refs.furniture_definitions,
+                                        characters: refs.characters,
                                     };
                                     if let Some(npc_id) =
                                         Self::show_inspector_panel(ui, editor_ref, &inspector_data)
@@ -4496,6 +4499,7 @@ impl MapsEditorState {
                             data.items,
                             data.conditions,
                             data.furniture_definitions,
+                            data.characters,
                         );
                     });
                 }
@@ -4893,6 +4897,7 @@ impl MapsEditorState {
     }
 
     /// Show event editor
+    #[allow(clippy::too_many_arguments)]
     fn show_event_editor(
         ui: &mut egui::Ui,
         editor: &mut MapEditorState,
@@ -4901,6 +4906,7 @@ impl MapsEditorState {
         items: &[Item],
         conditions: &[antares::domain::conditions::ConditionDefinition],
         furniture_definitions: &[antares::domain::world::furniture::FurnitureDefinition],
+        characters: &[antares::domain::character_definition::CharacterDefinition],
     ) {
         if let Some(ref mut event_editor) = editor.event_editor {
             egui::ComboBox::from_id_salt("map_event_type_combo")
@@ -5302,8 +5308,25 @@ impl MapsEditorState {
                     }
                 }
                 EventType::RecruitableCharacter => {
+                    // Autocomplete character selector
+                    {
+                        use crate::ui_helpers::autocomplete_character_selector;
+                        if autocomplete_character_selector(
+                            ui,
+                            "event_recruitable_character",
+                            "Character:",
+                            &mut event_editor.recruit_character_id,
+                            characters,
+                        ) {
+                            event_editor.recruit_character_id_input_buffer =
+                                event_editor.recruit_character_id.clone();
+                            editor.has_changes = true;
+                        }
+                    }
+
+                    // Also allow direct text editing for manual entry
                     ui.horizontal(|ui| {
-                        ui.label("Character ID:");
+                        ui.label("Or enter Character ID manually:");
                         if ui
                             .text_edit_singleline(
                                 &mut event_editor.recruit_character_id_input_buffer,
@@ -6119,11 +6142,27 @@ impl MapsEditorState {
         }
     }
 
-    /// Show a small preview of a map
+    /// Show a scaled preview of a map that fills the available column width.
+    ///
+    /// Tile size is computed so the entire map fits within the available width
+    /// and a proportional max height, preserving the map's aspect ratio.
+    /// No tiles are ever truncated regardless of map size.
     fn show_map_preview(ui: &mut egui::Ui, map: &Map) {
-        let tile_size = 8.0;
-        let preview_width = (map.width.min(30) as f32 * tile_size).min(240.0);
-        let preview_height = (map.height.min(20) as f32 * tile_size).min(160.0);
+        // Maximum tile size in the preview -- keeps small maps from looking huge.
+        const MAX_PREVIEW_TILE: f32 = 18.0;
+
+        // Use the full available column width; allow a square-ish max height.
+        let avail_width = ui.available_width().max(1.0);
+        let max_height = avail_width.min(320.0).max(1.0);
+
+        // Derive tile size that fits the whole map in (avail_width x max_height),
+        // preserving the aspect ratio and capping at MAX_PREVIEW_TILE.
+        let tile_size_w = avail_width / map.width as f32;
+        let tile_size_h = max_height / map.height as f32;
+        let tile_size = tile_size_w.min(tile_size_h).min(MAX_PREVIEW_TILE).max(1.0);
+
+        let preview_width = map.width as f32 * tile_size;
+        let preview_height = map.height as f32 * tile_size;
 
         let (response, painter) = ui.allocate_painter(
             egui::Vec2::new(preview_width, preview_height),
@@ -6132,18 +6171,11 @@ impl MapsEditorState {
 
         let rect = response.rect;
 
-        let scale_x = preview_width / (map.width as f32 * tile_size);
-        let scale_y = preview_height / (map.height as f32 * tile_size);
-        let scale = scale_x.min(scale_y);
-
-        let actual_tile_size = tile_size * scale;
-
-        // Draw a detailed view of the map with terrain colors
-        for y in 0..map.height.min(20) {
-            for x in 0..map.width.min(30) {
+        // Draw every tile -- no column/row truncation.
+        for y in 0..map.height {
+            for x in 0..map.width {
                 let pos = Position::new(x as i32, y as i32);
                 if let Some(tile) = map.get_tile(pos) {
-                    // Base color from terrain type
                     let base_color = match tile.terrain {
                         TerrainType::Ground => Color32::from_rgb(160, 140, 120),
                         TerrainType::Grass => Color32::from_rgb(100, 180, 100),
@@ -6156,7 +6188,7 @@ impl MapsEditorState {
                         TerrainType::Mountain => Color32::from_rgb(100, 100, 110),
                     };
 
-                    // Darken if blocked by wall
+                    // Darken blocked (wall) tiles.
                     let color = if tile.blocked {
                         Color32::from_rgb(
                             base_color.r() / 2,
@@ -6168,42 +6200,40 @@ impl MapsEditorState {
                     };
 
                     let tile_rect = Rect::from_min_size(
-                        rect.min
-                            + Vec2::new(x as f32 * actual_tile_size, y as f32 * actual_tile_size),
-                        Vec2::new(actual_tile_size, actual_tile_size),
+                        rect.min + Vec2::new(x as f32 * tile_size, y as f32 * tile_size),
+                        Vec2::new(tile_size, tile_size),
                     );
-
                     painter.rect_filled(tile_rect, 0.0, color);
                 }
             }
         }
 
-        // Draw event markers
+        // Draw event markers (red dot).
+        let marker_r = (tile_size / 3.0).max(1.5);
         for pos in map.events.keys() {
             if pos.x >= 0 && pos.x < map.width as i32 && pos.y >= 0 && pos.y < map.height as i32 {
                 let marker_pos = rect.min
                     + Vec2::new(
-                        pos.x as f32 * actual_tile_size + actual_tile_size / 2.0,
-                        pos.y as f32 * actual_tile_size + actual_tile_size / 2.0,
+                        pos.x as f32 * tile_size + tile_size / 2.0,
+                        pos.y as f32 * tile_size + tile_size / 2.0,
                     );
-                painter.circle_filled(marker_pos, actual_tile_size / 3.0, Color32::RED);
+                painter.circle_filled(marker_pos, marker_r, Color32::RED);
             }
         }
 
-        // Draw NPC markers
+        // Draw NPC markers (yellow dot).
         for npc in &map.npc_placements {
             let pos = &npc.position;
             if pos.x >= 0 && pos.x < map.width as i32 && pos.y >= 0 && pos.y < map.height as i32 {
                 let marker_pos = rect.min
                     + Vec2::new(
-                        pos.x as f32 * actual_tile_size + actual_tile_size / 2.0,
-                        pos.y as f32 * actual_tile_size + actual_tile_size / 2.0,
+                        pos.x as f32 * tile_size + tile_size / 2.0,
+                        pos.y as f32 * tile_size + tile_size / 2.0,
                     );
-                painter.circle_filled(marker_pos, actual_tile_size / 3.0, Color32::YELLOW);
+                painter.circle_filled(marker_pos, marker_r, Color32::YELLOW);
             }
         }
     }
-
     /// Show visual metadata editor for selected tile
     fn show_visual_metadata_editor(ui: &mut egui::Ui, editor: &mut MapEditorState, pos: Position) {
         // Preset selector
@@ -7941,6 +7971,7 @@ mod tests {
                 conditions: &[],
                 npcs: &[],
                 furniture_definitions: &[],
+                characters: &[],
             };
             MapsEditorState::show_inspector_panel(ui, &mut state, &data);
         });
@@ -7997,6 +8028,7 @@ mod tests {
                 conditions: &[],
                 npcs: &[],
                 furniture_definitions: &[],
+                characters: &[],
             };
             // Must not panic.
             MapsEditorState::show_inspector_panel(ui, &mut state, &data);
@@ -10440,6 +10472,53 @@ mod tests {
         assert!(
             editor.has_changes,
             "has_changes must be set after committing a Furniture event"
+        );
+    }
+
+    #[test]
+    fn test_encounter_allows_duplicate_monster_ids_in_to_map_event() {
+        // An encounter with three Skeletons (id=1) and one Orc (id=2) should
+        // serialise as monster_group: [1, 1, 1, 2] — duplicates are preserved.
+        let editor = EventEditorState {
+            event_type: EventType::Encounter,
+            name: "Skeleton Horde".to_string(),
+            description: "Many skeletons".to_string(),
+            encounter_monsters: vec![1, 1, 1, 2],
+            ..Default::default()
+        };
+
+        let event = editor.to_map_event().unwrap();
+        match event {
+            MapEvent::Encounter { monster_group, .. } => {
+                assert_eq!(
+                    monster_group,
+                    vec![1u8, 1u8, 1u8, 2u8],
+                    "duplicate monster IDs must be preserved in monster_group"
+                );
+            }
+            _ => panic!("expected Encounter event"),
+        }
+    }
+
+    #[test]
+    fn test_encounter_duplicate_monsters_round_trip_via_from_map_event() {
+        // Round-trip: an encounter with duplicate monster IDs should survive
+        // to_map_event -> from_map_event with the duplicates intact.
+        let original = EventEditorState {
+            event_type: EventType::Encounter,
+            name: "Wolf Pack".to_string(),
+            description: "A pack of wolves".to_string(),
+            encounter_monsters: vec![3, 3, 3, 3, 5],
+            ..Default::default()
+        };
+
+        let map_event = original.to_map_event().unwrap();
+        let restored = EventEditorState::from_map_event(Position::new(0, 0), &map_event);
+
+        assert_eq!(
+            restored.encounter_monsters,
+            vec![3u8, 3u8, 3u8, 3u8, 5u8],
+            "duplicate monster IDs must survive a to_map_event/from_map_event round-trip"
         );
     }
 }

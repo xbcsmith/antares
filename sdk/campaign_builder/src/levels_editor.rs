@@ -1330,7 +1330,7 @@ fn show_levels_preview(ui: &mut egui::Ui, entry: &ClassLevelThresholds) {
                             egui::Frame::new()
                                 .fill(ui.visuals().extreme_bg_color)
                                 .inner_margin(egui::Margin::symmetric(4, 2))
-                                .rounding(egui::CornerRadius::same(2))
+                                .corner_radius(egui::CornerRadius::same(2))
                                 .show(ui, |ui| {
                                     ui.label(format!("{}", xp));
                                 });
