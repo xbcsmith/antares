@@ -2,6 +2,174 @@
 
 ---
 
+## Bugfix: Character Sheet — Prev/Next/Party Overview Buttons and Panel Clipping (Complete)
+
+### Problems
+
+1. **Prev, Next, and Party Overview buttons did not respond to mouse clicks.**
+2. **Portrait column and stats column were clipped at the left and right screen edges.**
+
+### Root Causes
+
+#### 1. Buttons outside the clip rect
+
+Both `render_single_view` and `render_party_overview` built the header row as:
+
+```rust
+ui.horizontal(|ui| {
+    ui.colored_label(TITLE_COLOR, title);   // placed first — grabs natural width
+    ui.with_layout(right_to_left, |ui| {   // receives whatever is left (may be 0)
+        buttons...                          // placed outside clip rect → no clicks
+    });
+});
+```
+
+When the character title text is wide (e.g. "Aldric Ironforge — Level 12 Human Knight"
+at 16 px bold), `colored_label` consumes most or all of the available row width.
+`with_layout(right_to_left)` therefore receives a near-zero width sub-rect; the buttons
+are placed outside the egui clip rectangle and never receive pointer events.
+
+#### 2. Column overflow forces window off-screen
+
+`stats_col_w` was pre-computed *before* `ui.horizontal` ran:
+
+```rust
+let sep_w    = 1.0 + 2.0 * ui.spacing().item_spacing.x;   // underestimates by item_spacing
+let stats_col_w = (ui.available_width() - portrait_col_w - sep_w).max(300.0);
+```
+
+Inside the horizontal layout egui also inserts `item_spacing.x` between each adjacent
+widget, so `stats_col_w` is consistently a few pixels wider than the remaining space.
+The inner sub-column formula `(avail − 12.0) / 2.0` had the same flaw. The overflow
+accumulated, forced the egui `Window` to expand beyond `screen_w`, and — because the
+window is `anchor(CENTER_TOP)` — the excess extended equally past both screen edges.
+
+### Fixes
+
+#### `character_sheet_ui_system` — screen-aware window width
+
+```rust
+let screen_w = ctx.available_rect().width();
+egui::Window::new("Character Sheet")
+    .default_width((screen_w - 40.0).clamp(480.0, 760.0))
+    .max_width(screen_w - 20.0)
+    ...
+```
+
+#### `render_single_view` — header: buttons first
+
+The entire header row now uses `right_to_left`.  Buttons are added first (rightmost)
+and always have space; the title fills the remainder via a nested `left_to_right`
+sub-layout with `.truncate()` to handle very long names gracefully:
+
+```rust
+ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+    if ui.small_button("Party Overview").clicked() { ... }
+    if ui.small_button("Next >").clicked()         { ... }
+    if ui.small_button("< Prev").clicked()         { ... }
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.add(egui::Label::new(title).truncate());
+    });
+});
+```
+
+#### `render_single_view` — body: read widths inline, use `ui.columns`
+
+The body is wrapped in a `ScrollArea::vertical()` and uses `ui.horizontal_top()`.
+The right column width is read *inside* the layout after the portrait column and
+separator are placed — zero arithmetic, zero error:
+
+```rust
+let right_w = ui.available_width();   // read after portrait + separator
+ui.allocate_ui(egui::vec2(right_w, 0.0), |ui| {
+    ui.columns(2, |cols| {            // egui handles the spacing math
+        cols[0].vertical(|ui| { /* Core Stats + Conditions */                     });
+        cols[1].vertical(|ui| { /* Combat + XP + Equipment + Resistances + Profs */ });
+    });
+});
+```
+
+Portrait-column identity labels (name, class/race/level) now use `.truncate()` so
+long names cannot push the column beyond its 180 px allocation.
+
+#### `render_party_overview` — header: same button-first pattern
+
+```rust
+ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+    if ui.small_button("Single View").clicked() { ... }
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.colored_label(TITLE_COLOR, "Party Overview");
+    });
+});
+```
+
+### Files Changed
+
+- `src/game/systems/character_sheet_ui.rs`
+
+### Tests
+
+All 49 character-sheet related tests pass.
+
+---
+
+## Bugfix: Character Editor Portrait ID Clear Button (Complete)
+
+### Problem
+
+In the Campaign Builder → Character Editor, clicking the **Clear** button next
+to the Portrait ID field appeared to do nothing. The portrait name remained
+visible in the text input despite the underlying `selected_portrait_id` string
+being correctly cleared.
+
+### Root Cause
+
+`autocomplete_portrait_selector` in
+`sdk/campaign_builder/src/ui_helpers/autocomplete.rs` maintains a persistent
+`text_buffer` in egui memory (keyed by widget ID) so that the typed text
+survives frame boundaries.
+
+When the Clear button was clicked the handler called:
+
+```rust
+selected_portrait_id.clear();
+changed = true;
+```
+
+It did **not** clear `text_buffer`. The function then unconditionally called
+`store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer)` at the end of
+the frame, which re-persisted the old portrait ID. On the next frame
+`load_autocomplete_buffer` returned the stale value, the text input rendered
+the old portrait, and the clear appeared to have no effect.
+
+### Fix
+
+Added `text_buffer.clear();` inside the Clear button handler, immediately
+before the `store_autocomplete_buffer` call, so that the buffer is persisted
+as an empty string on the same frame the button is clicked:
+
+```rust
+if ui.button("Clear").clicked() && !selected_portrait_id.is_empty() {
+    selected_portrait_id.clear();
+    text_buffer.clear(); // ← fix: ensure buffer is also emptied
+    changed = true;
+}
+// Persist buffer back into egui memory so it survives frames.
+store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+```
+
+### Files Changed
+
+- `sdk/campaign_builder/src/ui_helpers/autocomplete.rs` — one-line fix in
+  `autocomplete_portrait_selector`
+- `sdk/campaign_builder/src/ui_helpers/tests.rs` — updated existing
+  `test_autocomplete_portrait_selector_clear_button` comment; added regression
+  test `test_autocomplete_portrait_selector_clear_resets_text_buffer` that
+  verifies the buffer is stored as `""` after clearing and that `portrait_id`
+  stays empty on the subsequent frame
+
+---
+
 ## Phase 5: Resistances and Character Info Section (Complete)
 
 ### Overview
