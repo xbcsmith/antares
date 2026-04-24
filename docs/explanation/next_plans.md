@@ -329,6 +329,12 @@ Write a plan with a phased approach to add Character Sheets to the game engine. 
 
 ✅ COMPLETED - [Character Sheet Plan](./character_sheet_implementation_plan.md)
 
+Layout
+
+| Character Sheet  <Name>                    | *Next* *Previous* *Overview*             |
+|                                            |                                          |
+
+
 ## Combat Issues
 
 ✅ FIXED - Unconcious Characters are allowed to attack several times until a different action is picked. Unconcious Characters should be removed from the round until they are revived or combat ends.

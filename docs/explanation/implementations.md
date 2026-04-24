@@ -107,6 +107,12 @@ ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
 
 - `src/game/systems/character_sheet_ui.rs`
 
+### Notes
+
+- Updated the single-character sheet to a proper two-column layout with the full-length portrait on the left and all character details on the right.
+- The right-hand detail pane now uses a vertical `ScrollArea` so long sheets no longer get clipped at the window bottom.
+- Navigation hints were moved into the title header to reduce vertical height and keep the body content visible.
+
 ### Tests
 
 All 49 character-sheet related tests pass.

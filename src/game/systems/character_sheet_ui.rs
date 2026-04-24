@@ -270,45 +270,38 @@ fn character_sheet_ui_system(
         Err(_) => return,
     };
 
-    // Window pinned to the screen centre-top
+    let screen_rect = ctx.available_rect();
+    let screen_w = screen_rect.width();
+    let screen_h = screen_rect.height();
+
+    // Window pinned to the screen centre-top and sized to fill most of the
+    // available client area so the character sheet can use a true two-column
+    // layout instead of forcing scroll into multi-column density.
     egui::Window::new("Character Sheet")
         .collapsible(false)
         .resizable(true)
-        .default_width(680.0)
+        .default_width((screen_w - 40.0).max(640.0))
+        .max_width(screen_w - 20.0)
+        .default_height((screen_h - 40.0).max(480.0))
+        .max_height(screen_h - 20.0)
         .anchor(egui::Align2::CENTER_TOP, [0.0, 20.0])
-        .show(ctx, |ui| {
-            match current_view {
-                CharacterSheetView::Single => {
-                    render_single_view(
-                        ui,
-                        &mut global_state,
-                        party_len,
-                        focused_index,
-                        &campaign_config,
-                        level_db.as_ref().and_then(|opt| opt.as_ref()),
-                        content_db,
-                        full_portrait_id,
-                        &portrait_key,
-                    );
-                }
-                CharacterSheetView::PartyOverview => {
-                    render_party_overview(ui, &mut global_state, party_len);
-                }
+        .show(ctx, |ui| match current_view {
+            CharacterSheetView::Single => {
+                render_single_view(
+                    ui,
+                    &mut global_state,
+                    party_len,
+                    focused_index,
+                    &campaign_config,
+                    level_db.as_ref().and_then(|opt| opt.as_ref()),
+                    content_db,
+                    full_portrait_id,
+                    &portrait_key,
+                );
             }
-
-            // -- Hint bar
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.colored_label(HINT_COLOR, "[Esc] Close");
-                ui.separator();
-                ui.colored_label(HINT_COLOR, "[Tab/→] Next");
-                ui.separator();
-                ui.colored_label(HINT_COLOR, "[Shift+Tab/←] Prev");
-                ui.separator();
-                ui.colored_label(HINT_COLOR, "[1-6] Select");
-                ui.separator();
-                ui.colored_label(HINT_COLOR, "[O] Toggle View");
-            });
+            CharacterSheetView::PartyOverview => {
+                render_party_overview(ui, &mut global_state, party_len);
+            }
         });
 }
 
@@ -359,13 +352,19 @@ fn render_single_view(
             .strong(),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Toggle view button
+            ui.colored_label(HINT_COLOR, "[O] Overview");
+            ui.separator();
+            ui.colored_label(HINT_COLOR, "[1-6] Select");
+            ui.separator();
+            ui.colored_label(HINT_COLOR, "[Shift+Tab/←] Prev");
+            ui.separator();
+            ui.colored_label(HINT_COLOR, "[Tab/→] Next");
+            ui.separator();
             if ui.small_button("Party Overview").clicked() {
                 if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
                     cs.toggle_view();
                 }
             }
-            // Navigation buttons
             if ui.small_button("Next >").clicked() {
                 if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
                     cs.focus_next(party_len);
@@ -381,100 +380,106 @@ fn render_single_view(
 
     ui.separator();
 
-    // -- Two-column layout: [Portrait/Info | Stats]
-    // Left column is 180 px wide; right column fills the remainder with the
-    // existing Core-Stats | Combat two-sub-column layout.
-    let portrait_col_w = 180.0_f32;
-    let sep_w = 1.0 + 2.0 * ui.spacing().item_spacing.x;
-    let stats_col_w = (ui.available_width() - portrait_col_w - sep_w).max(300.0);
+    let available = ui.available_size();
+    let col_h = available.y;
+    let left_w = 180.0;
+    let sep_total = (1.0 + 2.0 * ui.spacing().item_spacing.x) * 2.0;
+    let remaining = (available.x - left_w - sep_total).max(0.0);
+    let split_w = (remaining / 2.0).max(320.0);
+    let middle_w = split_w;
+    let right_w = split_w;
 
     ui.horizontal(|ui| {
         // -- Left column: portrait + character identity
-        ui.allocate_ui(egui::vec2(portrait_col_w, 0.0), |ui| {
-            ui.vertical(|ui| {
-                // Portrait area: 170 x 280 px
-                match full_portrait_id {
-                    Some(tid) => {
-                        ui.add(egui::Image::new(egui::load::SizedTexture::new(
-                            tid,
-                            egui::vec2(170.0, 280.0),
-                        )));
-                    }
-                    None => {
-                        // Allocate the portrait rectangle then fill with the
-                        // deterministic placeholder colour derived from portrait_key.
-                        let (portrait_rect, _) =
-                            ui.allocate_exact_size(egui::vec2(170.0, 280.0), egui::Sense::hover());
-                        let bevy_color = get_portrait_color(portrait_key);
-                        let srgba = bevy_color.to_srgba();
-                        let fill_color = egui::Color32::from_rgb(
-                            (srgba.red * 255.0) as u8,
-                            (srgba.green * 255.0) as u8,
-                            (srgba.blue * 255.0) as u8,
-                        );
-                        ui.painter().rect_filled(portrait_rect, 4.0, fill_color);
+        ui.allocate_ui(egui::vec2(left_w, col_h), |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("character_sheet_portrait_scroll")
+                .auto_shrink([true, false])
+                .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        let portrait_size = egui::vec2(170.0, 280.0);
 
-                        // Overlay character initials (first char of each word, up to 2)
-                        let initials: String = character
-                            .name
-                            .split_whitespace()
-                            .filter_map(|part| part.chars().next())
-                            .take(2)
-                            .flat_map(|c| c.to_uppercase())
-                            .collect();
-                        ui.painter().text(
-                            portrait_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            &initials,
-                            egui::FontId::proportional(48.0),
-                            egui::Color32::WHITE,
-                        );
-                    }
-                }
+                        match full_portrait_id {
+                            Some(tid) => {
+                                ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                                    tid,
+                                    portrait_size,
+                                )));
+                            }
+                            None => {
+                                let (portrait_rect, _) =
+                                    ui.allocate_exact_size(portrait_size, egui::Sense::hover());
+                                let bevy_color = get_portrait_color(portrait_key);
+                                let srgba = bevy_color.to_srgba();
+                                let fill_color = egui::Color32::from_rgb(
+                                    (srgba.red * 255.0) as u8,
+                                    (srgba.green * 255.0) as u8,
+                                    (srgba.blue * 255.0) as u8,
+                                );
+                                ui.painter().rect_filled(portrait_rect, 4.0, fill_color);
 
-                // Identity block below the portrait
-                ui.add_space(4.0);
-                ui.colored_label(TITLE_COLOR, egui::RichText::new(&character.name).strong());
-                ui.label(format!(
-                    "{} {} Lv {}",
-                    character.race_id, character.class_id, character.level
-                ));
-                // About block — Phase 5: fuller character identity information
-                ui.add_space(4.0);
-                ui.colored_label(TITLE_COLOR, "About");
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label("Sex:");
-                    ui.label(sex_display(character.sex));
+                                let initials: String = character
+                                    .name
+                                    .split_whitespace()
+                                    .filter_map(|part| part.chars().next())
+                                    .take(2)
+                                    .flat_map(|c| c.to_uppercase())
+                                    .collect();
+                                ui.painter().text(
+                                    portrait_rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    &initials,
+                                    egui::FontId::proportional(48.0),
+                                    egui::Color32::WHITE,
+                                );
+                            }
+                        }
+
+                        ui.add_space(8.0);
+                        ui.colored_label(
+                            TITLE_COLOR,
+                            egui::RichText::new(&character.name).strong(),
+                        );
+                        ui.label(format!(
+                            "{} {} Lv {}",
+                            character.race_id, character.class_id, character.level
+                        ));
+
+                        ui.add_space(8.0);
+                        ui.colored_label(TITLE_COLOR, "About");
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.label("Sex:");
+                            ui.label(sex_display(character.sex));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Alignment:");
+                            ui.label(alignment_display(character.alignment));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Age:");
+                            ui.label(format!("{} yr {} d", character.age, character.age_days));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Gold:");
+                            ui.label(format!("{}", character.gold));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Gems:");
+                            ui.label(format!("{}", character.gems));
+                        });
+                    });
                 });
-                ui.horizontal(|ui| {
-                    ui.label("Alignment:");
-                    ui.label(alignment_display(character.alignment));
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Age:");
-                    ui.label(format!("{} yr {} d", character.age, character.age_days));
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Gold:");
-                    ui.label(format!("{}", character.gold));
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Gems:");
-                    ui.label(format!("{}", character.gems));
-                });
-            });
         });
 
         ui.separator();
 
-        // -- Right column: existing Core-Stats | Combat two-sub-column layout
-        ui.allocate_ui(egui::vec2(stats_col_w, 0.0), |ui| {
-            let sub_col_w = (ui.available_width() - 12.0) / 2.0;
-
-            ui.horizontal(|ui| {
-                // -- Left sub-column: Core stats + Conditions
-                ui.allocate_ui(egui::vec2(sub_col_w, 0.0), |ui| {
+        // -- Middle column: stats, conditions, combat, experience
+        ui.allocate_ui(egui::vec2(middle_w, col_h), |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("character_sheet_stats_scroll")
+                .auto_shrink([true, false])
+                .show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.colored_label(TITLE_COLOR, "Core Stats");
                         ui.separator();
@@ -534,15 +539,8 @@ fn render_single_view(
                                 .collect();
                             ui.label(names.join(", "));
                         }
-                    });
-                });
 
-                ui.separator();
-
-                // -- Right sub-column: Combat + XP + Equipment + Proficiencies
-                ui.allocate_ui(egui::vec2(sub_col_w, 0.0), |ui| {
-                    ui.vertical(|ui| {
-                        // Combat stats
+                        ui.add_space(8.0);
                         ui.colored_label(TITLE_COLOR, "Combat");
                         ui.separator();
                         render_hp_row(ui, "HP", character.hp.current, character.hp.base);
@@ -556,8 +554,6 @@ fn render_single_view(
                         );
 
                         ui.add_space(8.0);
-
-                        // Experience
                         ui.colored_label(TITLE_COLOR, "Experience");
                         ui.separator();
                         let xp_next = experience_for_level_with_config(
@@ -577,9 +573,19 @@ fn render_single_view(
                                 }
                             }
                         }
+                    });
+                });
+        });
 
-                        ui.add_space(8.0);
-                        // Equipment
+        ui.separator();
+
+        // -- Right column: equipment, resistances, proficiencies
+        ui.allocate_ui(egui::vec2(right_w, col_h), |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("character_sheet_equipment_scroll")
+                .auto_shrink([true, false])
+                .show(ui, |ui| {
+                    ui.vertical(|ui| {
                         ui.colored_label(TITLE_COLOR, "Equipment");
                         ui.separator();
                         render_equip_slot(
@@ -619,8 +625,6 @@ fn render_single_view(
                         );
 
                         ui.add_space(8.0);
-
-                        // Resistances — Phase 5
                         ui.colored_label(TITLE_COLOR, "Resistances");
                         ui.separator();
                         render_resistance_row(ui, "Magic", character.resistances.magic.current);
@@ -637,8 +641,6 @@ fn render_single_view(
                         render_resistance_row(ui, "Psychic", character.resistances.psychic.current);
 
                         ui.add_space(8.0);
-
-                        // Proficiencies
                         ui.colored_label(TITLE_COLOR, "Proficiencies");
                         ui.separator();
                         let mut profs: Vec<String> = Vec::new();
@@ -662,7 +664,6 @@ fn render_single_view(
                         }
                     });
                 });
-            });
         });
     });
 }
