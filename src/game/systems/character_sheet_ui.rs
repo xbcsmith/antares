@@ -351,30 +351,41 @@ fn render_single_view(
             .size(16.0)
             .strong(),
         );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.colored_label(HINT_COLOR, "[O] Overview");
-            ui.separator();
-            ui.colored_label(HINT_COLOR, "[1-6] Select");
-            ui.separator();
-            ui.colored_label(HINT_COLOR, "[Shift+Tab/←] Prev");
-            ui.separator();
-            ui.colored_label(HINT_COLOR, "[Tab/→] Next");
-            ui.separator();
-            if ui.small_button("Party Overview").clicked() {
-                if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
-                    cs.toggle_view();
+
+        let available = ui.available_size();
+        let button_width = (available.x * 0.45).max(280.0).min(available.x - 80.0);
+        let spacer_width = if available.x > button_width {
+            available.x - button_width
+        } else {
+            0.0
+        };
+        ui.add_space(spacer_width);
+        ui.allocate_ui(egui::vec2(button_width, available.y), |ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("Party Overview").clicked() {
+                    if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                        cs.toggle_view();
+                    }
                 }
-            }
-            if ui.small_button("Next >").clicked() {
-                if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
-                    cs.focus_next(party_len);
+                if ui.small_button("Next >").clicked() {
+                    if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                        cs.focus_next(party_len);
+                    }
                 }
-            }
-            if ui.small_button("< Prev").clicked() {
-                if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
-                    cs.focus_prev(party_len);
+                if ui.small_button("< Prev").clicked() {
+                    if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                        cs.focus_prev(party_len);
+                    }
                 }
-            }
+                ui.separator();
+                ui.colored_label(HINT_COLOR, "[O] Overview");
+                ui.separator();
+                ui.colored_label(HINT_COLOR, "[1-6] Select");
+                ui.separator();
+                ui.colored_label(HINT_COLOR, "[Shift+Tab/←] Prev");
+                ui.separator();
+                ui.colored_label(HINT_COLOR, "[Tab/→] Next");
+            });
         });
     });
 
@@ -789,6 +800,7 @@ fn render_party_overview(
 
     egui::ScrollArea::horizontal()
         .id_salt("char_sheet_party_overview_scroll")
+        .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 for (idx, character) in members.iter().enumerate() {
@@ -797,7 +809,7 @@ fn render_party_overview(
                             .inner_margin(egui::Margin::same(8))
                             .stroke(egui::Stroke::new(1.0, egui::Color32::DARK_GRAY))
                             .show(ui, |ui| {
-                                ui.set_min_width(160.0);
+                                ui.set_min_size(egui::vec2(220.0, 0.0));
                                 ui.vertical(|ui| {
                                     ui.colored_label(
                                         TITLE_COLOR,
@@ -846,7 +858,7 @@ fn render_party_overview(
                                 });
                             });
                     });
-                    ui.add_space(4.0);
+                    ui.add_space(8.0);
                 }
             });
         });
