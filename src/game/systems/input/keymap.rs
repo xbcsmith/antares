@@ -44,6 +44,8 @@ pub enum GameAction {
     OpenSpellBook,
     /// Open or close the character sheet viewer.
     CharacterSheet,
+    /// Open the character sheet for party member at the given 0-based index.
+    SelectCharacter(usize),
 }
 
 /// Key mapping structure for efficient input lookups.
@@ -111,6 +113,36 @@ impl KeyMap {
             &mut bindings,
             &config.character_sheet,
             GameAction::CharacterSheet,
+        );
+        insert_action_bindings(
+            &mut bindings,
+            &config.character_select_1,
+            GameAction::SelectCharacter(0),
+        );
+        insert_action_bindings(
+            &mut bindings,
+            &config.character_select_2,
+            GameAction::SelectCharacter(1),
+        );
+        insert_action_bindings(
+            &mut bindings,
+            &config.character_select_3,
+            GameAction::SelectCharacter(2),
+        );
+        insert_action_bindings(
+            &mut bindings,
+            &config.character_select_4,
+            GameAction::SelectCharacter(3),
+        );
+        insert_action_bindings(
+            &mut bindings,
+            &config.character_select_5,
+            GameAction::SelectCharacter(4),
+        );
+        insert_action_bindings(
+            &mut bindings,
+            &config.character_select_6,
+            GameAction::SelectCharacter(5),
         );
 
         Self { bindings }
@@ -530,6 +562,7 @@ mod tests {
             cast: vec!["C".to_string()],
             character_sheet: vec!["F3".to_string()],
             movement_cooldown: 0.1,
+            ..ControlsConfig::default()
         };
 
         let key_map = KeyMap::from_controls_config(&config);
@@ -577,6 +610,7 @@ mod tests {
             spell_book: vec!["B".to_string()],
             character_sheet: vec!["P".to_string()],
             movement_cooldown: 0.2,
+            ..ControlsConfig::default()
         };
 
         let key_map = KeyMap::from_controls_config(&config);
@@ -613,5 +647,42 @@ mod tests {
 
         assert!(key_map.is_action_just_pressed(GameAction::Menu, &keyboard_input));
         assert!(!key_map.is_action_just_pressed(GameAction::Inventory, &keyboard_input));
+    }
+
+    #[test]
+    fn test_game_action_select_character_variants_exist() {
+        // All six SelectCharacter variants must be distinct values.
+        assert_ne!(
+            GameAction::SelectCharacter(0),
+            GameAction::SelectCharacter(1)
+        );
+        assert_ne!(
+            GameAction::SelectCharacter(0),
+            GameAction::SelectCharacter(5)
+        );
+        assert_eq!(
+            GameAction::SelectCharacter(3),
+            GameAction::SelectCharacter(3)
+        );
+    }
+
+    #[test]
+    fn test_select_character_1_key_maps_to_index_0() {
+        let config = ControlsConfig::default();
+        let key_map = KeyMap::from_controls_config(&config);
+        assert_eq!(
+            key_map.get_action(KeyCode::Digit1),
+            Some(GameAction::SelectCharacter(0))
+        );
+    }
+
+    #[test]
+    fn test_select_character_6_key_maps_to_index_5() {
+        let config = ControlsConfig::default();
+        let key_map = KeyMap::from_controls_config(&config);
+        assert_eq!(
+            key_map.get_action(KeyCode::Digit6),
+            Some(GameAction::SelectCharacter(5))
+        );
     }
 }

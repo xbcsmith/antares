@@ -297,7 +297,7 @@ Validation should also check for things like if a NPC is set to be a trainer but
 
 ✅ FIXED - Campaign Builder --> Map Editor --> Place Event --> Recruitable Character the Character ID does not autocomplete.
 
-Campaign Builder --> Map Editor --> Place Event --> Encounter There is no way to set the number of monsters of the same type in the encounter editor. Once a skeleton is added you can not add more Skeletons through the UI. You should be able to add multiple monsters of the same type to an Encounter
+✅ FIXED - Campaign Builder --> Map Editor --> Place Event --> Encounter There is no way to set the number of monsters of the same type in the encounter editor. Once a skeleton is added you can not add more Skeletons through the UI. You should be able to add multiple monsters of the same type to an Encounter
 
 ### SKill System Level Scaling
 
@@ -327,7 +327,13 @@ Clicking on a character HUD portrait or Pressing the Characters number (1-6) sho
 Write a plan with a phased approach to add Character Sheets to the game engine. THINK HARD and follow the rules in @PLAN.md
 
 
-✅ PLAN WRITTEN - [Character Sheet Plan](./character_sheet_implementation_plan.md)
+✅ COMPLETED - [Character Sheet Plan](./character_sheet_implementation_plan.md)
+
+Layout
+
+| Character Sheet  <Name>                    | *Next* *Previous* *Overview*             |
+|                                            |                                          |
+
 
 ## Combat Issues
 
@@ -338,3 +344,7 @@ Write a plan with a phased approach to add Character Sheets to the game engine. 
 ✅ FIXED - Dead characters status says OK but they have no HP after resting.
 
 Character marching order. There is no way to adjust marching order and the game engine loads the characters in random orders everytime you start the game. Marching order should be left to right. There should be a way to reorder the party marching order.
+
+Campaign Builder --> Character Editor --> Portrait ID --> Clear button does nothing. It should clear the current portrait entry
+
+Campaign Builder --> Character Editor --> Portrait ID --> Portrait Pop Up does not autoscale wider and gets cut off by the bottom of the window. I can't get to portraits that start with Z because it won't scroll far enough. It should scale the grid vertically and horizontally.

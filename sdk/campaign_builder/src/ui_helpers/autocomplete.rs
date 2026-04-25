@@ -1711,6 +1711,7 @@ pub fn autocomplete_portrait_selector(
         // Show clear button
         if ui.button("Clear").clicked() && !selected_portrait_id.is_empty() {
             selected_portrait_id.clear();
+            text_buffer.clear();
             changed = true;
         }
 

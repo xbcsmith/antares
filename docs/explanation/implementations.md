@@ -1,5 +1,480 @@
 # Implementations
 
+---
+
+## Bugfix: Character Sheet — Prev/Next/Party Overview Buttons and Panel Clipping (Complete)
+
+### Problems
+
+1. **Prev, Next, and Party Overview buttons did not respond to mouse clicks.**
+2. **Portrait column and stats column were clipped at the left and right screen edges.**
+
+### Root Causes
+
+#### 1. Buttons outside the clip rect
+
+Both `render_single_view` and `render_party_overview` built the header row as:
+
+```rust
+ui.horizontal(|ui| {
+    ui.colored_label(TITLE_COLOR, title);   // placed first — grabs natural width
+    ui.with_layout(right_to_left, |ui| {   // receives whatever is left (may be 0)
+        buttons...                          // placed outside clip rect → no clicks
+    });
+});
+```
+
+When the character title text is wide (e.g. "Aldric Ironforge — Level 12 Human Knight"
+at 16 px bold), `colored_label` consumes most or all of the available row width.
+`with_layout(right_to_left)` therefore receives a near-zero width sub-rect; the buttons
+are placed outside the egui clip rectangle and never receive pointer events.
+
+#### 2. Column overflow forces window off-screen
+
+`stats_col_w` was pre-computed *before* `ui.horizontal` ran:
+
+```rust
+let sep_w    = 1.0 + 2.0 * ui.spacing().item_spacing.x;   // underestimates by item_spacing
+let stats_col_w = (ui.available_width() - portrait_col_w - sep_w).max(300.0);
+```
+
+Inside the horizontal layout egui also inserts `item_spacing.x` between each adjacent
+widget, so `stats_col_w` is consistently a few pixels wider than the remaining space.
+The inner sub-column formula `(avail − 12.0) / 2.0` had the same flaw. The overflow
+accumulated, forced the egui `Window` to expand beyond `screen_w`, and — because the
+window is `anchor(CENTER_TOP)` — the excess extended equally past both screen edges.
+
+### Fixes
+
+#### `character_sheet_ui_system` — screen-aware window width
+
+```rust
+let screen_w = ctx.available_rect().width();
+egui::Window::new("Character Sheet")
+    .default_width((screen_w - 40.0).clamp(480.0, 760.0))
+    .max_width(screen_w - 20.0)
+    ...
+```
+
+#### `render_single_view` — header: buttons first
+
+The entire header row now uses `right_to_left`.  Buttons are added first (rightmost)
+and always have space; the title fills the remainder via a nested `left_to_right`
+sub-layout with `.truncate()` to handle very long names gracefully:
+
+```rust
+ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+    if ui.small_button("Party Overview").clicked() { ... }
+    if ui.small_button("Next >").clicked()         { ... }
+    if ui.small_button("< Prev").clicked()         { ... }
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.add(egui::Label::new(title).truncate());
+    });
+});
+```
+
+#### `render_single_view` — body: read widths inline, use `ui.columns`
+
+The body is wrapped in a `ScrollArea::vertical()` and uses `ui.horizontal_top()`.
+The right column width is read *inside* the layout after the portrait column and
+separator are placed — zero arithmetic, zero error:
+
+```rust
+let right_w = ui.available_width();   // read after portrait + separator
+ui.allocate_ui(egui::vec2(right_w, 0.0), |ui| {
+    ui.columns(2, |cols| {            // egui handles the spacing math
+        cols[0].vertical(|ui| { /* Core Stats + Conditions */                     });
+        cols[1].vertical(|ui| { /* Combat + XP + Equipment + Resistances + Profs */ });
+    });
+});
+```
+
+Portrait-column identity labels (name, class/race/level) now use `.truncate()` so
+long names cannot push the column beyond its 180 px allocation.
+
+#### `render_party_overview` — header: same button-first pattern
+
+```rust
+ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+    if ui.small_button("Single View").clicked() { ... }
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.colored_label(TITLE_COLOR, "Party Overview");
+    });
+});
+```
+
+### Files Changed
+
+- `src/game/systems/character_sheet_ui.rs`
+
+### Notes
+
+- Updated the single-character sheet to a proper two-column layout with the full-length portrait on the left and all character details on the right.
+- The right-hand detail pane now uses a vertical `ScrollArea` so long sheets no longer get clipped at the window bottom.
+- Navigation hints were moved into the title header to reduce vertical height and keep the body content visible.
+
+### Tests
+
+All 49 character-sheet related tests pass.
+
+---
+
+## Bugfix: Character Editor Portrait ID Clear Button (Complete)
+
+### Problem
+
+In the Campaign Builder → Character Editor, clicking the **Clear** button next
+to the Portrait ID field appeared to do nothing. The portrait name remained
+visible in the text input despite the underlying `selected_portrait_id` string
+being correctly cleared.
+
+### Root Cause
+
+`autocomplete_portrait_selector` in
+`sdk/campaign_builder/src/ui_helpers/autocomplete.rs` maintains a persistent
+`text_buffer` in egui memory (keyed by widget ID) so that the typed text
+survives frame boundaries.
+
+When the Clear button was clicked the handler called:
+
+```rust
+selected_portrait_id.clear();
+changed = true;
+```
+
+It did **not** clear `text_buffer`. The function then unconditionally called
+`store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer)` at the end of
+the frame, which re-persisted the old portrait ID. On the next frame
+`load_autocomplete_buffer` returned the stale value, the text input rendered
+the old portrait, and the clear appeared to have no effect.
+
+### Fix
+
+Added `text_buffer.clear();` inside the Clear button handler, immediately
+before the `store_autocomplete_buffer` call, so that the buffer is persisted
+as an empty string on the same frame the button is clicked:
+
+```rust
+if ui.button("Clear").clicked() && !selected_portrait_id.is_empty() {
+    selected_portrait_id.clear();
+    text_buffer.clear(); // ← fix: ensure buffer is also emptied
+    changed = true;
+}
+// Persist buffer back into egui memory so it survives frames.
+store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+```
+
+### Files Changed
+
+- `sdk/campaign_builder/src/ui_helpers/autocomplete.rs` — one-line fix in
+  `autocomplete_portrait_selector`
+- `sdk/campaign_builder/src/ui_helpers/tests.rs` — updated existing
+  `test_autocomplete_portrait_selector_clear_button` comment; added regression
+  test `test_autocomplete_portrait_selector_clear_resets_text_buffer` that
+  verifies the buffer is stored as `""` after clearing and that `portrait_id`
+  stays empty on the subsequent frame
+
+---
+
+## Phase 5: Resistances and Character Info Section (Complete)
+
+### Overview
+
+Phase 5 adds two new sections to the character sheet single view:
+
+1. **Resistances** — all eight `Resistances` fields from `Character.resistances`
+   (`magic`, `fire`, `cold`, `electricity`, `acid`, `fear`, `poison`, `psychic`)
+   are displayed in the right sub-column below Equipment. Zero values render in
+   grey (`STAT_EMPTY_COLOR`) and non-zero values render in amber
+   (`STAT_MODIFIED_COLOR`) for visual prominence.
+
+2. **About block** — the simple one-liner below the portrait in the left column
+   is replaced with a titled section listing Sex, Alignment, Age (years + days),
+   Gold, and Gems.
+
+### Files Changed
+
+#### `src/game/systems/character_sheet_ui.rs`
+
+**`render_resistance_row` (new private helper)**
+
+Added between `render_equip_slot` and `sex_display`. Accepts `label: &str` and
+`value: u8` (the `current` field from the `AttributePair` for that resistance):
+
+- `value == 0` → renders `"0"` in `STAT_EMPTY_COLOR` (grey).
+- `value > 0`  → renders the numeric value in `STAT_MODIFIED_COLOR` (amber).
+
+This coloring rule deliberately differs from `render_u8_row` (which compares
+`base` vs `current`): resistances are zero by default and any non-zero value
+is noteworthy regardless of the base.
+
+**`render_single_view` — Resistances section**
+
+In the right sub-column, after the seven equipment slots and before
+Proficiencies, a new **Resistances** section is rendered:
+
+```
+Resistances
+-----------
+Magic:       0        ← grey
+Fire:       20        ← amber
+Cold:       15        ← amber
+Electricity: 0        ← grey
+Acid:        0        ← grey
+Fear:       30        ← amber
+Poison:     25        ← amber
+Psychic:     8        ← amber
+```
+
+**`render_single_view` — Expanded About block**
+
+The existing identity block below the portrait was extended. The previous
+`"{sex} -- {alignment}"` single label is replaced with a titled `About`
+section containing five `ui.horizontal` rows:
+
+| Label | Source |
+|---|---|
+| Sex | `sex_display(character.sex)` |
+| Alignment | `alignment_display(character.alignment)` |
+| Age | `"{age} yr {age_days} d"` |
+| Gold | `character.gold` |
+| Gems | `character.gems` |
+
+### Tests Added (3 new tests)
+
+| Test | What it verifies |
+|---|---|
+| `test_render_resistances_zero_uses_empty_color` | `STAT_EMPTY_COLOR == Color32::from_rgb(128,128,128)`; `render_resistance_row(_, 0)` does not panic |
+| `test_render_resistances_nonzero_uses_modified_color` | `STAT_MODIFIED_COLOR == Color32::from_rgb(255,191,0)`; `render_resistance_row(_, 25/255)` does not panic |
+| `test_render_about_section_displays_sex_alignment_age` | `render_single_view` completes without panic for a character with non-default About fields (age 120, gold 1500, gems 12) and a mix of zero/non-zero resistances |
+
+### Design Decisions
+
+- **`render_resistance_row` is a dedicated helper** rather than reusing
+  `render_u8_row`: resistance display semantics are zero/non-zero, not
+  base-vs-current. A separate helper keeps the two concepts independent
+  and makes future changes to either easier.
+- **`AttributePair.current` displayed**: equipment/spell buffs modify
+  `current`; showing the active value is what the player needs to see in
+  combat.
+- **Resistances placed between Equipment and Proficiencies**: Equipment is the
+  primary combat concern; Resistances are secondary defensive information;
+  Proficiencies are class/race metadata. The ordering follows descending
+  combat relevance.
+- **About block uses titled section**: adding a `"About"` heading with a
+  separator makes the five new fields scannable and consistent with the
+  right-column section headers (Core Stats, Combat, Experience, Equipment,
+  Resistances, Proficiencies).
+
+### Quality Gates
+
+```text
+cargo fmt --all          → clean
+cargo check              → Finished, 0 errors
+cargo clippy -D warnings → Finished, 0 warnings
+cargo nextest run        → 4819 passed, 0 failed, 8 skipped
+```
+
+### Architecture Compliance
+
+- [x] `Resistances` struct fields used via `AttributePair.current` — never mutated
+- [x] `STAT_EMPTY_COLOR` / `STAT_MODIFIED_COLOR` constants used — no magic numbers
+- [x] `sex_display` / `alignment_display` helpers reused — no duplicated match logic
+- [x] `character.age`, `character.age_days`, `character.gold`, `character.gems` read-only — `AttributePair` pattern respected
+- [x] All eight resistance fields displayed — no fields omitted
+- [x] No test references to `campaigns/tutorial`
+- [x] All four quality gates pass
+
+---
+
+## Phase 2: HUD Portrait Click → Open Character Sheet (Complete)
+
+### Overview
+
+Clicking any HUD party portrait opens the character sheet focused on that party
+member. The feature works from all standard navigation modes **and from within
+active combat** — pressing Esc while viewing the sheet from combat returns the
+player to the active combat turn. Clicking is silently ignored in modal screens
+that own the pointer (`Dialogue`, `Training`, `MerchantInventory`,
+`ContainerInventory`, `TempleService`).
+
+### Changes
+
+#### `src/game/systems/hud.rs`
+
+- Added `use crate::game::systems::mouse_input;` import.
+- In `setup_hud`, added `Button` and `Interaction::None` to the
+  `CharacterPortrait` entity bundle so Bevy's interaction pipeline tracks
+  hover/press events on each portrait node.
+- Added `pub fn portrait_click_allowed(mode: &GameMode) -> bool` — a pure
+  predicate that returns `true` for `Exploration`, `Automap`, `Inventory`,
+  `SpellBook`, `GameLog`, `Combat`, and `CharacterSheet` modes, and `false`
+  for all blocking modal modes.
+- Added `fn handle_portrait_click_system` — a Bevy system that:
+  - Queries `(&CharacterPortrait, Ref<Interaction>)` for all portrait entities.
+  - Calls `mouse_input::mouse_just_pressed` + `mouse_input::is_activated` (the
+    shared activation model used by combat, menu, and dialogue systems).
+  - If activated and the mode is allowed, calls
+    `global_state.0.enter_character_sheet_at(portrait.party_index)`.
+  - Breaks after the first activated portrait (only one sheet can open per frame).
+- Registered `handle_portrait_click_system` in `HudPlugin::build` with
+  `.add_systems(Update, handle_portrait_click_system)` — **without**
+  `not_in_combat` so clicks fire during active combat turns.
+- Added `mod portrait_click_tests` with 11 pure-logic tests (no Bevy App):
+  `test_portrait_click_allowed_exploration`,
+  `test_portrait_click_allowed_automap`,
+  `test_portrait_click_allowed_game_log`,
+  `test_portrait_click_not_allowed_game_over`,
+  `test_handle_portrait_click_opens_sheet_in_exploration`,
+  `test_handle_portrait_click_opens_sheet_in_combat`,
+  `test_handle_portrait_click_ignored_in_dialogue`,
+  `test_handle_portrait_click_ignored_in_training`,
+  `test_handle_portrait_click_selects_correct_party_index`,
+  `test_handle_portrait_click_when_already_in_sheet_updates_index`,
+  `test_close_sheet_from_combat_returns_to_combat`.
+
+### Design Decisions
+
+- **`portrait_click_allowed` is `pub`**: Exposed for doc-tests and potential
+  reuse by future portrait-click extensions (e.g., right-click context menus).
+- **Allow-list over block-list**: Explicitly enumerating the allowed modes is
+  safer than listing blocked modes, since new modes added in the future are
+  blocked by default.
+- **`CharacterSheet` in the allowed list**: Clicking a different portrait while
+  the sheet is already open calls `enter_character_sheet_at` which updates
+  `focused_index` in-place without re-wrapping the resume mode. This means
+  switching members via portrait click always preserves the original return mode.
+- **No `not_in_combat` guard**: The system runs every frame including combat
+  frames. `enter_character_sheet_at` stores the full `Combat(_)` state as
+  `previous_mode`, so Esc correctly returns to the active combat turn without
+  any extra bookkeeping.
+- **Shared `mouse_input` helpers**: Uses the same `mouse_just_pressed` +
+  `is_activated` model as combat, menu, and dialogue to keep click semantics
+  identical across all Bevy UI screens.
+
+## Phase 1: Configurable Number-Key Character Selection (Complete)
+
+### Overview
+
+Adds configurable digit-key (1–6) selection to open and switch characters in
+the Character Sheet viewer. Pressing `1` in Exploration opens the sheet focused
+on party member 0; pressing `3` while the sheet is already open switches to
+member 2. All bindings are configurable via `config.ron` and can be rebound to
+any key supported by `parse_key_code`.
+
+### Changes
+
+#### `src/game/systems/input/keymap.rs`
+
+- Added `SelectCharacter(usize)` variant to `GameAction` (0-based party index
+  stored inside the variant). Derives `Copy + Hash` are preserved because
+  `usize: Copy + Hash`.
+- `KeyMap::from_controls_config` now registers six `SelectCharacter(0..5)`
+  bindings using the new `character_select_1`–`character_select_6` fields from
+  `ControlsConfig`.
+- Updated two exhaustive `ControlsConfig` struct literals
+  (`test_key_map_custom_config`, `test_key_map_multiple_keys_per_action`) with
+  `..ControlsConfig::default()` so they compile after the six new fields were added.
+- Updated one exhaustive literal in `src/game/systems/input.rs`
+  (`test_controls_config_validation_negative_cooldown`) for the same reason.
+- Added three new tests: `test_game_action_select_character_variants_exist`,
+  `test_select_character_1_key_maps_to_index_0`,
+  `test_select_character_6_key_maps_to_index_5`.
+
+#### `src/sdk/game_config.rs`
+
+- Added six new `#[serde(default)]` fields to `ControlsConfig`:
+  `character_select_1` … `character_select_6` (default keys `"1"`–`"6"`).
+- Added six private default functions `default_character_select_N_keys()`.
+- Extended `impl Default for ControlsConfig` with the six new fields.
+- Extended `ControlsConfig::validate` to reject empty key lists for all six
+  fields.
+- Added three new tests: `test_controls_config_character_select_defaults`,
+  `test_controls_validation_empty_character_select_key_fails`,
+  `test_controls_config_character_select_defaults_when_missing_from_ron`.
+
+#### `src/game/systems/input/frame_input.rs`
+
+- Added `pub character_select: Option<usize>` to `FrameInputIntent`
+  (default `None`; `Option<usize>: Copy` preserves the `Copy` derive).
+- `decode_frame_input` resolves `character_select` via a `(0..6).find(…)` scan
+  over `SelectCharacter(i)` bindings.
+- Updated `test_frame_input_intent_default_has_no_actions` to also assert
+  `character_select.is_none()`.
+- Added four new tests: `test_frame_input_intent_default_character_select_is_none`,
+  `test_decode_frame_input_character_select_1_fires_on_digit1`,
+  `test_decode_frame_input_character_select_6_fires_on_digit6`,
+  `test_decode_frame_input_custom_character_select_key`,
+  `test_decode_frame_input_no_character_select_when_no_digit_pressed`.
+
+#### `src/game/systems/input/global_toggles.rs`
+
+- Added a `character_select` block after the `character_sheet_toggle` block.
+- Allowed modes: all modes except `Combat`, `Dialogue`, `Training`,
+  `MerchantInventory` (where digit-key input conflicts with other UI).
+- Calls `GameState::enter_character_sheet_at(index)` for both opening the sheet
+  and updating `focused_index` in-place when already open.
+- Added helper `character_select_intent(index)` and four new tests:
+  `test_handle_global_mode_toggles_character_select_opens_sheet_at_index`,
+  `test_handle_global_mode_toggles_character_select_ignored_in_combat`,
+  `test_handle_global_mode_toggles_character_select_switches_index_when_in_sheet`,
+  `test_handle_global_mode_toggles_character_select_clamps_to_party_size`.
+
+#### `src/application/mod.rs`
+
+- Added `GameState::enter_character_sheet_at(index: usize)`.
+  - If already in `CharacterSheet`: updates `focused_index` in-place (preserves
+    stored resume mode).
+  - Otherwise: creates `CharacterSheetState::new(prev_mode)`, sets
+    `focused_index = index.min(party_size.saturating_sub(1))`, assigns
+    `GameMode::CharacterSheet`.
+  - Clamping is always safe: empty party yields index 0.
+- Added four new tests: `test_enter_character_sheet_at_sets_focused_index`,
+  `test_enter_character_sheet_at_clamps_to_party_size`,
+  `test_enter_character_sheet_at_when_already_open_updates_index`,
+  `test_enter_character_sheet_at_empty_party_uses_index_zero`.
+
+#### `src/game/systems/character_sheet_ui.rs`
+
+- `character_sheet_input_system` now accepts `input_config: Option<Res<InputConfigResource>>`.
+- After the arrow-key block (Single view only), iterates
+  `SelectCharacter(0..5)` via `is_action_just_pressed` and clamps to party
+  size, updating `focused_index` in-place.
+- Added import `use crate::game::systems::input::{GameAction, InputConfigResource};`.
+- Added one new test: `test_character_sheet_input_configured_digit_key_switches_focused_index`.
+
+#### `data/test_campaign/config.ron`
+
+- Added `character_select_1: ["1"]` … `character_select_6: ["6"]` to the
+  `controls` block so `ControlsConfig::validate` passes on campaign load.
+
+#### `campaigns/tutorial/config.ron`
+
+- Added the six `character_select_*` keys plus missing fields (`rest`,
+  `character_sheet`, `leveling`, `time`) to keep the live campaign config in
+  sync with the schema.
+
+### Design Decisions
+
+- **`Option<usize>` not a boolean array**: A single `Option<usize>` in
+  `FrameInputIntent` cleanly encodes "at most one select per frame" without
+  allocating. The `(0..6).find(…)` scan stops at the first matching key, so
+  simultaneously holding two digit keys picks the lower index.
+- **Both `global_toggles` and `character_sheet_input_system` handle in-sheet
+  switching**: The global toggle handler is responsible for mode transitions and
+  must handle the already-open case to avoid calling `enter_character_sheet`
+  (which is a no-op when already open). The `character_sheet_input_system`
+  handler is the dedicated in-sheet navigation layer and mirrors the same
+  behaviour. Both are idempotent — they set `focused_index` to the same clamped
+  value — so double-firing on one frame is safe.
+- **Blocked in `Combat | Dialogue | Training | MerchantInventory`**: Digit keys
+  have UI roles in those modes (combat target selection, dialogue choice
+  numbering). Phase 2 adds portrait-click access to the sheet from Combat.
+- **`#[serde(default)]` on all new config fields**: Existing `config.ron` files
+  that omit the new fields continue to deserialise without error and receive the
+  standard 1–6 key bindings.
+
+
 ## Trap Notification Pop-Up (Complete)
 
 ### Overview
@@ -13125,3 +13600,409 @@ exactly mirroring the pattern already used by `NpcDialogue` with
 - [x] `lib.rs` wires live `characters_editor_state.characters` -- real data at runtime
 - [x] No test references to `campaigns/tutorial` -- all fixtures use `data/test_campaign`
 - [x] No architectural deviations from architecture.md
+
+---
+
+## Phase 1 – Character Sheet: SelectCharacter Key Bindings (Complete)
+
+### Overview
+
+Added six `SelectCharacter(usize)` input bindings (digit keys 1–6) so the
+player can jump directly to a party member's character sheet from anywhere that
+reads keyboard input. This is the first increment of the Character Sheet
+feature — it wires the key-mapping layer without yet touching any UI rendering.
+
+### Changes
+
+#### `src/sdk/game_config.rs`
+
+- Added six new `Vec<String>` fields to `ControlsConfig`:
+  `character_select_1` through `character_select_6`.
+- Each field carries a `#[serde(default = "…")]` attribute and a corresponding
+  private `default_character_select_N_keys()` function returning `["N"]`.
+- `impl Default for ControlsConfig` initialises all six fields via their
+  default functions.
+- `ControlsConfig::validate` now loops over the six new fields and returns
+  `ConfigError::ValidationError` if any list is empty.
+- Three new tests added:
+  - `test_controls_config_character_select_defaults` — asserts all six defaults.
+  - `test_controls_validation_empty_character_select_key_fails` — asserts
+    validation rejects an empty list for each of the six fields individually.
+  - `test_controls_config_character_select_defaults_when_missing_from_ron` —
+    asserts serde defaults kick in when the fields are absent from the RON file.
+
+#### `src/game/systems/input/keymap.rs`
+
+- Added `SelectCharacter(usize)` variant to `GameAction` (after `CharacterSheet`).
+- `KeyMap::from_controls_config` now calls `insert_action_bindings` for all six
+  `character_select_N` config fields, mapping them to `SelectCharacter(0..=5)`.
+- Fixed two existing exhaustive struct-literal tests
+  (`test_key_map_custom_config`, `test_key_map_multiple_keys_per_action`) by
+  appending `..ControlsConfig::default()` so they remain valid after the six
+  new config fields were added.
+- Three new tests added:
+  - `test_game_action_select_character_variants_exist` — verifies distinct
+    `SelectCharacter` indices compare correctly.
+  - `test_select_character_1_key_maps_to_index_0` — asserts `Digit1` maps to
+    `SelectCharacter(0)` via the default config.
+  - `test_select_character_6_key_maps_to_index_5` — asserts `Digit6` maps to
+    `SelectCharacter(5)` via the default config.
+
+#### `src/game/systems/input.rs`
+
+- Fixed one exhaustive `ControlsConfig` struct literal in
+  `test_controls_config_validation_negative_cooldown` by appending
+  `..ControlsConfig::default()`.
+
+### Architecture Compliance
+
+- [x] Data structures match architecture.md exactly — no new domain types introduced
+- [x] `GameAction` variant follows existing naming convention
+- [x] Type alias `usize` used for 0-based party index (consistent with party slice indexing)
+- [x] Default key strings use RON-compatible names (`"1"` … `"6"`)
+- [x] `serde(default)` pattern is consistent with all other optional `ControlsConfig` fields
+- [x] No test references to `campaigns/tutorial` — all fixtures use `data/test_campaign`
+- [x] All four quality gates pass: `cargo fmt`, `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`
+- [x] No architectural deviations from architecture.md
+
+---
+
+## Phase 1 Character-Select Input (Complete)
+
+**Task**: Wire `GameAction::SelectCharacter(usize)` (already defined in
+`keymap.rs`) all the way through to a live `GameMode::CharacterSheet` transition
+via digit keys `1`–`6`.
+
+### Files changed
+
+#### `src/application/mod.rs`
+
+Added `GameState::enter_character_sheet_at(index: usize)`:
+
+- If already in `CharacterSheet` mode: updates `focused_index` to the clamped
+  index in-place, preserving the stored resume mode (enables digit-key "switch
+  character" while the sheet is already open).
+- Otherwise: clones the current mode as `previous_mode`, creates a
+  `CharacterSheetState` with `focused_index` clamped to `0..party_size`, and
+  sets `GameMode::CharacterSheet`.
+- Empty-party guard: index is always `0` when `party.members.len() == 0`.
+
+#### `src/game/systems/input/frame_input.rs`
+
+- Added `pub character_select: Option<usize>` to `FrameInputIntent` (last field,
+  `None` when no digit key was pressed this frame).
+- Added `character_select` to `decode_frame_input`: iterates `0..6`, calls
+  `is_action_just_pressed(GameAction::SelectCharacter(i), …)` — first match wins.
+- Updated `test_frame_input_intent_default_has_no_actions` to also assert
+  `intent.character_select.is_none()`.
+- Added 5 new tests: default `None`, Digit1 → `Some(0)`, Digit6 → `Some(5)`,
+  custom F9 binding, no digit pressed → `None`.
+
+#### `src/game/systems/input/global_toggles.rs`
+
+- Added `character_select` branch in `handle_global_mode_toggles`, placed after
+  the `character_sheet_toggle` block and before the final `false` return.
+  - Blocked in `Combat`, `Dialogue`, `Training`, `MerchantInventory` modes (logs
+    and returns `true` without changing mode).
+  - All other modes: calls `game_state.enter_character_sheet_at(index)`.
+- Added 4 new tests: open sheet at index, ignored in combat, switch index when
+  already in sheet, clamp to party size.
+
+### Test results
+
+- All 9 new tests pass.
+- Full suite: 4792 tests run, 4792 passed, 0 failed.
+
+### Architecture Compliance
+
+- [x] No new domain types — reuses `CharacterSheetState::focused_index`
+- [x] `enter_character_sheet_at` follows the same pattern as `enter_character_sheet`
+- [x] Clamping consistent with `ContainerInventoryState::switch_character` and
+  `MerchantInventoryState::switch_character`
+- [x] RON data files unchanged
+- [x] No test references to `campaigns/tutorial`
+- [x] All four quality gates pass
+
+## Phase 2 — Character Sheet: Portrait Click Opens Character Sheet (Complete)
+
+### Overview
+
+Phase 2 wires the HUD portrait buttons to open the character sheet when
+clicked.  Clicking any portrait in the bottom HUD strip opens
+`GameMode::CharacterSheet` focused on that party member.  The click is allowed
+in all modes where a UI focus conflict would not occur, and is blocked in
+`Dialogue`, `Training`, `MerchantInventory`, `ContainerInventory`, and
+`TempleService`.
+
+### Changes
+
+#### `src/game/systems/hud.rs`
+
+**Change 1 — New import**
+
+Added `use crate::game::systems::mouse_input;` after the `GlobalState` import
+so the shared mouse activation helpers are available in the HUD module.
+
+**Change 2 — `Button` + `Interaction::None` on `CharacterPortrait` spawn**
+
+The portrait entity inside `setup_hud` now includes `Button` and
+`Interaction::None` so Bevy's interaction system tracks mouse hover/press
+events for that node.
+
+**Change 3 — `portrait_click_allowed` + `handle_portrait_click_system`**
+
+Two functions inserted immediately before `fn update_hud`:
+
+- `pub fn portrait_click_allowed(mode: &GameMode) -> bool` — pure predicate
+  that returns `true` for `Exploration`, `Automap`, `Inventory(_)`,
+  `SpellBook(_)`, `GameLog`, `Combat(_)`, and `CharacterSheet(_)`.  `pub` so
+  doc-tests and external tests can call it directly.
+
+- `fn handle_portrait_click_system(...)` — Bevy system that iterates portrait
+  entities, detects activation via `mouse_input::is_activated`, guards on
+  `portrait_click_allowed`, and calls
+  `global_state.0.enter_character_sheet_at(portrait.party_index)`.
+
+The system uses the same dual-path activation model (changed
+`Interaction::Pressed` OR hovered + `just_pressed`) as every other Bevy UI
+system in Antares, routed through the shared `mouse_input` helpers.
+
+**Change 4 — System registration in `HudPlugin::build`**
+
+`.add_systems(Update, handle_portrait_click_system)` added **without** a
+`run_if(not_in_combat)` guard so portrait clicks fire during combat frames too.
+`enter_character_sheet_at` stores the full `Combat(_)` state in
+`CharacterSheetState::previous_mode`, so pressing Esc from the sheet correctly
+returns to the active combat turn.
+
+### Tests Added (11 new tests in `mod portrait_click_tests`)
+
+| Test | What it verifies |
+|------|-----------------|
+| `test_portrait_click_allowed_exploration` | Exploration is allowed |
+| `test_portrait_click_allowed_automap` | Automap is allowed |
+| `test_portrait_click_allowed_game_log` | GameLog is allowed |
+| `test_portrait_click_not_allowed_game_over` | GameOver is blocked |
+| `test_handle_portrait_click_opens_sheet_in_exploration` | Sheet opens at correct index from Exploration |
+| `test_handle_portrait_click_opens_sheet_in_combat` | Sheet opens from Combat; resume mode is Combat |
+| `test_handle_portrait_click_ignored_in_dialogue` | Dialogue blocks click |
+| `test_handle_portrait_click_ignored_in_training` | Training blocks click |
+| `test_handle_portrait_click_selects_correct_party_index` | Correct `focused_index` set |
+| `test_handle_portrait_click_when_already_in_sheet_updates_index` | Re-click updates index without re-wrapping resume mode |
+| `test_close_sheet_from_combat_returns_to_combat` | Esc from sheet opened during combat restores combat mode |
+
+### Architecture Compliance
+
+- `GameMode` variants used exactly as defined in `src/application/mod.rs`
+- `enter_character_sheet_at` called on `GameState` — no direct mutation of `mode`
+- `mouse_input` helpers used consistently — no ad-hoc `just_pressed` logic
+- No `unwrap()` calls; no new error types needed (function is infallible)
+- All tests are pure logic tests — no Bevy `App` needed
+
+### Quality Gates
+
+```text
+cargo fmt         → clean
+cargo check       → Finished, 0 errors
+cargo clippy      → Finished, 0 warnings
+cargo nextest run → 4808 passed, 0 failed
+```
+
+## Phase 3: Full-Length Portrait Asset Loading (Complete)
+
+### Overview
+
+Phase 3 adds a second portrait resource, `FullPortraitAssets`, and a matching
+loader system `ensure_full_portraits_loaded`.  Full-length (head-to-feet)
+portraits live at `<campaign_root>/assets/portraits/full/<portrait_id>.png` and
+are indexed by the same normalized key convention as head portraits (lowercase
+filename stem, spaces replaced by `_`).  When no full portrait file exists the
+HUD sheet falls back to the deterministic color placeholder from
+`get_portrait_color`.
+
+The `full/` sub-directory is optional; the loader silently skips loading (and
+retries each frame) when the directory does not yet exist, so campaigns that
+have not produced full portraits compile and run without errors.
+
+### Changes
+
+#### `src/game/systems/hud.rs`
+
+**Change 1 — `FullPortraitAssets` resource**
+
+New `#[derive(Resource, Default)]` struct inserted immediately after
+`PortraitAssets`:
+
+```antares/src/game/systems/hud.rs#L354-382
+/// Resource holding loaded full-length portrait image handles for the active campaign.
+///
+/// Full-length (head-to-feet) portraits are stored at:
+/// `<campaign_root>/assets/portraits/full/<portrait_id>.png`
+///
+/// Indexed by normalized filename stem (lowercased, spaces -> underscores).
+/// Populated by [`ensure_full_portraits_loaded`].  When a character has no
+/// full portrait, callers should fall back to [`get_portrait_color`].
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::hud::FullPortraitAssets;
+///
+/// let assets = FullPortraitAssets::default();
+/// assert!(assets.handles_by_name.is_empty());
+/// assert!(assets.loaded_for_campaign.is_none());
+/// ```
+#[derive(Resource, Default)]
+pub struct FullPortraitAssets {
+    /// Maps filename stem (normalized: lowercase, underscores) -> Image handle.
+    /// Keys are normalized filename stems (e.g., "aldric", "warrior_f", "10").
+    pub handles_by_name: HashMap<String, Handle<Image>>,
+    /// Optional fallback image handle used when a specific portrait cannot be loaded.
+    pub fallback: Option<Handle<Image>>,
+    /// Campaign ID this resource is currently populated for (to avoid re-loading).
+    pub loaded_for_campaign: Option<String>,
+}
+```
+
+**Change 2 — `HudPlugin::build` updated**
+
+- `.init_resource::<FullPortraitAssets>()` added after
+  `.init_resource::<Assets<Image>>()`.
+- `ensure_full_portraits_loaded` added to the `.run_if(not_in_combat)` system
+  set alongside `ensure_portraits_loaded`.
+
+**Change 3 — `ensure_full_portraits_loaded` system**
+
+New system added immediately after `ensure_portraits_loaded` that:
+
+- Returns immediately when no campaign is active.
+- Returns immediately (without marking `loaded_for_campaign`) when the `full/`
+  sub-directory does not exist, so the system retries on the next frame.
+- Reads PNG/JPG/JPEG files from `<campaign_root>/assets/portraits/full/`,
+  normalizes each filename stem, and inserts handles into
+  `FullPortraitAssets::handles_by_name`.
+- Marks `loaded_for_campaign` once the scan completes (even if the directory
+  is empty), preventing redundant re-scans.
+- Mirrors the path-stripping and `load_override` fallback logic of
+  `ensure_portraits_loaded` for consistency.
+
+#### `data/test_campaign/assets/portraits/full/.gitkeep`
+
+New empty fixture directory added so the test campaign includes a `full/`
+sub-directory.  Tests that exercise `scan_full_portraits_dir` on an empty
+directory use `tempfile::tempdir()` for isolation.
+
+### Tests Added (5 new tests in `mod full_portrait_tests`)
+
+| Test | What it verifies |
+|------|-----------------|
+| `test_full_portrait_assets_default_is_empty` | `FullPortraitAssets::default()` has empty map, no fallback, no campaign |
+| `test_ensure_full_portraits_loaded_graceful_on_missing_directory` | No panic when directory does not exist; empty result |
+| `test_ensure_full_portraits_loaded_graceful_on_empty_directory` | No panic on empty directory; empty result |
+| `test_ensure_full_portraits_loaded_indexes_png_file` | Single PNG file produces one entry with normalized key |
+| `test_ensure_full_portraits_loaded_skips_non_image_files` | `.md` and `.ron` files are not indexed |
+
+Tests use an inline `scan_full_portraits_dir` helper (same pattern as
+`test_scan_portraits_dir_filters_images` in the existing `tests` module) to
+avoid exercising Bevy's `AssetServer` in unit tests.
+
+### Architecture Compliance
+
+- `FullPortraitAssets` follows the same `Resource + Default` pattern as
+  `PortraitAssets` (Section 4 of architecture.md).
+- Type aliases and constants unchanged — no raw `u32` or magic numbers
+  introduced.
+- `full/` directory convention is additive and does not break existing
+  `PortraitAssets` behaviour.
+- No `unwrap()` without justification; all filesystem errors are handled
+  gracefully with `debug!` or `warn!` logs.
+- Test data uses `data/test_campaign`, not `campaigns/tutorial` (Implementation
+  Rule 5).
+
+### Quality Gates
+
+```text
+cargo fmt         → clean
+cargo check       → Finished, 0 errors
+cargo clippy      → Finished, 0 warnings
+cargo nextest run → 4813 passed, 0 failed
+```
+
+## Phase 4: Full-Length Portrait Rendering in the Character Sheet (Complete)
+
+### Overview
+
+Phase 4 wires the `FullPortraitAssets` resource (from Phase 3) into the
+character sheet UI, replacing the previous two-column stats layout with a
+**left-portrait + right-stats** design.  When a full-length portrait PNG exists
+for the focused character it is rendered at 170 × 280 px in the left column.
+When absent, a deterministic coloured placeholder with the character's initials
+is shown instead.  The hint bar was updated to document the Phase 1 `[1-6]`
+number-key navigation.
+
+### Changes
+
+#### `src/game/systems/character_sheet_ui.rs`
+
+**New imports**
+
+```rust
+use crate::game::systems::hud::{get_portrait_color, FullPortraitAssets};
+use bevy_egui::EguiTextureHandle;
+```
+
+**New private helpers** (added before `render_party_overview`):
+
+- `sex_display(sex: Sex) -> &'static str` — converts `Sex` enum to display string.
+- `alignment_display(alignment: Alignment) -> &'static str` — converts `Alignment`
+  enum to display string.
+
+**`character_sheet_ui_system`** — new system parameter and pre-`ctx_mut` block:
+
+- `full_portraits: Option<Res<FullPortraitAssets>>` added to the parameter list.
+- Before calling `contexts.ctx_mut()`, the focused character's portrait key is
+  resolved (lowercased `portrait_id` if set, otherwise lowercased `name`), and
+  a matching handle is registered with egui via
+  `contexts.add_image(EguiTextureHandle::Weak(h.id()))`.  This must precede
+  `ctx_mut()` because both operations require `&mut EguiContexts`.
+- The resulting `Option<egui::TextureId>` and `&portrait_key` are forwarded to
+  `render_single_view`.
+- Hint bar updated: `[1-6] Select` added between `[Shift+Tab/←] Prev` and
+  `[O] Toggle View`.
+
+**`render_single_view`** — signature and layout redesigned:
+
+- Parameter `global_state` changed from `&mut ResMut<GlobalState>` to
+  `&mut GlobalState` for testability (call site uses auto-deref coercion).
+- Two new parameters: `full_portrait_id: Option<egui::TextureId>` and
+  `portrait_key: &str`.
+- `#[allow(clippy::too_many_arguments)]` added (9-parameter render helper).
+- Layout redesigned to **left-portrait (180 px) + right-stats** columns:
+  - **Left column** (`allocate_ui(vec2(180.0, 0.0))`):
+    - If `full_portrait_id.is_some()`: renders image at 170 × 280 px via
+      `egui::Image::new(SizedTexture::new(tid, vec2(170.0, 280.0)))`.
+    - Otherwise: `allocate_exact_size(vec2(170.0, 280.0))` then
+      `painter().rect_filled` with `get_portrait_color(portrait_key)` converted
+      to `egui::Color32`, overlaid with the character's initials in white at
+      `FontId::proportional(48.0)`.
+    - Identity block below portrait: name (bold, `TITLE_COLOR`), race/class/level,
+      sex and alignment via the new helper functions.
+  - **Right column** (remaining width): the existing Core Stats | Conditions and
+    Combat | XP | Equipment | Proficiencies two-sub-column layout, unchanged.
+
+### Tests Added
+
+| Test | What it verifies |
+|---|---|
+| `test_render_single_view_placeholder_when_no_full_portrait` | No panic when `full_portrait_id = None`; placeholder path executes safely |
+| `test_render_single_view_hint_bar_contains_1_6_select` | Hint bar with `[1-6] Select` renders without panic |
+| `test_character_sheet_ui_system_accepts_full_portrait_assets_resource` | System accepts `FullPortraitAssets` resource; world resource is accessible after insertion |
+
+### Quality Gates
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --all` | ✅ clean |
+| `cargo check --all-targets --all-features` | ✅ 0 errors |
+| `cargo clippy --all-targets --all-features -- -D warnings` | ✅ 0 warnings |
+| `cargo nextest run --all-features` | ✅ 4816 passed, 0 failed |

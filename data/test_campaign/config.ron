@@ -26,6 +26,12 @@ GameConfig(
         automap: ["M"],
         spell_book: ["B"],
         character_sheet: ["P"],
+        character_select_1: ["1"],
+        character_select_2: ["2"],
+        character_select_3: ["3"],
+        character_select_4: ["4"],
+        character_select_5: ["5"],
+        character_select_6: ["6"],
         movement_cooldown: 0.2,
     ),
     camera: CameraConfig(
