@@ -466,6 +466,7 @@ mod tests {
             spell_book: vec!["B".to_string()],
             character_sheet: vec!["P".to_string()],
             movement_cooldown: -0.1,
+            ..ControlsConfig::default()
         };
 
         let result = config.validate();

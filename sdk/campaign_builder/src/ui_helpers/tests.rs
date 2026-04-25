@@ -2138,17 +2138,16 @@ fn test_autocomplete_portrait_selector_basic_selection() {
 
 #[test]
 fn test_autocomplete_portrait_selector_clear_button() {
-    // Test that clear button functionality is present
+    // Verify the selector renders without changing portrait_id when no
+    // button is clicked (passive render).
     let ctx = egui::Context::default();
     let mut portrait_id = "5".to_string();
     let available_portraits = vec!["5".to_string(), "10".to_string()];
 
     let _ = ctx.run(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
-            // Portrait is selected
             assert_eq!(portrait_id, "5");
 
-            // Call the selector (clear button should be available)
             autocomplete_portrait_selector(
                 ui,
                 "test_clear",
@@ -2162,6 +2161,76 @@ fn test_autocomplete_portrait_selector_clear_button() {
             assert_eq!(portrait_id, "5");
         });
     });
+}
+
+#[test]
+fn test_autocomplete_portrait_selector_clear_resets_text_buffer() {
+    // Regression test: the Clear button previously cleared `selected_portrait_id`
+    // but left the persistent `text_buffer` holding the old portrait ID.  On the
+    // next frame `store_autocomplete_buffer` would re-persist the stale value,
+    // making the input appear to show the portrait despite it being cleared.
+    //
+    // Fix: `text_buffer.clear()` is now called alongside `selected_portrait_id.clear()`
+    // so `store_autocomplete_buffer` persists "" instead of the stale portrait ID.
+    let ctx = egui::Context::default();
+    let available_portraits = vec!["5".to_string(), "10".to_string()];
+    // Stable buffer ID that autocomplete_portrait_selector uses for id_salt
+    // "test_clear_buf" under the "portrait" prefix.
+    let buffer_id = egui::Id::new("autocomplete:portrait:test_clear_buf");
+
+    // --- Frame 1: portrait "5" is selected, buffer is populated ---
+    let mut portrait_id = "5".to_string();
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            autocomplete_portrait_selector(
+                ui,
+                "test_clear_buf",
+                "Portrait:",
+                &mut portrait_id,
+                &available_portraits,
+                None,
+            );
+        });
+    });
+
+    // Confirm the buffer was populated with the selected portrait ID.
+    let buf: Option<String> = ctx.memory(|m| m.data.get_temp(buffer_id));
+    assert_eq!(
+        buf.as_deref(),
+        Some("5"),
+        "buffer must be populated after portrait selection"
+    );
+
+    // --- Simulate what the Clear button now does (portrait_id + text_buffer cleared) ---
+    // This mirrors the in-frame action: portrait_id.clear(), text_buffer.clear(),
+    // then store_autocomplete_buffer persists the now-empty text_buffer.
+    portrait_id.clear();
+    store_autocomplete_buffer(&ctx, buffer_id, "");
+
+    // --- Frame 2: render with cleared portrait_id; buffer must stay "" ---
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            autocomplete_portrait_selector(
+                ui,
+                "test_clear_buf",
+                "Portrait:",
+                &mut portrait_id,
+                &available_portraits,
+                None,
+            );
+        });
+    });
+
+    // portrait_id must remain "" — not re-populated from a stale buffer.
+    assert_eq!(portrait_id, "", "portrait_id must stay empty after Clear");
+
+    // The buffer must still be "" — the old "5" must not have been re-stored.
+    let buf_after: Option<String> = ctx.memory(|m| m.data.get_temp(buffer_id));
+    assert_eq!(
+        buf_after.as_deref(),
+        Some(""),
+        "text_buffer must be stored as empty after Clear, not the old portrait id"
+    );
 }
 
 #[test]

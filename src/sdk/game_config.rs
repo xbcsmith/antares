@@ -580,6 +580,42 @@ pub struct ControlsConfig {
     #[serde(default = "default_character_sheet_keys")]
     pub character_sheet: Vec<String>,
 
+    /// Keys for selecting party slot 1 (index 0) and opening the character sheet.
+    ///
+    /// Default: `["1"]`
+    #[serde(default = "default_character_select_1_keys")]
+    pub character_select_1: Vec<String>,
+
+    /// Keys for selecting party slot 2 (index 1) and opening the character sheet.
+    ///
+    /// Default: `["2"]`
+    #[serde(default = "default_character_select_2_keys")]
+    pub character_select_2: Vec<String>,
+
+    /// Keys for selecting party slot 3 (index 2) and opening the character sheet.
+    ///
+    /// Default: `["3"]`
+    #[serde(default = "default_character_select_3_keys")]
+    pub character_select_3: Vec<String>,
+
+    /// Keys for selecting party slot 4 (index 3) and opening the character sheet.
+    ///
+    /// Default: `["4"]`
+    #[serde(default = "default_character_select_4_keys")]
+    pub character_select_4: Vec<String>,
+
+    /// Keys for selecting party slot 5 (index 4) and opening the character sheet.
+    ///
+    /// Default: `["5"]`
+    #[serde(default = "default_character_select_5_keys")]
+    pub character_select_5: Vec<String>,
+
+    /// Keys for selecting party slot 6 (index 5) and opening the character sheet.
+    ///
+    /// Default: `["6"]`
+    #[serde(default = "default_character_select_6_keys")]
+    pub character_select_6: Vec<String>,
+
     /// Movement cooldown in seconds (prevents double-moves)
     pub movement_cooldown: f32,
 }
@@ -612,6 +648,30 @@ fn default_character_sheet_keys() -> Vec<String> {
     vec!["P".to_string()]
 }
 
+fn default_character_select_1_keys() -> Vec<String> {
+    vec!["1".to_string()]
+}
+
+fn default_character_select_2_keys() -> Vec<String> {
+    vec!["2".to_string()]
+}
+
+fn default_character_select_3_keys() -> Vec<String> {
+    vec!["3".to_string()]
+}
+
+fn default_character_select_4_keys() -> Vec<String> {
+    vec!["4".to_string()]
+}
+
+fn default_character_select_5_keys() -> Vec<String> {
+    vec!["5".to_string()]
+}
+
+fn default_character_select_6_keys() -> Vec<String> {
+    vec!["6".to_string()]
+}
+
 impl Default for ControlsConfig {
     fn default() -> Self {
         Self {
@@ -628,6 +688,12 @@ impl Default for ControlsConfig {
             cast: default_cast_keys(),
             spell_book: default_spell_book_keys(),
             character_sheet: default_character_sheet_keys(),
+            character_select_1: default_character_select_1_keys(),
+            character_select_2: default_character_select_2_keys(),
+            character_select_3: default_character_select_3_keys(),
+            character_select_4: default_character_select_4_keys(),
+            character_select_5: default_character_select_5_keys(),
+            character_select_6: default_character_select_6_keys(),
             movement_cooldown: 0.2,
         }
     }
@@ -671,6 +737,21 @@ impl ControlsConfig {
             return Err(ConfigError::ValidationError(
                 "character_sheet key list must not be empty".to_string(),
             ));
+        }
+
+        for (field_name, keys) in [
+            ("character_select_1", &self.character_select_1),
+            ("character_select_2", &self.character_select_2),
+            ("character_select_3", &self.character_select_3),
+            ("character_select_4", &self.character_select_4),
+            ("character_select_5", &self.character_select_5),
+            ("character_select_6", &self.character_select_6),
+        ] {
+            if keys.is_empty() {
+                return Err(ConfigError::ValidationError(format!(
+                    "{field_name} key list must not be empty"
+                )));
+            }
         }
 
         Ok(())
@@ -2221,5 +2302,80 @@ mod tests {
             LevelingConfig::default(),
             "missing leveling block must produce defaults"
         );
+    }
+
+    #[test]
+    fn test_controls_config_character_select_defaults() {
+        let config = ControlsConfig::default();
+        assert_eq!(config.character_select_1, vec!["1".to_string()]);
+        assert_eq!(config.character_select_2, vec!["2".to_string()]);
+        assert_eq!(config.character_select_3, vec!["3".to_string()]);
+        assert_eq!(config.character_select_4, vec!["4".to_string()]);
+        assert_eq!(config.character_select_5, vec!["5".to_string()]);
+        assert_eq!(config.character_select_6, vec!["6".to_string()]);
+    }
+
+    #[test]
+    fn test_controls_validation_empty_character_select_key_fails() {
+        for (idx, config) in [
+            ControlsConfig {
+                character_select_1: vec![],
+                ..ControlsConfig::default()
+            },
+            ControlsConfig {
+                character_select_2: vec![],
+                ..ControlsConfig::default()
+            },
+            ControlsConfig {
+                character_select_3: vec![],
+                ..ControlsConfig::default()
+            },
+            ControlsConfig {
+                character_select_4: vec![],
+                ..ControlsConfig::default()
+            },
+            ControlsConfig {
+                character_select_5: vec![],
+                ..ControlsConfig::default()
+            },
+            ControlsConfig {
+                character_select_6: vec![],
+                ..ControlsConfig::default()
+            },
+        ]
+        .iter()
+        .enumerate()
+        {
+            let result = config.validate();
+            assert!(
+                result.is_err(),
+                "character_select_{} empty list must fail validation",
+                idx + 1
+            );
+            if let Err(ConfigError::ValidationError(ref msg)) = result {
+                assert!(
+                    msg.contains(&format!("character_select_{}", idx + 1)),
+                    "error message should mention character_select_{}, got: {msg}",
+                    idx + 1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_controls_config_character_select_defaults_when_missing_from_ron() {
+        // A RON string without any character_select_* fields — serde defaults must kick in.
+        let ron_str = r#"(
+            move_forward: ["W", "ArrowUp"],
+            move_back: ["S", "ArrowDown"],
+            turn_left: ["A", "ArrowLeft"],
+            turn_right: ["D", "ArrowRight"],
+            interact: ["Space", "E"],
+            menu: ["Escape"],
+            movement_cooldown: 0.2,
+        )"#;
+        let config: ControlsConfig = ron::from_str(ron_str).expect("deserialize");
+        assert_eq!(config.character_select_1, vec!["1".to_string()]);
+        assert_eq!(config.character_select_6, vec!["6".to_string()]);
     }
 }

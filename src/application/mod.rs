@@ -2244,6 +2244,61 @@ impl GameState {
         );
     }
 
+    /// Enter the character sheet screen, focusing on the party member at `index`.
+    ///
+    /// - If already in `CharacterSheet` mode, updates `focused_index` to the
+    ///   clamped index without changing the stored resume mode.
+    /// - Otherwise, stores the current mode and opens the character sheet at the
+    ///   clamped index.
+    /// - `index` is clamped to `0..party_size`.  If the party is empty,
+    ///   `focused_index` is set to `0`.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - Desired 0-based party index to focus (clamped to valid range).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameMode, GameState};
+    /// use antares::domain::character::{Alignment, Character, Sex};
+    ///
+    /// let mut state = GameState::new();
+    /// let hero = Character::new(
+    ///     "Hero".to_string(),
+    ///     "human".to_string(),
+    ///     "knight".to_string(),
+    ///     Sex::Male,
+    ///     Alignment::Good,
+    /// );
+    /// state.party.add_member(hero).unwrap();
+    ///
+    /// state.enter_character_sheet_at(0);
+    /// assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+    /// if let GameMode::CharacterSheet(ref cs) = state.mode {
+    ///     assert_eq!(cs.focused_index, 0);
+    /// }
+    /// ```
+    pub fn enter_character_sheet_at(&mut self, index: usize) {
+        let party_size = self.party.members.len();
+        let clamped = if party_size == 0 {
+            0
+        } else {
+            index.min(party_size - 1)
+        };
+
+        if let GameMode::CharacterSheet(ref mut cs) = self.mode {
+            cs.focused_index = clamped;
+            return;
+        }
+
+        let prev = self.mode.clone();
+        let mut cs_state =
+            crate::application::character_sheet_state::CharacterSheetState::new(prev);
+        cs_state.focused_index = clamped;
+        self.mode = GameMode::CharacterSheet(cs_state);
+    }
+
     /// Enters dialogue mode
     pub fn enter_dialogue(&mut self) {
         self.mode = GameMode::Dialogue(crate::application::dialogue::DialogueState::new());
@@ -6267,6 +6322,96 @@ mod tests {
         assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
         if let GameMode::CharacterSheet(ref cs) = state.mode {
             assert_eq!(cs.focused_index, first_focused_index);
+        }
+    }
+
+    #[test]
+    fn test_enter_character_sheet_at_sets_focused_index() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut state = GameState::new();
+        // Add two party members so index 1 is valid.
+        for name in ["Alpha", "Beta"] {
+            let hero = Character::new(
+                name.to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            state.party.add_member(hero).unwrap();
+        }
+
+        state.enter_character_sheet_at(1);
+
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+        if let GameMode::CharacterSheet(ref cs) = state.mode {
+            assert_eq!(cs.focused_index, 1);
+        }
+    }
+
+    #[test]
+    fn test_enter_character_sheet_at_clamps_to_party_size() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut state = GameState::new();
+        let hero = Character::new(
+            "Solo Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+
+        // Party has 1 member (index 0 only). Requesting index 5 must clamp to 0.
+        state.enter_character_sheet_at(5);
+
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+        if let GameMode::CharacterSheet(ref cs) = state.mode {
+            assert_eq!(cs.focused_index, 0);
+        }
+    }
+
+    #[test]
+    fn test_enter_character_sheet_at_when_already_open_updates_index() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut state = GameState::new();
+        for name in ["Alpha", "Beta", "Gamma"] {
+            let hero = Character::new(
+                name.to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            state.party.add_member(hero).unwrap();
+        }
+        // Open at index 0 first.
+        state.enter_character_sheet_at(0);
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+
+        // Call again at index 2 — must update in-place without re-wrapping.
+        state.enter_character_sheet_at(2);
+
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+        if let GameMode::CharacterSheet(ref cs) = state.mode {
+            assert_eq!(cs.focused_index, 2);
+            // Resume mode must still be Exploration (not wrapped again).
+            assert!(matches!(cs.get_resume_mode(), GameMode::Exploration));
+        }
+    }
+
+    #[test]
+    fn test_enter_character_sheet_at_empty_party_uses_index_zero() {
+        let mut state = GameState::new();
+        // Empty party — party_size = 0, saturating_sub(1) = 0, any index clamps to 0.
+        state.enter_character_sheet_at(3);
+
+        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
+        if let GameMode::CharacterSheet(ref cs) = state.mode {
+            assert_eq!(cs.focused_index, 0);
         }
     }
 
