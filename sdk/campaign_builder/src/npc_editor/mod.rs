@@ -981,14 +981,16 @@ impl NpcEditorState {
 
                     ui.horizontal(|ui| {
                         ui.label("Portrait ID:");
-                        autocomplete_portrait_selector(
+                        if autocomplete_portrait_selector(
                             ui,
                             "npc_edit_portrait",
                             "",
                             &mut self.edit_buffer.portrait_id,
                             &self.available_portraits,
                             campaign_dir,
-                        );
+                        ) {
+                            needs_save = true;
+                        }
 
                         // Grid picker button
                         if ui.button("🖼").on_hover_text("Browse portraits").clicked() {
@@ -1003,14 +1005,16 @@ impl NpcEditorState {
 
                     ui.horizontal(|ui| {
                         ui.label("Sprite Sheet:");
-                        crate::ui_helpers::autocomplete_sprite_sheet_selector(
+                        if crate::ui_helpers::autocomplete_sprite_sheet_selector(
                             ui,
                             "npc_edit_sprite",
                             "",
                             &mut self.edit_buffer.sprite_sheet,
                             &self.available_sprite_sheets,
                             campaign_dir,
-                        );
+                        ) {
+                            needs_save = true;
+                        }
 
                         if ui.button("📁").on_hover_text("Browse sprite sheets").clicked() {
                             self.sprite_picker_open = true;
@@ -1035,13 +1039,15 @@ impl NpcEditorState {
                     ui.horizontal(|ui| {
                         ui.label("Creature ID:");
                         // Autocomplete input — type by name or numeric ID
-                        autocomplete_creature_selector(
+                        if autocomplete_creature_selector(
                             ui,
                             "npc_creature",
                             "",
                             &mut self.edit_buffer.creature_id,
                             &self.available_creatures,
-                        );
+                        ) {
+                            needs_save = true;
+                        }
 
                         // Grid picker button
                         if ui

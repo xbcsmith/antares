@@ -1870,14 +1870,17 @@ impl CharactersEditorState {
                         ui.label("Portrait ID:");
                         ui.horizontal(|ui| {
                             // Autocomplete input
-                            autocomplete_portrait_selector(
+                            if autocomplete_portrait_selector(
                                 ui,
                                 "character_portrait",
                                 "",
                                 &mut self.buffer.portrait_id,
                                 &self.available_portraits,
                                 ctx.campaign_dir,
-                            );
+                            ) {
+                                *ctx.unsaved_changes = true;
+                                self.has_unsaved_changes = true;
+                            }
 
                             // Grid picker button
                             if ui.button("🖼").on_hover_text("Browse portraits").clicked() {
@@ -1889,13 +1892,16 @@ impl CharactersEditorState {
                         ui.label("Creature ID:");
                         ui.horizontal(|ui| {
                             // Autocomplete input (types by name or numeric ID)
-                            autocomplete_creature_selector(
+                            if autocomplete_creature_selector(
                                 ui,
                                 "character_creature",
                                 "",
                                 &mut self.buffer.creature_id,
                                 &self.available_creatures,
-                            );
+                            ) {
+                                *ctx.unsaved_changes = true;
+                                self.has_unsaved_changes = true;
+                            }
 
                             // Grid picker button
                             if ui

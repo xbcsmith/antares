@@ -770,8 +770,9 @@ impl MonstersEditorState {
                         {
                             self.creature_picker_open = true;
                         }
-                        if ui.button("Clear").clicked() {
+                        if ui.button("Clear").clicked() && self.edit_buffer.creature_id.is_some() {
                             self.apply_selected_creature_id(None);
+                            *ctx.unsaved_changes = true;
                         }
                         ui.label("ℹ").on_hover_text(
                             "Links this monster to a procedural mesh creature definition. When set, \
