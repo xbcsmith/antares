@@ -2308,6 +2308,7 @@ pub fn extract_npc_candidates(maps: &[antares::domain::world::Map]) -> Vec<(Stri
 /// # Examples
 ///
 /// ```
+/// use campaign_builder::ui_helpers::extract_character_candidates;
 /// use antares::domain::character::Alignment;
 /// use antares::domain::character::Sex;
 /// use antares::domain::character_definition::CharacterDefinition;

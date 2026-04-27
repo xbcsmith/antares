@@ -408,6 +408,13 @@ impl CampaignMetadataEditorState {
     ///     faction: None,
     ///     is_merchant: false,
     ///     is_innkeeper: true,
+    ///     is_priest: false,
+    ///     is_trainer: false,
+    ///     stock_template: None,
+    ///     service_catalog: None,
+    ///     economy: None,
+    ///     training_fee_base: None,
+    ///     training_fee_multiplier: None,
     /// };
     /// let npcs = [npc];
     /// let filtered = state.visible_innkeepers(&npcs);

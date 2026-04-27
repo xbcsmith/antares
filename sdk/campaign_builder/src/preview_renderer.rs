@@ -181,6 +181,16 @@ struct ProjectedMeshCacheEntry {
     projected: Vec<egui::Pos2>,
 }
 
+struct MeshWireframeDrawParams<'a> {
+    painter: &'a egui::Painter,
+    rect: egui::Rect,
+    mesh_idx: usize,
+    mesh: &'a MeshDefinition,
+    transform: &'a MeshTransform,
+    global_scale: f32,
+    is_selected: bool,
+}
+
 /// 3D preview renderer for creatures
 ///
 /// This renderer manages a separate rendering context (conceptually a Bevy app)
@@ -480,16 +490,17 @@ impl PreviewRenderer {
 
             let is_selected = self.selected_mesh_index == Some(mesh_idx);
 
-            let (drawn, skipped) = self.draw_mesh_wireframe(
+            let draw_params = MeshWireframeDrawParams {
                 painter,
                 rect,
                 mesh_idx,
                 mesh,
-                &transform,
-                creature.scale,
+                transform: &transform,
+                global_scale: creature.scale,
                 is_selected,
-                &mut remaining_triangle_budget,
-            );
+            };
+            let (drawn, skipped) =
+                self.draw_mesh_wireframe(draw_params, &mut remaining_triangle_budget);
             drawn_triangle_count += drawn;
             skipped_triangle_count += skipped;
         }
@@ -657,17 +668,21 @@ impl PreviewRenderer {
     /// Returns `(drawn_triangles, skipped_triangles)`.
     fn draw_mesh_wireframe(
         &self,
-        painter: &egui::Painter,
-        rect: egui::Rect,
-        mesh_idx: usize,
-        mesh: &MeshDefinition,
-        transform: &MeshTransform,
-        global_scale: f32,
-        is_selected: bool,
+        params: MeshWireframeDrawParams<'_>,
         remaining_triangle_budget: &mut usize,
     ) -> (usize, usize) {
         // Simple orthographic-ish projection
         // TODO: use proper 3D rendering
+
+        let MeshWireframeDrawParams {
+            painter,
+            rect,
+            mesh_idx,
+            mesh,
+            transform,
+            global_scale,
+            is_selected,
+        } = params;
 
         let signature = Self::projected_mesh_signature(rect, mesh, transform, global_scale);
         let mut projected_cache = self.projected_mesh_cache.borrow_mut();

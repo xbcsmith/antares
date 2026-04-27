@@ -6214,13 +6214,13 @@ impl MapsEditorState {
 
         // Use the full available column width; allow a square-ish max height.
         let avail_width = ui.available_width().max(1.0);
-        let max_height = avail_width.min(320.0).max(1.0);
+        let max_height = avail_width.clamp(1.0, 320.0);
 
         // Derive tile size that fits the whole map in (avail_width x max_height),
         // preserving the aspect ratio and capping at MAX_PREVIEW_TILE.
         let tile_size_w = avail_width / map.width as f32;
         let tile_size_h = max_height / map.height as f32;
-        let tile_size = tile_size_w.min(tile_size_h).min(MAX_PREVIEW_TILE).max(1.0);
+        let tile_size = tile_size_w.min(tile_size_h).clamp(1.0, MAX_PREVIEW_TILE);
 
         let preview_width = map.width as f32 * tile_size;
         let preview_height = map.height as f32 * tile_size;

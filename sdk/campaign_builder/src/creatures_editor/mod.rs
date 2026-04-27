@@ -23,6 +23,8 @@ use eframe::egui;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
 
 mod mesh_ui;
 mod preview_panel;
@@ -156,6 +158,10 @@ pub struct CreaturesEditorState {
     pub register_asset_validated_creature: Option<CreatureDefinition>,
     /// Error message from the last Validate attempt; `None` when validation succeeded.
     pub register_asset_error: Option<String>,
+    /// `true` while a creature asset validation worker is reading/parsing a file.
+    pub register_asset_validation_in_progress: bool,
+    /// Receiver for the background creature asset validation result.
+    register_asset_validation_rx: Option<Receiver<RegisterAssetValidationResult>>,
     /// Cached list of `.ron` file paths found in `assets/creatures/`, used to
     /// drive the path autocomplete in the Register Asset dialog.
     pub available_creature_assets: Vec<String>,
@@ -249,6 +255,11 @@ struct RegistryViewCache {
     row_valid: Vec<bool>,
 }
 
+struct RegisterAssetValidationResult {
+    request_path: String,
+    result: Result<CreatureDefinition, String>,
+}
+
 impl Default for CreaturesEditorState {
     fn default() -> Self {
         let mut preview_renderer = None;
@@ -319,6 +330,8 @@ impl Default for CreaturesEditorState {
             register_asset_path_buffer: String::new(),
             register_asset_validated_creature: None,
             register_asset_error: None,
+            register_asset_validation_in_progress: false,
+            register_asset_validation_rx: None,
             available_creature_assets: Vec::new(),
             last_campaign_dir: None,
 
@@ -863,6 +876,7 @@ impl CreaturesEditorState {
         unsaved_changes: &mut bool,
     ) -> Option<String> {
         let mut result: Option<String> = None;
+        self.poll_register_asset_validation();
 
         // Deferred action flags collected inside the egui closure.
         let mut do_validate = false;
@@ -893,11 +907,23 @@ impl CreaturesEditorState {
                 ui.separator();
 
                 ui.horizontal(|ui| {
-                    if ui.button("🔍 Validate").clicked() {
+                    let validate_label = if self.register_asset_validation_in_progress {
+                        "⏳ Validating..."
+                    } else {
+                        "🔍 Validate"
+                    };
+                    if ui
+                        .add_enabled(
+                            !self.register_asset_validation_in_progress,
+                            egui::Button::new(validate_label),
+                        )
+                        .clicked()
+                    {
                         do_validate = true;
                     }
 
-                    let register_enabled = self.register_asset_validated_creature.is_some();
+                    let register_enabled = !self.register_asset_validation_in_progress
+                        && self.register_asset_validated_creature.is_some();
                     ui.add_enabled_ui(register_enabled, |ui| {
                         if ui
                             .button("📥 Register")
@@ -912,6 +938,12 @@ impl CreaturesEditorState {
                         do_cancel = true;
                     }
                 });
+
+                if self.register_asset_validation_in_progress {
+                    ui.separator();
+                    ui.spinner();
+                    ui.label("Validating creature asset in the background...");
+                }
 
                 // Error label (shown in red when validation fails)
                 if let Some(ref err) = self.register_asset_error {
@@ -963,7 +995,7 @@ impl CreaturesEditorState {
         // ---- Apply deferred actions (all closures have returned) ----
 
         if do_validate {
-            self.execute_register_asset_validation(creatures, campaign_dir);
+            self.start_register_asset_validation(creatures, campaign_dir, ctx.clone());
         }
 
         if do_register {
@@ -975,6 +1007,8 @@ impl CreaturesEditorState {
                 self.show_register_asset_dialog = false;
                 self.register_asset_path_buffer.clear();
                 self.register_asset_error = None;
+                self.register_asset_validation_in_progress = false;
+                self.register_asset_validation_rx = None;
                 result = Some(format!("Registered creature '{}' (ID {})", name, id));
             }
         }
@@ -984,6 +1018,8 @@ impl CreaturesEditorState {
             self.register_asset_path_buffer.clear();
             self.register_asset_validated_creature = None;
             self.register_asset_error = None;
+            self.register_asset_validation_in_progress = false;
+            self.register_asset_validation_rx = None;
         }
 
         result
@@ -1008,16 +1044,17 @@ impl CreaturesEditorState {
     ///
     /// * `creatures` - Read-only view of the current creature list for duplicate detection.
     /// * `campaign_dir` - Base directory used to resolve the relative asset path.
+    #[cfg(test)]
     fn execute_register_asset_validation(
         &mut self,
         creatures: &[CreatureDefinition],
         campaign_dir: &Option<PathBuf>,
     ) {
-        // Clear any prior results.
         self.register_asset_validated_creature = None;
         self.register_asset_error = None;
+        self.register_asset_validation_in_progress = false;
+        self.register_asset_validation_rx = None;
 
-        // 4.5 Path normalization: replace backslashes, trim leading slash.
         let normalized = self
             .register_asset_path_buffer
             .replace('\\', "/")
@@ -1030,61 +1067,168 @@ impl CreaturesEditorState {
             return;
         }
 
-        // Resolve full path.
         let full_path = if let Some(dir) = campaign_dir {
             dir.join(&normalized)
         } else {
             std::path::PathBuf::from(&normalized)
         };
 
-        // Read file contents.
-        let contents = match std::fs::read_to_string(&full_path) {
-            Ok(c) => c,
-            Err(e) => {
-                self.register_asset_error = Some(format!(
-                    "File not found or unreadable ({}): {}",
-                    full_path.display(),
-                    e
-                ));
-                return;
-            }
-        };
+        let existing_creatures: Vec<(CreatureId, String)> = creatures
+            .iter()
+            .map(|creature| (creature.id, creature.name.clone()))
+            .collect();
 
-        // Parse RON.
-        let creature: CreatureDefinition = match ron::from_str(&contents) {
-            Ok(c) => c,
-            Err(e) => {
-                self.register_asset_error = Some(format!("Parse error: {}", e));
-                return;
+        match Self::validate_creature_asset_file(full_path, existing_creatures) {
+            Ok(creature) => {
+                self.register_asset_validated_creature = Some(creature);
+                self.register_asset_error = None;
             }
-        };
+            Err(error) => {
+                self.register_asset_validated_creature = None;
+                self.register_asset_error = Some(error);
+            }
+        }
+    }
 
-        // 4.4 Duplicate ID check (direct vec scan — most authoritative source).
-        if let Some(existing) = creatures.iter().find(|c| c.id == creature.id) {
-            self.register_asset_error = Some(format!(
-                "ID {} is already registered to '{}'. Edit that creature or choose a file with a unique ID.",
-                creature.id, existing.name
-            ));
+    fn start_register_asset_validation(
+        &mut self,
+        creatures: &[CreatureDefinition],
+        campaign_dir: &Option<PathBuf>,
+        egui_ctx: egui::Context,
+    ) {
+        // Clear any prior results.
+        self.register_asset_validated_creature = None;
+        self.register_asset_error = None;
+        self.register_asset_validation_rx = None;
+
+        // 4.5 Path normalization: replace backslashes, trim leading slash.
+        let normalized = self
+            .register_asset_path_buffer
+            .replace('\\', "/")
+            .trim_start_matches('/')
+            .to_string();
+
+        if normalized.is_empty() {
+            self.register_asset_error =
+                Some("Path is empty. Enter a path relative to the campaign directory.".to_string());
+            self.register_asset_validation_in_progress = false;
             return;
         }
 
-        // 4.4 Range validity check via ID manager.
-        let category = crate::creature_id_manager::CreatureCategory::from_id(creature.id);
-        if let Err(crate::creature_id_manager::IdError::OutOfRange {
-            id,
-            category: cat_name,
-            range,
-        }) = self.id_manager.validate_id(creature.id, category)
+        let full_path = if let Some(dir) = campaign_dir {
+            dir.join(&normalized)
+        } else {
+            std::path::PathBuf::from(&normalized)
+        };
+
+        let existing_creatures: Vec<(CreatureId, String)> = creatures
+            .iter()
+            .map(|creature| (creature.id, creature.name.clone()))
+            .collect();
+
+        let request_path = normalized.clone();
+        let (tx, rx) = mpsc::channel();
+        self.register_asset_validation_rx = Some(rx);
+        self.register_asset_validation_in_progress = true;
+
+        thread::spawn(move || {
+            let validation_result =
+                Self::validate_creature_asset_file(full_path, existing_creatures);
+
+            let _ = tx.send(RegisterAssetValidationResult {
+                request_path,
+                result: validation_result,
+            });
+            egui_ctx.request_repaint();
+        });
+    }
+
+    fn poll_register_asset_validation(&mut self) {
+        let Some(rx) = self.register_asset_validation_rx.take() else {
+            return;
+        };
+
+        match rx.try_recv() {
+            Ok(validation_result) => {
+                self.register_asset_validation_in_progress = false;
+
+                let current_path = self
+                    .register_asset_path_buffer
+                    .replace('\\', "/")
+                    .trim_start_matches('/')
+                    .to_string();
+
+                if validation_result.request_path != current_path {
+                    self.register_asset_validated_creature = None;
+                    self.register_asset_error = Some(
+                        "Validation result ignored because the asset path changed. Validate again."
+                            .to_string(),
+                    );
+                    return;
+                }
+
+                match validation_result.result {
+                    Ok(creature) => {
+                        self.register_asset_validated_creature = Some(creature);
+                        self.register_asset_error = None;
+                    }
+                    Err(error) => {
+                        self.register_asset_validated_creature = None;
+                        self.register_asset_error = Some(error);
+                    }
+                }
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                self.register_asset_validation_rx = Some(rx);
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.register_asset_validation_in_progress = false;
+                self.register_asset_validated_creature = None;
+                self.register_asset_error =
+                    Some("Validation worker stopped before returning a result.".to_string());
+            }
+        }
+    }
+
+    fn validate_creature_asset_file(
+        full_path: PathBuf,
+        existing_creatures: Vec<(CreatureId, String)>,
+    ) -> Result<CreatureDefinition, String> {
+        let contents = std::fs::read_to_string(&full_path).map_err(|e| {
+            format!(
+                "File not found or unreadable ({}): {}",
+                full_path.display(),
+                e
+            )
+        })?;
+
+        let creature: CreatureDefinition =
+            ron::from_str(&contents).map_err(|e| format!("Parse error: {}", e))?;
+
+        if let Some((_, existing_name)) = existing_creatures
+            .iter()
+            .find(|(existing_id, _)| *existing_id == creature.id)
         {
-            self.register_asset_error = Some(format!(
-                "ID {} is outside the valid range for category {} ({}). Use a {} ID.",
-                id, cat_name, range, cat_name
+            return Err(format!(
+                "ID {} is already registered to '{}'. Edit that creature or choose a file with a unique ID.",
+                creature.id, existing_name
             ));
-            return;
         }
 
-        // All checks passed.
-        self.register_asset_validated_creature = Some(creature);
+        let category = crate::creature_id_manager::CreatureCategory::from_id(creature.id);
+        let range = category.id_range();
+        if !range.contains(&creature.id) {
+            return Err(format!(
+                "ID {} is outside the valid range for category {} ({}-{}). Use a {} ID.",
+                creature.id,
+                category.display_name(),
+                range.start,
+                range.end - 1,
+                category.display_name()
+            ));
+        }
+
+        Ok(creature)
     }
 
     /// Renders the registry preview panel for the creature at `idx`.
