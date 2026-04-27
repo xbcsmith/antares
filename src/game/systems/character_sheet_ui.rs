@@ -353,12 +353,12 @@ fn render_single_view(
         );
 
         let available = ui.available_size();
-        let button_width = (available.x * 0.45).max(280.0).min(available.x - 80.0);
-        let spacer_width = if available.x > button_width {
-            available.x - button_width
+        let button_width = if available.x <= 80.0 {
+            available.x.max(0.0)
         } else {
-            0.0
+            (available.x * 0.45).clamp(0.0, available.x - 80.0)
         };
+        let spacer_width = (available.x - button_width).max(0.0);
         ui.add_space(spacer_width);
         ui.allocate_ui(egui::vec2(button_width, available.y), |ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
