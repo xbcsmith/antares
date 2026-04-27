@@ -100,6 +100,21 @@ pub const CREATURE_SCALE_MIN: f64 = 0.001;
 /// Maximum allowed value for the creature-level scale slider.
 pub const CREATURE_SCALE_MAX: f64 = 5.0;
 
+/// Maximum primitive segment count allowed by the creature editor UI.
+///
+/// Higher values can produce very dense meshes that make egui preview rendering
+/// expensive enough to stall the desktop compositor on Linux.
+const PRIMITIVE_SEGMENTS_MAX: u32 = 64;
+
+/// Maximum primitive ring count allowed by the creature editor UI.
+const PRIMITIVE_RINGS_MAX: u32 = 64;
+
+/// Soft triangle budget shown as a warning before primitive generation.
+///
+/// Generation is still allowed above this threshold, but the dialog warns the
+/// user that preview rendering may become expensive.
+const PRIMITIVE_SOFT_TRIANGLE_BUDGET: usize = 8_192;
+
 /// Editor mode for creatures
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreaturesEditorMode {
@@ -2285,6 +2300,20 @@ impl CreaturesEditorState {
         result_message
     }
 
+    /// Estimate the vertex and triangle counts for the primitive currently configured in the dialog.
+    fn estimate_primitive_geometry(&self) -> (usize, usize) {
+        let segments = self.primitive_segments.clamp(3, PRIMITIVE_SEGMENTS_MAX) as usize;
+        let rings = self.primitive_rings.clamp(2, PRIMITIVE_RINGS_MAX) as usize;
+
+        match self.primitive_type {
+            PrimitiveType::Cube => (24, 12),
+            PrimitiveType::Sphere => ((rings + 1) * (segments + 1), rings * segments * 2),
+            PrimitiveType::Cylinder => ((segments * 4) + 6, segments * 4),
+            PrimitiveType::Pyramid => (5, 6),
+            PrimitiveType::Cone => ((segments * 2) + 3, segments * 2),
+        }
+    }
+
     /// Show primitive replacement dialog
     fn show_primitive_replacement_dialog(
         &mut self,
@@ -2333,10 +2362,16 @@ impl CreaturesEditorState {
                                 .logarithmic(true),
                         );
                         ui.add(
-                            egui::Slider::new(&mut self.primitive_segments, 3..=64)
-                                .text("Segments"),
+                            egui::Slider::new(
+                                &mut self.primitive_segments,
+                                3..=PRIMITIVE_SEGMENTS_MAX,
+                            )
+                            .text("Segments"),
                         );
-                        ui.add(egui::Slider::new(&mut self.primitive_rings, 2..=64).text("Rings"));
+                        ui.add(
+                            egui::Slider::new(&mut self.primitive_rings, 2..=PRIMITIVE_RINGS_MAX)
+                                .text("Rings"),
+                        );
                     }
                     PrimitiveType::Cylinder => {
                         ui.label("Cylinder Settings:");
@@ -2346,8 +2381,11 @@ impl CreaturesEditorState {
                                 .logarithmic(true),
                         );
                         ui.add(
-                            egui::Slider::new(&mut self.primitive_segments, 3..=64)
-                                .text("Segments"),
+                            egui::Slider::new(
+                                &mut self.primitive_segments,
+                                3..=PRIMITIVE_SEGMENTS_MAX,
+                            )
+                            .text("Segments"),
                         );
                     }
                     PrimitiveType::Pyramid => {
@@ -2366,8 +2404,11 @@ impl CreaturesEditorState {
                                 .logarithmic(true),
                         );
                         ui.add(
-                            egui::Slider::new(&mut self.primitive_segments, 3..=64)
-                                .text("Segments"),
+                            egui::Slider::new(
+                                &mut self.primitive_segments,
+                                3..=PRIMITIVE_SEGMENTS_MAX,
+                            )
+                            .text("Segments"),
                         );
                     }
                 }
@@ -2393,6 +2434,22 @@ impl CreaturesEditorState {
                 ui.checkbox(&mut self.primitive_keep_name, "Keep mesh name");
 
                 ui.separator();
+
+                let (estimated_vertices, estimated_triangles) = self.estimate_primitive_geometry();
+                ui.label(format!(
+                    "Estimated output: {} vertices, {} triangles",
+                    estimated_vertices, estimated_triangles
+                ));
+
+                if estimated_triangles > PRIMITIVE_SOFT_TRIANGLE_BUDGET {
+                    ui.colored_label(
+                        egui::Color32::YELLOW,
+                        format!(
+                            "⚠ Dense primitive: preview rendering may be slower above {} triangles.",
+                            PRIMITIVE_SOFT_TRIANGLE_BUDGET
+                        ),
+                    );
+                }
 
                 ui.horizontal(|ui| {
                     if ui.button("✓ Generate").clicked() {
@@ -2426,26 +2483,29 @@ impl CreaturesEditorState {
             self.primitive_custom_color
         };
 
+        let primitive_segments = self.primitive_segments.clamp(3, PRIMITIVE_SEGMENTS_MAX);
+        let primitive_rings = self.primitive_rings.clamp(2, PRIMITIVE_RINGS_MAX);
+
         // Generate primitive mesh
         let mut new_mesh = match self.primitive_type {
             PrimitiveType::Cube => generate_cube(self.primitive_size, color),
             PrimitiveType::Sphere => generate_sphere(
                 self.primitive_size,
-                self.primitive_segments,
-                self.primitive_rings,
+                primitive_segments,
+                primitive_rings,
                 color,
             ),
             PrimitiveType::Cylinder => generate_cylinder(
                 self.primitive_size,
                 self.primitive_size * 2.0,
-                self.primitive_segments,
+                primitive_segments,
                 color,
             ),
             PrimitiveType::Pyramid => generate_pyramid(self.primitive_size, color),
             PrimitiveType::Cone => generate_cone(
                 self.primitive_size,
                 self.primitive_size * 2.0,
-                self.primitive_segments,
+                primitive_segments,
                 color,
             ),
         };
