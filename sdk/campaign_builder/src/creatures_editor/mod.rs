@@ -20,6 +20,8 @@ use antares::domain::visual::{
     CreatureDefinition, CreatureReference, MeshDefinition, MeshTransform,
 };
 use eframe::egui;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
 mod mesh_ui;
@@ -143,6 +145,7 @@ pub struct CreaturesEditorState {
     /// executes the deletion.  Resets whenever `selected_registry_entry` changes
     /// or `back_to_registry()` is called.
     pub registry_delete_confirm_pending: bool,
+    registry_view_cache: RegistryViewCache,
 
     // Register Asset Dialog
     /// When `true`, the "Register Creature Asset" dialog window is visible.
@@ -209,7 +212,7 @@ pub enum PrimitiveType {
 }
 
 /// Sort order for registry list
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RegistrySortBy {
     Id,
     Name,
@@ -230,6 +233,20 @@ enum RegistryPreviewAction {
     Delete,
     /// Open the Register Asset dialog.
     RegisterAsset,
+}
+
+struct RegistryPreviewPanelResult {
+    action: Option<RegistryPreviewAction>,
+    delete_confirm_update: Option<bool>,
+}
+
+#[derive(Default)]
+struct RegistryViewCache {
+    initialized: bool,
+    signature: u64,
+    counts: (usize, usize, usize, usize, usize),
+    filtered_indices: Vec<usize>,
+    row_valid: Vec<bool>,
 }
 
 impl Default for CreaturesEditorState {
@@ -274,6 +291,7 @@ impl Default for CreaturesEditorState {
             validation_warnings: Vec::new(),
             validation_info: Vec::new(),
             last_validated_mesh_index: None,
+            registry_view_cache: RegistryViewCache::default(),
             show_primitive_dialog: false,
             primitive_type: PrimitiveType::Cube,
             primitive_size: 1.0,
@@ -373,20 +391,6 @@ impl CreaturesEditorState {
     ) -> Option<String> {
         let mut result_message: Option<String> = None;
 
-        // Update ID manager from current creatures
-        let references: Vec<CreatureReference> = creatures
-            .iter()
-            .map(|c| CreatureReference {
-                id: c.id,
-                name: c.name.clone(),
-                filepath: format!(
-                    "assets/creatures/{}.ron",
-                    c.name.to_lowercase().replace(' ', "_")
-                ),
-            })
-            .collect();
-        self.id_manager.update_from_registry(&references);
-
         // Refresh creature asset candidates when campaign directory changes
         if self.last_campaign_dir != *campaign_dir {
             self.available_creature_assets =
@@ -394,13 +398,14 @@ impl CreaturesEditorState {
             self.last_campaign_dir = campaign_dir.clone();
         }
 
+        self.refresh_registry_view_cache(creatures);
+
         // Registry Overview Section
         if self.show_registry_stats {
             ui.horizontal(|ui| {
                 ui.label(format!("📊 {} creatures registered", creatures.len()));
 
-                let (monsters, npcs, templates, variants, custom) =
-                    self.count_by_category(creatures);
+                let (monsters, npcs, templates, variants, custom) = self.registry_view_cache.counts;
                 ui.separator();
                 ui.label(format!(
                     "({} Monsters, {} NPCs, {} Templates, {} Variants, {} Custom)",
@@ -543,37 +548,7 @@ impl CreaturesEditorState {
         // Loop rows are each wrapped in push_id(creature_id) per sdk/AGENTS.md
         // Rule 1 to prevent widget-ID collisions between rows.
 
-        // Build filtered + sorted index list (owned, no external borrows).
-        let filtered_indices: Vec<usize> = {
-            let mut pairs: Vec<(usize, u32, String)> = creatures
-                .iter()
-                .enumerate()
-                .filter(|(_, c)| {
-                    if let Some(cat) = self.category_filter {
-                        if CreatureCategory::from_id(c.id) != cat {
-                            return false;
-                        }
-                    }
-                    if !self.search_query.is_empty() {
-                        let q = self.search_query.to_lowercase();
-                        return c.name.to_lowercase().contains(&q) || c.id.to_string().contains(&q);
-                    }
-                    true
-                })
-                .map(|(i, c)| (i, c.id, c.name.clone()))
-                .collect();
-
-            match self.registry_sort_by {
-                RegistrySortBy::Id => pairs.sort_by_key(|(_, id, _)| *id),
-                RegistrySortBy::Name => {
-                    pairs.sort_by(|(_, _, a), (_, _, b)| a.cmp(b));
-                }
-                RegistrySortBy::Category => {
-                    pairs.sort_by_key(|(_, id, _)| (CreatureCategory::from_id(*id) as u8, *id));
-                }
-            }
-            pairs.into_iter().map(|(i, _, _)| i).collect()
-        };
+        let filtered_indices = self.registry_view_cache.filtered_indices.clone();
 
         // Snapshot the fields the left closure needs so we do not borrow `self`
         // inside a closure that also needs `&mut self` later.
@@ -584,14 +559,7 @@ impl CreaturesEditorState {
         // capture for `show_registry_preview_panel`.  (Two closures passed to the same
         // function cannot both capture `self`, even if the borrows are disjoint fields.)
         // sdk/AGENTS.md Rule 6 / E0500 fix.
-        let row_valid: Vec<bool> = filtered_indices
-            .iter()
-            .map(|&idx| {
-                let c = &creatures[idx];
-                let cat = CreatureCategory::from_id(c.id);
-                self.id_manager.validate_id(c.id, cat).is_ok()
-            })
-            .collect();
+        let row_valid = self.registry_view_cache.row_valid.clone();
 
         // Deferred mutations collected inside closures; applied after show_split.
         let mut pending_edit: Option<(usize, String)> = None;
@@ -601,17 +569,12 @@ impl CreaturesEditorState {
         let mut pending_selection: Option<usize> = None;
         let mut pending_selection_reset_confirm = false;
 
-        // Snapshot fields needed by the right closure (preview).
-        // The right closure receives an immutable creature snapshot so we can
-        // call &mut self methods (show_registry_preview_panel) without a
-        // simultaneous borrow on `creatures`.
-        let preview_snapshot: Option<(usize, CreatureDefinition)> =
-            selected_entry.and_then(|idx| creatures.get(idx).map(|c| (idx, c.clone())));
-        // If the index is stale (creature deleted externally) clear the selection
-        // after show_split returns.
-        let preview_index_stale = selected_entry.is_some() && preview_snapshot.is_none();
+        // If the index is stale (creature deleted externally), clear the
+        // selection after show_split returns.
+        let preview_index_stale = selected_entry.is_some_and(|idx| creatures.get(idx).is_none());
 
         let delete_confirm_pending = self.registry_delete_confirm_pending;
+        let mut pending_delete_confirm_update: Option<bool> = None;
 
         TwoColumnLayout::new("creatures_registry")
             .with_inspector_min_width(300.0)
@@ -719,7 +682,7 @@ impl CreaturesEditorState {
                 },
                 // ---- Right column: preview panel ----
                 |right_ui| {
-                    match preview_snapshot {
+                    match selected_entry.and_then(|idx| creatures.get(idx).map(|c| (idx, c))) {
                         None => {
                             // No creature selected (or stale index handled below).
                             right_ui.centered_and_justified(|ui| {
@@ -730,18 +693,19 @@ impl CreaturesEditorState {
                                 );
                             });
                         }
-                        Some((sel_idx, ref creature)) => {
-                            // `creature` is a clone so there is no live borrow on
-                            // `creatures` here — `&mut self` in
-                            // show_registry_preview_panel is unambiguous.
-                            let action = self.show_registry_preview_panel(
+                        Some((sel_idx, creature)) => {
+                            let preview_result = Self::show_registry_preview_panel(
                                 right_ui,
                                 creature,
                                 sel_idx,
                                 delete_confirm_pending,
                             );
-                            if action.is_some() {
-                                pending_right_action = action;
+                            if preview_result.action.is_some() {
+                                pending_right_action = preview_result.action;
+                            }
+                            if preview_result.delete_confirm_update.is_some() {
+                                pending_delete_confirm_update =
+                                    preview_result.delete_confirm_update;
                             }
                         }
                     }
@@ -749,6 +713,10 @@ impl CreaturesEditorState {
             );
 
         let pending_preview_action = pending_right_action.or(pending_left_action);
+
+        if let Some(delete_confirm_update) = pending_delete_confirm_update {
+            self.registry_delete_confirm_pending = delete_confirm_update;
+        }
 
         // --- Apply deferred mutations (all closures have returned) ---
 
@@ -1146,13 +1114,13 @@ impl CreaturesEditorState {
     ///
     /// Returns a `RegistryPreviewAction` when the user clicks an action button.
     fn show_registry_preview_panel(
-        &mut self,
         ui: &mut egui::Ui,
         creature: &CreatureDefinition,
         idx: usize,
         delete_confirm_pending: bool,
-    ) -> Option<RegistryPreviewAction> {
+    ) -> RegistryPreviewPanelResult {
         let mut action: Option<RegistryPreviewAction> = None;
+        let mut delete_confirm_update: Option<bool> = None;
 
         // --- Heading: creature name ---
         ui.heading(&creature.name);
@@ -1310,7 +1278,7 @@ impl CreaturesEditorState {
                 // Cancel button: signal via a sentinel action variant so the
                 // caller can clear the flag after show_split returns.
                 if ui.button("Cancel").clicked() {
-                    self.registry_delete_confirm_pending = false;
+                    delete_confirm_update = Some(false);
                 }
             } else {
                 // First click arms the confirmation.
@@ -1319,7 +1287,7 @@ impl CreaturesEditorState {
                     .on_hover_text("Delete this creature (requires confirmation)")
                     .clicked()
                 {
-                    self.registry_delete_confirm_pending = true;
+                    delete_confirm_update = Some(true);
                 }
             }
         });
@@ -1332,7 +1300,95 @@ impl CreaturesEditorState {
                 .weak(),
         );
 
-        action
+        RegistryPreviewPanelResult {
+            action,
+            delete_confirm_update,
+        }
+    }
+
+    fn registry_view_signature(&self, creatures: &[CreatureDefinition]) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.search_query.hash(&mut hasher);
+        self.category_filter.hash(&mut hasher);
+        self.registry_sort_by.hash(&mut hasher);
+        creatures.len().hash(&mut hasher);
+
+        for creature in creatures {
+            creature.id.hash(&mut hasher);
+            creature.name.hash(&mut hasher);
+            creature.meshes.len().hash(&mut hasher);
+        }
+
+        hasher.finish()
+    }
+
+    fn refresh_registry_view_cache(&mut self, creatures: &[CreatureDefinition]) {
+        let signature = self.registry_view_signature(creatures);
+        if self.registry_view_cache.initialized && self.registry_view_cache.signature == signature {
+            return;
+        }
+
+        let references: Vec<CreatureReference> = creatures
+            .iter()
+            .map(|c| CreatureReference {
+                id: c.id,
+                name: c.name.clone(),
+                filepath: format!(
+                    "assets/creatures/{}.ron",
+                    c.name.to_lowercase().replace(' ', "_")
+                ),
+            })
+            .collect();
+        self.id_manager.update_from_registry(&references);
+
+        let counts = self.count_by_category(creatures);
+
+        let query = self.search_query.to_lowercase();
+        let mut pairs: Vec<(usize, u32, String)> = creatures
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| {
+                if let Some(cat) = self.category_filter {
+                    if CreatureCategory::from_id(c.id) != cat {
+                        return false;
+                    }
+                }
+
+                query.is_empty()
+                    || c.name.to_lowercase().contains(&query)
+                    || c.id.to_string().contains(&query)
+            })
+            .map(|(i, c)| (i, c.id, c.name.clone()))
+            .collect();
+
+        match self.registry_sort_by {
+            RegistrySortBy::Id => pairs.sort_by_key(|(_, id, _)| *id),
+            RegistrySortBy::Name => {
+                pairs.sort_by(|(_, _, a), (_, _, b)| a.cmp(b));
+            }
+            RegistrySortBy::Category => {
+                pairs.sort_by_key(|(_, id, _)| (CreatureCategory::from_id(*id) as u8, *id));
+            }
+        }
+
+        let filtered_indices: Vec<usize> = pairs.into_iter().map(|(i, _, _)| i).collect();
+
+        let row_valid: Vec<bool> = filtered_indices
+            .iter()
+            .map(|&idx| {
+                let c = &creatures[idx];
+                let cat = CreatureCategory::from_id(c.id);
+                self.id_manager.validate_id(c.id, cat).is_ok()
+            })
+            .collect();
+
+        self.registry_view_cache = RegistryViewCache {
+            initialized: true,
+            signature,
+            counts,
+            filtered_indices,
+            row_valid,
+        };
     }
 
     /// Count creatures by category
@@ -1629,7 +1685,8 @@ impl CreaturesEditorState {
                                 let name = mesh.name.as_deref().unwrap_or(&default_name);
                                 let label = format!("{} ({} verts)", name, mesh.vertices.len());
 
-                                if ui.selectable_label(is_selected, label).clicked() {
+                                if ui.selectable_label(is_selected, label).clicked() && !is_selected
+                                {
                                     self.selected_mesh_index = Some(idx);
                                     self.mesh_edit_buffer = Some(mesh.clone());
                                     self.mesh_transform_buffer =

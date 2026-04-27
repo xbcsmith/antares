@@ -41,6 +41,9 @@
 
 use antares::domain::visual::{CreatureDefinition, MeshDefinition, MeshTransform};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
 /// Camera control mode for the 3D preview
@@ -148,6 +151,14 @@ pub struct PreviewOptions {
 
     /// Render resolution (width, height)
     pub resolution: (u32, u32),
+
+    /// Maximum number of triangles to paint per preview frame.
+    ///
+    /// Dense imported meshes can contain far more triangles than egui's
+    /// immediate-mode painter can comfortably submit every frame. This budget
+    /// keeps the UI responsive by drawing an approximate preview instead of
+    /// exhausting the frame on every triangle.
+    pub max_preview_triangles: usize,
 }
 
 impl Default for PreviewOptions {
@@ -160,8 +171,14 @@ impl Default for PreviewOptions {
             background_color: [0.2, 0.2, 0.25, 1.0],
             enable_lighting: true,
             resolution: (512, 512),
+            max_preview_triangles: 20_000,
         }
     }
+}
+
+struct ProjectedMeshCacheEntry {
+    signature: u64,
+    projected: Vec<egui::Pos2>,
 }
 
 /// 3D preview renderer for creatures
@@ -197,6 +214,9 @@ pub struct PreviewRenderer {
     /// Per-mesh visibility flags provided by editor state.
     mesh_visibility: Vec<bool>,
 
+    /// Cached projected vertices by mesh index.
+    projected_mesh_cache: RefCell<Vec<Option<ProjectedMeshCacheEntry>>>,
+
     /// Last mouse position for drag interactions
     _last_mouse_pos: Option<(f32, f32)>,
 }
@@ -225,6 +245,7 @@ impl PreviewRenderer {
             needs_update: true,
             selected_mesh_index: None,
             mesh_visibility: Vec::new(),
+            projected_mesh_cache: RefCell::new(Vec::new()),
             _last_mouse_pos: None,
         }
     }
@@ -257,6 +278,7 @@ impl PreviewRenderer {
     pub fn update_creature(&mut self, creature: Option<CreatureDefinition>) {
         if let Ok(mut locked) = self.creature.lock() {
             *locked = creature;
+            self.projected_mesh_cache.borrow_mut().clear();
             self.needs_update = true;
         }
     }
@@ -274,8 +296,10 @@ impl PreviewRenderer {
 
     /// Set selected mesh index used for highlight overlay.
     pub fn set_selected_mesh_index(&mut self, selected_mesh_index: Option<usize>) {
-        self.selected_mesh_index = selected_mesh_index;
-        self.needs_update = true;
+        if self.selected_mesh_index != selected_mesh_index {
+            self.selected_mesh_index = selected_mesh_index;
+            self.needs_update = true;
+        }
     }
 
     /// Returns the selected mesh index used by preview rendering.
@@ -285,8 +309,10 @@ impl PreviewRenderer {
 
     /// Set per-mesh visibility flags used during rendering.
     pub fn set_mesh_visibility(&mut self, mesh_visibility: Vec<bool>) {
-        self.mesh_visibility = mesh_visibility;
-        self.needs_update = true;
+        if self.mesh_visibility != mesh_visibility {
+            self.mesh_visibility = mesh_visibility;
+            self.needs_update = true;
+        }
     }
 
     /// Returns the current mesh visibility mask.
@@ -432,10 +458,19 @@ impl PreviewRenderer {
         }
 
         // Draw creature meshes (simplified wireframe)
+        let mut visible_mesh_count = 0usize;
+        let mut visible_vertex_count = 0usize;
+        let mut remaining_triangle_budget = self.options.max_preview_triangles;
+        let mut drawn_triangle_count = 0usize;
+        let mut skipped_triangle_count = 0usize;
+
         for (mesh_idx, mesh) in creature.meshes.iter().enumerate() {
             if !self.mesh_visibility.get(mesh_idx).copied().unwrap_or(true) {
                 continue;
             }
+
+            visible_mesh_count += 1;
+            visible_vertex_count += mesh.vertices.len();
 
             let transform = creature
                 .mesh_transforms
@@ -445,20 +480,36 @@ impl PreviewRenderer {
 
             let is_selected = self.selected_mesh_index == Some(mesh_idx);
 
-            self.draw_mesh_wireframe(painter, rect, mesh, &transform, creature.scale, is_selected);
+            let (drawn, skipped) = self.draw_mesh_wireframe(
+                painter,
+                rect,
+                mesh_idx,
+                mesh,
+                &transform,
+                creature.scale,
+                is_selected,
+                &mut remaining_triangle_budget,
+            );
+            drawn_triangle_count += drawn;
+            skipped_triangle_count += skipped;
         }
 
         // Draw mesh count info
-        let info_text = format!(
-            "{} - {} meshes, {} total vertices",
-            creature.name,
-            creature.meshes.len(),
-            creature
-                .meshes
-                .iter()
-                .map(|m| m.vertices.len())
-                .sum::<usize>()
-        );
+        let info_text = if skipped_triangle_count > 0 {
+            format!(
+                "{} - {} visible meshes, {} visible vertices, {} triangles drawn ({} skipped by preview budget)",
+                creature.name,
+                visible_mesh_count,
+                visible_vertex_count,
+                drawn_triangle_count,
+                skipped_triangle_count
+            )
+        } else {
+            format!(
+                "{} - {} visible meshes, {} visible vertices, {} triangles drawn",
+                creature.name, visible_mesh_count, visible_vertex_count, drawn_triangle_count
+            )
+        };
 
         painter.text(
             egui::pos2(rect.min.x + 10.0, rect.max.y - 20.0),
@@ -542,26 +593,49 @@ impl PreviewRenderer {
         );
     }
 
-    /// Draw mesh as wireframe (simplified 3D projection)
-    /// Draw mesh as wireframe (simplified 3D projection)
-    fn draw_mesh_wireframe(
-        &self,
-        painter: &egui::Painter,
+    fn hash_f32(hasher: &mut DefaultHasher, value: f32) {
+        value.to_bits().hash(hasher);
+    }
+
+    fn projected_mesh_signature(
         rect: egui::Rect,
         mesh: &MeshDefinition,
         transform: &MeshTransform,
         global_scale: f32,
-        is_selected: bool,
-    ) {
-        // Simple orthographic-ish projection
-        // TODO: use proper 3D rendering
+    ) -> u64 {
+        let mut hasher = DefaultHasher::new();
 
+        Self::hash_f32(&mut hasher, rect.center().x);
+        Self::hash_f32(&mut hasher, rect.center().y);
+        Self::hash_f32(&mut hasher, global_scale);
+
+        for value in transform.translation {
+            Self::hash_f32(&mut hasher, value);
+        }
+        for value in transform.scale {
+            Self::hash_f32(&mut hasher, value);
+        }
+
+        mesh.vertices.len().hash(&mut hasher);
+        for vertex in &mesh.vertices {
+            for value in vertex {
+                Self::hash_f32(&mut hasher, *value);
+            }
+        }
+
+        hasher.finish()
+    }
+
+    fn project_mesh_vertices(
+        rect: egui::Rect,
+        mesh: &MeshDefinition,
+        transform: &MeshTransform,
+        global_scale: f32,
+    ) -> Vec<egui::Pos2> {
         let center = rect.center();
         let scale = 50.0 * global_scale;
 
-        // Project vertices to 2D screen space
-        let projected: Vec<egui::Pos2> = mesh
-            .vertices
+        mesh.vertices
             .iter()
             .map(|v| {
                 // Apply mesh transform (simplified)
@@ -575,7 +649,45 @@ impl PreviewRenderer {
 
                 egui::pos2(screen_x, screen_y)
             })
-            .collect();
+            .collect()
+    }
+
+    /// Draw mesh as wireframe (simplified 3D projection).
+    ///
+    /// Returns `(drawn_triangles, skipped_triangles)`.
+    fn draw_mesh_wireframe(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        mesh_idx: usize,
+        mesh: &MeshDefinition,
+        transform: &MeshTransform,
+        global_scale: f32,
+        is_selected: bool,
+        remaining_triangle_budget: &mut usize,
+    ) -> (usize, usize) {
+        // Simple orthographic-ish projection
+        // TODO: use proper 3D rendering
+
+        let signature = Self::projected_mesh_signature(rect, mesh, transform, global_scale);
+        let mut projected_cache = self.projected_mesh_cache.borrow_mut();
+        if projected_cache.len() <= mesh_idx {
+            projected_cache.resize_with(mesh_idx + 1, || None);
+        }
+
+        let cache_entry =
+            projected_cache[mesh_idx].get_or_insert_with(|| ProjectedMeshCacheEntry {
+                signature,
+                projected: Self::project_mesh_vertices(rect, mesh, transform, global_scale),
+            });
+
+        if cache_entry.signature != signature {
+            cache_entry.signature = signature;
+            cache_entry.projected =
+                Self::project_mesh_vertices(rect, mesh, transform, global_scale);
+        }
+
+        let projected = &cache_entry.projected;
 
         // Draw mesh color as a filled polygon (if not too many triangles)
         let mesh_color = egui::Color32::from_rgba_premultiplied(
@@ -586,46 +698,78 @@ impl PreviewRenderer {
         );
         let selected_stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 165, 0));
 
-        // Draw triangles
-        for tri in mesh.indices.chunks(3) {
-            if tri.len() == 3 {
-                let i0 = tri[0] as usize;
-                let i1 = tri[1] as usize;
-                let i2 = tri[2] as usize;
+        let mut drawn_triangles = 0usize;
 
-                if i0 < projected.len() && i1 < projected.len() && i2 < projected.len() {
-                    // Fill triangle
-                    let points = vec![projected[i0], projected[i1], projected[i2]];
-                    painter.add(egui::Shape::convex_polygon(
-                        points.clone(),
-                        mesh_color,
-                        egui::Stroke::NONE,
-                    ));
+        let triangle_count = mesh.indices.len() / 3;
+        if triangle_count == 0 {
+            return (0, 0);
+        }
 
-                    // Draw wireframe edges
-                    if self.options.show_wireframe {
-                        painter.line_segment(
-                            [projected[i0], projected[i1]],
-                            egui::Stroke::new(1.0, egui::Color32::BLACK),
-                        );
-                        painter.line_segment(
-                            [projected[i1], projected[i2]],
-                            egui::Stroke::new(1.0, egui::Color32::BLACK),
-                        );
-                        painter.line_segment(
-                            [projected[i2], projected[i0]],
-                            egui::Stroke::new(1.0, egui::Color32::BLACK),
-                        );
-                    }
+        if *remaining_triangle_budget == 0 {
+            return (0, triangle_count);
+        }
 
-                    if is_selected {
-                        painter.line_segment([projected[i0], projected[i1]], selected_stroke);
-                        painter.line_segment([projected[i1], projected[i2]], selected_stroke);
-                        painter.line_segment([projected[i2], projected[i0]], selected_stroke);
-                    }
+        let budget_for_mesh = (*remaining_triangle_budget).min(triangle_count);
+        let sample_stride = triangle_count.div_ceil(budget_for_mesh).max(1);
+        let sampled_triangle_count = triangle_count.div_ceil(sample_stride);
+        let mut skipped_triangles = triangle_count.saturating_sub(sampled_triangle_count);
+
+        // Draw sampled triangles across the whole mesh instead of drawing only
+        // the first N triangles. Step over unsampled triangles directly so dense
+        // previews do not still spend a frame scanning every triangle.
+        for tri_start in (0..triangle_count * 3).step_by(sample_stride * 3) {
+            if *remaining_triangle_budget == 0 {
+                skipped_triangles += 1;
+                continue;
+            }
+
+            let i0 = mesh.indices[tri_start] as usize;
+            let i1 = mesh.indices[tri_start + 1] as usize;
+            let i2 = mesh.indices[tri_start + 2] as usize;
+
+            if i0 < projected.len() && i1 < projected.len() && i2 < projected.len() {
+                let p0 = projected[i0];
+                let p1 = projected[i1];
+                let p2 = projected[i2];
+
+                let min_x = p0.x.min(p1.x).min(p2.x);
+                let max_x = p0.x.max(p1.x).max(p2.x);
+                let min_y = p0.y.min(p1.y).min(p2.y);
+                let max_y = p0.y.max(p1.y).max(p2.y);
+                let triangle_bounds =
+                    egui::Rect::from_min_max(egui::pos2(min_x, min_y), egui::pos2(max_x, max_y));
+
+                if !triangle_bounds.intersects(rect) {
+                    continue;
+                }
+
+                *remaining_triangle_budget -= 1;
+                drawn_triangles += 1;
+
+                // Fill triangle
+                let points = vec![p0, p1, p2];
+                painter.add(egui::Shape::convex_polygon(
+                    points,
+                    mesh_color,
+                    egui::Stroke::NONE,
+                ));
+
+                // Draw wireframe edges
+                if self.options.show_wireframe {
+                    painter.line_segment([p0, p1], egui::Stroke::new(1.0, egui::Color32::BLACK));
+                    painter.line_segment([p1, p2], egui::Stroke::new(1.0, egui::Color32::BLACK));
+                    painter.line_segment([p2, p0], egui::Stroke::new(1.0, egui::Color32::BLACK));
+                }
+
+                if is_selected {
+                    painter.line_segment([p0, p1], selected_stroke);
+                    painter.line_segment([p1, p2], selected_stroke);
+                    painter.line_segment([p2, p0], selected_stroke);
                 }
             }
         }
+
+        (drawn_triangles, skipped_triangles)
     }
 
     /// Show preview options UI

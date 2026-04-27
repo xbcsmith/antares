@@ -54,6 +54,7 @@ use antares::domain::world::{
 };
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
@@ -2847,94 +2848,124 @@ impl<'a> Widget for MapGridWidget<'a> {
                 + Vec2::new(x as f32 * self.tile_size, y as f32 * self.tile_size)
         };
 
-        // Draw tiles
-        for y in 0..self.state.map.height as i32 {
-            for x in 0..self.state.map.width as i32 {
-                let pos = Position::new(x, y);
-                if let Some(tile) = self.state.map.get_tile(pos) {
-                    let event_type = if self.state.show_events {
-                        self.state.map.events.get(&pos).map(|event| match event {
-                            MapEvent::Encounter { .. } => EventType::Encounter,
-                            MapEvent::Treasure { .. } => EventType::Treasure,
-                            MapEvent::Teleport { .. } => EventType::Teleport,
-                            MapEvent::Trap { .. } => EventType::Trap,
-                            MapEvent::Sign { .. } => EventType::Sign,
-                            MapEvent::NpcDialogue { .. } => EventType::NpcDialogue,
-                            MapEvent::RecruitableCharacter { .. } => {
-                                EventType::RecruitableCharacter
-                            }
-                            MapEvent::EnterInn { .. } => EventType::EnterInn,
-                            MapEvent::Furniture { .. } => EventType::Furniture,
-                            MapEvent::Container { .. } => EventType::Container,
-                            MapEvent::DroppedItem { .. } => EventType::Treasure,
-                            MapEvent::LockedDoor { .. } => EventType::Treasure,
-                            MapEvent::LockedContainer { .. } => EventType::Treasure,
-                        })
-                    } else {
-                        None
-                    };
-                    let has_npc_placement = self.state.show_npcs
-                        && self
-                            .state
-                            .map
-                            .npc_placements
-                            .iter()
-                            .any(|p| p.position == pos);
+        // Draw only visible tiles. Large maps can contain far more tiles than fit
+        // in the current scroll viewport; culling here avoids spending a frame
+        // painting and looking up every off-screen tile.
+        let map_origin = response.rect.min + grid_offset;
+        let map_rect = Rect::from_min_size(map_origin, Vec2::new(map_width_px, map_height_px));
+        let visible_rect = painter
+            .clip_rect()
+            .intersect(response.rect)
+            .intersect(map_rect);
 
-                    let color = Self::tile_color(tile, event_type.as_ref(), has_npc_placement);
+        if visible_rect.is_positive() {
+            let min_x = ((visible_rect.min.x - map_origin.x) / self.tile_size)
+                .floor()
+                .clamp(0.0, self.state.map.width as f32) as i32;
+            let max_x = ((visible_rect.max.x - map_origin.x) / self.tile_size)
+                .ceil()
+                .clamp(0.0, self.state.map.width as f32) as i32;
+            let min_y = ((visible_rect.min.y - map_origin.y) / self.tile_size)
+                .floor()
+                .clamp(0.0, self.state.map.height as f32) as i32;
+            let max_y = ((visible_rect.max.y - map_origin.y) / self.tile_size)
+                .ceil()
+                .clamp(0.0, self.state.map.height as f32) as i32;
 
-                    let rect = Rect::from_min_size(
-                        to_screen(x, y),
-                        Vec2::new(self.tile_size, self.tile_size),
-                    );
+            let npc_positions: HashSet<Position> = if self.state.show_npcs {
+                self.state
+                    .map
+                    .npc_placements
+                    .iter()
+                    .map(|placement| placement.position)
+                    .collect()
+            } else {
+                HashSet::new()
+            };
 
-                    painter.rect_filled(rect, 0.0, color);
+            for y in min_y..max_y {
+                for x in min_x..max_x {
+                    let pos = Position::new(x, y);
+                    if let Some(tile) = self.state.map.get_tile(pos) {
+                        let event_type = if self.state.show_events {
+                            self.state.map.events.get(&pos).map(|event| match event {
+                                MapEvent::Encounter { .. } => EventType::Encounter,
+                                MapEvent::Treasure { .. } => EventType::Treasure,
+                                MapEvent::Teleport { .. } => EventType::Teleport,
+                                MapEvent::Trap { .. } => EventType::Trap,
+                                MapEvent::Sign { .. } => EventType::Sign,
+                                MapEvent::NpcDialogue { .. } => EventType::NpcDialogue,
+                                MapEvent::RecruitableCharacter { .. } => {
+                                    EventType::RecruitableCharacter
+                                }
+                                MapEvent::EnterInn { .. } => EventType::EnterInn,
+                                MapEvent::Furniture { .. } => EventType::Furniture,
+                                MapEvent::Container { .. } => EventType::Container,
+                                MapEvent::DroppedItem { .. } => EventType::Treasure,
+                                MapEvent::LockedDoor { .. } => EventType::Treasure,
+                                MapEvent::LockedContainer { .. } => EventType::Treasure,
+                            })
+                        } else {
+                            None
+                        };
+                        let has_npc_placement =
+                            self.state.show_npcs && npc_positions.contains(&pos);
 
-                    // Draw grid lines
-                    if self.state.show_grid {
-                        painter.rect_stroke(
-                            rect,
-                            0.0,
-                            // Make the grid color white for better visibility on dark themes
-                            Stroke::new(1.0, Color32::WHITE),
-                            egui::StrokeKind::Outside,
+                        let color = Self::tile_color(tile, event_type.as_ref(), has_npc_placement);
+
+                        let rect = Rect::from_min_size(
+                            to_screen(x, y),
+                            Vec2::new(self.tile_size, self.tile_size),
                         );
-                    }
 
-                    // Highlight selected tile
-                    if self.state.selected_position == Some(pos) {
-                        painter.rect_stroke(
-                            rect,
-                            0.0,
-                            Stroke::new(2.0, Color32::YELLOW),
-                            egui::StrokeKind::Outside,
-                        );
-                    }
+                        painter.rect_filled(rect, 0.0, color);
 
-                    // Highlight multi-selected tiles
-                    if self.state.is_tile_selected(pos) {
-                        painter.rect_stroke(
-                            rect,
-                            0.0,
-                            Stroke::new(2.0, Color32::LIGHT_BLUE),
-                            egui::StrokeKind::Outside,
-                        );
-                    }
-
-                    // Highlight event being edited (distinct from selection highlights)
-                    if let Some(ref editor) = self.state.event_editor {
-                        if editor.position == pos {
-                            // Draw a thicker green border to make edit state clearly visible
+                        // Draw grid lines
+                        if self.state.show_grid {
                             painter.rect_stroke(
                                 rect,
                                 0.0,
-                                Stroke::new(3.0, Color32::LIGHT_GREEN),
+                                // Make the grid color white for better visibility on dark themes
+                                Stroke::new(1.0, Color32::WHITE),
                                 egui::StrokeKind::Outside,
                             );
+                        }
 
-                            // Draw a small green circle in the top-left corner as visual indicator
-                            let indicator_pos = rect.min + Vec2::new(4.0, 4.0);
-                            painter.circle_filled(indicator_pos, 3.0, Color32::LIGHT_GREEN);
+                        // Highlight selected tile
+                        if self.state.selected_position == Some(pos) {
+                            painter.rect_stroke(
+                                rect,
+                                0.0,
+                                Stroke::new(2.0, Color32::YELLOW),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
+
+                        // Highlight multi-selected tiles
+                        if self.state.is_tile_selected(pos) {
+                            painter.rect_stroke(
+                                rect,
+                                0.0,
+                                Stroke::new(2.0, Color32::LIGHT_BLUE),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
+
+                        // Highlight event being edited (distinct from selection highlights)
+                        if let Some(ref editor) = self.state.event_editor {
+                            if editor.position == pos {
+                                // Draw a thicker green border to make edit state clearly visible
+                                painter.rect_stroke(
+                                    rect,
+                                    0.0,
+                                    Stroke::new(3.0, Color32::LIGHT_GREEN),
+                                    egui::StrokeKind::Outside,
+                                );
+
+                                // Draw a small green circle in the top-left corner as visual indicator
+                                let indicator_pos = rect.min + Vec2::new(4.0, 4.0);
+                                painter.circle_filled(indicator_pos, 3.0, Color32::LIGHT_GREEN);
+                            }
                         }
                     }
                 }
@@ -3070,49 +3101,79 @@ impl<'a> Widget for MapPreviewWidget<'a> {
             response.rect.min + grid_offset + Vec2::new(x as f32 * tile_size, y as f32 * tile_size)
         };
 
-        for y in 0..self.map.height as i32 {
-            for x in 0..self.map.width as i32 {
-                let pos = Position::new(x, y);
-                if let Some(tile) = self.map.get_tile(pos) {
-                    let event_type = self.map.events.get(&pos).map(|event| match event {
-                        MapEvent::Encounter { .. } => EventType::Encounter,
-                        MapEvent::Treasure { .. } => EventType::Treasure,
-                        MapEvent::Teleport { .. } => EventType::Teleport,
-                        MapEvent::Trap { .. } => EventType::Trap,
-                        MapEvent::Sign { .. } => EventType::Sign,
-                        MapEvent::NpcDialogue { .. } => EventType::NpcDialogue,
-                        MapEvent::RecruitableCharacter { .. } => EventType::RecruitableCharacter,
-                        MapEvent::EnterInn { .. } => EventType::EnterInn,
-                        MapEvent::Furniture { .. } => EventType::Furniture,
-                        MapEvent::Container { .. } => EventType::Container,
-                        MapEvent::DroppedItem { .. } => EventType::Treasure,
-                        MapEvent::LockedDoor { .. } => EventType::Treasure,
-                        MapEvent::LockedContainer { .. } => EventType::Treasure,
-                    });
-                    let has_npc_placement =
-                        self.map.npc_placements.iter().any(|p| p.position == pos);
-                    let color =
-                        MapGridWidget::tile_color(tile, event_type.as_ref(), has_npc_placement);
+        let map_origin = response.rect.min + grid_offset;
+        let map_rect = Rect::from_min_size(map_origin, Vec2::new(map_width_px, map_height_px));
+        let visible_rect = painter
+            .clip_rect()
+            .intersect(response.rect)
+            .intersect(map_rect);
 
-                    let rect =
-                        Rect::from_min_size(to_screen(x, y), Vec2::new(tile_size, tile_size));
-                    painter.rect_filled(rect, 0.0, color);
+        if visible_rect.is_positive() {
+            let min_x = ((visible_rect.min.x - map_origin.x) / tile_size)
+                .floor()
+                .clamp(0.0, self.map.width as f32) as i32;
+            let max_x = ((visible_rect.max.x - map_origin.x) / tile_size)
+                .ceil()
+                .clamp(0.0, self.map.width as f32) as i32;
+            let min_y = ((visible_rect.min.y - map_origin.y) / tile_size)
+                .floor()
+                .clamp(0.0, self.map.height as f32) as i32;
+            let max_y = ((visible_rect.max.y - map_origin.y) / tile_size)
+                .ceil()
+                .clamp(0.0, self.map.height as f32) as i32;
 
-                    painter.rect_stroke(
-                        rect,
-                        0.0,
-                        Stroke::new(1.0, Color32::WHITE),
-                        egui::StrokeKind::Outside,
-                    );
+            let npc_positions: HashSet<Position> = self
+                .map
+                .npc_placements
+                .iter()
+                .map(|placement| placement.position)
+                .collect();
 
-                    if let Some(sel_pos) = self.selected_pos {
-                        if *sel_pos == pos {
-                            painter.rect_stroke(
-                                rect,
-                                0.0,
-                                Stroke::new(2.0, Color32::YELLOW),
-                                egui::StrokeKind::Outside,
-                            );
+            for y in min_y..max_y {
+                for x in min_x..max_x {
+                    let pos = Position::new(x, y);
+                    if let Some(tile) = self.map.get_tile(pos) {
+                        let event_type = self.map.events.get(&pos).map(|event| match event {
+                            MapEvent::Encounter { .. } => EventType::Encounter,
+                            MapEvent::Treasure { .. } => EventType::Treasure,
+                            MapEvent::Teleport { .. } => EventType::Teleport,
+                            MapEvent::Trap { .. } => EventType::Trap,
+                            MapEvent::Sign { .. } => EventType::Sign,
+                            MapEvent::NpcDialogue { .. } => EventType::NpcDialogue,
+                            MapEvent::RecruitableCharacter { .. } => {
+                                EventType::RecruitableCharacter
+                            }
+                            MapEvent::EnterInn { .. } => EventType::EnterInn,
+                            MapEvent::Furniture { .. } => EventType::Furniture,
+                            MapEvent::Container { .. } => EventType::Container,
+                            MapEvent::DroppedItem { .. } => EventType::Treasure,
+                            MapEvent::LockedDoor { .. } => EventType::Treasure,
+                            MapEvent::LockedContainer { .. } => EventType::Treasure,
+                        });
+                        let has_npc_placement = npc_positions.contains(&pos);
+                        let color =
+                            MapGridWidget::tile_color(tile, event_type.as_ref(), has_npc_placement);
+
+                        let rect =
+                            Rect::from_min_size(to_screen(x, y), Vec2::new(tile_size, tile_size));
+                        painter.rect_filled(rect, 0.0, color);
+
+                        painter.rect_stroke(
+                            rect,
+                            0.0,
+                            Stroke::new(1.0, Color32::WHITE),
+                            egui::StrokeKind::Outside,
+                        );
+
+                        if let Some(sel_pos) = self.selected_pos {
+                            if *sel_pos == pos {
+                                painter.rect_stroke(
+                                    rect,
+                                    0.0,
+                                    Stroke::new(2.0, Color32::YELLOW),
+                                    egui::StrokeKind::Outside,
+                                );
+                            }
                         }
                     }
                 }
