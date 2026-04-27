@@ -1629,7 +1629,16 @@ impl CreaturesEditorState {
         // `horizontal_wrapped` prevents clipping on narrow windows.
         if self.mode == CreaturesEditorMode::Edit || self.mode == CreaturesEditorMode::Add {
             ui.horizontal_wrapped(|ui| {
-                if ui.button("✓ Save").clicked() {
+                if ui.button("⬅ Back to List").clicked() {
+                    self.mode = CreaturesEditorMode::List;
+                    self.selected_mesh_index = None;
+                    self.mesh_edit_buffer = None;
+                    self.mesh_transform_buffer = None;
+                    self.preview_dirty = false;
+                    ui.ctx().request_repaint();
+                }
+
+                if ui.button("💾 Save").clicked() {
                     // Validate creature
                     if let Err(e) = self.edit_buffer.validate() {
                         result_message = Some(format!("Validation error: {}", e));
@@ -1661,7 +1670,7 @@ impl CreaturesEditorState {
                     }
                 }
 
-                if ui.button("✕ Cancel").clicked() {
+                if ui.button("❌ Cancel").clicked() {
                     self.mode = CreaturesEditorMode::List;
                     self.selected_mesh_index = None;
                     self.mesh_edit_buffer = None;

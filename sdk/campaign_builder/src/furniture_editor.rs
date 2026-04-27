@@ -1056,7 +1056,12 @@ impl FurnitureEditorState {
                 // ---- Form action buttons ------------------------------------
                 // SDK Rule 12: use horizontal_wrapped for button rows
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button("✅ Save Definition").clicked() {
+                    if ui.button("⬅ Back to List").clicked() {
+                        self.mode = FurnitureEditorMode::List;
+                        ui.ctx().request_repaint();
+                    }
+
+                    if ui.button("💾 Save").clicked() {
                         if is_add {
                             defs.push(self.edit_buffer.clone());
                         } else if let Some(idx) = self.selected_furniture {

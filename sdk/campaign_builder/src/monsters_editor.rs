@@ -976,9 +976,10 @@ impl MonstersEditorState {
                 ui.add_space(10.0);
                 ui.separator();
 
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.button("⬅ Back to List").clicked() {
                         self.mode = MonstersEditorMode::List;
+                        ui.ctx().request_repaint();
                     }
 
                     if ui.button("💾 Save").clicked() {
@@ -1004,6 +1005,7 @@ impl MonstersEditorState {
                     if ui.button("❌ Cancel").clicked() {
                         self.mode = MonstersEditorMode::List;
                         self.monster_name_input_buffer.clear();
+                        ui.ctx().request_repaint();
                     }
                 });
             });

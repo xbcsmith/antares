@@ -3734,14 +3734,9 @@ impl MapsEditorState {
         // Top bar with back button and save
         let mut back_clicked = false;
         let mut save_clicked = false;
+        let mut cancel_clicked = false;
 
         ui.horizontal(|ui| {
-            if ui.button("← Back to List").clicked() {
-                back_clicked = true;
-            }
-
-            ui.separator();
-
             if let Some(ref editor) = self.active_editor {
                 ui.label(format!(
                     "Editing: {} (ID: {})",
@@ -3754,10 +3749,6 @@ impl MapsEditorState {
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("💾 Save Map").clicked() {
-                    save_clicked = true;
-                }
-
                 // Get undo/redo state before buttons
                 let (can_undo, can_redo) = if let Some(ref editor) = self.active_editor {
                     (editor.can_undo(), editor.can_redo())
@@ -4007,6 +3998,32 @@ impl MapsEditorState {
             if let Some(z) = new_zoom {
                 self.zoom_level = z;
             }
+
+            ui.separator();
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("⬅ Back to List").clicked() {
+                    back_clicked = true;
+                    ui.ctx().request_repaint();
+                }
+
+                if ui.button("💾 Save").clicked() {
+                    save_clicked = true;
+                    ui.ctx().request_repaint();
+                }
+
+                if ui.button("❌ Cancel").clicked() {
+                    cancel_clicked = true;
+                    ui.ctx().request_repaint();
+                }
+            });
+        }
+
+        // Handle cancel action
+        if cancel_clicked {
+            self.mode = MapsEditorMode::List;
+            self.active_editor = None;
+            self.selected_map_idx = None;
+            return;
         }
 
         // Handle back action

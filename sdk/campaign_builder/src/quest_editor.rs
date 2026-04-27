@@ -1886,12 +1886,13 @@ impl QuestEditorState {
                 ui.add_space(10.0);
 
                 // Action buttons
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.button("⬅ Back to List").clicked() {
                         self.cancel_edit(quests);
+                        ui.ctx().request_repaint();
                     }
 
-                    if ui.button("✅ Save Quest").clicked() {
+                    if ui.button("💾 Save").clicked() {
                         match self.save_quest(quests) {
                             Ok(_) => {
                                 *unsaved_changes = true;
@@ -1901,10 +1902,12 @@ impl QuestEditorState {
                                 *status_message = format!("Error saving quest: {}", e);
                             }
                         }
+                        ui.ctx().request_repaint();
                     }
 
                     if ui.button("❌ Cancel").clicked() {
                         self.cancel_edit(quests);
+                        ui.ctx().request_repaint();
                     }
                 });
             });

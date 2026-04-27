@@ -1527,9 +1527,10 @@ impl NpcEditorState {
                 }
 
                 // Action buttons
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.button("⬅ Back to List").clicked() {
                         self.mode = NpcEditorMode::List;
+                        ui.ctx().request_repaint();
                     }
 
                     if ui.button("💾 Save").clicked() {
@@ -1608,6 +1609,7 @@ impl NpcEditorState {
                     if ui.button("❌ Cancel").clicked() {
                         self.mode = NpcEditorMode::List;
                         self.edit_buffer = NpcEditBuffer::default();
+                        ui.ctx().request_repaint();
                     }
                 });
             });

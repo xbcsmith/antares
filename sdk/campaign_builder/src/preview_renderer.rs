@@ -188,6 +188,7 @@ struct MeshWireframeDrawParams<'a> {
     mesh: &'a MeshDefinition,
     transform: &'a MeshTransform,
     global_scale: f32,
+    camera: &'a CameraState,
     is_selected: bool,
 }
 
@@ -497,6 +498,7 @@ impl PreviewRenderer {
                 mesh,
                 transform: &transform,
                 global_scale: creature.scale,
+                camera: &self.camera,
                 is_selected,
             };
             let (drawn, skipped) =
@@ -508,17 +510,22 @@ impl PreviewRenderer {
         // Draw mesh count info
         let info_text = if skipped_triangle_count > 0 {
             format!(
-                "{} - {} visible meshes, {} visible vertices, {} triangles drawn ({} skipped by preview budget)",
+                "{} - {} visible meshes, {} visible vertices, {} / {} budgeted triangles drawn ({} skipped by preview budget)",
                 creature.name,
                 visible_mesh_count,
                 visible_vertex_count,
                 drawn_triangle_count,
+                self.options.max_preview_triangles,
                 skipped_triangle_count
             )
         } else {
             format!(
-                "{} - {} visible meshes, {} visible vertices, {} triangles drawn",
-                creature.name, visible_mesh_count, visible_vertex_count, drawn_triangle_count
+                "{} - {} visible meshes, {} visible vertices, {} / {} budgeted triangles drawn",
+                creature.name,
+                visible_mesh_count,
+                visible_vertex_count,
+                drawn_triangle_count,
+                self.options.max_preview_triangles
             )
         };
 
@@ -613,12 +620,20 @@ impl PreviewRenderer {
         mesh: &MeshDefinition,
         transform: &MeshTransform,
         global_scale: f32,
+        camera: &CameraState,
     ) -> u64 {
         let mut hasher = DefaultHasher::new();
 
         Self::hash_f32(&mut hasher, rect.center().x);
         Self::hash_f32(&mut hasher, rect.center().y);
         Self::hash_f32(&mut hasher, global_scale);
+        Self::hash_f32(&mut hasher, camera.distance);
+        Self::hash_f32(&mut hasher, camera.azimuth);
+        Self::hash_f32(&mut hasher, camera.elevation);
+        Self::hash_f32(&mut hasher, camera.fov);
+        for value in camera.target {
+            Self::hash_f32(&mut hasher, value);
+        }
 
         for value in transform.translation {
             Self::hash_f32(&mut hasher, value);
@@ -642,21 +657,34 @@ impl PreviewRenderer {
         mesh: &MeshDefinition,
         transform: &MeshTransform,
         global_scale: f32,
+        camera: &CameraState,
     ) -> Vec<egui::Pos2> {
         let center = rect.center();
-        let scale = 50.0 * global_scale;
+        let distance = camera.distance.max(0.1);
+        let fov_scale = (60.0 / camera.fov.max(1.0)).clamp(0.25, 4.0);
+        let scale = (240.0 / distance) * global_scale * fov_scale;
+
+        let azimuth_cos = camera.azimuth.cos();
+        let azimuth_sin = camera.azimuth.sin();
+        let elevation_cos = camera.elevation.cos();
+        let elevation_sin = camera.elevation.sin();
 
         mesh.vertices
             .iter()
             .map(|v| {
-                // Apply mesh transform (simplified)
-                let x = v[0] * transform.scale[0] + transform.translation[0];
-                let y = v[1] * transform.scale[1] + transform.translation[1];
-                let z = v[2] * transform.scale[2] + transform.translation[2];
+                // Apply mesh transform.
+                let x = v[0] * transform.scale[0] + transform.translation[0] - camera.target[0];
+                let y = v[1] * transform.scale[1] + transform.translation[1] - camera.target[1];
+                let z = v[2] * transform.scale[2] + transform.translation[2] - camera.target[2];
 
-                // Simple isometric projection
-                let screen_x = center.x + (x - z * 0.5) * scale;
-                let screen_y = center.y - (y + z * 0.5) * scale;
+                // Rotate the mesh into camera orbit space so drag/orbit changes
+                // visibly alter the preview projection.
+                let orbit_x = x * azimuth_cos - z * azimuth_sin;
+                let orbit_z = x * azimuth_sin + z * azimuth_cos;
+                let orbit_y = y * elevation_cos - orbit_z * elevation_sin;
+
+                let screen_x = center.x + orbit_x * scale;
+                let screen_y = center.y - orbit_y * scale;
 
                 egui::pos2(screen_x, screen_y)
             })
@@ -681,10 +709,11 @@ impl PreviewRenderer {
             mesh,
             transform,
             global_scale,
+            camera,
             is_selected,
         } = params;
 
-        let signature = Self::projected_mesh_signature(rect, mesh, transform, global_scale);
+        let signature = Self::projected_mesh_signature(rect, mesh, transform, global_scale, camera);
         let mut projected_cache = self.projected_mesh_cache.borrow_mut();
         if projected_cache.len() <= mesh_idx {
             projected_cache.resize_with(mesh_idx + 1, || None);
@@ -693,13 +722,13 @@ impl PreviewRenderer {
         let cache_entry =
             projected_cache[mesh_idx].get_or_insert_with(|| ProjectedMeshCacheEntry {
                 signature,
-                projected: Self::project_mesh_vertices(rect, mesh, transform, global_scale),
+                projected: Self::project_mesh_vertices(rect, mesh, transform, global_scale, camera),
             });
 
         if cache_entry.signature != signature {
             cache_entry.signature = signature;
             cache_entry.projected =
-                Self::project_mesh_vertices(rect, mesh, transform, global_scale);
+                Self::project_mesh_vertices(rect, mesh, transform, global_scale, camera);
         }
 
         let projected = &cache_entry.projected;
@@ -1003,5 +1032,128 @@ mod tests {
         let mut renderer = PreviewRenderer::new();
         renderer.set_mesh_visibility(vec![true, false, true]);
         assert_eq!(renderer.mesh_visibility(), &[true, false, true]);
+    }
+
+    fn test_mesh() -> MeshDefinition {
+        MeshDefinition {
+            name: Some("Test Triangle".to_string()),
+            vertices: vec![[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        }
+    }
+
+    #[test]
+    fn test_project_mesh_vertices_responds_to_camera_distance() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 400.0));
+        let mesh = test_mesh();
+        let transform = MeshTransform::identity();
+
+        let near_camera = CameraState {
+            distance: 2.0,
+            ..Default::default()
+        };
+
+        let far_camera = CameraState {
+            distance: 8.0,
+            ..Default::default()
+        };
+
+        let near_projected =
+            PreviewRenderer::project_mesh_vertices(rect, &mesh, &transform, 1.0, &near_camera);
+        let far_projected =
+            PreviewRenderer::project_mesh_vertices(rect, &mesh, &transform, 1.0, &far_camera);
+
+        let center = rect.center();
+        let near_radius = near_projected[0].distance(center);
+        let far_radius = far_projected[0].distance(center);
+
+        assert!(
+            near_radius > far_radius,
+            "closer camera distance should project vertices farther from center"
+        );
+    }
+
+    #[test]
+    fn test_projected_mesh_signature_changes_with_camera_distance() {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 400.0));
+        let mesh = test_mesh();
+        let transform = MeshTransform::identity();
+
+        let near_camera = CameraState {
+            distance: 2.0,
+            ..Default::default()
+        };
+
+        let far_camera = CameraState {
+            distance: 8.0,
+            ..Default::default()
+        };
+
+        let near_signature =
+            PreviewRenderer::projected_mesh_signature(rect, &mesh, &transform, 1.0, &near_camera);
+        let far_signature =
+            PreviewRenderer::projected_mesh_signature(rect, &mesh, &transform, 1.0, &far_camera);
+
+        assert_ne!(
+            near_signature, far_signature,
+            "projection cache signature must include camera distance"
+        );
+    }
+
+    #[test]
+    fn test_draw_mesh_wireframe_respects_triangle_budget() {
+        let renderer = PreviewRenderer::new();
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 400.0));
+        let mesh = MeshDefinition {
+            name: Some("Two Triangles".to_string()),
+            vertices: vec![
+                [-1.0, -1.0, 0.0],
+                [1.0, -1.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [-1.0, 1.0, 0.0],
+            ],
+            indices: vec![0, 1, 2, 2, 3, 0],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let transform = MeshTransform::identity();
+        let ctx = egui::Context::default();
+
+        let mut observed: Option<(usize, usize)> = None;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let (_, painter) =
+                    ui.allocate_painter(egui::vec2(400.0, 400.0), egui::Sense::hover());
+                let params = MeshWireframeDrawParams {
+                    painter: &painter,
+                    rect,
+                    mesh_idx: 0,
+                    mesh: &mesh,
+                    transform: &transform,
+                    global_scale: 1.0,
+                    camera: &renderer.camera,
+                    is_selected: false,
+                };
+                let mut remaining_triangle_budget = 1;
+                observed =
+                    Some(renderer.draw_mesh_wireframe(params, &mut remaining_triangle_budget));
+            });
+        });
+
+        let (drawn, skipped) = observed.expect("draw result should be captured");
+        assert_eq!(drawn, 1);
+        assert_eq!(skipped, 1);
     }
 }

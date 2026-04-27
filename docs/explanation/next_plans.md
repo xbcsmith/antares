@@ -144,13 +144,13 @@ Write a plan with a phased approach to implementing the spell system updates in 
 
 ## Future Features and Fixes
 
-FIXED - When interaction with Recruitable Character is initiated from an adjacent tile, after the recruit dialog is finished and the player joins the party the Recruitable Characters mesh does not disappear until they are walked over. It should disappear immediately on recruitment. It looks remove_event`is called at the party's position instead of the adjacent tile where the event actually is, the event stays on the map, so the visual persists. The party then has to walk to that adjacent tile, triggering`check_for_events`again, which finds the`RecruitableCharacter` event but logs that it's not...
+✅ FIXED - When interaction with Recruitable Character is initiated from an adjacent tile, after the recruit dialog is finished and the player joins the party the Recruitable Characters mesh does not disappear until they are walked over. It should disappear immediately on recruitment. It looks remove_event`is called at the party's position instead of the adjacent tile where the event actually is, the event stays on the map, so the visual persists. The party then has to walk to that adjacent tile, triggering`check_for_events`again, which finds the`RecruitableCharacter` event but logs that it's not...
 
-FIXED - Combat should be able to be initiatiated using the E key or Mouse when standing on an adjacent tile to an encounter trigger, not just by stepping on the encounter trigger tile. This is important for accessibility and also for allowing players to choose when to engage in combat rather than being forced into it by stepping on a tile.
+✅ FIXED - Combat should be able to be initiatiated using the E key or Mouse when standing on an adjacent tile to an encounter trigger, not just by stepping on the encounter trigger tile. This is important for accessibility and also for allowing players to choose when to engage in combat rather than being forced into it by stepping on a tile.
 
-FIXED - Campaign Builder --> Maps --> Edit Map --> Click on NPC options are Edit NPC (goes straight to the NPC editor) and Remove NPC. Need a way to edit the Event so I can control what direction the NPC is facing. Currently there is no way to edit the NPC's facing direction, so all NPCs face the same direction which looks bad. We should add an Edit Event option that allows you to edit the event's facing direction as well as other properties of the event like the dialogue it triggers, the quests it gives, etc.
+✅ FIXED - Campaign Builder --> Maps --> Edit Map --> Click on NPC options are Edit NPC (goes straight to the NPC editor) and Remove NPC. Need a way to edit the Event so I can control what direction the NPC is facing. Currently there is no way to edit the NPC's facing direction, so all NPCs face the same direction which looks bad. We should add an Edit Event option that allows you to edit the event's facing direction as well as other properties of the event like the dialogue it triggers, the quests it gives, etc.
 
-FIXED - Spell Casting pop up during combat should be in the upper left hand corner of the screen. Currently it is low and to the left and is covered by the grey box that shows the Action buttons and the Monster HP. You can't get to it to click cancel when a Character has no combat spells or spell points left. We should move the Spell Casting pop up to the upper right hand corner of the screen so that it is not covered by the grey box and so that it is more visible and easier to click on.
+✅ FIXED - Spell Casting pop up during combat should be in the upper left hand corner of the screen. Currently it is low and to the left and is covered by the grey box that shows the Action buttons and the Monster HP. You can't get to it to click cancel when a Character has no combat spells or spell points left. We should move the Spell Casting pop up to the upper right hand corner of the screen so that it is not covered by the grey box and so that it is more visible and easier to click on.
 
 ## Things you never think of until you have to implement them
 
@@ -289,8 +289,6 @@ Validation should also check for things like if a NPC is set to be a trainer but
 
 ✅ FIXED -Why are the initializer blocks repeated in so many files directly in the repository save_game.rs, mod.rs, campaign_loader.rs, antares.rs, campaign_integration_test.rs, validation.rs? This should be consolidated into a single function that can be called from all these places to reduce code duplication and ensure consistency across the codebase. The initializer block should be moved to a common utility module in the SDK or game engine that can be imported and used wherever needed. This will make it easier to maintain and update the initializer logic in one place rather than having to update it in multiple files. It will also reduce the chances of bugs or inconsistencies arising from having multiple copies of the same code.
 
-
-
 ### SDK Editor Issues
 
 ✅ FIXED - Campaign Builder --> Map Editor --> Highlight Large map 40x40 and the Map Preview is truncated on both sides. The map preview should scale to the size of the Preview Column.
@@ -326,14 +324,12 @@ Clicking on a character HUD portrait or Pressing the Characters number (1-6) sho
 
 Write a plan with a phased approach to add Character Sheets to the game engine. THINK HARD and follow the rules in @PLAN.md
 
-
 ✅ COMPLETED - [Character Sheet Plan](./character_sheet_implementation_plan.md)
 
 Layout
 
-| Character Sheet  <Name>                    | *Next* *Previous* *Overview*             |
-|                                            |                                          |
-
+| Character Sheet <Name> | _Next_ _Previous_ _Overview_ |
+| | |
 
 ## Combat Issues
 
@@ -345,6 +341,12 @@ Layout
 
 Character marching order. There is no way to adjust marching order and the game engine loads the characters in random orders everytime you start the game. Marching order should be left to right. There should be a way to reorder the party marching order.
 
-Campaign Builder --> Character Editor --> Portrait ID --> Clear button does nothing. It should clear the current portrait entry
+✅ FIXED - Campaign Builder --> Character Editor --> Portrait ID --> Clear button does nothing. It should clear the current portrait entry
 
-Campaign Builder --> Character Editor --> Portrait ID --> Portrait Pop Up does not autoscale wider and gets cut off by the bottom of the window. I can't get to portraits that start with Z because it won't scroll far enough. It should scale the grid vertically and horizontally.
+✅ FIXED - Campaign Builder --> Character Editor --> Portrait ID --> Portrait Pop Up does not autoscale wider and gets cut off by the bottom of the window. I can't get to portraits that start with Z because it won't scroll far enough. It should scale the grid vertically and horizontally.
+
+✅ FIXED - Campaign Builder --> Creature Editor --> Camera Distance sliders and Triangle Budget do not do anything. Same problem for the Item Editor Camera Distance.
+
+Campaign Builder --> Item Meshes Editor --> Does not follow the same layout as the other Editors
+
+Campaign Builder --> Item Meshes Editor --> Editor Screen Does not follow the same layout as the other Editors

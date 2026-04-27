@@ -2037,24 +2037,11 @@ impl DialogueEditorState {
         dialogues: &mut Vec<DialogueTree>,
         status_message: &mut String,
     ) {
-        ui.horizontal(|ui| {
-            if ui.button("⬅ Back to List").clicked() {
-                self.cancel_edit();
-            }
-
-            if ui.button("💾 Save Dialogue").clicked() {
-                match self.save_dialogue() {
-                    Ok(()) => {
-                        *dialogues = self.dialogues.clone();
-                        *status_message = "Dialogue saved".to_string();
-                    }
-                    Err(e) => {
-                        *status_message = format!("Save failed: {}", e);
-                    }
-                }
-            }
+        ui.heading(if self.mode == DialogueEditorMode::Creating {
+            "Add New Dialogue"
+        } else {
+            "Edit Dialogue"
         });
-
         ui.separator();
 
         // Dialogue form
@@ -2130,6 +2117,32 @@ impl DialogueEditorState {
         } else {
             ui.label("Save dialogue to add nodes");
         }
+
+        ui.separator();
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("⬅ Back to List").clicked() {
+                self.cancel_edit();
+                ui.ctx().request_repaint();
+            }
+
+            if ui.button("💾 Save").clicked() {
+                match self.save_dialogue() {
+                    Ok(()) => {
+                        *dialogues = self.dialogues.clone();
+                        *status_message = "Dialogue saved".to_string();
+                    }
+                    Err(e) => {
+                        *status_message = format!("Save failed: {}", e);
+                    }
+                }
+                ui.ctx().request_repaint();
+            }
+
+            if ui.button("❌ Cancel").clicked() {
+                self.cancel_edit();
+                ui.ctx().request_repaint();
+            }
+        });
     }
 
     /// Show dialogue node tree editor with navigation and validation enhancements:
