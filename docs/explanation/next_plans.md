@@ -238,7 +238,7 @@ Write a plan with a phased approach to implement these features. THINK HARD and 
 
 Month Year Date in Game Engine View looks horrible.
 
-Trees are still horrible. Grass sucks as well. Is tree bark textures being applied? You can not tell one tree from the next. Oak, Pine, Palm, Dead all look the same. Foliage particularly Bushes clip tree trunks. And seems like editing them in the SDK does nothing to change their appearance.
+✅ PLANNED - [Vegetation Visual Quality Plan](./vegetation_visual_quality_implementation_plan.md) - Trees are still horrible. Grass sucks as well. Is tree bark textures being applied? You can not tell one tree from the next. Oak, Pine, Palm, Dead all look the same. Foliage particularly Bushes clip tree trunks. And seems like editing them in the SDK does nothing to change their appearance.
 
 ✅ FIXED - All the doors are facing the wrong way
 
@@ -301,6 +301,10 @@ Validation should also check for things like if a NPC is set to be a trainer but
 
 Next task will be to tackle skill system level scaling. Currently the skill system does not scale with character level. We should just do an Auto Skills system to start then follow the route training went with NPC Train Skills.
 
+Write a plan with a phased approach to implementing skill system level scaling in the game engine. THINK HARD and follow the rules in @PLAN.md
+
+[Skill System Level Scaling Implementation Plan](./skill_system_level_scaling_implementation_plan.md)
+
 ### Dialogues and Quests
 
 Node 1 (opening): "I have felt your approach for some time now. I am Zhaya, a seeker of truth. My training brought me here to this temple, where the stars speak of a great Astrologer. You appear to be adventurers of purpose. Perhaps our paths are meant to cross."
@@ -326,11 +330,6 @@ Write a plan with a phased approach to add Character Sheets to the game engine. 
 
 ✅ COMPLETED - [Character Sheet Plan](./character_sheet_implementation_plan.md)
 
-Layout
-
-| Character Sheet <Name> | _Next_ _Previous_ _Overview_ |
-| | |
-
 ## Combat Issues
 
 ✅ FIXED - Unconcious Characters are allowed to attack several times until a different action is picked. Unconcious Characters should be removed from the round until they are revived or combat ends.
@@ -347,6 +346,6 @@ Character marching order. There is no way to adjust marching order and the game 
 
 ✅ FIXED - Campaign Builder --> Creature Editor --> Camera Distance sliders and Triangle Budget do not do anything. Same problem for the Item Editor Camera Distance.
 
-Campaign Builder --> Item Meshes Editor --> Does not follow the same layout as the other Editors
+✅ FIXED - Campaign Builder --> Item Meshes Editor --> Does not follow the same layout as the other Editors
 
-Campaign Builder --> Item Meshes Editor --> Editor Screen Does not follow the same layout as the other Editors
+✅ FIXED - Campaign Builder --> Item Meshes Editor --> Editor Screen Does not follow the same layout as the other Editors

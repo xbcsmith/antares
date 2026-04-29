@@ -2,6 +2,73 @@
 
 ---
 
+## Vegetation Visual Quality Implementation Plan (Complete)
+
+### Overview
+
+Created `docs/explanation/vegetation_visual_quality_implementation_plan.md`, a phased implementation plan for fixing the current tree and grass visual quality problems.
+
+### Plan Scope
+
+The plan addresses the reported vegetation issues:
+
+- Trees look too similar across Oak, Pine, Palm, Dead, Willow, Birch, and Shrub variants.
+- Bark textures are not visibly effective.
+- Foliage appears as black blobs or poorly aligned clusters.
+- Bushes and shrubs clip tree trunks.
+- Grass looks sparse, spiky, and repetitive.
+- Campaign Builder vegetation edits do not visibly affect runtime output.
+
+### Key Design Decisions
+
+- Keep vegetation authoring data in existing `TileVisualMetadata` fields where possible.
+- Preserve domain/render separation by keeping Bevy-specific tree and grass generation in `src/game/systems`.
+- Port rendering concepts from `bevy_procedural_tree`, `bevy_procedural_grass`, and `bevy_terrain` instead of blindly adding incompatible dependencies.
+- Fix current defects first, especially branch meshes containing foliage sphere geometry and foliage transforms not matching trunk scaling.
+- Use deterministic placement and variation so vegetation looks natural without breaking repeatability.
+- Add tests using stable fixtures and avoid new test dependencies on `campaigns/tutorial`.
+
+### Files Added
+
+- `docs/explanation/vegetation_visual_quality_implementation_plan.md`
+
+---
+
+## Skill System Level Scaling Implementation Plan (Complete)
+
+### Overview
+
+Created `docs/explanation/skill_system_level_scaling_implementation_plan.md`, a phased implementation plan for adding level-scaled skills to the game engine.
+
+### Plan Scope
+
+The plan separates numeric, level-scaled **skills** from existing binary item-use **proficiencies** and defines a staged route for:
+
+- Domain skill definitions and `skills.ron`
+- Auto Skills derived from character level, class, race, and persistent character bonuses
+- Skill check APIs for game mechanics
+- Character-sheet skill display
+- Campaign Builder Skills Editor support
+- NPC Train Skills domain/application flow
+- NPC Train Skills UI
+- SDK authoring for skill trainer NPCs and dialogue
+- Documentation, validation, balancing, and migration guidance
+
+### Key Design Decisions
+
+- `ProficiencyDefinition` remains unchanged and item-focused.
+- Skills are introduced as a new domain concept with `SkillId`, `SkillRank`, `SkillDefinition`, `SkillDatabase`, and scaling modes.
+- Auto-derived ranks are computed on demand.
+- `Character` stores only persistent/manual/trained ranks.
+- NPC skill training is planned as a separate flow from existing NPC level training.
+- All test fixtures must live under `data/test_campaign`, not `campaigns/tutorial`.
+
+### Files Added
+
+- `docs/explanation/skill_system_level_scaling_implementation_plan.md`
+
+---
+
 ## Bugfix: Item Mesh Editor Toolbar and Action Row Visibility (Complete)
 
 ### Problem
