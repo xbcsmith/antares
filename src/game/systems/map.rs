@@ -33,6 +33,15 @@ type MeshCache = HashMap<MeshDimensions, Handle<Mesh>>;
 /// Offset to center map objects within their tile (matches camera centering)
 const TILE_CENTER_OFFSET: f32 = 0.5;
 
+/// Returns whether a forest tile should receive an extra random shrub.
+///
+/// Phase 1 vegetation cleanup intentionally keeps extra forest shrubs away from
+/// tiles that already have centered vegetation, because the current shrub
+/// spawner uses the tile center and visibly clips tree trunks there.
+fn should_spawn_extra_forest_shrub(is_forest: bool, spawned_center_vegetation: bool) -> bool {
+    is_forest && !spawned_center_vegetation
+}
+
 /// Plugin that renders the current map using Bevy meshes/materials.
 ///
 /// Note: The visual rendering plugin remains focused on rendering. The map
@@ -944,8 +953,12 @@ fn spawn_map(
                                 TileCoord(pos),
                             ));
 
-                            // Spawn tree/shrub if specified in metadata, or default for Forest
+                            // Spawn tree/shrub if specified in metadata, or default for Forest.
+                            // Track whether the tile already has centered vegetation so the
+                            // optional undergrowth pass cannot place a shrub directly inside
+                            // a tree trunk.
                             let tree_type = tile.visual.tree_type;
+                            let mut spawned_center_vegetation = false;
                             if let Some(t) = tree_type {
                                 // Explicitly map domain TreeType to rendered TreeType to resolve ambiguity
                                 let rendered_t = match t {
@@ -987,6 +1000,7 @@ fn spawn_map(
                                         map.id,
                                         Some(&tile.visual),
                                     );
+                                    spawned_center_vegetation = true;
                                 } else {
                                     let mut ctx = procedural_meshes::MeshSpawnContext {
                                         commands: &mut commands,
@@ -1002,6 +1016,7 @@ fn spawn_map(
                                         Some(&tile.visual),
                                         Some(rendered_t),
                                     );
+                                    spawned_center_vegetation = true;
                                 }
                             } else if is_forest {
                                 // Default tree for Forest terrain with no explicit tree type
@@ -1019,10 +1034,14 @@ fn spawn_map(
                                     Some(&tile.visual),
                                     None, // Use default tree type
                                 );
+                                spawned_center_vegetation = true;
                             }
 
-                            // Extra shrubs for variety in forest
-                            if is_forest {
+                            // Extra shrubs for variety in forest. Phase 1 keeps this conservative:
+                            // never place the random shrub at the same centered tile anchor as a
+                            // spawned tree/shrub, because that visibly clips trunks.
+                            if should_spawn_extra_forest_shrub(is_forest, spawned_center_vegetation)
+                            {
                                 let mut rng = rand::rng();
                                 if rng.random_range(0..10) < 4 {
                                     let mut ctx = procedural_meshes::MeshSpawnContext {
@@ -3074,6 +3093,22 @@ mod tests {
         app.insert_resource(Assets::<Mesh>::default());
         app.insert_resource(Assets::<StandardMaterial>::default());
         app
+    }
+
+    #[test]
+    fn test_should_spawn_extra_forest_shrub_only_on_empty_forest_tiles() {
+        assert!(
+            should_spawn_extra_forest_shrub(true, false),
+            "Forest tiles without centered vegetation may receive extra shrubs"
+        );
+        assert!(
+            !should_spawn_extra_forest_shrub(true, true),
+            "Forest tiles with centered trees/shrubs must not receive centered extra shrubs"
+        );
+        assert!(
+            !should_spawn_extra_forest_shrub(false, false),
+            "Non-forest tiles must not receive forest-only extra shrubs"
+        );
     }
 
     #[test]

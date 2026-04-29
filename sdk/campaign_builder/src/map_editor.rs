@@ -9202,6 +9202,94 @@ mod tests {
     }
 
     #[test]
+    fn test_terrain_editor_grass_metadata_round_trips_vegetation_fields() {
+        let blade_config = GrassBladeConfig {
+            length: 1.4,
+            width: 0.8,
+            tilt: 0.35,
+            curve: 0.55,
+            color_variation: 0.25,
+        };
+        let state = TerrainEditorState {
+            grass_density: GrassDensity::High,
+            grass_blade_config_enabled: true,
+            grass_blade_config: blade_config,
+            tree_type: TreeType::Pine,
+            rock_variant: RockVariant::Jagged,
+            water_flow_direction: WaterFlowDirection::North,
+            foliage_density: 1.7,
+            snow_coverage: 0.4,
+        };
+
+        let mut metadata = TileVisualMetadata::default();
+        state.apply_to_metadata_for_terrain(&mut metadata, TerrainType::Grass);
+
+        assert_eq!(metadata.grass_density, Some(GrassDensity::High));
+        assert_eq!(metadata.foliage_density, Some(1.7));
+        assert_eq!(metadata.grass_blade_config, Some(blade_config));
+        assert_eq!(metadata.tree_type, None);
+        assert_eq!(metadata.rock_variant, None);
+        assert_eq!(metadata.water_flow_direction, None);
+
+        let restored = TerrainEditorState::from_metadata(&metadata);
+        assert_eq!(restored.grass_density, GrassDensity::High);
+        assert!(restored.grass_blade_config_enabled);
+        assert_eq!(restored.grass_blade_config, blade_config);
+        assert_eq!(restored.foliage_density, 1.7);
+    }
+
+    #[test]
+    fn test_terrain_editor_forest_metadata_round_trips_tree_fields() {
+        let state = TerrainEditorState {
+            grass_density: GrassDensity::VeryHigh,
+            grass_blade_config_enabled: true,
+            grass_blade_config: GrassBladeConfig::default(),
+            tree_type: TreeType::Willow,
+            rock_variant: RockVariant::Crystal,
+            water_flow_direction: WaterFlowDirection::South,
+            foliage_density: 0.6,
+            snow_coverage: 0.25,
+        };
+
+        let mut metadata = TileVisualMetadata::default();
+        state.apply_to_metadata_for_terrain(&mut metadata, TerrainType::Forest);
+
+        assert_eq!(metadata.tree_type, Some(TreeType::Willow));
+        assert_eq!(metadata.foliage_density, Some(0.6));
+        assert_eq!(metadata.snow_coverage, Some(0.25));
+        assert_eq!(metadata.grass_density, None);
+        assert_eq!(metadata.grass_blade_config, None);
+        assert_eq!(metadata.rock_variant, None);
+        assert_eq!(metadata.water_flow_direction, None);
+
+        let restored = TerrainEditorState::from_metadata(&metadata);
+        assert_eq!(restored.tree_type, TreeType::Willow);
+        assert_eq!(restored.foliage_density, 0.6);
+        assert_eq!(restored.snow_coverage, 0.25);
+        assert!(!restored.grass_blade_config_enabled);
+    }
+
+    #[test]
+    fn test_terrain_editor_clear_metadata_removes_vegetation_fields() {
+        let mut metadata = TileVisualMetadata {
+            grass_density: Some(GrassDensity::High),
+            tree_type: Some(TreeType::Palm),
+            foliage_density: Some(1.4),
+            snow_coverage: Some(0.2),
+            grass_blade_config: Some(GrassBladeConfig::default()),
+            ..Default::default()
+        };
+
+        TerrainEditorState::clear_metadata(&mut metadata);
+
+        assert_eq!(metadata.grass_density, None);
+        assert_eq!(metadata.tree_type, None);
+        assert_eq!(metadata.foliage_density, None);
+        assert_eq!(metadata.snow_coverage, None);
+        assert_eq!(metadata.grass_blade_config, None);
+    }
+
+    #[test]
     fn test_visual_preset_to_metadata_lava_pool() {
         let metadata = VisualPreset::LavaPool.to_metadata();
         assert_eq!(metadata.height, Some(0.2));

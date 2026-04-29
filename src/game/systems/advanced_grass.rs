@@ -332,6 +332,30 @@ impl Default for GrassColorScheme {
     }
 }
 
+/// Scales the content-derived blade-count range by tile foliage density.
+///
+/// `TileVisualMetadata::foliage_density` is an authoring multiplier shared by
+/// vegetation systems.  Grass clamps it to `0.0..=2.0` so SDK edits can remove,
+/// reduce, or thicken grass coverage without creating unbounded blade counts.
+fn scaled_blade_count_range_for_foliage_density(
+    min_blades: u32,
+    max_blades: u32,
+    visual_metadata: Option<&TileVisualMetadata>,
+) -> (u32, u32, f32) {
+    let foliage_density_multiplier = visual_metadata
+        .map(TileVisualMetadata::foliage_density)
+        .unwrap_or(1.0)
+        .clamp(0.0, 2.0);
+    let scaled_min_blades = ((min_blades as f32) * foliage_density_multiplier).round() as u32;
+    let scaled_max_blades = ((max_blades as f32) * foliage_density_multiplier).round() as u32;
+
+    (
+        scaled_min_blades,
+        scaled_max_blades,
+        foliage_density_multiplier,
+    )
+}
+
 // ==================== Grass Mesh Generation ====================
 
 fn create_grass_blade_mesh(height: f32, width: f32, curve_amount: f32) -> Mesh {
@@ -609,17 +633,27 @@ pub fn spawn_grass(
         .unwrap_or_default();
 
     let (min_blades, max_blades) = quality_settings.blade_count_range_for_content(content_density);
+    let (scaled_min_blades, scaled_max_blades, foliage_density_multiplier) =
+        scaled_blade_count_range_for_foliage_density(min_blades, max_blades, visual_metadata);
 
     let mut rng = rand::rng();
-    let blade_count = if max_blades > 0 {
-        rng.random_range(min_blades..=max_blades)
+    let blade_count = if scaled_max_blades > 0 {
+        rng.random_range(scaled_min_blades.min(scaled_max_blades)..=scaled_max_blades)
     } else {
         0
     };
 
     debug!(
-        "grass blades for tile ({}, {}): content={:?} min={} max={} chosen={}",
-        position.x, position.y, content_density, min_blades, max_blades, blade_count
+        "grass blades for tile ({}, {}): content={:?} min={} max={} foliage_density={} scaled_min={} scaled_max={} chosen={}",
+        position.x,
+        position.y,
+        content_density,
+        min_blades,
+        max_blades,
+        foliage_density_multiplier,
+        scaled_min_blades,
+        scaled_max_blades,
+        blade_count
     );
 
     if blade_count == 0 {
@@ -1140,6 +1174,45 @@ mod tests {
         let config = GrassRenderConfig::default();
         assert_eq!(config.cull_distance, 30.0);
         assert_eq!(config.lod_distance, 15.0);
+    }
+
+    #[test]
+    fn test_scaled_blade_count_range_for_foliage_density_defaults_to_unmodified_range() {
+        let (min, max, multiplier) = scaled_blade_count_range_for_foliage_density(10, 20, None);
+
+        assert_eq!(min, 10);
+        assert_eq!(max, 20);
+        assert_eq!(multiplier, 1.0);
+    }
+
+    #[test]
+    fn test_scaled_blade_count_range_for_foliage_density_zero_suppresses_grass() {
+        let metadata = TileVisualMetadata {
+            foliage_density: Some(0.0),
+            ..Default::default()
+        };
+
+        let (min, max, multiplier) =
+            scaled_blade_count_range_for_foliage_density(10, 20, Some(&metadata));
+
+        assert_eq!(min, 0);
+        assert_eq!(max, 0);
+        assert_eq!(multiplier, 0.0);
+    }
+
+    #[test]
+    fn test_scaled_blade_count_range_for_foliage_density_scales_and_clamps_high_values() {
+        let metadata = TileVisualMetadata {
+            foliage_density: Some(3.5),
+            ..Default::default()
+        };
+
+        let (min, max, multiplier) =
+            scaled_blade_count_range_for_foliage_density(10, 20, Some(&metadata));
+
+        assert_eq!(min, 20);
+        assert_eq!(max, 40);
+        assert_eq!(multiplier, 2.0);
     }
 
     #[test]

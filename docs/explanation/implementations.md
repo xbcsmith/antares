@@ -2,6 +2,42 @@
 
 ---
 
+## Vegetation Visual Quality Phase 1 Implementation (Complete)
+
+### Overview
+
+Implemented Phase 1 of `docs/explanation/vegetation_visual_quality_implementation_plan.md`: diagnosed and corrected the existing vegetation pipeline defects before the larger species-specific tree and grass renderer phases.
+
+### Problems Fixed
+
+- Branch meshes no longer include foliage sphere geometry, removing the bark-material black blob artifacts.
+- Branch meshes now include `Mesh::ATTRIBUTE_UV_0` so bark textures can map onto trunks and branches.
+- Tree foliage billboard positions now receive the same height and scale metadata as trunk geometry.
+- `TileVisualMetadata::foliage_density()` now affects tree foliage coverage and grass blade-count ranges.
+- Dead trees and zero-foliage trees suppress foliage children.
+- Bark material loading keeps the bark texture and applies species-specific bark tints for Oak, Pine, Birch, Willow, Dead, Shrub, and Palm.
+- Vegetation texture material creation logs concise texture path and tree-type information.
+- Extra random forest shrubs no longer spawn at the tile center when a centered tree or shrub already exists there.
+- Campaign Builder grass and forest terrain metadata round-trip tests now cover vegetation fields that runtime consumes.
+
+### Files Changed
+
+- `src/game/systems/advanced_trees.rs`
+- `src/game/systems/procedural_meshes.rs`
+- `src/game/systems/advanced_grass.rs`
+- `src/game/systems/map.rs`
+- `sdk/campaign_builder/src/map_editor.rs`
+- `docs/explanation/vegetation_visual_quality_implementation_plan.md`
+
+### Validation
+
+- `cargo fmt --all` passed.
+- `cargo check --all-targets --all-features` passed.
+- `cargo clippy --all-targets --all-features -- -D warnings` passed.
+- `cargo nextest run --all-features` completed successfully.
+
+---
+
 ## Vegetation Visual Quality Implementation Plan (Complete)
 
 ### Overview
