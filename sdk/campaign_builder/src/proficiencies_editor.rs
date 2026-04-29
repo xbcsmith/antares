@@ -780,12 +780,13 @@ impl ProficienciesEditorState {
         ui.separator();
 
         // Action buttons
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let save_enabled = id_valid && id_unique && name_valid;
 
             if ui.button("⬅ Back to List").clicked() {
                 self.mode = ProficienciesEditorMode::List;
                 self.edit_buffer = Self::default_proficiency();
+                ui.ctx().request_repaint();
             }
 
             if ui
@@ -796,6 +797,13 @@ impl ProficienciesEditorState {
                 self.mode = ProficienciesEditorMode::List;
                 *unsaved_changes = true;
                 *status_message = format!("Saved proficiency: {}", self.edit_buffer.id);
+                ui.ctx().request_repaint();
+            }
+
+            if ui.button("❌ Cancel").clicked() {
+                self.mode = ProficienciesEditorMode::List;
+                self.edit_buffer = Self::default_proficiency();
+                ui.ctx().request_repaint();
             }
 
             if self.mode == ProficienciesEditorMode::Edit && ui.button("🔄 Reset").clicked() {

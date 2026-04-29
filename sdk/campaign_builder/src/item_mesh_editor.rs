@@ -26,7 +26,8 @@ use crate::item_mesh_workflow::{ItemMeshEditorMode, ItemMeshWorkflow};
 use crate::keyboard_shortcuts::ShortcutManager;
 use crate::preview_renderer::PreviewRenderer;
 use crate::ui_helpers::{
-    show_standard_list_item, ItemAction, MetadataBadge, StandardListItemConfig, TwoColumnLayout,
+    show_standard_list_item, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::visual::item_mesh::{ItemMeshCategory, ItemMeshDescriptor};
 use antares::domain::visual::CreatureDefinition;
@@ -1450,6 +1451,184 @@ impl ItemMeshEditorState {
 
     fn show_registry_mode(&mut self, ui: &mut egui::Ui, campaign_dir: Option<&PathBuf>) {
         ui.heading("🧊 Item Mesh Editor");
+        ui.add_space(5.0);
+
+        // Refresh the registry before rendering the toolbar so the top-bar
+        // count and actions reflect the current campaign on the first frame.
+        if let Some(dir) = campaign_dir {
+            if self.last_campaign_dir.as_ref() != Some(dir) {
+                self.load_from_campaign(dir);
+            }
+        }
+
+        let toolbar_action = EditorToolbar::new("Item Meshes")
+            .with_search(&mut self.search_query)
+            .with_total_count(self.registry.len())
+            .with_save_button(false)
+            .with_id_salt("item_mesh_toolbar")
+            .show(ui);
+
+        match toolbar_action {
+            ToolbarAction::New => {
+                let registry_len = self.registry.len();
+                self.registry.push(ItemMeshEntry {
+                    name: format!("New Mesh {}", registry_len + 1),
+                    category: ItemMeshCategory::Sword,
+                    file_path: format!("assets/items/new_mesh_{}.ron", registry_len + 1),
+                    descriptor: ItemMeshDescriptor {
+                        category: ItemMeshCategory::Sword,
+                        blade_length: 0.5,
+                        primary_color: [0.75, 0.75, 0.78, 1.0],
+                        accent_color: [0.5, 0.3, 0.1, 1.0],
+                        emissive: false,
+                        emissive_color: [0.0, 0.0, 0.0],
+                        scale: 1.0,
+                    },
+                    native_creature_def: None,
+                });
+                self.selected_entry = Some(self.registry.len() - 1);
+                self.preview_dirty = true;
+                ui.ctx().request_repaint();
+            }
+            ToolbarAction::Reload => {
+                if let Some(dir) = campaign_dir {
+                    self.last_campaign_dir = None;
+                    self.refresh_available_assets(dir);
+                    self.load_from_campaign(dir);
+                    ui.ctx().request_repaint();
+                }
+            }
+            ToolbarAction::Load | ToolbarAction::Import => {
+                if let Some(dir) = campaign_dir {
+                    self.refresh_available_assets(dir);
+                }
+                self.register_asset_path_buffer.clear();
+                self.register_asset_error = None;
+                self.show_register_asset_dialog = true;
+                ui.ctx().request_repaint();
+            }
+            ToolbarAction::Export => {
+                if let Some(idx) = self.selected_entry {
+                    if let Some(entry) = self.registry.get(idx) {
+                        if let Ok(ron_text) = ron::ser::to_string_pretty(
+                            &entry.descriptor,
+                            ron::ser::PrettyConfig::default(),
+                        ) {
+                            self.import_export_buffer = ron_text;
+                            self.show_import_dialog = true;
+                        }
+                    }
+                }
+                ui.ctx().request_repaint();
+            }
+            ToolbarAction::Save | ToolbarAction::None => {}
+        }
+
+        ui.horizontal_wrapped(|ui| {
+            egui::ComboBox::from_id_salt("item_mesh_category_filter")
+                .selected_text(
+                    self.category_filter
+                        .map(|c| format!("{:?}", c))
+                        .unwrap_or_else(|| "All Categories".to_string()),
+                )
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(self.category_filter.is_none(), "All Categories")
+                        .clicked()
+                    {
+                        self.category_filter = None;
+                        ui.ctx().request_repaint();
+                    }
+                    for cat in ItemMeshEditorState::all_categories() {
+                        let label = format!("{:?}", cat);
+                        if ui
+                            .selectable_label(self.category_filter == Some(*cat), &label)
+                            .clicked()
+                        {
+                            self.category_filter = Some(*cat);
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                });
+            ui.label("Category");
+
+            ui.separator();
+
+            egui::ComboBox::from_id_salt("item_mesh_sort_by")
+                .selected_text(match self.registry_sort_by {
+                    ItemMeshRegistrySortBy::Id => "Sort: ID",
+                    ItemMeshRegistrySortBy::Name => "Sort: Name",
+                    ItemMeshRegistrySortBy::Category => "Sort: Category",
+                })
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(
+                            self.registry_sort_by == ItemMeshRegistrySortBy::Id,
+                            "Sort: ID",
+                        )
+                        .clicked()
+                    {
+                        self.registry_sort_by = ItemMeshRegistrySortBy::Id;
+                        ui.ctx().request_repaint();
+                    }
+                    if ui
+                        .selectable_label(
+                            self.registry_sort_by == ItemMeshRegistrySortBy::Name,
+                            "Sort: Name",
+                        )
+                        .clicked()
+                    {
+                        self.registry_sort_by = ItemMeshRegistrySortBy::Name;
+                        ui.ctx().request_repaint();
+                    }
+                    if ui
+                        .selectable_label(
+                            self.registry_sort_by == ItemMeshRegistrySortBy::Category,
+                            "Sort: Category",
+                        )
+                        .clicked()
+                    {
+                        self.registry_sort_by = ItemMeshRegistrySortBy::Category;
+                        ui.ctx().request_repaint();
+                    }
+                });
+            ui.label("Sort");
+
+            ui.separator();
+
+            if ui.button("📁 Register Asset").clicked() {
+                if let Some(dir) = campaign_dir {
+                    self.refresh_available_assets(dir);
+                }
+                self.register_asset_path_buffer.clear();
+                self.register_asset_error = None;
+                self.show_register_asset_dialog = true;
+                ui.ctx().request_repaint();
+            }
+
+            if ui
+                .add_enabled(
+                    self.selected_entry.is_some(),
+                    egui::Button::new("📤 Export Selected RON"),
+                )
+                .on_hover_text("Export the selected item mesh descriptor as RON")
+                .clicked()
+            {
+                if let Some(idx) = self.selected_entry {
+                    if let Some(entry) = self.registry.get(idx) {
+                        if let Ok(ron_text) = ron::ser::to_string_pretty(
+                            &entry.descriptor,
+                            ron::ser::PrettyConfig::default(),
+                        ) {
+                            self.import_export_buffer = ron_text;
+                            self.show_import_dialog = true;
+                        }
+                    }
+                }
+                ui.ctx().request_repaint();
+            }
+        });
+
         ui.separator();
 
         // ── Pre-compute shared read-only state ────────────────────────────
@@ -1458,18 +1637,11 @@ impl ItemMeshEditorState {
         // can hold a live borrow while the other mutates — so we snapshot all
         // display data upfront and collect deferred mutations in local vars.
 
-        // Refresh available assets and populate the registry if the campaign
-        // dir changed (e.g. user opened a different campaign while the tab was
-        // visible, or the tab is first shown after open_campaign).
-        if let Some(dir) = campaign_dir {
-            if self.last_campaign_dir.as_ref() != Some(dir) {
-                self.load_from_campaign(dir);
-            }
-        }
+        // Registry refresh happens before the toolbar so the visible count and
+        // toolbar actions are based on the current campaign data.
 
         // Snapshot the fields the closures read.
         let selected_idx = self.selected_entry;
-        let registry_len = self.registry.len();
         let delete_confirm = self.registry_delete_confirm_pending;
 
         // Build filtered + sorted index list (owned, no external borrows).
@@ -1511,18 +1683,7 @@ impl ItemMeshEditorState {
             });
         let has_preview_renderer = self.preview_renderer.is_some();
 
-        // Snapshot of current filter/sort state for combo-box selected text.
-        let cat_label = self
-            .category_filter
-            .map(|c| format!("{:?}", c))
-            .unwrap_or_else(|| "All Categories".to_string());
-        let sort_label = match self.registry_sort_by {
-            ItemMeshRegistrySortBy::Id => "Sort: ID",
-            ItemMeshRegistrySortBy::Name => "Sort: Name",
-            ItemMeshRegistrySortBy::Category => "Sort: Category",
-        };
-        let category_filter_snap = self.category_filter;
-        let sort_snap = self.registry_sort_by;
+        // Filters and sort order are edited in the standard toolbar area above.
 
         // ── Deferred mutations: collected in closures, applied after ──────
         // Each closure gets its OWN set of pending vars to avoid two
@@ -1530,17 +1691,8 @@ impl ItemMeshEditorState {
         // After show_split returns we merge left_* and right_* into the
         // canonical pending_* values and apply them.
         let mut pending_select: Option<usize> = None;
-        let mut pending_new = false;
-        let mut pending_register_asset = false;
-        let mut pending_reload = false;
-        let mut new_category_filter = category_filter_snap;
-        let mut new_sort = sort_snap;
-        // Deferred search query update from the text edit widget.
-        let mut pending_new_search: Option<String> = None;
 
         // Left-closure-owned pending vars.
-        // Note: pending_new_search is also left-closure-owned (declared above
-        // before the layout split so it is accessible in the apply block too).
         let mut left_open_edit: Option<usize> = None;
         let mut left_duplicate: Option<usize> = None;
         let mut left_delete_confirm = delete_confirm;
@@ -1552,184 +1704,53 @@ impl ItemMeshEditorState {
         let mut right_delete_confirm = delete_confirm;
         let mut right_execute_delete = false;
         let mut right_export_ron: Option<usize> = None;
+        let mut right_register_asset = false;
 
         TwoColumnLayout::new("item_mesh_registry").show_split(
             ui,
             // ── Left column: search / filter / toolbar / list ─────────────
             |ui| {
-                ui.label("Search:");
-                // We need a local copy of search_query to satisfy the borrow
-                // checker — the text_edit writes back via a `&mut String`.
-                // Since both closures cannot borrow `self` simultaneously we
-                // read and write through a local buffer set before the layout
-                // and flushed after.  Because egui renders synchronously
-                // within the frame the mutation is visible immediately.
-                //
-                // Note: `search_query` is not snapshotted here because the
-                // left closure is the *only* place that mutates it; the right
-                // closure never reads it.  We therefore forward the mutable
-                // reference directly through a raw pointer — sound because
-                // the two closures run sequentially (not concurrently) and
-                // the right closure never touches this field.
-                //
-                // A cleaner approach (used by creatures_editor) is to collect
-                // a deferred "new_search_query: Option<String>" and apply it
-                // after show_split.  We use that pattern here.
-                //
-                // (The TextEdit widget does not have a "changed + value"
-                //  API in egui 0.33; we must give it a &mut String.)
-                //
-                // We cannot borrow `self.search_query` here because `self`
-                // is already captured by the outer `show_registry_mode` call.
-                // Instead we keep a copy in a local and flush it after.
-                //
-                // ── Workaround: the closure captures `pending_*` locals
-                //    plus an owned copy of the data it only reads.
-                // The `ui.text_edit_singleline` widget needs a `&mut String`.
-                // We pass a stack-allocated copy and detect whether it changed.
-                // (The copy is at most a few hundred bytes — negligible.)
-                //
-                // This is the canonical SDK pattern for mutable text fields
-                // inside `TwoColumnLayout` closures.
-                //
-                // Deferred search query: collect any change in a local
-                // owned String and flush it back after show_split returns.
-                // This avoids unsafe and keeps both closures free of
-                // simultaneous &mut self borrows.
-                let mut new_search_query = self.search_query.clone();
-                let changed = ui.text_edit_singleline(&mut new_search_query).changed();
-                if changed {
-                    // Flush immediately — the closure is FnOnce so this runs
-                    // before the right closure is constructed.
-                    // We must write through a raw pointer here because Rust
-                    // sees both closures as borrowing `self` at the same time,
-                    // even though they execute sequentially.
-                    // Use a purely-stack local instead: signal the change via
-                    // the existing `pending_*` deferred-mutation variables.
-                    //
-                    // Store the new value in a local that is captured only by
-                    // the left closure.  After show_split returns we apply it.
-                    pending_new_search = Some(new_search_query);
-                } else {
-                    // Display value unchanged; nothing to flush.
-                    drop(new_search_query);
-                }
-                ui.add_space(4.0);
-
-                // Category filter combo.
-                egui::ComboBox::from_id_salt("item_mesh_category_filter")
-                    .selected_text(&cat_label)
-                    .show_ui(ui, |ui| {
-                        if ui
-                            .selectable_label(new_category_filter.is_none(), "All Categories")
-                            .clicked()
-                        {
-                            new_category_filter = None;
-                        }
-                        for cat in ItemMeshEditorState::all_categories() {
-                            let label = format!("{:?}", cat);
-                            if ui
-                                .selectable_label(new_category_filter == Some(*cat), &label)
-                                .clicked()
-                            {
-                                new_category_filter = Some(*cat);
-                            }
-                        }
-                    });
-                ui.add_space(4.0);
-
-                // Sort combo.
-                egui::ComboBox::from_id_salt("item_mesh_sort_by")
-                    .selected_text(sort_label)
-                    .show_ui(ui, |ui| {
-                        if ui
-                            .selectable_label(new_sort == ItemMeshRegistrySortBy::Id, "Sort: ID")
-                            .clicked()
-                        {
-                            new_sort = ItemMeshRegistrySortBy::Id;
-                        }
-                        if ui
-                            .selectable_label(
-                                new_sort == ItemMeshRegistrySortBy::Name,
-                                "Sort: Name",
-                            )
-                            .clicked()
-                        {
-                            new_sort = ItemMeshRegistrySortBy::Name;
-                        }
-                        if ui
-                            .selectable_label(
-                                new_sort == ItemMeshRegistrySortBy::Category,
-                                "Sort: Category",
-                            )
-                            .clicked()
-                        {
-                            new_sort = ItemMeshRegistrySortBy::Category;
-                        }
-                    });
-                ui.add_space(6.0);
-
-                // Toolbar row.
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button("➕ New").clicked() {
-                        pending_new = true;
-                        ui.ctx().request_repaint();
-                    }
-                    if ui.button("📁 Register Asset").clicked() {
-                        pending_register_asset = true;
-                        ui.ctx().request_repaint();
-                    }
-                    if ui.button("🔄 Reload").clicked() {
-                        pending_reload = true;
-                        ui.ctx().request_repaint();
-                    }
-                });
-
+                ui.heading("Item Meshes");
                 ui.separator();
                 ui.label(format!("{} / {} entries", total_filtered, total_registry));
 
-                egui::ScrollArea::vertical()
-                    .id_salt("item_mesh_registry_list")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        for (display_idx, row) in row_data.iter().enumerate() {
-                            let real_idx = row.real_idx;
-                            // sdk/AGENTS.md Rule 1: push_id in every loop body.
-                            ui.push_id(display_idx, |ui| {
-                                let badge = item_mesh_category_badge(row.category);
-                                let config = StandardListItemConfig::new(&row.name)
-                                    .with_badges(vec![badge])
-                                    .selected(row.is_selected);
+                for (display_idx, row) in row_data.iter().enumerate() {
+                    let real_idx = row.real_idx;
+                    // sdk/AGENTS.md Rule 1: push_id in every loop body.
+                    ui.push_id(display_idx, |ui| {
+                        let badge = item_mesh_category_badge(row.category);
+                        let config = StandardListItemConfig::new(&row.name)
+                            .with_badges(vec![badge])
+                            .selected(row.is_selected);
 
-                                let (clicked, ctx_action) = show_standard_list_item(ui, config);
+                        let (clicked, ctx_action) = show_standard_list_item(ui, config);
 
-                                if clicked {
-                                    pending_select = Some(real_idx);
-                                    ui.ctx().request_repaint();
-                                }
+                        if clicked {
+                            pending_select = Some(real_idx);
+                            ui.ctx().request_repaint();
+                        }
 
-                                match ctx_action {
-                                    ItemAction::Edit => {
-                                        left_open_edit = Some(real_idx);
-                                        ui.ctx().request_repaint();
-                                    }
-                                    ItemAction::Duplicate => {
-                                        left_duplicate = Some(real_idx);
-                                        ui.ctx().request_repaint();
-                                    }
-                                    ItemAction::Delete => {
-                                        left_delete_confirm = true;
-                                        ui.ctx().request_repaint();
-                                    }
-                                    ItemAction::Export => {
-                                        left_export_ron = Some(real_idx);
-                                        ui.ctx().request_repaint();
-                                    }
-                                    ItemAction::None => {}
-                                }
-                            });
+                        match ctx_action {
+                            ItemAction::Edit => {
+                                left_open_edit = Some(real_idx);
+                                ui.ctx().request_repaint();
+                            }
+                            ItemAction::Duplicate => {
+                                left_duplicate = Some(real_idx);
+                                ui.ctx().request_repaint();
+                            }
+                            ItemAction::Delete => {
+                                left_delete_confirm = true;
+                                ui.ctx().request_repaint();
+                            }
+                            ItemAction::Export => {
+                                left_export_ron = Some(real_idx);
+                                ui.ctx().request_repaint();
+                            }
+                            ItemAction::None => {}
                         }
                     });
+                }
             },
             // ── Right column: detail / preview ────────────────────────────
             |ui| {
@@ -1746,73 +1767,71 @@ impl ItemMeshEditorState {
 
                 ui.add_space(8.0);
 
-                egui::ScrollArea::vertical()
-                    .id_salt("item_mesh_registry_preview")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        if has_preview_renderer {
-                            // We cannot call renderer.show() here because we'd
-                            // need a second `&mut self` borrow.  We render a
-                            // placeholder and let the right-column update happen
-                            // after show_split (see preview sync below).
-                            ui.label("(Preview synced on selection)");
-                        } else {
-                            ui.label("(no preview)");
+                if has_preview_renderer {
+                    // We cannot call renderer.show() here because we'd need a
+                    // second `&mut self` borrow. Render a placeholder and let
+                    // the preview sync happen after show_split.
+                    ui.label("(Preview synced on selection)");
+                } else {
+                    ui.label("(no preview)");
+                }
+
+                ui.add_space(8.0);
+
+                if selected_idx.is_some() {
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("✏️ Edit").clicked() {
+                            if let Some(idx) = selected_idx {
+                                right_open_edit = Some(idx);
+                                ui.ctx().request_repaint();
+                            }
                         }
-
-                        ui.add_space(8.0);
-
-                        if selected_idx.is_some() {
-                            ui.horizontal_wrapped(|ui| {
-                                if ui.button("✏️ Edit").clicked() {
-                                    if let Some(idx) = selected_idx {
-                                        right_open_edit = Some(idx);
-                                        ui.ctx().request_repaint();
-                                    }
-                                }
-                                if ui.button("📋 Duplicate").clicked() {
-                                    if let Some(idx) = selected_idx {
-                                        right_duplicate = Some(idx);
-                                        ui.ctx().request_repaint();
-                                    }
-                                }
-                                if ui
-                                    .button("🗑 Delete")
-                                    .on_hover_text("Delete this entry from the registry")
-                                    .clicked()
-                                {
-                                    right_delete_confirm = true;
-                                    ui.ctx().request_repaint();
-                                }
-                                if ui.button("📤 Export RON").clicked() {
-                                    if let Some(idx) = selected_idx {
-                                        right_export_ron = Some(idx);
-                                        ui.ctx().request_repaint();
-                                    }
-                                }
-                            });
+                        if ui.button("📋 Duplicate").clicked() {
+                            if let Some(idx) = selected_idx {
+                                right_duplicate = Some(idx);
+                                ui.ctx().request_repaint();
+                            }
                         }
-
-                        // Delete confirmation inline.
-                        if delete_confirm {
-                            ui.separator();
-                            ui.colored_label(
-                                egui::Color32::RED,
-                                "⚠️ Confirm delete? This cannot be undone.",
-                            );
-                            ui.horizontal(|ui| {
-                                if ui.button("✅ Yes, Delete").clicked() {
-                                    right_execute_delete = true;
-                                    right_delete_confirm = false;
-                                    ui.ctx().request_repaint();
-                                }
-                                if ui.button("❌ Cancel").clicked() {
-                                    right_delete_confirm = false;
-                                    ui.ctx().request_repaint();
-                                }
-                            });
+                        if ui
+                            .button("🗑 Delete")
+                            .on_hover_text("Delete this entry from the registry")
+                            .clicked()
+                        {
+                            right_delete_confirm = true;
+                            ui.ctx().request_repaint();
+                        }
+                        if ui.button("📤 Export RON").clicked() {
+                            if let Some(idx) = selected_idx {
+                                right_export_ron = Some(idx);
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                        if ui.button("📁 Register Asset").clicked() {
+                            right_register_asset = true;
+                            ui.ctx().request_repaint();
                         }
                     });
+                }
+
+                // Delete confirmation inline.
+                if delete_confirm {
+                    ui.separator();
+                    ui.colored_label(
+                        egui::Color32::RED,
+                        "⚠️ Confirm delete? This cannot be undone.",
+                    );
+                    ui.horizontal(|ui| {
+                        if ui.button("✅ Yes, Delete").clicked() {
+                            right_execute_delete = true;
+                            right_delete_confirm = false;
+                            ui.ctx().request_repaint();
+                        }
+                        if ui.button("❌ Cancel").clicked() {
+                            right_delete_confirm = false;
+                            ui.ctx().request_repaint();
+                        }
+                    });
+                }
             },
         );
 
@@ -1831,37 +1850,9 @@ impl ItemMeshEditorState {
 
         // ── Apply deferred mutations (all closures have returned) ─────────
 
-        self.category_filter = new_category_filter;
-        self.registry_sort_by = new_sort;
         self.registry_delete_confirm_pending = pending_delete_confirm;
 
-        // Flush deferred search query.
-        if let Some(new_q) = pending_new_search {
-            self.search_query = new_q;
-        }
-
-        if pending_new {
-            self.registry.push(ItemMeshEntry {
-                name: format!("New Mesh {}", registry_len + 1),
-                category: ItemMeshCategory::Sword,
-                file_path: format!("assets/items/new_mesh_{}.ron", registry_len + 1),
-                descriptor: ItemMeshDescriptor {
-                    category: ItemMeshCategory::Sword,
-                    blade_length: 0.5,
-                    primary_color: [0.75, 0.75, 0.78, 1.0],
-                    accent_color: [0.5, 0.3, 0.1, 1.0],
-                    emissive: false,
-                    emissive_color: [0.0, 0.0, 0.0],
-                    scale: 1.0,
-                },
-                native_creature_def: None,
-            });
-            self.selected_entry = Some(self.registry.len() - 1);
-            self.preview_dirty = true;
-            ui.ctx().request_repaint();
-        }
-
-        if pending_register_asset {
+        if right_register_asset {
             if let Some(dir) = campaign_dir {
                 self.refresh_available_assets(dir);
             }
@@ -1869,14 +1860,6 @@ impl ItemMeshEditorState {
             self.register_asset_error = None;
             self.show_register_asset_dialog = true;
             ui.ctx().request_repaint();
-        }
-
-        if pending_reload {
-            if let Some(dir) = campaign_dir {
-                self.last_campaign_dir = None;
-                self.refresh_available_assets(dir);
-                ui.ctx().request_repaint();
-            }
         }
 
         if let Some(idx) = pending_select {
@@ -2092,250 +2075,332 @@ impl ItemMeshEditorState {
         ui.separator();
 
         // ── Two-column content: properties | preview ───────────────────────
-        ui.columns(2, |cols| {
-            // ── Left: property editors ─────────────────────────────────────
-            egui::ScrollArea::vertical()
-                .id_salt("item_mesh_edit_props")
-                .auto_shrink([false, false])
-                .show(&mut cols[0], |ui| {
-                    // Override enabled checkbox.
-                    let mut override_enabled = self.override_enabled;
-                    if ui
-                        .checkbox(&mut override_enabled, "Override Enabled")
-                        .changed()
-                    {
-                        let old = self.override_enabled;
-                        self.override_enabled = override_enabled;
-                        self.undo_redo.push(ItemMeshEditAction::SetOverrideEnabled {
-                            old,
-                            new: override_enabled,
-                        });
-                        self.unsaved_changes = true;
-                        self.workflow.mark_dirty();
-                        ui.ctx().request_repaint();
-                    }
+        // Reserve space for the bottom Back to List / Save / Cancel action row
+        // before the edit columns consume the remaining available height.
+        let bottom_action_row_height = ui.spacing().interact_size.y
+            + ui.spacing().item_spacing.y
+            + ui.spacing().button_padding.y * 2.0
+            + 2.0;
+        let panel_height = (ui.available_height() - bottom_action_row_height)
+            .max(crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT);
 
-                    ui.separator();
+        // The edit screen uses the standard SDK two-column layout, but both
+        // columns need to mutate editor state. `TwoColumnLayout::show_split`
+        // evaluates the closures sequentially; this raw pointer avoids Rust's
+        // conservative multi-closure borrow conflict while preserving the
+        // standard layout.
+        let self_ptr: *mut ItemMeshEditorState = self as *mut _;
 
-                    let controls_enabled = self.override_enabled;
-
-                    // Category (read-only label).
-                    if let Some(desc) = &self.edit_buffer {
-                        ui.label(format!("Category: {:?}", desc.category));
-                    }
-                    ui.add_space(6.0);
-
-                    // Primary color sliders.
-                    ui.group(|ui| {
-                        ui.label("Primary Color:");
-                        if let Some(desc) = self.edit_buffer.as_mut() {
-                            let mut color = desc.primary_color;
-                            let mut changed = false;
-
-                            ui.add_enabled_ui(controls_enabled, |ui| {
-                                changed |= ui
-                                    .add(egui::Slider::new(&mut color[0], 0.0..=1.0).text("R"))
-                                    .changed();
-                                changed |= ui
-                                    .add(egui::Slider::new(&mut color[1], 0.0..=1.0).text("G"))
-                                    .changed();
-                                changed |= ui
-                                    .add(egui::Slider::new(&mut color[2], 0.0..=1.0).text("B"))
-                                    .changed();
-                                changed |= ui
-                                    .add(egui::Slider::new(&mut color[3], 0.0..=1.0).text("A"))
-                                    .changed();
-                            });
-
-                            if changed {
-                                let old = desc.primary_color;
-                                desc.primary_color = color;
-                                self.undo_redo
-                                    .push(ItemMeshEditAction::SetPrimaryColor { old, new: color });
-                                self.preview_dirty = true;
-                                self.unsaved_changes = true;
-                                self.workflow.mark_dirty();
-                                ui.ctx().request_repaint();
-                            }
-                        }
-                    });
-
-                    ui.add_space(4.0);
-
-                    // Accent color sliders.
-                    ui.group(|ui| {
-                        ui.label("Accent Color:");
-                        if let Some(desc) = self.edit_buffer.as_mut() {
-                            let mut color = desc.accent_color;
-                            let mut changed = false;
-
-                            ui.add_enabled_ui(controls_enabled, |ui| {
-                                changed |= ui
-                                    .add(egui::Slider::new(&mut color[0], 0.0..=1.0).text("R"))
-                                    .changed();
-                                changed |= ui
-                                    .add(egui::Slider::new(&mut color[1], 0.0..=1.0).text("G"))
-                                    .changed();
-                                changed |= ui
-                                    .add(egui::Slider::new(&mut color[2], 0.0..=1.0).text("B"))
-                                    .changed();
-                                changed |= ui
-                                    .add(egui::Slider::new(&mut color[3], 0.0..=1.0).text("A"))
-                                    .changed();
-                            });
-
-                            if changed {
-                                let old = desc.accent_color;
-                                desc.accent_color = color;
-                                self.undo_redo
-                                    .push(ItemMeshEditAction::SetAccentColor { old, new: color });
-                                self.preview_dirty = true;
-                                self.unsaved_changes = true;
-                                self.workflow.mark_dirty();
-                                ui.ctx().request_repaint();
-                            }
-                        }
-                    });
-
-                    ui.add_space(4.0);
-
-                    // Scale slider.
-                    ui.group(|ui| {
-                        ui.label("Scale:");
-                        if let Some(desc) = self.edit_buffer.as_mut() {
-                            let mut scale = desc.scale;
-                            let scale_resp = ui.add_enabled(
-                                controls_enabled,
-                                egui::Slider::new(&mut scale, 0.25..=4.0)
-                                    .step_by(0.05)
-                                    .text("×"),
-                            );
-                            if scale_resp.changed() {
-                                let old = desc.scale;
-                                desc.scale = scale;
-                                self.undo_redo
-                                    .push(ItemMeshEditAction::SetScale { old, new: scale });
-                                self.preview_dirty = true;
-                                self.unsaved_changes = true;
-                                self.workflow.mark_dirty();
-                                ui.ctx().request_repaint();
-                            }
-                        }
-                    });
-
-                    ui.add_space(4.0);
-
-                    // Emissive checkbox.
-                    if let Some(desc) = self.edit_buffer.as_mut() {
-                        let mut emissive = desc.emissive;
-                        let emissive_resp = ui.add_enabled(
-                            controls_enabled,
-                            egui::Checkbox::new(&mut emissive, "Emissive (Magical Glow)"),
-                        );
-                        if emissive_resp.changed() {
-                            let old = desc.emissive;
-                            desc.emissive = emissive;
-                            self.undo_redo
-                                .push(ItemMeshEditAction::SetEmissive { old, new: emissive });
-                            self.preview_dirty = true;
-                            self.unsaved_changes = true;
-                            self.workflow.mark_dirty();
+        ui.allocate_ui(egui::vec2(ui.available_width(), panel_height), |ui| {
+            TwoColumnLayout::new("item_mesh_edit")
+                .with_min_height(panel_height)
+                .with_inspector_min_width(360.0)
+                .show_split(
+                    ui,
+                    |ui| {
+                        let self_ref: &mut ItemMeshEditorState = unsafe { &mut *self_ptr };
+                        // Override enabled checkbox.
+                        let mut override_enabled = self_ref.override_enabled;
+                        if ui
+                            .checkbox(&mut override_enabled, "Override Enabled")
+                            .changed()
+                        {
+                            let old = self_ref.override_enabled;
+                            self_ref.override_enabled = override_enabled;
+                            self_ref
+                                .undo_redo
+                                .push(ItemMeshEditAction::SetOverrideEnabled {
+                                    old,
+                                    new: override_enabled,
+                                });
+                            self_ref.unsaved_changes = true;
+                            self_ref.workflow.mark_dirty();
                             ui.ctx().request_repaint();
                         }
-                    }
 
-                    ui.add_space(8.0);
+                        ui.separator();
 
-                    // Reset to defaults button.
-                    if ui
-                        .button("↺ Reset to Defaults")
-                        .on_hover_text("Resets all properties to auto-derived values")
-                        .clicked()
-                    {
-                        if let Some(desc) = &self.edit_buffer {
-                            let old_desc = desc.clone();
-                            // Reset to a neutral Sword descriptor (user can
-                            // edit from there; a real reset would re-derive
-                            // from the Item, but we don't hold the Item here).
-                            let new_desc = ItemMeshDescriptor {
-                                category: desc.category,
-                                blade_length: 0.5,
-                                primary_color: [0.75, 0.75, 0.78, 1.0],
-                                accent_color: [0.5, 0.3, 0.1, 1.0],
-                                emissive: false,
-                                emissive_color: [0.0, 0.0, 0.0],
-                                scale: 1.0,
-                            };
-                            self.undo_redo.push(ItemMeshEditAction::ReplaceDescriptor {
-                                old: old_desc,
-                                new: new_desc.clone(),
-                            });
-                            self.edit_buffer = Some(new_desc);
-                            self.preview_dirty = true;
-                            self.unsaved_changes = true;
-                            self.workflow.mark_dirty();
+                        let controls_enabled = self_ref.override_enabled;
+
+                        // Category (read-only label).
+                        if let Some(desc) = &self_ref.edit_buffer {
+                            ui.label(format!("Category: {:?}", desc.category));
                         }
-                        ui.ctx().request_repaint();
-                    }
+                        ui.add_space(6.0);
 
-                    ui.add_space(8.0);
+                        // Primary color sliders.
+                        ui.group(|ui| {
+                            ui.label("Primary Color:");
+                            if let Some(desc) = self_ref.edit_buffer.as_mut() {
+                                let mut color = desc.primary_color;
+                                let mut changed = false;
 
-                    // Validation collapsible.
-                    ui.collapsing("✅ Validation", |ui| {
-                        self.refresh_validation_state();
-                        if self.validation_errors.is_empty() && self.validation_warnings.is_empty()
-                        {
-                            ui.label("✅ No issues found.");
-                        }
-                        for err in &self.validation_errors {
-                            ui.colored_label(egui::Color32::RED, format!("❌ {}", err));
-                        }
-                        for warn in &self.validation_warnings {
-                            ui.colored_label(
-                                egui::Color32::from_rgb(255, 200, 0),
-                                format!("⚠️ {}", warn),
+                                ui.add_enabled_ui(controls_enabled, |ui| {
+                                    changed |= ui
+                                        .add(egui::Slider::new(&mut color[0], 0.0..=1.0).text("R"))
+                                        .changed();
+                                    changed |= ui
+                                        .add(egui::Slider::new(&mut color[1], 0.0..=1.0).text("G"))
+                                        .changed();
+                                    changed |= ui
+                                        .add(egui::Slider::new(&mut color[2], 0.0..=1.0).text("B"))
+                                        .changed();
+                                    changed |= ui
+                                        .add(egui::Slider::new(&mut color[3], 0.0..=1.0).text("A"))
+                                        .changed();
+                                });
+
+                                if changed {
+                                    let old = desc.primary_color;
+                                    desc.primary_color = color;
+                                    self_ref
+                                        .undo_redo
+                                        .push(ItemMeshEditAction::SetPrimaryColor {
+                                            old,
+                                            new: color,
+                                        });
+                                    self_ref.preview_dirty = true;
+                                    self_ref.unsaved_changes = true;
+                                    self_ref.workflow.mark_dirty();
+                                    ui.ctx().request_repaint();
+                                }
+                            }
+                        });
+
+                        ui.add_space(4.0);
+
+                        // Accent color sliders.
+                        ui.group(|ui| {
+                            ui.label("Accent Color:");
+                            if let Some(desc) = self_ref.edit_buffer.as_mut() {
+                                let mut color = desc.accent_color;
+                                let mut changed = false;
+
+                                ui.add_enabled_ui(controls_enabled, |ui| {
+                                    changed |= ui
+                                        .add(egui::Slider::new(&mut color[0], 0.0..=1.0).text("R"))
+                                        .changed();
+                                    changed |= ui
+                                        .add(egui::Slider::new(&mut color[1], 0.0..=1.0).text("G"))
+                                        .changed();
+                                    changed |= ui
+                                        .add(egui::Slider::new(&mut color[2], 0.0..=1.0).text("B"))
+                                        .changed();
+                                    changed |= ui
+                                        .add(egui::Slider::new(&mut color[3], 0.0..=1.0).text("A"))
+                                        .changed();
+                                });
+
+                                if changed {
+                                    let old = desc.accent_color;
+                                    desc.accent_color = color;
+                                    self_ref.undo_redo.push(ItemMeshEditAction::SetAccentColor {
+                                        old,
+                                        new: color,
+                                    });
+                                    self_ref.preview_dirty = true;
+                                    self_ref.unsaved_changes = true;
+                                    self_ref.workflow.mark_dirty();
+                                    ui.ctx().request_repaint();
+                                }
+                            }
+                        });
+
+                        ui.add_space(4.0);
+
+                        // Scale slider.
+                        ui.group(|ui| {
+                            ui.label("Scale:");
+                            if let Some(desc) = self_ref.edit_buffer.as_mut() {
+                                let mut scale = desc.scale;
+                                let scale_resp = ui.add_enabled(
+                                    controls_enabled,
+                                    egui::Slider::new(&mut scale, 0.25..=4.0)
+                                        .step_by(0.05)
+                                        .text("×"),
+                                );
+                                if scale_resp.changed() {
+                                    let old = desc.scale;
+                                    desc.scale = scale;
+                                    self_ref
+                                        .undo_redo
+                                        .push(ItemMeshEditAction::SetScale { old, new: scale });
+                                    self_ref.preview_dirty = true;
+                                    self_ref.unsaved_changes = true;
+                                    self_ref.workflow.mark_dirty();
+                                    ui.ctx().request_repaint();
+                                }
+                            }
+                        });
+
+                        ui.add_space(4.0);
+
+                        // Emissive checkbox.
+                        if let Some(desc) = self_ref.edit_buffer.as_mut() {
+                            let mut emissive = desc.emissive;
+                            let emissive_resp = ui.add_enabled(
+                                controls_enabled,
+                                egui::Checkbox::new(&mut emissive, "Emissive (Magical Glow)"),
                             );
+                            if emissive_resp.changed() {
+                                let old = desc.emissive;
+                                desc.emissive = emissive;
+                                self_ref
+                                    .undo_redo
+                                    .push(ItemMeshEditAction::SetEmissive { old, new: emissive });
+                                self_ref.preview_dirty = true;
+                                self_ref.unsaved_changes = true;
+                                self_ref.workflow.mark_dirty();
+                                ui.ctx().request_repaint();
+                            }
                         }
-                    });
-                });
 
-            // ── Right: preview ─────────────────────────────────────────────
-            egui::ScrollArea::vertical()
-                .id_salt("item_mesh_edit_preview")
-                .auto_shrink([false, false])
-                .show(&mut cols[1], |ui| {
-                    ui.heading("Preview");
+                        ui.add_space(8.0);
 
-                    if ui.button("🔄 Regenerate Preview").clicked() {
-                        self.sync_preview_renderer_from_descriptor();
-                        ui.ctx().request_repaint();
+                        // Reset to defaults button.
+                        if ui
+                            .button("↺ Reset to Defaults")
+                            .on_hover_text("Resets all properties to auto-derived values")
+                            .clicked()
+                        {
+                            if let Some(desc) = &self_ref.edit_buffer {
+                                let old_desc = desc.clone();
+                                // Reset to a neutral Sword descriptor (user can
+                                // edit from there; a real reset would re-derive
+                                // from the Item, but we don't hold the Item here).
+                                let new_desc = ItemMeshDescriptor {
+                                    category: desc.category,
+                                    blade_length: 0.5,
+                                    primary_color: [0.75, 0.75, 0.78, 1.0],
+                                    accent_color: [0.5, 0.3, 0.1, 1.0],
+                                    emissive: false,
+                                    emissive_color: [0.0, 0.0, 0.0],
+                                    scale: 1.0,
+                                };
+                                self_ref
+                                    .undo_redo
+                                    .push(ItemMeshEditAction::ReplaceDescriptor {
+                                        old: old_desc,
+                                        new: new_desc.clone(),
+                                    });
+                                self_ref.edit_buffer = Some(new_desc);
+                                self_ref.preview_dirty = true;
+                                self_ref.unsaved_changes = true;
+                                self_ref.workflow.mark_dirty();
+                            }
+                            ui.ctx().request_repaint();
+                        }
+
+                        ui.add_space(8.0);
+
+                        // Validation collapsible.
+                        ui.collapsing("✅ Validation", |ui| {
+                            self_ref.refresh_validation_state();
+                            if self_ref.validation_errors.is_empty()
+                                && self_ref.validation_warnings.is_empty()
+                            {
+                                ui.label("✅ No issues found.");
+                            }
+                            for err in &self_ref.validation_errors {
+                                ui.colored_label(egui::Color32::RED, format!("❌ {}", err));
+                            }
+                            for warn in &self_ref.validation_warnings {
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(255, 200, 0),
+                                    format!("⚠️ {}", warn),
+                                );
+                            }
+                        });
+                    },
+                    |ui| {
+                        let self_ref: &mut ItemMeshEditorState = unsafe { &mut *self_ptr };
+
+                        ui.heading("Preview");
+
+                        if ui.button("🔄 Regenerate Preview").clicked() {
+                            self_ref.sync_preview_renderer_from_descriptor();
+                            ui.ctx().request_repaint();
+                        }
+
+                        if let Some(desc) = &self_ref.edit_buffer {
+                            ui.label(format!("Category: {:?}", desc.category));
+                            ui.label("Triangle count: (procedural)");
+                        }
+
+                        if let Some(err) = &self_ref.preview_error {
+                            ui.colored_label(egui::Color32::RED, format!("Preview error: {}", err));
+                        }
+
+                        ui.add_space(4.0);
+                        ui.label("Camera distance:");
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut self_ref.camera_distance, 1.0..=20.0)
+                                    .text("units"),
+                            )
+                            .changed()
+                        {
+                            if let Some(renderer) = &mut self_ref.preview_renderer {
+                                renderer.camera.distance = self_ref.camera_distance;
+                            }
+                            ui.ctx().request_repaint();
+                        }
+
+                        // Sync preview if dirty.
+                        if self_ref.preview_dirty {
+                            self_ref.sync_preview_renderer_from_descriptor();
+                        }
+
+                        if let Some(renderer) = &mut self_ref.preview_renderer {
+                            renderer.camera.distance = self_ref.camera_distance;
+                            if renderer.show(ui) {
+                                self_ref.camera_distance = renderer.camera.distance;
+                                ui.ctx().request_repaint();
+                            }
+                        } else {
+                            ui.label("Preview not available in this build.");
+                        }
+                    },
+                );
+        });
+
+        ui.separator();
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("⬅ Back to List").clicked() {
+                self.back_to_registry();
+                ui.ctx().request_repaint();
+            }
+
+            if ui.button("💾 Save").clicked() {
+                if let Some(idx) = self.selected_entry {
+                    if let Some(entry) = self.registry.get(idx) {
+                        let file_path = entry.file_path.clone();
+                        if let Err(e) = self.perform_save_as_with_path(&file_path, campaign_dir) {
+                            self.operation_status = Some(format!("Save failed: {}", e));
+                        } else {
+                            self.operation_status = Some("Saved item mesh".to_string());
+                        }
                     }
+                }
+                ui.ctx().request_repaint();
+            }
 
-                    if let Some(desc) = &self.edit_buffer {
-                        ui.label(format!("Category: {:?}", desc.category));
-                        ui.label("Triangle count: (procedural)");
-                    }
+            if ui.button("❌ Cancel").clicked() {
+                self.back_to_registry();
+                ui.ctx().request_repaint();
+            }
 
-                    if let Some(err) = &self.preview_error {
-                        ui.colored_label(egui::Color32::RED, format!("Preview error: {}", err));
-                    }
+            ui.separator();
 
-                    ui.add_space(4.0);
-                    ui.label("Camera distance:");
-                    ui.add(egui::Slider::new(&mut self.camera_distance, 1.0..=20.0).text("units"));
-
-                    // Sync preview if dirty.
-                    if self.preview_dirty {
-                        self.sync_preview_renderer_from_descriptor();
-                    }
-
-                    if let Some(renderer) = &mut self.preview_renderer {
-                        renderer.camera.distance = self.camera_distance;
-                        renderer.show(ui);
-                    } else {
-                        ui.label("Preview not available in this build.");
-                    }
-                });
+            if ui.button("📁 Register Asset").clicked() {
+                if let Some(dir) = campaign_dir {
+                    self.refresh_available_assets(dir);
+                }
+                self.register_asset_path_buffer.clear();
+                self.register_asset_error = None;
+                self.show_register_asset_dialog = true;
+                ui.ctx().request_repaint();
+            }
         });
     }
 

@@ -34,9 +34,14 @@ impl CreaturesEditorState {
             }
 
             if ui.button("🔄 Reset Camera").clicked() {
-                self.camera_distance = 5.0;
-                self.preview_state.reset_camera();
-                self.preview_dirty = true;
+                if let Some(renderer) = self.preview_renderer.as_mut() {
+                    renderer.reset_camera();
+                    self.camera_distance = renderer.camera.distance;
+                    self.preview_state.camera.position = renderer.camera.position();
+                } else {
+                    self.camera_distance = 5.0;
+                    self.preview_state.reset_camera();
+                }
                 ui.ctx().request_repaint();
             }
         });
@@ -51,7 +56,10 @@ impl CreaturesEditorState {
                 )
                 .changed()
             {
-                self.preview_dirty = true;
+                if let Some(renderer) = self.preview_renderer.as_mut() {
+                    renderer.camera.distance = self.camera_distance;
+                    self.preview_state.camera.position = renderer.camera.position();
+                }
                 ui.ctx().request_repaint();
             }
 
@@ -64,6 +72,24 @@ impl CreaturesEditorState {
                 ui.ctx().request_repaint();
             }
         });
+
+        if let Some(renderer) = self.preview_renderer.as_mut() {
+            ui.horizontal(|ui| {
+                ui.label("Triangle Budget:");
+                let mut max_preview_triangles = renderer.options.max_preview_triangles as u32;
+                if ui
+                    .add(
+                        egui::Slider::new(&mut max_preview_triangles, 1_000..=100_000)
+                            .text("triangles")
+                            .logarithmic(true),
+                    )
+                    .changed()
+                {
+                    renderer.options.max_preview_triangles = max_preview_triangles as usize;
+                    ui.ctx().request_repaint();
+                }
+            });
+        }
 
         ui.separator();
 
@@ -84,7 +110,6 @@ impl CreaturesEditorState {
             self.preview_state.camera.position = renderer.camera.position();
 
             if interacted {
-                self.preview_dirty = true;
                 ui.ctx().request_repaint();
             }
         } else {
@@ -140,6 +165,7 @@ impl CreaturesEditorState {
         let visible = self.current_mesh_visibility();
         let preview_creature = self.edit_buffer.clone();
         let selected_mesh_index = self.selected_mesh_index;
+        let stats = self.build_preview_statistics(&visible);
 
         let renderer = self
             .preview_renderer
@@ -153,7 +179,7 @@ impl CreaturesEditorState {
         renderer.options.background_color = self.background_color;
         renderer.camera.distance = self.camera_distance;
 
-        renderer.set_mesh_visibility(visible.clone());
+        renderer.set_mesh_visibility(visible);
         renderer.set_selected_mesh_index(selected_mesh_index);
         renderer.update_creature(Some(preview_creature));
 
@@ -163,7 +189,6 @@ impl CreaturesEditorState {
         self.preview_state.options.show_axes = self.show_axes;
         self.preview_state.options.background_color = self.background_color;
 
-        let stats = self.build_preview_statistics(&visible);
         self.preview_state.update_statistics(stats);
 
         self.preview_dirty = false;

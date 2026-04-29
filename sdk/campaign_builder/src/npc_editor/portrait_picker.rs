@@ -146,116 +146,144 @@ impl NpcEditorState {
         // Clone the portraits list to avoid borrow issues
         let available_portraits = self.available_portraits.clone();
 
+        const THUMBNAIL_SIZE: f32 = 80.0;
+        const MIN_COLUMNS: usize = 3;
+        const MAX_COLUMNS: usize = 8;
+        const CELL_WIDTH: f32 = THUMBNAIL_SIZE + 18.0;
+        const WINDOW_MARGIN: f32 = 48.0;
+        const FOOTER_HEIGHT: f32 = 40.0;
+        const DEFAULT_WIDTH: f32 = 640.0;
+        const DEFAULT_HEIGHT: f32 = 560.0;
+        const MIN_WIDTH: f32 = 360.0;
+        const MIN_HEIGHT: f32 = 320.0;
+
+        let content_rect = ctx.content_rect();
+        let max_window_width = (content_rect.width() - WINDOW_MARGIN).max(MIN_WIDTH);
+        let max_window_height = (content_rect.height() - WINDOW_MARGIN).max(MIN_HEIGHT);
+        let window_width = DEFAULT_WIDTH.min(max_window_width);
+        let window_height = DEFAULT_HEIGHT.min(max_window_height);
+
         egui::Window::new("Select Portrait")
             .collapsible(false)
             .resizable(true)
-            .default_width(400.0)
-            .default_height(500.0)
+            .default_size([window_width, window_height])
+            .max_size([max_window_width, max_window_height])
+            .constrain_to(content_rect)
             .show(ctx, |ui| {
                 ui.label("Click a portrait to select:");
                 ui.separator();
 
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    // Display portraits in a grid with 4 columns
-                    const COLUMNS: usize = 4;
-                    const THUMBNAIL_SIZE: f32 = 80.0;
+                let scroll_height = (ui.available_height() - FOOTER_HEIGHT).max(160.0);
+                let columns = ((ui.available_width() / CELL_WIDTH).floor() as usize)
+                    .clamp(MIN_COLUMNS, MAX_COLUMNS);
 
-                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                egui::ScrollArea::both()
+                    .id_salt("npc_portrait_grid_picker_scroll")
+                    .max_height(scroll_height)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        // Display portraits in as many columns as fit the current window width.
+                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
 
-                    let total_portraits = available_portraits.len();
-                    let rows = total_portraits.div_ceil(COLUMNS);
+                        let total_portraits = available_portraits.len();
+                        let rows = total_portraits.div_ceil(columns);
 
-                    for row in 0..rows {
-                        ui.horizontal(|ui| {
-                            for col in 0..COLUMNS {
-                                let idx = row * COLUMNS + col;
-                                if idx >= total_portraits {
-                                    break;
-                                }
-
-                                let portrait_id = &available_portraits[idx];
-
-                                ui.vertical(|ui| {
-                                    // Try to load texture
-                                    self.load_portrait_texture(ctx, campaign_dir, portrait_id);
-                                    let has_texture = self
-                                        .portrait_textures
-                                        .get(portrait_id)
-                                        .and_then(|opt| opt.as_ref())
-                                        .is_some();
-
-                                    // Build tooltip text with portrait path
-                                    let tooltip_text = if let Some(path) =
-                                        resolve_portrait_path(campaign_dir, portrait_id)
-                                    {
-                                        format!(
-                                            "Portrait ID: {}\nPath: {}",
-                                            portrait_id,
-                                            path.display()
-                                        )
-                                    } else {
-                                        format!("Portrait ID: {}\n⚠ File not found", portrait_id)
-                                    };
-
-                                    // Create image button or placeholder
-                                    let button_response = if has_texture {
-                                        let texture = self
-                                            .portrait_textures
-                                            .get(portrait_id)
-                                            .and_then(|t| t.as_ref())
-                                            .expect("texture present since has_texture is true");
-                                        ui.add(
-                                            egui::Button::image(
-                                                egui::Image::new(texture).fit_to_exact_size(
-                                                    egui::vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE),
-                                                ),
-                                            )
-                                            .frame(true),
-                                        )
-                                        .on_hover_text(&tooltip_text)
-                                    } else {
-                                        // Placeholder for failed/missing images
-                                        let (rect, response) = ui.allocate_exact_size(
-                                            egui::vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE),
-                                            egui::Sense::click(),
-                                        );
-                                        ui.painter().rect_filled(
-                                            rect,
-                                            2.0,
-                                            egui::Color32::from_gray(50),
-                                        );
-                                        ui.painter().text(
-                                            rect.center(),
-                                            egui::Align2::CENTER_CENTER,
-                                            "?",
-                                            egui::FontId::proportional(24.0),
-                                            egui::Color32::from_gray(150),
-                                        );
-                                        response.on_hover_text(&tooltip_text)
-                                    };
-
-                                    // Check if clicked
-                                    if button_response.clicked() {
-                                        selected_portrait = Some(portrait_id.clone());
-                                        self.portrait_picker_open = false;
+                        for row in 0..rows {
+                            ui.horizontal(|ui| {
+                                for col in 0..columns {
+                                    let idx = row * columns + col;
+                                    if idx >= total_portraits {
+                                        break;
                                     }
 
-                                    // Show portrait ID below thumbnail
-                                    ui.label(
-                                        egui::RichText::new(portrait_id)
-                                            .size(10.0)
-                                            .color(egui::Color32::from_gray(200)),
-                                    );
-                                });
-                            }
-                        });
-                    }
+                                    let portrait_id = &available_portraits[idx];
 
-                    // Show message if no portraits found
-                    if total_portraits == 0 {
-                        ui.label("No portraits found in campaign assets/portraits directory.");
-                    }
-                });
+                                    ui.vertical(|ui| {
+                                        // Try to load texture
+                                        self.load_portrait_texture(ctx, campaign_dir, portrait_id);
+                                        let has_texture = self
+                                            .portrait_textures
+                                            .get(portrait_id)
+                                            .and_then(|opt| opt.as_ref())
+                                            .is_some();
+
+                                        // Build tooltip text with portrait path
+                                        let tooltip_text = if let Some(path) =
+                                            resolve_portrait_path(campaign_dir, portrait_id)
+                                        {
+                                            format!(
+                                                "Portrait ID: {}\nPath: {}",
+                                                portrait_id,
+                                                path.display()
+                                            )
+                                        } else {
+                                            format!(
+                                                "Portrait ID: {}\n⚠ File not found",
+                                                portrait_id
+                                            )
+                                        };
+
+                                        // Create image button or placeholder
+                                        let button_response = if has_texture {
+                                            let texture = self
+                                                .portrait_textures
+                                                .get(portrait_id)
+                                                .and_then(|t| t.as_ref())
+                                                .expect(
+                                                    "texture present since has_texture is true",
+                                                );
+                                            ui.add(
+                                                egui::Button::image(
+                                                    egui::Image::new(texture).fit_to_exact_size(
+                                                        egui::vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE),
+                                                    ),
+                                                )
+                                                .frame(true),
+                                            )
+                                            .on_hover_text(&tooltip_text)
+                                        } else {
+                                            // Placeholder for failed/missing images
+                                            let (rect, response) = ui.allocate_exact_size(
+                                                egui::vec2(THUMBNAIL_SIZE, THUMBNAIL_SIZE),
+                                                egui::Sense::click(),
+                                            );
+                                            ui.painter().rect_filled(
+                                                rect,
+                                                2.0,
+                                                egui::Color32::from_gray(50),
+                                            );
+                                            ui.painter().text(
+                                                rect.center(),
+                                                egui::Align2::CENTER_CENTER,
+                                                "?",
+                                                egui::FontId::proportional(24.0),
+                                                egui::Color32::from_gray(150),
+                                            );
+                                            response.on_hover_text(&tooltip_text)
+                                        };
+
+                                        // Check if clicked
+                                        if button_response.clicked() {
+                                            selected_portrait = Some(portrait_id.clone());
+                                            self.portrait_picker_open = false;
+                                        }
+
+                                        // Show portrait ID below thumbnail
+                                        ui.label(
+                                            egui::RichText::new(portrait_id)
+                                                .size(10.0)
+                                                .color(egui::Color32::from_gray(200)),
+                                        );
+                                    });
+                                }
+                            });
+                        }
+
+                        // Show message if no portraits found
+                        if total_portraits == 0 {
+                            ui.label("No portraits found in campaign assets/portraits directory.");
+                        }
+                    });
 
                 ui.separator();
                 ui.horizontal(|ui| {

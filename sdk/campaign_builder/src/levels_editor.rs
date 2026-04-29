@@ -1124,9 +1124,11 @@ impl LevelsEditorState {
                     if ui.button("⬅ Back to List").clicked() {
                         self.mode = LevelsEditorMode::List;
                         self.validation_errors.clear();
+                        ui.ctx().request_repaint();
                     }
 
                     if ui.button("💾 Save").clicked() {
+                        ui.ctx().request_repaint();
                         match self.validate_edit_buffer() {
                             Ok(entry) => {
                                 self.validation_errors.clear();
@@ -1177,6 +1179,7 @@ impl LevelsEditorState {
                         self.edit_buffer_class_id.clear();
                         self.edit_buffer_thresholds = vec![0u64; 200];
                         self.validation_errors.clear();
+                        ui.ctx().request_repaint();
                     }
                 });
             });

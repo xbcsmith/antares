@@ -792,13 +792,17 @@ pub fn autocomplete_creature_selector(
         }
 
         // Clear button
-        if ui.button("Clear").clicked() && !selected_creature_id.is_empty() {
+        if ui.button("Clear").clicked()
+            && (!selected_creature_id.is_empty() || !text_buffer.is_empty())
+        {
             selected_creature_id.clear();
-            remove_autocomplete_buffer(ui.ctx(), buffer_id);
+            text_buffer.clear();
             changed = true;
         }
 
-        // Persist buffer back into egui memory so it survives frames.
+        // Persist buffer back into egui memory so it survives frames. Store an
+        // explicit empty string after Clear so the field remains visually empty
+        // on the next frame instead of being reinitialized from stale state.
         store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
     });
 
@@ -1709,13 +1713,17 @@ pub fn autocomplete_portrait_selector(
         }
 
         // Show clear button
-        if ui.button("Clear").clicked() && !selected_portrait_id.is_empty() {
+        if ui.button("Clear").clicked()
+            && (!selected_portrait_id.is_empty() || !text_buffer.is_empty())
+        {
             selected_portrait_id.clear();
             text_buffer.clear();
             changed = true;
         }
 
-        // Persist buffer back into egui memory so it survives frames.
+        // Persist buffer back into egui memory so it survives frames. Store an
+        // explicit empty string after Clear so the field remains visually empty
+        // on the next frame instead of being reinitialized from stale state.
         store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
     });
 
@@ -1797,10 +1805,16 @@ pub fn autocomplete_sprite_sheet_selector(
         }
 
         // Clear button
-        if ui.button("Clear").clicked() && !selected_sheet.is_empty() {
+        if ui.button("Clear").clicked() && (!selected_sheet.is_empty() || !text_buffer.is_empty()) {
             selected_sheet.clear();
+            text_buffer.clear();
             changed = true;
         }
+
+        // Persist buffer back into egui memory so it survives frames. Store an
+        // explicit empty string after Clear so the field remains visually empty
+        // on the next frame instead of being reinitialized from stale state.
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
     });
 
     changed
@@ -2308,6 +2322,7 @@ pub fn extract_npc_candidates(maps: &[antares::domain::world::Map]) -> Vec<(Stri
 /// # Examples
 ///
 /// ```
+/// use campaign_builder::ui_helpers::extract_character_candidates;
 /// use antares::domain::character::Alignment;
 /// use antares::domain::character::Sex;
 /// use antares::domain::character_definition::CharacterDefinition;
@@ -2634,12 +2649,15 @@ pub fn autocomplete_creature_asset_selector(
             changed = true;
         }
 
-        if ui.button("Clear").clicked() && !selected_path.is_empty() {
+        if ui.button("Clear").clicked() && (!selected_path.is_empty() || !text_buffer.is_empty()) {
             selected_path.clear();
             text_buffer.clear();
             changed = true;
         }
 
+        // Persist buffer back into egui memory so it survives frames. Store an
+        // explicit empty string after Clear so the field remains visually empty
+        // on the next frame instead of being reinitialized from stale state.
         store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
     });
 

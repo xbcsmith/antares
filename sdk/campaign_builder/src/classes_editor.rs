@@ -962,12 +962,13 @@ impl ClassesEditorState {
 
                 ui.add_space(20.0);
 
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.button("⬅ Back to List").clicked() {
                         self.cancel_edit();
+                        ui.ctx().request_repaint();
                     }
 
-                    if ui.button("✅ Save").clicked() {
+                    if ui.button("💾 Save").clicked() {
                         if let Err(e) =
                             self.save_class(ctx.campaign_dir, ctx.data_file, ctx.status_message)
                         {
@@ -978,6 +979,7 @@ impl ClassesEditorState {
                     }
                     if ui.button("❌ Cancel").clicked() {
                         self.cancel_edit();
+                        ui.ctx().request_repaint();
                     }
                 });
             });

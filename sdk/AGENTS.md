@@ -1032,6 +1032,80 @@ during a manual review.
 
 ---
 
+### Rule 16: Edit Screens Must End With Back to List / Save / Cancel
+
+Every Campaign Builder editor screen that edits a single entity outside the
+list/detail registry view **must** include a bottom action row with these
+controls, in this order:
+
+1. `Back to List`
+2. `Save`
+3. `Cancel`
+
+The row must be rendered at the bottom of the edit screen, after the primary
+edit content, so users always have a consistent escape/save path regardless of
+which editor they are using.
+
+Required behavior:
+
+- `Back to List` returns to the editor's list/registry mode.
+- `Save` persists or applies the current edit using the editor's normal save
+  path, marks state clean when appropriate, and reports failures in the editor's
+  status/error channel.
+- `Cancel` discards the transient edit buffer where applicable and returns to
+  the list/registry mode.
+- Each button that changes layout-driving state must call `request_repaint()`.
+- Use `ui.horizontal_wrapped`, not `ui.horizontal`, so the action row does not
+  clip on narrow windows (Rule 12).
+
+**Permitted exception**: pure list/detail preview screens that do not enter a
+separate edit mode do not need this row. If a screen has an `Add` or `Edit`
+mode with a mutable buffer, it needs the row.
+
+**WRONG — edit screen has only top-toolbar navigation:**
+
+```antares/sdk/examples/wrong_edit_screen_actions.rs#L1-8
+// ❌ Users must scroll or hunt for inconsistent actions.
+ui.horizontal_wrapped(|ui| {
+    if ui.button("⬅ Registry").clicked() {
+        self.back_to_registry();
+    }
+});
+render_edit_form(ui);
+```
+
+**RIGHT — bottom action row after edit content:**
+
+```antares/sdk/examples/right_edit_screen_actions.rs#L1-21
+render_edit_form(ui);
+
+ui.separator();
+ui.horizontal_wrapped(|ui| {
+    if ui.button("⬅ Back to List").clicked() {
+        self.back_to_list();
+        ui.ctx().request_repaint();
+    }
+
+    if ui.button("💾 Save").clicked() {
+        self.save_current_edit();
+        ui.ctx().request_repaint();
+    }
+
+    if ui.button("✕ Cancel").clicked() {
+        self.cancel_edit();
+        ui.ctx().request_repaint();
+    }
+});
+```
+
+**Audit question to ask before every PR:**
+
+> "If this editor has an Add/Edit screen, does the bottom of that screen include
+> Back to List, Save, and Cancel in that order?"
+> If NO → add the row before merging.
+
+---
+
 ## Future Editor Standardization Pattern
 
 Use this section as the default implementation recipe when adding a new
@@ -1068,6 +1142,8 @@ discipline to avoid egui state bugs.
 8. If a legacy interaction is removed (for example double-click edit), ensure
    an equivalent path still exists (context menu and/or right-panel button),
    and document the trade-off in a code comment.
+9. For every Add/Edit screen, render a bottom `ui.horizontal_wrapped` action row
+   with `Back to List`, `Save`, and `Cancel` in that order (Rule 16).
 
 ### Minimal Row Template
 
@@ -1104,6 +1180,9 @@ ui.push_id(stable_id, |ui| {
 - [ ] Navigation-only lists explicitly disable context menu
 - [ ] Selection and action mutations are deferred and applied after closures
 - [ ] `request_repaint()` is called on layout-driving state changes
+- [ ] Every Add/Edit screen ends with a bottom `Back to List` / `Save` /
+      `Cancel` action row in that order, using `ui.horizontal_wrapped`
+      (Rule 16)
 - [ ] Search/filter/detail behavior remains intact
 - [ ] Data-file loader follows Rule 13 (exists guard, logger, reset, auto-load flag)
 - [ ] Every text field bound to a reference ID uses `autocomplete_*_selector`

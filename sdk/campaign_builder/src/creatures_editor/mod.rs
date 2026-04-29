@@ -20,7 +20,11 @@ use antares::domain::visual::{
     CreatureDefinition, CreatureReference, MeshDefinition, MeshTransform,
 };
 use eframe::egui;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
 
 mod mesh_ui;
 mod preview_panel;
@@ -96,6 +100,21 @@ pub const CREATURE_SCALE_MIN: f64 = 0.001;
 /// Maximum allowed value for the creature-level scale slider.
 pub const CREATURE_SCALE_MAX: f64 = 5.0;
 
+/// Maximum primitive segment count allowed by the creature editor UI.
+///
+/// Higher values can produce very dense meshes that make egui preview rendering
+/// expensive enough to stall the desktop compositor on Linux.
+const PRIMITIVE_SEGMENTS_MAX: u32 = 64;
+
+/// Maximum primitive ring count allowed by the creature editor UI.
+const PRIMITIVE_RINGS_MAX: u32 = 64;
+
+/// Soft triangle budget shown as a warning before primitive generation.
+///
+/// Generation is still allowed above this threshold, but the dialog warns the
+/// user that preview rendering may become expensive.
+const PRIMITIVE_SOFT_TRIANGLE_BUDGET: usize = 8_192;
+
 /// Editor mode for creatures
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreaturesEditorMode {
@@ -143,6 +162,7 @@ pub struct CreaturesEditorState {
     /// executes the deletion.  Resets whenever `selected_registry_entry` changes
     /// or `back_to_registry()` is called.
     pub registry_delete_confirm_pending: bool,
+    registry_view_cache: RegistryViewCache,
 
     // Register Asset Dialog
     /// When `true`, the "Register Creature Asset" dialog window is visible.
@@ -153,6 +173,10 @@ pub struct CreaturesEditorState {
     pub register_asset_validated_creature: Option<CreatureDefinition>,
     /// Error message from the last Validate attempt; `None` when validation succeeded.
     pub register_asset_error: Option<String>,
+    /// `true` while a creature asset validation worker is reading/parsing a file.
+    pub register_asset_validation_in_progress: bool,
+    /// Receiver for the background creature asset validation result.
+    register_asset_validation_rx: Option<Receiver<RegisterAssetValidationResult>>,
     /// Cached list of `.ron` file paths found in `assets/creatures/`, used to
     /// drive the path autocomplete in the Register Asset dialog.
     pub available_creature_assets: Vec<String>,
@@ -209,7 +233,7 @@ pub enum PrimitiveType {
 }
 
 /// Sort order for registry list
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RegistrySortBy {
     Id,
     Name,
@@ -230,6 +254,25 @@ enum RegistryPreviewAction {
     Delete,
     /// Open the Register Asset dialog.
     RegisterAsset,
+}
+
+struct RegistryPreviewPanelResult {
+    action: Option<RegistryPreviewAction>,
+    delete_confirm_update: Option<bool>,
+}
+
+#[derive(Default)]
+struct RegistryViewCache {
+    initialized: bool,
+    signature: u64,
+    counts: (usize, usize, usize, usize, usize),
+    filtered_indices: Vec<usize>,
+    row_valid: Vec<bool>,
+}
+
+struct RegisterAssetValidationResult {
+    request_path: String,
+    result: Result<CreatureDefinition, String>,
 }
 
 impl Default for CreaturesEditorState {
@@ -274,6 +317,7 @@ impl Default for CreaturesEditorState {
             validation_warnings: Vec::new(),
             validation_info: Vec::new(),
             last_validated_mesh_index: None,
+            registry_view_cache: RegistryViewCache::default(),
             show_primitive_dialog: false,
             primitive_type: PrimitiveType::Cube,
             primitive_size: 1.0,
@@ -301,6 +345,8 @@ impl Default for CreaturesEditorState {
             register_asset_path_buffer: String::new(),
             register_asset_validated_creature: None,
             register_asset_error: None,
+            register_asset_validation_in_progress: false,
+            register_asset_validation_rx: None,
             available_creature_assets: Vec::new(),
             last_campaign_dir: None,
 
@@ -373,20 +419,6 @@ impl CreaturesEditorState {
     ) -> Option<String> {
         let mut result_message: Option<String> = None;
 
-        // Update ID manager from current creatures
-        let references: Vec<CreatureReference> = creatures
-            .iter()
-            .map(|c| CreatureReference {
-                id: c.id,
-                name: c.name.clone(),
-                filepath: format!(
-                    "assets/creatures/{}.ron",
-                    c.name.to_lowercase().replace(' ', "_")
-                ),
-            })
-            .collect();
-        self.id_manager.update_from_registry(&references);
-
         // Refresh creature asset candidates when campaign directory changes
         if self.last_campaign_dir != *campaign_dir {
             self.available_creature_assets =
@@ -394,13 +426,14 @@ impl CreaturesEditorState {
             self.last_campaign_dir = campaign_dir.clone();
         }
 
+        self.refresh_registry_view_cache(creatures);
+
         // Registry Overview Section
         if self.show_registry_stats {
             ui.horizontal(|ui| {
                 ui.label(format!("📊 {} creatures registered", creatures.len()));
 
-                let (monsters, npcs, templates, variants, custom) =
-                    self.count_by_category(creatures);
+                let (monsters, npcs, templates, variants, custom) = self.registry_view_cache.counts;
                 ui.separator();
                 ui.label(format!(
                     "({} Monsters, {} NPCs, {} Templates, {} Variants, {} Custom)",
@@ -543,37 +576,7 @@ impl CreaturesEditorState {
         // Loop rows are each wrapped in push_id(creature_id) per sdk/AGENTS.md
         // Rule 1 to prevent widget-ID collisions between rows.
 
-        // Build filtered + sorted index list (owned, no external borrows).
-        let filtered_indices: Vec<usize> = {
-            let mut pairs: Vec<(usize, u32, String)> = creatures
-                .iter()
-                .enumerate()
-                .filter(|(_, c)| {
-                    if let Some(cat) = self.category_filter {
-                        if CreatureCategory::from_id(c.id) != cat {
-                            return false;
-                        }
-                    }
-                    if !self.search_query.is_empty() {
-                        let q = self.search_query.to_lowercase();
-                        return c.name.to_lowercase().contains(&q) || c.id.to_string().contains(&q);
-                    }
-                    true
-                })
-                .map(|(i, c)| (i, c.id, c.name.clone()))
-                .collect();
-
-            match self.registry_sort_by {
-                RegistrySortBy::Id => pairs.sort_by_key(|(_, id, _)| *id),
-                RegistrySortBy::Name => {
-                    pairs.sort_by(|(_, _, a), (_, _, b)| a.cmp(b));
-                }
-                RegistrySortBy::Category => {
-                    pairs.sort_by_key(|(_, id, _)| (CreatureCategory::from_id(*id) as u8, *id));
-                }
-            }
-            pairs.into_iter().map(|(i, _, _)| i).collect()
-        };
+        let filtered_indices = self.registry_view_cache.filtered_indices.clone();
 
         // Snapshot the fields the left closure needs so we do not borrow `self`
         // inside a closure that also needs `&mut self` later.
@@ -584,14 +587,7 @@ impl CreaturesEditorState {
         // capture for `show_registry_preview_panel`.  (Two closures passed to the same
         // function cannot both capture `self`, even if the borrows are disjoint fields.)
         // sdk/AGENTS.md Rule 6 / E0500 fix.
-        let row_valid: Vec<bool> = filtered_indices
-            .iter()
-            .map(|&idx| {
-                let c = &creatures[idx];
-                let cat = CreatureCategory::from_id(c.id);
-                self.id_manager.validate_id(c.id, cat).is_ok()
-            })
-            .collect();
+        let row_valid = self.registry_view_cache.row_valid.clone();
 
         // Deferred mutations collected inside closures; applied after show_split.
         let mut pending_edit: Option<(usize, String)> = None;
@@ -601,17 +597,12 @@ impl CreaturesEditorState {
         let mut pending_selection: Option<usize> = None;
         let mut pending_selection_reset_confirm = false;
 
-        // Snapshot fields needed by the right closure (preview).
-        // The right closure receives an immutable creature snapshot so we can
-        // call &mut self methods (show_registry_preview_panel) without a
-        // simultaneous borrow on `creatures`.
-        let preview_snapshot: Option<(usize, CreatureDefinition)> =
-            selected_entry.and_then(|idx| creatures.get(idx).map(|c| (idx, c.clone())));
-        // If the index is stale (creature deleted externally) clear the selection
-        // after show_split returns.
-        let preview_index_stale = selected_entry.is_some() && preview_snapshot.is_none();
+        // If the index is stale (creature deleted externally), clear the
+        // selection after show_split returns.
+        let preview_index_stale = selected_entry.is_some_and(|idx| creatures.get(idx).is_none());
 
         let delete_confirm_pending = self.registry_delete_confirm_pending;
+        let mut pending_delete_confirm_update: Option<bool> = None;
 
         TwoColumnLayout::new("creatures_registry")
             .with_inspector_min_width(300.0)
@@ -719,7 +710,7 @@ impl CreaturesEditorState {
                 },
                 // ---- Right column: preview panel ----
                 |right_ui| {
-                    match preview_snapshot {
+                    match selected_entry.and_then(|idx| creatures.get(idx).map(|c| (idx, c))) {
                         None => {
                             // No creature selected (or stale index handled below).
                             right_ui.centered_and_justified(|ui| {
@@ -730,18 +721,19 @@ impl CreaturesEditorState {
                                 );
                             });
                         }
-                        Some((sel_idx, ref creature)) => {
-                            // `creature` is a clone so there is no live borrow on
-                            // `creatures` here — `&mut self` in
-                            // show_registry_preview_panel is unambiguous.
-                            let action = self.show_registry_preview_panel(
+                        Some((sel_idx, creature)) => {
+                            let preview_result = Self::show_registry_preview_panel(
                                 right_ui,
                                 creature,
                                 sel_idx,
                                 delete_confirm_pending,
                             );
-                            if action.is_some() {
-                                pending_right_action = action;
+                            if preview_result.action.is_some() {
+                                pending_right_action = preview_result.action;
+                            }
+                            if preview_result.delete_confirm_update.is_some() {
+                                pending_delete_confirm_update =
+                                    preview_result.delete_confirm_update;
                             }
                         }
                     }
@@ -749,6 +741,10 @@ impl CreaturesEditorState {
             );
 
         let pending_preview_action = pending_right_action.or(pending_left_action);
+
+        if let Some(delete_confirm_update) = pending_delete_confirm_update {
+            self.registry_delete_confirm_pending = delete_confirm_update;
+        }
 
         // --- Apply deferred mutations (all closures have returned) ---
 
@@ -895,6 +891,7 @@ impl CreaturesEditorState {
         unsaved_changes: &mut bool,
     ) -> Option<String> {
         let mut result: Option<String> = None;
+        self.poll_register_asset_validation();
 
         // Deferred action flags collected inside the egui closure.
         let mut do_validate = false;
@@ -925,11 +922,23 @@ impl CreaturesEditorState {
                 ui.separator();
 
                 ui.horizontal(|ui| {
-                    if ui.button("🔍 Validate").clicked() {
+                    let validate_label = if self.register_asset_validation_in_progress {
+                        "⏳ Validating..."
+                    } else {
+                        "🔍 Validate"
+                    };
+                    if ui
+                        .add_enabled(
+                            !self.register_asset_validation_in_progress,
+                            egui::Button::new(validate_label),
+                        )
+                        .clicked()
+                    {
                         do_validate = true;
                     }
 
-                    let register_enabled = self.register_asset_validated_creature.is_some();
+                    let register_enabled = !self.register_asset_validation_in_progress
+                        && self.register_asset_validated_creature.is_some();
                     ui.add_enabled_ui(register_enabled, |ui| {
                         if ui
                             .button("📥 Register")
@@ -944,6 +953,12 @@ impl CreaturesEditorState {
                         do_cancel = true;
                     }
                 });
+
+                if self.register_asset_validation_in_progress {
+                    ui.separator();
+                    ui.spinner();
+                    ui.label("Validating creature asset in the background...");
+                }
 
                 // Error label (shown in red when validation fails)
                 if let Some(ref err) = self.register_asset_error {
@@ -995,7 +1010,7 @@ impl CreaturesEditorState {
         // ---- Apply deferred actions (all closures have returned) ----
 
         if do_validate {
-            self.execute_register_asset_validation(creatures, campaign_dir);
+            self.start_register_asset_validation(creatures, campaign_dir, ctx.clone());
         }
 
         if do_register {
@@ -1007,6 +1022,8 @@ impl CreaturesEditorState {
                 self.show_register_asset_dialog = false;
                 self.register_asset_path_buffer.clear();
                 self.register_asset_error = None;
+                self.register_asset_validation_in_progress = false;
+                self.register_asset_validation_rx = None;
                 result = Some(format!("Registered creature '{}' (ID {})", name, id));
             }
         }
@@ -1016,6 +1033,8 @@ impl CreaturesEditorState {
             self.register_asset_path_buffer.clear();
             self.register_asset_validated_creature = None;
             self.register_asset_error = None;
+            self.register_asset_validation_in_progress = false;
+            self.register_asset_validation_rx = None;
         }
 
         result
@@ -1040,16 +1059,17 @@ impl CreaturesEditorState {
     ///
     /// * `creatures` - Read-only view of the current creature list for duplicate detection.
     /// * `campaign_dir` - Base directory used to resolve the relative asset path.
+    #[cfg(test)]
     fn execute_register_asset_validation(
         &mut self,
         creatures: &[CreatureDefinition],
         campaign_dir: &Option<PathBuf>,
     ) {
-        // Clear any prior results.
         self.register_asset_validated_creature = None;
         self.register_asset_error = None;
+        self.register_asset_validation_in_progress = false;
+        self.register_asset_validation_rx = None;
 
-        // 4.5 Path normalization: replace backslashes, trim leading slash.
         let normalized = self
             .register_asset_path_buffer
             .replace('\\', "/")
@@ -1062,61 +1082,168 @@ impl CreaturesEditorState {
             return;
         }
 
-        // Resolve full path.
         let full_path = if let Some(dir) = campaign_dir {
             dir.join(&normalized)
         } else {
             std::path::PathBuf::from(&normalized)
         };
 
-        // Read file contents.
-        let contents = match std::fs::read_to_string(&full_path) {
-            Ok(c) => c,
-            Err(e) => {
-                self.register_asset_error = Some(format!(
-                    "File not found or unreadable ({}): {}",
-                    full_path.display(),
-                    e
-                ));
-                return;
-            }
-        };
+        let existing_creatures: Vec<(CreatureId, String)> = creatures
+            .iter()
+            .map(|creature| (creature.id, creature.name.clone()))
+            .collect();
 
-        // Parse RON.
-        let creature: CreatureDefinition = match ron::from_str(&contents) {
-            Ok(c) => c,
-            Err(e) => {
-                self.register_asset_error = Some(format!("Parse error: {}", e));
-                return;
+        match Self::validate_creature_asset_file(full_path, existing_creatures) {
+            Ok(creature) => {
+                self.register_asset_validated_creature = Some(creature);
+                self.register_asset_error = None;
             }
-        };
+            Err(error) => {
+                self.register_asset_validated_creature = None;
+                self.register_asset_error = Some(error);
+            }
+        }
+    }
 
-        // 4.4 Duplicate ID check (direct vec scan — most authoritative source).
-        if let Some(existing) = creatures.iter().find(|c| c.id == creature.id) {
-            self.register_asset_error = Some(format!(
-                "ID {} is already registered to '{}'. Edit that creature or choose a file with a unique ID.",
-                creature.id, existing.name
-            ));
+    fn start_register_asset_validation(
+        &mut self,
+        creatures: &[CreatureDefinition],
+        campaign_dir: &Option<PathBuf>,
+        egui_ctx: egui::Context,
+    ) {
+        // Clear any prior results.
+        self.register_asset_validated_creature = None;
+        self.register_asset_error = None;
+        self.register_asset_validation_rx = None;
+
+        // 4.5 Path normalization: replace backslashes, trim leading slash.
+        let normalized = self
+            .register_asset_path_buffer
+            .replace('\\', "/")
+            .trim_start_matches('/')
+            .to_string();
+
+        if normalized.is_empty() {
+            self.register_asset_error =
+                Some("Path is empty. Enter a path relative to the campaign directory.".to_string());
+            self.register_asset_validation_in_progress = false;
             return;
         }
 
-        // 4.4 Range validity check via ID manager.
-        let category = crate::creature_id_manager::CreatureCategory::from_id(creature.id);
-        if let Err(crate::creature_id_manager::IdError::OutOfRange {
-            id,
-            category: cat_name,
-            range,
-        }) = self.id_manager.validate_id(creature.id, category)
+        let full_path = if let Some(dir) = campaign_dir {
+            dir.join(&normalized)
+        } else {
+            std::path::PathBuf::from(&normalized)
+        };
+
+        let existing_creatures: Vec<(CreatureId, String)> = creatures
+            .iter()
+            .map(|creature| (creature.id, creature.name.clone()))
+            .collect();
+
+        let request_path = normalized.clone();
+        let (tx, rx) = mpsc::channel();
+        self.register_asset_validation_rx = Some(rx);
+        self.register_asset_validation_in_progress = true;
+
+        thread::spawn(move || {
+            let validation_result =
+                Self::validate_creature_asset_file(full_path, existing_creatures);
+
+            let _ = tx.send(RegisterAssetValidationResult {
+                request_path,
+                result: validation_result,
+            });
+            egui_ctx.request_repaint();
+        });
+    }
+
+    fn poll_register_asset_validation(&mut self) {
+        let Some(rx) = self.register_asset_validation_rx.take() else {
+            return;
+        };
+
+        match rx.try_recv() {
+            Ok(validation_result) => {
+                self.register_asset_validation_in_progress = false;
+
+                let current_path = self
+                    .register_asset_path_buffer
+                    .replace('\\', "/")
+                    .trim_start_matches('/')
+                    .to_string();
+
+                if validation_result.request_path != current_path {
+                    self.register_asset_validated_creature = None;
+                    self.register_asset_error = Some(
+                        "Validation result ignored because the asset path changed. Validate again."
+                            .to_string(),
+                    );
+                    return;
+                }
+
+                match validation_result.result {
+                    Ok(creature) => {
+                        self.register_asset_validated_creature = Some(creature);
+                        self.register_asset_error = None;
+                    }
+                    Err(error) => {
+                        self.register_asset_validated_creature = None;
+                        self.register_asset_error = Some(error);
+                    }
+                }
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                self.register_asset_validation_rx = Some(rx);
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.register_asset_validation_in_progress = false;
+                self.register_asset_validated_creature = None;
+                self.register_asset_error =
+                    Some("Validation worker stopped before returning a result.".to_string());
+            }
+        }
+    }
+
+    fn validate_creature_asset_file(
+        full_path: PathBuf,
+        existing_creatures: Vec<(CreatureId, String)>,
+    ) -> Result<CreatureDefinition, String> {
+        let contents = std::fs::read_to_string(&full_path).map_err(|e| {
+            format!(
+                "File not found or unreadable ({}): {}",
+                full_path.display(),
+                e
+            )
+        })?;
+
+        let creature: CreatureDefinition =
+            ron::from_str(&contents).map_err(|e| format!("Parse error: {}", e))?;
+
+        if let Some((_, existing_name)) = existing_creatures
+            .iter()
+            .find(|(existing_id, _)| *existing_id == creature.id)
         {
-            self.register_asset_error = Some(format!(
-                "ID {} is outside the valid range for category {} ({}). Use a {} ID.",
-                id, cat_name, range, cat_name
+            return Err(format!(
+                "ID {} is already registered to '{}'. Edit that creature or choose a file with a unique ID.",
+                creature.id, existing_name
             ));
-            return;
         }
 
-        // All checks passed.
-        self.register_asset_validated_creature = Some(creature);
+        let category = crate::creature_id_manager::CreatureCategory::from_id(creature.id);
+        let range = category.id_range();
+        if !range.contains(&creature.id) {
+            return Err(format!(
+                "ID {} is outside the valid range for category {} ({}-{}). Use a {} ID.",
+                creature.id,
+                category.display_name(),
+                range.start,
+                range.end - 1,
+                category.display_name()
+            ));
+        }
+
+        Ok(creature)
     }
 
     /// Renders the registry preview panel for the creature at `idx`.
@@ -1146,13 +1273,13 @@ impl CreaturesEditorState {
     ///
     /// Returns a `RegistryPreviewAction` when the user clicks an action button.
     fn show_registry_preview_panel(
-        &mut self,
         ui: &mut egui::Ui,
         creature: &CreatureDefinition,
         idx: usize,
         delete_confirm_pending: bool,
-    ) -> Option<RegistryPreviewAction> {
+    ) -> RegistryPreviewPanelResult {
         let mut action: Option<RegistryPreviewAction> = None;
+        let mut delete_confirm_update: Option<bool> = None;
 
         // --- Heading: creature name ---
         ui.heading(&creature.name);
@@ -1310,7 +1437,7 @@ impl CreaturesEditorState {
                 // Cancel button: signal via a sentinel action variant so the
                 // caller can clear the flag after show_split returns.
                 if ui.button("Cancel").clicked() {
-                    self.registry_delete_confirm_pending = false;
+                    delete_confirm_update = Some(false);
                 }
             } else {
                 // First click arms the confirmation.
@@ -1319,7 +1446,7 @@ impl CreaturesEditorState {
                     .on_hover_text("Delete this creature (requires confirmation)")
                     .clicked()
                 {
-                    self.registry_delete_confirm_pending = true;
+                    delete_confirm_update = Some(true);
                 }
             }
         });
@@ -1332,7 +1459,95 @@ impl CreaturesEditorState {
                 .weak(),
         );
 
-        action
+        RegistryPreviewPanelResult {
+            action,
+            delete_confirm_update,
+        }
+    }
+
+    fn registry_view_signature(&self, creatures: &[CreatureDefinition]) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.search_query.hash(&mut hasher);
+        self.category_filter.hash(&mut hasher);
+        self.registry_sort_by.hash(&mut hasher);
+        creatures.len().hash(&mut hasher);
+
+        for creature in creatures {
+            creature.id.hash(&mut hasher);
+            creature.name.hash(&mut hasher);
+            creature.meshes.len().hash(&mut hasher);
+        }
+
+        hasher.finish()
+    }
+
+    fn refresh_registry_view_cache(&mut self, creatures: &[CreatureDefinition]) {
+        let signature = self.registry_view_signature(creatures);
+        if self.registry_view_cache.initialized && self.registry_view_cache.signature == signature {
+            return;
+        }
+
+        let references: Vec<CreatureReference> = creatures
+            .iter()
+            .map(|c| CreatureReference {
+                id: c.id,
+                name: c.name.clone(),
+                filepath: format!(
+                    "assets/creatures/{}.ron",
+                    c.name.to_lowercase().replace(' ', "_")
+                ),
+            })
+            .collect();
+        self.id_manager.update_from_registry(&references);
+
+        let counts = self.count_by_category(creatures);
+
+        let query = self.search_query.to_lowercase();
+        let mut pairs: Vec<(usize, u32, String)> = creatures
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| {
+                if let Some(cat) = self.category_filter {
+                    if CreatureCategory::from_id(c.id) != cat {
+                        return false;
+                    }
+                }
+
+                query.is_empty()
+                    || c.name.to_lowercase().contains(&query)
+                    || c.id.to_string().contains(&query)
+            })
+            .map(|(i, c)| (i, c.id, c.name.clone()))
+            .collect();
+
+        match self.registry_sort_by {
+            RegistrySortBy::Id => pairs.sort_by_key(|(_, id, _)| *id),
+            RegistrySortBy::Name => {
+                pairs.sort_by(|(_, _, a), (_, _, b)| a.cmp(b));
+            }
+            RegistrySortBy::Category => {
+                pairs.sort_by_key(|(_, id, _)| (CreatureCategory::from_id(*id) as u8, *id));
+            }
+        }
+
+        let filtered_indices: Vec<usize> = pairs.into_iter().map(|(i, _, _)| i).collect();
+
+        let row_valid: Vec<bool> = filtered_indices
+            .iter()
+            .map(|&idx| {
+                let c = &creatures[idx];
+                let cat = CreatureCategory::from_id(c.id);
+                self.id_manager.validate_id(c.id, cat).is_ok()
+            })
+            .collect();
+
+        self.registry_view_cache = RegistryViewCache {
+            initialized: true,
+            signature,
+            counts,
+            filtered_indices,
+            row_valid,
+        };
     }
 
     /// Count creatures by category
@@ -1414,7 +1629,16 @@ impl CreaturesEditorState {
         // `horizontal_wrapped` prevents clipping on narrow windows.
         if self.mode == CreaturesEditorMode::Edit || self.mode == CreaturesEditorMode::Add {
             ui.horizontal_wrapped(|ui| {
-                if ui.button("✓ Save").clicked() {
+                if ui.button("⬅ Back to List").clicked() {
+                    self.mode = CreaturesEditorMode::List;
+                    self.selected_mesh_index = None;
+                    self.mesh_edit_buffer = None;
+                    self.mesh_transform_buffer = None;
+                    self.preview_dirty = false;
+                    ui.ctx().request_repaint();
+                }
+
+                if ui.button("💾 Save").clicked() {
                     // Validate creature
                     if let Err(e) = self.edit_buffer.validate() {
                         result_message = Some(format!("Validation error: {}", e));
@@ -1446,7 +1670,7 @@ impl CreaturesEditorState {
                     }
                 }
 
-                if ui.button("✕ Cancel").clicked() {
+                if ui.button("❌ Cancel").clicked() {
                     self.mode = CreaturesEditorMode::List;
                     self.selected_mesh_index = None;
                     self.mesh_edit_buffer = None;
@@ -1629,7 +1853,8 @@ impl CreaturesEditorState {
                                 let name = mesh.name.as_deref().unwrap_or(&default_name);
                                 let label = format!("{} ({} verts)", name, mesh.vertices.len());
 
-                                if ui.selectable_label(is_selected, label).clicked() {
+                                if ui.selectable_label(is_selected, label).clicked() && !is_selected
+                                {
                                     self.selected_mesh_index = Some(idx);
                                     self.mesh_edit_buffer = Some(mesh.clone());
                                     self.mesh_transform_buffer =
@@ -2084,6 +2309,20 @@ impl CreaturesEditorState {
         result_message
     }
 
+    /// Estimate the vertex and triangle counts for the primitive currently configured in the dialog.
+    fn estimate_primitive_geometry(&self) -> (usize, usize) {
+        let segments = self.primitive_segments.clamp(3, PRIMITIVE_SEGMENTS_MAX) as usize;
+        let rings = self.primitive_rings.clamp(2, PRIMITIVE_RINGS_MAX) as usize;
+
+        match self.primitive_type {
+            PrimitiveType::Cube => (24, 12),
+            PrimitiveType::Sphere => ((rings + 1) * (segments + 1), rings * segments * 2),
+            PrimitiveType::Cylinder => ((segments * 4) + 6, segments * 4),
+            PrimitiveType::Pyramid => (5, 6),
+            PrimitiveType::Cone => ((segments * 2) + 3, segments * 2),
+        }
+    }
+
     /// Show primitive replacement dialog
     fn show_primitive_replacement_dialog(
         &mut self,
@@ -2132,10 +2371,16 @@ impl CreaturesEditorState {
                                 .logarithmic(true),
                         );
                         ui.add(
-                            egui::Slider::new(&mut self.primitive_segments, 3..=64)
-                                .text("Segments"),
+                            egui::Slider::new(
+                                &mut self.primitive_segments,
+                                3..=PRIMITIVE_SEGMENTS_MAX,
+                            )
+                            .text("Segments"),
                         );
-                        ui.add(egui::Slider::new(&mut self.primitive_rings, 2..=64).text("Rings"));
+                        ui.add(
+                            egui::Slider::new(&mut self.primitive_rings, 2..=PRIMITIVE_RINGS_MAX)
+                                .text("Rings"),
+                        );
                     }
                     PrimitiveType::Cylinder => {
                         ui.label("Cylinder Settings:");
@@ -2145,8 +2390,11 @@ impl CreaturesEditorState {
                                 .logarithmic(true),
                         );
                         ui.add(
-                            egui::Slider::new(&mut self.primitive_segments, 3..=64)
-                                .text("Segments"),
+                            egui::Slider::new(
+                                &mut self.primitive_segments,
+                                3..=PRIMITIVE_SEGMENTS_MAX,
+                            )
+                            .text("Segments"),
                         );
                     }
                     PrimitiveType::Pyramid => {
@@ -2165,8 +2413,11 @@ impl CreaturesEditorState {
                                 .logarithmic(true),
                         );
                         ui.add(
-                            egui::Slider::new(&mut self.primitive_segments, 3..=64)
-                                .text("Segments"),
+                            egui::Slider::new(
+                                &mut self.primitive_segments,
+                                3..=PRIMITIVE_SEGMENTS_MAX,
+                            )
+                            .text("Segments"),
                         );
                     }
                 }
@@ -2192,6 +2443,22 @@ impl CreaturesEditorState {
                 ui.checkbox(&mut self.primitive_keep_name, "Keep mesh name");
 
                 ui.separator();
+
+                let (estimated_vertices, estimated_triangles) = self.estimate_primitive_geometry();
+                ui.label(format!(
+                    "Estimated output: {} vertices, {} triangles",
+                    estimated_vertices, estimated_triangles
+                ));
+
+                if estimated_triangles > PRIMITIVE_SOFT_TRIANGLE_BUDGET {
+                    ui.colored_label(
+                        egui::Color32::YELLOW,
+                        format!(
+                            "⚠ Dense primitive: preview rendering may be slower above {} triangles.",
+                            PRIMITIVE_SOFT_TRIANGLE_BUDGET
+                        ),
+                    );
+                }
 
                 ui.horizontal(|ui| {
                     if ui.button("✓ Generate").clicked() {
@@ -2225,26 +2492,29 @@ impl CreaturesEditorState {
             self.primitive_custom_color
         };
 
+        let primitive_segments = self.primitive_segments.clamp(3, PRIMITIVE_SEGMENTS_MAX);
+        let primitive_rings = self.primitive_rings.clamp(2, PRIMITIVE_RINGS_MAX);
+
         // Generate primitive mesh
         let mut new_mesh = match self.primitive_type {
             PrimitiveType::Cube => generate_cube(self.primitive_size, color),
             PrimitiveType::Sphere => generate_sphere(
                 self.primitive_size,
-                self.primitive_segments,
-                self.primitive_rings,
+                primitive_segments,
+                primitive_rings,
                 color,
             ),
             PrimitiveType::Cylinder => generate_cylinder(
                 self.primitive_size,
                 self.primitive_size * 2.0,
-                self.primitive_segments,
+                primitive_segments,
                 color,
             ),
             PrimitiveType::Pyramid => generate_pyramid(self.primitive_size, color),
             PrimitiveType::Cone => generate_cone(
                 self.primitive_size,
                 self.primitive_size * 2.0,
-                self.primitive_segments,
+                primitive_segments,
                 color,
             ),
         };
