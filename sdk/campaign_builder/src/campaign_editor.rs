@@ -408,6 +408,13 @@ impl CampaignMetadataEditorState {
     ///     faction: None,
     ///     is_merchant: false,
     ///     is_innkeeper: true,
+    ///     is_priest: false,
+    ///     is_trainer: false,
+    ///     stock_template: None,
+    ///     service_catalog: None,
+    ///     economy: None,
+    ///     training_fee_base: None,
+    ///     training_fee_multiplier: None,
     /// };
     /// let npcs = [npc];
     /// let filtered = state.visible_innkeepers(&npcs);
@@ -1540,12 +1547,13 @@ impl CampaignMetadataEditorState {
                     right_ui.add_space(10.0);
                     right_ui.separator();
                     right_ui.add_space(6.0);
-                    right_ui.horizontal(|ui| {
+                    right_ui.horizontal_wrapped(|ui| {
                         if ui.button("⬅ Back to List").clicked() {
                             self.mode = CampaignEditorMode::List;
+                            ui.ctx().request_repaint();
                         }
 
-                        if ui.button("💾 Save Campaign").clicked() {
+                        if ui.button("💾 Save").clicked() {
                             self.apply_buffer_to_metadata();
                             if let Some(path) = campaign_path.as_ref() {
                                 match self.save_to_file(path.as_path()) {
@@ -1581,6 +1589,11 @@ impl CampaignMetadataEditorState {
                             }
                         }
 
+                        if ui.button("❌ Cancel").clicked() {
+                            self.cancel_edit();
+                            ui.ctx().request_repaint();
+                        }
+
                         if ui.button("✅ Validate").clicked() {
                             // Apply pending edits in the buffer to the editor's metadata and
                             // update the shared `metadata` reference so the app-level validator
@@ -1595,6 +1608,7 @@ impl CampaignMetadataEditorState {
 
                             *ctx.status_message =
                                 "Validation requested from Campaign metadata editor".to_string();
+                            ui.ctx().request_repaint();
                         }
                     });
                 },

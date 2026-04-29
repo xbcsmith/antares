@@ -1314,16 +1314,19 @@ impl ConditionsEditorState {
 
             ui.separator();
 
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.button("⬅ Back to List").clicked() {
                     should_cancel = true;
+                    ui.ctx().request_repaint();
                 }
 
                 if ui.button("💾 Save").clicked() {
                     should_save = true;
+                    ui.ctx().request_repaint();
                 }
                 if ui.button("❌ Cancel").clicked() {
                     should_cancel = true;
+                    ui.ctx().request_repaint();
                 }
             });
 

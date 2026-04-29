@@ -770,8 +770,9 @@ impl MonstersEditorState {
                         {
                             self.creature_picker_open = true;
                         }
-                        if ui.button("Clear").clicked() {
+                        if ui.button("Clear").clicked() && self.edit_buffer.creature_id.is_some() {
                             self.apply_selected_creature_id(None);
+                            *ctx.unsaved_changes = true;
                         }
                         ui.label("ℹ").on_hover_text(
                             "Links this monster to a procedural mesh creature definition. When set, \
@@ -975,9 +976,10 @@ impl MonstersEditorState {
                 ui.add_space(10.0);
                 ui.separator();
 
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.button("⬅ Back to List").clicked() {
                         self.mode = MonstersEditorMode::List;
+                        ui.ctx().request_repaint();
                     }
 
                     if ui.button("💾 Save").clicked() {
@@ -1003,6 +1005,7 @@ impl MonstersEditorState {
                     if ui.button("❌ Cancel").clicked() {
                         self.mode = MonstersEditorMode::List;
                         self.monster_name_input_buffer.clear();
+                        ui.ctx().request_repaint();
                     }
                 });
             });

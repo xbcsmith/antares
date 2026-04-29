@@ -1231,11 +1231,12 @@ impl StockTemplatesEditorState {
                 }
 
                 // ── Action buttons ──
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.button("⬅ Back to List").clicked() {
                         self.mode = StockTemplatesEditorMode::List;
                         self.validation_errors.clear();
                         self.validation_warnings.clear();
+                        ui.ctx().request_repaint();
                     }
 
                     if ui.button("💾 Save").clicked() {
@@ -1298,6 +1299,7 @@ impl StockTemplatesEditorState {
                         self.edit_buffer = StockTemplateEditBuffer::default();
                         self.validation_errors.clear();
                         self.validation_warnings.clear();
+                        ui.ctx().request_repaint();
                     }
                 });
             });

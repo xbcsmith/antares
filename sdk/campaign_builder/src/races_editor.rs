@@ -1074,9 +1074,10 @@ impl RacesEditorState {
                 ui.separator();
 
                 // Save/Cancel/Back to List buttons
-                ui.horizontal(|ui| {
-                    if ui.button("Back to List").clicked() {
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("⬅ Back to List").clicked() {
                         self.cancel_edit();
+                        ui.ctx().request_repaint();
                     }
                     if ui.button("💾 Save").clicked() {
                         match self.save_race() {
@@ -1091,6 +1092,7 @@ impl RacesEditorState {
                     }
                     if ui.button("❌ Cancel").clicked() {
                         self.cancel_edit();
+                        ui.ctx().request_repaint();
                     }
                 });
             });

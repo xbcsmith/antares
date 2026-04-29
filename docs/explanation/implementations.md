@@ -2,6 +2,115 @@
 
 ---
 
+## Vegetation Visual Quality Implementation Plan (Complete)
+
+### Overview
+
+Created `docs/explanation/vegetation_visual_quality_implementation_plan.md`, a phased implementation plan for fixing the current tree and grass visual quality problems.
+
+### Plan Scope
+
+The plan addresses the reported vegetation issues:
+
+- Trees look too similar across Oak, Pine, Palm, Dead, Willow, Birch, and Shrub variants.
+- Bark textures are not visibly effective.
+- Foliage appears as black blobs or poorly aligned clusters.
+- Bushes and shrubs clip tree trunks.
+- Grass looks sparse, spiky, and repetitive.
+- Campaign Builder vegetation edits do not visibly affect runtime output.
+
+### Key Design Decisions
+
+- Keep vegetation authoring data in existing `TileVisualMetadata` fields where possible.
+- Preserve domain/render separation by keeping Bevy-specific tree and grass generation in `src/game/systems`.
+- Port rendering concepts from `bevy_procedural_tree`, `bevy_procedural_grass`, and `bevy_terrain` instead of blindly adding incompatible dependencies.
+- Fix current defects first, especially branch meshes containing foliage sphere geometry and foliage transforms not matching trunk scaling.
+- Use deterministic placement and variation so vegetation looks natural without breaking repeatability.
+- Add tests using stable fixtures and avoid new test dependencies on `campaigns/tutorial`.
+
+### Files Added
+
+- `docs/explanation/vegetation_visual_quality_implementation_plan.md`
+
+---
+
+## Skill System Level Scaling Implementation Plan (Complete)
+
+### Overview
+
+Created `docs/explanation/skill_system_level_scaling_implementation_plan.md`, a phased implementation plan for adding level-scaled skills to the game engine.
+
+### Plan Scope
+
+The plan separates numeric, level-scaled **skills** from existing binary item-use **proficiencies** and defines a staged route for:
+
+- Domain skill definitions and `skills.ron`
+- Auto Skills derived from character level, class, race, and persistent character bonuses
+- Skill check APIs for game mechanics
+- Character-sheet skill display
+- Campaign Builder Skills Editor support
+- NPC Train Skills domain/application flow
+- NPC Train Skills UI
+- SDK authoring for skill trainer NPCs and dialogue
+- Documentation, validation, balancing, and migration guidance
+
+### Key Design Decisions
+
+- `ProficiencyDefinition` remains unchanged and item-focused.
+- Skills are introduced as a new domain concept with `SkillId`, `SkillRank`, `SkillDefinition`, `SkillDatabase`, and scaling modes.
+- Auto-derived ranks are computed on demand.
+- `Character` stores only persistent/manual/trained ranks.
+- NPC skill training is planned as a separate flow from existing NPC level training.
+- All test fixtures must live under `data/test_campaign`, not `campaigns/tutorial`.
+
+### Files Added
+
+- `docs/explanation/skill_system_level_scaling_implementation_plan.md`
+
+---
+
+## Bugfix: Item Mesh Editor Toolbar and Action Row Visibility (Complete)
+
+### Problem
+
+The Campaign Builder's Item Mesh Editor had two related UI issues:
+
+1. The registry view top bar did not match the standard top bars used by other editors.
+2. Several item mesh action buttons existed in code but could be hard to find or hidden in the displayed workflow.
+
+### Root Causes
+
+- The Item Mesh Editor registry view used a custom search/filter/action layout instead of the shared `EditorToolbar` pattern used by the other Campaign Builder editors.
+- The Item Mesh Editor placed some contextual actions only in limited locations, making them unavailable from common registry/detail/edit workflows.
+- A prior attempted fix changed shared layout helpers, which affected unrelated editors. That shared-layout change was rejected and is not part of the final fix.
+
+### Fixes
+
+- Kept shared layout helpers unchanged.
+- Updated only the Item Mesh Editor registry view to use the existing shared `EditorToolbar` API with `item_mesh_toolbar` as its unique ID salt.
+- Moved category and sort filters into a wrapped secondary toolbar row, matching the layout style used by other registry editors.
+- Added explicit, visible registry actions for:
+  - `Register Asset`
+  - `Export Selected RON`
+- Wired the existing generic toolbar actions in the Item Mesh Editor without adding new `EditorToolbar` methods:
+  - `Load` and `Import` open the register-asset flow.
+  - `Export` exports the currently selected item mesh descriptor as RON.
+  - `Save` remains disabled through the pre-existing `with_save_button(false)` API.
+- Ensured contextual item mesh actions are available from:
+  - The registry toolbar area
+  - The detail/preview panel
+  - The edit-mode bottom action row
+- Reserved vertical space in the Item Mesh Editor edit screen before rendering its edit columns so `Back to List`, `Save`, `Cancel`, and `Register Asset` remain visible.
+
+### Validation
+
+- `cargo fmt --all` passed.
+- `cargo check --all-targets --all-features` passed after removing the rejected shared-toolbar API calls.
+- `cargo clippy --all-targets --all-features -- -D warnings` passed.
+- `cargo nextest run --all-features --status-level fail` passed: 4819 tests passed, 8 skipped.
+
+---
+
 ## Bugfix: Character Sheet — Prev/Next/Party Overview Buttons and Panel Clipping (Complete)
 
 ### Problems
@@ -31,7 +140,7 @@ are placed outside the egui clip rectangle and never receive pointer events.
 
 #### 2. Column overflow forces window off-screen
 
-`stats_col_w` was pre-computed *before* `ui.horizontal` ran:
+`stats_col_w` was pre-computed _before_ `ui.horizontal` ran:
 
 ```rust
 let sep_w    = 1.0 + 2.0 * ui.spacing().item_spacing.x;   // underestimates by item_spacing
@@ -58,7 +167,7 @@ egui::Window::new("Character Sheet")
 
 #### `render_single_view` — header: buttons first
 
-The entire header row now uses `right_to_left`.  Buttons are added first (rightmost)
+The entire header row now uses `right_to_left`. Buttons are added first (rightmost)
 and always have space; the title fills the remainder via a nested `left_to_right`
 sub-layout with `.truncate()` to handle very long names gracefully:
 
@@ -76,7 +185,7 @@ ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
 #### `render_single_view` — body: read widths inline, use `ui.columns`
 
 The body is wrapped in a `ScrollArea::vertical()` and uses `ui.horizontal_top()`.
-The right column width is read *inside* the layout after the portrait column and
+The right column width is read _inside_ the layout after the portrait column and
 separator are placed — zero arithmetic, zero error:
 
 ```rust
@@ -202,7 +311,7 @@ Added between `render_equip_slot` and `sex_display`. Accepts `label: &str` and
 `value: u8` (the `current` field from the `AttributePair` for that resistance):
 
 - `value == 0` → renders `"0"` in `STAT_EMPTY_COLOR` (grey).
-- `value > 0`  → renders the numeric value in `STAT_MODIFIED_COLOR` (amber).
+- `value > 0` → renders the numeric value in `STAT_MODIFIED_COLOR` (amber).
 
 This coloring rule deliberately differs from `render_u8_row` (which compares
 `base` vs `current`): resistances are zero by default and any non-zero value
@@ -232,20 +341,20 @@ The existing identity block below the portrait was extended. The previous
 `"{sex} -- {alignment}"` single label is replaced with a titled `About`
 section containing five `ui.horizontal` rows:
 
-| Label | Source |
-|---|---|
-| Sex | `sex_display(character.sex)` |
+| Label     | Source                                   |
+| --------- | ---------------------------------------- |
+| Sex       | `sex_display(character.sex)`             |
 | Alignment | `alignment_display(character.alignment)` |
-| Age | `"{age} yr {age_days} d"` |
-| Gold | `character.gold` |
-| Gems | `character.gems` |
+| Age       | `"{age} yr {age_days} d"`                |
+| Gold      | `character.gold`                         |
+| Gems      | `character.gems`                         |
 
 ### Tests Added (3 new tests)
 
-| Test | What it verifies |
-|---|---|
-| `test_render_resistances_zero_uses_empty_color` | `STAT_EMPTY_COLOR == Color32::from_rgb(128,128,128)`; `render_resistance_row(_, 0)` does not panic |
-| `test_render_resistances_nonzero_uses_modified_color` | `STAT_MODIFIED_COLOR == Color32::from_rgb(255,191,0)`; `render_resistance_row(_, 25/255)` does not panic |
+| Test                                                   | What it verifies                                                                                                                                                |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_render_resistances_zero_uses_empty_color`        | `STAT_EMPTY_COLOR == Color32::from_rgb(128,128,128)`; `render_resistance_row(_, 0)` does not panic                                                              |
+| `test_render_resistances_nonzero_uses_modified_color`  | `STAT_MODIFIED_COLOR == Color32::from_rgb(255,191,0)`; `render_resistance_row(_, 25/255)` does not panic                                                        |
 | `test_render_about_section_displays_sex_alignment_age` | `render_single_view` completes without panic for a character with non-default About fields (age 120, gold 1500, gems 12) and a mix of zero/non-zero resistances |
 
 ### Design Decisions
@@ -474,7 +583,6 @@ any key supported by `parse_key_code`.
   that omit the new fields continue to deserialise without error and receive the
   standard 1–6 key bindings.
 
-
 ## Trap Notification Pop-Up (Complete)
 
 ### Overview
@@ -572,6 +680,7 @@ game mechanic.
 count-based widget (`sdk/campaign_builder/src/ui_helpers/autocomplete.rs`).
 
 **Key design decisions:**
+
 - The underlying `Vec<MonsterId>` retains its flat, one-entry-per-instance
   representation (three Skeletons = three copies of the Skeleton ID). No data
   model change was required.
@@ -597,7 +706,6 @@ count-based widget (`sdk/campaign_builder/src/ui_helpers/autocomplete.rs`).
   — verifies that duplicate IDs survive a `to_map_event` → `from_map_event`
   round-trip intact
 
-
 ## Dead Character Shows OK Status After Rest — Bug Fix (Complete)
 
 ### Overview
@@ -611,7 +719,7 @@ and the active-condition list stored in `Character.active_conditions`.
 
 1. **`handle_rest_complete` ticked fatal characters** — the loop that calls
    `tick_conditions_rest()` and `reconcile_character_conditions()` ran on
-   *every* party member, including those whose `conditions.is_fatal()` is
+   _every_ party member, including those whose `conditions.is_fatal()` is
    `true`. All other rest helpers (`rest_party`, `rest_party_hour`,
    `apply_starvation_damage`) already guarded against this with
    `is_fatal()` checks.
@@ -656,10 +764,10 @@ present in this file).
 
 ### New Tests (2)
 
-| Test | File | What it verifies |
-|------|------|-----------------|
-| `test_handle_rest_complete_skips_fatal_members` | `src/game/systems/rest.rs` | A dead party member's DEAD condition and 0 HP are unchanged after running the rest-complete condition loop with the `is_fatal()` guard in place. |
-| `test_reconcile_character_conditions_noop_for_fatal` | `src/domain/combat/engine.rs` | Calling `reconcile_character_conditions` with empty condition definitions on a dead character does not clear the DEAD flag. |
+| Test                                                 | File                          | What it verifies                                                                                                                                 |
+| ---------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `test_handle_rest_complete_skips_fatal_members`      | `src/game/systems/rest.rs`    | A dead party member's DEAD condition and 0 HP are unchanged after running the rest-complete condition loop with the `is_fatal()` guard in place. |
+| `test_reconcile_character_conditions_noop_for_fatal` | `src/domain/combat/engine.rs` | Calling `reconcile_character_conditions` with empty condition definitions on a dead character does not clear the DEAD flag.                      |
 
 ### Architecture Compliance
 
@@ -713,10 +821,10 @@ on the caller's next check.
 
 ### New Tests (2)
 
-| Test | What it verifies |
-|------|-----------------|
-| `test_advance_turn_skips_unconscious_player` | A player who becomes unconscious (HP 0 + `UNCONSCIOUS` flag) mid-round is skipped by `advance_turn`; the monster becomes the current combatant. |
-| `test_advance_round_drops_unconscious_characters` | After advancing past the end of a round, the new round's `turn_order` contains only alive combatants — the unconscious player is excluded. |
+| Test                                              | What it verifies                                                                                                                                |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_advance_turn_skips_unconscious_player`      | A player who becomes unconscious (HP 0 + `UNCONSCIOUS` flag) mid-round is skipped by `advance_turn`; the monster becomes the current combatant. |
+| `test_advance_round_drops_unconscious_characters` | After advancing past the end of a round, the new round's `turn_order` contains only alive combatants — the unconscious player is excluded.      |
 
 ### Architecture Compliance
 
@@ -804,15 +912,15 @@ under `tests/`.
 
 The following files were updated to replace their inline struct literals:
 
-| File | Change |
-|---|---|
-| `src/sdk/validation.rs` | 3 × `CampaignConfig { … }` → `CampaignConfig { starting_innkeeper: "…", ..CampaignConfig::default() }` |
-| `src/sdk/campaign_packager.rs` | 2 × full `Campaign { … }` → `test_fixtures::make_test_campaign()` |
-| `src/application/mod.rs` | 3 × full `Campaign { … }` → `test_fixtures::make_test_campaign()` (with one field override via `mut`) |
-| `src/application/save_game.rs` | 1 × full `Campaign { … }` → `test_fixtures::make_test_campaign()` |
-| `src/bin/antares.rs` | `create_test_campaign` body → `CampaignConfig::default()`, `CampaignData::default()`, `CampaignAssets::default()` |
-| `src/sdk/campaign_loader.rs` | 2 × own test initialisers → struct-update syntax |
-| `tests/campaign_integration_test.rs` | `create_test_campaign` body → `common::make_test_campaign(…)` |
+| File                                 | Change                                                                                                            |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `src/sdk/validation.rs`              | 3 × `CampaignConfig { … }` → `CampaignConfig { starting_innkeeper: "…", ..CampaignConfig::default() }`            |
+| `src/sdk/campaign_packager.rs`       | 2 × full `Campaign { … }` → `test_fixtures::make_test_campaign()`                                                 |
+| `src/application/mod.rs`             | 3 × full `Campaign { … }` → `test_fixtures::make_test_campaign()` (with one field override via `mut`)             |
+| `src/application/save_game.rs`       | 1 × full `Campaign { … }` → `test_fixtures::make_test_campaign()`                                                 |
+| `src/bin/antares.rs`                 | `create_test_campaign` body → `CampaignConfig::default()`, `CampaignData::default()`, `CampaignAssets::default()` |
+| `src/sdk/campaign_loader.rs`         | 2 × own test initialisers → struct-update syntax                                                                  |
+| `tests/campaign_integration_test.rs` | `create_test_campaign` body → `common::make_test_campaign(…)`                                                     |
 
 ### Why This Matters
 
@@ -833,7 +941,6 @@ cargo check       → Finished, 0 errors
 cargo clippy      → Finished, 0 warnings
 cargo nextest run → 4761 passed, 0 failed
 ```
-
 
 ## SDK CLI Consolidation — Phase 4: Cleanup and Polish (Complete)
 
@@ -932,11 +1039,11 @@ antares-sdk --quiet names --theme fantasy --number 100
 
 #### 4.4 — Documentation Updated
 
-| File                                                        | Change                                                                                                 |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `docs/tutorials/name_generator_quickstart.md`               | All `cargo run --bin antares-name-gen` references replaced with `cargo run --bin antares-sdk -- names` |
-| `docs/how-to/sdk_cli_usage.md`                              | **New file** — complete reference for all `antares-sdk` subcommands                                    |
-| `docs/explanation/implementations.md`                       | This entry                                                                                             |
+| File                                          | Change                                                                                                 |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `docs/tutorials/name_generator_quickstart.md` | All `cargo run --bin antares-name-gen` references replaced with `cargo run --bin antares-sdk -- names` |
+| `docs/how-to/sdk_cli_usage.md`                | **New file** — complete reference for all `antares-sdk` subcommands                                    |
+| `docs/explanation/implementations.md`         | This entry                                                                                             |
 
 #### 4.4 (follow-up) — Stale Docs Sweep
 
@@ -945,22 +1052,22 @@ updated **12 additional documentation files** that still referenced the deleted
 standalone binaries. All old binary names are now replaced with their
 `antares-sdk` subcommand equivalents throughout the entire `docs/` tree.
 
-| File                                                        | Old Reference(s) Fixed                                    |
-| ----------------------------------------------------------- | --------------------------------------------------------- |
-| `docs/how-to/use_name_generator.md`                         | All `antares-name-gen` → `antares-sdk names`               |
-| `docs/how-to/using_sdk_tools.md`                            | All 5 old binaries → `antares-sdk` subcommands             |
-| `docs/how-to/using_map_builder.md`                          | `map_builder`, `validate_map` → `antares-sdk map build/validate` |
-| `docs/how-to/using_item_editor.md`                          | `item_editor`, `campaign_validator` → `antares-sdk` subcommands |
-| `docs/how-to/creating_maps.md`                              | `validate_map` → `antares-sdk map validate`               |
-| `docs/how-to/add_classes_races.md`                          | `campaign_validator` → `antares-sdk campaign validate`    |
-| `docs/how-to/create_characters.md`                          | `campaign_validator` → `antares-sdk campaign validate`    |
-| `docs/how-to/creating_and_validating_campaigns.md`          | All `campaign_validator` → `antares-sdk campaign validate` |
-| `docs/explanation/modding_guide.md`                         | `campaign_validator` → `antares-sdk campaign validate`; `--package` → `tar -czf` |
-| `docs/tutorials/creating_campaigns.md`                      | Old binary paths → `antares-sdk` subcommands; `--package` → `tar -czf` |
-| `docs/tutorials/getting_started_campaign_creation.md`       | All `campaign_validator` → `antares-sdk campaign validate` |
-| `docs/reference/architecture.md`                            | `src/bin/` listing updated; inline tool references updated  |
-| `docs/reference/map_ron_format.md`                          | `validate_map` → `antares-sdk map validate`               |
-| `docs/reference/campaign_content_format.md`                 | `campaign_validator` → `antares-sdk campaign validate`    |
+| File                                                  | Old Reference(s) Fixed                                                           |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `docs/how-to/use_name_generator.md`                   | All `antares-name-gen` → `antares-sdk names`                                     |
+| `docs/how-to/using_sdk_tools.md`                      | All 5 old binaries → `antares-sdk` subcommands                                   |
+| `docs/how-to/using_map_builder.md`                    | `map_builder`, `validate_map` → `antares-sdk map build/validate`                 |
+| `docs/how-to/using_item_editor.md`                    | `item_editor`, `campaign_validator` → `antares-sdk` subcommands                  |
+| `docs/how-to/creating_maps.md`                        | `validate_map` → `antares-sdk map validate`                                      |
+| `docs/how-to/add_classes_races.md`                    | `campaign_validator` → `antares-sdk campaign validate`                           |
+| `docs/how-to/create_characters.md`                    | `campaign_validator` → `antares-sdk campaign validate`                           |
+| `docs/how-to/creating_and_validating_campaigns.md`    | All `campaign_validator` → `antares-sdk campaign validate`                       |
+| `docs/explanation/modding_guide.md`                   | `campaign_validator` → `antares-sdk campaign validate`; `--package` → `tar -czf` |
+| `docs/tutorials/creating_campaigns.md`                | Old binary paths → `antares-sdk` subcommands; `--package` → `tar -czf`           |
+| `docs/tutorials/getting_started_campaign_creation.md` | All `campaign_validator` → `antares-sdk campaign validate`                       |
+| `docs/reference/architecture.md`                      | `src/bin/` listing updated; inline tool references updated                       |
+| `docs/reference/map_ron_format.md`                    | `validate_map` → `antares-sdk map validate`                                      |
+| `docs/reference/campaign_content_format.md`           | `campaign_validator` → `antares-sdk campaign validate`                           |
 
 #### 4.5 — Integration Tests
 
@@ -13529,7 +13636,6 @@ level, SP cost, gem cost, context label, and full `description` string from
 - [x] No test references to `campaigns/tutorial` — all fixtures use `data/test_campaign`
 - [x] No architectural deviations from architecture.md
 
-
 ---
 
 ## Map Editor -- Recruitable Character Autocomplete Selector (Complete)
@@ -13537,9 +13643,9 @@ level, SP cost, gem cost, context label, and full `description` string from
 ### Overview
 
 The Campaign Builder's Map Editor "Recruitable Character" event type previously
-used a plain `text_edit_singleline` for the Character ID field.  This made it
+used a plain `text_edit_singleline` for the Character ID field. This made it
 easy to enter an invalid or misspelled ID because there was no guidance about
-which character definitions exist.  This task replaces that bare text input
+which character definitions exist. This task replaces that bare text input
 with an autocomplete dropdown backed by the loaded `CharacterDefinition` list,
 exactly mirroring the pattern already used by `NpcDialogue` with
 `autocomplete_npc_selector`.
@@ -13554,8 +13660,8 @@ exactly mirroring the pattern already used by `NpcDialogue` with
   Follows the same pattern as `extract_npc_candidates`.
 - **`autocomplete_character_selector`** (new public function): thin wrapper
   around `autocomplete_entity_selector_generic` that drives the dropdown with
-  `extract_character_candidates`.  Writes back only the raw `CharacterDefinitionId`
-  string on selection.  Both functions are re-exported via `pub use autocomplete::*`
+  `extract_character_candidates`. Writes back only the raw `CharacterDefinitionId`
+  string on selection. Both functions are re-exported via `pub use autocomplete::*`
   in `ui_helpers/mod.rs` without any `mod.rs` change.
 
 #### `sdk/campaign_builder/src/map_editor.rs`
@@ -13572,7 +13678,7 @@ exactly mirroring the pattern already used by `NpcDialogue` with
 - **`EventType::RecruitableCharacter` branch**: the original plain-text
   "Character ID:" row is replaced by `autocomplete_character_selector`
   (writes `event_editor.recruit_character_id` and syncs
-  `recruit_character_id_input_buffer`).  A second "Or enter Character ID
+  `recruit_character_id_input_buffer`). A second "Or enter Character ID
   manually:" text input is kept beneath the dropdown for free-form entry.
 - **Tests** (`test_inspector_panel_runs_with_event`,
   `test_event_editor_renders_before_visual_properties_section`): both
@@ -13585,9 +13691,9 @@ exactly mirroring the pattern already used by `NpcDialogue` with
 
 ### Quality Gates
 
-- cargo fmt         -- no output (all files formatted)
-- cargo check       -- Finished with 0 errors, 0 warnings
-- cargo clippy      -- Finished with 0 warnings
+- cargo fmt -- no output (all files formatted)
+- cargo check -- Finished with 0 errors, 0 warnings
+- cargo clippy -- Finished with 0 warnings
 - cargo nextest run -- 4761 passed, 8 skipped, 0 failed
 
 ### Architecture Compliance
@@ -13718,7 +13824,7 @@ Added `GameState::enter_character_sheet_at(index: usize)`:
 - [x] No new domain types — reuses `CharacterSheetState::focused_index`
 - [x] `enter_character_sheet_at` follows the same pattern as `enter_character_sheet`
 - [x] Clamping consistent with `ContainerInventoryState::switch_character` and
-  `MerchantInventoryState::switch_character`
+      `MerchantInventoryState::switch_character`
 - [x] RON data files unchanged
 - [x] No test references to `campaigns/tutorial`
 - [x] All four quality gates pass
@@ -13728,8 +13834,8 @@ Added `GameState::enter_character_sheet_at(index: usize)`:
 ### Overview
 
 Phase 2 wires the HUD portrait buttons to open the character sheet when
-clicked.  Clicking any portrait in the bottom HUD strip opens
-`GameMode::CharacterSheet` focused on that party member.  The click is allowed
+clicked. Clicking any portrait in the bottom HUD strip opens
+`GameMode::CharacterSheet` focused on that party member. The click is allowed
 in all modes where a UI focus conflict would not occur, and is blocked in
 `Dialogue`, `Training`, `MerchantInventory`, `ContainerInventory`, and
 `TempleService`.
@@ -13755,7 +13861,7 @@ Two functions inserted immediately before `fn update_hud`:
 
 - `pub fn portrait_click_allowed(mode: &GameMode) -> bool` — pure predicate
   that returns `true` for `Exploration`, `Automap`, `Inventory(_)`,
-  `SpellBook(_)`, `GameLog`, `Combat(_)`, and `CharacterSheet(_)`.  `pub` so
+  `SpellBook(_)`, `GameLog`, `Combat(_)`, and `CharacterSheet(_)`. `pub` so
   doc-tests and external tests can call it directly.
 
 - `fn handle_portrait_click_system(...)` — Bevy system that iterates portrait
@@ -13777,19 +13883,19 @@ returns to the active combat turn.
 
 ### Tests Added (11 new tests in `mod portrait_click_tests`)
 
-| Test | What it verifies |
-|------|-----------------|
-| `test_portrait_click_allowed_exploration` | Exploration is allowed |
-| `test_portrait_click_allowed_automap` | Automap is allowed |
-| `test_portrait_click_allowed_game_log` | GameLog is allowed |
-| `test_portrait_click_not_allowed_game_over` | GameOver is blocked |
-| `test_handle_portrait_click_opens_sheet_in_exploration` | Sheet opens at correct index from Exploration |
-| `test_handle_portrait_click_opens_sheet_in_combat` | Sheet opens from Combat; resume mode is Combat |
-| `test_handle_portrait_click_ignored_in_dialogue` | Dialogue blocks click |
-| `test_handle_portrait_click_ignored_in_training` | Training blocks click |
-| `test_handle_portrait_click_selects_correct_party_index` | Correct `focused_index` set |
-| `test_handle_portrait_click_when_already_in_sheet_updates_index` | Re-click updates index without re-wrapping resume mode |
-| `test_close_sheet_from_combat_returns_to_combat` | Esc from sheet opened during combat restores combat mode |
+| Test                                                             | What it verifies                                         |
+| ---------------------------------------------------------------- | -------------------------------------------------------- |
+| `test_portrait_click_allowed_exploration`                        | Exploration is allowed                                   |
+| `test_portrait_click_allowed_automap`                            | Automap is allowed                                       |
+| `test_portrait_click_allowed_game_log`                           | GameLog is allowed                                       |
+| `test_portrait_click_not_allowed_game_over`                      | GameOver is blocked                                      |
+| `test_handle_portrait_click_opens_sheet_in_exploration`          | Sheet opens at correct index from Exploration            |
+| `test_handle_portrait_click_opens_sheet_in_combat`               | Sheet opens from Combat; resume mode is Combat           |
+| `test_handle_portrait_click_ignored_in_dialogue`                 | Dialogue blocks click                                    |
+| `test_handle_portrait_click_ignored_in_training`                 | Training blocks click                                    |
+| `test_handle_portrait_click_selects_correct_party_index`         | Correct `focused_index` set                              |
+| `test_handle_portrait_click_when_already_in_sheet_updates_index` | Re-click updates index without re-wrapping resume mode   |
+| `test_close_sheet_from_combat_returns_to_combat`                 | Esc from sheet opened during combat restores combat mode |
 
 ### Architecture Compliance
 
@@ -13813,10 +13919,10 @@ cargo nextest run → 4808 passed, 0 failed
 ### Overview
 
 Phase 3 adds a second portrait resource, `FullPortraitAssets`, and a matching
-loader system `ensure_full_portraits_loaded`.  Full-length (head-to-feet)
+loader system `ensure_full_portraits_loaded`. Full-length (head-to-feet)
 portraits live at `<campaign_root>/assets/portraits/full/<portrait_id>.png` and
 are indexed by the same normalized key convention as head portraits (lowercase
-filename stem, spaces replaced by `_`).  When no full portrait file exists the
+filename stem, spaces replaced by `_`). When no full portrait file exists the
 HUD sheet falls back to the deterministic color placeholder from
 `get_portrait_color`.
 
@@ -13833,7 +13939,7 @@ have not produced full portraits compile and run without errors.
 New `#[derive(Resource, Default)]` struct inserted immediately after
 `PortraitAssets`:
 
-```antares/src/game/systems/hud.rs#L354-382
+````antares/src/game/systems/hud.rs#L354-382
 /// Resource holding loaded full-length portrait image handles for the active campaign.
 ///
 /// Full-length (head-to-feet) portraits are stored at:
@@ -13862,7 +13968,7 @@ pub struct FullPortraitAssets {
     /// Campaign ID this resource is currently populated for (to avoid re-loading).
     pub loaded_for_campaign: Option<String>,
 }
-```
+````
 
 **Change 2 — `HudPlugin::build` updated**
 
@@ -13889,18 +13995,18 @@ New system added immediately after `ensure_portraits_loaded` that:
 #### `data/test_campaign/assets/portraits/full/.gitkeep`
 
 New empty fixture directory added so the test campaign includes a `full/`
-sub-directory.  Tests that exercise `scan_full_portraits_dir` on an empty
+sub-directory. Tests that exercise `scan_full_portraits_dir` on an empty
 directory use `tempfile::tempdir()` for isolation.
 
 ### Tests Added (5 new tests in `mod full_portrait_tests`)
 
-| Test | What it verifies |
-|------|-----------------|
-| `test_full_portrait_assets_default_is_empty` | `FullPortraitAssets::default()` has empty map, no fallback, no campaign |
-| `test_ensure_full_portraits_loaded_graceful_on_missing_directory` | No panic when directory does not exist; empty result |
-| `test_ensure_full_portraits_loaded_graceful_on_empty_directory` | No panic on empty directory; empty result |
-| `test_ensure_full_portraits_loaded_indexes_png_file` | Single PNG file produces one entry with normalized key |
-| `test_ensure_full_portraits_loaded_skips_non_image_files` | `.md` and `.ron` files are not indexed |
+| Test                                                              | What it verifies                                                        |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `test_full_portrait_assets_default_is_empty`                      | `FullPortraitAssets::default()` has empty map, no fallback, no campaign |
+| `test_ensure_full_portraits_loaded_graceful_on_missing_directory` | No panic when directory does not exist; empty result                    |
+| `test_ensure_full_portraits_loaded_graceful_on_empty_directory`   | No panic on empty directory; empty result                               |
+| `test_ensure_full_portraits_loaded_indexes_png_file`              | Single PNG file produces one entry with normalized key                  |
+| `test_ensure_full_portraits_loaded_skips_non_image_files`         | `.md` and `.ron` files are not indexed                                  |
 
 Tests use an inline `scan_full_portraits_dir` helper (same pattern as
 `test_scan_portraits_dir_filters_images` in the existing `tests` module) to
@@ -13934,10 +14040,10 @@ cargo nextest run → 4813 passed, 0 failed
 
 Phase 4 wires the `FullPortraitAssets` resource (from Phase 3) into the
 character sheet UI, replacing the previous two-column stats layout with a
-**left-portrait + right-stats** design.  When a full-length portrait PNG exists
+**left-portrait + right-stats** design. When a full-length portrait PNG exists
 for the focused character it is rendered at 170 × 280 px in the left column.
 When absent, a deterministic coloured placeholder with the character's initials
-is shown instead.  The hint bar was updated to document the Phase 1 `[1-6]`
+is shown instead. The hint bar was updated to document the Phase 1 `[1-6]`
 number-key navigation.
 
 ### Changes
@@ -13963,7 +14069,7 @@ use bevy_egui::EguiTextureHandle;
 - Before calling `contexts.ctx_mut()`, the focused character's portrait key is
   resolved (lowercased `portrait_id` if set, otherwise lowercased `name`), and
   a matching handle is registered with egui via
-  `contexts.add_image(EguiTextureHandle::Weak(h.id()))`.  This must precede
+  `contexts.add_image(EguiTextureHandle::Weak(h.id()))`. This must precede
   `ctx_mut()` because both operations require `&mut EguiContexts`.
 - The resulting `Option<egui::TextureId>` and `&portrait_key` are forwarded to
   `render_single_view`.
@@ -13992,17 +14098,17 @@ use bevy_egui::EguiTextureHandle;
 
 ### Tests Added
 
-| Test | What it verifies |
-|---|---|
-| `test_render_single_view_placeholder_when_no_full_portrait` | No panic when `full_portrait_id = None`; placeholder path executes safely |
-| `test_render_single_view_hint_bar_contains_1_6_select` | Hint bar with `[1-6] Select` renders without panic |
+| Test                                                                   | What it verifies                                                                           |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `test_render_single_view_placeholder_when_no_full_portrait`            | No panic when `full_portrait_id = None`; placeholder path executes safely                  |
+| `test_render_single_view_hint_bar_contains_1_6_select`                 | Hint bar with `[1-6] Select` renders without panic                                         |
 | `test_character_sheet_ui_system_accepts_full_portrait_assets_resource` | System accepts `FullPortraitAssets` resource; world resource is accessible after insertion |
 
 ### Quality Gates
 
-| Gate | Result |
-|---|---|
-| `cargo fmt --all` | ✅ clean |
-| `cargo check --all-targets --all-features` | ✅ 0 errors |
-| `cargo clippy --all-targets --all-features -- -D warnings` | ✅ 0 warnings |
-| `cargo nextest run --all-features` | ✅ 4816 passed, 0 failed |
+| Gate                                                       | Result                   |
+| ---------------------------------------------------------- | ------------------------ |
+| `cargo fmt --all`                                          | ✅ clean                 |
+| `cargo check --all-targets --all-features`                 | ✅ 0 errors              |
+| `cargo clippy --all-targets --all-features -- -D warnings` | ✅ 0 warnings            |
+| `cargo nextest run --all-features`                         | ✅ 4816 passed, 0 failed |
