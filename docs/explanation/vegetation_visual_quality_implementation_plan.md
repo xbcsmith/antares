@@ -268,13 +268,13 @@ Required tests:
 
 #### 2.6 Deliverables
 
-- [ ] Render-only `TreeSpeciesPreset` model exists.
-- [ ] Tree generation returns separate branch and leaf meshes.
-- [ ] Oak, Pine, Birch, Willow, Dead, Shrub, and Palm have distinct presets.
-- [ ] Bark UVs and leaf UVs are generated.
-- [ ] Mesh cache supports branch/leaf separation.
-- [ ] Deterministic variation exists without unbounded cache growth.
-- [ ] Tests verify species shape differences.
+- [x] Render-only `TreeSpeciesPreset` model exists.
+- [x] Tree generation returns separate branch and leaf meshes.
+- [x] Oak, Pine, Birch, Willow, Dead, Shrub, and Palm have distinct presets.
+- [x] Bark UVs and leaf UVs are generated.
+- [x] Mesh cache supports branch/leaf separation.
+- [x] Deterministic variation exists without unbounded cache growth.
+- [x] Tests verify species shape differences.
 
 #### 2.7 Success Criteria
 

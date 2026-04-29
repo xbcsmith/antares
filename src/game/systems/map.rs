@@ -996,6 +996,7 @@ fn spawn_map(
                                     };
                                     procedural_meshes::spawn_shrub(
                                         &mut ctx,
+                                        &asset_server,
                                         pos,
                                         map.id,
                                         Some(&tile.visual),
@@ -1052,6 +1053,7 @@ fn spawn_map(
                                     };
                                     procedural_meshes::spawn_shrub(
                                         &mut ctx,
+                                        &asset_server,
                                         pos,
                                         map.id,
                                         Some(&tile.visual),

@@ -8,7 +8,7 @@
 //!
 //! Character rendering (NPCs, Monsters, Recruitables) uses the sprite system.
 
-use super::advanced_trees::{TerrainVisualConfig, TreeType};
+use super::advanced_trees::TreeType;
 use super::map::{MapEntity, TileCoord};
 use crate::domain::types::{self, CreatureId};
 use crate::domain::world;
@@ -18,7 +18,7 @@ use crate::game::components::furniture::{
 };
 use bevy::color::LinearRgba;
 use bevy::prelude::*;
-use rand::Rng;
+
 use std::collections::HashMap;
 use tracing;
 
@@ -50,10 +50,11 @@ use tracing;
 pub struct ProceduralMeshCache {
     /// Cached trunk mesh handle for trees
     tree_trunk: Option<Handle<Mesh>>,
-    /// Cached foliage mesh handle for trees
-    tree_foliage: Option<Handle<Mesh>>,
-    /// Cached mesh handles for advanced tree types by TreeType variant
-    tree_meshes: HashMap<TreeType, Handle<Mesh>>,
+
+    /// Cached branch mesh handles for advanced tree types by bounded tree mesh key
+    tree_branch_meshes: HashMap<super::advanced_trees::TreeMeshCacheKey, Handle<Mesh>>,
+    /// Cached leaf/frond mesh handles for advanced tree types by bounded tree mesh key
+    tree_leaf_meshes: HashMap<super::advanced_trees::TreeMeshCacheKey, Handle<Mesh>>,
     /// Cached horizontal bar mesh handle for portals (top/bottom)
     portal_frame_horizontal: Option<Handle<Mesh>>,
     /// Cached vertical bar mesh handle for portals (left/right)
@@ -140,31 +141,60 @@ pub struct ProceduralMeshCache {
 }
 
 impl ProceduralMeshCache {
-    /// Gets or creates a mesh handle for a specific tree type
+    /// Gets or creates branch and leaf mesh handles for a bounded tree variant.
     ///
     /// # Arguments
     ///
-    /// * `tree_type` - The type of tree to get/create mesh for
+    /// * `tree_type` - The type of tree to get/create meshes for
+    /// * `cache_key` - Bounded cache key containing species, density, quality, and variant buckets
     /// * `meshes` - Mesh asset storage
     ///
     /// # Returns
     ///
-    /// Mesh handle for the tree type (either cached or newly created)
+    /// Mesh handles for the tree branch mesh and optional leaf/frond mesh
+    pub fn get_or_create_tree_mesh_pair(
+        &mut self,
+        tree_type: TreeType,
+        cache_key: super::advanced_trees::TreeMeshCacheKey,
+        meshes: &mut Assets<Mesh>,
+    ) -> super::advanced_trees::TreeMeshPair {
+        if let Some(branches) = self.tree_branch_meshes.get(&cache_key) {
+            return super::advanced_trees::TreeMeshPair {
+                branches: branches.clone(),
+                leaves: self.tree_leaf_meshes.get(&cache_key).cloned(),
+            };
+        }
+
+        let generated = super::advanced_trees::generate_tree_meshes_for_key(tree_type, cache_key);
+        let branches = meshes.add(generated.branches);
+        let leaves = generated.leaves.map(|mesh| meshes.add(mesh));
+
+        self.tree_branch_meshes.insert(cache_key, branches.clone());
+        if let Some(leaf_handle) = &leaves {
+            self.tree_leaf_meshes.insert(cache_key, leaf_handle.clone());
+        }
+
+        super::advanced_trees::TreeMeshPair { branches, leaves }
+    }
+
+    /// Gets or creates a branch mesh handle for a specific tree type.
+    ///
+    /// This compatibility helper uses the default foliage-density, quality, and
+    /// variant buckets. New tree rendering should prefer
+    /// [`get_or_create_tree_mesh_pair`](Self::get_or_create_tree_mesh_pair).
     pub fn get_or_create_tree_mesh(
         &mut self,
         tree_type: TreeType,
         meshes: &mut Assets<Mesh>,
     ) -> Handle<Mesh> {
-        if let Some(handle) = self.tree_meshes.get(&tree_type) {
-            handle.clone()
-        } else {
-            let config = tree_type.config();
-            let graph = super::advanced_trees::generate_branch_graph(tree_type);
-            let mesh = super::advanced_trees::generate_branch_mesh(&graph, &config);
-            let handle = meshes.add(mesh);
-            self.tree_meshes.insert(tree_type, handle.clone());
-            handle
-        }
+        let key = super::advanced_trees::TreeMeshCacheKey::new(
+            tree_type,
+            tree_type.config().foliage_density,
+            0,
+            0,
+        );
+        self.get_or_create_tree_mesh_pair(tree_type, key, meshes)
+            .branches
     }
 
     /// Gets or creates a mesh handle for a specific creature mesh part
@@ -425,7 +455,9 @@ impl ProceduralMeshCache {
     /// in existing entities are not affected; only new asset loads will be prevented.
     pub fn clear_all(&mut self) {
         self.tree_trunk = None;
-        self.tree_foliage = None;
+
+        self.tree_branch_meshes.clear();
+        self.tree_leaf_meshes.clear();
         self.portal_frame_horizontal = None;
         self.portal_frame_vertical = None;
         self.sign_post = None;
@@ -534,9 +566,10 @@ impl ProceduralMeshCache {
         if self.tree_trunk.is_some() {
             count += 1;
         }
-        if self.tree_foliage.is_some() {
-            count += 1;
-        }
+
+        count += self.tree_branch_meshes.len();
+        count += self.tree_leaf_meshes.len();
+
         if self.portal_frame_horizontal.is_some() {
             count += 1;
         }
@@ -677,10 +710,6 @@ impl ProceduralMeshCache {
 }
 
 // ==================== Constants ====================
-
-// Tree dimensions (world units, 1 unit ≈ 10 feet)
-
-const TREE_FOLIAGE_RADIUS: f32 = 0.6;
 
 // Event marker dimensions
 // Portal dimensions - rectangular frame standing vertically
@@ -954,166 +983,6 @@ fn foliage_texture_path(tree_type: TreeType) -> &'static str {
 ///     &mut cache,
 /// );
 /// ```
-/// Spawns foliage clusters at leaf branch endpoints using alpha-masked plane quads.
-///
-/// Replaces the previous sphere-based foliage with double-sided plane quads that
-/// carry a per-`TreeType` alpha-masked foliage texture.  This gives far better
-/// silhouettes while keeping draw-call count low (one cached material per tree type).
-///
-/// # Algorithm
-///
-/// 1. Identifies all leaf branches (endpoints with no children).
-/// 2. For each leaf, calculates cluster size: `(foliage_density * 5.0) as usize`.
-/// 3. Spawns foliage plane quads positioned at branch endpoint + random offset.
-/// 4. Uses seeded RNG for deterministic placement (same seed = same foliage).
-/// 5. Quad size scales with `foliage_density * TREE_FOLIAGE_RADIUS`.
-/// 6. When a `color_tint` is supplied the cached material is cloned and its
-///    `base_color` is overridden; otherwise the cached handle is reused directly.
-///
-/// # Arguments
-///
-/// * `commands` - Bevy commands for spawning entities
-/// * `materials` - Asset storage for materials
-/// * `meshes` - Asset storage for meshes
-/// * `asset_server` - Asset server for loading foliage textures
-/// * `graph` - The generated branch graph from the tree
-/// * `config` - Tree configuration with foliage_density parameter
-/// * `foliage_color` - Optional tint colour applied to foliage base_color
-/// * `tree_type` - The tree variant — selects the correct foliage texture
-/// * `parent_entity` - Parent entity to attach foliage quads to
-/// * `cache` - Procedural mesh cache for reusing mesh and material handles
-struct FoliageClusterSpawnConfig<'a> {
-    graph: &'a super::advanced_trees::BranchGraph,
-    tree_config: &'a super::advanced_trees::TreeConfig,
-    visual_config: &'a TerrainVisualConfig,
-    foliage_color: Option<Color>,
-    tree_type: TreeType,
-    parent_entity: Entity,
-}
-
-fn spawn_foliage_clusters(
-    ctx: &mut MeshSpawnContext<'_, '_, '_>,
-    asset_server: &AssetServer,
-    spawn_config: FoliageClusterSpawnConfig<'_>,
-) {
-    // Identify leaf branches (endpoints)
-    let leaf_indices = super::advanced_trees::get_leaf_branches(spawn_config.graph);
-
-    // Calculate cluster size from foliage density
-    let cluster_size = (spawn_config.tree_config.foliage_density * 5.0) as usize;
-
-    // If no foliage requested, return early
-    if cluster_size == 0 || leaf_indices.is_empty() {
-        return;
-    }
-
-    // Quad size: foliage_density * TREE_FOLIAGE_RADIUS gives a natural cluster footprint
-    let foliage_size = spawn_config.tree_config.foliage_density * TREE_FOLIAGE_RADIUS;
-
-    // Get or create the plane quad mesh from cache.
-    // We reuse the existing tree_foliage slot — it now stores a plane quad instead of a sphere.
-    let foliage_mesh = ctx.cache.tree_foliage.clone().unwrap_or_else(|| {
-        let handle = ctx.meshes.add(
-            Plane3d::default()
-                .mesh()
-                .size(foliage_size * 2.0, foliage_size * 2.0)
-                .build(),
-        );
-        ctx.cache.tree_foliage = Some(handle.clone());
-        handle
-    });
-
-    // Obtain the base cached foliage material for this tree type.
-    let base_material = ctx.cache.get_or_create_foliage_material(
-        spawn_config.tree_type,
-        asset_server,
-        ctx.materials,
-    );
-
-    // If a tint colour is supplied, clone the cached material and override base_color.
-    // When there is no tint we reuse the cached handle to avoid extra allocations.
-    let foliage_material = if let Some(tint) = spawn_config.foliage_color {
-        // Clone the cached material's data and apply the tint
-        let mut mat = ctx
-            .materials
-            .get(&base_material)
-            .cloned()
-            .unwrap_or_else(|| StandardMaterial {
-                alpha_mode: AlphaMode::Mask(TREE_FOLIAGE_ALPHA_CUTOFF),
-                double_sided: true,
-                cull_mode: None,
-                perceptual_roughness: 0.8,
-                ..default()
-            });
-        mat.base_color = tint;
-        ctx.materials.add(mat)
-    } else {
-        base_material
-    };
-
-    // Seeded RNG for deterministic foliage placement
-    use rand::Rng;
-    use rand::SeedableRng;
-    let mut rng = rand::rngs::StdRng::seed_from_u64(42); // Fixed seed for consistency
-
-    // Spawn foliage at each leaf branch
-    for &leaf_idx in &leaf_indices {
-        let branch = &spawn_config.graph.branches[leaf_idx];
-
-        // Spawn multiple foliage quads in a cluster
-        for _quad_idx in 0..cluster_size {
-            // Random offset from branch endpoint (within radius 0.2-0.5)
-            let offset_radius = rng.random_range(0.2..=0.5);
-            let angle = rng.random_range(0.0..std::f32::consts::TAU);
-
-            let offset_x = offset_radius * angle.cos();
-            let offset_z = offset_radius * angle.sin();
-            let offset_y = rng.random_range(-0.1..0.1);
-
-            // Quad scale based on branch end radius (0.3–0.6)
-            let quad_scale = (branch.end_radius * 1.5).clamp(0.3, 0.6);
-
-            // Random Y-axis rotation so quads fan out naturally
-            let rotation_y = rng.random_range(0.0..std::f32::consts::TAU);
-
-            // Position in the tree parent's local space.  The branch mesh child
-            // is scaled by visual metadata, so foliage endpoint positions must
-            // receive the same metadata scaling or leaves detach from trunks.
-            let unscaled_position = branch.end + Vec3::new(offset_x, offset_y, offset_z);
-            let position = Vec3::new(
-                unscaled_position.x * spawn_config.visual_config.scale,
-                unscaled_position.y * spawn_config.visual_config.height_multiplier,
-                unscaled_position.z * spawn_config.visual_config.scale,
-            );
-
-            let scaled_quad = quad_scale * spawn_config.visual_config.scale.max(0.1);
-
-            // Spawn foliage quad, rotated to face up (Plane3d is XZ, we want XY billboard)
-            let foliage = ctx
-                .commands
-                .spawn((
-                    Mesh3d(foliage_mesh.clone()),
-                    MeshMaterial3d(foliage_material.clone()),
-                    Transform::from_translation(position)
-                        .with_rotation(
-                            Quat::from_rotation_y(rotation_y)
-                                * Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
-                        )
-                        .with_scale(Vec3::splat(scaled_quad)),
-                    GlobalTransform::default(),
-                    Visibility::default(),
-                    bevy::light::NotShadowCaster,
-                    bevy::light::NotShadowReceiver,
-                ))
-                .id();
-
-            ctx.commands
-                .entity(spawn_config.parent_entity)
-                .add_child(foliage);
-        }
-    }
-}
-
 pub fn spawn_tree(
     ctx: &mut MeshSpawnContext<'_, '_, '_>,
     asset_server: &AssetServer,
@@ -1127,14 +996,30 @@ pub fn spawn_tree(
         .map(super::advanced_trees::TerrainVisualConfig::from)
         .unwrap_or_default();
 
-    // Generate branch graph for the tree type
+    // Resolve the tree type for species-specific mesh generation.
     let tree_type_resolved = tree_type.unwrap_or(super::advanced_trees::TreeType::Oak);
-    let branch_graph = super::advanced_trees::generate_branch_graph(tree_type_resolved);
 
-    // Get or create advanced tree mesh from cache
-    let tree_mesh = ctx
-        .cache
-        .get_or_create_tree_mesh(tree_type_resolved, ctx.meshes);
+    let foliage_multiplier = visual_metadata
+        .map(TileVisualMetadata::foliage_density)
+        .unwrap_or(1.0);
+    let resolved_foliage_density =
+        (tree_type_resolved.config().foliage_density * foliage_multiplier).clamp(0.0, 2.0);
+    let generation_seed = super::advanced_trees::TreeGenerationSeed::from_parts(
+        tree_type_resolved,
+        map_id,
+        position.x,
+        position.y,
+        0,
+    );
+    let tree_cache_key = super::advanced_trees::tree_mesh_cache_key(
+        tree_type_resolved,
+        resolved_foliage_density,
+        0,
+        generation_seed,
+    );
+    let tree_meshes =
+        ctx.cache
+            .get_or_create_tree_mesh_pair(tree_type_resolved, tree_cache_key, ctx.meshes);
 
     // Use the cached bark texture material as the source, then clone it for
     // the resolved tree type and optional metadata tint.  This keeps the bark
@@ -1161,8 +1046,8 @@ pub fn spawn_tree(
     bark_material.base_color = resolved_bark_color;
     let tree_material = ctx.materials.add(bark_material);
 
-    // Apply color tint to foliage if present — passed as Option<Color> to
-    // spawn_foliage_clusters which handles the tinted clone internally.
+    // Apply color tint to species leaf/frond meshes when present. The tinted
+    // material is cloned so shared cached foliage materials are never mutated.
     let foliage_color = visual_config
         .color_tint
         .map(|tint| multiply_color(TREE_FOLIAGE_COLOR, tint));
@@ -1188,7 +1073,7 @@ pub fn spawn_tree(
     let tree_structure = ctx
         .commands
         .spawn((
-            Mesh3d(tree_mesh),
+            Mesh3d(tree_meshes.branches.clone()),
             MeshMaterial3d(tree_material),
             Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(
                 visual_config.scale,
@@ -1203,40 +1088,64 @@ pub fn spawn_tree(
         .id();
     ctx.commands.entity(parent).add_child(tree_structure);
 
-    // Spawn foliage clusters at leaf branch endpoints using plane quads.  The
-    // domain metadata foliage density multiplier is applied here so Campaign
-    // Builder edits visibly change runtime foliage coverage.
-    let mut tree_config = tree_type_resolved.config();
-    let foliage_multiplier = visual_metadata
-        .map(TileVisualMetadata::foliage_density)
-        .unwrap_or(1.0);
-    tree_config.foliage_density =
-        (tree_config.foliage_density * foliage_multiplier).clamp(0.0, 2.0);
+    // Spawn cached species leaf/frond mesh when available.  Species without
+    // leaves, such as Dead trees, intentionally render only branch geometry.
+    if let Some(leaf_mesh) = tree_meshes.leaves.clone() {
+        let base_material = ctx.cache.get_or_create_foliage_material(
+            tree_type_resolved,
+            asset_server,
+            ctx.materials,
+        );
+        let leaf_material = if let Some(tint) = foliage_color {
+            let mut mat = ctx
+                .materials
+                .get(&base_material)
+                .cloned()
+                .unwrap_or_else(|| StandardMaterial {
+                    alpha_mode: AlphaMode::Mask(TREE_FOLIAGE_ALPHA_CUTOFF),
+                    double_sided: true,
+                    cull_mode: None,
+                    perceptual_roughness: 0.8,
+                    ..default()
+                });
+            mat.base_color = tint;
+            ctx.materials.add(mat)
+        } else {
+            base_material
+        };
 
-    spawn_foliage_clusters(
-        ctx,
-        asset_server,
-        FoliageClusterSpawnConfig {
-            graph: &branch_graph,
-            tree_config: &tree_config,
-            visual_config: &visual_config,
-            foliage_color,
-            tree_type: tree_type_resolved,
-            parent_entity: parent,
-        },
-    );
+        let leaf_entity = ctx
+            .commands
+            .spawn((
+                Mesh3d(leaf_mesh),
+                MeshMaterial3d(leaf_material),
+                Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(
+                    visual_config.scale,
+                    visual_config.height_multiplier,
+                    visual_config.scale,
+                )),
+                GlobalTransform::default(),
+                Visibility::default(),
+                bevy::light::NotShadowCaster,
+                bevy::light::NotShadowReceiver,
+            ))
+            .id();
+        ctx.commands.entity(parent).add_child(leaf_entity);
+    }
 
     parent
 }
 
 /// Spawns a procedurally generated shrub
 ///
-/// Uses the advanced tree generation system (TreeType::Shrub) which generates
-/// a multi-stem mesh with vertex coloring.
+/// Uses the species tree mesh pair pipeline (`TreeType::Shrub`) so shrubs share
+/// the same branch/leaf mesh caching and foliage-density behavior as other
+/// tree variants.
 ///
 /// # Arguments
 ///
 /// * `ctx` - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
+/// * `asset_server` - Asset server used to resolve shrub bark and foliage textures
 /// * `position` - Tile position in world coordinates
 /// * `map_id` - Map identifier for cleanup
 /// * `visual_metadata` - Optional per-tile customization (height controls shrub size, scale affects foliage density)
@@ -1246,50 +1155,19 @@ pub fn spawn_tree(
 /// Entity ID of the shrub entity
 pub fn spawn_shrub(
     ctx: &mut MeshSpawnContext<'_, '_, '_>,
+    asset_server: &AssetServer,
     position: types::Position,
     map_id: types::MapId,
     visual_metadata: Option<&TileVisualMetadata>,
 ) -> Entity {
-    let shrub_mesh = ctx
-        .cache
-        .get_or_create_tree_mesh(TreeType::Shrub, ctx.meshes);
-
-    // Get visual configuration
-    let meta = TerrainVisualConfig::from(visual_metadata.unwrap_or(&TileVisualMetadata::default()));
-    let height_scale = meta.height_multiplier;
-    let width_scale = meta.scale;
-
-    // Random Y-rotation
-    let mut rng = rand::rng();
-    let rotation = Quat::from_rotation_y(rng.random_range(0.0..std::f32::consts::TAU));
-
-    // Create material that supports vertex colors (or just standard PBR)
-    // The advanced tree mesh has vertex colors baked in.
-    let material = ctx.materials.add(StandardMaterial {
-        base_color: Color::WHITE, // Vertex colors multiply with this
-        perceptual_roughness: 0.9,
-        ..default()
-    });
-
-    ctx.commands
-        .spawn((
-            Mesh3d(shrub_mesh),
-            MeshMaterial3d(material),
-            Transform::from_xyz(
-                position.x as f32 + TILE_CENTER_OFFSET,
-                0.0,
-                position.y as f32 + TILE_CENTER_OFFSET,
-            )
-            .with_scale(Vec3::new(width_scale, height_scale, width_scale))
-            .with_rotation(rotation),
-            GlobalTransform::default(),
-            Visibility::default(),
-            bevy::light::NotShadowCaster,
-            bevy::light::NotShadowReceiver,
-            MapEntity(map_id),
-            TileCoord(position),
-        ))
-        .id()
+    spawn_tree(
+        ctx,
+        asset_server,
+        position,
+        map_id,
+        visual_metadata,
+        Some(TreeType::Shrub),
+    )
 }
 
 // Grass rendering lives in `advanced_grass.rs` (spawn, mesh, culling, LOD).
@@ -3002,9 +2880,9 @@ mod tests {
     /// Validates tree constants are within reasonable bounds
     #[test]
     fn test_tree_constants_valid() {
-        // Constants should be positive and follow size relationships
-        // These checks serve as documentation of design invariants
-        let _ = TREE_FOLIAGE_RADIUS;
+        // Tree render constants should compile with valid values.
+        let _ = TREE_TRUNK_COLOR;
+        let _ = TREE_FOLIAGE_COLOR;
         // Compile will verify constants exist with correct values
     }
 
@@ -3055,7 +2933,8 @@ mod tests {
     fn test_cache_default_all_none() {
         let cache = ProceduralMeshCache::default();
         assert!(cache.tree_trunk.is_none());
-        assert!(cache.tree_foliage.is_none());
+        assert!(cache.tree_branch_meshes.is_empty());
+        assert!(cache.tree_leaf_meshes.is_empty());
         assert!(cache.portal_frame_horizontal.is_none());
         assert!(cache.portal_frame_vertical.is_none());
         assert!(cache.sign_post.is_none());
@@ -3078,18 +2957,16 @@ mod tests {
 
         // After initialization, cache should remain empty until set
         // This test documents the cache's purpose: to store handles
-        assert!(cache.tree_foliage.is_none());
     }
 
-    /// Tests that tree foliage dimensions are suitable for caching
+    /// Tests that tree leaf mesh caches start empty.
     #[test]
-    fn test_tree_foliage_dimensions_consistent() {
-        // Tree foliage dimensions should be consistent.
-        // Foliage should be larger than trunk for visual appeal.
-        // These constants are verified at compile time through their usage in
-        // Sphere { radius } which requires a valid f32 value.
-        let _ = TREE_FOLIAGE_RADIUS;
-        // Test passes if constants compile with valid values
+    fn test_tree_leaf_mesh_cache_defaults_empty() {
+        let cache = ProceduralMeshCache::default();
+        assert!(
+            cache.tree_leaf_meshes.is_empty(),
+            "Generated leaf/frond mesh cache should start empty"
+        );
     }
 
     /// Tests that portal frame dimensions are suitable for caching
@@ -4060,7 +3937,9 @@ mod tests {
         // After clearing, should still be None
         cache.clear_all();
         assert!(cache.tree_trunk.is_none());
-        assert!(cache.tree_foliage.is_none());
+
+        assert!(cache.tree_branch_meshes.is_empty());
+        assert!(cache.tree_leaf_meshes.is_empty());
         assert!(cache.sign_post.is_none());
     }
 
@@ -4237,6 +4116,31 @@ mod tests {
         );
     }
 
+    /// Tests that tree mesh pair cache reuses branch and leaf handles for equivalent keys.
+    #[test]
+    fn test_get_or_create_tree_mesh_pair_reuses_cached_handles() {
+        let mut cache = ProceduralMeshCache::default();
+        let mut meshes = Assets::<Mesh>::default();
+        let key =
+            crate::game::systems::advanced_trees::TreeMeshCacheKey::new(TreeType::Oak, 1.0, 0, 42);
+
+        let first = cache.get_or_create_tree_mesh_pair(TreeType::Oak, key, &mut meshes);
+        let second = cache.get_or_create_tree_mesh_pair(TreeType::Oak, key, &mut meshes);
+
+        assert_eq!(
+            first.branches.id(),
+            second.branches.id(),
+            "Equivalent tree mesh cache keys must reuse branch mesh handles"
+        );
+        assert_eq!(
+            first.leaves.as_ref().map(Handle::id),
+            second.leaves.as_ref().map(Handle::id),
+            "Equivalent tree mesh cache keys must reuse leaf mesh handles"
+        );
+        assert_eq!(cache.tree_branch_meshes.len(), 1);
+        assert_eq!(cache.tree_leaf_meshes.len(), 1);
+    }
+
     /// Tests that ProceduralMeshCache::default() initialises tree_bark_material as None
     #[test]
     fn test_cache_tree_bark_material_default_none() {
@@ -4405,7 +4309,7 @@ mod tests {
         app.add_systems(Update, spawn_scaled_tree_system);
         app.update();
 
-        let (branch_scale, foliage_translation) = {
+        let (branch_scale, leaf_scale) = {
             let world = app.world_mut();
             let parent_children = world
                 .query::<(&TileCoord, &Children)>()
@@ -4416,7 +4320,7 @@ mod tests {
 
             assert!(
                 parent_children.len() > 1,
-                "scaled leafy oak should spawn branch mesh plus foliage children"
+                "scaled leafy oak should spawn branch mesh plus leaf mesh child"
             );
 
             let branch_transform = world
@@ -4424,22 +4328,19 @@ mod tests {
                 .expect("branch child should have a Transform")
                 .scale;
 
-            let foliage_transform = world
+            let leaf_transform = world
                 .get::<Transform>(parent_children[1])
-                .expect("foliage child should have a Transform")
-                .translation;
+                .expect("leaf child should have a Transform")
+                .scale;
 
-            (branch_transform, foliage_transform)
+            (branch_transform, leaf_transform)
         };
 
         assert_eq!(branch_scale, Vec3::new(1.5, 2.0, 1.5));
-        assert!(
-            foliage_translation.y > 4.0,
-            "foliage endpoint should receive height metadata scaling"
-        );
-        assert!(
-            foliage_translation.x.abs() > 0.1 || foliage_translation.z.abs() > 0.1,
-            "foliage endpoint should receive horizontal scale metadata"
+        assert_eq!(
+            leaf_scale,
+            Vec3::new(1.5, 2.0, 1.5),
+            "species leaf mesh should receive the same metadata scaling as branch geometry"
         );
     }
 

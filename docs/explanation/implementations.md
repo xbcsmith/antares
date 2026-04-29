@@ -2,6 +2,42 @@
 
 ---
 
+## Vegetation Visual Quality Phase 2 Implementation (Complete)
+
+### Overview
+
+Implemented Phase 2 of `docs/explanation/vegetation_visual_quality_implementation_plan.md`: replaced the generic tree pipeline with render-layer species presets and separated branch and leaf/frond mesh generation.
+
+### Problems Fixed
+
+- Added render-only `TreeSpeciesPreset`, `BranchPreset`, and `LeafPreset` models for species-specific tree silhouettes.
+- Added `TreeMeshCacheKey`, `TreeGenerationSeed`, `TreeMeshPair`, and `GeneratedTreeMeshes` for bounded deterministic tree variants.
+- Tree generation now returns separate branch and leaf/frond meshes.
+- Oak, Pine, Birch, Willow, Dead, Shrub, and Palm now have distinct render presets.
+- Palm trees now use crown-only frond generation.
+- Pine trees now use a narrow conical branch-whorl graph.
+- Dead trees generate branch geometry without a leaf mesh.
+- Shrubs now use the same species tree mesh pair pipeline as other tree variants.
+- Mesh caching now stores branch and leaf/frond handles separately by bounded cache key.
+- Deterministic tree variation uses bucketed cache keys to avoid unbounded per-tile mesh growth.
+- Added regression tests for species presets, cache keys, seed stability, leaf mesh generation, palm crown placement, pine/oak silhouette ratios, mesh-stat determinism, and mesh-pair cache reuse.
+
+### Files Changed
+
+- `src/game/systems/advanced_trees.rs`
+- `src/game/systems/procedural_meshes.rs`
+- `src/game/systems/map.rs`
+- `docs/explanation/vegetation_visual_quality_implementation_plan.md`
+
+### Validation
+
+- `cargo fmt --all` passed.
+- `cargo check --all-targets --all-features` passed.
+- `cargo clippy --all-targets --all-features -- -D warnings` passed.
+- `cargo nextest run --all-features --status-level fail` passed: 4841 tests passed, 8 skipped.
+
+---
+
 ## Vegetation Visual Quality Phase 1 Implementation (Complete)
 
 ### Overview
