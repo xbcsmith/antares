@@ -651,12 +651,16 @@ impl VisualPreset {
                 height: Some(2.0),
                 scale: Some(0.5),
                 color_tint: Some((0.6, 0.9, 0.6)), // Light green tint
+                tree_type: Some(TreeType::Oak),
+                foliage_density: Some(0.8),
                 ..Default::default()
             },
             VisualPreset::LargeTree => TileVisualMetadata {
                 height: Some(4.0),
                 scale: Some(1.5),
                 color_tint: Some((0.5, 0.8, 0.5)), // Green tint
+                tree_type: Some(TreeType::Oak),
+                foliage_density: Some(1.4),
                 ..Default::default()
             },
             VisualPreset::LowMountain => TileVisualMetadata {
@@ -695,24 +699,32 @@ impl VisualPreset {
                 height: Some(1.0),
                 scale: Some(0.6),
                 color_tint: Some((0.5, 0.85, 0.5)), // Medium green tint
+                tree_type: Some(TreeType::Oak),
+                foliage_density: Some(0.7),
                 ..Default::default()
             },
             VisualPreset::MediumTree => TileVisualMetadata {
                 height: Some(2.0),
                 scale: Some(0.8),
                 color_tint: Some((0.5, 0.85, 0.5)), // Medium green tint
+                tree_type: Some(TreeType::Oak),
+                foliage_density: Some(1.0),
                 ..Default::default()
             },
             VisualPreset::TallTree => TileVisualMetadata {
                 height: Some(3.0),
                 scale: Some(1.2),
                 color_tint: Some((0.5, 0.85, 0.5)), // Medium green tint
+                tree_type: Some(TreeType::Oak),
+                foliage_density: Some(1.3),
                 ..Default::default()
             },
             VisualPreset::DeadTree => TileVisualMetadata {
                 height: Some(2.5),
                 scale: Some(0.7),
                 color_tint: Some((0.6, 0.5, 0.4)), // Brown/gray tint
+                tree_type: Some(TreeType::Dead),
+                foliage_density: Some(0.0),
                 ..Default::default()
             },
             // Shrub variants
@@ -720,18 +732,24 @@ impl VisualPreset {
                 height: Some(0.4),
                 scale: Some(0.4),
                 color_tint: Some((0.3, 0.6, 0.3)), // Dark green tint
+                tree_type: Some(TreeType::Shrub),
+                foliage_density: Some(0.8),
                 ..Default::default()
             },
             VisualPreset::LargeShrub => TileVisualMetadata {
                 height: Some(0.8),
                 scale: Some(0.9),
                 color_tint: Some((0.3, 0.6, 0.3)), // Dark green tint
+                tree_type: Some(TreeType::Shrub),
+                foliage_density: Some(1.4),
                 ..Default::default()
             },
             VisualPreset::FloweringShrub => TileVisualMetadata {
                 height: Some(0.6),
                 scale: Some(0.7),
                 color_tint: Some((0.8, 0.5, 0.7)), // Flower pink tint
+                tree_type: Some(TreeType::Shrub),
+                foliage_density: Some(1.1),
                 ..Default::default()
             },
             // Grass variants
@@ -739,18 +757,45 @@ impl VisualPreset {
                 height: Some(0.2),
                 scale: Some(0.8),
                 color_tint: Some((0.6, 0.9, 0.6)), // Light green tint
+                grass_density: Some(GrassDensity::Low),
+                foliage_density: Some(0.7),
+                grass_blade_config: Some(GrassBladeConfig {
+                    length: 0.65,
+                    width: 0.8,
+                    tilt: 0.25,
+                    curve: 0.2,
+                    color_variation: 0.15,
+                }),
                 ..Default::default()
             },
             VisualPreset::TallGrass => TileVisualMetadata {
                 height: Some(0.4),
                 scale: Some(1.0),
                 color_tint: Some((0.5, 0.85, 0.5)), // Medium green tint
+                grass_density: Some(GrassDensity::High),
+                foliage_density: Some(1.4),
+                grass_blade_config: Some(GrassBladeConfig {
+                    length: 1.6,
+                    width: 1.1,
+                    tilt: 0.4,
+                    curve: 0.5,
+                    color_variation: 0.3,
+                }),
                 ..Default::default()
             },
             VisualPreset::DriedGrass => TileVisualMetadata {
                 height: Some(0.3),
                 scale: Some(0.9),
                 color_tint: Some((0.7, 0.6, 0.4)), // Brown/tan tint
+                grass_density: Some(GrassDensity::Low),
+                foliage_density: Some(0.6),
+                grass_blade_config: Some(GrassBladeConfig {
+                    length: 0.9,
+                    width: 0.8,
+                    tilt: 0.35,
+                    curve: 0.2,
+                    color_variation: 0.05,
+                }),
                 ..Default::default()
             },
             // Mountain variants
@@ -1287,29 +1332,46 @@ impl TerrainEditorState {
                 } else {
                     None
                 };
-                // Don't set tree_type, rock_variant, water_flow_direction
+                metadata.tree_type = None;
+                metadata.rock_variant = None;
+                metadata.water_flow_direction = None;
+                metadata.snow_coverage = None;
             }
             TerrainType::Forest => {
                 metadata.tree_type = Some(self.tree_type);
                 metadata.foliage_density = Some(self.foliage_density);
                 metadata.snow_coverage = Some(self.snow_coverage);
+                metadata.grass_density = None;
+                metadata.rock_variant = None;
+                metadata.water_flow_direction = None;
                 metadata.grass_blade_config = None;
-                // Don't set grass_density, rock_variant, water_flow_direction
             }
             TerrainType::Mountain => {
                 metadata.rock_variant = Some(self.rock_variant);
                 metadata.snow_coverage = Some(self.snow_coverage);
+                metadata.grass_density = None;
+                metadata.tree_type = None;
+                metadata.water_flow_direction = None;
+                metadata.foliage_density = None;
                 metadata.grass_blade_config = None;
-                // Don't set grass_density, tree_type, water_flow_direction, foliage_density
             }
             TerrainType::Water | TerrainType::Swamp => {
                 metadata.water_flow_direction = Some(self.water_flow_direction);
+                metadata.grass_density = None;
+                metadata.tree_type = None;
+                metadata.rock_variant = None;
+                metadata.foliage_density = None;
+                metadata.snow_coverage = None;
                 metadata.grass_blade_config = None;
-                // Don't set grass_density, tree_type, rock_variant, foliage_density, snow_coverage
             }
             _ => {
+                metadata.grass_density = None;
+                metadata.tree_type = None;
+                metadata.rock_variant = None;
+                metadata.water_flow_direction = None;
+                metadata.foliage_density = None;
+                metadata.snow_coverage = None;
                 metadata.grass_blade_config = None;
-                // For other terrain types (Ground, Stone, Dirt, Lava), don't set any terrain-specific fields
             }
         }
     }
@@ -1354,6 +1416,21 @@ impl TerrainEditorState {
         metadata.water_flow_direction = None;
         metadata.foliage_density = None;
         metadata.snow_coverage = None;
+        metadata.grass_blade_config = None;
+    }
+
+    /// Clear vegetation-specific fields from metadata.
+    ///
+    /// Removes only runtime vegetation controls while leaving unrelated visual
+    /// metadata such as dimensions, tint, snow, rock, and water settings intact.
+    ///
+    /// # Arguments
+    ///
+    /// * `metadata` - Mutable reference to TileVisualMetadata to update
+    pub fn clear_vegetation_metadata(metadata: &mut TileVisualMetadata) {
+        metadata.grass_density = None;
+        metadata.tree_type = None;
+        metadata.foliage_density = None;
         metadata.grass_blade_config = None;
     }
 }
@@ -1411,9 +1488,27 @@ pub struct MapEditorState {
 impl MapEditorState {
     /// Creates a new map editor state
     pub fn new(map: Map) -> Self {
+        let default_visual = TileVisualMetadata::default();
+        let visual_overrides: std::collections::HashMap<Position, TileVisualMetadata> = map
+            .tiles
+            .iter()
+            .filter_map(|tile| {
+                if tile.visual == default_visual {
+                    None
+                } else {
+                    Some((Position::new(tile.x, tile.y), tile.visual.clone()))
+                }
+            })
+            .collect();
+
         let metadata = MapMetadata {
             name: map.name.clone(),
             description: map.description.clone(),
+            tile_visual_metadata: if visual_overrides.is_empty() {
+                None
+            } else {
+                Some(visual_overrides)
+            },
             ..Default::default()
         };
 
@@ -1443,11 +1538,38 @@ impl MapEditorState {
         }
     }
 
-    /// Apply visual metadata to a single tile
+    /// Apply visual metadata to a single tile and mirror it into editor metadata.
     pub fn apply_visual_metadata(&mut self, pos: Position, metadata: &TileVisualMetadata) {
+        if !self.map.is_valid_position(pos) {
+            return;
+        }
+
         if let Some(tile) = self.map.get_tile_mut(pos) {
             tile.visual = metadata.clone();
-            self.has_changes = true;
+        }
+
+        self.sync_editor_visual_metadata(pos, metadata);
+
+        self.has_changes = true;
+    }
+
+    /// Synchronize editor metadata cache with a tile's saved visual metadata.
+    ///
+    /// Default visual metadata is removed from the cache so reset operations do
+    /// not leave stale per-tile overrides behind.
+    fn sync_editor_visual_metadata(&mut self, pos: Position, metadata: &TileVisualMetadata) {
+        if metadata == &TileVisualMetadata::default() {
+            if let Some(metadata_map) = self.metadata.tile_visual_metadata.as_mut() {
+                metadata_map.remove(&pos);
+                if metadata_map.is_empty() {
+                    self.metadata.tile_visual_metadata = None;
+                }
+            }
+        } else {
+            self.metadata
+                .tile_visual_metadata
+                .get_or_insert_with(std::collections::HashMap::new)
+                .insert(pos, metadata.clone());
         }
     }
 
@@ -1484,60 +1606,45 @@ impl MapEditorState {
     /// editor.apply_terrain_state_to_selection();
     /// ```
     pub fn apply_terrain_state_to_selection(&mut self) {
-        // Initialize metadata map if it doesn't exist
-        if self.metadata.tile_visual_metadata.is_none() {
-            self.metadata.tile_visual_metadata = Some(std::collections::HashMap::new());
-        }
-
-        if self.selected_tiles.is_empty() {
-            // If no multi-selection, apply to current selected position
-            if let Some(pos) = self.selected_position {
-                // Get the terrain type for this tile
-                if let Some(tile) = self.map.get_tile(pos) {
-                    let terrain_type = tile.terrain;
-
-                    // Update Metadata Map (Editor State)
-                    if let Some(metadata_map) = self.metadata.tile_visual_metadata.as_mut() {
-                        let metadata = metadata_map
-                            .entry(pos)
-                            .or_insert_with(TileVisualMetadata::default);
-                        self.terrain_editor_state
-                            .apply_to_metadata_for_terrain(metadata, terrain_type);
-                        self.has_changes = true;
-                    }
-
-                    // Update Actual Map Tile
-                    if let Some(tile) = self.map.get_tile_mut(pos) {
-                        self.terrain_editor_state
-                            .apply_to_metadata_for_terrain(&mut tile.visual, terrain_type);
-                    }
-                }
-            }
+        let target_positions: Vec<Position> = if self.selected_tiles.is_empty() {
+            self.selected_position.into_iter().collect()
         } else {
-            // Apply to all selected tiles
-            for pos in self.selected_tiles.clone() {
-                // Get the terrain type for this tile
-                if let Some(tile) = self.map.get_tile(pos) {
-                    let terrain_type = tile.terrain;
+            self.selected_tiles.clone()
+        };
 
-                    // Update Metadata Map (Editor State)
-                    if let Some(metadata_map) = self.metadata.tile_visual_metadata.as_mut() {
-                        let metadata = metadata_map
-                            .entry(pos)
-                            .or_insert_with(TileVisualMetadata::default);
-                        self.terrain_editor_state
-                            .apply_to_metadata_for_terrain(metadata, terrain_type);
-                    }
-
-                    // Update Actual Map Tile
-                    if let Some(tile) = self.map.get_tile_mut(pos) {
-                        self.terrain_editor_state
-                            .apply_to_metadata_for_terrain(&mut tile.visual, terrain_type);
-                    }
-                }
-            }
-            self.has_changes = true;
+        let terrain_state = self.terrain_editor_state.clone();
+        for pos in target_positions {
+            self.apply_terrain_state_to_tile(pos, &terrain_state);
         }
+    }
+
+    /// Apply terrain-specific state to one tile through a single synchronized path.
+    ///
+    /// Updates the editor metadata map first, then mirrors the resolved metadata
+    /// back into the saved map tile so save/reload preserves runtime vegetation
+    /// fields.
+    fn apply_terrain_state_to_tile(&mut self, pos: Position, terrain_state: &TerrainEditorState) {
+        let Some(terrain_type) = self.map.get_tile(pos).map(|tile| tile.terrain) else {
+            return;
+        };
+
+        let mut updated_metadata = self
+            .metadata
+            .tile_visual_metadata
+            .as_ref()
+            .and_then(|metadata_map| metadata_map.get(&pos))
+            .cloned()
+            .or_else(|| self.map.get_tile(pos).map(|tile| tile.visual.clone()))
+            .unwrap_or_default();
+
+        terrain_state.apply_to_metadata_for_terrain(&mut updated_metadata, terrain_type);
+
+        if let Some(tile) = self.map.get_tile_mut(pos) {
+            tile.visual = updated_metadata.clone();
+        }
+
+        self.sync_editor_visual_metadata(pos, &updated_metadata);
+        self.has_changes = true;
     }
 
     /// Toggle multi-select mode
@@ -1577,6 +1684,7 @@ impl MapEditorState {
             if let Some(tile_mut) = self.map.get_tile_mut(pos) {
                 let new_tile = tile.clone();
                 *tile_mut = tile;
+                self.sync_editor_visual_metadata(pos, &new_tile.visual);
 
                 self.undo_stack.push(EditorAction::TileChanged {
                     position: pos,
@@ -2774,8 +2882,10 @@ impl<'a> MapGridWidget<'a> {
             return Color32::from_rgb(255, 200, 0); // Yellow for NPC placements
         }
 
-        // Determine terrain color first so we can blend it with wall color if needed
-        let terrain_color = match tile.terrain {
+        // Determine terrain color first so we can blend it with wall color if needed.
+        // Apply visual color tint to the grid preview so vegetation presets such as
+        // dried grass, dead trees, and flowering shrubs are visible while authoring.
+        let mut terrain_color = match tile.terrain {
             TerrainType::Ground => Color32::from_rgb(210, 180, 140), // Tan
             TerrainType::Grass => Color32::from_rgb(50, 205, 50),    // Lime Green
             TerrainType::Water => Color32::from_rgb(30, 144, 255),   // Dodger Blue
@@ -2786,6 +2896,14 @@ impl<'a> MapGridWidget<'a> {
             TerrainType::Forest => Color32::from_rgb(34, 139, 34),   // Forest Green
             TerrainType::Mountain => Color32::from_rgb(105, 105, 105), // Dim Gray
         };
+
+        if let Some((r, g, b)) = tile.visual.color_tint {
+            terrain_color = Color32::from_rgb(
+                ((terrain_color.r() as f32 * r).clamp(0.0, 255.0)).round() as u8,
+                ((terrain_color.g() as f32 * g).clamp(0.0, 255.0)).round() as u8,
+                ((terrain_color.b() as f32 * b).clamp(0.0, 255.0)).round() as u8,
+            );
+        }
 
         if let Some(event_type) = event_type {
             return event_type.color();
@@ -2990,18 +3108,26 @@ impl<'a> Widget for MapGridWidget<'a> {
 
                     self.state.selected_position = Some(pos);
 
-                    // Synchronize terrain editor state with selected tile (unless multi-selecting)
+                    // Synchronize terrain editor state with selected tile (unless multi-selecting).
+                    // Prefer staged editor metadata, but fall back to the tile's serialized visual
+                    // metadata so saved/reloaded vegetation fields repopulate the controls.
                     if !self.state.multi_select_mode {
-                        if let Some(metadata_map) =
-                            self.state.metadata.tile_visual_metadata.as_ref()
-                        {
-                            if let Some(metadata) = metadata_map.get(&pos) {
-                                self.state.terrain_editor_state =
-                                    TerrainEditorState::from_metadata(metadata);
-                            } else {
-                                self.state.terrain_editor_state = TerrainEditorState::default();
-                            }
-                        }
+                        let fallback_metadata = self
+                            .state
+                            .map
+                            .get_tile(pos)
+                            .map(|selected_tile| selected_tile.visual.clone())
+                            .unwrap_or_default();
+                        let metadata = self
+                            .state
+                            .metadata
+                            .tile_visual_metadata
+                            .as_ref()
+                            .and_then(|metadata_map| metadata_map.get(&pos))
+                            .cloned()
+                            .unwrap_or(fallback_metadata);
+                        self.state.terrain_editor_state =
+                            TerrainEditorState::from_metadata(&metadata);
                     }
 
                     // Apply current tool
@@ -3951,7 +4077,7 @@ impl MapsEditorState {
                             egui::ScrollArea::both()
                                 .id_salt("map_editor_grid_scroll")
                                 .max_height(panel_height)
-                                .auto_shrink([false, false])
+                                .auto_shrink([true, false])
                                 .show(left_ui, |ui| {
                                     // Debug logging removed: no additional stderr logs.
 
@@ -3974,6 +4100,7 @@ impl MapsEditorState {
 
                             egui::ScrollArea::vertical()
                                 .id_salt("map_editor_inspector_scroll")
+                                .auto_shrink([true, false])
                                 .show(right_ui, |ui| {
                                     let inspector_data = MapInspectorData {
                                         maps,
@@ -4214,6 +4341,21 @@ impl MapsEditorState {
                     ui.label(format!("Terrain: {:?}", tile.terrain));
                     ui.label(format!("Wall: {:?}", tile.wall_type));
                     ui.label(format!("Blocked: {}", tile.blocked));
+                    ui.separator();
+                    ui.label(
+                        egui::RichText::new("🌿 Vegetation Authoring")
+                            .strong()
+                            .color(egui::Color32::LIGHT_GREEN),
+                    );
+                    ui.label(Self::vegetation_authoring_summary(&tile.visual));
+                    ui.label(
+                        egui::RichText::new(Self::vegetation_runtime_hint(
+                            tile.terrain,
+                            &tile.visual,
+                        ))
+                        .small()
+                        .color(egui::Color32::GRAY),
+                    );
                 }
 
                 if let Some((idx, placement)) = editor
@@ -4626,12 +4768,23 @@ impl MapsEditorState {
                     ui.separator();
 
                     if ui.button("🗑️ Clear Terrain Properties").clicked() {
-                        if let Some(metadata_map) = editor.metadata.tile_visual_metadata.as_mut() {
-                            if let Some(metadata) = metadata_map.get_mut(&pos) {
-                                TerrainEditorState::clear_metadata(metadata);
+                        let target_positions = if editor.selected_tiles.is_empty() {
+                            vec![pos]
+                        } else {
+                            editor.selected_tiles.clone()
+                        };
+
+                        for tile_pos in target_positions {
+                            if let Some(tile) = editor.map.get_tile_mut(tile_pos) {
+                                TerrainEditorState::clear_metadata(&mut tile.visual);
+                                let updated_metadata = tile.visual.clone();
+                                editor.sync_editor_visual_metadata(tile_pos, &updated_metadata);
                             }
                         }
+
                         editor.terrain_editor_state = TerrainEditorState::default();
+                        editor.has_changes = true;
+                        ui.ctx().request_repaint();
                     }
                 }
             });
@@ -4640,33 +4793,17 @@ impl MapsEditorState {
             ui.separator();
             ui.group(|ui| {
                 if let Some(selected_preset) = Self::show_preset_palette(ui, editor) {
-                    // Initialize metadata map if it doesn't exist
-                    if editor.metadata.tile_visual_metadata.is_none() {
-                        editor.metadata.tile_visual_metadata =
-                            Some(std::collections::HashMap::new());
-                    }
+                    let metadata = selected_preset.to_metadata();
 
                     if !editor.selected_tiles.is_empty() {
-                        // Multi-select active: apply to all selected tiles
-                        if let Some(metadata_map) = editor.metadata.tile_visual_metadata.as_mut() {
-                            for tile_pos in &editor.selected_tiles {
-                                let metadata = metadata_map
-                                    .entry(*tile_pos)
-                                    .or_insert_with(TileVisualMetadata::default);
-                                *metadata = selected_preset.to_metadata();
-                            }
-                            editor.has_changes = true;
-                        }
+                        editor.apply_visual_metadata_to_selection(&metadata);
                     } else {
-                        // Single selection: apply to current tile
-                        if let Some(metadata_map) = editor.metadata.tile_visual_metadata.as_mut() {
-                            let metadata = metadata_map
-                                .entry(pos)
-                                .or_insert_with(TileVisualMetadata::default);
-                            *metadata = selected_preset.to_metadata();
-                            editor.has_changes = true;
-                        }
+                        editor.apply_visual_metadata(pos, &metadata);
                     }
+
+                    editor.visual_editor.load_from_metadata(&metadata);
+                    editor.terrain_editor_state = TerrainEditorState::from_metadata(&metadata);
+                    ui.ctx().request_repaint();
                 }
             });
         } else {
@@ -4717,6 +4854,45 @@ impl MapsEditorState {
         }
 
         requested_open_npc
+    }
+
+    /// Build a compact vegetation summary for the selected tile inspector.
+    fn vegetation_authoring_summary(metadata: &TileVisualMetadata) -> String {
+        format!(
+            "Tree: {:?} · Grass: {:?} · Foliage: {:.1}× · Scale: {:.1}×{}",
+            metadata.tree_type(),
+            metadata.grass_density(),
+            metadata.foliage_density(),
+            metadata.effective_scale(),
+            metadata
+                .grass_blade_config
+                .map(|config| format!(" · Blade length: {:.2}×", config.length))
+                .unwrap_or_default()
+        )
+    }
+
+    /// Explain how the current vegetation metadata affects runtime rendering.
+    fn vegetation_runtime_hint(terrain_type: TerrainType, metadata: &TileVisualMetadata) -> String {
+        match terrain_type {
+            TerrainType::Grass => format!(
+                "Runtime effect: grass density controls clump coverage; foliage density multiplies coverage; blade config {} height/shape/color variation.",
+                if metadata.grass_blade_config.is_some() {
+                    "customizes"
+                } else {
+                    "uses default"
+                }
+            ),
+            TerrainType::Forest => {
+                if metadata.tree_type() == TreeType::Dead || metadata.foliage_density() <= 0.0 {
+                    "Runtime effect: forest tile spawns a dead or leafless tree with no foliage canopy.".to_string()
+                } else if metadata.tree_type() == TreeType::Shrub {
+                    "Runtime effect: forest tile spawns shrub vegetation instead of a full tree.".to_string()
+                } else {
+                    "Runtime effect: tree type selects species mesh; foliage density controls canopy and understory shrubs.".to_string()
+                }
+            }
+            _ => "Runtime effect: vegetation fields are saved, but only Grass and Forest terrain consume them directly.".to_string(),
+        }
     }
 
     /// Helper: extract name and description from any MapEvent variant
@@ -6321,21 +6497,23 @@ impl MapsEditorState {
                 .selected_text("Select Preset...")
                 .show_ui(ui, |ui| {
                     for preset in VisualPreset::all() {
-                        if ui.button(preset.name()).clicked() {
-                            let metadata = preset.to_metadata();
-                            if editor.multi_select_mode && !editor.selected_tiles.is_empty() {
-                                editor.apply_visual_metadata_to_selection(&metadata);
-                                // When bulk-applying a preset, reflect it in the editor so subsequent "Apply"
-                                // uses the same metadata rather than being overwritten by selection clicks.
-                                editor.visual_editor.load_from_metadata(&metadata);
-                            } else {
-                                editor.apply_visual_metadata(pos, &metadata);
-                                // For single-selection workflows, load the tile's metadata into the editor.
-                                if let Some(tile) = editor.map.get_tile(pos) {
-                                    editor.visual_editor.load_from_tile(tile);
+                        ui.push_id(preset, |ui| {
+                            if ui.button(preset.name()).clicked() {
+                                let metadata = preset.to_metadata();
+                                if editor.multi_select_mode && !editor.selected_tiles.is_empty() {
+                                    editor.apply_visual_metadata_to_selection(&metadata);
+                                } else {
+                                    editor.apply_visual_metadata(pos, &metadata);
                                 }
+
+                                // Keep both visual and terrain-specific controls synchronized with the
+                                // selected preset so semantic vegetation fields are immediately visible.
+                                editor.visual_editor.load_from_metadata(&metadata);
+                                editor.terrain_editor_state =
+                                    TerrainEditorState::from_metadata(&metadata);
+                                ui.ctx().request_repaint();
                             }
-                        }
+                        });
                     }
                 });
         });
@@ -6459,6 +6637,7 @@ impl MapsEditorState {
                 // Reset editor UI state after applying
                 editor.visual_editor.reset();
                 editor.terrain_editor_state = TerrainEditorState::default();
+                ui.ctx().request_repaint();
             }
 
             if ui.button("Reset to Defaults").clicked() {
@@ -6468,6 +6647,32 @@ impl MapsEditorState {
 
                 editor.visual_editor.reset();
                 editor.terrain_editor_state = TerrainEditorState::default();
+                ui.ctx().request_repaint();
+            }
+
+            if ui
+                .button("🌿 Reset Vegetation")
+                .on_hover_text("Clears grass density, tree type, foliage density, and custom grass blade config for the selected tile(s).")
+                .clicked()
+            {
+                let target_positions = if editor.selected_tiles.is_empty() {
+                    vec![pos]
+                } else {
+                    editor.selected_tiles.clone()
+                };
+
+                for tile_pos in target_positions {
+                    if let Some(tile) = editor.map.get_tile_mut(tile_pos) {
+                        TerrainEditorState::clear_vegetation_metadata(&mut tile.visual);
+                        let updated_metadata = tile.visual.clone();
+                        editor.sync_editor_visual_metadata(tile_pos, &updated_metadata);
+                    }
+                }
+
+                editor.visual_editor.reset();
+                editor.terrain_editor_state = TerrainEditorState::default();
+                editor.has_changes = true;
+                ui.ctx().request_repaint();
             }
         });
 
@@ -6483,10 +6688,12 @@ impl MapsEditorState {
 
             if ui.button(button_text).clicked() {
                 editor.toggle_multi_select_mode();
+                ui.ctx().request_repaint();
             }
 
             if !editor.selected_tiles.is_empty() && ui.button("Clear Selection").clicked() {
                 editor.clear_tile_selection();
+                ui.ctx().request_repaint();
             }
         });
 
@@ -6523,7 +6730,8 @@ impl MapsEditorState {
         match terrain_type {
             TerrainType::Grass => {
                 // Grass density dropdown
-                ui.label("Grass Density:");
+                ui.label("Grass Density:")
+                    .on_hover_text("Runtime effect: changes clump coverage for Grass terrain.");
                 let mut density_index = match state.grass_density {
                     GrassDensity::None => 0,
                     GrassDensity::Low => 1,
@@ -6555,7 +6763,9 @@ impl MapsEditorState {
                     };
                 }
 
-                ui.label("Foliage Density:");
+                ui.label("Foliage Density:").on_hover_text(
+                    "Runtime effect: multiplies grass clump coverage for this tile.",
+                );
                 changed |= ui
                     .add(
                         egui::Slider::new(&mut state.foliage_density, 0.0..=2.0)
@@ -6570,6 +6780,7 @@ impl MapsEditorState {
                         &mut state.grass_blade_config_enabled,
                         "Custom Grass Blade Config",
                     )
+                    .on_hover_text("Runtime effect: customizes clump blade length, width, lean, curvature, and color variation.")
                     .changed();
 
                 if state.grass_blade_config_enabled {
@@ -6625,7 +6836,8 @@ impl MapsEditorState {
 
             TerrainType::Forest => {
                 // Tree type dropdown
-                ui.label("Tree Type:");
+                ui.label("Tree Type:")
+                    .on_hover_text("Runtime effect: selects the species-specific tree or shrub mesh spawned on Forest terrain.");
                 let mut tree_index = match state.tree_type {
                     TreeType::Oak => 0,
                     TreeType::Pine => 1,
@@ -6663,7 +6875,8 @@ impl MapsEditorState {
                     };
                 }
 
-                ui.label("Foliage Density:");
+                ui.label("Foliage Density:")
+                    .on_hover_text("Runtime effect: controls canopy fullness and planned understory shrub density.");
                 changed |= ui
                     .add(
                         egui::Slider::new(&mut state.foliage_density, 0.0..=2.0)
@@ -6782,19 +6995,35 @@ impl MapsEditorState {
         let mut selected_preset = None;
 
         ui.heading("Visual Presets");
+        let scope_text = if state.selected_tiles.is_empty() {
+            "Preset scope: selected tile only".to_string()
+        } else {
+            format!(
+                "Preset scope: {} selected tiles",
+                state.selected_tiles.len()
+            )
+        };
+        ui.label(
+            egui::RichText::new(scope_text)
+                .small()
+                .color(egui::Color32::GRAY),
+        );
 
         // Category filter tabs
         ui.horizontal(|ui| {
             for category in PresetCategory::all() {
-                if ui
-                    .selectable_label(
-                        state.preset_category_filter == *category,
-                        category.display_name(),
-                    )
-                    .clicked()
-                {
-                    state.preset_category_filter = *category;
-                }
+                ui.push_id(category.display_name(), |ui| {
+                    if ui
+                        .selectable_label(
+                            state.preset_category_filter == *category,
+                            category.display_name(),
+                        )
+                        .clicked()
+                    {
+                        state.preset_category_filter = *category;
+                        ui.ctx().request_repaint();
+                    }
+                });
             }
         });
 
@@ -6808,9 +7037,11 @@ impl MapsEditorState {
             .spacing([8.0, 8.0])
             .show(ui, |ui| {
                 for (idx, preset) in presets.iter().enumerate() {
-                    if ui.button(preset.name()).clicked() {
-                        selected_preset = Some(*preset);
-                    }
+                    ui.push_id(preset, |ui| {
+                        if ui.button(preset.name()).clicked() {
+                            selected_preset = Some(*preset);
+                        }
+                    });
 
                     // New row every 3 presets
                     if (idx + 1) % 3 == 0 {
@@ -7713,6 +7944,224 @@ mod tests {
         }
 
         assert!(state.has_changes);
+    }
+
+    #[test]
+    fn test_apply_visual_metadata_synchronizes_tile_and_editor_metadata() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let pos = Position::new(3, 4);
+        let metadata = VisualPreset::TallGrass.to_metadata();
+
+        state.apply_visual_metadata(pos, &metadata);
+
+        let tile = state.map.get_tile(pos).expect("Tile should exist");
+        assert_eq!(tile.visual, metadata);
+
+        let editor_metadata = state
+            .metadata
+            .tile_visual_metadata
+            .as_ref()
+            .and_then(|metadata_map| metadata_map.get(&pos))
+            .expect("Editor metadata should exist for edited tile");
+        assert_eq!(editor_metadata, &metadata);
+        assert!(state.has_changes);
+    }
+
+    #[test]
+    fn test_new_editor_loads_saved_vegetation_metadata_from_map_tiles() {
+        let mut map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(4, 4);
+        let metadata = VisualPreset::DeadTree.to_metadata();
+        map.get_tile_mut(pos).expect("Tile should exist").visual = metadata.clone();
+
+        let state = MapEditorState::new(map);
+
+        let editor_metadata = state
+            .metadata
+            .tile_visual_metadata
+            .as_ref()
+            .and_then(|metadata_map| metadata_map.get(&pos))
+            .expect("Saved vegetation metadata should load into editor metadata");
+        assert_eq!(editor_metadata, &metadata);
+        assert_eq!(
+            state.map.get_tile(pos).expect("Tile should exist").visual,
+            metadata
+        );
+    }
+
+    #[test]
+    fn test_grass_blade_config_survives_save_reload_round_trip() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let pos = Position::new(2, 2);
+        state.selected_terrain = TerrainType::Grass;
+        state.paint_tile(pos);
+
+        let metadata = VisualPreset::TallGrass.to_metadata();
+        state.apply_visual_metadata(pos, &metadata);
+
+        let ron = state.save_to_ron().expect("Map should serialize");
+        let loaded_map: Map = ron::from_str(&ron).expect("Map should deserialize");
+        let loaded_tile = loaded_map.get_tile(pos).expect("Tile should reload");
+
+        assert_eq!(loaded_tile.visual.grass_density, Some(GrassDensity::High));
+        assert_eq!(
+            loaded_tile.visual.grass_blade_config,
+            metadata.grass_blade_config
+        );
+    }
+
+    #[test]
+    fn test_clear_metadata_removes_vegetation_specific_fields() {
+        let mut metadata = TileVisualMetadata {
+            grass_density: Some(GrassDensity::High),
+            tree_type: Some(TreeType::Dead),
+            foliage_density: Some(1.5),
+            rock_variant: Some(RockVariant::Jagged),
+            water_flow_direction: Some(WaterFlowDirection::East),
+            snow_coverage: Some(0.25),
+            grass_blade_config: Some(GrassBladeConfig::default()),
+            ..Default::default()
+        };
+
+        TerrainEditorState::clear_vegetation_metadata(&mut metadata);
+
+        assert_eq!(metadata.grass_density, None);
+        assert_eq!(metadata.tree_type, None);
+        assert_eq!(metadata.foliage_density, None);
+        assert_eq!(metadata.grass_blade_config, None);
+        assert_eq!(metadata.rock_variant, Some(RockVariant::Jagged));
+        assert_eq!(
+            metadata.water_flow_direction,
+            Some(WaterFlowDirection::East)
+        );
+        assert_eq!(metadata.snow_coverage, Some(0.25));
+    }
+
+    #[test]
+    fn test_vegetation_presets_set_runtime_semantic_fields() {
+        let dead_tree = VisualPreset::DeadTree.to_metadata();
+        assert_eq!(dead_tree.tree_type, Some(TreeType::Dead));
+        assert_eq!(dead_tree.foliage_density, Some(0.0));
+        assert_eq!(dead_tree.grass_density, None);
+
+        let small_shrub = VisualPreset::SmallShrub.to_metadata();
+        assert_eq!(small_shrub.tree_type, Some(TreeType::Shrub));
+        assert_eq!(small_shrub.foliage_density, Some(0.8));
+
+        let large_tree = VisualPreset::LargeTree.to_metadata();
+        assert_eq!(large_tree.tree_type, Some(TreeType::Oak));
+        assert_eq!(large_tree.foliage_density, Some(1.4));
+    }
+
+    #[test]
+    fn test_grass_presets_set_density_and_blade_config() {
+        let short_grass = VisualPreset::ShortGrass.to_metadata();
+        assert_eq!(short_grass.grass_density, Some(GrassDensity::Low));
+        assert_eq!(short_grass.foliage_density, Some(0.7));
+        assert_eq!(
+            short_grass
+                .grass_blade_config
+                .expect("Short grass should customize blade config")
+                .length,
+            0.65
+        );
+
+        let tall_grass = VisualPreset::TallGrass.to_metadata();
+        assert_eq!(tall_grass.grass_density, Some(GrassDensity::High));
+        assert_eq!(tall_grass.foliage_density, Some(1.4));
+        assert_eq!(
+            tall_grass
+                .grass_blade_config
+                .expect("Tall grass should customize blade config")
+                .length,
+            1.6
+        );
+
+        let dried_grass = VisualPreset::DriedGrass.to_metadata();
+        assert_eq!(dried_grass.grass_density, Some(GrassDensity::Low));
+        assert_eq!(
+            dried_grass
+                .grass_blade_config
+                .expect("Dried grass should customize blade config")
+                .color_variation,
+            0.05
+        );
+    }
+
+    #[test]
+    fn test_apply_terrain_metadata_for_grass_keeps_grass_fields() {
+        let terrain_state = TerrainEditorState {
+            grass_density: GrassDensity::High,
+            grass_blade_config_enabled: true,
+            grass_blade_config: GrassBladeConfig {
+                length: 1.5,
+                width: 1.1,
+                tilt: 0.4,
+                curve: 0.6,
+                color_variation: 0.35,
+            },
+            tree_type: TreeType::Dead,
+            foliage_density: 1.25,
+            ..Default::default()
+        };
+        let mut metadata = TileVisualMetadata {
+            height: Some(0.4),
+            color_tint: Some((0.5, 0.8, 0.5)),
+            tree_type: Some(TreeType::Oak),
+            ..Default::default()
+        };
+
+        terrain_state.apply_to_metadata_for_terrain(&mut metadata, TerrainType::Grass);
+
+        assert_eq!(metadata.height, Some(0.4));
+        assert_eq!(metadata.color_tint, Some((0.5, 0.8, 0.5)));
+        assert_eq!(metadata.grass_density, Some(GrassDensity::High));
+        assert_eq!(metadata.foliage_density, Some(1.25));
+        assert_eq!(
+            metadata.grass_blade_config,
+            Some(terrain_state.grass_blade_config)
+        );
+        assert_eq!(metadata.tree_type, None);
+        assert_eq!(metadata.rock_variant, None);
+        assert_eq!(metadata.water_flow_direction, None);
+    }
+
+    #[test]
+    fn test_apply_terrain_metadata_for_forest_keeps_tree_fields() {
+        let terrain_state = TerrainEditorState {
+            tree_type: TreeType::Pine,
+            foliage_density: 1.75,
+            snow_coverage: 0.4,
+            grass_density: GrassDensity::VeryHigh,
+            grass_blade_config_enabled: true,
+            grass_blade_config: GrassBladeConfig {
+                length: 1.8,
+                width: 1.2,
+                tilt: 0.45,
+                curve: 0.7,
+                color_variation: 0.4,
+            },
+            ..Default::default()
+        };
+        let mut metadata = TileVisualMetadata {
+            scale: Some(1.2),
+            grass_density: Some(GrassDensity::High),
+            grass_blade_config: Some(GrassBladeConfig::default()),
+            ..Default::default()
+        };
+
+        terrain_state.apply_to_metadata_for_terrain(&mut metadata, TerrainType::Forest);
+
+        assert_eq!(metadata.scale, Some(1.2));
+        assert_eq!(metadata.tree_type, Some(TreeType::Pine));
+        assert_eq!(metadata.foliage_density, Some(1.75));
+        assert_eq!(metadata.snow_coverage, Some(0.4));
+        assert_eq!(metadata.grass_density, None);
+        assert_eq!(metadata.grass_blade_config, None);
+        assert_eq!(metadata.rock_variant, None);
+        assert_eq!(metadata.water_flow_direction, None);
     }
 
     #[test]

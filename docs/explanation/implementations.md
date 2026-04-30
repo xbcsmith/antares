@@ -2,6 +2,46 @@
 
 ---
 
+## Vegetation Visual Quality Phase 5 Implementation (Complete)
+
+### Overview
+
+Implemented Phase 5 of `docs/explanation/vegetation_visual_quality_implementation_plan.md`: improved Campaign Builder feedback for vegetation authoring so SDK tile edits visibly map to runtime vegetation behavior.
+
+### Problems Fixed
+
+- Updated Campaign Builder vegetation presets so tree, shrub, and grass presets set runtime-consumed semantic fields.
+- Tree presets now set `tree_type` and `foliage_density` instead of only generic height, scale, and tint.
+- `DeadTree` now sets `tree_type = Some(TreeType::Dead)` and `foliage_density = Some(0.0)` so it renders as a dead tree without foliage.
+- Shrub presets now set `tree_type = Some(TreeType::Shrub)` and appropriate foliage density values.
+- Grass presets now set `grass_density`, `foliage_density`, and `grass_blade_config` so short, tall, and dried grass affect clump coverage and blade appearance at runtime.
+- Applying visual metadata now synchronizes both the map tile's serialized `visual` data and the editor-side metadata cache.
+- Opening a map in the editor now reconstructs editor metadata from saved tile visual metadata so reload restores vegetation controls.
+- Terrain-specific metadata application now uses one synchronized path that updates editor metadata and saved tile data together.
+- Grass terrain application clears irrelevant tree, rock, water, and snow fields while preserving relevant visual styling.
+- Forest terrain application clears irrelevant grass, rock, and water fields while preserving relevant tree fields.
+- Added a selected-tile vegetation authoring summary showing resolved tree type, grass density, foliage density, scale, and blade length when present.
+- Added runtime effect hints for Grass and Forest terrain so authors can see what controls change in-game.
+- Added a `Reset Vegetation` action that clears vegetation-specific fields while preserving unrelated visual metadata.
+- Map grid preview now applies visual color tint so dried grass, dead trees, and flowering shrubs are visibly distinguishable while authoring.
+- Preset palette now displays whether a preset applies to one selected tile or the current multi-tile selection.
+- Updated Campaign Builder egui ID usage in vegetation preset loops with `push_id`.
+- Updated map editor scroll areas to avoid the project-forbidden `auto_shrink([false, false])` pattern.
+
+### Files Changed
+
+- `sdk/campaign_builder/src/map_editor.rs`
+- `docs/explanation/implementations.md`
+
+### Validation
+
+- `cargo fmt --all` passed.
+- `cargo check --all-targets --all-features` passed.
+- `cargo clippy --all-targets --all-features -- -D warnings` passed.
+- `cargo nextest run --all-features --status-level fail` passed: 4875 tests passed, 8 skipped.
+
+---
+
 ## Vegetation Visual Quality Phase 4 Implementation (Complete)
 
 ### Overview
