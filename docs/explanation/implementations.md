@@ -2,6 +2,45 @@
 
 ---
 
+## Vegetation Visual Quality Phase 3 Implementation (Complete)
+
+### Overview
+
+Implemented Phase 3 of `docs/explanation/vegetation_visual_quality_implementation_plan.md`: upgraded grass rendering from sparse per-blade spawning to clumped, cached, deterministic, wind-ready vegetation.
+
+### Problems Fixed
+
+- Added `GrassPatch`, `GrassClump`, `GrassMeshQuality`, `GrassMaterialKey`, `GrassPlacementSeed`, `GrassWindParams`, and `GrassAssetCache` render-layer concepts.
+- Replaced high-density sparse per-blade grass with crossed-card clumps that read as patches instead of isolated spikes.
+- Added reusable grass mesh variants keyed by mesh quality, blade configuration bucket, and clump card count.
+- Added reusable grass material variants keyed by tint, color variation, and alpha-mask settings.
+- Switched active map rendering to `spawn_grass_cached` with a persistent `GrassAssetCache`.
+- Preserved `spawn_grass` as a compatibility wrapper while the optimized render path uses the persistent cache.
+- Grass placement is now deterministic by map ID and tile position through `GrassPlacementSeed`.
+- Grass geometry now supports tapered curved cards with 3, 5, or 7 segments depending on `GrassMeshQuality`.
+- Clumps use 2–4 rotated cards for visible volume.
+- Height and width variation now apply through deterministic clump transform scaling instead of creating unique per-clump meshes.
+- `grass_blade_config.length`, `width`, `tilt`, `curve`, and `color_variation` affect mesh/material bucket selection and visible output.
+- `foliage_density` continues to scale grass coverage and now scales clump coverage through the blade-to-clump conversion.
+- Grass clumps include `GrassWindParams` so later wind animation can consume phase, strength, and frequency without changing spawn data.
+- Existing grass distance culling and LOD systems remain active and now operate on the clump representation.
+- Map terrain logic now centralizes grass-cover eligibility so both `Grass` and `Forest` terrain spawn procedural ground cover according to metadata.
+
+### Files Changed
+
+- `src/game/systems/advanced_grass.rs`
+- `src/game/systems/map.rs`
+- `docs/explanation/implementations.md`
+
+### Validation
+
+- `cargo fmt --all` passed.
+- `cargo check --all-targets --all-features` passed.
+- `cargo clippy --all-targets --all-features -- -D warnings` passed.
+- `cargo nextest run --all-features --status-level fail` passed: 4851 tests passed, 8 skipped.
+
+---
+
 ## Vegetation Visual Quality Phase 2 Implementation (Complete)
 
 ### Overview

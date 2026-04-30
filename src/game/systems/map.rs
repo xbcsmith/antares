@@ -42,6 +42,14 @@ fn should_spawn_extra_forest_shrub(is_forest: bool, spawned_center_vegetation: b
     is_forest && !spawned_center_vegetation
 }
 
+/// Returns whether a terrain tile should receive procedural grass ground cover.
+fn should_spawn_grass_cover(terrain: world::TerrainType) -> bool {
+    matches!(
+        terrain,
+        world::TerrainType::Forest | world::TerrainType::Grass
+    )
+}
+
 /// Plugin that renders the current map using Bevy meshes/materials.
 ///
 /// Note: The visual rendering plugin remains focused on rendering. The map
@@ -377,6 +385,7 @@ impl Plugin for MapRenderingPlugin {
         // registry on startup so metadata is available before map spawn runs.
         app.init_resource::<SpriteAssets>()
             .init_resource::<crate::game::resources::GrassQualitySettings>()
+            .init_resource::<super::advanced_grass::GrassAssetCache>()
             .init_resource::<super::advanced_grass::GrassRenderConfig>() // Add grass render config
             .init_resource::<super::advanced_grass::GrassInstanceConfig>()
             .add_systems(
@@ -418,6 +427,7 @@ fn spawn_map_system(
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
     quality_settings: Res<crate::game::resources::GrassQualitySettings>,
+    mut grass_cache: ResMut<super::advanced_grass::GrassAssetCache>,
     terrain_cache: Res<TerrainMaterialCache>,
     mut cache: Local<super::procedural_meshes::ProceduralMeshCache>,
 ) {
@@ -430,6 +440,7 @@ fn spawn_map_system(
         global_state,
         content,
         quality_settings,
+        grass_cache.as_mut(),
         &terrain_cache,
         &mut cache,
     );
@@ -679,6 +690,7 @@ fn spawn_map_markers(
         let cache_ref: &TerrainMaterialCache = terrain_cache.as_deref().unwrap_or(&default_cache);
 
         let mut procedural_cache = super::procedural_meshes::ProceduralMeshCache::default();
+        let mut grass_cache = super::advanced_grass::GrassAssetCache::default();
         spawn_map(
             commands,
             meshes,
@@ -688,6 +700,7 @@ fn spawn_map_markers(
             global_state,
             content,
             quality_settings,
+            &mut grass_cache,
             cache_ref,
             &mut procedural_cache,
         );
@@ -787,6 +800,7 @@ fn spawn_map(
     global_state: Res<crate::game::resources::GlobalState>,
     content: Res<crate::application::resources::GameContent>,
     quality_settings: Res<crate::game::resources::GrassQualitySettings>,
+    grass_cache: &mut super::advanced_grass::GrassAssetCache,
     terrain_cache: &TerrainMaterialCache,
     procedural_cache: &mut super::procedural_meshes::ProceduralMeshCache,
 ) {
@@ -935,7 +949,7 @@ fn spawn_map(
                                 TileCoord(pos),
                             ));
                         }
-                        world::TerrainType::Forest | world::TerrainType::Grass => {
+                        terrain if should_spawn_grass_cover(terrain) => {
                             let is_forest = tile.terrain == world::TerrainType::Forest;
 
                             // Render grass floor
@@ -1062,11 +1076,12 @@ fn spawn_map(
                             }
 
                             // Always spawn grass ground cover for these terrains
-                            super::advanced_grass::spawn_grass(
+                            super::advanced_grass::spawn_grass_cached(
                                 &mut commands,
                                 &mut materials,
                                 &mut meshes,
                                 &asset_server,
+                                grass_cache,
                                 pos,
                                 map.id,
                                 Some(&tile.visual),
@@ -2025,6 +2040,34 @@ mod tests {
 
         assert_eq!(centered_x, 5.5);
         assert_eq!(centered_z, 10.5);
+    }
+
+    #[test]
+    fn test_should_spawn_grass_cover_for_grass_terrain() {
+        assert!(should_spawn_grass_cover(world::TerrainType::Grass));
+    }
+
+    #[test]
+    fn test_should_spawn_grass_cover_for_forest_terrain() {
+        assert!(should_spawn_grass_cover(world::TerrainType::Forest));
+    }
+
+    #[test]
+    fn test_should_not_spawn_grass_cover_for_non_vegetated_terrain() {
+        for terrain in [
+            world::TerrainType::Ground,
+            world::TerrainType::Water,
+            world::TerrainType::Lava,
+            world::TerrainType::Swamp,
+            world::TerrainType::Stone,
+            world::TerrainType::Dirt,
+            world::TerrainType::Mountain,
+        ] {
+            assert!(
+                !should_spawn_grass_cover(terrain),
+                "terrain {terrain:?} should not spawn procedural grass cover"
+            );
+        }
     }
 
     #[test]

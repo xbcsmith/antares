@@ -15,7 +15,8 @@
 
 use bevy::log::debug;
 use bevy::prelude::*;
-use rand::Rng;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use std::collections::HashMap;
 
 use crate::domain::types;
@@ -38,6 +39,66 @@ const GRASS_BLADE_TEXTURE: &str = "assets/textures/grass/grass_blade.png";
 /// Fragments with alpha below this value are discarded, producing a clean
 /// silhouette without sorting artefacts.
 const GRASS_ALPHA_CUTOFF: f32 = 0.3;
+
+/// Minimum number of crossed blade cards in a grass clump.
+const MIN_CARDS_PER_CLUMP: u32 = 2;
+
+/// Maximum number of crossed blade cards in a grass clump.
+const MAX_CARDS_PER_CLUMP: u32 = 4;
+
+/// Average authored blades represented by one clump entity.
+const BLADES_PER_CLUMP: u32 = 8;
+
+/// Radius used when distributing clumps within a tile.
+const GRASS_PATCH_RADIUS: f32 = 0.42;
+
+/// Minimum clump height variation multiplier.
+const MIN_HEIGHT_VARIATION: f32 = 0.75;
+
+/// Maximum clump height variation multiplier.
+const MAX_HEIGHT_VARIATION: f32 = 1.25;
+
+/// Minimum clump width variation multiplier.
+const MIN_WIDTH_VARIATION: f32 = 0.85;
+
+/// Maximum clump width variation multiplier.
+const MAX_WIDTH_VARIATION: f32 = 1.15;
+
+/// Ground lift that prevents alpha-masked grass from z-fighting with floors.
+const GRASS_GROUND_CLEARANCE: f32 = 0.015;
+
+/// Resource holding shared grass mesh and material assets.
+///
+/// The cache is explicit so map spawning can reuse grass assets without relying
+/// on process-global state. Meshes are keyed by quality and bucketed blade
+/// configuration; materials are keyed by tint and alpha-mask settings.
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::game::systems::advanced_grass::GrassAssetCache;
+///
+/// let cache = GrassAssetCache::default();
+/// assert_eq!(cache.mesh_count(), 0);
+/// assert_eq!(cache.material_count(), 0);
+/// ```
+#[derive(Resource, Default, Debug)]
+pub struct GrassAssetCache {
+    mesh_handles: HashMap<GrassMeshKey, Handle<Mesh>>,
+    material_handles: HashMap<GrassMaterialKey, Handle<StandardMaterial>>,
+}
+
+impl GrassAssetCache {
+    /// Returns the number of cached grass mesh variants.
+    pub fn mesh_count(&self) -> usize {
+        self.mesh_handles.len()
+    }
+
+    /// Returns the number of cached grass material variants.
+    pub fn material_count(&self) -> usize {
+        self.material_handles.len()
+    }
+}
 
 // ==================== Grass Rendering Components ====================
 
@@ -65,6 +126,209 @@ impl Default for GrassCluster {
             cull_distance: 50.0,
         }
     }
+}
+
+/// Parent component for all grass spawned for a single tile.
+///
+/// `GrassPatch` keeps the optimized clump children grouped by tile while
+/// preserving the existing `GrassCluster` component used by culling and LOD.
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::game::systems::advanced_grass::GrassPatch;
+///
+/// let patch = GrassPatch { clump_count: 12 };
+/// assert_eq!(patch.clump_count, 12);
+/// ```
+#[derive(Component, Clone, Copy, Debug)]
+pub struct GrassPatch {
+    /// Number of renderable clumps spawned under this patch.
+    pub clump_count: u32,
+}
+
+/// Component marking one renderable clump of crossed grass cards.
+///
+/// A clump replaces several sparse per-blade entities with one shared mesh
+/// instance, reducing entity and asset churn while keeping visible volume.
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::game::systems::advanced_grass::GrassClump;
+///
+/// let clump = GrassClump { card_count: 3 };
+/// assert_eq!(clump.card_count, 3);
+/// ```
+#[derive(Component, Clone, Copy, Debug)]
+pub struct GrassClump {
+    /// Number of crossed cards represented by this clump mesh.
+    pub card_count: u32,
+}
+
+/// Mesh quality tiers for grass blade card geometry.
+///
+/// Lower quality uses fewer curve segments. Higher quality uses more segments
+/// for smoother tapered and bent blades.
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::game::systems::advanced_grass::GrassMeshQuality;
+///
+/// assert_eq!(GrassMeshQuality::Low.segment_count(), 3);
+/// assert_eq!(GrassMeshQuality::Medium.segment_count(), 5);
+/// assert_eq!(GrassMeshQuality::High.segment_count(), 7);
+/// ```
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub enum GrassMeshQuality {
+    /// Low-quality mesh with three curve segments.
+    Low,
+    /// Medium-quality mesh with five curve segments.
+    Medium,
+    /// High-quality mesh with seven curve segments.
+    High,
+}
+
+impl GrassMeshQuality {
+    /// Returns the number of vertical curve segments for this quality tier.
+    pub fn segment_count(self) -> usize {
+        match self {
+            Self::Low => 3,
+            Self::Medium => 5,
+            Self::High => 7,
+        }
+    }
+
+    fn from_settings(settings: &GrassQualitySettings) -> Self {
+        match settings.performance_level {
+            crate::game::resources::grass_quality_settings::GrassPerformanceLevel::Low => Self::Low,
+            crate::game::resources::grass_quality_settings::GrassPerformanceLevel::Medium => {
+                Self::Medium
+            }
+            crate::game::resources::grass_quality_settings::GrassPerformanceLevel::High => {
+                Self::High
+            }
+        }
+    }
+}
+
+/// Cache key for shared alpha-masked grass materials.
+///
+/// The key buckets tint and alpha values so many clumps can share a material
+/// while still allowing dried or tinted grass to look distinct.
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::game::systems::advanced_grass::GrassMaterialKey;
+///
+/// let key = GrassMaterialKey::from_tint((0.4, 0.8, 0.3), 0.2);
+/// assert!(key.tint_g >= key.tint_r);
+/// ```
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct GrassMaterialKey {
+    /// Quantized red tint bucket.
+    pub tint_r: u8,
+    /// Quantized green tint bucket.
+    pub tint_g: u8,
+    /// Quantized blue tint bucket.
+    pub tint_b: u8,
+    /// Quantized color variation bucket.
+    pub variation: u8,
+    /// Quantized alpha cutoff bucket.
+    pub alpha_cutoff: u8,
+}
+
+impl GrassMaterialKey {
+    /// Builds a material key from a tint tuple and color variation value.
+    pub fn from_tint(tint: (f32, f32, f32), variation: f32) -> Self {
+        Self {
+            tint_r: quantize_unit(tint.0),
+            tint_g: quantize_unit(tint.1),
+            tint_b: quantize_unit(tint.2),
+            variation: quantize_unit(variation),
+            alpha_cutoff: quantize_unit(GRASS_ALPHA_CUTOFF),
+        }
+    }
+}
+
+/// Deterministic grass placement seed derived from map ID and tile position.
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::domain::types::Position;
+/// use antares::game::systems::advanced_grass::GrassPlacementSeed;
+///
+/// let a = GrassPlacementSeed::new(1, Position::new(2, 3));
+/// let b = GrassPlacementSeed::new(1, Position::new(2, 3));
+/// assert_eq!(a.value(), b.value());
+/// ```
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct GrassPlacementSeed(u64);
+
+impl GrassPlacementSeed {
+    /// Creates a deterministic seed from map ID and tile coordinates.
+    pub fn new(map_id: types::MapId, position: types::Position) -> Self {
+        let mut seed = 0x9E37_79B9_7F4A_7C15_u64;
+        seed ^= u64::from(map_id).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        seed ^= (position.x as i64 as u64).rotate_left(17);
+        seed ^= (position.y as i64 as u64).rotate_left(41);
+        Self(seed)
+    }
+
+    /// Returns the raw deterministic seed value.
+    pub fn value(self) -> u64 {
+        self.0
+    }
+
+    fn rng(self) -> StdRng {
+        StdRng::seed_from_u64(self.0)
+    }
+}
+
+/// Render-layer grass wind parameters.
+///
+/// Wind values are attached now so later animation work can consume them
+/// without changing the spawn pipeline.
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::game::systems::advanced_grass::GrassWindParams;
+///
+/// let wind = GrassWindParams::default();
+/// assert!(wind.strength > 0.0);
+/// ```
+#[derive(Component, Clone, Copy, Debug)]
+pub struct GrassWindParams {
+    /// Wind sway strength in world units.
+    pub strength: f32,
+    /// Wind animation frequency in cycles per second.
+    pub frequency: f32,
+    /// Deterministic phase offset for this clump.
+    pub phase: f32,
+}
+
+impl Default for GrassWindParams {
+    fn default() -> Self {
+        Self {
+            strength: 0.04,
+            frequency: 0.65,
+            phase: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+struct GrassMeshKey {
+    quality: GrassMeshQuality,
+    length: u16,
+    width: u16,
+    tilt: u16,
+    curve: u16,
+    cards: u8,
 }
 
 /// Component marking an individual grass blade within a cluster
@@ -358,11 +622,117 @@ fn scaled_blade_count_range_for_foliage_density(
 
 // ==================== Grass Mesh Generation ====================
 
+fn quantize_unit(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+fn quantize_mesh_value(value: f32) -> u16 {
+    (value.clamp(0.0, 4.0) * 1000.0).round() as u16
+}
+
+fn cached_material_color(key: GrassMaterialKey, color_scheme: &GrassColorScheme) -> Color {
+    let variation = f32::from(key.variation) / 255.0;
+    let base = color_scheme.base_color.to_srgba();
+    let tip = color_scheme.tip_color.to_srgba();
+
+    Color::srgb(
+        (base.red * (1.0 - variation) + tip.red * variation).clamp(0.0, 1.0),
+        (base.green * (1.0 - variation) + tip.green * variation).clamp(0.0, 1.0),
+        (base.blue * (1.0 - variation) + tip.blue * variation).clamp(0.0, 1.0),
+    )
+}
+
+fn grass_mesh_key(
+    quality: GrassMeshQuality,
+    blade_config: &BladeConfig,
+    card_count: u32,
+) -> GrassMeshKey {
+    GrassMeshKey {
+        quality,
+        length: quantize_mesh_value(blade_config.length),
+        width: quantize_mesh_value(blade_config.width),
+        tilt: quantize_mesh_value(blade_config.tilt),
+        curve: quantize_mesh_value(blade_config.curve),
+        cards: card_count.clamp(MIN_CARDS_PER_CLUMP, MAX_CARDS_PER_CLUMP) as u8,
+    }
+}
+
+fn get_or_create_grass_mesh(
+    meshes: &mut ResMut<Assets<Mesh>>,
+    grass_cache: &mut GrassAssetCache,
+    key: GrassMeshKey,
+    blade_height: f32,
+    blade_config: &BladeConfig,
+) -> Handle<Mesh> {
+    if let Some(handle) = grass_cache.mesh_handles.get(&key).cloned() {
+        return handle;
+    }
+
+    let mesh = create_grass_clump_mesh(
+        blade_height * blade_config.length,
+        GRASS_BLADE_WIDTH * blade_config.width,
+        blade_config.tilt,
+        blade_config.curve,
+        key.quality.segment_count(),
+        u32::from(key.cards),
+    );
+    let handle = meshes.add(mesh);
+    grass_cache.mesh_handles.insert(key, handle.clone());
+
+    handle
+}
+
+fn get_or_create_grass_material(
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    asset_server: &Res<AssetServer>,
+    grass_cache: &mut GrassAssetCache,
+    key: GrassMaterialKey,
+    color_scheme: &GrassColorScheme,
+) -> Handle<StandardMaterial> {
+    if let Some(handle) = grass_cache.material_handles.get(&key).cloned() {
+        return handle;
+    }
+
+    let texture_handle: Handle<Image> = asset_server.load(GRASS_BLADE_TEXTURE);
+    let handle = materials.add(StandardMaterial {
+        base_color: cached_material_color(key, color_scheme),
+        base_color_texture: Some(texture_handle),
+        alpha_mode: AlphaMode::Mask(GRASS_ALPHA_CUTOFF),
+        double_sided: true,
+        cull_mode: None,
+        perceptual_roughness: 0.7,
+        ..default()
+    });
+
+    grass_cache.material_handles.insert(key, handle.clone());
+
+    handle
+}
+
+#[cfg(test)]
 fn create_grass_blade_mesh(height: f32, width: f32, curve_amount: f32) -> Mesh {
-    let segment_count = 4;
+    create_curved_grass_card_mesh(
+        height,
+        width,
+        0.0,
+        curve_amount,
+        GrassMeshQuality::Medium.segment_count(),
+        &[Color::WHITE; 2],
+    )
+}
+
+fn create_curved_grass_card_mesh(
+    height: f32,
+    width: f32,
+    tilt: f32,
+    curve_amount: f32,
+    segment_count: usize,
+    vertex_colors: &[Color; 2],
+) -> Mesh {
     let mut positions = Vec::new();
     let mut normals = Vec::new();
     let mut uvs = Vec::new();
+    let mut colors = Vec::new();
     let mut indices = Vec::new();
     let mut curve_points = Vec::with_capacity(segment_count + 1);
 
@@ -378,7 +748,7 @@ fn create_grass_blade_mesh(height: f32, width: f32, curve_amount: f32) -> Mesh {
         let coeff1 = 2.0 * one_minus_t * t;
         let coeff2 = t * t;
 
-        let curve_x = coeff0 * 0.0 + coeff1 * 0.0 + coeff2 * curve_amount;
+        let curve_x = coeff0 * 0.0 + coeff1 * (tilt * height * 0.25) + coeff2 * curve_amount;
         let curve_y = coeff0 * p0_y + coeff1 * p1_y + coeff2 * p2_y;
 
         curve_points.push(Vec3::new(0.0, curve_y, curve_x));
@@ -396,15 +766,18 @@ fn create_grass_blade_mesh(height: f32, width: f32, curve_amount: f32) -> Mesh {
         };
 
         let normal = Vec3::X.cross(tangent).normalize_or_zero();
-        let taper_width = width * (1.0 - t);
+        let taper_width = width * (1.0 - t).max(0.08);
+        let color = vertex_colors[0].mix(&vertex_colors[1], t).to_linear();
 
         positions.push([-taper_width / 2.0, point.y, point.z]);
         normals.push([normal.x, normal.y, normal.z]);
         uvs.push([0.0, t]);
+        colors.push([color.red, color.green, color.blue, color.alpha]);
 
         positions.push([taper_width / 2.0, point.y, point.z]);
         normals.push([normal.x, normal.y, normal.z]);
         uvs.push([1.0, t]);
+        colors.push([color.red, color.green, color.blue, color.alpha]);
     }
 
     for i in 0..segment_count {
@@ -426,102 +799,196 @@ fn create_grass_blade_mesh(height: f32, width: f32, curve_amount: f32) -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(bevy::mesh::Indices::U32(indices));
 
     mesh
 }
 
+fn create_grass_clump_mesh(
+    height: f32,
+    width: f32,
+    tilt: f32,
+    curve_amount: f32,
+    segment_count: usize,
+    card_count: u32,
+) -> Mesh {
+    let card_count = card_count.clamp(MIN_CARDS_PER_CLUMP, MAX_CARDS_PER_CLUMP);
+    let mut positions = Vec::new();
+    let mut normals = Vec::new();
+    let mut uvs = Vec::new();
+    let mut colors = Vec::new();
+    let mut indices = Vec::new();
+    let mut vertex_offset = 0_u32;
+
+    for card_index in 0..card_count {
+        let rotation =
+            Quat::from_rotation_y(card_index as f32 * std::f32::consts::TAU / card_count as f32);
+        let color_lift = 1.0 + (card_index as f32 / card_count as f32 - 0.5) * 0.18;
+        let base_color = Color::srgb(0.85 * color_lift, 0.95 * color_lift, 0.75 * color_lift);
+        let tip_color = Color::srgb(1.0, (1.05 * color_lift).min(1.0), 0.85 * color_lift);
+        let card = create_curved_grass_card_mesh(
+            height,
+            width,
+            tilt,
+            curve_amount,
+            segment_count,
+            &[base_color, tip_color],
+        );
+
+        let card_positions = card
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .and_then(|attr| attr.as_float3())
+            .expect("grass card mesh should contain float3 positions");
+        let card_normals = card
+            .attribute(Mesh::ATTRIBUTE_NORMAL)
+            .and_then(|attr| attr.as_float3())
+            .expect("grass card mesh should contain float3 normals");
+        let card_uvs = match card
+            .attribute(Mesh::ATTRIBUTE_UV_0)
+            .expect("grass card mesh should contain UVs")
+        {
+            bevy::mesh::VertexAttributeValues::Float32x2(values) => values.as_slice(),
+            _ => unreachable!("grass card mesh should contain float2 UVs"),
+        };
+        let card_colors = match card
+            .attribute(Mesh::ATTRIBUTE_COLOR)
+            .expect("grass card mesh should contain vertex colors")
+        {
+            bevy::mesh::VertexAttributeValues::Float32x4(values) => values.as_slice(),
+            _ => unreachable!("grass card mesh should contain float4 colors"),
+        };
+
+        for (position, normal) in card_positions.iter().zip(card_normals.iter()) {
+            let rotated_position = rotation * Vec3::new(position[0], position[1], position[2]);
+            let rotated_normal = rotation * Vec3::new(normal[0], normal[1], normal[2]);
+            positions.push([rotated_position.x, rotated_position.y, rotated_position.z]);
+            normals.push([rotated_normal.x, rotated_normal.y, rotated_normal.z]);
+        }
+        uvs.extend_from_slice(card_uvs);
+        colors.extend_from_slice(card_colors);
+
+        if let Some(card_indices) = card.indices() {
+            match card_indices {
+                bevy::mesh::Indices::U32(card_indices) => {
+                    indices.extend(card_indices.iter().map(|index| vertex_offset + index));
+                }
+                bevy::mesh::Indices::U16(card_indices) => {
+                    indices.extend(
+                        card_indices
+                            .iter()
+                            .map(|index| vertex_offset + u32::from(*index)),
+                    );
+                }
+            }
+        }
+
+        vertex_offset += card.count_vertices() as u32;
+    }
+
+    let mut mesh = Mesh::new(
+        bevy::mesh::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::all(),
+    );
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    mesh.insert_indices(bevy::mesh::Indices::U32(indices));
+
+    mesh
+}
+
+fn clump_count_for_blade_count(blade_count: u32) -> u32 {
+    if blade_count == 0 {
+        0
+    } else {
+        ((blade_count as f32) / BLADES_PER_CLUMP as f32).ceil() as u32
+    }
+}
+
 // ==================== Grass Spawning ====================
 
 #[allow(clippy::too_many_arguments)]
-fn spawn_grass_cluster(
+fn spawn_grass_clump(
     commands: &mut Commands,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,
     asset_server: &Res<AssetServer>,
-    cluster_center: Vec2,
+    grass_cache: &mut GrassAssetCache,
+    clump_center: Vec2,
     blade_height: f32,
     blade_config: &BladeConfig,
     color_scheme: &GrassColorScheme,
+    material_key: GrassMaterialKey,
+    quality: GrassMeshQuality,
+    card_count: u32,
+    lod_index: u32,
+    rng: &mut StdRng,
     parent_entity: Entity,
 ) {
-    let mut rng = rand::rng();
-    let blade_count_in_cluster = rng.random_range(5..=10);
-    let cluster_radius = 0.1;
+    let height_variation = rng.random_range(MIN_HEIGHT_VARIATION..=MAX_HEIGHT_VARIATION);
+    let width_variation = rng.random_range(MIN_WIDTH_VARIATION..=MAX_WIDTH_VARIATION);
 
-    for blade_index in 0..blade_count_in_cluster {
-        let angle = rng.random_range(0.0..std::f32::consts::TAU);
-        let distance = rng.random_range(0.0..cluster_radius);
-        let offset_x = angle.cos() * distance;
-        let offset_z = angle.sin() * distance;
+    let mesh_key = grass_mesh_key(quality, blade_config, card_count);
+    let clump_mesh =
+        get_or_create_grass_mesh(meshes, grass_cache, mesh_key, blade_height, blade_config);
+    let clump_material = get_or_create_grass_material(
+        materials,
+        asset_server,
+        grass_cache,
+        material_key,
+        color_scheme,
+    );
 
-        let blade_x = cluster_center.x + offset_x;
-        let blade_z = cluster_center.y + offset_z;
+    let rotation_y = rng.random_range(0.0..std::f32::consts::TAU);
+    let lean_angle = rng.random_range(0.0..std::f32::consts::TAU);
+    let lean_dir = Vec3::new(lean_angle.cos(), 0.0, lean_angle.sin());
+    let tilt_axis = Vec3::new(-lean_dir.z, 0.0, lean_dir.x).normalize_or_zero();
+    let tilt_amount = rng.random_range(0.0..=blade_config.tilt);
+    let tilt_rotation = if tilt_axis == Vec3::ZERO {
+        Quat::IDENTITY
+    } else {
+        Quat::from_axis_angle(tilt_axis, tilt_amount)
+    };
+    let final_rotation = Quat::from_rotation_y(rotation_y) * tilt_rotation;
 
-        let height_variation = rng.random_range(0.7..=1.3);
-        let varied_height = blade_height * blade_config.length * height_variation;
+    let clump = commands
+        .spawn((
+            Mesh3d(clump_mesh.clone()),
+            MeshMaterial3d(clump_material.clone()),
+            Transform::from_xyz(
+                clump_center.x,
+                GRASS_BLADE_Y_OFFSET + GRASS_GROUND_CLEARANCE,
+                clump_center.y,
+            )
+            .with_rotation(final_rotation)
+            .with_scale(Vec3::new(
+                width_variation,
+                height_variation,
+                width_variation,
+            )),
+            GlobalTransform::default(),
+            Visibility::default(),
+            // Grass should not cast/receive dynamic shadows; this avoids
+            // heavy shadow-map cost and dark first-person self-shadowing.
+            bevy::light::NotShadowCaster,
+            bevy::light::NotShadowReceiver,
+            GrassClump { card_count },
+            GrassBlade { lod_index },
+            GrassBladeInstance {
+                mesh: clump_mesh.clone(),
+                material: clump_material.clone(),
+            },
+            GrassWindParams {
+                phase: rng.random_range(0.0..std::f32::consts::TAU),
+                ..Default::default()
+            },
+        ))
+        .id();
 
-        let width_variation = rng.random_range(0.8..=1.2);
-        let varied_width = GRASS_BLADE_WIDTH * blade_config.width * width_variation;
-
-        let curve_variation = rng.random_range(0.0..=1.0);
-        let curve_amount = blade_config.curve * curve_variation * 0.3;
-
-        let rotation_y = rng.random_range(0.0..std::f32::consts::TAU);
-        let lean_angle = rng.random_range(0.0..std::f32::consts::TAU);
-        let lean_dir = Vec3::new(lean_angle.cos(), 0.0, lean_angle.sin());
-        let tilt_axis = Vec3::new(-lean_dir.z, 0.0, lean_dir.x).normalize_or_zero();
-        let tilt_amount = rng.random_range(0.0..=blade_config.tilt);
-        let tilt_rotation = if tilt_axis == Vec3::ZERO {
-            Quat::IDENTITY
-        } else {
-            Quat::from_axis_angle(tilt_axis, tilt_amount)
-        };
-        let final_rotation = Quat::from_rotation_y(rotation_y) * tilt_rotation;
-
-        let blade_mesh = meshes.add(create_grass_blade_mesh(
-            varied_height,
-            varied_width,
-            curve_amount,
-        ));
-
-        let blade_color = color_scheme.sample_blade_color(&mut rng);
-
-        let texture_handle: Handle<Image> = asset_server.load(GRASS_BLADE_TEXTURE);
-        let blade_material = materials.add(StandardMaterial {
-            base_color: blade_color,
-            base_color_texture: Some(texture_handle),
-            alpha_mode: AlphaMode::Mask(GRASS_ALPHA_CUTOFF),
-            double_sided: true,
-            cull_mode: None,
-            perceptual_roughness: 0.7,
-            ..default()
-        });
-
-        let blade = commands
-            .spawn((
-                Mesh3d(blade_mesh.clone()),
-                MeshMaterial3d(blade_material.clone()),
-                Transform::from_xyz(blade_x, GRASS_BLADE_Y_OFFSET, blade_z)
-                    .with_rotation(final_rotation),
-                GlobalTransform::default(),
-                Visibility::default(),
-                // Grass should not cast/receive dynamic shadows; this avoids
-                // heavy shadow-map cost and dark first-person self-shadowing.
-                bevy::light::NotShadowCaster,
-                bevy::light::NotShadowReceiver,
-                GrassBlade {
-                    lod_index: blade_index as u32,
-                },
-                GrassBladeInstance {
-                    mesh: blade_mesh.clone(),
-                    material: blade_material.clone(),
-                },
-            ))
-            .id();
-
-        commands.entity(parent_entity).add_child(blade);
-    }
+    commands.entity(parent_entity).add_child(clump);
 }
 
 /// Spawns grass clusters for a terrain tile
@@ -536,6 +1003,7 @@ fn spawn_grass_cluster(
 /// * `materials` - Material asset storage
 /// * `meshes` - Mesh asset storage
 /// * `asset_server` - Bevy asset server used to load the grass blade texture
+/// * `grass_cache` - Explicit cache for reusable grass mesh and material assets
 /// * `position` - Tile position in world coordinates
 /// * `map_id` - Map identifier for cleanup
 /// * `visual_metadata` - Optional per-tile visual customization
@@ -554,7 +1022,7 @@ fn spawn_grass_cluster(
 /// ```rust
 /// use antares::domain::types::{MapId, Position};
 /// use antares::game::resources::GrassQualitySettings;
-/// use antares::game::systems::advanced_grass::spawn_grass;
+/// use antares::game::systems::advanced_grass::{spawn_grass_cached, GrassAssetCache};
 /// use bevy::prelude::{Assets, AssetServer, Commands, Mesh, Res, ResMut, StandardMaterial};
 ///
 /// fn spawn_example(
@@ -562,13 +1030,15 @@ fn spawn_grass_cluster(
 ///     mut materials: ResMut<Assets<StandardMaterial>>,
 ///     mut meshes: ResMut<Assets<Mesh>>,
 ///     asset_server: Res<AssetServer>,
+///     mut grass_cache: ResMut<GrassAssetCache>,
 ///     settings: Res<GrassQualitySettings>,
 /// ) {
-///     let _entity = spawn_grass(
+///     let _entity = spawn_grass_cached(
 ///         &mut commands,
 ///         &mut materials,
 ///         &mut meshes,
 ///         &asset_server,
+///         grass_cache.as_mut(),
 ///         Position::new(1, 2),
 ///         1u16,
 ///         None,
@@ -578,11 +1048,12 @@ fn spawn_grass_cluster(
 /// }
 /// ```
 #[allow(clippy::too_many_arguments)]
-pub fn spawn_grass(
+pub fn spawn_grass_cached(
     commands: &mut Commands,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,
     asset_server: &Res<AssetServer>,
+    grass_cache: &mut GrassAssetCache,
     position: types::Position,
     map_id: types::MapId,
     visual_metadata: Option<&TileVisualMetadata>,
@@ -636,7 +1107,8 @@ pub fn spawn_grass(
     let (scaled_min_blades, scaled_max_blades, foliage_density_multiplier) =
         scaled_blade_count_range_for_foliage_density(min_blades, max_blades, visual_metadata);
 
-    let mut rng = rand::rng();
+    let placement_seed = GrassPlacementSeed::new(map_id, position);
+    let mut rng = placement_seed.rng();
     let blade_count = if scaled_max_blades > 0 {
         rng.random_range(scaled_min_blades.min(scaled_max_blades)..=scaled_max_blades)
     } else {
@@ -684,35 +1156,126 @@ pub fn spawn_grass(
             MapEntity(map_id),
             TileCoord(position),
             GrassCluster::default(),
+            GrassPatch {
+                clump_count: clump_count_for_blade_count(blade_count),
+            },
         ))
         .id();
 
-    let cluster_count = (blade_count / 7).max(1);
+    let clump_count = clump_count_for_blade_count(blade_count);
+    let material_key = GrassMaterialKey::from_tint(resolved_tint, blade_config.color_variation);
+    let mesh_quality = GrassMeshQuality::from_settings(quality_settings);
 
-    for _ in 0..cluster_count {
-        let cluster_x = rng.random_range(-0.4..0.4);
-        let cluster_z = rng.random_range(-0.4..0.4);
-        let cluster_center = Vec2::new(cluster_x, cluster_z);
+    for clump_index in 0..clump_count {
+        let angle = rng.random_range(0.0..std::f32::consts::TAU);
+        let distance = rng.random_range(0.0..GRASS_PATCH_RADIUS);
+        let clump_center = Vec2::new(angle.cos() * distance, angle.sin() * distance);
+        let card_count = rng.random_range(MIN_CARDS_PER_CLUMP..=MAX_CARDS_PER_CLUMP);
 
-        spawn_grass_cluster(
+        spawn_grass_clump(
             commands,
             materials,
             meshes,
             asset_server,
-            cluster_center,
+            grass_cache,
+            clump_center,
             blade_height,
             &blade_config,
             &color_scheme,
+            material_key,
+            mesh_quality,
+            card_count,
+            clump_index,
+            &mut rng,
             parent,
         );
     }
 
     debug!(
-        "spawn_grass completed at tile ({}, {}) with {} clusters",
-        position.x, position.y, cluster_count
+        "spawn_grass completed at tile ({}, {}) with {} clumps from deterministic seed {}",
+        position.x,
+        position.y,
+        clump_count,
+        placement_seed.value()
     );
 
     parent
+}
+
+/// Compatibility grass spawn entry point that builds a temporary cache.
+///
+/// This keeps older call sites working while [`spawn_grass_cached`] provides
+/// the optimized render path for systems that own a persistent [`GrassAssetCache`].
+///
+/// # Arguments
+///
+/// * `commands` - Bevy Commands for entity spawning
+/// * `materials` - Material asset storage
+/// * `meshes` - Mesh asset storage
+/// * `asset_server` - Bevy asset server used to load the grass blade texture
+/// * `position` - Tile position in world coordinates
+/// * `map_id` - Map identifier for cleanup
+/// * `visual_metadata` - Optional per-tile visual customization
+/// * `tile_tint` - Optional explicit RGB colour tint
+/// * `quality_settings` - Performance settings for grass density scaling
+///
+/// # Returns
+///
+/// Entity ID of the parent grass patch entity.
+///
+/// # Examples
+///
+/// ```rust
+/// use antares::domain::types::Position;
+/// use antares::game::resources::GrassQualitySettings;
+/// use antares::game::systems::advanced_grass::spawn_grass;
+/// use bevy::prelude::{Assets, AssetServer, Commands, Mesh, Res, ResMut, StandardMaterial};
+///
+/// fn spawn_example(
+///     mut commands: Commands,
+///     mut materials: ResMut<Assets<StandardMaterial>>,
+///     mut meshes: ResMut<Assets<Mesh>>,
+///     asset_server: Res<AssetServer>,
+///     settings: Res<GrassQualitySettings>,
+/// ) {
+///     let _entity = spawn_grass(
+///         &mut commands,
+///         &mut materials,
+///         &mut meshes,
+///         &asset_server,
+///         Position::new(1, 2),
+///         1u16,
+///         None,
+///         None,
+///         &settings,
+///     );
+/// }
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_grass(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    asset_server: &Res<AssetServer>,
+    position: types::Position,
+    map_id: types::MapId,
+    visual_metadata: Option<&TileVisualMetadata>,
+    tile_tint: Option<(f32, f32, f32)>,
+    quality_settings: &GrassQualitySettings,
+) -> Entity {
+    let mut grass_cache = GrassAssetCache::default();
+    spawn_grass_cached(
+        commands,
+        materials,
+        meshes,
+        asset_server,
+        &mut grass_cache,
+        position,
+        map_id,
+        visual_metadata,
+        tile_tint,
+        quality_settings,
+    )
 }
 
 // ==================== Grass Performance Systems ====================
@@ -1160,6 +1723,75 @@ mod tests {
     }
 
     #[test]
+    fn test_higher_grass_density_produces_higher_clump_count() {
+        let settings = GrassQualitySettings::default();
+        let (_, low_max_blades) = settings.blade_count_range_for_content(GrassDensity::Low);
+        let (_, high_max_blades) = settings.blade_count_range_for_content(GrassDensity::High);
+
+        let low_clumps = clump_count_for_blade_count(low_max_blades);
+        let high_clumps = clump_count_for_blade_count(high_max_blades);
+
+        assert!(
+            high_clumps > low_clumps,
+            "high density should produce more clumps than low density"
+        );
+    }
+
+    #[test]
+    fn test_foliage_density_scales_grass_clump_coverage() {
+        let thin_metadata = TileVisualMetadata {
+            foliage_density: Some(0.5),
+            ..Default::default()
+        };
+        let thick_metadata = TileVisualMetadata {
+            foliage_density: Some(2.0),
+            ..Default::default()
+        };
+
+        let (_, thin_max, _) =
+            scaled_blade_count_range_for_foliage_density(40, 60, Some(&thin_metadata));
+        let (_, thick_max, _) =
+            scaled_blade_count_range_for_foliage_density(40, 60, Some(&thick_metadata));
+
+        assert!(
+            clump_count_for_blade_count(thick_max) > clump_count_for_blade_count(thin_max),
+            "higher foliage_density should increase clump coverage"
+        );
+    }
+
+    #[test]
+    fn test_grass_blade_config_affects_generated_mesh_bucket() {
+        let default_config = BladeConfig::default();
+        let custom_config = BladeConfig {
+            length: 1.6,
+            width: 0.7,
+            tilt: 0.45,
+            curve: 0.8,
+            color_variation: 0.2,
+        };
+
+        let default_key = grass_mesh_key(GrassMeshQuality::Medium, &default_config, 3);
+        let custom_key = grass_mesh_key(GrassMeshQuality::Medium, &custom_config, 3);
+
+        assert_ne!(
+            default_key, custom_key,
+            "grass_blade_config should affect reusable mesh bucket selection"
+        );
+    }
+
+    #[test]
+    fn test_grass_placement_seed_is_deterministic_by_map_and_tile() {
+        let position = types::Position::new(4, 9);
+
+        let first = GrassPlacementSeed::new(7, position);
+        let second = GrassPlacementSeed::new(7, position);
+        let different_tile = GrassPlacementSeed::new(7, types::Position::new(5, 9));
+
+        assert_eq!(first, second);
+        assert_ne!(first, different_tile);
+    }
+
+    #[test]
     fn test_blade_config_default_values() {
         let config = BladeConfig::default();
         assert_eq!(config.length, 1.0);
@@ -1218,7 +1850,7 @@ mod tests {
     #[test]
     fn test_create_grass_blade_mesh_vertex_count() {
         let blade = create_grass_blade_mesh(0.4, 0.15, 0.1);
-        assert_eq!(blade.count_vertices(), 10);
+        assert_eq!(blade.count_vertices(), 12);
     }
 
     #[test]
@@ -1232,7 +1864,7 @@ mod tests {
             })
             .unwrap_or(0);
 
-        assert_eq!(indices_count, 24);
+        assert_eq!(indices_count, 30);
     }
 
     #[test]
@@ -1268,13 +1900,13 @@ mod tests {
     ///
     /// `create_grass_blade_mesh` generates UVs as `[u, t]` where `u ∈ {0.0,
     /// 1.0}` and `t` is the normalised segment position from 0.0 (base) to
-    /// 1.0 (tip).  With `segment_count = 4` there are 5 levels × 2 vertices =
-    /// 10 vertices total.  The first vertex has t = 0.0 and the last has
+    /// 1.0 (tip).  With `segment_count = 5` there are 6 levels × 2 vertices =
+    /// 12 vertices total.  The first vertex has t = 0.0 and the last has
     /// t = 1.0, so the V range is exactly [0.0, 1.0].
     #[test]
     fn test_create_grass_blade_mesh_uvs_span_full_v_range() {
-        let segment_count: usize = 4;
-        let expected_vertices = (segment_count + 1) * 2; // 10
+        let segment_count: usize = 5;
+        let expected_vertices = (segment_count + 1) * 2; // 12
 
         let blade = create_grass_blade_mesh(0.4, 0.15, 0.1);
 
@@ -1715,20 +2347,25 @@ mod tests {
 
         app.update();
 
-        let (blade_count, cluster_count) = {
+        let (blade_count, clump_count, cluster_count) = {
             let world = app.world_mut();
             let blades = world
                 .query_filtered::<Entity, With<GrassBlade>>()
+                .iter(world)
+                .count();
+            let clumps = world
+                .query_filtered::<Entity, With<GrassClump>>()
                 .iter(world)
                 .count();
             let clusters = world
                 .query_filtered::<Entity, With<GrassCluster>>()
                 .iter(world)
                 .count();
-            (blades, clusters)
+            (blades, clumps, clusters)
         };
 
         assert_eq!(blade_count, 0);
+        assert_eq!(clump_count, 0);
         assert_eq!(cluster_count, 0);
     }
 
@@ -1809,6 +2446,87 @@ mod tests {
 
         assert!(blade_count > 0);
         assert!(cluster_count > 0);
+    }
+
+    #[test]
+    fn test_spawn_grass_cached_reuses_mesh_and_material_handles_for_similar_clumps() {
+        fn spawn_two_cached_grass_patches(
+            mut commands: Commands,
+            mut materials: ResMut<Assets<StandardMaterial>>,
+            mut meshes: ResMut<Assets<Mesh>>,
+            asset_server: Res<AssetServer>,
+            mut grass_cache: ResMut<GrassAssetCache>,
+            settings: Res<GrassQualitySettings>,
+        ) {
+            let metadata = TileVisualMetadata {
+                grass_density: Some(GrassDensity::Low),
+                grass_blade_config: Some(world::GrassBladeConfig::default()),
+                ..Default::default()
+            };
+
+            spawn_grass_cached(
+                &mut commands,
+                &mut materials,
+                &mut meshes,
+                &asset_server,
+                grass_cache.as_mut(),
+                types::Position::new(2, 2),
+                1u16,
+                Some(&metadata),
+                None,
+                &settings,
+            );
+            spawn_grass_cached(
+                &mut commands,
+                &mut materials,
+                &mut meshes,
+                &asset_server,
+                grass_cache.as_mut(),
+                types::Position::new(3, 2),
+                1u16,
+                Some(&metadata),
+                None,
+                &settings,
+            );
+        }
+
+        let mut app = App::new();
+        app.add_plugins(bevy::app::PluginGroup::set(
+            bevy::MinimalPlugins,
+            bevy::app::ScheduleRunnerPlugin::default(),
+        ))
+        .add_plugins(bevy::asset::AssetPlugin::default())
+        .init_asset::<Image>()
+        .init_asset::<StandardMaterial>()
+        .init_asset::<Mesh>()
+        .init_resource::<GrassAssetCache>();
+        app.insert_resource(GrassQualitySettings {
+            performance_level:
+                crate::game::resources::grass_quality_settings::GrassPerformanceLevel::Medium,
+        });
+        app.add_systems(Update, spawn_two_cached_grass_patches);
+
+        app.update();
+
+        let clump_count = {
+            let world = app.world_mut();
+            world
+                .query_filtered::<Entity, With<GrassClump>>()
+                .iter(world)
+                .count()
+        };
+        let cache = app.world().resource::<GrassAssetCache>();
+
+        assert!(clump_count > 0);
+        assert!(
+            cache.mesh_count() < clump_count,
+            "similar clumps should reuse fewer mesh handles than spawned clump entities"
+        );
+        assert_eq!(
+            cache.material_count(),
+            1,
+            "similar grass tint/material settings should reuse one material handle"
+        );
     }
 
     // ── Grass rendering tests ─────────────────────────────────────────────────
@@ -1929,6 +2647,37 @@ mod tests {
     ///
     /// We verify this by computing the `GrassColorScheme` directly from the
     /// tint values and checking that the tinted colour is strictly darker.
+    #[test]
+    fn test_grass_asset_cache_default_is_empty() {
+        let cache = GrassAssetCache::default();
+
+        assert_eq!(cache.mesh_count(), 0);
+        assert_eq!(cache.material_count(), 0);
+    }
+
+    #[test]
+    fn test_cached_material_color_uses_variation_bucket() {
+        let scheme = GrassColorScheme {
+            base_color: Color::srgb(0.1, 0.2, 0.3),
+            tip_color: Color::srgb(0.7, 0.8, 0.9),
+            variation: 1.0,
+        };
+
+        let no_variation_key = GrassMaterialKey::from_tint((1.0, 1.0, 1.0), 0.0);
+        let full_variation_key = GrassMaterialKey::from_tint((1.0, 1.0, 1.0), 1.0);
+
+        let base_color = cached_material_color(no_variation_key, &scheme).to_srgba();
+        let tip_color = cached_material_color(full_variation_key, &scheme).to_srgba();
+
+        assert!((base_color.red - 0.1).abs() < 0.001);
+        assert!((base_color.green - 0.2).abs() < 0.001);
+        assert!((base_color.blue - 0.3).abs() < 0.001);
+
+        assert!((tip_color.red - 0.7).abs() < 0.001);
+        assert!((tip_color.green - 0.8).abs() < 0.001);
+        assert!((tip_color.blue - 0.9).abs() < 0.001);
+    }
+
     #[test]
     fn test_grass_color_tint_forwarded_to_color_scheme() {
         // Build a GrassColorScheme the same way spawn_grass does with tint (0.5, 0.5, 0.5).
