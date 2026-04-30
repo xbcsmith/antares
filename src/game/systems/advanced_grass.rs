@@ -23,6 +23,7 @@ use crate::domain::types;
 use crate::domain::world::{self, TileVisualMetadata};
 use crate::game::resources::GrassQualitySettings;
 use crate::game::systems::map::{MapEntity, TileCoord};
+use crate::game::systems::vegetation_placement::VegetationExclusionZone;
 
 // ==================== Constants ====================
 
@@ -642,6 +643,38 @@ fn cached_material_color(key: GrassMaterialKey, color_scheme: &GrassColorScheme)
     )
 }
 
+fn point_inside_grass_exclusion_zones(
+    point: Vec2,
+    grass_exclusion_zones: &[VegetationExclusionZone],
+) -> bool {
+    grass_exclusion_zones
+        .iter()
+        .any(|zone| zone.contains(point))
+}
+
+fn find_allowed_grass_clump_center(
+    rng: &mut StdRng,
+    tile_world_center: Vec2,
+    grass_exclusion_zones: &[VegetationExclusionZone],
+) -> Option<Vec2> {
+    const MAX_ATTEMPTS: usize = 12;
+
+    for _ in 0..MAX_ATTEMPTS {
+        let angle = rng.random_range(0.0..std::f32::consts::TAU);
+        let distance = rng.random_range(0.0..GRASS_PATCH_RADIUS);
+        let local_center = Vec2::new(angle.cos() * distance, angle.sin() * distance);
+
+        if !point_inside_grass_exclusion_zones(
+            tile_world_center + local_center,
+            grass_exclusion_zones,
+        ) {
+            return Some(local_center);
+        }
+    }
+
+    None
+}
+
 fn grass_mesh_key(
     quality: GrassMeshQuality,
     blade_config: &BladeConfig,
@@ -1060,6 +1093,58 @@ pub fn spawn_grass_cached(
     tile_tint: Option<(f32, f32, f32)>,
     quality_settings: &GrassQualitySettings,
 ) -> Entity {
+    spawn_grass_cached_with_exclusions(
+        commands,
+        materials,
+        meshes,
+        asset_server,
+        grass_cache,
+        &[],
+        position,
+        map_id,
+        visual_metadata,
+        tile_tint,
+        quality_settings,
+    )
+}
+
+/// Spawns grass clusters for a terrain tile while avoiding vegetation exclusion zones.
+///
+/// Exclusion zones are world-space X/Z ellipses produced by the vegetation
+/// placement planner. Clump centers that fall inside one of those zones are
+/// deterministically resampled, and skipped if no valid placement can be found.
+///
+/// # Arguments
+///
+/// * `commands` - Bevy Commands for entity spawning
+/// * `materials` - Material asset storage
+/// * `meshes` - Mesh asset storage
+/// * `asset_server` - Bevy asset server used to load the grass blade texture
+/// * `grass_cache` - Explicit cache for reusable grass mesh and material assets
+/// * `grass_exclusion_zones` - World-space zones that grass clumps must avoid
+/// * `position` - Tile position in world coordinates
+/// * `map_id` - Map identifier for cleanup
+/// * `visual_metadata` - Optional per-tile visual customization
+/// * `tile_tint` - Optional explicit RGB colour tint
+/// * `quality_settings` - Performance settings for grass density scaling
+///
+/// # Returns
+///
+/// Entity ID of the parent grass patch entity.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_grass_cached_with_exclusions(
+    commands: &mut Commands,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    asset_server: &Res<AssetServer>,
+    grass_cache: &mut GrassAssetCache,
+    grass_exclusion_zones: &[VegetationExclusionZone],
+    position: types::Position,
+    map_id: types::MapId,
+    visual_metadata: Option<&TileVisualMetadata>,
+    tile_tint: Option<(f32, f32, f32)>,
+    quality_settings: &GrassQualitySettings,
+) -> Entity {
     debug!(
         "spawn_grass called at tile ({}, {}) map {:?}",
         position.x, position.y, map_id
@@ -1166,10 +1251,17 @@ pub fn spawn_grass_cached(
     let material_key = GrassMaterialKey::from_tint(resolved_tint, blade_config.color_variation);
     let mesh_quality = GrassMeshQuality::from_settings(quality_settings);
 
+    let tile_world_center = Vec2::new(
+        position.x as f32 + TILE_CENTER_OFFSET,
+        position.y as f32 + TILE_CENTER_OFFSET,
+    );
+
     for clump_index in 0..clump_count {
-        let angle = rng.random_range(0.0..std::f32::consts::TAU);
-        let distance = rng.random_range(0.0..GRASS_PATCH_RADIUS);
-        let clump_center = Vec2::new(angle.cos() * distance, angle.sin() * distance);
+        let Some(clump_center) =
+            find_allowed_grass_clump_center(&mut rng, tile_world_center, grass_exclusion_zones)
+        else {
+            continue;
+        };
         let card_count = rng.random_range(MIN_CARDS_PER_CLUMP..=MAX_CARDS_PER_CLUMP);
 
         spawn_grass_clump(
@@ -1789,6 +1881,34 @@ mod tests {
 
         assert_eq!(first, second);
         assert_ne!(first, different_tile);
+    }
+
+    #[test]
+    fn test_find_allowed_grass_clump_center_avoids_exclusion_zone() {
+        let tile_world_center = Vec2::new(0.5, 0.5);
+        let exclusion_zone = VegetationExclusionZone::new(tile_world_center, 0.30, 0.30);
+        let mut rng = GrassPlacementSeed::new(1, types::Position::new(0, 0)).rng();
+
+        let clump_center =
+            find_allowed_grass_clump_center(&mut rng, tile_world_center, &[exclusion_zone])
+                .expect("expected at least one clump position outside the exclusion zone");
+
+        assert!(
+            !exclusion_zone.contains(tile_world_center + clump_center),
+            "grass clump should be outside trunk exclusion zone"
+        );
+    }
+
+    #[test]
+    fn test_find_allowed_grass_clump_center_returns_none_when_tile_is_fully_excluded() {
+        let tile_world_center = Vec2::new(0.5, 0.5);
+        let exclusion_zone = VegetationExclusionZone::new(tile_world_center, 2.0, 2.0);
+        let mut rng = GrassPlacementSeed::new(1, types::Position::new(0, 0)).rng();
+
+        let clump_center =
+            find_allowed_grass_clump_center(&mut rng, tile_world_center, &[exclusion_zone]);
+
+        assert!(clump_center.is_none());
     }
 
     #[test]

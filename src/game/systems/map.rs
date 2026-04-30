@@ -14,9 +14,8 @@ use crate::game::resources::TerrainMaterialCache;
 use crate::game::systems::actor::spawn_actor_sprite;
 use crate::game::systems::creature_spawning::spawn_creature;
 use crate::game::systems::furniture_rendering::resolve_furniture_fields;
-use crate::game::systems::procedural_meshes;
 use crate::game::systems::ui::{GameLogEvent, LogCategory};
-use rand::Rng;
+use crate::game::systems::{procedural_meshes, vegetation_placement};
 
 const DEFAULT_NPC_SPRITE_PATH: &str = "sprites/placeholders/npc_placeholder.png";
 use bevy::prelude::*;
@@ -48,6 +47,19 @@ fn should_spawn_grass_cover(terrain: world::TerrainType) -> bool {
         terrain,
         world::TerrainType::Forest | world::TerrainType::Grass
     )
+}
+
+fn should_spawn_procedural_vegetation(tile: &world::Tile) -> bool {
+    !tile.blocked
+        && tile.wall_type == world::WallType::None
+        && should_spawn_grass_cover(tile.terrain)
+}
+
+fn vegetation_anchor_tile_offset(
+    anchor: vegetation_placement::VegetationAnchor,
+    position: types::Position,
+) -> Vec2 {
+    anchor.center - vegetation_placement::tile_center(position)
 }
 
 /// Plugin that renders the current map using Bevy meshes/materials.
@@ -951,6 +963,10 @@ fn spawn_map(
                         }
                         terrain if should_spawn_grass_cover(terrain) => {
                             let is_forest = tile.terrain == world::TerrainType::Forest;
+                            let vegetation_plan =
+                                vegetation_placement::tile_vegetation_plan(tile, map.id, pos);
+                            let should_spawn_procedural_vegetation =
+                                should_spawn_procedural_vegetation(tile);
 
                             // Render grass floor
                             commands.spawn((
@@ -968,126 +984,136 @@ fn spawn_map(
                             ));
 
                             // Spawn tree/shrub if specified in metadata, or default for Forest.
-                            // Track whether the tile already has centered vegetation so the
-                            // optional undergrowth pass cannot place a shrub directly inside
-                            // a tree trunk.
+                            // The vegetation plan supplies deterministic offsets and exclusion
+                            // footprints so trunks, shrubs, and grass do not all stack at tile center.
                             let tree_type = tile.visual.tree_type;
-                            let mut spawned_center_vegetation = false;
-                            if let Some(t) = tree_type {
-                                // Explicitly map domain TreeType to rendered TreeType to resolve ambiguity
-                                let rendered_t = match t {
-                                    crate::domain::world::TreeType::Oak => {
-                                        crate::game::systems::advanced_trees::TreeType::Oak
-                                    }
-                                    crate::domain::world::TreeType::Pine => {
-                                        crate::game::systems::advanced_trees::TreeType::Pine
-                                    }
-                                    crate::domain::world::TreeType::Birch => {
-                                        crate::game::systems::advanced_trees::TreeType::Birch
-                                    }
-                                    crate::domain::world::TreeType::Willow => {
-                                        crate::game::systems::advanced_trees::TreeType::Willow
-                                    }
-                                    crate::domain::world::TreeType::Dead => {
-                                        crate::game::systems::advanced_trees::TreeType::Dead
-                                    }
-                                    crate::domain::world::TreeType::Shrub => {
-                                        crate::game::systems::advanced_trees::TreeType::Shrub
-                                    }
-                                    crate::domain::world::TreeType::Palm => {
-                                        crate::game::systems::advanced_trees::TreeType::Palm
-                                    }
-                                };
+                            if should_spawn_procedural_vegetation {
+                                if let Some(t) = tree_type {
+                                    // Explicitly map domain TreeType to rendered TreeType to resolve ambiguity
+                                    let rendered_t = match t {
+                                        crate::domain::world::TreeType::Oak => {
+                                            crate::game::systems::advanced_trees::TreeType::Oak
+                                        }
+                                        crate::domain::world::TreeType::Pine => {
+                                            crate::game::systems::advanced_trees::TreeType::Pine
+                                        }
+                                        crate::domain::world::TreeType::Birch => {
+                                            crate::game::systems::advanced_trees::TreeType::Birch
+                                        }
+                                        crate::domain::world::TreeType::Willow => {
+                                            crate::game::systems::advanced_trees::TreeType::Willow
+                                        }
+                                        crate::domain::world::TreeType::Dead => {
+                                            crate::game::systems::advanced_trees::TreeType::Dead
+                                        }
+                                        crate::domain::world::TreeType::Shrub => {
+                                            crate::game::systems::advanced_trees::TreeType::Shrub
+                                        }
+                                        crate::domain::world::TreeType::Palm => {
+                                            crate::game::systems::advanced_trees::TreeType::Palm
+                                        }
+                                    };
 
-                                if rendered_t
-                                    == crate::game::systems::advanced_trees::TreeType::Shrub
-                                {
-                                    let mut ctx = procedural_meshes::MeshSpawnContext {
-                                        commands: &mut commands,
-                                        materials: &mut materials,
-                                        meshes: &mut meshes,
-                                        cache: procedural_cache,
-                                    };
-                                    procedural_meshes::spawn_shrub(
-                                        &mut ctx,
-                                        &asset_server,
-                                        pos,
-                                        map.id,
-                                        Some(&tile.visual),
-                                    );
-                                    spawned_center_vegetation = true;
-                                } else {
-                                    let mut ctx = procedural_meshes::MeshSpawnContext {
-                                        commands: &mut commands,
-                                        materials: &mut materials,
-                                        meshes: &mut meshes,
-                                        cache: procedural_cache,
-                                    };
-                                    procedural_meshes::spawn_tree(
-                                        &mut ctx,
-                                        &asset_server,
-                                        pos,
-                                        map.id,
-                                        Some(&tile.visual),
-                                        Some(rendered_t),
-                                    );
-                                    spawned_center_vegetation = true;
+                                    if rendered_t
+                                        == crate::game::systems::advanced_trees::TreeType::Shrub
+                                    {
+                                        for shrub_anchor in &vegetation_plan.shrub_anchors {
+                                            let mut ctx = procedural_meshes::MeshSpawnContext {
+                                                commands: &mut commands,
+                                                materials: &mut materials,
+                                                meshes: &mut meshes,
+                                                cache: procedural_cache,
+                                            };
+                                            procedural_meshes::spawn_shrub_with_offset(
+                                                &mut ctx,
+                                                &asset_server,
+                                                pos,
+                                                map.id,
+                                                Some(&tile.visual),
+                                                vegetation_anchor_tile_offset(*shrub_anchor, pos),
+                                            );
+                                        }
+                                    } else if let Some(tree_anchor) = vegetation_plan.tree_anchor {
+                                        let mut ctx = procedural_meshes::MeshSpawnContext {
+                                            commands: &mut commands,
+                                            materials: &mut materials,
+                                            meshes: &mut meshes,
+                                            cache: procedural_cache,
+                                        };
+                                        procedural_meshes::spawn_tree_with_offset(
+                                            &mut ctx,
+                                            &asset_server,
+                                            pos,
+                                            map.id,
+                                            Some(&tile.visual),
+                                            Some(rendered_t),
+                                            vegetation_anchor_tile_offset(tree_anchor, pos),
+                                        );
+                                    }
+                                } else if is_forest {
+                                    // Default tree for Forest terrain with no explicit tree type.
+                                    if let Some(tree_anchor) = vegetation_plan.tree_anchor {
+                                        let mut ctx = procedural_meshes::MeshSpawnContext {
+                                            commands: &mut commands,
+                                            materials: &mut materials,
+                                            meshes: &mut meshes,
+                                            cache: procedural_cache,
+                                        };
+                                        procedural_meshes::spawn_tree_with_offset(
+                                            &mut ctx,
+                                            &asset_server,
+                                            pos,
+                                            map.id,
+                                            Some(&tile.visual),
+                                            None, // Use default tree type
+                                            vegetation_anchor_tile_offset(tree_anchor, pos),
+                                        );
+                                    }
                                 }
-                            } else if is_forest {
-                                // Default tree for Forest terrain with no explicit tree type
-                                let mut ctx = procedural_meshes::MeshSpawnContext {
-                                    commands: &mut commands,
-                                    materials: &mut materials,
-                                    meshes: &mut meshes,
-                                    cache: procedural_cache,
-                                };
-                                procedural_meshes::spawn_tree(
-                                    &mut ctx,
+                            }
+
+                            // Extra shrubs for forest composition are now deterministic plan anchors.
+                            // They are placed outside tree trunk exclusion radii instead of using
+                            // runtime randomness at the tile center.
+                            if should_spawn_procedural_vegetation
+                                && should_spawn_extra_forest_shrub(is_forest, false)
+                                && tree_type != Some(world::TreeType::Shrub)
+                            {
+                                for shrub_anchor in &vegetation_plan.shrub_anchors {
+                                    let mut ctx = procedural_meshes::MeshSpawnContext {
+                                        commands: &mut commands,
+                                        materials: &mut materials,
+                                        meshes: &mut meshes,
+                                        cache: procedural_cache,
+                                    };
+                                    procedural_meshes::spawn_shrub_with_offset(
+                                        &mut ctx,
+                                        &asset_server,
+                                        pos,
+                                        map.id,
+                                        Some(&tile.visual),
+                                        vegetation_anchor_tile_offset(*shrub_anchor, pos),
+                                    );
+                                }
+                            }
+
+                            // Always spawn grass ground cover for these terrains, avoiding known
+                            // tree and shrub exclusion zones from the deterministic vegetation plan.
+                            if should_spawn_procedural_vegetation {
+                                super::advanced_grass::spawn_grass_cached_with_exclusions(
+                                    &mut commands,
+                                    &mut materials,
+                                    &mut meshes,
                                     &asset_server,
+                                    grass_cache,
+                                    &vegetation_plan.grass_exclusion_zones,
                                     pos,
                                     map.id,
                                     Some(&tile.visual),
-                                    None, // Use default tree type
+                                    tile.visual.color_tint,
+                                    &quality_settings,
                                 );
-                                spawned_center_vegetation = true;
                             }
-
-                            // Extra shrubs for variety in forest. Phase 1 keeps this conservative:
-                            // never place the random shrub at the same centered tile anchor as a
-                            // spawned tree/shrub, because that visibly clips trunks.
-                            if should_spawn_extra_forest_shrub(is_forest, spawned_center_vegetation)
-                            {
-                                let mut rng = rand::rng();
-                                if rng.random_range(0..10) < 4 {
-                                    let mut ctx = procedural_meshes::MeshSpawnContext {
-                                        commands: &mut commands,
-                                        materials: &mut materials,
-                                        meshes: &mut meshes,
-                                        cache: procedural_cache,
-                                    };
-                                    procedural_meshes::spawn_shrub(
-                                        &mut ctx,
-                                        &asset_server,
-                                        pos,
-                                        map.id,
-                                        Some(&tile.visual),
-                                    );
-                                }
-                            }
-
-                            // Always spawn grass ground cover for these terrains
-                            super::advanced_grass::spawn_grass_cached(
-                                &mut commands,
-                                &mut materials,
-                                &mut meshes,
-                                &asset_server,
-                                grass_cache,
-                                pos,
-                                map.id,
-                                Some(&tile.visual),
-                                tile.visual.color_tint,
-                                &quality_settings,
-                            );
                         }
                         _ => {
                             // Spawn regular floor for Ground, Stone, Dirt, Lava,
@@ -2068,6 +2094,72 @@ mod tests {
                 "terrain {terrain:?} should not spawn procedural grass cover"
             );
         }
+    }
+
+    #[test]
+    fn test_forest_vegetation_plan_same_tile_is_deterministic() {
+        let tile = world::Tile::new(0, 0, world::TerrainType::Forest, world::WallType::None);
+        let position = Position::new(4, 5);
+
+        let first = vegetation_placement::tile_vegetation_plan(&tile, 1, position);
+        let second = vegetation_placement::tile_vegetation_plan(&tile, 1, position);
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_forest_default_tree_and_extra_shrubs_have_non_overlapping_positions() {
+        let mut tile = world::Tile::new(0, 0, world::TerrainType::Forest, world::WallType::None);
+        tile.visual.foliage_density = Some(1.0);
+
+        let plan = vegetation_placement::tile_vegetation_plan(&tile, 1, Position::new(0, 0));
+        let tree = plan
+            .tree_anchor
+            .expect("forest tile should plan a default tree");
+
+        assert!(plan.uses_default_forest_tree);
+        assert!(
+            !plan.shrub_anchors.is_empty(),
+            "forest tile should plan deterministic understory shrubs"
+        );
+
+        for shrub in &plan.shrub_anchors {
+            let minimum = tree.max_radius()
+                + shrub.max_radius()
+                + vegetation_placement::SHRUB_TRUNK_SAFETY_MARGIN
+                - 0.001;
+            assert!(
+                tree.distance_to(*shrub) >= minimum,
+                "planned forest shrub should avoid default tree trunk footprint"
+            );
+        }
+    }
+
+    #[test]
+    fn test_explicit_shrub_tile_does_not_plan_full_size_default_tree() {
+        let mut tile = world::Tile::new(0, 0, world::TerrainType::Forest, world::WallType::None);
+        tile.visual.tree_type = Some(world::TreeType::Shrub);
+
+        let plan = vegetation_placement::tile_vegetation_plan(&tile, 1, Position::new(0, 0));
+
+        assert!(plan.tree_anchor.is_none());
+        assert_eq!(plan.explicit_tree_type, Some(world::TreeType::Shrub));
+        assert!(!plan.shrub_anchors.is_empty());
+        assert!(!plan.uses_default_forest_tree);
+    }
+
+    #[test]
+    fn test_grass_cover_avoids_planned_tree_trunk_exclusion_zone() {
+        let tile = world::Tile::new(0, 0, world::TerrainType::Forest, world::WallType::None);
+        let plan = vegetation_placement::tile_vegetation_plan(&tile, 1, Position::new(0, 0));
+        let tree = plan
+            .tree_anchor
+            .expect("forest tile should plan a default tree");
+
+        assert!(
+            !plan.allows_grass_clump_at(tree.center),
+            "grass clumps should avoid the planned tree trunk footprint"
+        );
     }
 
     #[test]

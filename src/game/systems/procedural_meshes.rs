@@ -991,6 +991,44 @@ pub fn spawn_tree(
     visual_metadata: Option<&TileVisualMetadata>,
     tree_type: Option<super::advanced_trees::TreeType>,
 ) -> Entity {
+    spawn_tree_with_offset(
+        ctx,
+        asset_server,
+        position,
+        map_id,
+        visual_metadata,
+        tree_type,
+        Vec2::ZERO,
+    )
+}
+
+/// Spawns a procedural tree mesh at a deterministic offset inside its tile.
+///
+/// This variant is used by vegetation placement rules so trees and shrubs can
+/// share a tile without all occupying the exact tile center.
+///
+/// # Arguments
+///
+/// * `ctx` - Mutable mesh spawning context
+/// * `asset_server` - Asset server used to resolve bark and foliage textures
+/// * `position` - Tile position in world coordinates
+/// * `map_id` - Map identifier for cleanup
+/// * `visual_metadata` - Optional per-tile visual customization
+/// * `tree_type` - Optional render-layer tree type
+/// * `tile_offset` - Local X/Z offset from tile center
+///
+/// # Returns
+///
+/// Entity ID of the parent tree entity
+pub fn spawn_tree_with_offset(
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
+    asset_server: &AssetServer,
+    position: types::Position,
+    map_id: types::MapId,
+    visual_metadata: Option<&TileVisualMetadata>,
+    tree_type: Option<super::advanced_trees::TreeType>,
+    tile_offset: Vec2,
+) -> Entity {
     // Determine visual configuration from optional metadata
     let visual_config = visual_metadata
         .map(super::advanced_trees::TerrainVisualConfig::from)
@@ -1057,9 +1095,11 @@ pub fn spawn_tree(
         .commands
         .spawn((
             Transform::from_xyz(
-                position.x as f32 + TILE_CENTER_OFFSET,
-                0.0,
-                position.y as f32 + TILE_CENTER_OFFSET,
+                position.x as f32 + TILE_CENTER_OFFSET + tile_offset.x,
+                visual_metadata
+                    .map(TileVisualMetadata::effective_y_offset)
+                    .unwrap_or(0.0),
+                position.y as f32 + TILE_CENTER_OFFSET + tile_offset.y,
             )
             .with_rotation(Quat::from_rotation_y(visual_config.rotation_y.to_radians())),
             GlobalTransform::default(),
@@ -1160,13 +1200,46 @@ pub fn spawn_shrub(
     map_id: types::MapId,
     visual_metadata: Option<&TileVisualMetadata>,
 ) -> Entity {
-    spawn_tree(
+    spawn_shrub_with_offset(
+        ctx,
+        asset_server,
+        position,
+        map_id,
+        visual_metadata,
+        Vec2::ZERO,
+    )
+}
+
+/// Spawns a procedurally generated shrub at a deterministic offset inside its tile.
+///
+/// # Arguments
+///
+/// * `ctx` - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
+/// * `asset_server` - Asset server used to resolve shrub bark and foliage textures
+/// * `position` - Tile position in world coordinates
+/// * `map_id` - Map identifier for cleanup
+/// * `visual_metadata` - Optional per-tile customization
+/// * `tile_offset` - Local X/Z offset from tile center
+///
+/// # Returns
+///
+/// Entity ID of the shrub entity
+pub fn spawn_shrub_with_offset(
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
+    asset_server: &AssetServer,
+    position: types::Position,
+    map_id: types::MapId,
+    visual_metadata: Option<&TileVisualMetadata>,
+    tile_offset: Vec2,
+) -> Entity {
+    spawn_tree_with_offset(
         ctx,
         asset_server,
         position,
         map_id,
         visual_metadata,
         Some(TreeType::Shrub),
+        tile_offset,
     )
 }
 

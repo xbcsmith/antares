@@ -2,6 +2,48 @@
 
 ---
 
+## Vegetation Visual Quality Phase 4 Implementation (Complete)
+
+### Overview
+
+Implemented Phase 4 of `docs/explanation/vegetation_visual_quality_implementation_plan.md`: added deterministic vegetation placement rules and terrain-aware composition so trees, shrubs, and grass occupy believable non-overlapping positions within each tile.
+
+### Problems Fixed
+
+- Added `src/game/systems/vegetation_placement.rs` with deterministic render-layer placement helpers.
+- Added stable vegetation seeds through `vegetation_seed(map_id, position, salt)`.
+- Added `tree_anchor_for_tile`, `shrub_anchors_for_tile`, `grass_exclusion_zones`, and `tile_vegetation_plan`.
+- Added `VegetationAnchor`, `VegetationKind`, `VegetationExclusionZone`, and `TileVegetationPlan`.
+- Tree trunk exclusion radii are now planned before spawning shrubs or grass.
+- Shrub anchors are placed outside tree trunk footprints plus a safety margin.
+- Shrub-only tiles can still use a center anchor without spawning a full-size default tree.
+- Grass clumps now avoid planned tree and shrub exclusion zones through `spawn_grass_cached_with_exclusions`.
+- Added offset-aware `spawn_tree_with_offset` and `spawn_shrub_with_offset` variants in `procedural_meshes`.
+- Map vegetation spawning now consumes a single deterministic per-tile vegetation plan.
+- Forest default trees and understory shrubs are deterministic rather than runtime-random.
+- Placement respects metadata `scale`, `width_x`, `width_z`, `y_offset`, and `rotation_y`.
+- `foliage_density` now drives planned understory shrub count instead of unrelated random shrub spawning.
+- Blocked tiles and wall tiles suppress procedural vegetation where known blocking props/data are available.
+- Explicit `TreeType::Shrub` tiles no longer plan or spawn a full-size default forest tree.
+
+### Files Changed
+
+- `src/game/systems/vegetation_placement.rs`
+- `src/game/systems/mod.rs`
+- `src/game/systems/procedural_meshes.rs`
+- `src/game/systems/advanced_grass.rs`
+- `src/game/systems/map.rs`
+- `docs/explanation/implementations.md`
+
+### Validation
+
+- `cargo fmt --all` passed.
+- `cargo check --all-targets --all-features` passed.
+- `cargo clippy --all-targets --all-features -- -D warnings` passed.
+- `cargo nextest run --all-features --status-level fail` passed: 4875 tests passed, 8 skipped.
+
+---
+
 ## Vegetation Visual Quality Phase 3 Implementation (Complete)
 
 ### Overview
