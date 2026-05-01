@@ -397,6 +397,7 @@ impl Plugin for MapRenderingPlugin {
         // registry on startup so metadata is available before map spawn runs.
         app.init_resource::<SpriteAssets>()
             .init_resource::<crate::game::resources::GrassQualitySettings>()
+            .init_resource::<crate::game::resources::VegetationQualitySettings>()
             .init_resource::<super::advanced_grass::GrassAssetCache>()
             .init_resource::<super::advanced_grass::GrassRenderConfig>() // Add grass render config
             .init_resource::<super::advanced_grass::GrassInstanceConfig>()
@@ -414,7 +415,8 @@ impl Plugin for MapRenderingPlugin {
             .add_systems(
                 Update,
                 (
-                    // Grass performance systems for culling and LOD
+                    // Vegetation performance systems for culling and LOD
+                    super::advanced_trees::tree_lod_switching_system,
                     super::advanced_grass::grass_distance_culling_system,
                     super::advanced_grass::grass_lod_system,
                     // Instance batching for diagnostics
@@ -438,7 +440,7 @@ fn spawn_map_system(
     asset_server: Res<AssetServer>,
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
-    quality_settings: Res<crate::game::resources::GrassQualitySettings>,
+    vegetation_quality: Res<crate::game::resources::VegetationQualitySettings>,
     mut grass_cache: ResMut<super::advanced_grass::GrassAssetCache>,
     terrain_cache: Res<TerrainMaterialCache>,
     mut cache: Local<super::procedural_meshes::ProceduralMeshCache>,
@@ -451,7 +453,8 @@ fn spawn_map_system(
         asset_server,
         global_state,
         content,
-        quality_settings,
+        vegetation_quality.grass_quality_settings(),
+        *vegetation_quality,
         grass_cache.as_mut(),
         &terrain_cache,
         &mut cache,
@@ -644,7 +647,7 @@ fn spawn_map_markers(
     asset_server: Res<AssetServer>,
     global_state: Res<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
-    quality_settings: Res<crate::game::resources::GrassQualitySettings>,
+    vegetation_quality: Option<Res<crate::game::resources::VegetationQualitySettings>>,
     terrain_cache: Option<Res<TerrainMaterialCache>>,
     query_existing: Query<(Entity, &MapEntity)>,
     mut last_map: Local<Option<types::MapId>>,
@@ -711,7 +714,12 @@ fn spawn_map_markers(
             asset_server,
             global_state,
             content,
-            quality_settings,
+            vegetation_quality
+                .as_deref()
+                .copied()
+                .unwrap_or_default()
+                .grass_quality_settings(),
+            vegetation_quality.as_deref().copied().unwrap_or_default(),
             &mut grass_cache,
             cache_ref,
             &mut procedural_cache,
@@ -811,7 +819,8 @@ fn spawn_map(
     asset_server: Res<AssetServer>,
     global_state: Res<crate::game::resources::GlobalState>,
     content: Res<crate::application::resources::GameContent>,
-    quality_settings: Res<crate::game::resources::GrassQualitySettings>,
+    quality_settings: crate::game::resources::GrassQualitySettings,
+    vegetation_quality: crate::game::resources::VegetationQualitySettings,
     grass_cache: &mut super::advanced_grass::GrassAssetCache,
     terrain_cache: &TerrainMaterialCache,
     procedural_cache: &mut super::procedural_meshes::ProceduralMeshCache,
@@ -1024,13 +1033,15 @@ fn spawn_map(
                                                 meshes: &mut meshes,
                                                 cache: procedural_cache,
                                             };
-                                            procedural_meshes::spawn_shrub_with_offset(
+                                            procedural_meshes::spawn_tree_with_offset_with_quality(
                                                 &mut ctx,
                                                 &asset_server,
                                                 pos,
                                                 map.id,
                                                 Some(&tile.visual),
+                                                Some(crate::game::systems::advanced_trees::TreeType::Shrub),
                                                 vegetation_anchor_tile_offset(*shrub_anchor, pos),
+                                                &vegetation_quality,
                                             );
                                         }
                                     } else if let Some(tree_anchor) = vegetation_plan.tree_anchor {
@@ -1040,7 +1051,7 @@ fn spawn_map(
                                             meshes: &mut meshes,
                                             cache: procedural_cache,
                                         };
-                                        procedural_meshes::spawn_tree_with_offset(
+                                        procedural_meshes::spawn_tree_with_offset_with_quality(
                                             &mut ctx,
                                             &asset_server,
                                             pos,
@@ -1048,6 +1059,7 @@ fn spawn_map(
                                             Some(&tile.visual),
                                             Some(rendered_t),
                                             vegetation_anchor_tile_offset(tree_anchor, pos),
+                                            &vegetation_quality,
                                         );
                                     }
                                 } else if is_forest {
@@ -1059,7 +1071,7 @@ fn spawn_map(
                                             meshes: &mut meshes,
                                             cache: procedural_cache,
                                         };
-                                        procedural_meshes::spawn_tree_with_offset(
+                                        procedural_meshes::spawn_tree_with_offset_with_quality(
                                             &mut ctx,
                                             &asset_server,
                                             pos,
@@ -1067,6 +1079,7 @@ fn spawn_map(
                                             Some(&tile.visual),
                                             None, // Use default tree type
                                             vegetation_anchor_tile_offset(tree_anchor, pos),
+                                            &vegetation_quality,
                                         );
                                     }
                                 }
@@ -1086,13 +1099,15 @@ fn spawn_map(
                                         meshes: &mut meshes,
                                         cache: procedural_cache,
                                     };
-                                    procedural_meshes::spawn_shrub_with_offset(
+                                    procedural_meshes::spawn_tree_with_offset_with_quality(
                                         &mut ctx,
                                         &asset_server,
                                         pos,
                                         map.id,
                                         Some(&tile.visual),
+                                        Some(crate::game::systems::advanced_trees::TreeType::Shrub),
                                         vegetation_anchor_tile_offset(*shrub_anchor, pos),
+                                        &vegetation_quality,
                                     );
                                 }
                             }
@@ -2159,6 +2174,49 @@ mod tests {
         assert!(
             !plan.allows_grass_clump_at(tree.center),
             "grass clumps should avoid the planned tree trunk footprint"
+        );
+    }
+
+    #[test]
+    fn test_map_level_vegetation_cache_budget_bounds_repeated_identical_forest_tiles() {
+        let vegetation_quality = crate::game::resources::VegetationQualitySettings::for_level(
+            crate::game::resources::VegetationQualityLevel::Low,
+        );
+        let tree_type = crate::game::systems::advanced_trees::TreeType::Oak;
+        let mut procedural_cache = procedural_meshes::ProceduralMeshCache::default();
+        let mut meshes = Assets::<Mesh>::default();
+
+        for x in 0..64 {
+            let position = Position::new(x, 0);
+            let generation_seed =
+                crate::game::systems::advanced_trees::TreeGenerationSeed::from_parts(
+                    tree_type, 1, position.x, position.y, 0,
+                );
+
+            for lod_level in [
+                crate::game::systems::advanced_trees::TreeLodLevel::Lod0,
+                crate::game::systems::advanced_trees::TreeLodLevel::Lod1,
+                crate::game::systems::advanced_trees::TreeLodLevel::Lod2,
+            ] {
+                let cache_key =
+                    crate::game::systems::advanced_trees::TreeMeshCacheKey::new_with_variant_budget(
+                        tree_type,
+                        tree_type.config().foliage_density,
+                        lod_level.quality_level(),
+                        generation_seed.0,
+                        vegetation_quality.max_tree_mesh_variants_per_species as u64,
+                    );
+
+                procedural_cache.get_or_create_tree_mesh_pair(tree_type, cache_key, &mut meshes);
+            }
+        }
+
+        let max_tree_mesh_handles = vegetation_quality.max_tree_mesh_variants_per_species * 5;
+        assert!(
+            procedural_cache.cached_count() <= max_tree_mesh_handles,
+            "repeated identical forest tiles should stay within the tree mesh cache budget: {} <= {}",
+            procedural_cache.cached_count(),
+            max_tree_mesh_handles
         );
     }
 

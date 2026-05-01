@@ -2,6 +2,60 @@
 
 ---
 
+## Vegetation Visual Quality Phase 6 Implementation (Complete)
+
+### Overview
+
+Implemented Phase 6 of `docs/explanation/vegetation_visual_quality_implementation_plan.md`: added vegetation-wide quality settings, tree and grass LOD behavior, and bounded mesh/material cache budgets so improved vegetation visuals remain performant in dense scenes.
+
+### Problems Fixed
+
+- Added `VegetationQualityLevel` and `VegetationQualitySettings` as render-only game resources for Low, Medium, and High vegetation quality.
+- Added vegetation-wide LOD and budget settings for tree LOD switch distances, grass LOD distance, global vegetation cull distance, maximum tree mesh variants per species, and maximum grass material variants.
+- Re-exported vegetation quality resources from `src/game/resources/mod.rs` for normal runtime use.
+- Added tree LOD tiers (`LOD0`, `LOD1`, `LOD2`) with deterministic mesh generation differences:
+  - `LOD0` uses full branch and leaf geometry.
+  - `LOD1` reduces branch recursion, branch fan-out, leaf count, leaf size, and foliage density.
+  - `LOD2` uses a simplified billboard/impostor silhouette and suppresses separate leaf meshes.
+- Added tree LOD distance selection and a runtime tree LOD switching system that shows only the child mesh matching the current camera-distance bucket.
+- Added `TreeLodGroup` and `TreeLodVisibility` components so spawned tree entities carry their LOD behavior without altering map data.
+- Updated procedural tree spawning to create LOD0, LOD1, and LOD2 child meshes up front and initialize LOD visibility correctly.
+- Added quality-aware tree spawning entry points so map rendering can pass the current vegetation quality settings.
+- Added bounded tree mesh cache keys with explicit per-species variant budgets so repeated map spawns cannot generate one mesh variant per tile.
+- Added cached tree bark and foliage material variants keyed by species and quantized tint, preventing unbounded material creation for similar vegetation colors.
+- Updated grass LOD to support Near, Mid, Far, and Culled tiers:
+  - Near keeps all clumps visible.
+  - Mid keeps every other clump visible.
+  - Far keeps every fourth clump visible as low-detail patches.
+  - Culled hides all grass children beyond the configured vegetation budget.
+- Aligned `GrassRenderConfig` defaults with `VegetationQualitySettings`.
+- Derived grass density scaling and grass material budget behavior from the active vegetation quality level.
+- Added grass material key budget bucketing so low-quality settings reuse fewer material variants.
+- Registered `VegetationQualitySettings` in `MapRenderingPlugin`.
+- Added `tree_lod_switching_system` to the runtime vegetation update systems.
+- Updated map spawning to derive grass quality from vegetation quality and pass vegetation quality into tree and shrub spawning.
+- Added map-level regression coverage showing repeated identical forest tiles remain inside a bounded vegetation cache budget.
+- Documented the initial performance target: dense forest scenes should prioritize bounded cache growth and LOD reduction while keeping at least a 30 FPS target on the reference machine.
+
+### Files Changed
+
+- `src/game/resources/performance.rs`
+- `src/game/resources/mod.rs`
+- `src/game/systems/advanced_trees.rs`
+- `src/game/systems/advanced_grass.rs`
+- `src/game/systems/procedural_meshes.rs`
+- `src/game/systems/map.rs`
+- `docs/explanation/implementations.md`
+
+### Validation
+
+- `cargo fmt --all` passed.
+- `cargo check --all-targets --all-features` passed.
+- `cargo clippy --all-targets --all-features -- -D warnings` passed.
+- `cargo nextest run --all-features --status-level fail` passed: 4897 tests passed, 8 skipped, 2 leaky.
+
+---
+
 ## Vegetation Visual Quality Phase 5 Implementation (Complete)
 
 ### Overview

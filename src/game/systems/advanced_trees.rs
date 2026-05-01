@@ -44,6 +44,216 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
+/// Default first tree LOD switch distance in world units.
+pub const DEFAULT_TREE_LOD_DISTANCE_1: f32 = 18.0;
+
+/// Default second tree LOD switch distance in world units.
+pub const DEFAULT_TREE_LOD_DISTANCE_2: f32 = 34.0;
+
+/// Default maximum tree draw distance in world units.
+pub const DEFAULT_TREE_CULL_DISTANCE: f32 = 45.0;
+
+/// Default cap for deterministic mesh variants per species and LOD quality bucket.
+pub const DEFAULT_MAX_TREE_MESH_VARIANTS_PER_SPECIES: u64 = 8;
+
+/// Tree level-of-detail buckets used by procedural tree rendering.
+///
+/// LOD changes are visual-only. They alter generated mesh complexity but never
+/// mutate map data or gameplay state.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::advanced_trees::TreeLodLevel;
+///
+/// assert_eq!(TreeLodLevel::Lod0.quality_level(), 0);
+/// assert_eq!(TreeLodLevel::from_quality_level(2), TreeLodLevel::Lod2);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TreeLodLevel {
+    /// Full branch and leaf mesh detail.
+    Lod0,
+    /// Reduced branch sections and fewer leaves.
+    Lod1,
+    /// Billboard/impostor silhouette.
+    Lod2,
+}
+
+impl TreeLodLevel {
+    /// Converts a cache quality bucket into a tree LOD level.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::systems::advanced_trees::TreeLodLevel;
+    ///
+    /// assert_eq!(TreeLodLevel::from_quality_level(0), TreeLodLevel::Lod0);
+    /// assert_eq!(TreeLodLevel::from_quality_level(9), TreeLodLevel::Lod2);
+    /// ```
+    pub fn from_quality_level(quality_level: u8) -> Self {
+        match quality_level {
+            0 => Self::Lod0,
+            1 => Self::Lod1,
+            _ => Self::Lod2,
+        }
+    }
+
+    /// Returns the cache quality bucket for this LOD level.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::systems::advanced_trees::TreeLodLevel;
+    ///
+    /// assert_eq!(TreeLodLevel::Lod1.quality_level(), 1);
+    /// ```
+    pub fn quality_level(self) -> u8 {
+        match self {
+            Self::Lod0 => 0,
+            Self::Lod1 => 1,
+            Self::Lod2 => 2,
+        }
+    }
+}
+
+/// Selects the tree LOD level for a camera distance.
+///
+/// Returns `None` when the tree should be culled.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::advanced_trees::{select_tree_lod_level, TreeLodLevel};
+///
+/// assert_eq!(select_tree_lod_level(5.0, 18.0, 34.0, 45.0), Some(TreeLodLevel::Lod0));
+/// assert_eq!(select_tree_lod_level(40.0, 18.0, 34.0, 45.0), Some(TreeLodLevel::Lod2));
+/// assert_eq!(select_tree_lod_level(50.0, 18.0, 34.0, 45.0), None);
+/// ```
+pub fn select_tree_lod_level(
+    distance: f32,
+    lod_distance_1: f32,
+    lod_distance_2: f32,
+    cull_distance: f32,
+) -> Option<TreeLodLevel> {
+    if distance > cull_distance {
+        None
+    } else if distance > lod_distance_2 {
+        Some(TreeLodLevel::Lod2)
+    } else if distance > lod_distance_1 {
+        Some(TreeLodLevel::Lod1)
+    } else {
+        Some(TreeLodLevel::Lod0)
+    }
+}
+
+/// Component attached to a tree parent entity to configure runtime LOD switching.
+///
+/// The component is render-only. It controls child mesh visibility based on
+/// camera distance and never mutates map data or gameplay state.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::advanced_trees::TreeLodGroup;
+///
+/// let group = TreeLodGroup::default();
+/// assert!(group.tree_lod_distance_1 < group.tree_lod_distance_2);
+/// assert!(group.tree_lod_distance_2 < group.cull_distance);
+/// ```
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct TreeLodGroup {
+    /// Distance at which the tree switches from LOD0 to LOD1.
+    pub tree_lod_distance_1: f32,
+    /// Distance at which the tree switches from LOD1 to LOD2.
+    pub tree_lod_distance_2: f32,
+    /// Distance beyond which all tree LOD children are hidden.
+    pub cull_distance: f32,
+}
+
+impl Default for TreeLodGroup {
+    fn default() -> Self {
+        Self {
+            tree_lod_distance_1: DEFAULT_TREE_LOD_DISTANCE_1,
+            tree_lod_distance_2: DEFAULT_TREE_LOD_DISTANCE_2,
+            cull_distance: DEFAULT_TREE_CULL_DISTANCE,
+        }
+    }
+}
+
+/// Component attached to a child mesh entity that belongs to a tree LOD level.
+///
+/// A tree parent with [`TreeLodGroup`] can own multiple children marked with
+/// `TreeLodVisibility`; [`tree_lod_switching_system`] shows only the child
+/// matching the current camera-distance bucket.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::advanced_trees::{TreeLodLevel, TreeLodVisibility};
+///
+/// let marker = TreeLodVisibility { level: TreeLodLevel::Lod1 };
+/// assert_eq!(marker.level, TreeLodLevel::Lod1);
+/// ```
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TreeLodVisibility {
+    /// LOD bucket represented by this child mesh.
+    pub level: TreeLodLevel,
+}
+
+/// Runtime system that switches tree child visibility based on camera distance.
+///
+/// The system expects a parent entity with [`TreeLodGroup`] and child entities
+/// tagged with [`TreeLodVisibility`]. It is visual-only and leaves all map and
+/// gameplay state unchanged.
+///
+/// # Examples
+///
+/// ```
+/// use bevy::prelude::*;
+/// use antares::game::systems::advanced_trees::{tree_lod_switching_system, TreeLodGroup};
+///
+/// fn setup_app(app: &mut App) {
+///     app.add_systems(Update, tree_lod_switching_system);
+///     app.world_mut().spawn(TreeLodGroup::default());
+/// }
+/// ```
+pub fn tree_lod_switching_system(
+    camera_query: Query<&GlobalTransform, With<Camera3d>>,
+    group_query: Query<(&GlobalTransform, &Children, &TreeLodGroup)>,
+    mut lod_child_query: Query<(&TreeLodVisibility, &mut Visibility)>,
+) {
+    let Ok(camera_transform) = camera_query.single() else {
+        return;
+    };
+
+    let camera_position = camera_transform.translation();
+
+    for (tree_transform, children, group) in group_query.iter() {
+        let distance = camera_position.distance(tree_transform.translation());
+        let selected_lod = select_tree_lod_level(
+            distance,
+            group.tree_lod_distance_1,
+            group.tree_lod_distance_2,
+            group.cull_distance,
+        );
+
+        for child in children.iter() {
+            if let Ok((lod_marker, mut visibility)) = lod_child_query.get_mut(child) {
+                *visibility = if selected_lod == Some(lod_marker.level) {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                };
+            }
+        }
+    }
+}
+
+fn bounded_tree_variant_bucket(variant_seed: u64, max_variants: u64) -> u8 {
+    let budget = max_variants.max(1);
+    (variant_seed % budget) as u8
+}
+
 // ==================== Data Structures ====================
 
 /// Represents a single branch segment in a tree structure
@@ -287,11 +497,43 @@ impl TreeMeshCacheKey {
         quality_level: u8,
         variant_seed: u64,
     ) -> Self {
+        Self::new_with_variant_budget(
+            tree_type,
+            foliage_density,
+            quality_level,
+            variant_seed,
+            DEFAULT_MAX_TREE_MESH_VARIANTS_PER_SPECIES,
+        )
+    }
+
+    /// Builds a bounded cache key with an explicit per-species variant budget.
+    ///
+    /// This constructor is used by quality settings and tests to prove repeated
+    /// map spawns cannot create one mesh variant per tile.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::systems::advanced_trees::{TreeMeshCacheKey, TreeType};
+    ///
+    /// let key = TreeMeshCacheKey::new_with_variant_budget(TreeType::Oak, 1.0, 0, 99, 2);
+    /// assert!(key.variant_seed_bucket < 2);
+    /// ```
+    pub fn new_with_variant_budget(
+        tree_type: TreeType,
+        foliage_density: f32,
+        quality_level: u8,
+        variant_seed: u64,
+        max_variants_per_species: u64,
+    ) -> Self {
         Self {
             tree_type,
             foliage_density_bucket: (foliage_density.clamp(0.0, 2.0) * 10.0).round() as u8,
-            quality_level,
-            variant_seed_bucket: (variant_seed % 8) as u8,
+            quality_level: TreeLodLevel::from_quality_level(quality_level).quality_level(),
+            variant_seed_bucket: bounded_tree_variant_bucket(
+                variant_seed,
+                max_variants_per_species,
+            ),
         }
     }
 }
@@ -1014,7 +1256,19 @@ fn merge_branch_meshes(branch_meshes: Vec<BranchMeshData>) -> Mesh {
 /// # Returns
 ///
 /// A Bevy Mesh with positions, normals, and indices for all branches
-pub fn generate_branch_mesh(graph: &BranchGraph, _config: &TreeConfig) -> Mesh {
+pub fn generate_branch_mesh(graph: &BranchGraph, config: &TreeConfig) -> Mesh {
+    generate_branch_mesh_for_lod(graph, config, TreeLodLevel::Lod0)
+}
+
+/// Generates a branch mesh for a specific tree LOD level.
+///
+/// LOD1 reduces cylinder segment counts, while LOD0 preserves full detail.
+/// LOD2 normally uses an impostor mesh and should not call this helper.
+fn generate_branch_mesh_for_lod(
+    graph: &BranchGraph,
+    _config: &TreeConfig,
+    lod_level: TreeLodLevel,
+) -> Mesh {
     if graph.branches.is_empty() {
         return Mesh::from(Cuboid::new(0.1, 0.1, 0.1));
     }
@@ -1028,14 +1282,20 @@ pub fn generate_branch_mesh(graph: &BranchGraph, _config: &TreeConfig) -> Mesh {
             continue; // Skip degenerate branches
         }
 
-        // Determine segment count based on branch radius
-        // Thicker branches get more segments for smoothness
-        let segments = if branch.start_radius > 0.2 {
+        // Determine segment count based on branch radius and LOD.
+        // Thicker branches get more segments for smoothness; lower LODs use
+        // fewer radial segments to reduce vertex and index counts.
+        let base_segments = if branch.start_radius > 0.2 {
             12
         } else if branch.start_radius > 0.1 {
             10
         } else {
             8
+        };
+        let segments = match lod_level {
+            TreeLodLevel::Lod0 => base_segments,
+            TreeLodLevel::Lod1 => (base_segments / 2).max(4),
+            TreeLodLevel::Lod2 => 4,
         };
 
         let (positions, normals, indices) = create_tapered_cylinder(
@@ -1198,6 +1458,57 @@ pub fn generate_leaf_mesh(
     Some(mesh)
 }
 
+fn apply_tree_lod_to_preset(preset: &mut TreeSpeciesPreset, lod_level: TreeLodLevel) {
+    match lod_level {
+        TreeLodLevel::Lod0 => {}
+        TreeLodLevel::Lod1 => {
+            preset.tree_config.depth = preset.tree_config.depth.saturating_sub(2).max(1);
+            preset.branch.recursion_depth = preset.branch.recursion_depth.saturating_sub(2).max(1);
+            let reduced_max = preset.branch.child_count_range.1.saturating_sub(1);
+            let reduced_min = preset.branch.child_count_range.0.min(reduced_max.max(1));
+            preset.branch.child_count_range = (reduced_min, reduced_max.max(reduced_min));
+            preset.branch.length_factors = preset.branch.length_factors.map(|factor| factor * 0.72);
+            preset.leaves.count = preset.leaves.count.saturating_div(2).max(1);
+            preset.leaves.size *= 0.82;
+            preset.tree_config.foliage_density *= 0.65;
+        }
+        TreeLodLevel::Lod2 => {
+            preset.tree_config.depth = 1;
+            preset.branch.recursion_depth = 1;
+            preset.branch.child_count_range = (1, 1);
+            preset.leaves.enabled = false;
+            preset.leaves.count = 0;
+            preset.tree_config.foliage_density = 0.0;
+        }
+    }
+}
+
+fn create_tree_impostor_mesh(preset: &TreeSpeciesPreset) -> Mesh {
+    let height = preset.tree_config.height.max(0.5);
+    let width = (height * preset.silhouette_width_ratio).clamp(0.25, height * 1.5);
+    let half_width = width * 0.5;
+
+    let positions = vec![
+        [-half_width, 0.0, 0.0],
+        [half_width, 0.0, 0.0],
+        [half_width, height, 0.0],
+        [-half_width, height, 0.0],
+    ];
+    let normals = vec![[0.0, 0.0, 1.0]; 4];
+    let uvs = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    let indices = vec![0, 1, 2, 0, 2, 3];
+
+    let mut mesh = Mesh::new(
+        bevy::mesh::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(bevy::mesh::Indices::U32(indices));
+    mesh
+}
+
 /// Generates branch and optional leaf meshes for a tree type and cache key.
 ///
 /// # Examples
@@ -1218,10 +1529,20 @@ pub fn generate_tree_meshes_for_key(
     let seed = TreeGenerationSeed(
         base_seed_for_tree_type(tree_type) ^ cache_key.variant_seed_bucket as u64,
     );
-    let graph = generate_branch_graph_with_seed(tree_type, seed);
+    let lod_level = TreeLodLevel::from_quality_level(cache_key.quality_level);
     let mut preset = tree_type.species_preset();
     preset.tree_config.foliage_density = cache_key.foliage_density_bucket as f32 / 10.0;
-    let branches = generate_branch_mesh(&graph, &preset.tree_config);
+    apply_tree_lod_to_preset(&mut preset, lod_level);
+
+    if lod_level == TreeLodLevel::Lod2 {
+        return GeneratedTreeMeshes {
+            branches: create_tree_impostor_mesh(&preset),
+            leaves: None,
+        };
+    }
+
+    let graph = generate_branch_graph_with_preset_and_seed(tree_type, &preset, seed);
+    let branches = generate_branch_mesh_for_lod(&graph, &preset.tree_config, lod_level);
     let leaves = generate_leaf_mesh(&graph, &preset, seed);
 
     GeneratedTreeMeshes { branches, leaves }
@@ -1315,13 +1636,21 @@ pub fn generate_branch_graph_with_seed(
     generation_seed: TreeGenerationSeed,
 ) -> BranchGraph {
     let preset = tree_type.species_preset();
+    generate_branch_graph_with_preset_and_seed(tree_type, &preset, generation_seed)
+}
+
+fn generate_branch_graph_with_preset_and_seed(
+    tree_type: TreeType,
+    preset: &TreeSpeciesPreset,
+    generation_seed: TreeGenerationSeed,
+) -> BranchGraph {
     let mut rng = StdRng::seed_from_u64(generation_seed.0);
 
     let mut graph = match tree_type {
-        TreeType::Shrub => generate_shrub_graph(&preset, &mut rng),
-        TreeType::Palm => generate_palm_graph(&preset, &mut rng),
-        TreeType::Pine => generate_pine_graph(&preset, &mut rng),
-        _ => generate_recursive_species_graph(tree_type, &preset, &mut rng),
+        TreeType::Shrub => generate_shrub_graph(preset, &mut rng),
+        TreeType::Palm => generate_palm_graph(preset, &mut rng),
+        TreeType::Pine => generate_pine_graph(preset, &mut rng),
+        _ => generate_recursive_species_graph(tree_type, preset, &mut rng),
     };
 
     graph.update_bounds();
@@ -1852,6 +2181,170 @@ mod tests {
             meshes.leaves.is_none(),
             "Dead trees should not generate leaf meshes"
         );
+    }
+
+    #[test]
+    fn test_select_tree_lod_level_uses_configured_distances_and_cull_budget() {
+        assert_eq!(
+            select_tree_lod_level(
+                5.0,
+                DEFAULT_TREE_LOD_DISTANCE_1,
+                DEFAULT_TREE_LOD_DISTANCE_2,
+                DEFAULT_TREE_CULL_DISTANCE,
+            ),
+            Some(TreeLodLevel::Lod0)
+        );
+        assert_eq!(
+            select_tree_lod_level(
+                24.0,
+                DEFAULT_TREE_LOD_DISTANCE_1,
+                DEFAULT_TREE_LOD_DISTANCE_2,
+                DEFAULT_TREE_CULL_DISTANCE,
+            ),
+            Some(TreeLodLevel::Lod1)
+        );
+        assert_eq!(
+            select_tree_lod_level(
+                40.0,
+                DEFAULT_TREE_LOD_DISTANCE_1,
+                DEFAULT_TREE_LOD_DISTANCE_2,
+                DEFAULT_TREE_CULL_DISTANCE,
+            ),
+            Some(TreeLodLevel::Lod2)
+        );
+        assert_eq!(
+            select_tree_lod_level(
+                50.0,
+                DEFAULT_TREE_LOD_DISTANCE_1,
+                DEFAULT_TREE_LOD_DISTANCE_2,
+                DEFAULT_TREE_CULL_DISTANCE,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn test_generate_tree_meshes_for_key_lod_settings_reduce_mesh_vertex_counts() {
+        let lod0_key =
+            TreeMeshCacheKey::new(TreeType::Oak, 1.0, TreeLodLevel::Lod0.quality_level(), 3);
+        let lod1_key =
+            TreeMeshCacheKey::new(TreeType::Oak, 1.0, TreeLodLevel::Lod1.quality_level(), 3);
+        let lod2_key =
+            TreeMeshCacheKey::new(TreeType::Oak, 1.0, TreeLodLevel::Lod2.quality_level(), 3);
+
+        let lod0 = generate_tree_meshes_for_key(TreeType::Oak, lod0_key);
+        let lod1 = generate_tree_meshes_for_key(TreeType::Oak, lod1_key);
+        let lod2 = generate_tree_meshes_for_key(TreeType::Oak, lod2_key);
+
+        assert!(
+            lod1.branches.count_vertices() < lod0.branches.count_vertices(),
+            "LOD1 should reduce branch mesh vertices"
+        );
+        assert!(
+            lod2.branches.count_vertices() < lod1.branches.count_vertices(),
+            "LOD2 impostor should be simpler than LOD1"
+        );
+        assert!(
+            lod2.leaves.is_none(),
+            "LOD2 should use a single billboard/impostor mesh without separate leaves"
+        );
+    }
+
+    #[test]
+    fn test_tree_mesh_cache_key_variant_bucket_respects_variant_budget() {
+        for seed in 0..128 {
+            let key = TreeMeshCacheKey::new(TreeType::Willow, 1.0, 0, seed);
+            assert!(
+                u64::from(key.variant_seed_bucket) < DEFAULT_MAX_TREE_MESH_VARIANTS_PER_SPECIES,
+                "variant bucket {} exceeded budget {}",
+                key.variant_seed_bucket,
+                DEFAULT_MAX_TREE_MESH_VARIANTS_PER_SPECIES
+            );
+        }
+    }
+
+    #[test]
+    fn test_tree_mesh_cache_key_explicit_variant_budget_bounds_buckets() {
+        for seed in 0..128 {
+            let key = TreeMeshCacheKey::new_with_variant_budget(TreeType::Pine, 1.0, 0, seed, 2);
+            assert!(
+                key.variant_seed_bucket < 2,
+                "variant bucket {} exceeded explicit budget",
+                key.variant_seed_bucket
+            );
+        }
+    }
+
+    #[test]
+    fn test_tree_lod_switching_system_shows_selected_lod_child() {
+        let mut app = App::new();
+        app.add_systems(Update, tree_lod_switching_system);
+
+        app.world_mut().spawn((
+            Camera3d::default(),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            GlobalTransform::from(Transform::from_xyz(0.0, 0.0, 0.0)),
+        ));
+
+        let tree = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(24.0, 0.0, 0.0),
+                GlobalTransform::from(Transform::from_xyz(24.0, 0.0, 0.0)),
+                TreeLodGroup {
+                    tree_lod_distance_1: 10.0,
+                    tree_lod_distance_2: 30.0,
+                    cull_distance: 45.0,
+                },
+            ))
+            .id();
+
+        let lod0 = app
+            .world_mut()
+            .spawn((
+                Visibility::default(),
+                TreeLodVisibility {
+                    level: TreeLodLevel::Lod0,
+                },
+            ))
+            .id();
+        let lod1 = app
+            .world_mut()
+            .spawn((
+                Visibility::default(),
+                TreeLodVisibility {
+                    level: TreeLodLevel::Lod1,
+                },
+            ))
+            .id();
+        let lod2 = app
+            .world_mut()
+            .spawn((
+                Visibility::default(),
+                TreeLodVisibility {
+                    level: TreeLodLevel::Lod2,
+                },
+            ))
+            .id();
+
+        app.world_mut().entity_mut(tree).add_child(lod0);
+        app.world_mut().entity_mut(tree).add_child(lod1);
+        app.world_mut().entity_mut(tree).add_child(lod2);
+
+        app.update();
+
+        assert!(matches!(
+            app.world().get::<Visibility>(lod0).unwrap(),
+            Visibility::Hidden
+        ));
+        assert!(matches!(
+            app.world().get::<Visibility>(lod1).unwrap(),
+            Visibility::Inherited
+        ));
+        assert!(matches!(
+            app.world().get::<Visibility>(lod2).unwrap(),
+            Visibility::Hidden
+        ));
     }
 
     #[test]

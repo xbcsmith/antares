@@ -138,6 +138,34 @@ pub struct ProceduralMeshCache {
     tree_bark_material: Option<Handle<StandardMaterial>>,
     /// Cached foliage material handles keyed by TreeType variant
     tree_foliage_materials: HashMap<TreeType, Handle<StandardMaterial>>,
+    /// Cached bark material variants keyed by species and quantized tint.
+    tree_bark_material_variants: HashMap<TreeMaterialCacheKey, Handle<StandardMaterial>>,
+    /// Cached foliage material variants keyed by species and quantized tint.
+    tree_foliage_material_variants: HashMap<TreeMaterialCacheKey, Handle<StandardMaterial>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+struct TreeMaterialCacheKey {
+    tree_type: TreeType,
+    tint_r: u8,
+    tint_g: u8,
+    tint_b: u8,
+}
+
+impl TreeMaterialCacheKey {
+    fn from_color(tree_type: TreeType, color: Color) -> Self {
+        let color = color.to_srgba();
+        Self {
+            tree_type,
+            tint_r: quantize_color_channel(color.red),
+            tint_g: quantize_color_channel(color.green),
+            tint_b: quantize_color_channel(color.blue),
+        }
+    }
+}
+
+fn quantize_color_channel(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 31.0).round() as u8
 }
 
 impl ProceduralMeshCache {
@@ -351,6 +379,67 @@ impl ProceduralMeshCache {
             handle
         }
     }
+
+    fn get_or_create_bark_material_variant(
+        &mut self,
+        asset_server: &AssetServer,
+        materials: &mut Assets<StandardMaterial>,
+        tree_type: TreeType,
+        color: Color,
+    ) -> Handle<StandardMaterial> {
+        let key = TreeMaterialCacheKey::from_color(tree_type, color);
+        if let Some(handle) = self.tree_bark_material_variants.get(&key) {
+            return handle.clone();
+        }
+
+        let base_handle = self.get_or_create_bark_material(asset_server, materials);
+        let mut material =
+            materials
+                .get(&base_handle)
+                .cloned()
+                .unwrap_or_else(|| StandardMaterial {
+                    base_color_texture: Some(asset_server.load(TREE_BARK_TEXTURE)),
+                    perceptual_roughness: 0.9,
+                    ..default()
+                });
+        material.base_color = color;
+
+        let handle = materials.add(material);
+        self.tree_bark_material_variants.insert(key, handle.clone());
+        handle
+    }
+
+    fn get_or_create_foliage_material_variant(
+        &mut self,
+        tree_type: TreeType,
+        asset_server: &AssetServer,
+        materials: &mut Assets<StandardMaterial>,
+        color: Color,
+    ) -> Handle<StandardMaterial> {
+        let key = TreeMaterialCacheKey::from_color(tree_type, color);
+        if let Some(handle) = self.tree_foliage_material_variants.get(&key) {
+            return handle.clone();
+        }
+
+        let base_handle = self.get_or_create_foliage_material(tree_type, asset_server, materials);
+        let mut material =
+            materials
+                .get(&base_handle)
+                .cloned()
+                .unwrap_or_else(|| StandardMaterial {
+                    alpha_mode: AlphaMode::Mask(TREE_FOLIAGE_ALPHA_CUTOFF),
+                    double_sided: true,
+                    cull_mode: None,
+                    perceptual_roughness: 0.8,
+                    ..default()
+                });
+        material.base_color = color;
+
+        let handle = materials.add(material);
+        self.tree_foliage_material_variants
+            .insert(key, handle.clone());
+        handle
+    }
 }
 
 // ==================== Cache Helper Methods ====================
@@ -506,6 +595,8 @@ impl ProceduralMeshCache {
         self.item_quest = None;
         self.tree_bark_material = None;
         self.tree_foliage_materials.clear();
+        self.tree_bark_material_variants.clear();
+        self.tree_foliage_material_variants.clear();
     }
 
     /// Gets or creates a cached mesh handle for an item category.
@@ -569,6 +660,8 @@ impl ProceduralMeshCache {
 
         count += self.tree_branch_meshes.len();
         count += self.tree_leaf_meshes.len();
+        count += self.tree_bark_material_variants.len();
+        count += self.tree_foliage_material_variants.len();
 
         if self.portal_frame_horizontal.is_some() {
             count += 1;
@@ -991,7 +1084,54 @@ pub fn spawn_tree(
     visual_metadata: Option<&TileVisualMetadata>,
     tree_type: Option<super::advanced_trees::TreeType>,
 ) -> Entity {
-    spawn_tree_with_offset(
+    spawn_tree_with_quality(
+        ctx,
+        asset_server,
+        position,
+        map_id,
+        visual_metadata,
+        tree_type,
+        &crate::game::resources::VegetationQualitySettings::default(),
+    )
+}
+
+/// Spawns a procedural tree mesh with vegetation quality settings.
+///
+/// This quality-aware entry point lets map spawning pass the current runtime
+/// vegetation budget while the legacy [`spawn_tree`] wrapper preserves existing
+/// call sites with the default quality settings.
+///
+/// # Arguments
+///
+/// * `ctx` - Mutable mesh spawning context
+/// * `asset_server` - Asset server used to resolve bark and foliage textures
+/// * `position` - Tile position in world coordinates
+/// * `map_id` - Map identifier for cleanup
+/// * `visual_metadata` - Optional per-tile visual customization
+/// * `tree_type` - Optional render-layer tree type
+/// * `vegetation_quality` - Runtime vegetation quality, LOD, and cache budget settings
+///
+/// # Returns
+///
+/// Entity ID of the parent tree entity
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::procedural_meshes::spawn_tree_with_quality;
+///
+/// let _spawn_fn = spawn_tree_with_quality;
+/// ```
+pub fn spawn_tree_with_quality(
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
+    asset_server: &AssetServer,
+    position: types::Position,
+    map_id: types::MapId,
+    visual_metadata: Option<&TileVisualMetadata>,
+    tree_type: Option<super::advanced_trees::TreeType>,
+    vegetation_quality: &crate::game::resources::VegetationQualitySettings,
+) -> Entity {
+    spawn_tree_with_offset_with_quality(
         ctx,
         asset_server,
         position,
@@ -999,6 +1139,7 @@ pub fn spawn_tree(
         visual_metadata,
         tree_type,
         Vec2::ZERO,
+        vegetation_quality,
     )
 }
 
@@ -1029,6 +1170,57 @@ pub fn spawn_tree_with_offset(
     tree_type: Option<super::advanced_trees::TreeType>,
     tile_offset: Vec2,
 ) -> Entity {
+    spawn_tree_with_offset_with_quality(
+        ctx,
+        asset_server,
+        position,
+        map_id,
+        visual_metadata,
+        tree_type,
+        tile_offset,
+        &crate::game::resources::VegetationQualitySettings::default(),
+    )
+}
+
+/// Spawns a procedural tree mesh at a deterministic offset using explicit vegetation quality.
+///
+/// This is the quality-aware implementation used by map spawning. It keeps LOD
+/// distances and mesh/material cache budgets aligned with the current runtime
+/// vegetation setting without changing authored map data.
+///
+/// # Arguments
+///
+/// * `ctx` - Mutable mesh spawning context
+/// * `asset_server` - Asset server used to resolve bark and foliage textures
+/// * `position` - Tile position in world coordinates
+/// * `map_id` - Map identifier for cleanup
+/// * `visual_metadata` - Optional per-tile visual customization
+/// * `tree_type` - Optional render-layer tree type
+/// * `tile_offset` - Local X/Z offset from tile center
+/// * `vegetation_quality` - Runtime vegetation quality, LOD, and cache budget settings
+///
+/// # Returns
+///
+/// Entity ID of the parent tree entity
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::procedural_meshes::spawn_tree_with_offset_with_quality;
+///
+/// let _spawn_fn = spawn_tree_with_offset_with_quality;
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_tree_with_offset_with_quality(
+    ctx: &mut MeshSpawnContext<'_, '_, '_>,
+    asset_server: &AssetServer,
+    position: types::Position,
+    map_id: types::MapId,
+    visual_metadata: Option<&TileVisualMetadata>,
+    tree_type: Option<super::advanced_trees::TreeType>,
+    tile_offset: Vec2,
+    vegetation_quality: &crate::game::resources::VegetationQualitySettings,
+) -> Entity {
     // Determine visual configuration from optional metadata
     let visual_config = visual_metadata
         .map(super::advanced_trees::TerrainVisualConfig::from)
@@ -1049,15 +1241,25 @@ pub fn spawn_tree_with_offset(
         position.y,
         0,
     );
-    let tree_cache_key = super::advanced_trees::tree_mesh_cache_key(
-        tree_type_resolved,
-        resolved_foliage_density,
-        0,
-        generation_seed,
-    );
-    let tree_meshes =
-        ctx.cache
-            .get_or_create_tree_mesh_pair(tree_type_resolved, tree_cache_key, ctx.meshes);
+    let tree_lod_meshes = [
+        super::advanced_trees::TreeLodLevel::Lod0,
+        super::advanced_trees::TreeLodLevel::Lod1,
+        super::advanced_trees::TreeLodLevel::Lod2,
+    ]
+    .map(|lod_level| {
+        let cache_key = super::advanced_trees::TreeMeshCacheKey::new_with_variant_budget(
+            tree_type_resolved,
+            resolved_foliage_density,
+            lod_level.quality_level(),
+            generation_seed.0,
+            vegetation_quality.max_tree_mesh_variants_per_species as u64,
+        );
+        (
+            lod_level,
+            ctx.cache
+                .get_or_create_tree_mesh_pair(tree_type_resolved, cache_key, ctx.meshes),
+        )
+    });
 
     // Use the cached bark texture material as the source, then clone it for
     // the resolved tree type and optional metadata tint.  This keeps the bark
@@ -1068,21 +1270,12 @@ pub fn spawn_tree_with_offset(
         .color_tint
         .map(|tint| multiply_color(base_bark_color, tint))
         .unwrap_or(base_bark_color);
-    let bark_handle = ctx
-        .cache
-        .get_or_create_bark_material(asset_server, ctx.materials);
-    let mut bark_material =
-        ctx.materials
-            .get(&bark_handle)
-            .cloned()
-            .unwrap_or_else(|| StandardMaterial {
-                base_color_texture: Some(asset_server.load(TREE_BARK_TEXTURE)),
-                base_color: TREE_TRUNK_COLOR,
-                perceptual_roughness: 0.9,
-                ..default()
-            });
-    bark_material.base_color = resolved_bark_color;
-    let tree_material = ctx.materials.add(bark_material);
+    let tree_material = ctx.cache.get_or_create_bark_material_variant(
+        asset_server,
+        ctx.materials,
+        tree_type_resolved,
+        resolved_bark_color,
+    );
 
     // Apply color tint to species leaf/frond meshes when present. The tinted
     // material is cloned so shared cached foliage materials are never mutated.
@@ -1106,71 +1299,80 @@ pub fn spawn_tree_with_offset(
             Visibility::default(),
             MapEntity(map_id),
             TileCoord(position),
+            super::advanced_trees::TreeLodGroup {
+                tree_lod_distance_1: vegetation_quality.tree_lod_distance_1,
+                tree_lod_distance_2: vegetation_quality.tree_lod_distance_2,
+                cull_distance: vegetation_quality.vegetation_cull_distance,
+            },
         ))
         .id();
 
-    // Spawn tree mesh child at origin (branch graph is based at 0,0,0)
-    let tree_structure = ctx
-        .commands
-        .spawn((
-            Mesh3d(tree_meshes.branches.clone()),
-            MeshMaterial3d(tree_material),
-            Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(
-                visual_config.scale,
-                visual_config.height_multiplier,
-                visual_config.scale,
-            )),
-            GlobalTransform::default(),
-            Visibility::default(),
-            bevy::light::NotShadowCaster,
-            bevy::light::NotShadowReceiver,
-        ))
-        .id();
-    ctx.commands.entity(parent).add_child(tree_structure);
-
-    // Spawn cached species leaf/frond mesh when available.  Species without
-    // leaves, such as Dead trees, intentionally render only branch geometry.
-    if let Some(leaf_mesh) = tree_meshes.leaves.clone() {
-        let base_material = ctx.cache.get_or_create_foliage_material(
-            tree_type_resolved,
-            asset_server,
-            ctx.materials,
-        );
-        let leaf_material = if let Some(tint) = foliage_color {
-            let mut mat = ctx
-                .materials
-                .get(&base_material)
-                .cloned()
-                .unwrap_or_else(|| StandardMaterial {
-                    alpha_mode: AlphaMode::Mask(TREE_FOLIAGE_ALPHA_CUTOFF),
-                    double_sided: true,
-                    cull_mode: None,
-                    perceptual_roughness: 0.8,
-                    ..default()
-                });
-            mat.base_color = tint;
-            ctx.materials.add(mat)
+    // Spawn tree LOD mesh children at origin (branch graphs are based at 0,0,0).
+    for (lod_level, tree_meshes) in tree_lod_meshes {
+        let initial_visibility = if lod_level == super::advanced_trees::TreeLodLevel::Lod0 {
+            Visibility::default()
         } else {
-            base_material
+            Visibility::Hidden
         };
 
-        let leaf_entity = ctx
+        let tree_structure = ctx
             .commands
             .spawn((
-                Mesh3d(leaf_mesh),
-                MeshMaterial3d(leaf_material),
+                Mesh3d(tree_meshes.branches.clone()),
+                MeshMaterial3d(tree_material.clone()),
                 Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(
                     visual_config.scale,
                     visual_config.height_multiplier,
                     visual_config.scale,
                 )),
                 GlobalTransform::default(),
-                Visibility::default(),
+                initial_visibility,
                 bevy::light::NotShadowCaster,
                 bevy::light::NotShadowReceiver,
+                super::advanced_trees::TreeLodVisibility { level: lod_level },
             ))
             .id();
-        ctx.commands.entity(parent).add_child(leaf_entity);
+        ctx.commands.entity(parent).add_child(tree_structure);
+
+        // Spawn cached species leaf/frond mesh when available. Species without
+        // leaves, such as Dead trees and LOD2 impostors, intentionally render
+        // only branch/silhouette geometry.
+        if let Some(leaf_mesh) = tree_meshes.leaves.clone() {
+            let base_material = ctx.cache.get_or_create_foliage_material(
+                tree_type_resolved,
+                asset_server,
+                ctx.materials,
+            );
+            let leaf_material = if let Some(tint) = foliage_color {
+                ctx.cache.get_or_create_foliage_material_variant(
+                    tree_type_resolved,
+                    asset_server,
+                    ctx.materials,
+                    tint,
+                )
+            } else {
+                base_material
+            };
+
+            let leaf_entity = ctx
+                .commands
+                .spawn((
+                    Mesh3d(leaf_mesh),
+                    MeshMaterial3d(leaf_material),
+                    Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(
+                        visual_config.scale,
+                        visual_config.height_multiplier,
+                        visual_config.scale,
+                    )),
+                    GlobalTransform::default(),
+                    initial_visibility,
+                    bevy::light::NotShadowCaster,
+                    bevy::light::NotShadowReceiver,
+                    super::advanced_trees::TreeLodVisibility { level: lod_level },
+                ))
+                .id();
+            ctx.commands.entity(parent).add_child(leaf_entity);
+        }
     }
 
     parent
@@ -4023,6 +4225,41 @@ mod tests {
         assert_eq!(cache.cached_count(), 0);
     }
 
+    /// Tests that tree material variant maps contribute to procedural cache totals.
+    #[test]
+    fn test_cache_cached_count_includes_tree_material_variants() {
+        let mut cache = ProceduralMeshCache::default();
+        let key = TreeMaterialCacheKey::from_color(TreeType::Oak, Color::srgb(0.2, 0.6, 0.2));
+
+        cache
+            .tree_bark_material_variants
+            .insert(key, Handle::default());
+        assert_eq!(cache.cached_count(), 1);
+
+        cache
+            .tree_foliage_material_variants
+            .insert(key, Handle::default());
+        assert_eq!(cache.cached_count(), 2);
+    }
+
+    /// Tests that tree material cache keys bucket similar tints while preserving species.
+    #[test]
+    fn test_tree_material_cache_key_quantizes_tint_channels_and_species() {
+        let oak_a = TreeMaterialCacheKey::from_color(TreeType::Oak, Color::srgb(0.50, 0.60, 0.70));
+        let oak_b = TreeMaterialCacheKey::from_color(TreeType::Oak, Color::srgb(0.51, 0.61, 0.71));
+        let pine_same_tint =
+            TreeMaterialCacheKey::from_color(TreeType::Pine, Color::srgb(0.50, 0.60, 0.70));
+
+        assert_eq!(
+            oak_a, oak_b,
+            "nearby tree material tints should share bounded cache buckets"
+        );
+        assert_ne!(
+            oak_a, pine_same_tint,
+            "tree material cache keys must keep species-specific materials distinct"
+        );
+    }
+
     /// Tests create_simplified_mesh with zero reduction
     #[test]
     fn test_create_simplified_mesh_zero_reduction() {
@@ -4159,6 +4396,48 @@ mod tests {
         app.update();
     }
 
+    /// Tests that tinted bark material variants are cached and reused.
+    #[test]
+    fn test_bark_material_variant_cache_reuses_equivalent_tint_bucket() {
+        fn create_bark_variants_system(
+            asset_server: Res<AssetServer>,
+            mut materials: ResMut<Assets<StandardMaterial>>,
+        ) {
+            let mut cache = ProceduralMeshCache::default();
+            let first = cache.get_or_create_bark_material_variant(
+                &asset_server,
+                &mut materials,
+                TreeType::Oak,
+                Color::srgb(0.50, 0.60, 0.70),
+            );
+            let second = cache.get_or_create_bark_material_variant(
+                &asset_server,
+                &mut materials,
+                TreeType::Oak,
+                Color::srgb(0.51, 0.61, 0.71),
+            );
+
+            assert_eq!(
+                first.id(),
+                second.id(),
+                "similar tint buckets should reuse the same cached bark material variant"
+            );
+            assert_eq!(cache.tree_bark_material_variants.len(), 1);
+        }
+
+        let mut app = bevy::app::App::new();
+        app.add_plugins(bevy::app::PluginGroup::set(
+            bevy::MinimalPlugins,
+            bevy::app::ScheduleRunnerPlugin::default(),
+        ))
+        .add_plugins(bevy::asset::AssetPlugin::default())
+        .init_asset::<Image>()
+        .init_asset::<StandardMaterial>();
+        app.add_systems(Update, create_bark_variants_system);
+
+        app.update();
+    }
+
     /// Tests that bark base colours vary by species before metadata tinting.
     #[test]
     fn test_bark_color_for_tree_type_is_species_specific() {
@@ -4212,6 +4491,38 @@ mod tests {
         );
         assert_eq!(cache.tree_branch_meshes.len(), 1);
         assert_eq!(cache.tree_leaf_meshes.len(), 1);
+    }
+
+    /// Tests that repeated variant seeds remain bounded by the tree mesh cache budget.
+    #[test]
+    fn test_tree_mesh_cache_remains_bounded_for_repeated_variant_seeds() {
+        let mut cache = ProceduralMeshCache::default();
+        let mut meshes = Assets::<Mesh>::default();
+        let quality_level =
+            crate::game::systems::advanced_trees::TreeLodLevel::Lod0.quality_level();
+        let max_variants_per_species = 2_u64;
+
+        for variant_seed in 0..128 {
+            let key =
+                crate::game::systems::advanced_trees::TreeMeshCacheKey::new_with_variant_budget(
+                    TreeType::Oak,
+                    1.0,
+                    quality_level,
+                    variant_seed,
+                    max_variants_per_species,
+                );
+
+            cache.get_or_create_tree_mesh_pair(TreeType::Oak, key, &mut meshes);
+        }
+
+        assert!(
+            cache.tree_branch_meshes.len() <= max_variants_per_species as usize,
+            "branch mesh cache should stay within the per-species variant budget"
+        );
+        assert!(
+            cache.tree_leaf_meshes.len() <= max_variants_per_species as usize,
+            "leaf mesh cache should stay within the per-species variant budget"
+        );
     }
 
     /// Tests that ProceduralMeshCache::default() initialises tree_bark_material as None
@@ -4274,8 +4585,8 @@ mod tests {
 
         assert_eq!(
             child_counts,
-            vec![1],
-            "Dead tree should only have the branch mesh child and no foliage children"
+            vec![3],
+            "Dead tree should spawn branch/impostor children for LOD0, LOD1, and LOD2 with no foliage children"
         );
     }
 
@@ -4333,8 +4644,8 @@ mod tests {
 
         assert_eq!(
             child_counts,
-            vec![1],
-            "foliage_density = 0.0 should leave only the branch mesh child"
+            vec![3],
+            "foliage_density = 0.0 should leave only branch/impostor children for LOD0, LOD1, and LOD2"
         );
     }
 
@@ -4426,10 +4737,20 @@ mod tests {
         // Assets<StandardMaterial> from a Bevy App, which is not available in
         // unit tests.  We verify the clear path does not panic and resets state.
         assert!(cache.tree_foliage_materials.is_empty());
+        assert!(cache.tree_bark_material_variants.is_empty());
+        assert!(cache.tree_foliage_material_variants.is_empty());
         cache.clear_all();
         assert!(
             cache.tree_foliage_materials.is_empty(),
             "tree_foliage_materials should be empty after clear_all()"
+        );
+        assert!(
+            cache.tree_bark_material_variants.is_empty(),
+            "tree_bark_material_variants should be empty after clear_all()"
+        );
+        assert!(
+            cache.tree_foliage_material_variants.is_empty(),
+            "tree_foliage_material_variants should be empty after clear_all()"
         );
         assert!(
             cache.tree_bark_material.is_none(),

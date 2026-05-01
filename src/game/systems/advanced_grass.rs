@@ -21,7 +21,9 @@ use std::collections::HashMap;
 
 use crate::domain::types;
 use crate::domain::world::{self, TileVisualMetadata};
-use crate::game::resources::GrassQualitySettings;
+use crate::game::resources::{
+    GrassPerformanceLevel, GrassQualitySettings, VegetationQualityLevel, VegetationQualitySettings,
+};
 use crate::game::systems::map::{MapEntity, TileCoord};
 use crate::game::systems::vegetation_placement::VegetationExclusionZone;
 
@@ -52,6 +54,12 @@ const BLADES_PER_CLUMP: u32 = 8;
 
 /// Radius used when distributing clumps within a tile.
 const GRASS_PATCH_RADIUS: f32 = 0.42;
+
+/// Multiplier from the first grass LOD distance to the far-card LOD threshold.
+const FAR_GRASS_LOD_DISTANCE_MULTIPLIER: f32 = 1.5;
+
+/// Default budget for grass material variant buckets.
+const DEFAULT_MAX_GRASS_MATERIAL_VARIANT_BUCKETS: usize = 64;
 
 /// Minimum clump height variation multiplier.
 const MIN_HEIGHT_VARIATION: f32 = 0.75;
@@ -167,6 +175,58 @@ pub struct GrassClump {
     pub card_count: u32,
 }
 
+/// Grass runtime LOD tiers.
+///
+/// These tiers reduce visible clumps at distance without changing tile data or
+/// gameplay state.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::advanced_grass::GrassLodTier;
+///
+/// assert_eq!(GrassLodTier::Near.retention_stride(), Some(1));
+/// assert_eq!(GrassLodTier::Far.retention_stride(), Some(4));
+/// assert_eq!(GrassLodTier::Culled.retention_stride(), None);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GrassLodTier {
+    /// Full clumps and all visible child clump entities.
+    Near,
+    /// Half of clump children remain visible.
+    Mid,
+    /// One quarter of clump children remain visible as low-card patches.
+    Far,
+    /// Grass is hidden by the culling budget.
+    Culled,
+}
+
+impl GrassLodTier {
+    /// Returns the child-retention stride for this tier.
+    ///
+    /// `None` means the tier is culled. `Some(1)` means every clump remains
+    /// visible, `Some(2)` means every other clump remains visible, and so on.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::systems::advanced_grass::GrassLodTier;
+    ///
+    /// assert_eq!(GrassLodTier::Near.retention_stride(), Some(1));
+    /// assert_eq!(GrassLodTier::Mid.retention_stride(), Some(2));
+    /// assert_eq!(GrassLodTier::Far.retention_stride(), Some(4));
+    /// assert_eq!(GrassLodTier::Culled.retention_stride(), None);
+    /// ```
+    pub fn retention_stride(self) -> Option<u32> {
+        match self {
+            Self::Near => Some(1),
+            Self::Mid => Some(2),
+            Self::Far => Some(4),
+            Self::Culled => None,
+        }
+    }
+}
+
 /// Mesh quality tiers for grass blade card geometry.
 ///
 /// Lower quality uses fewer curve segments. Higher quality uses more segments
@@ -244,11 +304,23 @@ pub struct GrassMaterialKey {
 impl GrassMaterialKey {
     /// Builds a material key from a tint tuple and color variation value.
     pub fn from_tint(tint: (f32, f32, f32), variation: f32) -> Self {
+        Self::from_tint_with_budget(tint, variation, DEFAULT_MAX_GRASS_MATERIAL_VARIANT_BUCKETS)
+    }
+
+    /// Builds a material key using a bounded material-variant budget.
+    ///
+    /// Lower budgets coarsen tint and variation buckets so repeated map spawns
+    /// cannot create one material per subtly different blade color.
+    pub fn from_tint_with_budget(
+        tint: (f32, f32, f32),
+        variation: f32,
+        max_material_variants: usize,
+    ) -> Self {
         Self {
-            tint_r: quantize_unit(tint.0),
-            tint_g: quantize_unit(tint.1),
-            tint_b: quantize_unit(tint.2),
-            variation: quantize_unit(variation),
+            tint_r: quantize_unit_with_budget(tint.0, max_material_variants),
+            tint_g: quantize_unit_with_budget(tint.1, max_material_variants),
+            tint_b: quantize_unit_with_budget(tint.2, max_material_variants),
+            variation: quantize_unit_with_budget(variation, max_material_variants),
             alpha_cutoff: quantize_unit(GRASS_ALPHA_CUTOFF),
         }
     }
@@ -399,9 +471,34 @@ pub struct GrassRenderConfig {
 
 impl Default for GrassRenderConfig {
     fn default() -> Self {
+        Self::from_vegetation_quality(&VegetationQualitySettings::default())
+    }
+}
+
+impl GrassRenderConfig {
+    /// Builds grass culling and LOD distances from vegetation-wide quality settings.
+    ///
+    /// This keeps grass render budgets aligned with tree and global vegetation
+    /// budgets while preserving grass-specific runtime components.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::resources::performance::{
+    ///     VegetationQualityLevel, VegetationQualitySettings,
+    /// };
+    /// use antares::game::systems::advanced_grass::GrassRenderConfig;
+    ///
+    /// let quality = VegetationQualitySettings::for_level(VegetationQualityLevel::Low);
+    /// let config = GrassRenderConfig::from_vegetation_quality(&quality);
+    ///
+    /// assert_eq!(config.cull_distance, quality.vegetation_cull_distance);
+    /// assert_eq!(config.lod_distance, quality.grass_lod_distance);
+    /// ```
+    pub fn from_vegetation_quality(settings: &VegetationQualitySettings) -> Self {
         Self {
-            cull_distance: 30.0,
-            lod_distance: 15.0,
+            cull_distance: settings.vegetation_cull_distance,
+            lod_distance: settings.grass_lod_distance,
         }
     }
 }
@@ -625,6 +722,38 @@ fn scaled_blade_count_range_for_foliage_density(
 
 fn quantize_unit(value: f32) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+fn vegetation_quality_from_grass_quality_settings(
+    quality_settings: &GrassQualitySettings,
+) -> VegetationQualitySettings {
+    let quality_level = match quality_settings.performance_level {
+        GrassPerformanceLevel::Low => VegetationQualityLevel::Low,
+        GrassPerformanceLevel::Medium => VegetationQualityLevel::Medium,
+        GrassPerformanceLevel::High => VegetationQualityLevel::High,
+    };
+
+    VegetationQualitySettings::for_level(quality_level)
+}
+
+fn material_budget_levels(max_material_variants: usize) -> u8 {
+    match max_material_variants {
+        0 | 1 => 1,
+        2..=16 => 2,
+        17..=64 => 4,
+        _ => 8,
+    }
+}
+
+fn quantize_unit_with_budget(value: f32, max_material_variants: usize) -> u8 {
+    let levels = material_budget_levels(max_material_variants);
+    if levels <= 1 {
+        return 0;
+    }
+
+    let max_bucket = f32::from(levels - 1);
+    let bucket = (value.clamp(0.0, 1.0) * max_bucket).round();
+    ((bucket / max_bucket) * 255.0).round() as u8
 }
 
 fn quantize_mesh_value(value: f32) -> u16 {
@@ -1248,7 +1377,12 @@ pub fn spawn_grass_cached_with_exclusions(
         .id();
 
     let clump_count = clump_count_for_blade_count(blade_count);
-    let material_key = GrassMaterialKey::from_tint(resolved_tint, blade_config.color_variation);
+    let vegetation_quality = vegetation_quality_from_grass_quality_settings(quality_settings);
+    let material_key = GrassMaterialKey::from_tint_with_budget(
+        resolved_tint,
+        blade_config.color_variation,
+        vegetation_quality.max_grass_material_variants,
+    );
     let mesh_quality = GrassMeshQuality::from_settings(quality_settings);
 
     let tile_world_center = Vec2::new(
@@ -1389,6 +1523,7 @@ pub fn grass_distance_culling_system(
     mut grass_query: Query<(&GlobalTransform, &mut Visibility, &GrassCluster)>,
     camera_query: Query<&GlobalTransform, With<Camera3d>>,
     config: Res<GrassRenderConfig>,
+    vegetation_quality: Option<Res<VegetationQualitySettings>>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
         return;
@@ -1396,14 +1531,45 @@ pub fn grass_distance_culling_system(
 
     let camera_pos = camera_transform.translation();
 
+    let effective_config = vegetation_quality
+        .as_deref()
+        .map(GrassRenderConfig::from_vegetation_quality)
+        .unwrap_or(*config);
+
     for (transform, mut visibility, cluster) in grass_query.iter_mut() {
         let distance = camera_pos.distance(transform.translation());
 
-        if distance > cluster.cull_distance.max(config.cull_distance) {
+        if distance > cluster.cull_distance.max(effective_config.cull_distance) {
             *visibility = Visibility::Hidden;
         } else {
             *visibility = Visibility::Inherited;
         }
+    }
+}
+
+/// Selects the grass LOD tier for a camera distance.
+///
+/// Returns [`GrassLodTier::Culled`] outside the configured cull distance.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::advanced_grass::{select_grass_lod_tier, GrassLodTier};
+///
+/// assert_eq!(select_grass_lod_tier(5.0, 20.0, 50.0), GrassLodTier::Near);
+/// assert_eq!(select_grass_lod_tier(25.0, 20.0, 50.0), GrassLodTier::Mid);
+/// assert_eq!(select_grass_lod_tier(40.0, 20.0, 50.0), GrassLodTier::Far);
+/// assert_eq!(select_grass_lod_tier(60.0, 20.0, 50.0), GrassLodTier::Culled);
+/// ```
+pub fn select_grass_lod_tier(distance: f32, lod_distance: f32, cull_distance: f32) -> GrassLodTier {
+    if distance > cull_distance {
+        GrassLodTier::Culled
+    } else if distance > lod_distance * FAR_GRASS_LOD_DISTANCE_MULTIPLIER {
+        GrassLodTier::Far
+    } else if distance > lod_distance {
+        GrassLodTier::Mid
+    } else {
+        GrassLodTier::Near
     }
 }
 
@@ -1425,6 +1591,7 @@ pub fn grass_lod_system(
     cluster_query: Query<(&GlobalTransform, &Children), With<GrassCluster>>,
     mut blade_query: Query<(&mut Visibility, &GrassBlade)>,
     config: Res<GrassRenderConfig>,
+    vegetation_quality: Option<Res<VegetationQualitySettings>>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
         return;
@@ -1432,26 +1599,25 @@ pub fn grass_lod_system(
 
     let camera_pos = camera_transform.translation();
 
+    let effective_config = vegetation_quality
+        .as_deref()
+        .map(GrassRenderConfig::from_vegetation_quality)
+        .unwrap_or(*config);
+
     for (cluster_transform, children) in cluster_query.iter() {
         let distance = camera_pos.distance(cluster_transform.translation());
-
-        if distance > config.cull_distance {
-            continue;
-        }
-
-        let lod_ratio = if distance > config.lod_distance {
-            0.5
-        } else {
-            1.0
-        };
+        let lod_tier = select_grass_lod_tier(
+            distance,
+            effective_config.lod_distance,
+            effective_config.cull_distance,
+        );
 
         for child in children.iter() {
             if let Ok((mut visibility, blade)) = blade_query.get_mut(child) {
-                if lod_ratio < 1.0 && blade.lod_index % 2 == 1 {
-                    *visibility = Visibility::Hidden;
-                } else {
-                    *visibility = Visibility::Inherited;
-                }
+                *visibility = match lod_tier.retention_stride() {
+                    Some(stride) if blade.lod_index % stride == 0 => Visibility::Inherited,
+                    _ => Visibility::Hidden,
+                };
             }
         }
     }
@@ -1922,10 +2088,30 @@ mod tests {
     }
 
     #[test]
+    fn test_vegetation_quality_from_grass_quality_settings_maps_budget_level() {
+        let low = vegetation_quality_from_grass_quality_settings(&GrassQualitySettings {
+            performance_level: GrassPerformanceLevel::Low,
+        });
+        let high = vegetation_quality_from_grass_quality_settings(&GrassQualitySettings {
+            performance_level: GrassPerformanceLevel::High,
+        });
+
+        assert_eq!(low.quality_level, VegetationQualityLevel::Low);
+        assert_eq!(high.quality_level, VegetationQualityLevel::High);
+        assert!(low.max_grass_material_variants < high.max_grass_material_variants);
+        assert!(low.vegetation_cull_distance < high.vegetation_cull_distance);
+    }
+
+    #[test]
     fn test_grass_render_config_default_values() {
         let config = GrassRenderConfig::default();
-        assert_eq!(config.cull_distance, 30.0);
-        assert_eq!(config.lod_distance, 15.0);
+        let vegetation_quality = VegetationQualitySettings::default();
+
+        assert_eq!(
+            config.cull_distance,
+            vegetation_quality.vegetation_cull_distance
+        );
+        assert_eq!(config.lod_distance, vegetation_quality.grass_lod_distance);
     }
 
     #[test]
@@ -2182,6 +2368,99 @@ mod tests {
 
         assert!(matches!(even_visibility, Visibility::Inherited));
         assert!(matches!(odd_visibility, Visibility::Hidden));
+    }
+
+    #[test]
+    fn test_select_grass_lod_tier_uses_near_mid_far_and_cull_budgets() {
+        assert_eq!(select_grass_lod_tier(5.0, 20.0, 50.0), GrassLodTier::Near);
+        assert_eq!(select_grass_lod_tier(25.0, 20.0, 50.0), GrassLodTier::Mid);
+        assert_eq!(select_grass_lod_tier(40.0, 20.0, 50.0), GrassLodTier::Far);
+        assert_eq!(
+            select_grass_lod_tier(60.0, 20.0, 50.0),
+            GrassLodTier::Culled
+        );
+    }
+
+    #[test]
+    fn test_grass_lod_system_far_distance_keeps_only_every_fourth_clump() {
+        let mut app = App::new();
+        app.insert_resource(GrassRenderConfig {
+            cull_distance: 50.0,
+            lod_distance: 20.0,
+        });
+        app.add_systems(Update, grass_lod_system);
+
+        app.world_mut().spawn((
+            Camera3d::default(),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            GlobalTransform::from(Transform::from_xyz(0.0, 0.0, 0.0)),
+        ));
+
+        let cluster = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(40.0, 0.0, 0.0),
+                GlobalTransform::from(Transform::from_xyz(40.0, 0.0, 0.0)),
+                Visibility::default(),
+                GrassCluster::default(),
+            ))
+            .id();
+
+        let mut blades = Vec::new();
+        for lod_index in 0..4 {
+            let blade = app
+                .world_mut()
+                .spawn((
+                    Transform::default(),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                    GrassBlade { lod_index },
+                ))
+                .id();
+            app.world_mut().entity_mut(cluster).add_child(blade);
+            blades.push(blade);
+        }
+
+        app.update();
+
+        assert!(matches!(
+            app.world().get::<Visibility>(blades[0]).unwrap(),
+            Visibility::Inherited
+        ));
+        for blade in blades.iter().skip(1) {
+            assert!(matches!(
+                app.world().get::<Visibility>(*blade).unwrap(),
+                Visibility::Hidden
+            ));
+        }
+    }
+
+    #[test]
+    fn test_grass_material_budget_follows_grass_quality_settings() {
+        let low = GrassQualitySettings {
+            performance_level: GrassPerformanceLevel::Low,
+        };
+        let high = GrassQualitySettings {
+            performance_level: GrassPerformanceLevel::High,
+        };
+
+        let low_budget =
+            vegetation_quality_from_grass_quality_settings(&low).max_grass_material_variants;
+        let high_budget =
+            vegetation_quality_from_grass_quality_settings(&high).max_grass_material_variants;
+
+        assert!(low_budget < high_budget);
+    }
+
+    #[test]
+    fn test_grass_material_key_budget_buckets_similar_tints() {
+        let first = GrassMaterialKey::from_tint_with_budget((0.56, 0.58, 0.57), 0.62, 4);
+        let second = GrassMaterialKey::from_tint_with_budget((0.61, 0.63, 0.60), 0.66, 4);
+
+        assert_eq!(
+            first, second,
+            "low material budgets should bucket nearby tints into the same reusable material key"
+        );
     }
 
     #[test]
