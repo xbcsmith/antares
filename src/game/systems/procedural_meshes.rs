@@ -168,6 +168,23 @@ fn quantize_color_channel(value: f32) -> u8 {
     (value.clamp(0.0, 1.0) * 31.0).round() as u8
 }
 
+fn tree_material_variation_multiplier(variant_seed_bucket: u8) -> f32 {
+    let normalized = f32::from(variant_seed_bucket % 8) / 7.0;
+    1.0 + (normalized - 0.5) * 0.16
+}
+
+fn apply_tree_material_color_variation(color: Color, variant_seed_bucket: u8) -> Color {
+    let multiplier = tree_material_variation_multiplier(variant_seed_bucket);
+    let color = color.to_srgba();
+
+    Color::srgba(
+        (color.red * multiplier).clamp(0.0, 1.0),
+        (color.green * multiplier).clamp(0.0, 1.0),
+        (color.blue * multiplier).clamp(0.0, 1.0),
+        color.alpha,
+    )
+}
+
 impl ProceduralMeshCache {
     /// Gets or creates branch and leaf mesh handles for a bounded tree variant.
     ///
@@ -1241,6 +1258,15 @@ pub fn spawn_tree_with_offset_with_quality(
         position.y,
         0,
     );
+    let material_variant_seed_bucket =
+        super::advanced_trees::TreeMeshCacheKey::new_with_variant_budget(
+            tree_type_resolved,
+            resolved_foliage_density,
+            super::advanced_trees::TreeLodLevel::Lod0.quality_level(),
+            generation_seed.0,
+            vegetation_quality.max_tree_mesh_variants_per_species as u64,
+        )
+        .variant_seed_bucket;
     let tree_lod_meshes = [
         super::advanced_trees::TreeLodLevel::Lod0,
         super::advanced_trees::TreeLodLevel::Lod1,
@@ -1266,10 +1292,12 @@ pub fn spawn_tree_with_offset_with_quality(
     // texture applied while making tree variants and SDK colour edits visibly
     // affect trunk appearance without mutating the shared cached handle.
     let base_bark_color = bark_color_for_tree_type(tree_type_resolved);
-    let resolved_bark_color = visual_config
+    let tinted_bark_color = visual_config
         .color_tint
         .map(|tint| multiply_color(base_bark_color, tint))
         .unwrap_or(base_bark_color);
+    let resolved_bark_color =
+        apply_tree_material_color_variation(tinted_bark_color, material_variant_seed_bucket);
     let tree_material = ctx.cache.get_or_create_bark_material_variant(
         asset_server,
         ctx.materials,
@@ -1277,11 +1305,15 @@ pub fn spawn_tree_with_offset_with_quality(
         resolved_bark_color,
     );
 
-    // Apply color tint to species leaf/frond meshes when present. The tinted
-    // material is cloned so shared cached foliage materials are never mutated.
-    let foliage_color = visual_config
+    // Apply color tint and bounded deterministic variant colour to species
+    // leaf/frond meshes. The variant material is cached by quantized tint so
+    // repeated map tiles reuse handles instead of creating one material per tile.
+    let tinted_foliage_color = visual_config
         .color_tint
-        .map(|tint| multiply_color(TREE_FOLIAGE_COLOR, tint));
+        .map(|tint| multiply_color(TREE_FOLIAGE_COLOR, tint))
+        .unwrap_or(TREE_FOLIAGE_COLOR);
+    let foliage_color =
+        apply_tree_material_color_variation(tinted_foliage_color, material_variant_seed_bucket);
 
     // Spawn parent tree entity with optional rotation
     let parent = ctx
@@ -1338,21 +1370,12 @@ pub fn spawn_tree_with_offset_with_quality(
         // leaves, such as Dead trees and LOD2 impostors, intentionally render
         // only branch/silhouette geometry.
         if let Some(leaf_mesh) = tree_meshes.leaves.clone() {
-            let base_material = ctx.cache.get_or_create_foliage_material(
+            let leaf_material = ctx.cache.get_or_create_foliage_material_variant(
                 tree_type_resolved,
                 asset_server,
                 ctx.materials,
+                foliage_color,
             );
-            let leaf_material = if let Some(tint) = foliage_color {
-                ctx.cache.get_or_create_foliage_material_variant(
-                    tree_type_resolved,
-                    asset_server,
-                    ctx.materials,
-                    tint,
-                )
-            } else {
-                base_material
-            };
 
             let leaf_entity = ctx
                 .commands
@@ -4257,6 +4280,30 @@ mod tests {
         assert_ne!(
             oak_a, pine_same_tint,
             "tree material cache keys must keep species-specific materials distinct"
+        );
+    }
+
+    /// Tests deterministic tree material colour variation stays bounded by variant bucket.
+    #[test]
+    fn test_tree_material_color_variation_is_bounded_and_deterministic() {
+        let base = Color::srgb(0.50, 0.60, 0.70);
+        let first = apply_tree_material_color_variation(base, 3);
+        let second = apply_tree_material_color_variation(base, 3);
+        let darker = apply_tree_material_color_variation(base, 0);
+        let brighter = apply_tree_material_color_variation(base, 7);
+
+        assert_eq!(first.to_srgba(), second.to_srgba());
+        assert!(
+            darker.to_srgba().green < brighter.to_srgba().green,
+            "higher variant buckets should brighten within the bounded range"
+        );
+        assert!(
+            (0.92..=1.08).contains(&tree_material_variation_multiplier(0)),
+            "darkest material variation must stay within the bounded range"
+        );
+        assert!(
+            (0.92..=1.08).contains(&tree_material_variation_multiplier(7)),
+            "brightest material variation must stay within the bounded range"
         );
     }
 

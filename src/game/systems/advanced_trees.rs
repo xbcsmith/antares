@@ -254,6 +254,25 @@ fn bounded_tree_variant_bucket(variant_seed: u64, max_variants: u64) -> u8 {
     (variant_seed % budget) as u8
 }
 
+fn tree_variant_unit(seed: TreeGenerationSeed, stream: u64) -> f32 {
+    let mut value = seed.0 ^ stream.wrapping_mul(0xD6E8_FEB8_6659_FD93);
+    value ^= value >> 30;
+    value = value.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    value ^= value >> 27;
+    value = value.wrapping_mul(0x94D0_49BB_1331_11EB);
+    value ^= value >> 31;
+
+    ((value >> 40) as u32) as f32 / 16_777_215.0
+}
+
+fn tree_height_multiplier_for_seed(seed: TreeGenerationSeed) -> f32 {
+    0.9 + tree_variant_unit(seed, 1) * 0.2
+}
+
+fn apply_tree_variant_to_preset(preset: &mut TreeSpeciesPreset, seed: TreeGenerationSeed) {
+    preset.tree_config.height *= tree_height_multiplier_for_seed(seed);
+}
+
 // ==================== Data Structures ====================
 
 /// Represents a single branch segment in a tree structure
@@ -1532,6 +1551,7 @@ pub fn generate_tree_meshes_for_key(
     let lod_level = TreeLodLevel::from_quality_level(cache_key.quality_level);
     let mut preset = tree_type.species_preset();
     preset.tree_config.foliage_density = cache_key.foliage_density_bucket as f32 / 10.0;
+    apply_tree_variant_to_preset(&mut preset, seed);
     apply_tree_lod_to_preset(&mut preset, lod_level);
 
     if lod_level == TreeLodLevel::Lod2 {
@@ -1750,7 +1770,8 @@ fn generate_palm_graph(preset: &TreeSpeciesPreset, rng: &mut StdRng) -> BranchGr
 fn generate_pine_graph(preset: &TreeSpeciesPreset, rng: &mut StdRng) -> BranchGraph {
     let config = &preset.tree_config;
     let mut graph = BranchGraph::new();
-    let trunk = make_trunk(config);
+    let mut trunk = make_trunk(config);
+    apply_deterministic_trunk_bend(&mut trunk, config, rng);
     let trunk_index = graph.add_branch(trunk);
 
     let whorl_count = 3;
@@ -1789,6 +1810,13 @@ fn generate_pine_graph(preset: &TreeSpeciesPreset, rng: &mut StdRng) -> BranchGr
     graph
 }
 
+fn apply_deterministic_trunk_bend(trunk: &mut Branch, config: &TreeConfig, rng: &mut StdRng) {
+    let bend_angle = rng.random_range(0.0..std::f32::consts::TAU);
+    let bend_distance = config.height * rng.random_range(0.02_f32..=0.08_f32);
+    trunk.end.x += bend_angle.cos() * bend_distance;
+    trunk.end.z += bend_angle.sin() * bend_distance;
+}
+
 /// Generates a recursive broadleaf/dead/willow/birch graph from the species preset.
 fn generate_recursive_species_graph(
     tree_type: TreeType,
@@ -1797,7 +1825,8 @@ fn generate_recursive_species_graph(
 ) -> BranchGraph {
     let config = &preset.tree_config;
     let mut graph = BranchGraph::new();
-    let trunk = make_trunk(config);
+    let mut trunk = make_trunk(config);
+    apply_deterministic_trunk_bend(&mut trunk, config, rng);
     let trunk_index = graph.add_branch(trunk);
 
     subdivide_branch(&mut graph, trunk_index, 0, tree_type, config, rng);
@@ -2261,6 +2290,71 @@ mod tests {
                 DEFAULT_MAX_TREE_MESH_VARIANTS_PER_SPECIES
             );
         }
+    }
+
+    #[test]
+    fn test_tree_height_multiplier_for_seed_is_bounded_and_deterministic() {
+        let seed = TreeGenerationSeed::from_parts(TreeType::Oak, 1, 2, 3, 4);
+        let first = tree_height_multiplier_for_seed(seed);
+        let second = tree_height_multiplier_for_seed(seed);
+
+        assert_eq!(first, second);
+        assert!((0.9..=1.1).contains(&first));
+    }
+
+    #[test]
+    fn test_cached_species_variant_changes_tree_height_without_unbounded_range() {
+        fn mesh_height(mesh: &Mesh) -> f32 {
+            let positions = mesh
+                .attribute(Mesh::ATTRIBUTE_POSITION)
+                .expect("tree branch mesh should contain positions")
+                .as_float3()
+                .expect("tree branch positions should be float3");
+
+            let (min_y, max_y) = positions.iter().fold(
+                (f32::INFINITY, f32::NEG_INFINITY),
+                |(min_y, max_y), position| (min_y.min(position[1]), max_y.max(position[1])),
+            );
+
+            max_y - min_y
+        }
+
+        let key_a =
+            TreeMeshCacheKey::new(TreeType::Oak, 1.0, TreeLodLevel::Lod0.quality_level(), 0);
+        let key_b =
+            TreeMeshCacheKey::new(TreeType::Oak, 1.0, TreeLodLevel::Lod0.quality_level(), 1);
+
+        let mesh_a = generate_tree_meshes_for_key(TreeType::Oak, key_a);
+        let mesh_b = generate_tree_meshes_for_key(TreeType::Oak, key_b);
+
+        let height_a = mesh_height(&mesh_a.branches);
+        let height_b = mesh_height(&mesh_b.branches);
+        let height_ratio = height_a.max(height_b) / height_a.min(height_b);
+
+        assert!(height_a.is_finite() && height_a > 0.0);
+        assert!(height_b.is_finite() && height_b > 0.0);
+        assert_ne!(
+            height_a, height_b,
+            "different cached variant buckets should produce visibly different tree heights"
+        );
+        assert!(
+            height_ratio <= 1.25,
+            "cached height variation should remain bounded, got ratio {height_ratio}"
+        );
+    }
+
+    #[test]
+    fn test_deterministic_trunk_bend_offsets_trunk_top_within_bounded_range() {
+        let config = TreeType::Oak.config();
+        let seed = TreeGenerationSeed::from_parts(TreeType::Oak, 1, 2, 3, 4);
+        let mut rng = StdRng::seed_from_u64(seed.0);
+        let mut trunk = make_trunk(&config);
+
+        apply_deterministic_trunk_bend(&mut trunk, &config, &mut rng);
+
+        let horizontal_bend = Vec2::new(trunk.end.x, trunk.end.z).length();
+        assert!(horizontal_bend > 0.0);
+        assert!(horizontal_bend <= config.height * 0.08 + 0.001);
     }
 
     #[test]

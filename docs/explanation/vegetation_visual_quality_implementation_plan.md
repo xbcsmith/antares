@@ -1,6 +1,3 @@
-<!-- SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com> -->
-<!-- SPDX-License-Identifier: Apache-2.0 -->
-
 # Vegetation Visual Quality Implementation Plan
 
 ## Overview
@@ -366,13 +363,13 @@ Required tests:
 
 #### 3.6 Deliverables
 
-- [ ] Grass uses reusable mesh variants.
-- [ ] Grass uses reusable material variants.
-- [ ] Grass clumps replace sparse per-blade noise.
-- [ ] `foliage_density` affects grass coverage.
-- [ ] Grass LOD path is active.
-- [ ] Grass culling remains active.
-- [ ] Tests cover density, metadata, batching, and LOD behavior.
+- [x] Grass uses reusable mesh variants.
+- [x] Grass uses reusable material variants.
+- [x] Grass clumps replace sparse per-blade noise.
+- [x] `foliage_density` affects grass coverage.
+- [x] Grass LOD path is active.
+- [x] Grass culling remains active.
+- [x] Tests cover density, metadata, batching, and LOD behavior.
 
 #### 3.7 Success Criteria
 
@@ -443,12 +440,12 @@ Required tests:
 
 #### 4.5 Deliverables
 
-- [ ] Deterministic vegetation placement helper exists.
-- [ ] Tree trunk exclusion radius is enforced.
-- [ ] Shrubs no longer clip tree trunks.
-- [ ] Grass avoids obvious trunk intersections.
-- [ ] Placement respects metadata scale.
-- [ ] Tests cover deterministic placement and exclusion rules.
+- [x] Deterministic vegetation placement helper exists.
+- [x] Tree trunk exclusion radius is enforced.
+- [x] Shrubs no longer clip tree trunks.
+- [x] Grass avoids obvious trunk intersections.
+- [x] Placement respects metadata scale.
+- [x] Tests cover deterministic placement and exclusion rules.
 
 #### 4.6 Success Criteria
 
@@ -522,11 +519,11 @@ Required tests:
 
 #### 5.5 Deliverables
 
-- [ ] Vegetation presets set runtime-consumed fields.
-- [ ] SDK terrain controls visibly correspond to runtime effects.
-- [ ] Save/reload preserves vegetation metadata.
-- [ ] Optional authoring summary/preview exists.
-- [ ] Tests cover preset and metadata behavior.
+- [x] Vegetation presets set runtime-consumed fields.
+- [x] SDK terrain controls visibly correspond to runtime effects.
+- [x] Save/reload preserves vegetation metadata.
+- [x] Optional authoring summary/preview exists.
+- [x] Tests cover preset and metadata behavior.
 
 #### 5.6 Success Criteria
 
@@ -618,12 +615,12 @@ Required tests:
 
 #### 6.6 Deliverables
 
-- [ ] Vegetation quality setting exists.
-- [ ] Tree LOD meshes or impostors exist.
-- [ ] Grass LOD works with new clumps.
-- [ ] Mesh/material cache growth is bounded.
-- [ ] Tests cover LOD and cache behavior.
-- [ ] Performance targets are documented.
+- [x] Vegetation quality setting exists.
+- [x] Tree LOD meshes or impostors exist.
+- [x] Grass LOD works with new clumps.
+- [x] Mesh/material cache growth is bounded.
+- [x] Tests cover LOD and cache behavior.
+- [x] Performance targets are documented.
 
 #### 6.7 Success Criteria
 
@@ -703,11 +700,11 @@ Required checks:
 
 #### 7.5 Deliverables
 
-- [ ] Visual quality guide reflects the new real implementation.
-- [ ] Implementation summary is updated.
-- [ ] Stable test-campaign vegetation fixtures exist if needed.
-- [ ] Visual validation scenarios cover all tree and grass types.
-- [ ] All required quality gates pass.
+- [x] Visual quality guide reflects the new real implementation.
+- [x] Implementation summary is updated.
+- [x] Stable test-campaign vegetation fixtures exist if needed.
+- [x] Visual validation scenarios cover all tree and grass types.
+- [x] All required quality gates pass.
 
 #### 7.6 Success Criteria
 
@@ -761,19 +758,19 @@ Required checks:
 
 ## Final Acceptance Checklist
 
-- [ ] Bark textures visibly apply to trunks.
-- [ ] Oak, Pine, Palm, Dead, Willow, Birch, and Shrub are visually distinguishable.
-- [ ] Dead trees have no foliage.
-- [ ] Palm trees have a tall trunk and crown fronds.
-- [ ] Pine trees have conical evergreen silhouettes.
-- [ ] Willow trees droop.
-- [ ] Shrubs do not clip tree trunks.
-- [ ] Grass forms believable clumps.
-- [ ] Grass density settings visibly change coverage.
-- [ ] SDK vegetation edits affect runtime output.
-- [ ] No new tests reference `campaigns/tutorial`.
-- [ ] `docs/explanation/implementations.md` is updated after implementation.
-- [ ] `cargo fmt --all` passes.
-- [ ] `cargo check --all-targets --all-features` passes.
-- [ ] `cargo clippy --all-targets --all-features -- -D warnings` passes.
-- [ ] `cargo nextest run --all-features` passes.
+- [x] Bark textures visibly apply to trunks.
+- [x] Oak, Pine, Palm, Dead, Willow, Birch, and Shrub are visually distinguishable.
+- [x] Dead trees have no foliage.
+- [x] Palm trees have a tall trunk and crown fronds.
+- [x] Pine trees have conical evergreen silhouettes.
+- [x] Willow trees droop.
+- [x] Shrubs do not clip tree trunks.
+- [x] Grass forms believable clumps.
+- [x] Grass density settings visibly change coverage.
+- [x] SDK vegetation edits affect runtime output.
+- [x] No new tests reference `campaigns/tutorial`.
+- [x] `docs/explanation/implementations.md` is updated after implementation.
+- [x] `cargo fmt --all` passes.
+- [x] `cargo check --all-targets --all-features` passes.
+- [x] `cargo clippy --all-targets --all-features -- -D warnings` passes.
+- [x] `cargo nextest run --all-features` passes.

@@ -2,6 +2,55 @@
 
 ---
 
+## Vegetation Visual Quality Phase 7 Implementation (Complete)
+
+### Overview
+
+Implemented Phase 7 of `docs/explanation/vegetation_visual_quality_implementation_plan.md`: completed documentation, stable test-campaign fixtures, and repeatable visual validation coverage for the vegetation visual quality pipeline.
+
+### Problems Fixed
+
+- Replaced outdated claims in `docs/explanation/procedural_mesh_visual_quality.md` with the current vegetation implementation:
+  - Tree species presets and separate branch/leaf meshes.
+  - Clumped grass with reusable mesh/material variants.
+  - Deterministic vegetation placement and exclusion zones.
+  - Vegetation-wide quality settings and active tree/grass LOD.
+  - Current known limitations, including far grass LOD reduction behavior and future wind animation.
+- Removed stale documentation references that implied validation should depend on the live `campaigns/tutorial` campaign.
+- Added `data/test_campaign/data/maps/map_7.ron` as a stable vegetation visual validation fixture.
+- The validation fixture covers:
+  - Oak, Pine, Birch, Willow, Dead, Shrub, and Palm tree species.
+  - Grass `None`, `Low`, `Medium`, `High`, and `VeryHigh` density cases.
+  - Dead trees with zero foliage.
+  - Willow near water.
+  - Shrub undergrowth.
+  - Metadata stress tiles for height, scale, width, tint, foliage, rotation, and grass blade configuration.
+- Updated `tests/visual_quality_validation_test.rs` to parse and validate the stable fixture instead of relying on tutorial-map assumptions.
+- Updated `docs/explanation/vegetation_visual_quality_implementation_plan.md` so completed deliverables and the final acceptance checklist reflect actual implementation status.
+- Closed the remaining deterministic-variation gaps by adding bounded cached tree height variation and deterministic trunk bend variation.
+- Added bounded deterministic tree material color variation keyed by cache variant bucket so repeated species can vary without unbounded material growth.
+- Preserved the project rule that test data lives under `data/test_campaign`, not `campaigns/tutorial`.
+
+### Files Changed
+
+- `docs/explanation/procedural_mesh_visual_quality.md`
+- `docs/explanation/vegetation_visual_quality_implementation_plan.md`
+- `docs/explanation/implementations.md`
+- `data/test_campaign/data/maps/map_7.ron`
+- `tests/visual_quality_validation_test.rs`
+- `src/game/systems/advanced_trees.rs`
+- `src/game/systems/procedural_meshes.rs`
+
+### Validation
+
+- `cargo fmt --all` passed.
+- `cargo check --all-targets --all-features` passed.
+- `cargo clippy --all-targets --all-features -- -D warnings` passed.
+- `cargo test --test visual_quality_validation_test --all-features` passed: 30 tests passed.
+- `cargo nextest run --all-features --status-level fail` passed: 4902 tests passed, 8 skipped.
+
+---
+
 ## Vegetation Visual Quality Phase 6 Implementation (Complete)
 
 ### Overview
