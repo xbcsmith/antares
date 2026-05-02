@@ -28,6 +28,12 @@ Write a plan with a phased approach to cleaning up the codebase. THINK HARD and 
 
 ✅ PLAN WRITTEN - [SDK Codebase Cleanup Plan](./sdk_codebase_cleanup_plan.md)
 
+
+### Visual Properties
+
+Campaing Builder --> Map Editor --> Edit Map --> Select Tile. The Visual Properties preset pull down resets the trees to always be oak trees. It does not maintain the tree type that is currently on the map or respect the Terrain-Specific Settings pull down tree type. These 2 settings should be independant. I should be able to specify a small tree type for a tile, then specify the tree type. The Visual Properties values can not be edited. Trying to change the Height or Scale by hand does not work and the value snaps back to the preset value.
+
+
 ## Game Engine
 
 ### Clean up
@@ -349,3 +355,139 @@ Character marching order. There is no way to adjust marching order and the game 
 ✅ FIXED - Campaign Builder --> Item Meshes Editor --> Does not follow the same layout as the other Editors
 
 ✅ FIXED - Campaign Builder --> Item Meshes Editor --> Editor Screen Does not follow the same layout as the other Editors
+
+
+## Tree Fixes
+
+Why trunks are still black
+
+The engine **is loading/assigning a bark texture path**, but the material pipeline is likely darkening it into black.
+
+Right now the tree trunk material is effectively:
+
+1. Use `bark.png` as `base_color_texture`.
+2. Also apply a dark species bark `base_color`.
+3. Also apply the map tile `color_tint`.
+4. Then Bevy’s material shader multiplies texture color × base color.
+5. Earlier branch vertex colors were also multiplying, which I fixed, but the material color multiplication is still enough to crush the bark texture.
+
+So if the bark texture is already dark brown, then multiplying it by a dark bark color and a green tint like `(0.12, 0.42, 0.14)` can easily produce near-black.
+
+In other words: **the bark texture may be present, but we are tinting/multiplying it into black.**
+
+The correct fix is not more `unlit`. The correct fix is:
+
+- Treat `bark.png` as the primary bark color source.
+- Use a mostly white/light material base color when a bark texture is present.
+- Do **not** multiply leaf/forest green `color_tint` directly into bark.
+- If we want species bark variation, apply a subtle blend/tint, not a full multiply.
+- For Dead/Birch/Pine/etc., use separate bark tint rules that cannot crush texture luminance.
+
+## Why foliage looks round
+
+Yes. The foliage silhouette is mostly controlled by the alpha mask texture on each leaf/frond card.
+
+From what we saw:
+
+- `foliage_oak.png` is round.
+- Pine is more vertical/narrow, but if the mesh/card placement or material selection is wrong, it may not read correctly.
+- Birch/shrub likely also use round-ish masks.
+- The current leaf mesh generator places textured cards at branch endpoints. If the texture is circular, the visible leaf cluster is circular.
+
+So yes: **round foliage textures are a major reason foliage looks like round blobs.**
+
+There are two separate contributors:
+
+1. **Texture shape**
+   - Round alpha mask → round visible blob.
+2. **Leaf card generation**
+   - Large cards at endpoints → obvious blob shapes.
+   - Too few cards → each texture silhouette is individually noticeable.
+   - No species-specific card orientation strategy → species look similar.
+
+## What needs to change
+
+### 1. Fix bark material handling
+
+Change bark material logic so it does not multiply bark texture into black.
+
+Proposed behavior:
+
+| Case | Base color behavior |
+| --- | --- |
+| Normal textured bark | `Color::WHITE` or very light neutral |
+| Dead bark | subtle grey-brown tint, not direct multiply |
+| Birch bark | subtle pale tint, not direct multiply |
+| Pine/Oak/Willow bark | subtle warm/cool tint only |
+| Tile `color_tint` | should affect foliage strongly, bark weakly or not at all |
+
+The key rule: **never multiply dark bark texture by dark material colors.**
+
+### 2. Separate bark tint from foliage tint
+
+Right now map `color_tint` is being used too broadly.
+
+For a forest tile, a green tint should mainly affect:
+
+- leaves
+- grass
+- maybe slight ambient hue
+
+It should **not** make trunks green-black.
+
+We need something like:
+
+- `foliage_color = species_foliage_color × tile_color_tint`
+- `bark_color = species_bark_color blended 10–25% toward tile_color_tint`, or ignore tile tint entirely
+
+### 3. Replace round foliage blobs with species-appropriate masks/shapes
+
+For the current implementation, we can improve without adding new dependencies:
+
+| Species | Better foliage/card treatment |
+| --- | --- |
+| Oak | smaller irregular leaf clusters, not one large round blob |
+| Pine | narrow triangular/needle cards in whorls |
+| Birch | smaller sparse light leaf cards |
+| Willow | elongated hanging strips/cards |
+| Shrub | small bushy clusters lower to ground |
+| Palm | long frond cards |
+| Dead | no foliage |
+
+This means either:
+
+- replace textures with non-round masks, or
+- generate smaller/more cards so each round mask is less obvious, or
+- both.
+
+### 4. Add tests that catch this specific failure
+
+We need regression tests for:
+
+- Bark material with texture uses a non-dark base color.
+- Bark tinting cannot reduce brightness below a safe threshold.
+- Tile green tint does not blacken bark.
+- Oak/Pine/Dead material outputs differ.
+- Dead has no foliage material/leaf mesh.
+- LOD2 never produces an opaque rectangular slab.
+
+### 5. Re-check the three tiles after renderer fix
+
+The target for your screenshot should be:
+
+- `(8,11)` Oak:
+  - visible brown bark
+  - broad green foliage
+- `(9,11)` Pine:
+  - visible darker bark
+  - narrow/conical green foliage
+- `(10,11)` Dead:
+  - grey/brown bare branches
+  - no leaf blobs
+  - no black slab
+
+## Short version
+
+- **Trunks are black because bark texture is being multiplied by dark material/tint colors.**
+- **Foliage looks round because the foliage alpha textures are round and the current leaf cards expose that round silhouette.**
+- The fix is to adjust bark material color math and replace/reshape foliage card/texture usage, not keep tweaking `map_1.ron`.

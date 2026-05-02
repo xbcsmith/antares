@@ -1483,6 +1483,10 @@ pub struct MapEditorState {
     pub selected_tiles: Vec<Position>,
     /// Selection mode (single vs multi)
     pub multi_select_mode: bool,
+    /// Tracks which tile position was last loaded into `visual_editor` by
+    /// `maybe_load_visual_from_selected_position`. Used to prevent snap-back
+    /// when the user manually edits visual property values between frames.
+    pub last_loaded_visual_position: Option<Position>,
 }
 
 impl MapEditorState {
@@ -1535,6 +1539,7 @@ impl MapEditorState {
             preset_category_filter: PresetCategory::All,
             selected_tiles: Vec::new(),
             multi_select_mode: false,
+            last_loaded_visual_position: None,
         }
     }
 
@@ -1584,6 +1589,97 @@ impl MapEditorState {
             // Apply to all selected tiles
             for pos in self.selected_tiles.clone() {
                 self.apply_visual_metadata(pos, metadata);
+            }
+        }
+    }
+
+    /// Apply a visual preset to a tile while preserving the tile's existing
+    /// terrain-specific settings (tree type, grass density, rock variant, etc.).
+    ///
+    /// This allows the Visual Properties preset dropdown to control only the
+    /// visual dimensions (height, scale, color tint, etc.) without overriding
+    /// terrain-specific settings configured in the Terrain-Specific Settings panel.
+    /// The two panels are fully independent.
+    ///
+    /// # Arguments
+    ///
+    /// * `pos`             - The map position to apply the preset to
+    /// * `preset_metadata` - Preset metadata; only its visual fields are used
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::map_editor::MapEditorState;
+    /// use antares::domain::world::Map;
+    /// use antares::domain::types::Position;
+    ///
+    /// let mut editor = MapEditorState::new(Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10));
+    /// let pos = Position::new(5, 5);
+    /// editor.selected_position = Some(pos);
+    /// ```
+    fn apply_preset_preserving_terrain(
+        &mut self,
+        pos: Position,
+        preset_metadata: &TileVisualMetadata,
+    ) {
+        if !self.map.is_valid_position(pos) {
+            return;
+        }
+        // Capture the tile's existing terrain-specific fields before merging.
+        let existing = self
+            .map
+            .get_tile(pos)
+            .map(|t| t.visual.clone())
+            .unwrap_or_default();
+
+        // Visual fields come from the preset; terrain fields come from the existing tile.
+        let merged = TileVisualMetadata {
+            tree_type: existing.tree_type,
+            grass_density: existing.grass_density,
+            rock_variant: existing.rock_variant,
+            water_flow_direction: existing.water_flow_direction,
+            foliage_density: existing.foliage_density,
+            snow_coverage: existing.snow_coverage,
+            grass_blade_config: existing.grass_blade_config,
+            ..preset_metadata.clone()
+        };
+
+        self.apply_visual_metadata(pos, &merged);
+    }
+
+    /// Apply a visual preset to all selected tiles while preserving each tile's
+    /// individual terrain-specific settings.
+    ///
+    /// Falls back to the currently selected position when no multi-selection exists.
+    /// See [`apply_preset_preserving_terrain`] for the field-merge strategy.
+    ///
+    /// # Arguments
+    ///
+    /// * `preset_metadata` - Preset metadata; only its visual fields are used
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::map_editor::MapEditorState;
+    /// use antares::domain::world::{Map, TileVisualMetadata};
+    /// use antares::domain::types::Position;
+    ///
+    /// let mut editor = MapEditorState::new(Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10));
+    /// editor.selected_position = Some(Position::new(5, 5));
+    /// let preset = TileVisualMetadata { height: Some(2.0), ..Default::default() };
+    /// editor.apply_preset_to_selection_preserving_terrain(&preset);
+    /// ```
+    pub fn apply_preset_to_selection_preserving_terrain(
+        &mut self,
+        preset_metadata: &TileVisualMetadata,
+    ) {
+        if self.selected_tiles.is_empty() {
+            if let Some(pos) = self.selected_position {
+                self.apply_preset_preserving_terrain(pos, preset_metadata);
+            }
+        } else {
+            for pos in self.selected_tiles.clone() {
+                self.apply_preset_preserving_terrain(pos, preset_metadata);
             }
         }
     }
@@ -1745,13 +1841,17 @@ impl MapEditorState {
     }
 
     /// Load visual metadata into the editor from the currently selected position,
-    /// but only when multi-select mode is not active. This prevents bulk-selection
-    /// clicks from accidentally overwriting the editor's staged values.
+    /// but only when:
+    /// - multi-select mode is not active (prevents bulk-selection clicks from
+    ///   overwriting staged values), AND
+    /// - the position has changed since the last load (prevents every-frame
+    ///   snap-back that makes manual DragValue edits impossible).
     pub fn maybe_load_visual_from_selected_position(&mut self) {
         if let Some(pos) = self.selected_position {
-            if !self.multi_select_mode {
+            if !self.multi_select_mode && Some(pos) != self.last_loaded_visual_position {
                 if let Some(tile) = self.map.get_tile(pos) {
                     self.visual_editor.load_from_tile(tile);
+                    self.last_loaded_visual_position = Some(pos);
                 }
             }
         }
@@ -4795,14 +4895,18 @@ impl MapsEditorState {
                 if let Some(selected_preset) = Self::show_preset_palette(ui, editor) {
                     let metadata = selected_preset.to_metadata();
 
-                    if !editor.selected_tiles.is_empty() {
-                        editor.apply_visual_metadata_to_selection(&metadata);
-                    } else {
-                        editor.apply_visual_metadata(pos, &metadata);
-                    }
+                    // Apply visual fields only; preserve each tile's terrain-specific settings.
+                    // The Visual Presets palette and the Terrain-Specific Settings panel are
+                    // fully independent.
+                    editor.apply_preset_to_selection_preserving_terrain(&metadata);
 
+                    // Update the visual editor to reflect the preset's visual fields.
                     editor.visual_editor.load_from_metadata(&metadata);
-                    editor.terrain_editor_state = TerrainEditorState::from_metadata(&metadata);
+
+                    // Mark position as loaded so the next frame does not snap back.
+                    editor.last_loaded_visual_position = editor.selected_position;
+
+                    // NOTE: terrain_editor_state is intentionally NOT overwritten here.
                     ui.ctx().request_repaint();
                 }
             });
@@ -6500,17 +6604,22 @@ impl MapsEditorState {
                         ui.push_id(preset, |ui| {
                             if ui.button(preset.name()).clicked() {
                                 let metadata = preset.to_metadata();
-                                if editor.multi_select_mode && !editor.selected_tiles.is_empty() {
-                                    editor.apply_visual_metadata_to_selection(&metadata);
-                                } else {
-                                    editor.apply_visual_metadata(pos, &metadata);
-                                }
+                                // Apply visual fields only; preserve each tile's terrain-specific
+                                // settings (tree type, grass density, etc.) — the two panels are
+                                // independent and must not interfere with each other.
+                                editor.apply_preset_to_selection_preserving_terrain(&metadata);
 
-                                // Keep both visual and terrain-specific controls synchronized with the
-                                // selected preset so semantic vegetation fields are immediately visible.
+                                // Load the preset's visual fields into the editor so the user can
+                                // inspect and further adjust them manually before clicking Apply.
                                 editor.visual_editor.load_from_metadata(&metadata);
-                                editor.terrain_editor_state =
-                                    TerrainEditorState::from_metadata(&metadata);
+
+                                // Mark the current position as loaded so the next-frame reload
+                                // does NOT snap back the staged values.
+                                editor.last_loaded_visual_position = editor.selected_position;
+
+                                // NOTE: terrain_editor_state is intentionally NOT overwritten here.
+                                // The Terrain-Specific Settings panel is fully independent of the
+                                // Visual Properties preset.
                                 ui.ctx().request_repaint();
                             }
                         });
@@ -6637,6 +6746,9 @@ impl MapsEditorState {
                 // Reset editor UI state after applying
                 editor.visual_editor.reset();
                 editor.terrain_editor_state = TerrainEditorState::default();
+                // Invalidate the position cache so the next frame reloads from
+                // the tile, showing the applied values instead of the reset defaults.
+                editor.last_loaded_visual_position = None;
                 ui.ctx().request_repaint();
             }
 
@@ -6647,6 +6759,8 @@ impl MapsEditorState {
 
                 editor.visual_editor.reset();
                 editor.terrain_editor_state = TerrainEditorState::default();
+                // Invalidate position cache so the next frame reloads from tile.
+                editor.last_loaded_visual_position = None;
                 ui.ctx().request_repaint();
             }
 
@@ -6672,6 +6786,8 @@ impl MapsEditorState {
                 editor.visual_editor.reset();
                 editor.terrain_editor_state = TerrainEditorState::default();
                 editor.has_changes = true;
+                // Invalidate position cache so the next frame reloads from tile.
+                editor.last_loaded_visual_position = None;
                 ui.ctx().request_repaint();
             }
         });
@@ -11113,6 +11229,87 @@ mod tests {
             }
             _ => panic!("expected Encounter event"),
         }
+    }
+
+    #[test]
+    fn test_preset_preserves_tile_tree_type() {
+        // Verifies that apply_preset_to_selection_preserving_terrain does NOT overwrite
+        // a tile's existing tree_type with the preset's default Oak type.
+        let map = Map::new(1, "Test Map".to_string(), "Test".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+
+        let pos = Position::new(5, 5);
+        editor.selected_position = Some(pos);
+
+        // Give the tile a non-Oak tree type before applying the preset.
+        {
+            let tile = editor.map.get_tile_mut(pos).unwrap();
+            tile.visual.tree_type = Some(TreeType::Pine);
+            tile.visual.foliage_density = Some(1.5);
+        }
+
+        // SmallTree preset hardcodes Oak; applying it via the preserving method must
+        // keep Pine on the tile.
+        let small_tree_preset = VisualPreset::SmallTree.to_metadata();
+        assert_eq!(
+            small_tree_preset.tree_type,
+            Some(TreeType::Oak),
+            "Preset baseline: SmallTree uses Oak"
+        );
+
+        editor.apply_preset_to_selection_preserving_terrain(&small_tree_preset);
+
+        let tile = editor.map.get_tile(pos).unwrap();
+        // Visual fields come from the preset.
+        assert_eq!(tile.visual.height, Some(2.0));
+        assert_eq!(tile.visual.scale, Some(0.5));
+        // Terrain-specific fields are preserved from the original tile.
+        assert_eq!(
+            tile.visual.tree_type,
+            Some(TreeType::Pine),
+            "tree_type must not be overridden by the visual preset"
+        );
+        assert_eq!(
+            tile.visual.foliage_density,
+            Some(1.5),
+            "foliage_density must not be overridden by the visual preset"
+        );
+    }
+
+    #[test]
+    fn test_visual_editor_values_dont_snap_back_on_same_position() {
+        // Verifies that maybe_load_visual_from_selected_position does NOT reload
+        // when the position has not changed, so manual DragValue edits survive
+        // across frames without snapping back to the tile's stored value.
+        let map = Map::new(1, "Test Map".to_string(), "Test".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+
+        let pos = Position::new(3, 3);
+        editor.selected_position = Some(pos);
+
+        // First call: position changed from None → loads from tile and records position.
+        editor.maybe_load_visual_from_selected_position();
+        assert_eq!(
+            editor.last_loaded_visual_position,
+            Some(pos),
+            "Position should be recorded after first load"
+        );
+
+        // Simulate the user manually staging a new height value.
+        editor.visual_editor.enable_height = true;
+        editor.visual_editor.temp_height = 9.9;
+
+        // Second call with the same position: must NOT reload from tile.
+        editor.maybe_load_visual_from_selected_position();
+
+        assert!(
+            editor.visual_editor.enable_height,
+            "Staged enable_height must survive the second call"
+        );
+        assert_eq!(
+            editor.visual_editor.temp_height, 9.9,
+            "Staged height must not snap back to tile value"
+        );
     }
 
     #[test]

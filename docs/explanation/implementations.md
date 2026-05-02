@@ -2,6 +2,45 @@
 
 ---
 
+## Tutorial Map Vegetation Content Refresh (Complete)
+
+### Overview
+
+Updated `campaigns/tutorial/data/maps/map_1.ron` so the live tutorial town square uses the improved vegetation pipeline instead of suppressing foliage or repeating the same Oak metadata across the forest edge.
+
+### Problems Fixed
+
+- Re-enabled foliage for non-dead trees that had `foliage_density = Some(0.0)`.
+- Preserved bare foliage only for intentional `Dead` trees.
+- Diversified the forest edge with Oak, Pine, Birch, Willow, Dead, and Shrub metadata.
+- Added species-specific tint, height, scale, width, foliage density, grass density, and rotation metadata.
+- Fixed tree material visibility in dim tutorial scenes by making bark and foliage materials unlit, applying species-specific foliage base colors, and preserving species/tint-specific material variants.
+- Fixed bark texture handling so `bark.png` remains the primary trunk color source instead of being multiplied by dark species/tile tints into black trunks.
+- Fixed branch meshes so neutral vertex colors no longer multiply bark materials into black trunks in dim first-person views.
+- Replaced round foliage alpha-mask dependence with geometry-shaped species foliage so Oak, Pine, Birch, Willow, Shrub, and Palm no longer all read as circular leaf blobs.
+- Replaced the problematic LOD2 opaque billboard/impostor slab with a simplified branch-mesh LOD so distant/near trees no longer render as giant black rectangles.
+- Added shrub/underbrush tiles so the deterministic vegetation placement rules can produce visible understory.
+- Added grass coverage metadata to selected forest tiles so trees have ground cover without relying on default-only visuals.
+- Preserved gameplay-affecting data: tile coordinates, blocked flags, wall types, events, NPCs, teleports, locks, containers, and map dimensions were not intentionally changed.
+
+### Files Changed
+
+- `campaigns/tutorial/data/maps/map_1.ron`
+- `src/game/systems/procedural_meshes.rs`
+- `src/game/systems/advanced_trees.rs`
+- `docs/explanation/implementations.md`
+
+### Validation
+
+- `cargo fmt --all` passed.
+- `cargo check --all-targets --all-features` passed.
+- `cargo clippy --all-targets --all-features -- -D warnings` passed.
+- `cargo nextest run --all-features --status-level fail` passed: 4905 tests passed, 8 skipped.
+- Targeted tree material tests passed for unlit bark and species-specific foliage material behavior.
+- `cargo run --bin antares-sdk -- campaign validate campaigns/tutorial` still reports pre-existing campaign validation errors unrelated to this vegetation metadata refresh, including missing treasure item IDs and creature mesh winding/degenerate triangle diagnostics.
+
+---
+
 ## Vegetation Visual Quality Phase 7 Implementation (Complete)
 
 ### Overview

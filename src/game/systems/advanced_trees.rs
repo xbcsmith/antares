@@ -75,7 +75,7 @@ pub enum TreeLodLevel {
     Lod0,
     /// Reduced branch sections and fewer leaves.
     Lod1,
-    /// Billboard/impostor silhouette.
+    /// Simplified branch mesh silhouette with reduced foliage.
     Lod2,
 }
 
@@ -1282,7 +1282,7 @@ pub fn generate_branch_mesh(graph: &BranchGraph, config: &TreeConfig) -> Mesh {
 /// Generates a branch mesh for a specific tree LOD level.
 ///
 /// LOD1 reduces cylinder segment counts, while LOD0 preserves full detail.
-/// LOD2 normally uses an impostor mesh and should not call this helper.
+/// LOD2 uses the lowest branch segment count instead of an opaque billboard slab.
 fn generate_branch_mesh_for_lod(
     graph: &BranchGraph,
     _config: &TreeConfig,
@@ -1338,18 +1338,10 @@ fn generate_branch_mesh_for_lod(
             })
             .collect();
 
-        // Generate vertex colors (Bark Brown gradient based on Y height)
-        // Darker at bottom, lighter at top
-        let colors: Vec<[f32; 4]> = positions
-            .iter()
-            .map(|pos| {
-                let height = pos[1]; // Y coordinate
-                                     // Simple gradient: 0.2 at bottom to 0.5 at top
-                let brightness = (0.2 + (height * 0.1)).clamp(0.2, 0.6);
-                // Brown color [R, G, B, A]
-                [0.4 * brightness, 0.25 * brightness, 0.15 * brightness, 1.0]
-            })
-            .collect();
+        // Keep branch vertex colors neutral so bark materials and species tints
+        // control visible color. Dark per-vertex bark colors multiply with the
+        // material and make trunks collapse to black in dim first-person scenes.
+        let colors: Vec<[f32; 4]> = vec![[1.0, 1.0, 1.0, 1.0]; positions.len()];
 
         branch_meshes.push((positions, normals, uvs, colors, indices));
     }
@@ -1357,7 +1349,12 @@ fn generate_branch_mesh_for_lod(
     merge_branch_meshes(branch_meshes)
 }
 
-/// Appends a single leaf/frond card to mesh attribute buffers.
+/// Appends a single species-shaped leaf/frond polygon to mesh attribute buffers.
+///
+/// The mesh itself provides the silhouette instead of relying on a round alpha
+/// mask. This prevents Oak/Pine/Birch/Willow foliage from all reading as the
+/// same circular blob when viewed in first person.
+#[allow(clippy::too_many_arguments)]
 fn append_leaf_card(
     positions: &mut Vec<[f32; 3]>,
     normals: &mut Vec<[f32; 3]>,
@@ -1366,8 +1363,8 @@ fn append_leaf_card(
     origin: Vec3,
     direction: Vec3,
     size: f32,
+    preset: &TreeSpeciesPreset,
 ) {
-    let index_start = positions.len() as u32;
     let normal = direction.cross(Vec3::Y).normalize_or_zero();
     let side = if normal == Vec3::ZERO {
         Vec3::X
@@ -1378,18 +1375,48 @@ fn append_leaf_card(
         .lerp(direction.normalize_or_zero(), 0.35)
         .normalize_or_zero();
 
-    let half_width = size * 0.5;
-    let height = size * 1.25;
+    match preset.tree_type {
+        TreeType::Pine => {
+            append_pine_needle_cluster(positions, normals, uvs, indices, origin, side, up, size)
+        }
+        TreeType::Willow => {
+            append_willow_hanging_strip(positions, normals, uvs, indices, origin, side, up, size)
+        }
+        TreeType::Palm => {
+            append_palm_frond(positions, normals, uvs, indices, origin, side, up, size)
+        }
+        TreeType::Birch => append_diamond_leaf(
+            positions,
+            normals,
+            uvs,
+            indices,
+            origin,
+            side,
+            up,
+            size * 0.72,
+        ),
+        TreeType::Shrub => {
+            append_clustered_shrub_leaf(positions, normals, uvs, indices, origin, side, up, size)
+        }
+        TreeType::Oak => {
+            append_lobed_leaf_cluster(positions, normals, uvs, indices, origin, side, up, size)
+        }
+        TreeType::Dead => {}
+    }
+}
 
-    let corners = [
-        origin - side * half_width,
-        origin + side * half_width,
-        origin + side * half_width + up * height,
-        origin - side * half_width + up * height,
-    ];
+fn append_quad(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    corners: [Vec3; 4],
+    normal: Vec3,
+) {
+    let index_start = positions.len() as u32;
 
     positions.extend(corners.map(|corner| corner.to_array()));
-    normals.extend([side.to_array(); 4]);
+    normals.extend([normal.to_array(); 4]);
     uvs.extend([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
     indices.extend_from_slice(&[
         index_start,
@@ -1399,6 +1426,285 @@ fn append_leaf_card(
         index_start + 2,
         index_start + 3,
     ]);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_diamond(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    center: Vec3,
+    side: Vec3,
+    up: Vec3,
+    width: f32,
+    height: f32,
+) {
+    let index_start = positions.len() as u32;
+    let normal = side.cross(up).normalize_or_zero();
+
+    let corners = [
+        center - up * height * 0.5,
+        center + side * width * 0.5,
+        center + up * height * 0.5,
+        center - side * width * 0.5,
+    ];
+
+    positions.extend(corners.map(|corner| corner.to_array()));
+    normals.extend([normal.to_array(); 4]);
+    uvs.extend([[0.5, 0.0], [1.0, 0.5], [0.5, 1.0], [0.0, 0.5]]);
+    indices.extend_from_slice(&[
+        index_start,
+        index_start + 1,
+        index_start + 2,
+        index_start,
+        index_start + 2,
+        index_start + 3,
+    ]);
+}
+
+fn append_triangle(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    corners: [Vec3; 3],
+    normal: Vec3,
+) {
+    let index_start = positions.len() as u32;
+
+    positions.extend(corners.map(|corner| corner.to_array()));
+    normals.extend([normal.to_array(); 3]);
+    uvs.extend([[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]);
+    indices.extend_from_slice(&[index_start, index_start + 1, index_start + 2]);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_lobed_leaf_cluster(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    origin: Vec3,
+    side: Vec3,
+    up: Vec3,
+    size: f32,
+) {
+    let normal = side.cross(up).normalize_or_zero();
+    let lobe_width = size * 0.28;
+    let lobe_height = size * 0.50;
+
+    for offset in [-0.28_f32, 0.0, 0.28] {
+        append_diamond(
+            positions,
+            normals,
+            uvs,
+            indices,
+            origin + side * size * offset,
+            side,
+            up,
+            lobe_width,
+            lobe_height,
+        );
+    }
+
+    append_quad(
+        positions,
+        normals,
+        uvs,
+        indices,
+        [
+            origin - side * size * 0.34 - up * size * 0.10,
+            origin + side * size * 0.34 - up * size * 0.10,
+            origin + side * size * 0.18 + up * size * 0.30,
+            origin - side * size * 0.18 + up * size * 0.30,
+        ],
+        normal,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_pine_needle_cluster(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    origin: Vec3,
+    side: Vec3,
+    up: Vec3,
+    size: f32,
+) {
+    let normal = side.cross(up).normalize_or_zero();
+    let height = size * 1.65;
+    let half_width = size * 0.18;
+
+    append_triangle(
+        positions,
+        normals,
+        uvs,
+        indices,
+        [
+            origin - side * half_width - up * height * 0.45,
+            origin + side * half_width - up * height * 0.45,
+            origin + up * height * 0.55,
+        ],
+        normal,
+    );
+
+    append_triangle(
+        positions,
+        normals,
+        uvs,
+        indices,
+        [
+            origin - side * half_width * 0.75 - up * height * 0.10,
+            origin + side * half_width * 0.75 - up * height * 0.10,
+            origin + up * height * 0.75,
+        ],
+        normal,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_willow_hanging_strip(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    origin: Vec3,
+    side: Vec3,
+    up: Vec3,
+    size: f32,
+) {
+    let normal = side.cross(up).normalize_or_zero();
+    let strip_width = size * 0.16;
+    let strip_height = size * 1.85;
+    let down = -up;
+
+    for offset in [-0.18_f32, 0.0, 0.18] {
+        append_quad(
+            positions,
+            normals,
+            uvs,
+            indices,
+            [
+                origin + side * size * offset - side * strip_width * 0.5,
+                origin + side * size * offset + side * strip_width * 0.5,
+                origin + side * size * offset + side * strip_width * 0.35 + down * strip_height,
+                origin + side * size * offset - side * strip_width * 0.35 + down * strip_height,
+            ],
+            normal,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_palm_frond(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    origin: Vec3,
+    side: Vec3,
+    up: Vec3,
+    size: f32,
+) {
+    let normal = side.cross(up).normalize_or_zero();
+    let length = size * 2.0;
+    let base_width = size * 0.16;
+
+    append_triangle(
+        positions,
+        normals,
+        uvs,
+        indices,
+        [
+            origin - side * base_width,
+            origin + side * base_width,
+            origin + up * length + side * size * 0.35,
+        ],
+        normal,
+    );
+
+    append_triangle(
+        positions,
+        normals,
+        uvs,
+        indices,
+        [
+            origin - side * base_width,
+            origin + side * base_width,
+            origin + up * length - side * size * 0.35,
+        ],
+        normal,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_diamond_leaf(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    origin: Vec3,
+    side: Vec3,
+    up: Vec3,
+    size: f32,
+) {
+    append_diamond(
+        positions,
+        normals,
+        uvs,
+        indices,
+        origin,
+        side,
+        up,
+        size * 0.45,
+        size * 0.75,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_clustered_shrub_leaf(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    origin: Vec3,
+    side: Vec3,
+    up: Vec3,
+    size: f32,
+) {
+    append_diamond_leaf(
+        positions,
+        normals,
+        uvs,
+        indices,
+        origin - side * size * 0.18,
+        side,
+        up,
+        size * 0.78,
+    );
+    append_diamond_leaf(
+        positions,
+        normals,
+        uvs,
+        indices,
+        origin + side * size * 0.18,
+        side,
+        up,
+        size * 0.78,
+    );
+    append_diamond_leaf(
+        positions,
+        normals,
+        uvs,
+        indices,
+        origin + up * size * 0.20,
+        side,
+        up,
+        size * 0.70,
+    );
 }
 
 /// Generates a separate leaf/frond mesh for the provided species graph.
@@ -1458,6 +1764,7 @@ pub fn generate_leaf_mesh(
                 origin,
                 branch_dir,
                 size,
+                preset,
             );
         }
     }
@@ -1495,37 +1802,12 @@ fn apply_tree_lod_to_preset(preset: &mut TreeSpeciesPreset, lod_level: TreeLodLe
             preset.tree_config.depth = 1;
             preset.branch.recursion_depth = 1;
             preset.branch.child_count_range = (1, 1);
+            preset.branch.length_factors = preset.branch.length_factors.map(|factor| factor * 0.55);
             preset.leaves.enabled = false;
             preset.leaves.count = 0;
             preset.tree_config.foliage_density = 0.0;
         }
     }
-}
-
-fn create_tree_impostor_mesh(preset: &TreeSpeciesPreset) -> Mesh {
-    let height = preset.tree_config.height.max(0.5);
-    let width = (height * preset.silhouette_width_ratio).clamp(0.25, height * 1.5);
-    let half_width = width * 0.5;
-
-    let positions = vec![
-        [-half_width, 0.0, 0.0],
-        [half_width, 0.0, 0.0],
-        [half_width, height, 0.0],
-        [-half_width, height, 0.0],
-    ];
-    let normals = vec![[0.0, 0.0, 1.0]; 4];
-    let uvs = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
-    let indices = vec![0, 1, 2, 0, 2, 3];
-
-    let mut mesh = Mesh::new(
-        bevy::mesh::PrimitiveTopology::TriangleList,
-        bevy::asset::RenderAssetUsages::default(),
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_indices(bevy::mesh::Indices::U32(indices));
-    mesh
 }
 
 /// Generates branch and optional leaf meshes for a tree type and cache key.
@@ -1553,13 +1835,6 @@ pub fn generate_tree_meshes_for_key(
     preset.tree_config.foliage_density = cache_key.foliage_density_bucket as f32 / 10.0;
     apply_tree_variant_to_preset(&mut preset, seed);
     apply_tree_lod_to_preset(&mut preset, lod_level);
-
-    if lod_level == TreeLodLevel::Lod2 {
-        return GeneratedTreeMeshes {
-            branches: create_tree_impostor_mesh(&preset),
-            leaves: None,
-        };
-    }
 
     let graph = generate_branch_graph_with_preset_and_seed(tree_type, &preset, seed);
     let branches = generate_branch_mesh_for_lod(&graph, &preset.tree_config, lod_level);
@@ -2271,11 +2546,12 @@ mod tests {
         );
         assert!(
             lod2.branches.count_vertices() < lod1.branches.count_vertices(),
-            "LOD2 impostor should be simpler than LOD1"
+            "LOD2 simplified branch mesh should be simpler than LOD1"
         );
         assert!(
-            lod2.leaves.is_none(),
-            "LOD2 should use a single billboard/impostor mesh without separate leaves"
+            lod2.leaves.as_ref().map(Mesh::count_vertices).unwrap_or(0)
+                <= lod1.leaves.as_ref().map(Mesh::count_vertices).unwrap_or(0),
+            "LOD2 should reduce or suppress leaf geometry compared with LOD1"
         );
     }
 
@@ -2510,6 +2786,33 @@ mod tests {
             mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_some(),
             "Branch mesh must include UV_0 coordinates for bark texture mapping"
         );
+    }
+
+    #[test]
+    fn test_generate_branch_mesh_uses_neutral_vertex_colors() {
+        let graph = generate_branch_graph(TreeType::Oak);
+        let mesh = generate_branch_mesh(&graph, &TreeType::Oak.config());
+
+        let colors = match mesh
+            .attribute(Mesh::ATTRIBUTE_COLOR)
+            .expect("Branch mesh must include neutral vertex colors")
+        {
+            bevy::mesh::VertexAttributeValues::Float32x4(values) => values.as_slice(),
+            _ => panic!("Branch mesh colors must be float4 values"),
+        };
+
+        assert!(
+            !colors.is_empty(),
+            "Branch mesh should include one neutral color per vertex"
+        );
+
+        for color in colors {
+            assert_eq!(
+                *color,
+                [1.0, 1.0, 1.0, 1.0],
+                "Branch vertex colors must stay neutral so bark materials and species tints do not blacken in dim scenes"
+            );
+        }
     }
 
     #[test]
