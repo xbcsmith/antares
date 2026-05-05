@@ -8,7 +8,21 @@
 
 #[cfg(test)]
 mod visual_quality_validation_tests {
-    use antares::domain::world::{GrassDensity, TreeType};
+
+    use antares::domain::world::{GrassDensity, Map, TerrainType, TreeType};
+    use std::collections::BTreeSet;
+    use std::path::PathBuf;
+
+    fn load_vegetation_validation_map() -> Map {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let map_path = PathBuf::from(manifest_dir).join("data/test_campaign/data/maps/map_7.ron");
+
+        let contents = std::fs::read_to_string(&map_path)
+            .unwrap_or_else(|e| panic!("failed to read vegetation validation map: {e}"));
+
+        ron::from_str(&contents)
+            .unwrap_or_else(|e| panic!("failed to parse vegetation validation map: {e}"))
+    }
 
     // ============================================================================
     // MESH COMPLEXITY SPECIFICATIONS
@@ -56,25 +70,27 @@ mod visual_quality_validation_tests {
     // TREE TYPE SPECIFICATIONS
     // ============================================================================
 
-    /// Verifies all five tree types are defined
+    /// Verifies all seven vegetation tree types are defined.
     #[test]
     fn test_all_tree_types_exist() {
         let tree_types = [
             TreeType::Oak,
             TreeType::Pine,
-            TreeType::Dead,
+            TreeType::Birch,
             TreeType::Willow,
+            TreeType::Dead,
+            TreeType::Shrub,
             TreeType::Palm,
         ];
 
-        assert_eq!(tree_types.len(), 5, "Should have 5 tree types");
+        assert_eq!(tree_types.len(), 7, "Should have 7 tree types");
 
         // Verify distinct debug names
         let names: Vec<String> = tree_types.iter().map(|t| format!("{:?}", t)).collect();
         let mut unique_names = names.clone();
         unique_names.sort();
         unique_names.dedup();
-        assert_eq!(unique_names.len(), 5, "All tree types should be distinct");
+        assert_eq!(unique_names.len(), 7, "All tree types should be distinct");
     }
 
     /// Verifies Oak tree specification
@@ -98,6 +114,18 @@ mod visual_quality_validation_tests {
         const PINE_FOLIAGE_DENSITY: f32 = 1.2;
         const OAK_FOLIAGE_DENSITY: f32 = 1.8;
         const _: () = assert!(PINE_FOLIAGE_DENSITY < OAK_FOLIAGE_DENSITY);
+    }
+
+    /// Verifies Birch tree specification
+    #[test]
+    fn test_birch_tree_specification() {
+        let birch = TreeType::Birch;
+        assert_ne!(format!("{:?}", birch), "Dead", "Birch should not be dead");
+
+        // Birch specs: slender trunk, lighter bark/tint, sparse-to-medium canopy.
+        const BIRCH_FOLIAGE_DENSITY: f32 = 0.85;
+        const OAK_FOLIAGE_DENSITY: f32 = 1.8;
+        const _: () = assert!(BIRCH_FOLIAGE_DENSITY < OAK_FOLIAGE_DENSITY);
     }
 
     /// Verifies Dead tree specification
@@ -155,7 +183,7 @@ mod visual_quality_validation_tests {
         assert_eq!(
             densities.len(),
             4,
-            "All 4 grass density levels should exist"
+            "All 4 non-empty grass density levels should exist"
         );
 
         let names: Vec<String> = densities.iter().map(|d| format!("{:?}", d)).collect();
@@ -165,7 +193,7 @@ mod visual_quality_validation_tests {
         assert_eq!(
             unique_names.len(),
             4,
-            "All grass density levels should be distinct"
+            "All non-empty grass density levels should be distinct"
         );
     }
 
@@ -311,64 +339,134 @@ mod visual_quality_validation_tests {
     }
 
     // ============================================================================
-    // TUTORIAL MAP CONTENT SPECIFICATIONS
+    // STABLE TEST-CAMPAIGN VEGETATION FIXTURE SPECIFICATIONS
     // ============================================================================
 
-    /// Verifies Map 1 content specification
+    /// Verifies the stable vegetation validation fixture exists and parses.
     #[test]
-    fn test_map_1_content_specification() {
-        const MAP_WIDTH: usize = 20;
-        const MAP_HEIGHT: usize = 20;
-        const GRASS_REGION_SIZE: usize = 10;
+    fn test_vegetation_validation_map_fixture_parses() {
+        let map = load_vegetation_validation_map();
 
-        const _: () = assert!(
-            MAP_WIDTH >= 20 && MAP_HEIGHT >= 20,
-            "Map size should be 20x20"
+        assert_eq!(map.id, 7);
+        assert_eq!(map.name, "Vegetation Visual Validation");
+        assert_eq!(map.width, 8);
+        assert_eq!(map.height, 4);
+        assert!(!map.allow_random_encounters);
+    }
+
+    /// Verifies the stable vegetation validation fixture covers all tree species.
+    #[test]
+    fn test_vegetation_validation_map_covers_all_tree_species() {
+        let map = load_vegetation_validation_map();
+
+        let tree_types: BTreeSet<String> = map
+            .tiles
+            .iter()
+            .filter_map(|tile| tile.visual.tree_type)
+            .map(|tree_type| format!("{tree_type:?}"))
+            .collect();
+
+        let expected = BTreeSet::from([
+            "Oak".to_string(),
+            "Pine".to_string(),
+            "Birch".to_string(),
+            "Willow".to_string(),
+            "Dead".to_string(),
+            "Shrub".to_string(),
+            "Palm".to_string(),
+        ]);
+
+        assert_eq!(
+            tree_types, expected,
+            "vegetation validation fixture must cover every tree species"
         );
-        const _: () = assert!(GRASS_REGION_SIZE > 4, "Grass region should be visible");
     }
 
-    /// Verifies Map 2 content specification
+    /// Verifies the stable vegetation validation fixture covers all grass densities.
     #[test]
-    fn test_map_2_content_specification() {
-        const MAP_WIDTH: usize = 20;
-        const MAP_HEIGHT: usize = 20;
-        const OAK_REGION_WIDTH: usize = 10;
-        const PINE_REGION_WIDTH: usize = 10;
+    fn test_vegetation_validation_map_covers_all_grass_densities() {
+        let map = load_vegetation_validation_map();
 
-        assert_eq!(OAK_REGION_WIDTH + PINE_REGION_WIDTH, MAP_WIDTH);
-        const _: () = assert!(MAP_HEIGHT >= 19);
+        let grass_densities: BTreeSet<String> = map
+            .tiles
+            .iter()
+            .filter_map(|tile| tile.visual.grass_density)
+            .map(|density| format!("{density:?}"))
+            .collect();
+
+        let expected = BTreeSet::from([
+            "None".to_string(),
+            "Low".to_string(),
+            "Medium".to_string(),
+            "High".to_string(),
+            "VeryHigh".to_string(),
+        ]);
+
+        assert_eq!(
+            grass_densities, expected,
+            "vegetation validation fixture must cover None, Low, Medium, High, and VeryHigh grass"
+        );
     }
 
-    /// Verifies Map 3 content specification
+    /// Verifies the stable vegetation validation fixture has dead trees without foliage.
     #[test]
-    fn test_map_3_content_specification() {
-        const MAP_WIDTH: usize = 20;
-        const MAP_HEIGHT: usize = 20;
-        const TREE_DENSITY: f32 = 0.5;
+    fn test_vegetation_validation_map_dead_trees_have_zero_foliage() {
+        let map = load_vegetation_validation_map();
 
-        const _: () = assert!(MAP_WIDTH >= 20 && MAP_HEIGHT >= 20);
-        const _: () = assert!(TREE_DENSITY > 0.0 && TREE_DENSITY < 1.0);
+        let dead_tree_tiles: Vec<_> = map
+            .tiles
+            .iter()
+            .filter(|tile| tile.visual.tree_type == Some(TreeType::Dead))
+            .collect();
+
+        assert!(
+            !dead_tree_tiles.is_empty(),
+            "vegetation validation fixture must contain at least one dead tree"
+        );
+
+        for tile in dead_tree_tiles {
+            assert_eq!(
+                tile.visual.foliage_density,
+                Some(0.0),
+                "dead tree at ({}, {}) must have foliage_density = 0.0",
+                tile.x,
+                tile.y
+            );
+        }
     }
 
-    /// Verifies Map 4 (Dead tree) content specification
+    /// Verifies the stable vegetation validation fixture has explicit SDK metadata stress tiles.
     #[test]
-    fn test_map_4_content_specification() {
-        const MAP_WIDTH: usize = 20;
-        const MAP_HEIGHT: usize = 20;
+    fn test_vegetation_validation_map_has_metadata_stress_tiles() {
+        let map = load_vegetation_validation_map();
 
-        // All trees should be dead type
-        const _: () = assert!(MAP_WIDTH >= 20 && MAP_HEIGHT >= 20);
-    }
+        let has_tree_metadata_stress = map.tiles.iter().any(|tile| {
+            tile.terrain == TerrainType::Forest
+                && tile.visual.tree_type.is_some()
+                && tile.visual.width_x.is_some()
+                && tile.visual.width_z.is_some()
+                && tile.visual.scale.is_some()
+                && tile.visual.rotation_y.is_some()
+                && tile.visual.foliage_density.is_some()
+        });
 
-    /// Verifies Map 5 content specification
-    #[test]
-    fn test_map_5_content_specification() {
-        const MAP_WIDTH: usize = 20;
-        const MAP_HEIGHT: usize = 20;
+        let has_grass_metadata_stress = map.tiles.iter().any(|tile| {
+            tile.terrain == TerrainType::Grass
+                && tile.visual.grass_density.is_some()
+                && tile.visual.grass_blade_config.is_some()
+                && tile.visual.color_tint.is_some()
+                && tile.visual.scale.is_some()
+                && tile.visual.foliage_density.is_some()
+        });
 
-        // Should have mixed tree types
-        const _: () = assert!(MAP_WIDTH >= 20 && MAP_HEIGHT >= 20);
+        assert!(
+            has_tree_metadata_stress,
+            "vegetation validation fixture must include tree metadata stress coverage"
+        );
+        assert!(
+            has_grass_metadata_stress,
+            "vegetation validation fixture must include grass metadata stress coverage"
+        );
     }
 
     // ============================================================================
@@ -381,8 +479,10 @@ mod visual_quality_validation_tests {
         let tree_types = [
             TreeType::Oak,
             TreeType::Pine,
-            TreeType::Dead,
+            TreeType::Birch,
             TreeType::Willow,
+            TreeType::Dead,
+            TreeType::Shrub,
             TreeType::Palm,
         ];
 
@@ -421,7 +521,7 @@ mod visual_quality_validation_tests {
             "Grass Densities",
             "Visual Metadata",
             "Performance",
-            "Tutorial Maps",
+            "Stable Test-Campaign Vegetation Fixture",
             "Coexistence",
             "Status",
         ];

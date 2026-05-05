@@ -1313,6 +1313,10 @@ impl CampaignBuilderApp {
             &sorted,
             "spells",
         )?;
+        self.logger.info(
+            category::FILE_IO,
+            &format!("Saved {} spells", self.campaign_data.spells.len()),
+        );
         self.unsaved_changes = true;
         Ok(())
     }
@@ -1354,6 +1358,10 @@ impl CampaignBuilderApp {
             &sorted,
             "conditions",
         )?;
+        self.logger.info(
+            category::FILE_IO,
+            &format!("Saved {} conditions", self.campaign_data.conditions.len()),
+        );
         self.unsaved_changes = true;
         Ok(())
     }
@@ -1627,6 +1635,10 @@ impl CampaignBuilderApp {
             &sorted,
             "monsters",
         )?;
+        self.logger.info(
+            category::FILE_IO,
+            &format!("Saved {} monsters", self.campaign_data.monsters.len()),
+        );
         self.unsaved_changes = true;
         Ok(())
     }
@@ -2010,6 +2022,10 @@ impl CampaignBuilderApp {
             fs::write(&map_path, contents)
                 .map_err(|e| CampaignIoError::WriteFileFailed(format!("map: {}", e)))?;
 
+            self.logger.info(
+                category::FILE_IO,
+                &format!("Saved map {} ({})", map.id, map.name),
+            );
             self.unsaved_changes = true;
             Ok(())
         } else {
@@ -2624,6 +2640,42 @@ impl CampaignBuilderApp {
 
         if let Err(e) = self.save_proficiencies() {
             save_warnings.push(format!("Proficiencies: {}", e));
+        }
+
+        // Flush any active map editor pending changes into campaign_data.maps
+        // before saving.  Without this, edits that haven't gone through the
+        // in-editor "💾 Save" button are silently dropped when the user clicks
+        // Campaign Save.  The Map Editor stores its working copy in
+        // `active_editor.map` (a clone of the original); we must sync it back
+        // before the save loop reads campaign_data.maps.
+        let editor_flush: Option<(usize, Map)> = {
+            let idx = self.editor_registry.maps_editor_state.selected_map_idx;
+            idx.and_then(|idx| {
+                self.editor_registry
+                    .maps_editor_state
+                    .active_editor
+                    .as_mut()
+                    .map(|editor| {
+                        editor.commit_pending_event_to_map();
+                        editor.apply_metadata();
+                        (idx, editor.map.clone())
+                    })
+            })
+        };
+        if let Some((idx, flushed_map)) = editor_flush {
+            if idx < self.campaign_data.maps.len() {
+                self.campaign_data.maps[idx] = flushed_map;
+            }
+            // Mark the editor as clean: the on-disk and in-memory states
+            // are now identical after this campaign save.
+            if let Some(editor) = self
+                .editor_registry
+                .maps_editor_state
+                .active_editor
+                .as_mut()
+            {
+                editor.has_changes = false;
+            }
         }
 
         // Save maps individually (they're saved per-map, not as a collection)

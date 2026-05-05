@@ -12,7 +12,9 @@
 //! - `Branch`: Individual segment in the tree structure
 //! - `BranchGraph`: Complete tree as flat Vec with parent-child relationships via indices
 //! - `TreeConfig`: Parameters for tree generation (trunk radius, height, foliage, etc.)
+//! - `TreeSpeciesPreset`: Render-only species presets for distinct silhouettes
 //! - `TreeType`: Enum defining distinct tree variants
+//! - `TreeMeshPair`: Separate branch and leaf/frond meshes for rendering
 //! - `TerrainVisualConfig`: Per-tile visual customization from domain layer
 //!
 //! # Examples
@@ -40,6 +42,236 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+
+/// Default first tree LOD switch distance in world units.
+pub const DEFAULT_TREE_LOD_DISTANCE_1: f32 = 18.0;
+
+/// Default second tree LOD switch distance in world units.
+pub const DEFAULT_TREE_LOD_DISTANCE_2: f32 = 34.0;
+
+/// Default maximum tree draw distance in world units.
+pub const DEFAULT_TREE_CULL_DISTANCE: f32 = 45.0;
+
+/// Default cap for deterministic mesh variants per species and LOD quality bucket.
+pub const DEFAULT_MAX_TREE_MESH_VARIANTS_PER_SPECIES: u64 = 8;
+
+/// Tree level-of-detail buckets used by procedural tree rendering.
+///
+/// LOD changes are visual-only. They alter generated mesh complexity but never
+/// mutate map data or gameplay state.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::advanced_trees::TreeLodLevel;
+///
+/// assert_eq!(TreeLodLevel::Lod0.quality_level(), 0);
+/// assert_eq!(TreeLodLevel::from_quality_level(2), TreeLodLevel::Lod2);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TreeLodLevel {
+    /// Full branch and leaf mesh detail.
+    Lod0,
+    /// Reduced branch sections and fewer leaves.
+    Lod1,
+    /// Simplified branch mesh silhouette with reduced foliage.
+    Lod2,
+}
+
+impl TreeLodLevel {
+    /// Converts a cache quality bucket into a tree LOD level.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::systems::advanced_trees::TreeLodLevel;
+    ///
+    /// assert_eq!(TreeLodLevel::from_quality_level(0), TreeLodLevel::Lod0);
+    /// assert_eq!(TreeLodLevel::from_quality_level(9), TreeLodLevel::Lod2);
+    /// ```
+    pub fn from_quality_level(quality_level: u8) -> Self {
+        match quality_level {
+            0 => Self::Lod0,
+            1 => Self::Lod1,
+            _ => Self::Lod2,
+        }
+    }
+
+    /// Returns the cache quality bucket for this LOD level.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::systems::advanced_trees::TreeLodLevel;
+    ///
+    /// assert_eq!(TreeLodLevel::Lod1.quality_level(), 1);
+    /// ```
+    pub fn quality_level(self) -> u8 {
+        match self {
+            Self::Lod0 => 0,
+            Self::Lod1 => 1,
+            Self::Lod2 => 2,
+        }
+    }
+}
+
+/// Selects the tree LOD level for a camera distance.
+///
+/// Returns `None` when the tree should be culled.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::advanced_trees::{select_tree_lod_level, TreeLodLevel};
+///
+/// assert_eq!(select_tree_lod_level(5.0, 18.0, 34.0, 45.0), Some(TreeLodLevel::Lod0));
+/// assert_eq!(select_tree_lod_level(40.0, 18.0, 34.0, 45.0), Some(TreeLodLevel::Lod2));
+/// assert_eq!(select_tree_lod_level(50.0, 18.0, 34.0, 45.0), None);
+/// ```
+pub fn select_tree_lod_level(
+    distance: f32,
+    lod_distance_1: f32,
+    lod_distance_2: f32,
+    cull_distance: f32,
+) -> Option<TreeLodLevel> {
+    if distance > cull_distance {
+        None
+    } else if distance > lod_distance_2 {
+        Some(TreeLodLevel::Lod2)
+    } else if distance > lod_distance_1 {
+        Some(TreeLodLevel::Lod1)
+    } else {
+        Some(TreeLodLevel::Lod0)
+    }
+}
+
+/// Component attached to a tree parent entity to configure runtime LOD switching.
+///
+/// The component is render-only. It controls child mesh visibility based on
+/// camera distance and never mutates map data or gameplay state.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::advanced_trees::TreeLodGroup;
+///
+/// let group = TreeLodGroup::default();
+/// assert!(group.tree_lod_distance_1 < group.tree_lod_distance_2);
+/// assert!(group.tree_lod_distance_2 < group.cull_distance);
+/// ```
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct TreeLodGroup {
+    /// Distance at which the tree switches from LOD0 to LOD1.
+    pub tree_lod_distance_1: f32,
+    /// Distance at which the tree switches from LOD1 to LOD2.
+    pub tree_lod_distance_2: f32,
+    /// Distance beyond which all tree LOD children are hidden.
+    pub cull_distance: f32,
+}
+
+impl Default for TreeLodGroup {
+    fn default() -> Self {
+        Self {
+            tree_lod_distance_1: DEFAULT_TREE_LOD_DISTANCE_1,
+            tree_lod_distance_2: DEFAULT_TREE_LOD_DISTANCE_2,
+            cull_distance: DEFAULT_TREE_CULL_DISTANCE,
+        }
+    }
+}
+
+/// Component attached to a child mesh entity that belongs to a tree LOD level.
+///
+/// A tree parent with [`TreeLodGroup`] can own multiple children marked with
+/// `TreeLodVisibility`; [`tree_lod_switching_system`] shows only the child
+/// matching the current camera-distance bucket.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::advanced_trees::{TreeLodLevel, TreeLodVisibility};
+///
+/// let marker = TreeLodVisibility { level: TreeLodLevel::Lod1 };
+/// assert_eq!(marker.level, TreeLodLevel::Lod1);
+/// ```
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TreeLodVisibility {
+    /// LOD bucket represented by this child mesh.
+    pub level: TreeLodLevel,
+}
+
+/// Runtime system that switches tree child visibility based on camera distance.
+///
+/// The system expects a parent entity with [`TreeLodGroup`] and child entities
+/// tagged with [`TreeLodVisibility`]. It is visual-only and leaves all map and
+/// gameplay state unchanged.
+///
+/// # Examples
+///
+/// ```
+/// use bevy::prelude::*;
+/// use antares::game::systems::advanced_trees::{tree_lod_switching_system, TreeLodGroup};
+///
+/// fn setup_app(app: &mut App) {
+///     app.add_systems(Update, tree_lod_switching_system);
+///     app.world_mut().spawn(TreeLodGroup::default());
+/// }
+/// ```
+pub fn tree_lod_switching_system(
+    camera_query: Query<&GlobalTransform, With<Camera3d>>,
+    group_query: Query<(&GlobalTransform, &Children, &TreeLodGroup)>,
+    mut lod_child_query: Query<(&TreeLodVisibility, &mut Visibility)>,
+) {
+    let Ok(camera_transform) = camera_query.single() else {
+        return;
+    };
+
+    let camera_position = camera_transform.translation();
+
+    for (tree_transform, children, group) in group_query.iter() {
+        let distance = camera_position.distance(tree_transform.translation());
+        let selected_lod = select_tree_lod_level(
+            distance,
+            group.tree_lod_distance_1,
+            group.tree_lod_distance_2,
+            group.cull_distance,
+        );
+
+        for child in children.iter() {
+            if let Ok((lod_marker, mut visibility)) = lod_child_query.get_mut(child) {
+                *visibility = if selected_lod == Some(lod_marker.level) {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                };
+            }
+        }
+    }
+}
+
+fn bounded_tree_variant_bucket(variant_seed: u64, max_variants: u64) -> u8 {
+    let budget = max_variants.max(1);
+    (variant_seed % budget) as u8
+}
+
+fn tree_variant_unit(seed: TreeGenerationSeed, stream: u64) -> f32 {
+    let mut value = seed.0 ^ stream.wrapping_mul(0xD6E8_FEB8_6659_FD93);
+    value ^= value >> 30;
+    value = value.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    value ^= value >> 27;
+    value = value.wrapping_mul(0x94D0_49BB_1331_11EB);
+    value ^= value >> 31;
+
+    ((value >> 40) as u32) as f32 / 16_777_215.0
+}
+
+fn tree_height_multiplier_for_seed(seed: TreeGenerationSeed) -> f32 {
+    0.9 + tree_variant_unit(seed, 1) * 0.2
+}
+
+fn apply_tree_variant_to_preset(preset: &mut TreeSpeciesPreset, seed: TreeGenerationSeed) {
+    preset.tree_config.height *= tree_height_multiplier_for_seed(seed);
+}
 
 // ==================== Data Structures ====================
 
@@ -158,7 +390,7 @@ pub struct TreeConfig {
     /// Default: 3
     pub depth: u32,
 
-    /// Density of foliage spheres at branch endpoints
+    /// Density of foliage billboards at branch endpoints
     /// Valid range: 0.0 - 1.0 (0.0 = no foliage, 1.0 = maximum density)
     /// Default: 0.7
     pub foliage_density: f32,
@@ -180,6 +412,206 @@ impl Default for TreeConfig {
             foliage_color: (0.2, 0.6, 0.2),
         }
     }
+}
+
+/// Render-only branch-generation parameters for one tree species.
+///
+/// This preset deliberately lives in the Bevy game layer, not the domain layer,
+/// so visual mesh generation can evolve without changing campaign data or core
+/// world structures.
+#[derive(Clone, Debug)]
+pub struct BranchPreset {
+    /// Number of recursive branch levels for the species.
+    pub recursion_depth: u32,
+    /// Preferred child count range per branch.
+    pub child_count_range: (u8, u8),
+    /// Branch length multiplier by recursion level.
+    pub length_factors: [f32; 5],
+    /// Radius multiplier applied to child branches.
+    pub radius_factor: f32,
+    /// Bend/gnarliness amount used by species-specific generators.
+    pub gnarliness: f32,
+    /// Directional force applied to new branch growth.
+    pub force_direction: Vec3,
+    /// Strength of the directional force.
+    pub force_strength: f32,
+}
+
+/// Render-only leaf and frond parameters for one tree species.
+///
+/// Leaves remain separate from branch meshes so bark materials never render
+/// foliage geometry.
+#[derive(Clone, Debug)]
+pub struct LeafPreset {
+    /// Whether this species should spawn leaves/fronds.
+    pub enabled: bool,
+    /// Number of leaf cards or clusters per endpoint.
+    pub count: u32,
+    /// Approximate card size in world units.
+    pub size: f32,
+    /// Leaf size variance used by deterministic generation.
+    pub size_variance: f32,
+    /// Leaf/frond angle in degrees relative to its parent branch.
+    pub angle_degrees: f32,
+    /// Normalized branch position where leaves should begin.
+    pub start: f32,
+}
+
+/// Complete render-only preset for one Antares tree species.
+///
+/// The existing [`TreeConfig`] remains available for compatibility, while this
+/// richer preset captures the species identity required by the vegetation visual
+/// quality pipeline.
+#[derive(Clone, Debug)]
+pub struct TreeSpeciesPreset {
+    /// Tree species represented by this preset.
+    pub tree_type: TreeType,
+    /// Human-readable species label used in diagnostics and tests.
+    pub name: &'static str,
+    /// Base structural tree configuration.
+    pub tree_config: TreeConfig,
+    /// Branch-generation parameters.
+    pub branch: BranchPreset,
+    /// Leaf/frond-generation parameters.
+    pub leaves: LeafPreset,
+    /// Desired width-to-height silhouette ratio.
+    pub silhouette_width_ratio: f32,
+    /// Whether foliage should be concentrated at the crown.
+    pub crown_foliage_only: bool,
+    /// Whether branches should visually droop.
+    pub drooping: bool,
+}
+
+/// Cache key for generated tree branch/leaf mesh variants.
+///
+/// The key intentionally buckets values that affect geometry so deterministic
+/// variation does not create one mesh per map tile.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct TreeMeshCacheKey {
+    /// Species shape.
+    pub tree_type: TreeType,
+    /// Bucketed foliage density, typically `0..=20` for `0.0..=2.0`.
+    pub foliage_density_bucket: u8,
+    /// Render quality level bucket.
+    pub quality_level: u8,
+    /// Reusable deterministic variant bucket.
+    pub variant_seed_bucket: u8,
+}
+
+impl TreeMeshCacheKey {
+    /// Builds a bounded cache key from tree render inputs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::systems::advanced_trees::{TreeMeshCacheKey, TreeType};
+    ///
+    /// let key = TreeMeshCacheKey::new(TreeType::Oak, 1.25, 0, 42);
+    /// assert_eq!(key.tree_type, TreeType::Oak);
+    /// assert!(key.foliage_density_bucket <= 20);
+    /// ```
+    pub fn new(
+        tree_type: TreeType,
+        foliage_density: f32,
+        quality_level: u8,
+        variant_seed: u64,
+    ) -> Self {
+        Self::new_with_variant_budget(
+            tree_type,
+            foliage_density,
+            quality_level,
+            variant_seed,
+            DEFAULT_MAX_TREE_MESH_VARIANTS_PER_SPECIES,
+        )
+    }
+
+    /// Builds a bounded cache key with an explicit per-species variant budget.
+    ///
+    /// This constructor is used by quality settings and tests to prove repeated
+    /// map spawns cannot create one mesh variant per tile.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::systems::advanced_trees::{TreeMeshCacheKey, TreeType};
+    ///
+    /// let key = TreeMeshCacheKey::new_with_variant_budget(TreeType::Oak, 1.0, 0, 99, 2);
+    /// assert!(key.variant_seed_bucket < 2);
+    /// ```
+    pub fn new_with_variant_budget(
+        tree_type: TreeType,
+        foliage_density: f32,
+        quality_level: u8,
+        variant_seed: u64,
+        max_variants_per_species: u64,
+    ) -> Self {
+        Self {
+            tree_type,
+            foliage_density_bucket: (foliage_density.clamp(0.0, 2.0) * 10.0).round() as u8,
+            quality_level: TreeLodLevel::from_quality_level(quality_level).quality_level(),
+            variant_seed_bucket: bounded_tree_variant_bucket(
+                variant_seed,
+                max_variants_per_species,
+            ),
+        }
+    }
+}
+
+/// Stable deterministic seed for tree generation.
+///
+/// Combines species, map, tile, and caller-provided salt into a single value so
+/// repeated map loads produce the same reusable variant selection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TreeGenerationSeed(pub u64);
+
+impl TreeGenerationSeed {
+    /// Creates a deterministic seed from stable tree placement inputs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::systems::advanced_trees::{TreeGenerationSeed, TreeType};
+    ///
+    /// let a = TreeGenerationSeed::from_parts(TreeType::Pine, 1, 2, 3, 99);
+    /// let b = TreeGenerationSeed::from_parts(TreeType::Pine, 1, 2, 3, 99);
+    /// assert_eq!(a, b);
+    /// ```
+    pub fn from_parts(
+        tree_type: TreeType,
+        map_id: u16,
+        tile_x: i32,
+        tile_y: i32,
+        salt: u64,
+    ) -> Self {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        tree_type.hash(&mut hasher);
+        map_id.hash(&mut hasher);
+        tile_x.hash(&mut hasher);
+        tile_y.hash(&mut hasher);
+        salt.hash(&mut hasher);
+        Self(hasher.finish())
+    }
+}
+
+/// Handles for cached branch and leaf meshes for a tree variant.
+#[derive(Clone, Debug)]
+pub struct TreeMeshPair {
+    /// Cached branch/trunk mesh.
+    pub branches: Handle<Mesh>,
+    /// Optional cached leaf/frond mesh.
+    pub leaves: Option<Handle<Mesh>>,
+}
+
+/// Generated branch and leaf meshes for a tree variant.
+///
+/// This type is returned by mesh-generation helpers before Bevy asset handles
+/// are allocated by the rendering layer.
+#[derive(Debug)]
+pub struct GeneratedTreeMeshes {
+    /// Generated branch/trunk mesh.
+    pub branches: Mesh,
+    /// Optional generated leaf/frond mesh.
+    pub leaves: Option<Mesh>,
 }
 
 /// Per-tile visual configuration derived from TileVisualMetadata
@@ -410,6 +842,235 @@ impl TreeType {
             TreeType::Palm,
         ]
     }
+
+    /// Returns the render-only species preset for this tree type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::systems::advanced_trees::TreeType;
+    ///
+    /// let preset = TreeType::Palm.species_preset();
+    /// assert!(preset.crown_foliage_only);
+    /// ```
+    pub fn species_preset(&self) -> TreeSpeciesPreset {
+        match self {
+            TreeType::Oak => TreeSpeciesPreset {
+                tree_type: *self,
+                name: "Oak",
+                tree_config: self.config(),
+                branch: BranchPreset {
+                    recursion_depth: 4,
+                    child_count_range: (3, 4),
+                    length_factors: [1.0, 0.8, 0.7, 0.6, 0.5],
+                    radius_factor: 0.68,
+                    gnarliness: 0.16,
+                    force_direction: Vec3::Y,
+                    force_strength: 0.05,
+                },
+                leaves: LeafPreset {
+                    enabled: true,
+                    count: 5,
+                    size: 0.55,
+                    size_variance: 0.25,
+                    angle_degrees: 35.0,
+                    start: 0.35,
+                },
+                silhouette_width_ratio: 0.85,
+                crown_foliage_only: false,
+                drooping: false,
+            },
+            TreeType::Pine => TreeSpeciesPreset {
+                tree_type: *self,
+                name: "Pine",
+                tree_config: self.config(),
+                branch: BranchPreset {
+                    recursion_depth: 3,
+                    child_count_range: (5, 7),
+                    length_factors: [1.0, 0.9, 0.65, 0.35, 0.2],
+                    radius_factor: 0.55,
+                    gnarliness: 0.04,
+                    force_direction: Vec3::Y,
+                    force_strength: 0.35,
+                },
+                leaves: LeafPreset {
+                    enabled: true,
+                    count: 4,
+                    size: 0.42,
+                    size_variance: 0.15,
+                    angle_degrees: 55.0,
+                    start: 0.2,
+                },
+                silhouette_width_ratio: 0.38,
+                crown_foliage_only: false,
+                drooping: false,
+            },
+            TreeType::Birch => TreeSpeciesPreset {
+                tree_type: *self,
+                name: "Birch",
+                tree_config: self.config(),
+                branch: BranchPreset {
+                    recursion_depth: 3,
+                    child_count_range: (2, 3),
+                    length_factors: [1.0, 0.75, 0.62, 0.48, 0.35],
+                    radius_factor: 0.58,
+                    gnarliness: 0.08,
+                    force_direction: Vec3::Y,
+                    force_strength: 0.15,
+                },
+                leaves: LeafPreset {
+                    enabled: true,
+                    count: 3,
+                    size: 0.42,
+                    size_variance: 0.20,
+                    angle_degrees: 32.0,
+                    start: 0.45,
+                },
+                silhouette_width_ratio: 0.55,
+                crown_foliage_only: false,
+                drooping: false,
+            },
+            TreeType::Willow => TreeSpeciesPreset {
+                tree_type: *self,
+                name: "Willow",
+                tree_config: self.config(),
+                branch: BranchPreset {
+                    recursion_depth: 4,
+                    child_count_range: (3, 5),
+                    length_factors: [1.0, 0.82, 0.74, 0.68, 0.55],
+                    radius_factor: 0.62,
+                    gnarliness: 0.18,
+                    force_direction: Vec3::NEG_Y,
+                    force_strength: 0.55,
+                },
+                leaves: LeafPreset {
+                    enabled: true,
+                    count: 6,
+                    size: 0.60,
+                    size_variance: 0.18,
+                    angle_degrees: 75.0,
+                    start: 0.25,
+                },
+                silhouette_width_ratio: 0.75,
+                crown_foliage_only: false,
+                drooping: true,
+            },
+            TreeType::Dead => TreeSpeciesPreset {
+                tree_type: *self,
+                name: "Dead Tree",
+                tree_config: self.config(),
+                branch: BranchPreset {
+                    recursion_depth: 2,
+                    child_count_range: (1, 2),
+                    length_factors: [1.0, 0.78, 0.64, 0.45, 0.30],
+                    radius_factor: 0.62,
+                    gnarliness: 0.42,
+                    force_direction: Vec3::Y,
+                    force_strength: 0.0,
+                },
+                leaves: LeafPreset {
+                    enabled: false,
+                    count: 0,
+                    size: 0.0,
+                    size_variance: 0.0,
+                    angle_degrees: 0.0,
+                    start: 1.0,
+                },
+                silhouette_width_ratio: 0.70,
+                crown_foliage_only: false,
+                drooping: false,
+            },
+            TreeType::Shrub => TreeSpeciesPreset {
+                tree_type: *self,
+                name: "Shrub",
+                tree_config: self.config(),
+                branch: BranchPreset {
+                    recursion_depth: 2,
+                    child_count_range: (3, 7),
+                    length_factors: [1.0, 0.68, 0.45, 0.25, 0.15],
+                    radius_factor: 0.70,
+                    gnarliness: 0.24,
+                    force_direction: Vec3::Y,
+                    force_strength: 0.05,
+                },
+                leaves: LeafPreset {
+                    enabled: true,
+                    count: 6,
+                    size: 0.34,
+                    size_variance: 0.30,
+                    angle_degrees: 25.0,
+                    start: 0.15,
+                },
+                silhouette_width_ratio: 1.40,
+                crown_foliage_only: false,
+                drooping: false,
+            },
+            TreeType::Palm => TreeSpeciesPreset {
+                tree_type: *self,
+                name: "Palm",
+                tree_config: self.config(),
+                branch: BranchPreset {
+                    recursion_depth: 1,
+                    child_count_range: (7, 9),
+                    length_factors: [1.0, 0.42, 0.0, 0.0, 0.0],
+                    radius_factor: 0.42,
+                    gnarliness: 0.06,
+                    force_direction: Vec3::Y,
+                    force_strength: 0.20,
+                },
+                leaves: LeafPreset {
+                    enabled: true,
+                    count: 8,
+                    size: 0.85,
+                    size_variance: 0.15,
+                    angle_degrees: 82.0,
+                    start: 0.9,
+                },
+                silhouette_width_ratio: 0.45,
+                crown_foliage_only: true,
+                drooping: false,
+            },
+        }
+    }
+}
+
+/// Returns a stable base seed for a tree type.
+fn base_seed_for_tree_type(tree_type: TreeType) -> u64 {
+    match tree_type {
+        TreeType::Oak => 42,
+        TreeType::Pine => 43,
+        TreeType::Birch => 44,
+        TreeType::Willow => 45,
+        TreeType::Dead => 46,
+        TreeType::Shrub => 47,
+        TreeType::Palm => 48,
+    }
+}
+
+/// Returns a deterministic graph-generation seed for a tree type.
+fn default_generation_seed(tree_type: TreeType) -> TreeGenerationSeed {
+    TreeGenerationSeed(base_seed_for_tree_type(tree_type))
+}
+
+/// Creates a root trunk branch from a tree config.
+fn make_trunk(config: &TreeConfig) -> Branch {
+    Branch {
+        start: Vec3::ZERO,
+        end: Vec3::new(0.0, config.height, 0.0),
+        start_radius: config.trunk_radius,
+        end_radius: config.trunk_radius * 0.7,
+        children: vec![],
+    }
+}
+
+/// Generates a reusable deterministic mesh cache key for a tree placement.
+pub fn tree_mesh_cache_key(
+    tree_type: TreeType,
+    foliage_density: f32,
+    quality_level: u8,
+    generation_seed: TreeGenerationSeed,
+) -> TreeMeshCacheKey {
+    TreeMeshCacheKey::new(tree_type, foliage_density, quality_level, generation_seed.0)
 }
 
 // ==================== Mesh Generation ====================
@@ -537,68 +1198,14 @@ fn create_tapered_cylinder(
     (positions, normals, indices)
 }
 
-/// Generates a UV sphere mesh data
-///
-/// # Arguments
-///
-/// * `center` - Center position of the sphere
-/// * `radius` - Radius of the sphere
-/// * `segments` - Number of vertical segments (longitude)
-/// * `rings` - Number of horizontal rings (latitude)
-///
-/// # Returns
-///
-/// Tuple of (positions, normals, indices)
-fn create_sphere(
-    center: Vec3,
-    radius: f32,
-    segments: u32,
-    rings: u32,
-) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u32>) {
-    let mut positions = Vec::new();
-    let mut normals = Vec::new();
-    let mut indices = Vec::new();
-
-    for r in 0..=rings {
-        let v = r as f32 / rings as f32;
-        let phi = v * std::f32::consts::PI; // 0 to PI
-
-        for s in 0..=segments {
-            let u = s as f32 / segments as f32;
-            let theta = u * std::f32::consts::TAU; // 0 to 2PI
-
-            let x = radius * phi.sin() * theta.cos();
-            let y = radius * phi.cos();
-            let z = radius * phi.sin() * theta.sin();
-
-            let pos = Vec3::new(x, y, z);
-            let normal = pos.normalize();
-
-            positions.push([(pos + center).x, (pos + center).y, (pos + center).z]);
-            normals.push([normal.x, normal.y, normal.z]);
-        }
-    }
-
-    for r in 0..rings {
-        for s in 0..segments {
-            let first = (r * (segments + 1)) + s;
-            let second = first + segments + 1;
-
-            indices.push(first);
-            indices.push(second);
-            indices.push(first + 1);
-
-            indices.push(second);
-            indices.push(second + 1);
-            indices.push(first + 1);
-        }
-    }
-
-    (positions, normals, indices)
-}
-
-/// Type alias for branch mesh data: (positions, normals, colors, indices)
-type BranchMeshData = (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 4]>, Vec<u32>);
+/// Type alias for branch mesh data: (positions, normals, UVs, colors, indices)
+type BranchMeshData = (
+    Vec<[f32; 3]>,
+    Vec<[f32; 3]>,
+    Vec<[f32; 2]>,
+    Vec<[f32; 4]>,
+    Vec<u32>,
+);
 
 /// Merges multiple branch meshes into a single Mesh
 ///
@@ -617,17 +1224,18 @@ fn merge_branch_meshes(branch_meshes: Vec<BranchMeshData>) -> Mesh {
     }
 
     // Calculate total capacity needed
-    let total_verts: usize = branch_meshes.iter().map(|(p, _, _, _)| p.len()).sum();
-    let total_indices: usize = branch_meshes.iter().map(|(_, _, _, i)| i.len()).sum();
+    let total_verts: usize = branch_meshes.iter().map(|(p, _, _, _, _)| p.len()).sum();
+    let total_indices: usize = branch_meshes.iter().map(|(_, _, _, _, i)| i.len()).sum();
 
     let mut all_positions = Vec::with_capacity(total_verts);
     let mut all_normals = Vec::with_capacity(total_verts);
+    let mut all_uvs = Vec::with_capacity(total_verts);
     let mut all_colors = Vec::with_capacity(total_verts);
     let mut all_indices = Vec::with_capacity(total_indices);
 
     let mut current_index_offset = 0u32;
 
-    for (positions, normals, colors, indices) in branch_meshes {
+    for (positions, normals, uvs, colors, indices) in branch_meshes {
         // Offset indices for this segment
         for index in indices {
             all_indices.push(index + current_index_offset);
@@ -636,6 +1244,7 @@ fn merge_branch_meshes(branch_meshes: Vec<BranchMeshData>) -> Mesh {
         current_index_offset += positions.len() as u32;
         all_positions.extend(positions);
         all_normals.extend(normals);
+        all_uvs.extend(uvs);
         all_colors.extend(colors);
     }
 
@@ -646,6 +1255,7 @@ fn merge_branch_meshes(branch_meshes: Vec<BranchMeshData>) -> Mesh {
 
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, all_positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, all_normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, all_uvs);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, all_colors);
     mesh.insert_indices(bevy::mesh::Indices::U32(all_indices));
 
@@ -666,6 +1276,18 @@ fn merge_branch_meshes(branch_meshes: Vec<BranchMeshData>) -> Mesh {
 ///
 /// A Bevy Mesh with positions, normals, and indices for all branches
 pub fn generate_branch_mesh(graph: &BranchGraph, config: &TreeConfig) -> Mesh {
+    generate_branch_mesh_for_lod(graph, config, TreeLodLevel::Lod0)
+}
+
+/// Generates a branch mesh for a specific tree LOD level.
+///
+/// LOD1 reduces cylinder segment counts, while LOD0 preserves full detail.
+/// LOD2 uses the lowest branch segment count instead of an opaque billboard slab.
+fn generate_branch_mesh_for_lod(
+    graph: &BranchGraph,
+    _config: &TreeConfig,
+    lod_level: TreeLodLevel,
+) -> Mesh {
     if graph.branches.is_empty() {
         return Mesh::from(Cuboid::new(0.1, 0.1, 0.1));
     }
@@ -679,14 +1301,20 @@ pub fn generate_branch_mesh(graph: &BranchGraph, config: &TreeConfig) -> Mesh {
             continue; // Skip degenerate branches
         }
 
-        // Determine segment count based on branch radius
-        // Thicker branches get more segments for smoothness
-        let segments = if branch.start_radius > 0.2 {
+        // Determine segment count based on branch radius and LOD.
+        // Thicker branches get more segments for smoothness; lower LODs use
+        // fewer radial segments to reduce vertex and index counts.
+        let base_segments = if branch.start_radius > 0.2 {
             12
         } else if branch.start_radius > 0.1 {
             10
         } else {
             8
+        };
+        let segments = match lod_level {
+            TreeLodLevel::Lod0 => base_segments,
+            TreeLodLevel::Lod1 => (base_segments / 2).max(4),
+            TreeLodLevel::Lod2 => 4,
         };
 
         let (positions, normals, indices) = create_tapered_cylinder(
@@ -697,65 +1325,522 @@ pub fn generate_branch_mesh(graph: &BranchGraph, config: &TreeConfig) -> Mesh {
             segments,
         );
 
-        // Generate vertex colors (Bark Brown gradient based on Y height)
-        // Darker at bottom, lighter at top
-        let colors: Vec<[f32; 4]> = positions
+        let branch_length = length.max(0.01);
+        let uvs: Vec<[f32; 2]> = positions
             .iter()
-            .map(|pos| {
-                let height = pos[1]; // Y coordinate
-                                     // Simple gradient: 0.2 at bottom to 0.5 at top
-                let brightness = (0.2 + (height * 0.1)).clamp(0.2, 0.6);
-                // Brown color [R, G, B, A]
-                [0.4 * brightness, 0.25 * brightness, 0.15 * brightness, 1.0]
+            .enumerate()
+            .map(|(idx, pos)| {
+                let ring_slot = idx / 2;
+                let u = (ring_slot as f32 / segments as f32).fract();
+                let distance_from_start = Vec3::from(*pos).distance(branch.start);
+                let v = distance_from_start / branch_length;
+                [u, v]
             })
             .collect();
 
-        branch_meshes.push((positions, normals, colors, indices));
-    }
+        // Keep branch vertex colors neutral so bark materials and species tints
+        // control visible color. Dark per-vertex bark colors multiply with the
+        // material and make trunks collapse to black in dim first-person scenes.
+        let colors: Vec<[f32; 4]> = vec![[1.0, 1.0, 1.0, 1.0]; positions.len()];
 
-    // Generate foliage spheres at leaf endpoints based on density
-    if config.foliage_density > 0.0 {
-        let leaf_indices = get_leaf_branches(graph);
-        let foliage_color = [
-            config.foliage_color.0,
-            config.foliage_color.1,
-            config.foliage_color.2,
-            1.0,
-        ];
-
-        for leaf_idx in leaf_indices {
-            // Apply foliage probability (using index as seed) per leaf to match density
-            // Or just spawn on all leaves if density > 0.5?
-            // "Density of foliage spheres" usually means probability per leaf, or size/number.
-            // Let's assume probability: if density is 0.7, 70% of leaves get a sphere.
-
-            // Deterministic pseudo-random check based on leaf index
-            let pseudo_rand = ((leaf_idx * 17) % 100) as f32 / 100.0;
-            if pseudo_rand > config.foliage_density {
-                continue;
-            }
-
-            let leaf_branch = &graph.branches[leaf_idx];
-
-            // Foliage sphere radius proportional to branch end radius, but clamped
-            let radius = (leaf_branch.end_radius * 4.0).clamp(0.4, 0.8);
-
-            // Generate sphere
-            let (positions, normals, indices) = create_sphere(
-                leaf_branch.end,
-                radius,
-                8, // Segments (low poly to save verts)
-                6, // Rings
-            );
-
-            // Foliage color
-            let colors = vec![foliage_color; positions.len()];
-
-            branch_meshes.push((positions, normals, colors, indices));
-        }
+        branch_meshes.push((positions, normals, uvs, colors, indices));
     }
 
     merge_branch_meshes(branch_meshes)
+}
+
+/// Appends a single species-shaped leaf/frond polygon to mesh attribute buffers.
+///
+/// The mesh itself provides the silhouette instead of relying on a round alpha
+/// mask. This prevents Oak/Pine/Birch/Willow foliage from all reading as the
+/// same circular blob when viewed in first person.
+#[allow(clippy::too_many_arguments)]
+fn append_leaf_card(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    origin: Vec3,
+    direction: Vec3,
+    size: f32,
+    preset: &TreeSpeciesPreset,
+) {
+    let normal = direction.cross(Vec3::Y).normalize_or_zero();
+    let side = if normal == Vec3::ZERO {
+        Vec3::X
+    } else {
+        normal
+    };
+    let up = Vec3::Y
+        .lerp(direction.normalize_or_zero(), 0.35)
+        .normalize_or_zero();
+
+    match preset.tree_type {
+        TreeType::Pine => {
+            append_pine_needle_cluster(positions, normals, uvs, indices, origin, side, up, size)
+        }
+        TreeType::Willow => {
+            append_willow_hanging_strip(positions, normals, uvs, indices, origin, side, up, size)
+        }
+        TreeType::Palm => {
+            append_palm_frond(positions, normals, uvs, indices, origin, side, up, size)
+        }
+        TreeType::Birch => append_diamond_leaf(
+            positions,
+            normals,
+            uvs,
+            indices,
+            origin,
+            side,
+            up,
+            size * 0.72,
+        ),
+        TreeType::Shrub => {
+            append_clustered_shrub_leaf(positions, normals, uvs, indices, origin, side, up, size)
+        }
+        TreeType::Oak => {
+            append_lobed_leaf_cluster(positions, normals, uvs, indices, origin, side, up, size)
+        }
+        TreeType::Dead => {}
+    }
+}
+
+fn append_quad(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    corners: [Vec3; 4],
+    normal: Vec3,
+) {
+    let index_start = positions.len() as u32;
+
+    positions.extend(corners.map(|corner| corner.to_array()));
+    normals.extend([normal.to_array(); 4]);
+    uvs.extend([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+    indices.extend_from_slice(&[
+        index_start,
+        index_start + 1,
+        index_start + 2,
+        index_start,
+        index_start + 2,
+        index_start + 3,
+    ]);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_diamond(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    center: Vec3,
+    side: Vec3,
+    up: Vec3,
+    width: f32,
+    height: f32,
+) {
+    let index_start = positions.len() as u32;
+    let normal = side.cross(up).normalize_or_zero();
+
+    let corners = [
+        center - up * height * 0.5,
+        center + side * width * 0.5,
+        center + up * height * 0.5,
+        center - side * width * 0.5,
+    ];
+
+    positions.extend(corners.map(|corner| corner.to_array()));
+    normals.extend([normal.to_array(); 4]);
+    uvs.extend([[0.5, 0.0], [1.0, 0.5], [0.5, 1.0], [0.0, 0.5]]);
+    indices.extend_from_slice(&[
+        index_start,
+        index_start + 1,
+        index_start + 2,
+        index_start,
+        index_start + 2,
+        index_start + 3,
+    ]);
+}
+
+fn append_triangle(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    corners: [Vec3; 3],
+    normal: Vec3,
+) {
+    let index_start = positions.len() as u32;
+
+    positions.extend(corners.map(|corner| corner.to_array()));
+    normals.extend([normal.to_array(); 3]);
+    uvs.extend([[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]);
+    indices.extend_from_slice(&[index_start, index_start + 1, index_start + 2]);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_lobed_leaf_cluster(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    origin: Vec3,
+    side: Vec3,
+    up: Vec3,
+    size: f32,
+) {
+    let normal = side.cross(up).normalize_or_zero();
+    let lobe_width = size * 0.28;
+    let lobe_height = size * 0.50;
+
+    for offset in [-0.28_f32, 0.0, 0.28] {
+        append_diamond(
+            positions,
+            normals,
+            uvs,
+            indices,
+            origin + side * size * offset,
+            side,
+            up,
+            lobe_width,
+            lobe_height,
+        );
+    }
+
+    append_quad(
+        positions,
+        normals,
+        uvs,
+        indices,
+        [
+            origin - side * size * 0.34 - up * size * 0.10,
+            origin + side * size * 0.34 - up * size * 0.10,
+            origin + side * size * 0.18 + up * size * 0.30,
+            origin - side * size * 0.18 + up * size * 0.30,
+        ],
+        normal,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_pine_needle_cluster(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    origin: Vec3,
+    side: Vec3,
+    up: Vec3,
+    size: f32,
+) {
+    let normal = side.cross(up).normalize_or_zero();
+    let height = size * 1.65;
+    let half_width = size * 0.18;
+
+    append_triangle(
+        positions,
+        normals,
+        uvs,
+        indices,
+        [
+            origin - side * half_width - up * height * 0.45,
+            origin + side * half_width - up * height * 0.45,
+            origin + up * height * 0.55,
+        ],
+        normal,
+    );
+
+    append_triangle(
+        positions,
+        normals,
+        uvs,
+        indices,
+        [
+            origin - side * half_width * 0.75 - up * height * 0.10,
+            origin + side * half_width * 0.75 - up * height * 0.10,
+            origin + up * height * 0.75,
+        ],
+        normal,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_willow_hanging_strip(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    origin: Vec3,
+    side: Vec3,
+    up: Vec3,
+    size: f32,
+) {
+    let normal = side.cross(up).normalize_or_zero();
+    let strip_width = size * 0.16;
+    let strip_height = size * 1.85;
+    let down = -up;
+
+    for offset in [-0.18_f32, 0.0, 0.18] {
+        append_quad(
+            positions,
+            normals,
+            uvs,
+            indices,
+            [
+                origin + side * size * offset - side * strip_width * 0.5,
+                origin + side * size * offset + side * strip_width * 0.5,
+                origin + side * size * offset + side * strip_width * 0.35 + down * strip_height,
+                origin + side * size * offset - side * strip_width * 0.35 + down * strip_height,
+            ],
+            normal,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_palm_frond(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    origin: Vec3,
+    side: Vec3,
+    up: Vec3,
+    size: f32,
+) {
+    let normal = side.cross(up).normalize_or_zero();
+    let length = size * 2.0;
+    let base_width = size * 0.16;
+
+    append_triangle(
+        positions,
+        normals,
+        uvs,
+        indices,
+        [
+            origin - side * base_width,
+            origin + side * base_width,
+            origin + up * length + side * size * 0.35,
+        ],
+        normal,
+    );
+
+    append_triangle(
+        positions,
+        normals,
+        uvs,
+        indices,
+        [
+            origin - side * base_width,
+            origin + side * base_width,
+            origin + up * length - side * size * 0.35,
+        ],
+        normal,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_diamond_leaf(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    origin: Vec3,
+    side: Vec3,
+    up: Vec3,
+    size: f32,
+) {
+    append_diamond(
+        positions,
+        normals,
+        uvs,
+        indices,
+        origin,
+        side,
+        up,
+        size * 0.45,
+        size * 0.75,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_clustered_shrub_leaf(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    origin: Vec3,
+    side: Vec3,
+    up: Vec3,
+    size: f32,
+) {
+    append_diamond_leaf(
+        positions,
+        normals,
+        uvs,
+        indices,
+        origin - side * size * 0.18,
+        side,
+        up,
+        size * 0.78,
+    );
+    append_diamond_leaf(
+        positions,
+        normals,
+        uvs,
+        indices,
+        origin + side * size * 0.18,
+        side,
+        up,
+        size * 0.78,
+    );
+    append_diamond_leaf(
+        positions,
+        normals,
+        uvs,
+        indices,
+        origin + up * size * 0.20,
+        side,
+        up,
+        size * 0.70,
+    );
+}
+
+/// Generates a separate leaf/frond mesh for the provided species graph.
+///
+/// Returns `None` for leafless species such as [`TreeType::Dead`].
+pub fn generate_leaf_mesh(
+    graph: &BranchGraph,
+    preset: &TreeSpeciesPreset,
+    generation_seed: TreeGenerationSeed,
+) -> Option<Mesh> {
+    if !preset.leaves.enabled || preset.tree_config.foliage_density <= 0.0 {
+        return None;
+    }
+
+    let mut leaf_indices = get_leaf_branches(graph);
+    if preset.crown_foliage_only {
+        let crown_start = preset.tree_config.height * preset.leaves.start;
+        leaf_indices.retain(|idx| graph.branches[*idx].start.y >= crown_start);
+    }
+
+    if leaf_indices.is_empty() {
+        return None;
+    }
+
+    let mut rng = StdRng::seed_from_u64(generation_seed.0 ^ 0xA11C_E5AF);
+    let mut positions = Vec::new();
+    let mut normals = Vec::new();
+    let mut uvs = Vec::new();
+    let mut indices = Vec::new();
+
+    let density_count = (preset.tree_config.foliage_density * preset.leaves.count as f32)
+        .round()
+        .max(1.0) as u32;
+
+    for leaf_idx in leaf_indices {
+        let branch = &graph.branches[leaf_idx];
+        let branch_dir = (branch.end - branch.start).normalize_or_zero();
+
+        for _ in 0..density_count {
+            let size_variation =
+                1.0 + rng.random_range(-preset.leaves.size_variance..=preset.leaves.size_variance);
+            let size = preset.leaves.size * size_variation.max(0.2);
+            let angle = rng.random_range(0.0..std::f32::consts::TAU);
+            let offset_radius = rng.random_range(0.02..=0.18) * size;
+            let origin = branch.end
+                + Vec3::new(
+                    offset_radius * angle.cos(),
+                    rng.random_range(-0.05_f32..0.08_f32),
+                    offset_radius * angle.sin(),
+                );
+
+            append_leaf_card(
+                &mut positions,
+                &mut normals,
+                &mut uvs,
+                &mut indices,
+                origin,
+                branch_dir,
+                size,
+                preset,
+            );
+        }
+    }
+
+    if positions.is_empty() {
+        return None;
+    }
+
+    let mut mesh = Mesh::new(
+        bevy::mesh::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(bevy::mesh::Indices::U32(indices));
+    Some(mesh)
+}
+
+fn apply_tree_lod_to_preset(preset: &mut TreeSpeciesPreset, lod_level: TreeLodLevel) {
+    match lod_level {
+        TreeLodLevel::Lod0 => {}
+        TreeLodLevel::Lod1 => {
+            preset.tree_config.depth = preset.tree_config.depth.saturating_sub(2).max(1);
+            preset.branch.recursion_depth = preset.branch.recursion_depth.saturating_sub(2).max(1);
+            let reduced_max = preset.branch.child_count_range.1.saturating_sub(1);
+            let reduced_min = preset.branch.child_count_range.0.min(reduced_max.max(1));
+            preset.branch.child_count_range = (reduced_min, reduced_max.max(reduced_min));
+            preset.branch.length_factors = preset.branch.length_factors.map(|factor| factor * 0.72);
+            preset.leaves.count = preset.leaves.count.saturating_div(2).max(1);
+            preset.leaves.size *= 0.82;
+            preset.tree_config.foliage_density *= 0.65;
+        }
+        TreeLodLevel::Lod2 => {
+            preset.tree_config.depth = 1;
+            preset.branch.recursion_depth = 1;
+            preset.branch.child_count_range = (1, 1);
+            preset.branch.length_factors = preset.branch.length_factors.map(|factor| factor * 0.55);
+            preset.leaves.enabled = false;
+            preset.leaves.count = 0;
+            preset.tree_config.foliage_density = 0.0;
+        }
+    }
+}
+
+/// Generates branch and optional leaf meshes for a tree type and cache key.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::advanced_trees::{
+///     generate_tree_meshes_for_key, TreeMeshCacheKey, TreeType,
+/// };
+///
+/// let key = TreeMeshCacheKey::new(TreeType::Oak, 1.0, 0, 0);
+/// let meshes = generate_tree_meshes_for_key(TreeType::Oak, key);
+/// assert!(meshes.branches.count_vertices() > 0);
+/// ```
+pub fn generate_tree_meshes_for_key(
+    tree_type: TreeType,
+    cache_key: TreeMeshCacheKey,
+) -> GeneratedTreeMeshes {
+    let seed = TreeGenerationSeed(
+        base_seed_for_tree_type(tree_type) ^ cache_key.variant_seed_bucket as u64,
+    );
+    let lod_level = TreeLodLevel::from_quality_level(cache_key.quality_level);
+    let mut preset = tree_type.species_preset();
+    preset.tree_config.foliage_density = cache_key.foliage_density_bucket as f32 / 10.0;
+    apply_tree_variant_to_preset(&mut preset, seed);
+    apply_tree_lod_to_preset(&mut preset, lod_level);
+
+    let graph = generate_branch_graph_with_preset_and_seed(tree_type, &preset, seed);
+    let branches = generate_branch_mesh_for_lod(&graph, &preset.tree_config, lod_level);
+    let leaves = generate_leaf_mesh(&graph, &preset, seed);
+
+    GeneratedTreeMeshes { branches, leaves }
 }
 
 /// Identifies all leaf (endpoint) branches in a branch graph
@@ -822,89 +1907,204 @@ pub fn get_leaf_branches(graph: &BranchGraph) -> Vec<usize> {
 /// assert_eq!(graph.branches[0].start, Vec3::ZERO);
 /// ```
 pub fn generate_branch_graph(tree_type: TreeType) -> BranchGraph {
-    let config = tree_type.config();
+    generate_branch_graph_with_seed(tree_type, default_generation_seed(tree_type))
+}
+
+/// Generates a complete branch graph using a caller-provided deterministic seed.
+///
+/// The seed is stable and reusable, so map reloads can reproduce the same tree
+/// variants while cache keys bucket variants to avoid one mesh per tile.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::advanced_trees::{
+///     generate_branch_graph_with_seed, TreeGenerationSeed, TreeType,
+/// };
+///
+/// let seed = TreeGenerationSeed::from_parts(TreeType::Oak, 1, 4, 7, 99);
+/// let graph = generate_branch_graph_with_seed(TreeType::Oak, seed);
+/// assert!(!graph.branches.is_empty());
+/// ```
+pub fn generate_branch_graph_with_seed(
+    tree_type: TreeType,
+    generation_seed: TreeGenerationSeed,
+) -> BranchGraph {
+    let preset = tree_type.species_preset();
+    generate_branch_graph_with_preset_and_seed(tree_type, &preset, generation_seed)
+}
+
+fn generate_branch_graph_with_preset_and_seed(
+    tree_type: TreeType,
+    preset: &TreeSpeciesPreset,
+    generation_seed: TreeGenerationSeed,
+) -> BranchGraph {
+    let mut rng = StdRng::seed_from_u64(generation_seed.0);
+
+    let mut graph = match tree_type {
+        TreeType::Shrub => generate_shrub_graph(preset, &mut rng),
+        TreeType::Palm => generate_palm_graph(preset, &mut rng),
+        TreeType::Pine => generate_pine_graph(preset, &mut rng),
+        _ => generate_recursive_species_graph(tree_type, preset, &mut rng),
+    };
+
+    graph.update_bounds();
+    graph
+}
+
+/// Generates a low, multi-stem shrub graph.
+fn generate_shrub_graph(preset: &TreeSpeciesPreset, rng: &mut StdRng) -> BranchGraph {
+    let config = &preset.tree_config;
     let mut graph = BranchGraph::new();
 
-    // Seed RNG based on tree type for deterministic output
-    let seed = match tree_type {
-        TreeType::Oak => 42u64,
-        TreeType::Pine => 43u64,
-        TreeType::Birch => 44u64,
-        TreeType::Willow => 45u64,
-        TreeType::Dead => 46u64,
-        TreeType::Shrub => 47u64,
-        TreeType::Palm => 48u64,
-    };
-    let mut rng = StdRng::seed_from_u64(seed);
+    let root_index = graph.add_branch(Branch {
+        start: Vec3::ZERO,
+        end: Vec3::ZERO,
+        start_radius: 0.0,
+        end_radius: 0.0,
+        children: vec![],
+    });
 
-    if tree_type == TreeType::Shrub {
-        // Create invisible dummy root to maintain "index 0 is root" invariant
-        let dummy_root = Branch {
+    let stem_count =
+        rng.random_range(preset.branch.child_count_range.0..=preset.branch.child_count_range.1);
+    let angle_step = std::f32::consts::TAU / stem_count as f32;
+
+    for i in 0..stem_count {
+        let angle = (i as f32 * angle_step) + rng.random_range(-0.25_f32..0.25_f32);
+        let lean = rng.random_range(0.45_f32..0.78_f32);
+        let height = config.height * rng.random_range(0.82_f32..1.18_f32);
+
+        let end_pos = Vec3::new(
+            height * lean.sin() * angle.cos(),
+            height * lean.cos(),
+            height * lean.sin() * angle.sin(),
+        );
+
+        let stem_index = graph.add_branch(Branch {
             start: Vec3::ZERO,
-            end: Vec3::ZERO,
-            start_radius: 0.0,
-            end_radius: 0.0,
-            children: vec![],
-        };
-        let root_index = graph.add_branch(dummy_root);
-
-        // Generate 3-7 stems
-        let stem_count = rng.random_range(3..=7);
-        let angle_step = std::f32::consts::TAU / stem_count as f32;
-
-        for i in 0..stem_count {
-            let angle = (i as f32 * angle_step) + rng.random_range(-0.2_f32..0.2_f32);
-            let lean = rng.random_range(0.3_f32..0.6_f32); // Lean outward (radians)
-
-            // Vary height slightly
-            let height = config.height * rng.random_range(0.8_f32..1.2_f32);
-
-            // Correct calculation:
-            // x = height * sin(lean) * cos(angle)
-            // y = height * cos(lean)
-            // z = height * sin(lean) * sin(angle)
-
-            let sin_lean = lean.sin();
-            let cos_lean = lean.cos();
-
-            let end_pos = Vec3::new(
-                height * sin_lean * angle.cos(),
-                height * cos_lean,
-                height * sin_lean * angle.sin(),
-            );
-
-            let stem = Branch {
-                start: Vec3::ZERO, // Or slightly offset: Vec3::new(rng... * 0.1, 0.0, ...)
-                end: end_pos,
-                start_radius: config.trunk_radius,
-                end_radius: config.trunk_radius * 0.5,
-                children: vec![],
-            };
-
-            let stem_index = graph.add_branch(stem);
-            graph.branches[root_index].children.push(stem_index);
-
-            // Recursively subdivide stems (start at depth 1 since stem is depth 0 equivalent)
-            subdivide_branch(&mut graph, stem_index, 1, tree_type, &config, &mut rng);
-        }
-    } else {
-        // Standard tree generation with single trunk
-        let trunk = Branch {
-            start: Vec3::ZERO,
-            end: Vec3::new(0.0, config.height, 0.0),
+            end: end_pos,
             start_radius: config.trunk_radius,
-            end_radius: config.trunk_radius * 0.7,
+            end_radius: config.trunk_radius * 0.45,
             children: vec![],
-        };
+        });
+        graph.branches[root_index].children.push(stem_index);
 
-        let trunk_index = graph.add_branch(trunk);
-
-        // Recursively subdivide the trunk
-        subdivide_branch(&mut graph, trunk_index, 0, tree_type, &config, &mut rng);
+        subdivide_branch(&mut graph, stem_index, 1, preset.tree_type, config, rng);
     }
 
-    // Update bounds for the complete tree
-    graph.update_bounds();
+    graph
+}
+
+/// Generates a palm graph with a single tall trunk and crown-only fronds.
+fn generate_palm_graph(preset: &TreeSpeciesPreset, rng: &mut StdRng) -> BranchGraph {
+    let config = &preset.tree_config;
+    let mut graph = BranchGraph::new();
+    let trunk_height = config.height;
+    let trunk_index = graph.add_branch(Branch {
+        start: Vec3::ZERO,
+        end: Vec3::new(
+            rng.random_range(-0.10_f32..0.10_f32),
+            trunk_height,
+            rng.random_range(-0.10_f32..0.10_f32),
+        ),
+        start_radius: config.trunk_radius,
+        end_radius: config.trunk_radius * 0.62,
+        children: vec![],
+    });
+
+    let frond_count =
+        rng.random_range(preset.branch.child_count_range.0..=preset.branch.child_count_range.1);
+    let crown = graph.branches[trunk_index].end;
+    let frond_length = config.height * preset.branch.length_factors[1];
+
+    for i in 0..frond_count {
+        let angle = (i as f32 / frond_count as f32) * std::f32::consts::TAU
+            + rng.random_range(-0.12_f32..0.12_f32);
+        let lift = rng.random_range(0.10_f32..0.32_f32);
+        let end = crown
+            + Vec3::new(
+                frond_length * angle.cos(),
+                frond_length * lift,
+                frond_length * angle.sin(),
+            );
+
+        let frond_index = graph.add_branch(Branch {
+            start: crown,
+            end,
+            start_radius: config.trunk_radius * 0.28,
+            end_radius: config.trunk_radius * 0.05,
+            children: vec![],
+        });
+        graph.branches[trunk_index].children.push(frond_index);
+    }
+
+    graph
+}
+
+/// Generates a conical pine graph with branch whorls along the trunk.
+fn generate_pine_graph(preset: &TreeSpeciesPreset, rng: &mut StdRng) -> BranchGraph {
+    let config = &preset.tree_config;
+    let mut graph = BranchGraph::new();
+    let mut trunk = make_trunk(config);
+    apply_deterministic_trunk_bend(&mut trunk, config, rng);
+    let trunk_index = graph.add_branch(trunk);
+
+    let whorl_count = 3;
+    let branches_per_whorl = 5;
+
+    for whorl in 0..whorl_count {
+        let y_fraction = 0.26 + whorl as f32 * 0.22;
+        let start = Vec3::new(0.0, graph.branches[trunk_index].end.y * y_fraction, 0.0);
+        let taper = 1.0 - y_fraction;
+        let branch_length = config.height * (0.10 + taper * 0.12);
+        let branch_radius = config.trunk_radius * (0.20 + taper * 0.20);
+
+        for i in 0..branches_per_whorl {
+            let angle = (i as f32 / branches_per_whorl as f32) * std::f32::consts::TAU
+                + (whorl as f32 * 0.37)
+                + rng.random_range(-0.08_f32..0.08_f32);
+            let upward = 0.28 + whorl as f32 * 0.06;
+            let end = start
+                + Vec3::new(
+                    branch_length * angle.cos(),
+                    branch_length * upward,
+                    branch_length * angle.sin(),
+                );
+
+            let branch_index = graph.add_branch(Branch {
+                start,
+                end,
+                start_radius: branch_radius,
+                end_radius: branch_radius * 0.35,
+                children: vec![],
+            });
+            graph.branches[trunk_index].children.push(branch_index);
+        }
+    }
+
+    graph
+}
+
+fn apply_deterministic_trunk_bend(trunk: &mut Branch, config: &TreeConfig, rng: &mut StdRng) {
+    let bend_angle = rng.random_range(0.0..std::f32::consts::TAU);
+    let bend_distance = config.height * rng.random_range(0.02_f32..=0.08_f32);
+    trunk.end.x += bend_angle.cos() * bend_distance;
+    trunk.end.z += bend_angle.sin() * bend_distance;
+}
+
+/// Generates a recursive broadleaf/dead/willow/birch graph from the species preset.
+fn generate_recursive_species_graph(
+    tree_type: TreeType,
+    preset: &TreeSpeciesPreset,
+    rng: &mut StdRng,
+) -> BranchGraph {
+    let config = &preset.tree_config;
+    let mut graph = BranchGraph::new();
+    let mut trunk = make_trunk(config);
+    apply_deterministic_trunk_bend(&mut trunk, config, rng);
+    let trunk_index = graph.add_branch(trunk);
+
+    subdivide_branch(&mut graph, trunk_index, 0, tree_type, config, rng);
 
     graph
 }
@@ -943,27 +2143,18 @@ fn subdivide_branch(
         return;
     }
 
+    let preset = tree_type.species_preset();
+
     // Determine number of children based on tree type
-    let child_count = match tree_type {
-        TreeType::Oak => rng.random_range(3..=4),
-        TreeType::Pine => rng.random_range(2..=3),
-        TreeType::Birch => rng.random_range(2..=3),
-        TreeType::Willow => rng.random_range(3..=4),
-        TreeType::Dead => rng.random_range(1..=2),
-        TreeType::Shrub => rng.random_range(2..=3),
-        TreeType::Palm => rng.random_range(2..=3),
-    };
+    let child_count =
+        rng.random_range(preset.branch.child_count_range.0..=preset.branch.child_count_range.1);
 
     // Calculate parent direction
     let parent_dir = (parent.end - parent.start).normalize();
 
     // Length reduction factor per level
-    let length_factor = match current_depth {
-        0 => 0.8,
-        1 => 0.75,
-        2 => 0.7,
-        _ => 0.65,
-    };
+    let depth_index = current_depth.min((preset.branch.length_factors.len() - 1) as u32) as usize;
+    let length_factor = preset.branch.length_factors[depth_index];
     let parent_length = (parent.end - parent.start).length();
     let child_length = parent_length * length_factor;
 
@@ -987,16 +2178,31 @@ fn subdivide_branch(
         let rotation_axis = parent_dir;
         let rotated_perp = rotate_vector_around_axis(perpendicular, rotation_axis, rotation_angle);
 
-        // Combine: tilt angle from parent direction + rotation for variety
-        let child_dir = rotate_vector_around_axis(parent_dir, rotated_perp, angle_rad).normalize();
+        // Combine: tilt angle from parent direction + rotation for variety.
+        let mut child_dir =
+            rotate_vector_around_axis(parent_dir, rotated_perp, angle_rad).normalize();
+
+        if preset.branch.force_strength > 0.0 {
+            let force_dir = preset.branch.force_direction.normalize_or_zero();
+            if force_dir != Vec3::ZERO {
+                child_dir = child_dir
+                    .lerp(force_dir, preset.branch.force_strength.clamp(0.0, 0.85))
+                    .normalize_or_zero();
+            }
+        }
+
+        if preset.drooping && current_depth > 0 {
+            child_dir = child_dir.lerp(Vec3::NEG_Y, 0.35).normalize_or_zero();
+        }
 
         // Calculate child end position with slight curvature offset
-        let curvature_offset = rotated_perp * (child_length * 0.1);
+        let curvature_offset =
+            rotated_perp * (child_length * (0.06 + preset.branch.gnarliness * 0.18));
         let child_end = parent.end + child_dir * child_length + curvature_offset;
 
         // Apply radius tapering
-        let child_start_radius = parent.end_radius * 0.7;
-        let child_end_radius = child_start_radius * 0.7;
+        let child_start_radius = parent.end_radius * preset.branch.radius_factor;
+        let child_end_radius = child_start_radius * preset.branch.radius_factor;
 
         // Create child branch
         let child = Branch {
@@ -1039,11 +2245,13 @@ fn rotate_vector_around_axis(vector: Vec3, axis: Vec3, angle: f32) -> Vec3 {
 
 /// Extended cache for advanced tree meshes
 ///
-/// Stores generated branch graph meshes by tree type to avoid recomputation.
+/// Stores generated branch/leaf mesh handles by bounded cache key to avoid
+/// recomputation while still allowing species, quality, foliage-density, and
+/// deterministic variant differences.
 #[derive(Clone, Debug, Default)]
 pub struct AdvancedTreeMeshCache {
-    /// Cached tree meshes by type (key: TreeType, value: mesh handle)
-    pub tree_meshes: HashMap<TreeType, Handle<Mesh>>,
+    /// Cached branch and leaf mesh handles by bounded tree mesh key.
+    pub tree_meshes: HashMap<TreeMeshCacheKey, TreeMeshPair>,
 }
 
 // ==================== Tests ====================
@@ -1217,6 +2425,460 @@ mod tests {
     fn test_advanced_tree_mesh_cache_default() {
         let cache = AdvancedTreeMeshCache::default();
         assert!(cache.tree_meshes.is_empty());
+    }
+
+    #[test]
+    fn test_tree_species_preset_all_variants_have_expected_identity_flags() {
+        let oak = TreeType::Oak.species_preset();
+        let pine = TreeType::Pine.species_preset();
+        let willow = TreeType::Willow.species_preset();
+        let dead = TreeType::Dead.species_preset();
+        let palm = TreeType::Palm.species_preset();
+
+        assert!(oak.leaves.enabled);
+        assert!(pine.silhouette_width_ratio < oak.silhouette_width_ratio);
+        assert!(willow.drooping);
+        assert!(!dead.leaves.enabled);
+        assert!(palm.crown_foliage_only);
+    }
+
+    #[test]
+    fn test_tree_mesh_cache_key_buckets_density_and_variant() {
+        let key_a = TreeMeshCacheKey::new(TreeType::Oak, 1.26, 2, 17);
+        let key_b = TreeMeshCacheKey::new(TreeType::Oak, 4.0, 2, 17);
+
+        assert_eq!(key_a.foliage_density_bucket, 13);
+        assert_eq!(key_b.foliage_density_bucket, 20);
+        assert_eq!(key_a.variant_seed_bucket, 1);
+        assert_eq!(key_a.quality_level, 2);
+    }
+
+    #[test]
+    fn test_tree_generation_seed_is_stable_for_same_inputs() {
+        let seed_a = TreeGenerationSeed::from_parts(TreeType::Palm, 1, 2, 3, 99);
+        let seed_b = TreeGenerationSeed::from_parts(TreeType::Palm, 1, 2, 3, 99);
+        let seed_c = TreeGenerationSeed::from_parts(TreeType::Pine, 1, 2, 3, 99);
+
+        assert_eq!(seed_a, seed_b);
+        assert_ne!(seed_a, seed_c);
+    }
+
+    #[test]
+    fn test_generate_tree_meshes_for_key_creates_leaf_mesh_for_leafy_species() {
+        let key = TreeMeshCacheKey::new(TreeType::Oak, 1.0, 0, 3);
+        let meshes = generate_tree_meshes_for_key(TreeType::Oak, key);
+
+        assert!(meshes.branches.count_vertices() > 0);
+        assert!(
+            meshes.leaves.is_some(),
+            "Oak should generate a separate leaf mesh"
+        );
+    }
+
+    #[test]
+    fn test_generate_tree_meshes_for_key_dead_tree_has_no_leaf_mesh() {
+        let key = TreeMeshCacheKey::new(TreeType::Dead, 0.0, 0, 3);
+        let meshes = generate_tree_meshes_for_key(TreeType::Dead, key);
+
+        assert!(meshes.branches.count_vertices() > 0);
+        assert!(
+            meshes.leaves.is_none(),
+            "Dead trees should not generate leaf meshes"
+        );
+    }
+
+    #[test]
+    fn test_select_tree_lod_level_uses_configured_distances_and_cull_budget() {
+        assert_eq!(
+            select_tree_lod_level(
+                5.0,
+                DEFAULT_TREE_LOD_DISTANCE_1,
+                DEFAULT_TREE_LOD_DISTANCE_2,
+                DEFAULT_TREE_CULL_DISTANCE,
+            ),
+            Some(TreeLodLevel::Lod0)
+        );
+        assert_eq!(
+            select_tree_lod_level(
+                24.0,
+                DEFAULT_TREE_LOD_DISTANCE_1,
+                DEFAULT_TREE_LOD_DISTANCE_2,
+                DEFAULT_TREE_CULL_DISTANCE,
+            ),
+            Some(TreeLodLevel::Lod1)
+        );
+        assert_eq!(
+            select_tree_lod_level(
+                40.0,
+                DEFAULT_TREE_LOD_DISTANCE_1,
+                DEFAULT_TREE_LOD_DISTANCE_2,
+                DEFAULT_TREE_CULL_DISTANCE,
+            ),
+            Some(TreeLodLevel::Lod2)
+        );
+        assert_eq!(
+            select_tree_lod_level(
+                50.0,
+                DEFAULT_TREE_LOD_DISTANCE_1,
+                DEFAULT_TREE_LOD_DISTANCE_2,
+                DEFAULT_TREE_CULL_DISTANCE,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn test_generate_tree_meshes_for_key_lod_settings_reduce_mesh_vertex_counts() {
+        let lod0_key =
+            TreeMeshCacheKey::new(TreeType::Oak, 1.0, TreeLodLevel::Lod0.quality_level(), 3);
+        let lod1_key =
+            TreeMeshCacheKey::new(TreeType::Oak, 1.0, TreeLodLevel::Lod1.quality_level(), 3);
+        let lod2_key =
+            TreeMeshCacheKey::new(TreeType::Oak, 1.0, TreeLodLevel::Lod2.quality_level(), 3);
+
+        let lod0 = generate_tree_meshes_for_key(TreeType::Oak, lod0_key);
+        let lod1 = generate_tree_meshes_for_key(TreeType::Oak, lod1_key);
+        let lod2 = generate_tree_meshes_for_key(TreeType::Oak, lod2_key);
+
+        assert!(
+            lod1.branches.count_vertices() < lod0.branches.count_vertices(),
+            "LOD1 should reduce branch mesh vertices"
+        );
+        assert!(
+            lod2.branches.count_vertices() < lod1.branches.count_vertices(),
+            "LOD2 simplified branch mesh should be simpler than LOD1"
+        );
+        assert!(
+            lod2.leaves.as_ref().map(Mesh::count_vertices).unwrap_or(0)
+                <= lod1.leaves.as_ref().map(Mesh::count_vertices).unwrap_or(0),
+            "LOD2 should reduce or suppress leaf geometry compared with LOD1"
+        );
+    }
+
+    #[test]
+    fn test_tree_mesh_cache_key_variant_bucket_respects_variant_budget() {
+        for seed in 0..128 {
+            let key = TreeMeshCacheKey::new(TreeType::Willow, 1.0, 0, seed);
+            assert!(
+                u64::from(key.variant_seed_bucket) < DEFAULT_MAX_TREE_MESH_VARIANTS_PER_SPECIES,
+                "variant bucket {} exceeded budget {}",
+                key.variant_seed_bucket,
+                DEFAULT_MAX_TREE_MESH_VARIANTS_PER_SPECIES
+            );
+        }
+    }
+
+    #[test]
+    fn test_tree_height_multiplier_for_seed_is_bounded_and_deterministic() {
+        let seed = TreeGenerationSeed::from_parts(TreeType::Oak, 1, 2, 3, 4);
+        let first = tree_height_multiplier_for_seed(seed);
+        let second = tree_height_multiplier_for_seed(seed);
+
+        assert_eq!(first, second);
+        assert!((0.9..=1.1).contains(&first));
+    }
+
+    #[test]
+    fn test_cached_species_variant_changes_tree_height_without_unbounded_range() {
+        fn mesh_height(mesh: &Mesh) -> f32 {
+            let positions = mesh
+                .attribute(Mesh::ATTRIBUTE_POSITION)
+                .expect("tree branch mesh should contain positions")
+                .as_float3()
+                .expect("tree branch positions should be float3");
+
+            let (min_y, max_y) = positions.iter().fold(
+                (f32::INFINITY, f32::NEG_INFINITY),
+                |(min_y, max_y), position| (min_y.min(position[1]), max_y.max(position[1])),
+            );
+
+            max_y - min_y
+        }
+
+        let key_a =
+            TreeMeshCacheKey::new(TreeType::Oak, 1.0, TreeLodLevel::Lod0.quality_level(), 0);
+        let key_b =
+            TreeMeshCacheKey::new(TreeType::Oak, 1.0, TreeLodLevel::Lod0.quality_level(), 1);
+
+        let mesh_a = generate_tree_meshes_for_key(TreeType::Oak, key_a);
+        let mesh_b = generate_tree_meshes_for_key(TreeType::Oak, key_b);
+
+        let height_a = mesh_height(&mesh_a.branches);
+        let height_b = mesh_height(&mesh_b.branches);
+        let height_ratio = height_a.max(height_b) / height_a.min(height_b);
+
+        assert!(height_a.is_finite() && height_a > 0.0);
+        assert!(height_b.is_finite() && height_b > 0.0);
+        assert_ne!(
+            height_a, height_b,
+            "different cached variant buckets should produce visibly different tree heights"
+        );
+        assert!(
+            height_ratio <= 1.25,
+            "cached height variation should remain bounded, got ratio {height_ratio}"
+        );
+    }
+
+    #[test]
+    fn test_deterministic_trunk_bend_offsets_trunk_top_within_bounded_range() {
+        let config = TreeType::Oak.config();
+        let seed = TreeGenerationSeed::from_parts(TreeType::Oak, 1, 2, 3, 4);
+        let mut rng = StdRng::seed_from_u64(seed.0);
+        let mut trunk = make_trunk(&config);
+
+        apply_deterministic_trunk_bend(&mut trunk, &config, &mut rng);
+
+        let horizontal_bend = Vec2::new(trunk.end.x, trunk.end.z).length();
+        assert!(horizontal_bend > 0.0);
+        assert!(horizontal_bend <= config.height * 0.08 + 0.001);
+    }
+
+    #[test]
+    fn test_tree_mesh_cache_key_explicit_variant_budget_bounds_buckets() {
+        for seed in 0..128 {
+            let key = TreeMeshCacheKey::new_with_variant_budget(TreeType::Pine, 1.0, 0, seed, 2);
+            assert!(
+                key.variant_seed_bucket < 2,
+                "variant bucket {} exceeded explicit budget",
+                key.variant_seed_bucket
+            );
+        }
+    }
+
+    #[test]
+    fn test_tree_lod_switching_system_shows_selected_lod_child() {
+        let mut app = App::new();
+        app.add_systems(Update, tree_lod_switching_system);
+
+        app.world_mut().spawn((
+            Camera3d::default(),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            GlobalTransform::from(Transform::from_xyz(0.0, 0.0, 0.0)),
+        ));
+
+        let tree = app
+            .world_mut()
+            .spawn((
+                Transform::from_xyz(24.0, 0.0, 0.0),
+                GlobalTransform::from(Transform::from_xyz(24.0, 0.0, 0.0)),
+                TreeLodGroup {
+                    tree_lod_distance_1: 10.0,
+                    tree_lod_distance_2: 30.0,
+                    cull_distance: 45.0,
+                },
+            ))
+            .id();
+
+        let lod0 = app
+            .world_mut()
+            .spawn((
+                Visibility::default(),
+                TreeLodVisibility {
+                    level: TreeLodLevel::Lod0,
+                },
+            ))
+            .id();
+        let lod1 = app
+            .world_mut()
+            .spawn((
+                Visibility::default(),
+                TreeLodVisibility {
+                    level: TreeLodLevel::Lod1,
+                },
+            ))
+            .id();
+        let lod2 = app
+            .world_mut()
+            .spawn((
+                Visibility::default(),
+                TreeLodVisibility {
+                    level: TreeLodLevel::Lod2,
+                },
+            ))
+            .id();
+
+        app.world_mut().entity_mut(tree).add_child(lod0);
+        app.world_mut().entity_mut(tree).add_child(lod1);
+        app.world_mut().entity_mut(tree).add_child(lod2);
+
+        app.update();
+
+        assert!(matches!(
+            app.world().get::<Visibility>(lod0).unwrap(),
+            Visibility::Hidden
+        ));
+        assert!(matches!(
+            app.world().get::<Visibility>(lod1).unwrap(),
+            Visibility::Inherited
+        ));
+        assert!(matches!(
+            app.world().get::<Visibility>(lod2).unwrap(),
+            Visibility::Hidden
+        ));
+    }
+
+    #[test]
+    fn test_palm_graph_has_crown_only_leaf_branches() {
+        let graph = generate_branch_graph(TreeType::Palm);
+        let config = TreeType::Palm.config();
+        let leaf_indices = get_leaf_branches(&graph);
+
+        assert!(!leaf_indices.is_empty());
+        assert!(
+            leaf_indices
+                .iter()
+                .all(|idx| graph.branches[*idx].start.y >= config.height * 0.75),
+            "Palm leaf/frond branches should start near the crown"
+        );
+    }
+
+    #[test]
+    fn test_pine_bounds_are_taller_than_wide() {
+        let graph = generate_branch_graph(TreeType::Pine);
+        let (min, max) = graph.bounds;
+        let height = max.y - min.y;
+        let width = (max.x - min.x).max(max.z - min.z);
+
+        assert!(
+            height > width * 2.0,
+            "Pine silhouette should be tall and conical"
+        );
+    }
+
+    #[test]
+    fn test_oak_bounds_are_wider_relative_to_height_than_pine() {
+        let oak = generate_branch_graph(TreeType::Oak);
+        let pine = generate_branch_graph(TreeType::Pine);
+
+        let oak_width = (oak.bounds.1.x - oak.bounds.0.x).max(oak.bounds.1.z - oak.bounds.0.z);
+        let oak_height = oak.bounds.1.y - oak.bounds.0.y;
+        let pine_width = (pine.bounds.1.x - pine.bounds.0.x).max(pine.bounds.1.z - pine.bounds.0.z);
+        let pine_height = pine.bounds.1.y - pine.bounds.0.y;
+
+        assert!(
+            oak_width / oak_height > pine_width / pine_height,
+            "Oak should have a broader silhouette ratio than pine"
+        );
+    }
+
+    #[test]
+    fn test_same_tree_mesh_cache_key_produces_same_mesh_statistics() {
+        let key = TreeMeshCacheKey::new(TreeType::Birch, 1.0, 0, 4);
+        let meshes_a = generate_tree_meshes_for_key(TreeType::Birch, key);
+        let meshes_b = generate_tree_meshes_for_key(TreeType::Birch, key);
+
+        assert_eq!(
+            meshes_a.branches.count_vertices(),
+            meshes_b.branches.count_vertices()
+        );
+        assert_eq!(
+            meshes_a.leaves.as_ref().map(Mesh::count_vertices),
+            meshes_b.leaves.as_ref().map(Mesh::count_vertices)
+        );
+    }
+
+    #[test]
+    fn test_generate_branch_mesh_has_bark_uvs() {
+        let graph = generate_branch_graph(TreeType::Oak);
+        let mesh = generate_branch_mesh(&graph, &TreeType::Oak.config());
+
+        assert!(
+            mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_some(),
+            "Branch mesh must include UV_0 coordinates for bark texture mapping"
+        );
+    }
+
+    #[test]
+    fn test_generate_branch_mesh_uses_neutral_vertex_colors() {
+        let graph = generate_branch_graph(TreeType::Oak);
+        let mesh = generate_branch_mesh(&graph, &TreeType::Oak.config());
+
+        let colors = match mesh
+            .attribute(Mesh::ATTRIBUTE_COLOR)
+            .expect("Branch mesh must include neutral vertex colors")
+        {
+            bevy::mesh::VertexAttributeValues::Float32x4(values) => values.as_slice(),
+            _ => panic!("Branch mesh colors must be float4 values"),
+        };
+
+        assert!(
+            !colors.is_empty(),
+            "Branch mesh should include one neutral color per vertex"
+        );
+
+        for color in colors {
+            assert_eq!(
+                *color,
+                [1.0, 1.0, 1.0, 1.0],
+                "Branch vertex colors must stay neutral so bark materials and species tints do not blacken in dim scenes"
+            );
+        }
+    }
+
+    #[test]
+    fn test_generate_branch_mesh_is_bark_only_for_leafy_tree() {
+        let graph = generate_branch_graph(TreeType::Oak);
+        let mesh = generate_branch_mesh(&graph, &TreeType::Oak.config());
+
+        let expected_branch_only_vertices: usize = graph
+            .branches
+            .iter()
+            .filter_map(|branch| {
+                let length = (branch.end - branch.start).length();
+                if length < 0.01 {
+                    return None;
+                }
+
+                let segments = if branch.start_radius > 0.2 {
+                    12
+                } else if branch.start_radius > 0.1 {
+                    10
+                } else {
+                    8
+                };
+
+                Some(segments * 2)
+            })
+            .sum();
+
+        assert_eq!(
+            mesh.count_vertices(),
+            expected_branch_only_vertices,
+            "Branch mesh must not include foliage sphere vertices"
+        );
+    }
+
+    #[test]
+    fn test_generate_branch_mesh_dead_tree_contains_no_foliage_geometry() {
+        let graph = generate_branch_graph(TreeType::Dead);
+        let mesh = generate_branch_mesh(&graph, &TreeType::Dead.config());
+
+        let expected_branch_only_vertices: usize = graph
+            .branches
+            .iter()
+            .filter_map(|branch| {
+                let length = (branch.end - branch.start).length();
+                if length < 0.01 {
+                    return None;
+                }
+
+                let segments = if branch.start_radius > 0.2 {
+                    12
+                } else if branch.start_radius > 0.1 {
+                    10
+                } else {
+                    8
+                };
+
+                Some(segments * 2)
+            })
+            .sum();
+
+        assert_eq!(
+            mesh.count_vertices(),
+            expected_branch_only_vertices,
+            "Dead tree branch mesh must not include foliage geometry"
+        );
     }
 
     #[test]
@@ -1673,6 +3335,7 @@ mod tests {
         let merged = merge_branch_meshes(vec![(
             positions.clone(),
             normals.clone(),
+            vec![[0.0, 0.0]; positions.len()],
             vec![[0.4, 0.3, 0.2, 1.0]; positions.len()],
             indices,
         )]);
@@ -1703,8 +3366,20 @@ mod tests {
         let len1 = mesh1.0.len();
         let len2 = mesh2.0.len();
         let merged = merge_branch_meshes(vec![
-            (mesh1.0, mesh1.1, vec![[0.4, 0.3, 0.2, 1.0]; len1], mesh1.2),
-            (mesh2.0, mesh2.1, vec![[0.4, 0.3, 0.2, 1.0]; len2], mesh2.2),
+            (
+                mesh1.0,
+                mesh1.1,
+                vec![[0.0, 0.0]; len1],
+                vec![[0.4, 0.3, 0.2, 1.0]; len1],
+                mesh1.2,
+            ),
+            (
+                mesh2.0,
+                mesh2.1,
+                vec![[0.0, 0.0]; len2],
+                vec![[0.4, 0.3, 0.2, 1.0]; len2],
+                mesh2.2,
+            ),
         ]);
 
         // Verify merged mesh has attributes
@@ -1726,6 +3401,7 @@ mod tests {
         let merged = merge_branch_meshes(vec![(
             mesh1.0,
             mesh1.1,
+            vec![[0.0, 0.0]; len],
             vec![[0.4, 0.3, 0.2, 1.0]; len],
             mesh1.2,
         )]);
@@ -1747,6 +3423,7 @@ mod tests {
             (
                 pos1.clone(),
                 norm1.clone(),
+                vec![[0.0, 0.0]; len],
                 vec![[0.4, 0.3, 0.2, 1.0]; len],
                 idx1.clone(),
             );
@@ -1980,13 +3657,14 @@ mod tests {
     }
 
     #[test]
-    fn test_foliage_density_zero_produces_no_spheres() {
+    fn test_foliage_density_zero_produces_no_leaf_cards() {
         // TreeType::Dead has foliage_density = 0.0
-        let config = TreeType::Dead.config();
-        let cluster_size = (config.foliage_density * 5.0) as usize;
-        assert_eq!(
-            cluster_size, 0,
-            "Zero foliage density should produce 0 sphere clusters"
+        let preset = TreeType::Dead.species_preset();
+        let graph = generate_branch_graph(TreeType::Dead);
+        let leaves = generate_leaf_mesh(&graph, &preset, default_generation_seed(TreeType::Dead));
+        assert!(
+            leaves.is_none(),
+            "Zero foliage density should produce no leaf-card mesh"
         );
     }
 

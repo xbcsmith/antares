@@ -8,7 +8,250 @@
 //! and instancing statistics.
 
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// Default first tree LOD switch distance in world units.
+pub const DEFAULT_TREE_LOD_DISTANCE_1: f32 = 18.0;
+
+/// Default second tree LOD switch distance in world units.
+pub const DEFAULT_TREE_LOD_DISTANCE_2: f32 = 34.0;
+
+/// Default grass LOD switch distance in world units.
+pub const DEFAULT_GRASS_LOD_DISTANCE: f32 = 15.0;
+
+/// Default maximum vegetation draw distance in world units.
+pub const DEFAULT_VEGETATION_CULL_DISTANCE: f32 = 45.0;
+
+/// Default cap for cached procedural tree mesh variants per species.
+pub const DEFAULT_MAX_TREE_MESH_VARIANTS_PER_SPECIES: usize = 8;
+
+/// Default cap for cached grass material variants.
+pub const DEFAULT_MAX_GRASS_MATERIAL_VARIANTS: usize = 64;
+
+/// Vegetation-wide visual quality levels.
+///
+/// This render-only setting changes geometry detail, LOD distances, density
+/// scaling, and cache budgets without mutating map data or gameplay state.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::resources::performance::VegetationQualityLevel;
+///
+/// assert_eq!(VegetationQualityLevel::Medium.name(), "Medium");
+/// assert!(VegetationQualityLevel::Low.density_multiplier() < 1.0);
+/// ```
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VegetationQualityLevel {
+    /// Low quality uses shorter draw distances, fewer variants, and lower density.
+    Low,
+
+    /// Medium quality is the balanced default.
+    #[default]
+    Medium,
+
+    /// High quality uses longer draw distances and full near-field detail.
+    High,
+}
+
+impl VegetationQualityLevel {
+    /// Returns a human-readable quality-level name.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::resources::performance::VegetationQualityLevel;
+    ///
+    /// assert_eq!(VegetationQualityLevel::High.name(), "High");
+    /// ```
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::High => "High",
+        }
+    }
+
+    /// Returns the deterministic density multiplier for vegetation spawns.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::resources::performance::VegetationQualityLevel;
+    ///
+    /// assert_eq!(VegetationQualityLevel::Medium.density_multiplier(), 1.0);
+    /// ```
+    pub fn density_multiplier(self) -> f32 {
+        match self {
+            Self::Low => 0.25,
+            Self::Medium => 1.0,
+            Self::High => 1.5,
+        }
+    }
+
+    /// Returns the matching grass performance level.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::resources::grass_quality_settings::GrassPerformanceLevel;
+    /// use antares::game::resources::performance::VegetationQualityLevel;
+    ///
+    /// assert_eq!(
+    ///     VegetationQualityLevel::Low.grass_performance_level(),
+    ///     GrassPerformanceLevel::Low
+    /// );
+    /// ```
+    pub fn grass_performance_level(
+        self,
+    ) -> crate::game::resources::grass_quality_settings::GrassPerformanceLevel {
+        match self {
+            Self::Low => crate::game::resources::grass_quality_settings::GrassPerformanceLevel::Low,
+            Self::Medium => {
+                crate::game::resources::grass_quality_settings::GrassPerformanceLevel::Medium
+            }
+            Self::High => {
+                crate::game::resources::grass_quality_settings::GrassPerformanceLevel::High
+            }
+        }
+    }
+}
+
+/// Render-only quality, LOD, and cache-budget settings for vegetation.
+///
+/// The settings apply to procedural trees, shrubs, and grass. They deliberately
+/// live in the game-resource layer so authors can tune runtime visual quality
+/// without changing domain map data.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::resources::performance::{
+///     VegetationQualityLevel, VegetationQualitySettings,
+/// };
+///
+/// let low = VegetationQualitySettings::for_level(VegetationQualityLevel::Low);
+/// let high = VegetationQualitySettings::for_level(VegetationQualityLevel::High);
+/// assert!(low.vegetation_cull_distance < high.vegetation_cull_distance);
+/// assert!(low.max_tree_mesh_variants_per_species < high.max_tree_mesh_variants_per_species);
+/// ```
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VegetationQualitySettings {
+    /// Vegetation-wide quality preset.
+    pub quality_level: VegetationQualityLevel,
+
+    /// Distance at which trees switch from LOD0 to LOD1.
+    pub tree_lod_distance_1: f32,
+
+    /// Distance at which trees switch from LOD1 to LOD2.
+    pub tree_lod_distance_2: f32,
+
+    /// Distance at which grass switches from near to mid/far LOD.
+    pub grass_lod_distance: f32,
+
+    /// Maximum distance at which vegetation remains visible.
+    pub vegetation_cull_distance: f32,
+
+    /// Maximum reusable mesh variant buckets per species and quality level.
+    pub max_tree_mesh_variants_per_species: usize,
+
+    /// Maximum reusable grass material buckets.
+    pub max_grass_material_variants: usize,
+}
+
+impl Default for VegetationQualitySettings {
+    fn default() -> Self {
+        Self::for_level(VegetationQualityLevel::Medium)
+    }
+}
+
+impl VegetationQualitySettings {
+    /// Builds deterministic settings for a quality preset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::resources::performance::{
+    ///     VegetationQualityLevel, VegetationQualitySettings,
+    /// };
+    ///
+    /// let settings = VegetationQualitySettings::for_level(VegetationQualityLevel::Low);
+    /// assert_eq!(settings.quality_level, VegetationQualityLevel::Low);
+    /// ```
+    pub fn for_level(quality_level: VegetationQualityLevel) -> Self {
+        match quality_level {
+            VegetationQualityLevel::Low => Self {
+                quality_level,
+                tree_lod_distance_1: 10.0,
+                tree_lod_distance_2: 22.0,
+                grass_lod_distance: 8.0,
+                vegetation_cull_distance: 28.0,
+                max_tree_mesh_variants_per_species: 2,
+                max_grass_material_variants: 16,
+            },
+            VegetationQualityLevel::Medium => Self {
+                quality_level,
+                tree_lod_distance_1: DEFAULT_TREE_LOD_DISTANCE_1,
+                tree_lod_distance_2: DEFAULT_TREE_LOD_DISTANCE_2,
+                grass_lod_distance: DEFAULT_GRASS_LOD_DISTANCE,
+                vegetation_cull_distance: DEFAULT_VEGETATION_CULL_DISTANCE,
+                max_tree_mesh_variants_per_species: DEFAULT_MAX_TREE_MESH_VARIANTS_PER_SPECIES,
+                max_grass_material_variants: DEFAULT_MAX_GRASS_MATERIAL_VARIANTS,
+            },
+            VegetationQualityLevel::High => Self {
+                quality_level,
+                tree_lod_distance_1: 28.0,
+                tree_lod_distance_2: 52.0,
+                grass_lod_distance: 24.0,
+                vegetation_cull_distance: 72.0,
+                max_tree_mesh_variants_per_species: 8,
+                max_grass_material_variants: 64,
+            },
+        }
+    }
+
+    /// Returns grass quality settings derived from this vegetation preset.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::resources::grass_quality_settings::GrassPerformanceLevel;
+    /// use antares::game::resources::performance::{
+    ///     VegetationQualityLevel, VegetationQualitySettings,
+    /// };
+    ///
+    /// let settings = VegetationQualitySettings::for_level(VegetationQualityLevel::High);
+    /// assert_eq!(
+    ///     settings.grass_quality_settings().performance_level,
+    ///     GrassPerformanceLevel::High
+    /// );
+    /// ```
+    pub fn grass_quality_settings(
+        self,
+    ) -> crate::game::resources::grass_quality_settings::GrassQualitySettings {
+        crate::game::resources::grass_quality_settings::GrassQualitySettings {
+            performance_level: self.quality_level.grass_performance_level(),
+        }
+    }
+
+    /// Returns whether tree LOD distances are strictly ordered and culling is farthest.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::resources::performance::VegetationQualitySettings;
+    ///
+    /// assert!(VegetationQualitySettings::default().has_valid_lod_order());
+    /// ```
+    pub fn has_valid_lod_order(self) -> bool {
+        self.tree_lod_distance_1 > 0.0
+            && self.tree_lod_distance_2 > self.tree_lod_distance_1
+            && self.vegetation_cull_distance > self.tree_lod_distance_2
+            && self.grass_lod_distance > 0.0
+            && self.vegetation_cull_distance > self.grass_lod_distance
+    }
+}
 
 /// Global performance metrics resource
 ///
@@ -329,6 +572,97 @@ impl MeshCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_vegetation_quality_level_names() {
+        assert_eq!(VegetationQualityLevel::Low.name(), "Low");
+        assert_eq!(VegetationQualityLevel::Medium.name(), "Medium");
+        assert_eq!(VegetationQualityLevel::High.name(), "High");
+    }
+
+    #[test]
+    fn test_vegetation_quality_level_density_multipliers_are_ordered() {
+        assert!(
+            VegetationQualityLevel::Low.density_multiplier()
+                < VegetationQualityLevel::Medium.density_multiplier()
+        );
+        assert!(
+            VegetationQualityLevel::Medium.density_multiplier()
+                < VegetationQualityLevel::High.density_multiplier()
+        );
+    }
+
+    #[test]
+    fn test_vegetation_quality_level_maps_to_grass_performance_level() {
+        use crate::game::resources::grass_quality_settings::GrassPerformanceLevel;
+
+        assert_eq!(
+            VegetationQualityLevel::Low.grass_performance_level(),
+            GrassPerformanceLevel::Low
+        );
+        assert_eq!(
+            VegetationQualityLevel::Medium.grass_performance_level(),
+            GrassPerformanceLevel::Medium
+        );
+        assert_eq!(
+            VegetationQualityLevel::High.grass_performance_level(),
+            GrassPerformanceLevel::High
+        );
+    }
+
+    #[test]
+    fn test_vegetation_quality_settings_default_is_medium() {
+        let settings = VegetationQualitySettings::default();
+
+        assert_eq!(settings.quality_level, VegetationQualityLevel::Medium);
+        assert_eq!(settings.tree_lod_distance_1, DEFAULT_TREE_LOD_DISTANCE_1);
+        assert_eq!(settings.tree_lod_distance_2, DEFAULT_TREE_LOD_DISTANCE_2);
+        assert_eq!(settings.grass_lod_distance, DEFAULT_GRASS_LOD_DISTANCE);
+        assert_eq!(
+            settings.vegetation_cull_distance,
+            DEFAULT_VEGETATION_CULL_DISTANCE
+        );
+    }
+
+    #[test]
+    fn test_vegetation_quality_settings_lod_distances_are_valid_for_all_levels() {
+        for level in [
+            VegetationQualityLevel::Low,
+            VegetationQualityLevel::Medium,
+            VegetationQualityLevel::High,
+        ] {
+            let settings = VegetationQualitySettings::for_level(level);
+            assert!(
+                settings.has_valid_lod_order(),
+                "{level:?} vegetation LOD distances must be ordered"
+            );
+        }
+    }
+
+    #[test]
+    fn test_vegetation_quality_settings_low_reduces_budgets_vs_high() {
+        let low = VegetationQualitySettings::for_level(VegetationQualityLevel::Low);
+        let high = VegetationQualitySettings::for_level(VegetationQualityLevel::High);
+
+        assert!(low.tree_lod_distance_1 < high.tree_lod_distance_1);
+        assert!(low.tree_lod_distance_2 < high.tree_lod_distance_2);
+        assert!(low.grass_lod_distance < high.grass_lod_distance);
+        assert!(low.vegetation_cull_distance < high.vegetation_cull_distance);
+        assert!(low.max_tree_mesh_variants_per_species < high.max_tree_mesh_variants_per_species);
+        assert!(low.max_grass_material_variants < high.max_grass_material_variants);
+    }
+
+    #[test]
+    fn test_vegetation_quality_settings_derives_grass_quality_settings() {
+        use crate::game::resources::grass_quality_settings::GrassPerformanceLevel;
+
+        let settings = VegetationQualitySettings::for_level(VegetationQualityLevel::Low);
+
+        assert_eq!(
+            settings.grass_quality_settings().performance_level,
+            GrassPerformanceLevel::Low
+        );
+    }
 
     #[test]
     fn test_performance_metrics_fps() {
