@@ -2,6 +2,347 @@
 
 ---
 
+## Map Editor: Unsaved-Changes Warning Fires on Apply (Complete)
+
+### Overview
+
+Fixed a UX bug where the campaign-level "unsaved changes" indicator did not
+appear when the user clicked **Apply** or **Apply Terrain Settings** in the Map
+Editor. The warning only appeared after the user clicked the in-editor
+**💾 Save** button — at which point the changes were already on disk and the
+indicator was misleading.
+
+### Root Cause
+
+`MapEditorState::has_changes` is set to `true` by every Apply operation (visual
+metadata apply, terrain apply, tile paint, event add/remove, etc.). The Map
+Editor's header correctly shows the `●` dot based on this flag. However, the
+campaign-level `unsaved_changes` flag (`ctx.unsaved_changes`, which drives the
+app-wide "unsaved changes" warning) was only updated in two places:
+
+- The in-editor **💾 Save** button handler (`*ctx.unsaved_changes = true` after
+  a successful file write).
+- The **⬅ Back to List** button handler (same, on auto-save).
+
+No code ever propagated `has_changes = true` → `*ctx.unsaved_changes = true`
+immediately after an Apply click.
+
+### Fix
+
+Added a single propagation check inside `MapsEditorState::show_editor`
+(`map_editor.rs`), executed on every frame where `active_editor` is present,
+immediately after the zoom-level update and before the button row:
+
+```rust
+// Propagate the map's dirty flag to the campaign-level unsaved-changes
+// indicator on every frame where the editor has pending changes.
+if editor.has_changes {
+    *ctx.unsaved_changes = true;
+}
+```
+
+Because `has_changes` is set synchronously by the Apply button handlers (which
+run in the same egui frame as the click), the campaign indicator now fires on
+the **same frame** as the Apply click — exactly when the user expects it.
+
+### Tests Added
+
+- `test_has_changes_set_by_visual_apply` — verifies `has_changes = true` after
+  a visual-only Apply (the prerequisite for the propagation to fire).
+- `test_has_changes_set_by_terrain_apply` — verifies `has_changes = true` after
+  a terrain Apply (same prerequisite for terrain settings).
+
+### Files Changed
+
+- `sdk/campaign_builder/src/map_editor.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+## Campaign Save: Map Changes Dropped + Missing Map Save Logging (Complete)
+
+### Overview
+
+Fixed two bugs in `CampaignBuilderApp::do_save_campaign` (`campaign_io.rs`) that
+caused map edits to be silently discarded on Campaign Save, and made map saves
+invisible in the application log.
+
+### Bug 1 — Map changes dropped on Campaign Save
+
+`do_save_campaign` iterates `campaign_data.maps` to write each map file. However
+the Map Editor stores its working copy in
+`editor_registry.maps_editor_state.active_editor.map` — a clone created when the
+user opened a map for editing. That clone is only synced back to
+`campaign_data.maps[selected_map_idx]` when the user explicitly clicks the Map
+Editor's own in-editor **💾 Save** or **⬅ Back** buttons.
+
+When the user instead clicked the top-level **Campaign Save** button after
+applying visual/terrain changes, `campaign_data.maps` still contained the
+original pre-edit data. The save loop wrote the stale data to disk, overwriting
+any changes the user had just applied.
+
+**Fix**: Added an active-editor flush block at the top of `do_save_campaign`,
+immediately before the map-save loop. The block uses a two-step borrow pattern
+(extract `editor_flush: Option<(usize, Map)>` in its own scope, then apply the
+write to `campaign_data.maps`) to satisfy the borrow checker. After flushing,
+`editor.has_changes` is cleared so the Map Editor's "unsaved changes" indicator
+stays consistent with the newly-persisted state.
+
+### Bug 2 — Map saves invisible in the application log
+
+`save_map` in `campaign_io.rs` had no `logger.info` call, unlike `save_items`,
+`save_proficiencies`, and `save_furniture`. This made it impossible to confirm
+from the log that map files were being written (or to notice when they were not).
+`save_spells`, `save_monsters`, and `save_conditions` had the same gap.
+
+**Fix**: Added `logger.info(category::FILE_IO, …)` to `save_map`,
+`save_spells`, `save_monsters`, and `save_conditions`, completing consistent
+`[I] FileIO: Saved …` coverage for all save functions.
+
+### Files Changed
+
+- `sdk/campaign_builder/src/campaign_io.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+## Map Editor: Fix Staged Terrain Clobbered by Visual Confirm Reload (Complete)
+
+### Overview
+
+Fixed a bug in `MapEditorState::maybe_load_visual_from_selected_position` where a
+single guard field (`last_loaded_visual_position`) was used to gate reloads of
+**both** `visual_editor` and `terrain_editor_state`. When the Visual Properties
+Apply button fired, it set `last_loaded_visual_position = None` to request a
+confirmation reload on the next frame. On that next frame,
+`maybe_load_visual_from_selected_position` also reloaded `terrain_editor_state`
+from the tile — silently discarding any terrain changes the user had staged in the
+Terrain-Specific Settings panel but had not yet committed by clicking
+"Apply Terrain Settings".
+
+The result: if the user applied visual changes first and terrain changes second
+(across separate frames), the terrain settings visible in the UI were reset to the
+tile's stored values before the terrain Apply button could write them, causing the
+map to be saved without the intended terrain changes.
+
+### Root Cause
+
+`maybe_load_visual_from_selected_position` checked a single condition,
+`Some(pos) != self.last_loaded_visual_position`, to decide whether to reload
+**both** editors. Setting that field to `None` at the same position (after a
+visual Apply) satisfied the condition even though the user had not navigated to a
+new tile, triggering an unintended terrain state reload.
+
+### Changes Made
+
+**`sdk/campaign_builder/src/map_editor.rs`**
+
+- **New field `last_loaded_terrain_position: Option<Position>`** added to
+  `MapEditorState`. This field tracks which tile was last loaded into
+  `terrain_editor_state` independently of `last_loaded_visual_position`, so
+  that a visual "confirmation reload" (setting `last_loaded_visual_position = None`
+  at the same position) no longer affects terrain state.
+
+- **`maybe_load_visual_from_selected_position` updated**: The terrain reload is
+  now gated on `Some(pos) != self.last_loaded_terrain_position` (a separate
+  check from the visual guard). Terrain state is only refreshed from the tile
+  when the selected position actually changes to a different tile. A visual
+  confirm reload at the same position updates `visual_editor` and
+  `last_loaded_visual_position` only.
+
+- **`MapEditorState::new`**: Initialises `last_loaded_terrain_position: None`.
+
+- **Regression test `test_staged_terrain_not_clobbered_by_visual_confirm_reload`**
+  added to `mod tests`. The test simulates the exact multi-frame sequence that
+  triggered the bug:
+  1. Frame 1 — select tile, both editors load.
+  2. User stages terrain changes (not yet applied).
+  3. Frame 2 — visual Apply writes height to tile, sets
+     `last_loaded_visual_position = None`.
+  4. Frame 3 — confirm reload fires; asserts `visual_editor` reflects the applied
+     height AND staged terrain values are unchanged.
+  5. Frame 4 — terrain Apply writes staged terrain; asserts both height and terrain
+     fields are present in the tile.
+
+### Files Changed
+
+- `sdk/campaign_builder/src/map_editor.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+## Map Editor: Terrain/Visual Complete Decoupling + Apply Fix (Complete)
+
+### Overview
+
+Fixed a cluster of bugs in the Campaign Builder → Map Editor → Edit Map → Select Tile inspector panel that made both the Visual Properties and Terrain-Specific Settings panels non-functional.
+
+### Problems Fixed
+
+**Bug 1 — Visual Properties Apply did not actually write changes to the tile:**
+The Apply button called `apply_visual_metadata_to_selection` (which writes all-`None` visual metadata, clearing the tile) and then `apply_terrain_state_to_selection` (which reads the now-blank tile and writes the terrain state). When no visual checkboxes were checked, the entire tile was first zeroed out, then terrain fields were re-applied. However, the Apply button then immediately reset `terrain_editor_state = TerrainEditorState::default()` (Oak) _after_ the write, so the user saw Oak and concluded nothing was saved.
+
+**Bug 2 — Visual Properties Apply reset Terrain-Specific Settings to Oak:**
+After every Apply click, `terrain_editor_state` was unconditionally reset to `TerrainEditorState::default()`, which has `tree_type = TreeType::Oak`. The Terrain-Specific Settings panel would instantly flip back to Oak / Medium density / 0 snow — even if the data had been written correctly to the tile.
+
+**Bug 3 — No independent Apply button for Terrain-Specific Settings:**
+The only way to write terrain changes to the tile was via the Visual Properties Apply button. The two panels were not independent — terrain settings could only be committed as a side effect of a visual apply.
+
+**Bug 4 — Clicking a tile did not populate Terrain-Specific Settings from tile data:**
+`maybe_load_visual_from_selected_position` only reloaded `visual_editor` when the selected position changed. It never reloaded `terrain_editor_state`. After any event that invalidated the position cache (Apply, Reset, etc.) the terrain panel would show defaults, not the tile's actual stored values.
+
+**Bug 5 — Pre-existing broken tests hidden by incomplete quality gate:**
+Two tests (`test_multi_select_preserves_visual_editor` and `test_preset_application_in_multi_select_mode_updates_visual_editor`) compared `visual_editor.to_metadata()` — which explicitly strips all terrain fields — against a `ShortGrass` preset that includes `grass_density`, `foliage_density`, and `grass_blade_config`. The assertion could never pass. These failures were invisible because `cargo nextest run --all-features` without `--workspace` only runs the root `antares` crate, not the `campaign_builder` workspace member.
+
+### Changes Made
+
+**`sdk/campaign_builder/src/map_editor.rs`**
+
+- **`maybe_load_visual_from_selected_position`**: Now also reloads `terrain_editor_state` from `tile.visual` when the position changes. This ensures clicking a tile always populates _both_ Visual Properties and Terrain-Specific Settings from whatever is stored on that tile.
+
+- **`show_inspector_panel` — new "Apply Terrain Settings" button**: Added an independent `✅ Apply Terrain Settings` / `✅ Apply to N Tiles` button in the Terrain-Specific Settings group, between the terrain controls and the existing "Clear Terrain Properties" button. This button:
+
+  - Calls `apply_terrain_state_to_selection()` to write staged terrain values to the tile(s).
+  - Immediately reloads `terrain_editor_state` from `tile.visual` to confirm what was written.
+  - Does **not** touch `visual_editor` (the panels are fully independent).
+
+- **`show_visual_metadata_editor` — Apply button rewritten**: The Visual Properties Apply button now:
+
+  - Uses `apply_preset_to_selection_preserving_terrain(&visual_only)` instead of `apply_visual_metadata_to_selection` — this writes the editor's visual fields while preserving each tile's existing terrain-specific data.
+  - Removes the `apply_terrain_state_to_selection()` call — terrain is applied independently.
+  - Removes the `terrain_editor_state = TerrainEditorState::default()` reset — staged terrain changes are never discarded by a visual-only apply.
+  - Sets `last_loaded_visual_position = None` to trigger a visual reload on the next frame (confirming applied values).
+
+- **Two pre-existing broken test assertions fixed**: Both tests that compared `visual_editor.to_metadata()` against `ShortGrass.to_metadata()` (which includes terrain fields) now strip the terrain-specific fields from the expected value before comparing, with comments explaining why.
+
+- **Three new regression tests added**:
+  - `test_visual_apply_does_not_reset_terrain_editor_state` — staged Pine/2.0/0.8 survives a visual-only Apply.
+  - `test_terrain_apply_button_writes_to_tile_and_reloads_state` — `apply_terrain_state_to_selection` writes Pine/2.0/0.8 to tile and reload confirms.
+  - `test_visual_apply_and_terrain_apply_are_independent` — applying height=3.5 visually and then Birch/1.8 terrain produces a tile with both fields intact.
+
+### Quality Gate Fix
+
+The AGENTS.md quality gate command `cargo nextest run --all-features` only tests the root `antares` crate, not the `campaign_builder` workspace member. The correct command to catch all failures is:
+
+```
+cargo nextest run --all-features --workspace
+```
+
+### Files Changed
+
+- `sdk/campaign_builder/src/map_editor.rs`
+- `docs/explanation/implementations.md`
+
+### Validation
+
+- `cargo fmt --all` passed.
+- `cargo check --all-targets --all-features` passed.
+- `cargo clippy --all-targets --all-features -- -D warnings` passed.
+- `cargo nextest run --all-features --workspace` passed: **7259 tests run, 7259 passed, 8 skipped**.
+
+---
+
+## Map Editor: Visual Properties Preset Independence and Snap-Back Fix (Complete)
+
+### Overview
+
+Fixed two bugs in the Campaign Builder → Map Editor → Edit Map → Select Tile inspector panel.
+
+### Problems Fixed
+
+**Bug 1 — Visual Properties preset dropdown resets tree type to Oak:**
+Every tree-type preset (`SmallTree`, `LargeTree`, `ShortTree`, etc.) hardcodes
+`tree_type: Some(TreeType::Oak)` in its `TileVisualMetadata`. When a preset was
+applied, it wrote the full metadata (including `tree_type`) directly to the tile
+AND overwrote `terrain_editor_state` with the preset's values. This meant:
+
+- Selecting a preset in the Visual Properties dropdown silently clobbered any tree
+  type the user had set in the Terrain-Specific Settings panel.
+- The Visual Preset Palette at the bottom of the inspector had the same problem.
+- The two panels were effectively coupled instead of independent.
+
+**Bug 2 — Height/Scale DragValue snaps back immediately:**
+`maybe_load_visual_from_selected_position()` was called on **every frame** inside
+`show_visual_metadata_editor`. This unconditionally reloaded the tile's saved
+values into the editor every render cycle, so any manual DragValue edit (height,
+scale, etc.) was overwritten on the very next frame before the user could release
+the mouse button.
+
+### Changes Made
+
+**`sdk/campaign_builder/src/map_editor.rs`**
+
+- Added `last_loaded_visual_position: Option<Position>` field to `MapEditorState`.
+  This tracks which tile position was last loaded into the visual editor, allowing
+  the reload to be skipped when the position has not changed.
+
+- Updated `maybe_load_visual_from_selected_position` to gate its reload on
+  `Some(pos) != self.last_loaded_visual_position`. The function now sets
+  `last_loaded_visual_position = Some(pos)` after loading. This means:
+
+  - First click on a tile → loads from tile (position changed from `None`) ✅
+  - Subsequent frames with the same tile selected → skips reload (values stay) ✅
+  - Navigating to a different tile → loads from new tile ✅
+  - Multi-select mode → always skips (existing guard unchanged) ✅
+
+- Added `fn apply_preset_preserving_terrain(pos, preset_metadata)` — merges the
+  preset's visual fields (height, scale, color_tint, y_offset, rotation_y, etc.)
+  with the tile's **existing** terrain-specific fields (tree_type, grass_density,
+  rock_variant, water_flow_direction, foliage_density, snow_coverage,
+  grass_blade_config). Each tile retains its own terrain settings.
+
+- Added `pub fn apply_preset_to_selection_preserving_terrain(preset_metadata)` —
+  calls the above for the selected tile or all multi-selected tiles.
+
+- Updated the **Visual Properties preset dropdown** (`show_visual_metadata_editor`):
+
+  - Uses `apply_preset_to_selection_preserving_terrain` instead of
+    `apply_visual_metadata_to_selection`.
+  - Sets `last_loaded_visual_position = editor.selected_position` after applying,
+    so the preset values shown in the editor are not immediately overwritten by the
+    next-frame reload.
+  - **No longer overwrites `terrain_editor_state`** — the Terrain-Specific Settings
+    panel is fully independent.
+
+- Updated the **Apply button**: adds `last_loaded_visual_position = None` so the
+  next frame reloads from the tile (showing the freshly applied values).
+
+- Updated the **Reset to Defaults** and **Reset Vegetation** buttons: both now set
+  `last_loaded_visual_position = None` to force a tile reload on the next frame.
+
+- Updated the **Visual Preset Palette** handler in `show_inspector_panel`:
+  - Uses `apply_preset_to_selection_preserving_terrain`.
+  - Sets `last_loaded_visual_position`.
+  - Does **not** overwrite `terrain_editor_state`.
+
+### New Tests
+
+Two regression tests added to `mod tests` in `map_editor.rs`:
+
+- `test_preset_preserves_tile_tree_type` — verifies that
+  `apply_preset_to_selection_preserving_terrain` with a `SmallTree` preset (which
+  has `tree_type: Oak`) does NOT overwrite a tile whose `tree_type` was set to Pine.
+  Also verifies that the preset's visual fields (height, scale) are correctly applied.
+
+- `test_visual_editor_values_dont_snap_back_on_same_position` — verifies that
+  calling `maybe_load_visual_from_selected_position` twice for the same position
+  does not reload on the second call, so a manually staged `temp_height = 9.9`
+  survives across frames.
+
+### Files Changed
+
+- `sdk/campaign_builder/src/map_editor.rs`
+- `docs/explanation/implementations.md`
+
+### Validation
+
+- `cargo fmt --all` passed.
+- `cargo check --all-targets --all-features` passed.
+- `cargo clippy --all-targets --all-features -- -D warnings` passed.
+- `cargo nextest run --all-features` passed: 4905 tests passed, 8 skipped.
+
+---
+
 ## Tutorial Map Vegetation Content Refresh (Complete)
 
 ### Overview

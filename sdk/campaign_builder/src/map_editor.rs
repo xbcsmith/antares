@@ -1486,7 +1486,19 @@ pub struct MapEditorState {
     /// Tracks which tile position was last loaded into `visual_editor` by
     /// `maybe_load_visual_from_selected_position`. Used to prevent snap-back
     /// when the user manually edits visual property values between frames.
+    ///
+    /// Setting this to `None` (e.g. after a Visual Apply for confirmation reload)
+    /// must NOT affect terrain state — see `last_loaded_terrain_position`.
     pub last_loaded_visual_position: Option<Position>,
+    /// Tracks which tile position was last loaded into `terrain_editor_state` by
+    /// `maybe_load_visual_from_selected_position`.
+    ///
+    /// This is intentionally separate from `last_loaded_visual_position` so that
+    /// a visual "confirmation reload" (where `last_loaded_visual_position` is set
+    /// to `None` after an Apply) does NOT overwrite staged-but-unapplied terrain
+    /// changes in `terrain_editor_state`. Terrain state is only refreshed from
+    /// the tile when the selected position actually changes to a different tile.
+    pub last_loaded_terrain_position: Option<Position>,
 }
 
 impl MapEditorState {
@@ -1540,6 +1552,7 @@ impl MapEditorState {
             selected_tiles: Vec::new(),
             multi_select_mode: false,
             last_loaded_visual_position: None,
+            last_loaded_terrain_position: None,
         }
     }
 
@@ -1851,6 +1864,17 @@ impl MapEditorState {
             if !self.multi_select_mode && Some(pos) != self.last_loaded_visual_position {
                 if let Some(tile) = self.map.get_tile(pos) {
                     self.visual_editor.load_from_tile(tile);
+                    // Only reload terrain state when the selected position
+                    // actually changes to a different tile — NOT on a visual
+                    // Apply "confirmation reload" (where last_loaded_visual_position
+                    // is set to None at the same position).  Reloading terrain on
+                    // every visual confirm reload would silently discard staged
+                    // terrain changes the user hasn't yet applied.
+                    if Some(pos) != self.last_loaded_terrain_position {
+                        let tile_visual = tile.visual.clone();
+                        self.terrain_editor_state = TerrainEditorState::from_metadata(&tile_visual);
+                        self.last_loaded_terrain_position = Some(pos);
+                    }
                     self.last_loaded_visual_position = Some(pos);
                 }
             }
@@ -4226,6 +4250,15 @@ impl MapsEditorState {
                 self.zoom_level = z;
             }
 
+            // Propagate the map's dirty flag to the campaign-level unsaved-changes
+            // indicator on every frame where the editor has pending changes.
+            // Without this, the "unsaved changes" warning only appears after the
+            // user clicks the in-editor 💾 Save button (which also sets the flag),
+            // but the user expects it as soon as they click Apply on any tile change.
+            if editor.has_changes {
+                *ctx.unsaved_changes = true;
+            }
+
             ui.separator();
             ui.horizontal_wrapped(|ui| {
                 if ui.button("⬅ Back to List").clicked() {
@@ -4864,6 +4897,28 @@ impl MapsEditorState {
                         terrain_type,
                         &mut editor.terrain_editor_state,
                     );
+
+                    ui.separator();
+
+                    // Independent apply button for terrain-specific settings.
+                    // This is the only way to write staged terrain changes to
+                    // the tile; Visual Properties Apply does not touch terrain.
+                    let terrain_apply_text = if !editor.selected_tiles.is_empty() {
+                        format!("✅ Apply to {} Tiles", editor.selected_tiles.len())
+                    } else {
+                        "✅ Apply Terrain Settings".to_string()
+                    };
+                    if ui.button(&terrain_apply_text).clicked() {
+                        editor.apply_terrain_state_to_selection();
+                        // Reload terrain state from the primary selected tile
+                        // so the panel confirms the values just written.
+                        let tile_visual = editor.map.get_tile(pos).map(|t| t.visual.clone());
+                        if let Some(visual) = tile_visual {
+                            editor.terrain_editor_state =
+                                TerrainEditorState::from_metadata(&visual);
+                        }
+                        ui.ctx().request_repaint();
+                    }
 
                     ui.separator();
 
@@ -6739,15 +6794,18 @@ impl MapsEditorState {
             };
 
             if ui.button(&apply_text).clicked() {
-                let visual_metadata = editor.visual_editor.to_metadata();
-                editor.apply_visual_metadata_to_selection(&visual_metadata);
-                editor.apply_terrain_state_to_selection();
+                // Apply only the visual-editor fields to the tile, preserving
+                // each tile's existing terrain-specific data (tree type, grass
+                // density, etc.).  Terrain settings are applied independently
+                // via the "Apply Terrain Settings" button in the
+                // Terrain-Specific Settings panel.
+                let visual_only = editor.visual_editor.to_metadata();
+                editor.apply_preset_to_selection_preserving_terrain(&visual_only);
 
-                // Reset editor UI state after applying
-                editor.visual_editor.reset();
-                editor.terrain_editor_state = TerrainEditorState::default();
-                // Invalidate the position cache so the next frame reloads from
-                // the tile, showing the applied values instead of the reset defaults.
+                // Reload the visual editor from the tile on the next frame to
+                // confirm the applied values.  terrain_editor_state is
+                // intentionally left unchanged — the user's staged terrain
+                // settings must not be discarded by a visual-only apply.
                 editor.last_loaded_visual_position = None;
                 ui.ctx().request_repaint();
             }
@@ -6755,11 +6813,11 @@ impl MapsEditorState {
             if ui.button("Reset to Defaults").clicked() {
                 let default_metadata = TileVisualMetadata::default();
                 editor.apply_visual_metadata_to_selection(&default_metadata);
-                // Also clear terrain metadata (default metadata effectively clears visual representation)
-
+                // Resetting visual also clears any terrain overrides on the tile.
                 editor.visual_editor.reset();
                 editor.terrain_editor_state = TerrainEditorState::default();
-                // Invalidate position cache so the next frame reloads from tile.
+                // Invalidate position cache so the next frame reloads both
+                // panels from the tile (now reset to defaults).
                 editor.last_loaded_visual_position = None;
                 ui.ctx().request_repaint();
             }
@@ -7823,15 +7881,28 @@ mod tests {
         let pos_b = Position::new(1, 1);
         let pos_c = Position::new(2, 2);
 
-        // Simulate applying a preset to a single tile and loading it into the editor
+        // Simulate applying a preset to a single tile and loading it into the editor.
+        // ShortGrass has both visual fields (height, scale, color_tint) and terrain
+        // fields (grass_density, foliage_density, grass_blade_config).
         let preset_md = VisualPreset::ShortGrass.to_metadata();
         editor.apply_visual_metadata(pos_a, &preset_md);
         if let Some(tile) = editor.map.get_tile(pos_a) {
             editor.visual_editor.load_from_tile(tile);
         }
 
-        // Editor should reflect the preset
-        assert_eq!(editor.visual_editor.to_metadata(), preset_md);
+        // visual_editor.to_metadata() only carries visual fields — terrain-specific
+        // fields (grass_density, foliage_density, grass_blade_config) are managed
+        // separately by terrain_editor_state and are always returned as None.
+        // Build the expected value by stripping terrain fields from the preset.
+        let preset_visual_only = TileVisualMetadata {
+            grass_density: None,
+            foliage_density: None,
+            grass_blade_config: None,
+            ..preset_md.clone()
+        };
+
+        // Editor should reflect the visual portion of the preset.
+        assert_eq!(editor.visual_editor.to_metadata(), preset_visual_only);
 
         // Enter multi-select and add other tiles (simulate clicking them)
         editor.toggle_multi_select_mode();
@@ -7846,7 +7917,7 @@ mod tests {
         // Simulate UI attempting to load tile metadata on selection change while multi-select is active.
         // This should NOT overwrite the editor's current pending metadata (the preset).
         editor.maybe_load_visual_from_selected_position();
-        assert_eq!(editor.visual_editor.to_metadata(), preset_md);
+        assert_eq!(editor.visual_editor.to_metadata(), preset_visual_only);
 
         // Now toggle multi-select off (user finishes selection). When the editor attempts to load
         // the selected tile now (single-select semantics), it should load the tile's metadata.
@@ -7903,8 +7974,17 @@ mod tests {
         assert_eq!(tile_b.visual, preset_md);
         assert_eq!(tile_c.visual, preset_md);
 
-        // Editor should reflect applied preset
-        assert_eq!(editor.visual_editor.to_metadata(), preset_md);
+        // Editor should reflect the visual portion of the applied preset.
+        // visual_editor.to_metadata() never returns terrain-specific fields
+        // (grass_density, foliage_density, grass_blade_config) — those are
+        // managed separately by terrain_editor_state.
+        let preset_visual_only = TileVisualMetadata {
+            grass_density: None,
+            foliage_density: None,
+            grass_blade_config: None,
+            ..preset_md.clone()
+        };
+        assert_eq!(editor.visual_editor.to_metadata(), preset_visual_only);
     }
 
     #[test]
@@ -11277,6 +11357,202 @@ mod tests {
     }
 
     #[test]
+    fn test_visual_apply_does_not_reset_terrain_editor_state() {
+        // Verifies that the Visual Properties Apply button does NOT wipe out
+        // the user's staged terrain changes.  The two panels are independent.
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let mut state = MapEditorState::new(map);
+
+        let pos = Position::new(5, 5);
+        state.selected_position = Some(pos);
+        state.selected_terrain = TerrainType::Forest;
+        state.paint_tile(pos);
+
+        // Stage terrain settings (not yet written to tile).
+        state.terrain_editor_state.tree_type = TreeType::Pine;
+        state.terrain_editor_state.foliage_density = 2.0;
+        state.terrain_editor_state.snow_coverage = 0.8;
+
+        // Simulate Visual Properties Apply: preserve terrain fields from tile.
+        let visual_only = state.visual_editor.to_metadata();
+        state.apply_preset_to_selection_preserving_terrain(&visual_only);
+        state.last_loaded_visual_position = None;
+
+        // terrain_editor_state must still show the staged values — not reset
+        // to Oak/default — because Visual Apply is visual-only.
+        assert_eq!(
+            state.terrain_editor_state.tree_type,
+            TreeType::Pine,
+            "terrain_editor_state must not be reset to Oak by a visual-only apply"
+        );
+        assert_eq!(state.terrain_editor_state.foliage_density, 2.0);
+        assert_eq!(state.terrain_editor_state.snow_coverage, 0.8);
+
+        // The tile's terrain fields must still be None (staged but not applied).
+        let tile = state.map.get_tile(pos).unwrap();
+        assert_eq!(
+            tile.visual.tree_type, None,
+            "terrain not yet applied — tile should still have None tree_type"
+        );
+    }
+
+    #[test]
+    fn test_terrain_apply_button_writes_to_tile_and_reloads_state() {
+        // Verifies that apply_terrain_state_to_selection (Terrain Apply button)
+        // correctly writes staged settings to the tile, and that reloading
+        // terrain_editor_state from the tile afterwards shows confirmed values.
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let mut state = MapEditorState::new(map);
+
+        let pos = Position::new(5, 5);
+        state.selected_position = Some(pos);
+        state.selected_terrain = TerrainType::Forest;
+        state.paint_tile(pos);
+
+        // Stage terrain settings.
+        state.terrain_editor_state.tree_type = TreeType::Pine;
+        state.terrain_editor_state.foliage_density = 2.0;
+        state.terrain_editor_state.snow_coverage = 0.8;
+
+        // Simulate Terrain Apply button.
+        state.apply_terrain_state_to_selection();
+
+        // Simulate the post-apply reload (terrain panel confirms applied values).
+        let tile_visual = state.map.get_tile(pos).map(|t| t.visual.clone());
+        if let Some(visual) = tile_visual {
+            state.terrain_editor_state = TerrainEditorState::from_metadata(&visual);
+        }
+
+        // Tile must have the applied terrain fields.
+        let tile = state.map.get_tile(pos).unwrap();
+        assert_eq!(tile.visual.tree_type, Some(TreeType::Pine));
+        assert_eq!(tile.visual.foliage_density, Some(2.0));
+        assert_eq!(tile.visual.snow_coverage, Some(0.8));
+
+        // terrain_editor_state must confirm the written values.
+        assert_eq!(state.terrain_editor_state.tree_type, TreeType::Pine);
+        assert_eq!(state.terrain_editor_state.foliage_density, 2.0);
+        assert_eq!(state.terrain_editor_state.snow_coverage, 0.8);
+    }
+
+    #[test]
+    fn test_visual_apply_and_terrain_apply_are_independent() {
+        // End-to-end test: apply visual first, then terrain (or vice-versa).
+        // Both writes must survive independently in the tile.
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let mut state = MapEditorState::new(map);
+
+        let pos = Position::new(3, 3);
+        state.selected_position = Some(pos);
+        state.selected_terrain = TerrainType::Forest;
+        state.paint_tile(pos);
+
+        // --- Step 1: apply visual (height only) ---
+        state.visual_editor.enable_height = true;
+        state.visual_editor.temp_height = 3.5;
+        let visual_only = state.visual_editor.to_metadata();
+        state.apply_preset_to_selection_preserving_terrain(&visual_only);
+        state.last_loaded_visual_position = None;
+
+        // After visual apply: tile has height, terrain fields still None.
+        let tile = state.map.get_tile(pos).unwrap();
+        assert_eq!(tile.visual.height, Some(3.5));
+        assert_eq!(tile.visual.tree_type, None);
+
+        // --- Step 2: stage terrain, then apply terrain ---
+        state.terrain_editor_state.tree_type = TreeType::Birch;
+        state.terrain_editor_state.foliage_density = 1.8;
+        state.apply_terrain_state_to_selection();
+
+        // After terrain apply: tile must have BOTH height (from visual apply)
+        // and tree_type/foliage (from terrain apply).
+        let tile = state.map.get_tile(pos).unwrap();
+        assert_eq!(
+            tile.visual.height,
+            Some(3.5),
+            "visual height must survive terrain apply"
+        );
+        assert_eq!(tile.visual.tree_type, Some(TreeType::Birch));
+        assert_eq!(tile.visual.foliage_density, Some(1.8));
+    }
+
+    #[test]
+    fn test_staged_terrain_not_clobbered_by_visual_confirm_reload() {
+        // Regression test: applying Visual Properties and then Terrain-Specific
+        // Settings across separate frames must preserve staged terrain changes.
+        //
+        // Bug: setting last_loaded_visual_position = None after visual Apply
+        // triggered maybe_load_visual_from_selected_position to reload
+        // terrain_editor_state from the tile (which lacked the staged terrain
+        // values), silently discarding the user's terrain changes before they
+        // could click "Apply Terrain Settings".
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let mut state = MapEditorState::new(map);
+
+        let pos = Position::new(4, 4);
+        state.selected_position = Some(pos);
+        state.selected_terrain = TerrainType::Grass;
+        state.paint_tile(pos);
+
+        // Simulate Frame 1 – initial tile selection loads both editors.
+        state.maybe_load_visual_from_selected_position();
+        assert_eq!(state.last_loaded_visual_position, Some(pos));
+        assert_eq!(state.last_loaded_terrain_position, Some(pos));
+
+        // User stages terrain changes (not applied to tile yet).
+        state.terrain_editor_state.grass_density = GrassDensity::High;
+        state.terrain_editor_state.foliage_density = 1.8;
+
+        // Simulate Frame 2 – Visual Apply: write to tile, request confirm reload.
+        state.visual_editor.enable_height = true;
+        state.visual_editor.temp_height = 2.5;
+        let visual_only = state.visual_editor.to_metadata();
+        state.apply_preset_to_selection_preserving_terrain(&visual_only);
+        state.last_loaded_visual_position = None; // confirm reload trigger
+
+        // Simulate Frame 3 – visual confirm reload fires.
+        state.maybe_load_visual_from_selected_position();
+
+        // Visual editor should reflect the applied height (confirmation reload).
+        assert!(state.visual_editor.enable_height);
+        assert!(
+            (state.visual_editor.temp_height - 2.5).abs() < 0.01,
+            "visual height must be confirmed after reload"
+        );
+
+        // Staged terrain changes must NOT have been reset by the visual reload.
+        assert_eq!(
+            state.terrain_editor_state.grass_density,
+            GrassDensity::High,
+            "staged grass_density must survive visual confirm reload"
+        );
+        assert!(
+            (state.terrain_editor_state.foliage_density - 1.8).abs() < 0.01,
+            "staged foliage_density must survive visual confirm reload"
+        );
+
+        // Simulate Frame 4 – Terrain Apply: staged values write to tile.
+        state.apply_terrain_state_to_selection();
+
+        // Both visual and terrain changes must now be in the tile.
+        let tile = state.map.get_tile(pos).unwrap();
+        assert_eq!(
+            tile.visual.height,
+            Some(2.5),
+            "visual height must survive terrain apply"
+        );
+        assert_eq!(
+            tile.visual.grass_density,
+            Some(GrassDensity::High),
+            "grass_density must reach the tile"
+        );
+        assert!(
+            (tile.visual.foliage_density.unwrap_or(0.0) - 1.8).abs() < 0.01,
+            "foliage_density must reach the tile"
+        );
+    }
+
+    #[test]
     fn test_visual_editor_values_dont_snap_back_on_same_position() {
         // Verifies that maybe_load_visual_from_selected_position does NOT reload
         // when the position has not changed, so manual DragValue edits survive
@@ -11309,6 +11585,54 @@ mod tests {
         assert_eq!(
             editor.visual_editor.temp_height, 9.9,
             "Staged height must not snap back to tile value"
+        );
+    }
+
+    #[test]
+    fn test_has_changes_set_by_visual_apply() {
+        // Verifies that applying visual properties sets has_changes = true.
+        // This is the prerequisite for the campaign-level unsaved_changes
+        // propagation in show_editor: if has_changes is true, the campaign
+        // indicator fires on the same frame as the Apply click.
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let mut state = MapEditorState::new(map);
+
+        let pos = Position::new(2, 2);
+        state.selected_position = Some(pos);
+
+        assert!(!state.has_changes, "no changes before any apply");
+
+        state.visual_editor.enable_height = true;
+        state.visual_editor.temp_height = 1.8;
+        let visual_only = state.visual_editor.to_metadata();
+        state.apply_preset_to_selection_preserving_terrain(&visual_only);
+
+        assert!(
+            state.has_changes,
+            "has_changes must be true after visual Apply"
+        );
+    }
+
+    #[test]
+    fn test_has_changes_set_by_terrain_apply() {
+        // Verifies that applying terrain-specific settings sets has_changes = true.
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let mut state = MapEditorState::new(map);
+
+        let pos = Position::new(3, 3);
+        state.selected_position = Some(pos);
+        state.selected_terrain = TerrainType::Grass;
+        state.paint_tile(pos);
+
+        // paint_tile sets has_changes; reset it to isolate the terrain apply.
+        state.has_changes = false;
+
+        state.terrain_editor_state.grass_density = GrassDensity::High;
+        state.apply_terrain_state_to_selection();
+
+        assert!(
+            state.has_changes,
+            "has_changes must be true after terrain Apply"
         );
     }
 
