@@ -710,6 +710,119 @@ The plan addresses the reported vegetation issues:
 
 ---
 
+## Skill System — Phase 1: Domain Foundation — Skill Definitions (Complete)
+
+### Overview
+
+Implemented the complete domain foundation for the Antares skill system. Introduces
+`src/domain/skills.rs` as a new module with all skill types, a RON-backed
+`SkillDatabase`, and pure scaling helpers. Wired the database into `ContentDatabase`
+in `src/sdk/database.rs`. Created RON data files for base game, test campaign
+fixture, and tutorial campaign.
+
+### Files Created
+
+| File                                 | Purpose                                                   |
+| ------------------------------------ | --------------------------------------------------------- |
+| `src/domain/skills.rs`               | Full skill domain module (types, DB, scaling, validation) |
+| `data/skills.ron`                    | Base game skill definitions (8 skills, all categories)    |
+| `data/test_campaign/data/skills.ron` | Stable test fixture (6 skills, all 4 scaling modes)       |
+| `campaigns/tutorial/data/skills.ron` | Live campaign skill definitions                           |
+
+### Files Modified
+
+| File                  | Changes                                                                                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/domain/mod.rs`   | Added `pub mod skills;` and Phase 1 re-exports                                                                                                                           |
+| `src/sdk/database.rs` | Added `SkillLoadError`, `ContentDatabase.skills`, loading in `load_campaign`/`load_core`, skill validation in `validate()`, `ContentStats.skill_count`, `stats()` update |
+
+### New Types
+
+| Type               | Kind       | Purpose                                                                                                                |
+| ------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `SkillId`          | type alias | `String` — stable campaign-authored identifier                                                                         |
+| `SkillRank`        | type alias | `u16` — numeric rank value                                                                                             |
+| `SkillCategory`    | enum       | `Combat`, `Exploration`, `Knowledge`, `Social`, `Utility`                                                              |
+| `SkillScalingMode` | enum       | `Flat`, `Linear{base,per_level}`, `Step{base,per_levels,amount}`, `Table{ranks_by_level}`                              |
+| `SkillDefinition`  | struct     | Single campaign-authored skill with validation                                                                         |
+| `SkillDatabase`    | struct     | RON-backed database with `get`, `has`, `all`, `all_ids`, `by_category`, `validate`, `add`, `remove`, `len`, `is_empty` |
+| `SkillError`       | enum       | `SkillNotFound`, `LoadError`, `ParseError`, `ValidationError`, `DuplicateId`                                           |
+
+### New Functions
+
+| Function                                              | Purpose                                                                                                                                                                                    |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `rank_for_level(definition, level)`                   | Pure deterministic scaling — `Flat→0`, `Linear→base + per_level*(level-1)`, `Step→base + ((level-1)/per_levels)*amount`, `Table→ranks_by_level[min(level-1, last)]`; clamped to `max_rank` |
+| `rank_for_level_with_bonus(definition, level, bonus)` | Auto rank + signed bonus, clamped to `0..=max_rank`                                                                                                                                        |
+| `validate_skill_id(id)`                               | Enforces non-empty lowercase snake*case (`a-z`, `0-9`, `*`; must start with `a-z`)                                                                                                         |
+| `validate_skill_rank(rank, max_rank)`                 | Asserts `rank <= max_rank`                                                                                                                                                                 |
+
+### Scaling Mode Formulas
+
+| Mode                                   | Formula                   | Example (perception level 5) |
+| -------------------------------------- | ------------------------- | ---------------------------- |
+| `Flat`                                 | always 0                  | 0                            |
+| `Linear(base:0, per_level:1)`          | `0 + 1*(5-1) = 4`         | 4                            |
+| `Step(base:0, per_levels:2, amount:1)` | `0 + (4/2)*1 = 2`         | 2                            |
+| `Table([0,0,1,1,2,...])`               | `table[min(4, last)] = 2` | 2                            |
+
+### ContentDatabase Integration
+
+- Added `DatabaseError::SkillLoadError(String)` variant.
+- Added `pub skills: SkillDatabase` field to `ContentDatabase`.
+- Both `load_campaign()` and `load_core()` load `data/skills.ron` when present; a missing file is not an error (skill support is opt-in per campaign).
+- `validate()` now calls `self.skills.validate()` — catches step `per_levels == 0`, empty tables, table entries exceeding `max_rank`.
+- `ContentStats` gains `pub skill_count: usize` included in `total()`.
+
+### Tests
+
+Added 30 unit tests in `src/domain/skills.rs` and 1 integration test in `src/sdk/database.rs`.
+
+All Phase 1 required tests from the plan:
+
+| Test                                                       | Location          | Status |
+| ---------------------------------------------------------- | ----------------- | ------ |
+| `test_skill_definition_validate_rejects_empty_id`          | `skills.rs`       | ✅     |
+| `test_skill_definition_validate_rejects_non_snake_case_id` | `skills.rs`       | ✅     |
+| `test_skill_database_rejects_duplicate_id`                 | `skills.rs`       | ✅     |
+| `test_rank_for_level_flat_returns_base_rank`               | `skills.rs`       | ✅     |
+| `test_rank_for_level_linear_scales_by_level`               | `skills.rs`       | ✅     |
+| `test_rank_for_level_step_scales_at_interval`              | `skills.rs`       | ✅     |
+| `test_rank_for_level_table_clamps_after_last_entry`        | `skills.rs`       | ✅     |
+| `test_rank_for_level_clamps_to_max_rank`                   | `skills.rs`       | ✅     |
+| `test_skill_database_loads_test_campaign_fixture`          | `skills.rs`       | ✅     |
+| `test_content_stats_includes_skill_count`                  | `sdk/database.rs` | ✅     |
+
+### Phase 1 Deliverables Checklist
+
+- [x] `src/domain/skills.rs` created with SPDX header and doc comments.
+- [x] `SkillId`, `SkillRank`, `SkillCategory`, `SkillScalingMode`, `SkillDefinition`, `SkillDatabase`, and `SkillError` implemented.
+- [x] Skill rank scaling helpers implemented as pure functions.
+- [x] `src/domain/mod.rs` exports skills module.
+- [x] Base and test skill RON files added.
+- [x] Campaign/content loader includes skill database.
+- [x] Unit tests cover scaling and validation.
+- [x] `docs/explanation/implementations.md` updated.
+
+### Quality Gates
+
+```
+cargo fmt --all          → No output (all files formatted)
+cargo check              → Finished with 0 errors
+cargo clippy             → Finished with 0 warnings
+cargo nextest run        → 4939 passed, 0 failed, 8 skipped
+```
+
+### Architecture Compliance
+
+- `ProficiencyDefinition` was not modified; skills are a strictly additive module.
+- `SkillId` is `String`-typed, consistent with `ProficiencyId` and other ID aliases.
+- RON format used for all data files; no JSON or YAML created.
+- Test fixtures live under `data/test_campaign/data/`, not `campaigns/tutorial`.
+- SPDX copyright/license header on `skills.rs`.
+
+---
+
 ## Skill System Level Scaling Implementation Plan (Complete)
 
 ### Overview

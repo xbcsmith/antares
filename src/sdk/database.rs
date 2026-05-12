@@ -40,6 +40,7 @@ use crate::domain::items::ItemDatabase;
 use crate::domain::magic::types::Spell;
 use crate::domain::quest::{Quest, QuestId};
 use crate::domain::races::{RaceDatabase, RaceError};
+use crate::domain::skills::SkillDatabase;
 use crate::domain::types::{MapId, MonsterId, SpellId};
 use crate::domain::world::furniture::FurnitureDatabase;
 use crate::domain::world::{Map, MapBlueprint};
@@ -91,6 +92,9 @@ pub enum DatabaseError {
 
     #[error("Failed to load furniture: {0}")]
     FurnitureLoadError(String),
+
+    #[error("Failed to load skills: {0}")]
+    SkillLoadError(String),
 
     #[error("Failed to load map {map_id}: {error}")]
     MapLoadError { map_id: String, error: String },
@@ -1081,6 +1085,12 @@ pub struct ContentDatabase {
     /// Loaded from `data/furniture.ron` in the campaign directory.
     /// Missing file is not an error — furniture support is opt-in per campaign.
     pub furniture: FurnitureDatabase,
+
+    /// Skill definitions database.
+    ///
+    /// Loaded from `data/skills.ron` in the campaign directory.
+    /// Missing file is not an error — skills are added progressively.
+    pub skills: SkillDatabase,
 }
 
 impl ContentDatabase {
@@ -1111,6 +1121,7 @@ impl ContentDatabase {
             npc_stock_templates:
                 crate::domain::world::npc_runtime::MerchantStockTemplateDatabase::new(),
             furniture: FurnitureDatabase::new(),
+            skills: SkillDatabase::new(),
         }
     }
 
@@ -1277,6 +1288,14 @@ impl ContentDatabase {
             FurnitureDatabase::new()
         };
 
+        // Load skill definitions (opt-in per campaign; missing file is not an error)
+        let skills = if data_dir.join("skills.ron").exists() {
+            SkillDatabase::load_from_file(data_dir.join("skills.ron"))
+                .map_err(|e| DatabaseError::SkillLoadError(e.to_string()))?
+        } else {
+            SkillDatabase::new()
+        };
+
         Ok(Self {
             classes,
             races,
@@ -1292,6 +1311,7 @@ impl ContentDatabase {
             npc_stock_templates,
             creatures,
             furniture,
+            skills,
         })
     }
 
@@ -1428,6 +1448,14 @@ impl ContentDatabase {
             FurnitureDatabase::new()
         };
 
+        // Load skill definitions (opt-in; missing file is not an error)
+        let skills = if data_path.join("skills.ron").exists() {
+            SkillDatabase::load_from_file(data_path.join("skills.ron"))
+                .map_err(|e| DatabaseError::SkillLoadError(e.to_string()))?
+        } else {
+            SkillDatabase::new()
+        };
+
         Ok(Self {
             classes,
             races,
@@ -1443,6 +1471,7 @@ impl ContentDatabase {
             npc_stock_templates,
             creatures,
             furniture,
+            skills,
         })
     }
 
@@ -1467,6 +1496,11 @@ impl ContentDatabase {
     pub fn validate(&self) -> Result<(), DatabaseError> {
         // Validate classes
         self.classes
+            .validate()
+            .map_err(|e| DatabaseError::ValidationError(e.to_string()))?;
+
+        // Validate skills
+        self.skills
             .validate()
             .map_err(|e| DatabaseError::ValidationError(e.to_string()))?;
 
@@ -1611,6 +1645,7 @@ impl ContentDatabase {
             npc_count: self.npcs.count(),
             creature_count: self.creatures.count(),
             npc_stock_template_count: self.npc_stock_templates.len(),
+            skill_count: self.skills.len(),
         }
     }
 }
@@ -1677,6 +1712,9 @@ pub struct ContentStats {
 
     /// Number of merchant stock template definitions
     pub npc_stock_template_count: usize,
+
+    /// Number of skill definitions
+    pub skill_count: usize,
 }
 
 impl ContentStats {
@@ -1701,6 +1739,7 @@ impl ContentStats {
     ///     npc_count: 12,
     ///     creature_count: 0,
     ///     npc_stock_template_count: 0,
+    ///     skill_count: 0,
     /// };
     /// assert_eq!(stats.total(), 263);
     /// ```
@@ -1718,12 +1757,55 @@ impl ContentStats {
             + self.npc_count
             + self.creature_count
             + self.npc_stock_template_count
+            + self.skill_count
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_content_stats_includes_skill_count() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let db = ContentDatabase::load_campaign(
+            std::path::Path::new(manifest_dir).join("data/test_campaign"),
+        )
+        .expect("test_campaign must load");
+
+        let stats = db.stats();
+
+        // The test campaign fixture defines 5 Phase 1 skills.
+        assert_eq!(
+            stats.skill_count,
+            db.skills.len(),
+            "stats().skill_count must match skills.len()"
+        );
+        // At least the 5 canonical skills must be present.
+        assert!(
+            stats.skill_count >= 5,
+            "test campaign must have at least 5 skills, got {}",
+            stats.skill_count
+        );
+        // skill_count is included in total().
+        assert_eq!(
+            stats.total(),
+            stats.class_count
+                + stats.race_count
+                + stats.item_count
+                + stats.monster_count
+                + stats.spell_count
+                + stats.map_count
+                + stats.quest_count
+                + stats.dialogue_count
+                + stats.condition_count
+                + stats.character_count
+                + stats.npc_count
+                + stats.creature_count
+                + stats.npc_stock_template_count
+                + stats.skill_count,
+        );
+    }
 
     #[test]
     fn test_content_database_new() {
@@ -1766,6 +1848,7 @@ mod tests {
             npc_count: 0,
             creature_count: 0,
             npc_stock_template_count: 0,
+            skill_count: 0,
         };
         assert_eq!(stats.total(), 17);
     }
@@ -2549,6 +2632,7 @@ mod tests {
             npc_count: 0,
             creature_count: 0,
             npc_stock_template_count: 0,
+            skill_count: 0,
         };
 
         // Total should include character_count, npc_count, and creature_count
@@ -2860,6 +2944,7 @@ mod tests {
             creature_count: 0,
             npc_count: 15,
             npc_stock_template_count: 0,
+            skill_count: 0,
         };
 
         assert_eq!(stats.total(), 181);
