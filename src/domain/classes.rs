@@ -13,6 +13,7 @@
 //! See `docs/explanation/sdk_implementation_plan.md` for implementation details.
 
 use crate::domain::proficiency::{ProficiencyDatabase, ProficiencyId};
+use crate::domain::skills::{SkillDatabase, SkillGrant};
 use crate::domain::types::{DiceRoll, ItemId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -40,6 +41,10 @@ pub enum ClassError {
 
     #[error("Invalid proficiency reference: {0}")]
     InvalidProficiency(String),
+
+    /// A skill grant in this class references an unknown skill ID.
+    #[error("Invalid skill reference in class '{0}': skill '{1}' not found")]
+    InvalidSkill(String, String),
 }
 
 // ===== Type Aliases =====
@@ -93,6 +98,7 @@ pub enum SpellStat {
 ///     starting_armor_id: None,
 ///     starting_items: vec![],
 ///     proficiencies: vec!["simple_weapon".to_string(), "heavy_armor".to_string()],
+///     skill_grants: vec![],
 /// };
 ///
 /// assert_eq!(knight.name, "Knight");
@@ -143,6 +149,13 @@ pub struct ClassDefinition {
     /// Uses UNION logic with race proficiencies (class OR race grants proficiency).
     #[serde(default)]
     pub proficiencies: Vec<ProficiencyId>,
+
+    /// Skill grants this class provides to characters of this class.
+    ///
+    /// Each grant adds a flat bonus and/or a per-level bonus to the named skill.
+    /// Defaults to empty for backward compatibility with existing data files.
+    #[serde(default)]
+    pub skill_grants: Vec<SkillGrant>,
 }
 
 impl ClassDefinition {
@@ -178,6 +191,7 @@ impl ClassDefinition {
             starting_armor_id: None,
             starting_items: vec![],
             proficiencies: vec![],
+            skill_grants: vec![],
         }
     }
 
@@ -202,6 +216,7 @@ impl ClassDefinition {
     ///     starting_armor_id: None,
     ///     starting_items: vec![],
     ///     proficiencies: vec![],
+    ///     skill_grants: vec![],
     /// };
     ///
     /// assert!(!knight.can_cast_spells());
@@ -231,6 +246,7 @@ impl ClassDefinition {
     ///     starting_armor_id: None,
     ///     starting_items: vec![],
     ///     proficiencies: vec![],
+    ///     skill_grants: vec![],
     /// };
     ///
     /// assert_eq!(knight.name, "Knight");
@@ -256,6 +272,7 @@ impl ClassDefinition {
     ///     starting_armor_id: None,
     ///     starting_items: vec![],
     ///     proficiencies: vec!["simple_weapon".to_string(), "light_armor".to_string()],
+    ///     skill_grants: vec![],
     /// };
     ///
     /// assert!(robber.has_ability("backstab"));
@@ -299,6 +316,7 @@ impl ClassDefinition {
     ///         "martial_melee".to_string(),
     ///         "heavy_armor".to_string(),
     ///     ],
+    ///     skill_grants: vec![],
     /// };
     ///
     /// assert!(knight.has_proficiency("heavy_armor"));
@@ -519,6 +537,57 @@ impl ClassDatabase {
         Ok(())
     }
 
+    /// Validates that every `skill_id` in every class's `skill_grants` exists in `skill_db`.
+    ///
+    /// Collects all errors rather than failing on the first, so callers can
+    /// report all invalid references in one pass.
+    ///
+    /// # Arguments
+    ///
+    /// * `skill_db` — The loaded [`SkillDatabase`] to validate references against.
+    ///
+    /// # Returns
+    ///
+    /// An empty `Vec` when all skill IDs are valid; a non-empty `Vec` of
+    /// [`SkillError::InvalidSkillReference`] entries otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::classes::ClassDatabase;
+    /// use antares::domain::skills::SkillDatabase;
+    ///
+    /// let class_ron = r#"[
+    ///     (id: "knight", name: "Knight",
+    ///      hp_die: (count: 1, sides: 10, bonus: 0),
+    ///      spell_school: None, is_pure_caster: false, spell_stat: None,
+    ///      special_abilities: [], starting_weapon_id: None, starting_armor_id: None,
+    ///      starting_items: [], proficiencies: [], skill_grants: []),
+    /// ]"#;
+    /// let class_db = ClassDatabase::load_from_string(class_ron).unwrap();
+    /// let skill_db = SkillDatabase::new();
+    /// let errors = class_db.validate_with_skill_db(&skill_db);
+    /// assert!(errors.is_empty());
+    /// ```
+    pub fn validate_with_skill_db(
+        &self,
+        skill_db: &SkillDatabase,
+    ) -> Vec<crate::domain::skills::SkillError> {
+        use crate::domain::skills::SkillError;
+        let mut errors = Vec::new();
+        for class_def in self.classes.values() {
+            for grant in &class_def.skill_grants {
+                if !skill_db.has(&grant.skill_id) {
+                    errors.push(SkillError::InvalidSkillReference(format!(
+                        "Class '{}' references unknown skill '{}'",
+                        class_def.id, grant.skill_id
+                    )));
+                }
+            }
+        }
+        errors
+    }
+
     /// Returns the number of classes in the database
     pub fn len(&self) -> usize {
         self.classes.len()
@@ -581,6 +650,7 @@ mod tests {
                 "martial_melee".to_string(),
                 "heavy_armor".to_string(),
             ],
+            skill_grants: vec![],
         }
     }
 
@@ -598,6 +668,7 @@ mod tests {
             starting_armor_id: None,
             starting_items: vec![],
             proficiencies: vec!["simple_weapon".to_string(), "arcane_item".to_string()],
+            skill_grants: vec![],
         }
     }
 
@@ -945,5 +1016,66 @@ mod tests {
         // Should return InvalidProficiency error
         let res = db.validate_with_proficiency_db(&prof_db);
         assert!(matches!(res, Err(ClassError::InvalidProficiency(_))));
+    }
+
+    #[test]
+    fn test_class_database_validate_with_skill_db_rejects_unknown_skill() {
+        use crate::domain::skills::{SkillDatabase, SkillGrant};
+
+        let grant = SkillGrant {
+            skill_id: "nonexistent_skill".to_string(),
+            flat_bonus: 2,
+            per_level_bonus: 0,
+            minimum_rank: None,
+            maximum_rank_override: None,
+        };
+        drop(grant); // constructed for documentation; RON test below exercises same path
+
+        let ron = r#"[
+            (id: "knight", name: "Knight",
+             hp_die: (count: 1, sides: 10, bonus: 0),
+             spell_school: None, is_pure_caster: false, spell_stat: None,
+             special_abilities: [], starting_weapon_id: None, starting_armor_id: None,
+             starting_items: [], proficiencies: [],
+             skill_grants: [(skill_id: "nonexistent_skill", flat_bonus: 2,
+                             per_level_bonus: 0, minimum_rank: None,
+                             maximum_rank_override: None)]),
+        ]"#;
+
+        let class_db = ClassDatabase::load_from_string(ron).unwrap();
+        let skill_db = SkillDatabase::new(); // empty — no skills registered
+
+        let errors = class_db.validate_with_skill_db(&skill_db);
+        assert!(
+            !errors.is_empty(),
+            "expected errors for unknown skill reference"
+        );
+        assert!(errors[0].to_string().contains("nonexistent_skill"));
+    }
+
+    #[test]
+    fn test_class_database_validate_with_skill_db_accepts_known_skill() {
+        use crate::domain::skills::SkillDatabase;
+
+        let class_ron = r#"[
+            (id: "knight", name: "Knight",
+             hp_die: (count: 1, sides: 10, bonus: 0),
+             spell_school: None, is_pure_caster: false, spell_stat: None,
+             special_abilities: [], starting_weapon_id: None, starting_armor_id: None,
+             starting_items: [], proficiencies: [],
+             skill_grants: [(skill_id: "athletics", flat_bonus: 2, per_level_bonus: 0,
+                             minimum_rank: None, maximum_rank_override: None)]),
+        ]"#;
+
+        let skill_ron = r#"[
+            (id: "athletics", name: "Athletics", category: Utility,
+             description: "", scaling: Flat, max_rank: 20, is_trainable: true),
+        ]"#;
+
+        let class_db = ClassDatabase::load_from_string(class_ron).unwrap();
+        let skill_db = SkillDatabase::load_from_string(skill_ron).unwrap();
+
+        let errors = class_db.validate_with_skill_db(&skill_db);
+        assert!(errors.is_empty(), "no errors expected when skill exists");
     }
 }

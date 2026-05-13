@@ -17,6 +17,10 @@
 //! | [`SkillRank`] | type alias | Numeric rank value (0–65535) |
 //! | [`SkillCategory`] | enum | UI grouping |
 //! | [`SkillScalingMode`] | enum | How a skill's auto-rank grows with level |
+//! | [`SkillGrantSource`] | enum | Which system produced a skill bonus |
+//! | [`SkillGrant`] | struct | Data-driven bonus attached to class/race |
+//! | [`CharacterSkillRanks`] | struct | Persistent character-owned skill ranks |
+//! | [`SkillBreakdown`] | struct | Full rank derivation with source breakdown |
 //! | [`SkillDefinition`] | struct | A single campaign-authored skill |
 //! | [`SkillDatabase`] | struct | Loaded, validated collection of definitions |
 //! | [`SkillError`] | enum | All error conditions for this module |
@@ -75,6 +79,18 @@ pub enum SkillError {
     /// Two or more skill definitions share the same `id`.
     #[error("Duplicate skill ID: {0}")]
     DuplicateId(String),
+
+    /// The character's class ID was not found in the class database.
+    #[error("Class not found: {0}")]
+    ClassNotFound(String),
+
+    /// The character's race ID was not found in the race database.
+    #[error("Race not found: {0}")]
+    RaceNotFound(String),
+
+    /// A skill grant references a skill ID that does not exist in the database.
+    #[error("Invalid skill reference in grant: {0}")]
+    InvalidSkillReference(String),
 }
 
 // ===== Type Aliases =====
@@ -177,6 +193,200 @@ pub enum SkillScalingMode {
         /// Explicit rank values indexed by `level - 1`.
         ranks_by_level: Vec<SkillRank>,
     },
+}
+
+// ===== Skill Grant Types =====
+
+/// Identifies the originating source of a [`SkillGrant`].
+///
+/// Used in [`SkillBreakdown`] to show players (and developers) which system
+/// contributed each bonus to a character's effective skill rank.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::skills::SkillGrantSource;
+///
+/// let source = SkillGrantSource::Class;
+/// assert_eq!(source, SkillGrantSource::Class);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SkillGrantSource {
+    /// Bonus comes from the character's class definition.
+    Class,
+    /// Bonus comes from the character's race definition.
+    Race,
+    /// Bonus comes from explicit persistent character ranks.
+    Character,
+    /// Bonus comes from paid NPC training (future use).
+    Training,
+    /// Bonus is temporary (e.g., spell effect). Not yet implemented.
+    Temporary,
+}
+
+/// A data-driven bonus to a single skill, attached to a class or race definition.
+///
+/// All bonuses are additive. `per_level_bonus` is multiplied by the
+/// character's level before adding. Both can be negative (for penalties).
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::skills::{SkillGrant, SkillGrantSource};
+///
+/// let grant = SkillGrant {
+///     skill_id: "perception".to_string(),
+///     flat_bonus: 2,
+///     per_level_bonus: 0,
+///     minimum_rank: None,
+///     maximum_rank_override: None,
+/// };
+/// assert_eq!(grant.skill_id, "perception");
+/// assert_eq!(grant.flat_bonus, 2);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillGrant {
+    /// The skill this grant applies to.
+    pub skill_id: SkillId,
+
+    /// Flat bonus added regardless of level.
+    pub flat_bonus: i16,
+
+    /// Additional bonus per character level. Defaults to 0.
+    #[serde(default)]
+    pub per_level_bonus: i16,
+
+    /// Optional floor for the effective rank from this source.
+    ///
+    /// Applied after all additive bonuses and the global max-rank clamp.
+    pub minimum_rank: Option<SkillRank>,
+
+    /// Optional grant-specific cap that overrides the global `max_rank`.
+    ///
+    /// Applied as the very last step, so it can only reduce the result.
+    pub maximum_rank_override: Option<SkillRank>,
+}
+
+/// Persistent, character-owned skill ranks keyed by [`SkillId`].
+///
+/// Represents explicit ranks a character has accrued through NPC training or
+/// manual assignment. Auto-derived class/race grants are computed on demand
+/// by [`SkillResolver`] and are NOT stored here.
+///
+/// Supports `#[serde(default)]` at the field site via the `Default` derive.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::skills::{CharacterSkillRanks, SkillRank};
+///
+/// let mut ranks = CharacterSkillRanks::new();
+/// ranks.set("perception".to_string(), 5);
+/// assert_eq!(ranks.get(&"perception".to_string()), Some(5));
+/// assert!(ranks.contains(&"perception".to_string()));
+/// ```
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct CharacterSkillRanks(pub HashMap<SkillId, SkillRank>);
+
+impl CharacterSkillRanks {
+    /// Creates a new, empty ranks map.
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    /// Looks up the persistent rank for `id`.
+    ///
+    /// Returns `None` if the skill has not been explicitly ranked.
+    pub fn get(&self, id: &SkillId) -> Option<SkillRank> {
+        self.0.get(id).copied()
+    }
+
+    /// Inserts or updates the persistent rank for `id`.
+    pub fn set(&mut self, id: SkillId, rank: SkillRank) {
+        self.0.insert(id, rank);
+    }
+
+    /// Increments the persistent rank for `id` by 1.
+    ///
+    /// Inserts at rank `1` if the skill was previously absent.
+    pub fn increment(&mut self, id: &SkillId) {
+        let entry = self.0.entry(id.clone()).or_insert(0);
+        *entry = entry.saturating_add(1);
+    }
+
+    /// Removes the persistent rank entry for `id`.
+    ///
+    /// No-op if the skill was not present.
+    pub fn remove(&mut self, id: &SkillId) {
+        self.0.remove(id);
+    }
+
+    /// Returns `true` if an explicit persistent rank exists for `id`.
+    pub fn contains(&self, id: &SkillId) -> bool {
+        self.0.contains_key(id)
+    }
+}
+
+/// One contribution line in a [`SkillBreakdown`].
+///
+/// Used for UI display and debugging to show which source contributed
+/// how many ranks to the effective total.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::skills::{SkillBreakdownEntry, SkillGrantSource};
+///
+/// let entry = SkillBreakdownEntry { source: SkillGrantSource::Class, bonus: 3 };
+/// assert_eq!(entry.bonus, 3);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillBreakdownEntry {
+    /// Which system produced this bonus.
+    pub source: SkillGrantSource,
+    /// The signed rank contribution (can be negative).
+    pub bonus: i32,
+}
+
+/// Full breakdown of how a character's effective skill rank was computed.
+///
+/// Returned by [`SkillResolver::effective_skill_breakdown`] for UI display
+/// and debugging. The `final_rank` is authoritative; `entries` explain it.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::skills::{SkillBreakdown, SkillBreakdownEntry, SkillGrantSource};
+///
+/// let breakdown = SkillBreakdown {
+///     skill_id: "perception".to_string(),
+///     auto_rank: 4,
+///     entries: vec![
+///         SkillBreakdownEntry { source: SkillGrantSource::Class, bonus: 2 },
+///     ],
+///     character_rank: 0,
+///     final_rank: 6,
+///     applied_minimum_rank: None,
+///     applied_maximum_rank_override: None,
+/// };
+/// assert_eq!(breakdown.final_rank, 6);
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkillBreakdown {
+    /// The skill this breakdown is for.
+    pub skill_id: SkillId,
+    /// Rank from the skill's auto-scaling formula at the character's level.
+    pub auto_rank: SkillRank,
+    /// Individual grant contributions from class, race, etc.
+    pub entries: Vec<SkillBreakdownEntry>,
+    /// Persistent character-owned rank contribution.
+    pub character_rank: SkillRank,
+    /// Final effective rank after clamping, floors, and overrides.
+    pub final_rank: SkillRank,
+    /// The minimum_rank floor applied, if any.
+    pub applied_minimum_rank: Option<SkillRank>,
+    /// The maximum_rank_override cap applied, if any.
+    pub applied_maximum_rank_override: Option<SkillRank>,
 }
 
 // ===== Structures =====
@@ -1305,5 +1515,86 @@ mod tests {
     fn test_skill_category_equality() {
         assert_eq!(SkillCategory::Combat, SkillCategory::Combat);
         assert_ne!(SkillCategory::Social, SkillCategory::Utility);
+    }
+
+    // ── CharacterSkillRanks tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_character_skill_ranks_new_is_empty() {
+        let ranks = CharacterSkillRanks::new();
+        assert!(!ranks.contains(&"perception".to_string()));
+        assert_eq!(ranks.get(&"perception".to_string()), None);
+    }
+
+    #[test]
+    fn test_character_skill_ranks_set_and_get() {
+        let mut ranks = CharacterSkillRanks::new();
+        ranks.set("perception".to_string(), 5);
+        assert_eq!(ranks.get(&"perception".to_string()), Some(5));
+    }
+
+    #[test]
+    fn test_character_skill_ranks_set_overwrites() {
+        let mut ranks = CharacterSkillRanks::new();
+        ranks.set("perception".to_string(), 3);
+        ranks.set("perception".to_string(), 7);
+        assert_eq!(ranks.get(&"perception".to_string()), Some(7));
+    }
+
+    #[test]
+    fn test_character_skill_ranks_increment_from_zero() {
+        let mut ranks = CharacterSkillRanks::new();
+        ranks.increment(&"perception".to_string());
+        assert_eq!(ranks.get(&"perception".to_string()), Some(1));
+    }
+
+    #[test]
+    fn test_character_skill_ranks_increment_existing() {
+        let mut ranks = CharacterSkillRanks::new();
+        ranks.set("perception".to_string(), 4);
+        ranks.increment(&"perception".to_string());
+        assert_eq!(ranks.get(&"perception".to_string()), Some(5));
+    }
+
+    #[test]
+    fn test_character_skill_ranks_remove() {
+        let mut ranks = CharacterSkillRanks::new();
+        ranks.set("perception".to_string(), 5);
+        ranks.remove(&"perception".to_string());
+        assert!(!ranks.contains(&"perception".to_string()));
+        assert_eq!(ranks.get(&"perception".to_string()), None);
+    }
+
+    #[test]
+    fn test_character_skill_ranks_remove_missing_is_noop() {
+        let mut ranks = CharacterSkillRanks::new();
+        ranks.remove(&"nonexistent".to_string()); // no panic
+    }
+
+    #[test]
+    fn test_character_skill_ranks_contains() {
+        let mut ranks = CharacterSkillRanks::new();
+        assert!(!ranks.contains(&"athletics".to_string()));
+        ranks.set("athletics".to_string(), 2);
+        assert!(ranks.contains(&"athletics".to_string()));
+    }
+
+    #[test]
+    fn test_character_skill_ranks_default_is_empty() {
+        let ranks = CharacterSkillRanks::default();
+        assert!(!ranks.contains(&"any".to_string()));
+    }
+
+    #[test]
+    fn test_character_skill_ranks_serde_roundtrip() {
+        let mut ranks = CharacterSkillRanks::new();
+        ranks.set("perception".to_string(), 5);
+        ranks.set("athletics".to_string(), 3);
+        // Serialize via ron then deserialize back
+        let ron_str = ron::to_string(&ranks).expect("serialization failed");
+        let restored: CharacterSkillRanks =
+            ron::from_str(&ron_str).expect("deserialization failed");
+        assert_eq!(restored.get(&"perception".to_string()), Some(5));
+        assert_eq!(restored.get(&"athletics".to_string()), Some(3));
     }
 }

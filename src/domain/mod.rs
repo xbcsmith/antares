@@ -38,6 +38,7 @@ pub mod progression;
 pub mod quest;
 pub mod races;
 pub mod resources;
+pub mod skill_resolver;
 pub mod skills;
 pub mod transactions;
 pub mod types;
@@ -62,12 +63,16 @@ pub use types::{
 };
 pub use types::{DiceRoll, Direction, GameTime, Position};
 
-// Re-export skill types (Phase 1 types; CharacterSkillRanks and PartySkillScope added in later phases)
+// Re-export skill types (Phase 1 + Phase 2)
 pub use skills::{
     rank_for_level, rank_for_level_with_bonus, validate_skill_id, validate_skill_rank,
-    SkillCategory, SkillDatabase, SkillDefinition, SkillError, SkillId, SkillRank,
+    CharacterSkillRanks, SkillBreakdown, SkillBreakdownEntry, SkillCategory, SkillDatabase,
+    SkillDefinition, SkillError, SkillGrant, SkillGrantSource, SkillId, SkillRank,
     SkillScalingMode,
 };
+
+// Re-export skill resolver
+pub use skill_resolver::{SkillResolver, SkillResolverContext};
 
 // Re-export proficiency types
 pub use proficiency::{

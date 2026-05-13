@@ -2,6 +2,483 @@
 
 ---
 
+## Phase 2: Auto Skills — Character Effective Skill Ranks (Complete)
+
+### Overview
+
+Phase 2 implements the gameplay-facing Auto Skills system. Characters now have
+an **effective skill rank** derived from four additive sources:
+
+1. **Auto-scaling** from the skill's `SkillScalingMode` at the character's level.
+2. **Class grants** — flat and/or per-level bonuses defined on the `ClassDefinition`.
+3. **Race grants** — flat and/or per-level bonuses defined on the `RaceDefinition`.
+4. **Persistent character ranks** — stored in `Character::skill_ranks` and updated
+   through NPC training or manual assignment.
+
+The computed rank is clamped to the skill's `max_rank`, then optionally raised by
+`minimum_rank` floors and lowered by `maximum_rank_override` caps declared on
+individual grants.
+
+### New Public Types
+
+| Type                       | Module           | Purpose                                                                                                         |
+| -------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------- |
+| `SkillGrantSource`         | `skills`         | Identifies origin of a rank contribution (`Class`, `Race`, `Character`, `Training`, `Temporary`)                |
+| `SkillGrant`               | `skills`         | Data-driven bonus: `skill_id`, `flat_bonus`, `per_level_bonus`, `minimum_rank`, `maximum_rank_override`         |
+| `CharacterSkillRanks`      | `skills`         | Newtype `HashMap<SkillId, SkillRank>` with `new/get/set/increment/remove/contains` methods                      |
+| `SkillBreakdownEntry`      | `skills`         | One contribution line: `(source, bonus)`                                                                        |
+| `SkillBreakdown`           | `skills`         | Full derivation record for UI/debugging                                                                         |
+| `SkillResolverContext<'a>` | `skill_resolver` | Bundles `level`, `class_id`, `race_id`, `char_ranks`, `class_grants`, `race_grants` to avoid too-many-arguments |
+| `SkillResolver`            | `skill_resolver` | Stateless resolver with four associated functions                                                               |
+
+### New Error Variants (added to `SkillError`)
+
+| Variant                         | Meaning                                           |
+| ------------------------------- | ------------------------------------------------- |
+| `ClassNotFound(String)`         | Character's class ID is missing from the database |
+| `RaceNotFound(String)`          | Character's race ID is missing from the database  |
+| `InvalidSkillReference(String)` | A skill grant references a non-existent skill ID  |
+
+### Effective Rank Formula
+
+```
+auto_rank   = rank_for_level(definition, character.level)
+additive    = auto_rank
+            + Σ class grants (flat_bonus + per_level_bonus × level)
+            + Σ race grants  (flat_bonus + per_level_bonus × level)
+            + character.skill_ranks[skill_id]
+clamped     = clamp(additive, 0, definition.max_rank)
+after_floor = max(clamped, max_of_all_minimum_ranks).min(max_rank)
+final_rank  = min(after_floor, min_of_all_maximum_rank_overrides)
+```
+
+### `SkillResolver` API
+
+All methods are associated functions; callers build a `SkillResolverContext` and pass it in.
+
+| Function                                                                   | Return                               |
+| -------------------------------------------------------------------------- | ------------------------------------ |
+| `SkillResolver::effective_skill_rank(&ctx, skill_id, skills)`              | `Result<SkillRank, SkillError>`      |
+| `SkillResolver::effective_skill_breakdown(&ctx, skill_id, skills)`         | `Result<SkillBreakdown, SkillError>` |
+| `SkillResolver::all_effective_skill_ranks(&ctx, skills)`                   | `HashMap<SkillId, SkillRank>`        |
+| `SkillResolver::character_has_skill_rank(&ctx, skill_id, minimum, skills)` | `bool`                               |
+
+### Files Created or Modified
+
+| File                                  | Change                                                                                                               |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/skills.rs`                | New error variants, `SkillGrantSource`, `SkillGrant`, `CharacterSkillRanks`, `SkillBreakdownEntry`, `SkillBreakdown` |
+| `src/domain/skill_resolver.rs`        | **New file** — `SkillResolverContext`, `SkillResolver`, 16 tests                                                     |
+| `src/domain/classes.rs`               | `ClassDefinition::skill_grants`, `ClassDatabase::validate_with_skill_db`                                             |
+| `src/domain/races.rs`                 | `RaceDefinition::skill_grants`, `RaceDatabase::validate_with_skill_db`                                               |
+| `src/domain/character.rs`             | `Character::skill_ranks: CharacterSkillRanks` with `#[serde(default)]`                                               |
+| `src/domain/mod.rs`                   | `pub mod skill_resolver;`, `SkillResolverContext`, all Phase 2 types re-exported                                     |
+| `data/classes.ron`                    | `skill_grants` added to all 6 base classes                                                                           |
+| `data/races.ron`                      | `skill_grants` added to all 6 base races                                                                             |
+| `data/test_campaign/data/classes.ron` | `skill_grants` added (test fixture)                                                                                  |
+| `data/test_campaign/data/races.ron`   | `skill_grants` added (test fixture)                                                                                  |
+| `campaigns/tutorial/data/classes.ron` | `skill_grants` added (7 classes including monk)                                                                      |
+| `campaigns/tutorial/data/races.ron`   | `skill_grants` added (6 races)                                                                                       |
+
+Cascading struct literal fixes were also applied to:
+`src/sdk/cli/class_editor.rs`, `src/sdk/cli/race_editor.rs`,
+`src/domain/character_definition.rs`, `src/domain/items/equipment_validation.rs`,
+`src/domain/transactions.rs`, `src/game/systems/inventory_ui.rs`,
+`tests/cli_editor_tests.rs`.
+
+### Tests Added (Phase 2.4 Required Tests ✅)
+
+| Test                                                               | Location            | Status |
+| ------------------------------------------------------------------ | ------------------- | ------ |
+| `test_effective_skill_rank_uses_auto_level_scaling`                | `skill_resolver.rs` | ✅     |
+| `test_effective_skill_rank_adds_class_grant`                       | `skill_resolver.rs` | ✅     |
+| `test_effective_skill_rank_adds_race_grant`                        | `skill_resolver.rs` | ✅     |
+| `test_effective_skill_rank_adds_character_rank`                    | `skill_resolver.rs` | ✅     |
+| `test_effective_skill_rank_clamps_to_skill_max`                    | `skill_resolver.rs` | ✅     |
+| `test_effective_skill_rank_missing_skill_returns_error`            | `skill_resolver.rs` | ✅     |
+| `test_effective_skill_rank_missing_class_returns_error`            | `skill_resolver.rs` | ✅     |
+| `test_effective_skill_rank_missing_race_returns_error`             | `skill_resolver.rs` | ✅     |
+| `test_all_effective_skill_ranks_contains_all_database_skills`      | `skill_resolver.rs` | ✅     |
+| `test_skill_grants_deserialize_from_test_campaign_classes`         | `skill_resolver.rs` | ✅     |
+| `test_class_database_validate_with_skill_db_rejects_unknown_skill` | `classes.rs`        | ✅     |
+| `test_race_database_validate_with_skill_db_rejects_unknown_skill`  | `races.rs`          | ✅     |
+
+Additional tests added beyond the required set:
+
+- 10 `CharacterSkillRanks` method tests (`skills.rs`)
+- 3 character-level skill rank tests (`character.rs`)
+- 5 extra resolver integration tests (`skill_resolver.rs`)
+
+### Phase 2.5 Deliverables Checklist
+
+- [x] `SkillGrant` and breakdown types implemented
+- [x] `CharacterSkillRanks` newtype with `new/get/set/increment/remove/contains` implemented
+- [x] `ClassDefinition.skill_grants` added with `#[serde(default)]`
+- [x] `RaceDefinition.skill_grants` added with `#[serde(default)]`
+- [x] `Character.skill_ranks: CharacterSkillRanks` added with `#[serde(default)]`
+- [x] `ClassDatabase::validate_with_skill_db` implemented
+- [x] `RaceDatabase::validate_with_skill_db` implemented
+- [x] Effective skill resolver (`SkillResolver`) implemented in `skill_resolver.rs`
+- [x] Class/race fixture data updated (all 6 data files)
+- [x] Tests cover auto scaling, class grants, race grants, character ranks, and clamping
+- [x] `docs/explanation/implementations.md` updated
+
+### Phase 2.6 Success Criteria Verification
+
+| Criterion                                                                    | Result                                                           |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Level 1 and level 10 of same class resolve different ranks for linear skills | ✅ (`test_effective_skill_rank_uses_auto_level_scaling`)         |
+| Robber has higher `disarm_traps` rank than knight at equal level (fixture)   | ✅ (robber gets flat_bonus: 3, knight gets 0 for `disarm_traps`) |
+| Race grants combine with class grants                                        | ✅ (`test_effective_skill_rank_combines_class_and_race_grants`)  |
+| Existing proficiency-based item usage unchanged                              | ✅ (all 4971 tests pass)                                         |
+| Old saves/RON without `skill_grants` or `skill_ranks` still deserialize      | ✅ (`#[serde(default)]` on all new fields)                       |
+
+### Quality Gates
+
+```
+cargo fmt --all                                    → clean (no output)
+cargo check --all-targets --all-features           → Finished (0 errors, 0 warnings)
+cargo clippy --all-targets --all-features -D warnings → Finished (0 warnings)
+cargo nextest run --all-features                   → 4971 passed, 0 failed, 8 skipped
+```
+
+---
+
+### Overview
+
+Extended `ClassDefinition` (in `src/domain/classes.rs`) and `RaceDefinition`
+(in `src/domain/races.rs`) to carry a `skill_grants: Vec<SkillGrant>` field,
+and added `validate_with_skill_db` to both `ClassDatabase` and `RaceDatabase`
+so that cross-reference errors (grants pointing at unknown skill IDs) are
+collected and reported in one pass.
+
+### What Was Added
+
+#### `src/domain/classes.rs`
+
+- **Import**: `use crate::domain::skills::{SkillDatabase, SkillGrant};`
+- **`ClassError::InvalidSkill(String, String)`** — new error variant (class ID,
+  skill ID) for future use in single-error-returning validators.
+- **`ClassDefinition::skill_grants: Vec<SkillGrant>`** — `#[serde(default)]`
+  field; deserializes to `[]` when absent, so all existing RON data files
+  remain valid without modification.
+- **`ClassDefinition::new`** — initialises `skill_grants: vec![]`.
+- **`ClassDatabase::validate_with_skill_db(&self, skill_db: &SkillDatabase)
+-> Vec<SkillError>`** — iterates every class's grants and pushes an
+  `InvalidSkillReference` entry for each unknown skill ID. Collects all errors
+  rather than short-circuiting on the first.
+- All struct-literal doc examples and in-module test helpers updated to include
+  `skill_grants: vec![]`.
+
+#### `src/domain/races.rs`
+
+- **Import**: `use crate::domain::skills::{SkillDatabase, SkillGrant};`
+- **`RaceDefinition::skill_grants: Vec<SkillGrant>`** — `#[serde(default)]`
+  field; identical backward-compatibility guarantee.
+- **`RaceDefinition::new`** — initialises `skill_grants: vec![]`.
+- **`RaceDatabase::validate_with_skill_db(&self, skill_db: &SkillDatabase)
+-> Vec<SkillError>`** — same collect-all-errors pattern as the class side.
+- All struct-literal doc examples and in-module test helpers updated.
+
+#### Other files updated (struct literals only — no logic change)
+
+| File                                       | What changed                                                |
+| ------------------------------------------ | ----------------------------------------------------------- |
+| `src/sdk/cli/class_editor.rs`              | `ClassDefinition { … }` literal                             |
+| `src/sdk/cli/race_editor.rs`               | `RaceDefinition { … }` literal                              |
+| `src/domain/character_definition.rs`       | 9× `ClassDefinition` + 5× `RaceDefinition` in tests         |
+| `src/domain/items/equipment_validation.rs` | 2× `ClassDefinition` + 2× `RaceDefinition` in test helpers  |
+| `src/domain/transactions.rs`               | 1× `ClassDefinition` in test helper                         |
+| `src/game/systems/inventory_ui.rs`         | 1× `ClassDefinition` in test                                |
+| `tests/cli_editor_tests.rs`                | 2× `ClassDefinition` + 2× `RaceDefinition` in test builders |
+
+### Tests Added
+
+**In `src/domain/classes.rs`**
+
+- `test_class_database_validate_with_skill_db_rejects_unknown_skill` — verifies
+  that a class with a grant referencing a skill absent from the database
+  produces a non-empty error vec whose message contains the unknown skill ID.
+- `test_class_database_validate_with_skill_db_accepts_known_skill` — verifies
+  that a class grant pointing at an existing skill produces no errors.
+
+**In `src/domain/races.rs`**
+
+- `test_race_database_validate_with_skill_db_rejects_unknown_skill` — same
+  pattern for races.
+- `test_race_database_validate_with_skill_db_accepts_known_skill` — same
+  pattern for races.
+
+### Design Decisions
+
+- `#[serde(default)]` ensures forward-compatibility: existing campaign data
+  files that omit `skill_grants` load without error.
+- `validate_with_skill_db` returns `Vec<SkillError>` (collect-all) rather than
+  `Result<(), SkillError>` (fail-fast) so callers can report the full set of
+  broken references in one pass — consistent with how the SDK's campaign
+  builder surfaces validation feedback.
+- The top-level `ClassError::InvalidSkill` variant is added for completeness
+  and future single-error use; `validate_with_skill_db` intentionally uses
+  `SkillError::InvalidSkillReference` to keep error types consistent with the
+  skills module.
+
+### Quality Gates
+
+```
+cargo fmt        → clean (no output)
+cargo check      → Finished (0 errors)
+cargo clippy     → Finished (0 warnings)
+```
+
+### Files Changed
+
+- `src/domain/classes.rs`
+- `src/domain/races.rs`
+- `src/sdk/cli/class_editor.rs`
+- `src/sdk/cli/race_editor.rs`
+- `src/domain/character_definition.rs`
+- `src/domain/items/equipment_validation.rs`
+- `src/domain/transactions.rs`
+- `src/game/systems/inventory_ui.rs`
+- `tests/cli_editor_tests.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+## Phase 2 Skill System: SkillResolver and Grant Types (Complete)
+
+### Overview
+
+Implemented Phase 2 of the Antares skill system, adding data-driven grant types
+(`SkillGrant`, `SkillGrantSource`), persistent character rank storage
+(`CharacterSkillRanks`), diagnostic breakdown types (`SkillBreakdownEntry`,
+`SkillBreakdown`), and the stateless `SkillResolver` that computes each
+character's effective skill rank from all contributing sources.
+
+### What Was Added
+
+#### `src/domain/skills.rs` — New Types
+
+**`SkillError` — 3 new variants**
+
+- `ClassNotFound(String)` — the character's class ID was not found in the class
+  database.
+- `RaceNotFound(String)` — the character's race ID was not found in the race
+  database.
+- `InvalidSkillReference(String)` — a grant references a skill ID that does not
+  exist in the database.
+
+**`SkillGrantSource` (enum)** — identifies which system contributed a bonus:
+`Class`, `Race`, `Character`, `Training`, `Temporary`.
+
+**`SkillGrant` (struct)** — a data-driven bonus attached to a class or race
+definition. Fields: `skill_id`, `flat_bonus`, `per_level_bonus`,
+`minimum_rank`, `maximum_rank_override`. Fully serializable via RON.
+
+**`CharacterSkillRanks` (struct)** — a `HashMap<SkillId, SkillRank>` newtype
+for persistent, character-owned skill ranks. Provides `new`, `get`, `set`,
+`increment`, `remove`, `contains`. Derives `Default`, `Serialize`,
+`Deserialize`.
+
+**`SkillBreakdownEntry` (struct)** — one contribution line in a breakdown:
+`source: SkillGrantSource`, `bonus: i32`.
+
+**`SkillBreakdown` (struct)** — full derivation record returned by
+`SkillResolver::effective_skill_breakdown`: `skill_id`, `auto_rank`, `entries`,
+`character_rank`, `final_rank`, `applied_minimum_rank`,
+`applied_maximum_rank_override`.
+
+#### `src/domain/skill_resolver.rs` — New File
+
+**`SkillResolver` (struct)** — stateless resolver with four associated
+functions:
+
+1. `effective_skill_rank(level, class_id, race_id, char_ranks, skill_id, skills,
+class_grants, race_grants) -> Result<SkillRank, SkillError>` — computes
+   effective rank with the 8-step formula:
+
+   - Auto rank from `rank_for_level`
+   - Additive class grants (flat + per_level × level)
+   - Additive race grants
+   - Additive character persistent rank
+   - Clamp to `[0, max_rank]`
+   - Apply `minimum_rank` floor (most generous across all grants)
+   - Apply `maximum_rank_override` cap (most restrictive across all grants)
+
+2. `effective_skill_breakdown(…) -> Result<SkillBreakdown, SkillError>` —
+   identical computation, but returns a full `SkillBreakdown` with per-source
+   `entries` for UI display and debugging.
+
+3. `all_effective_skill_ranks(…) -> HashMap<SkillId, SkillRank>` — iterates
+   every skill in the database and returns a map of all effective ranks.
+
+4. `character_has_skill_rank(…, minimum) -> bool` — convenience predicate.
+
+### Effective Rank Formula (canonical)
+
+```
+auto_rank = rank_for_level(definition, level)
+additive  = auto_rank
+           + Σ(class grants: flat + per_level × level)
+           + Σ(race grants:  flat + per_level × level)
+           + character_persistent_rank
+clamped   = clamp(additive, 0, definition.max_rank)
+after_floor = max(clamped, highest_minimum_rank).min(max_rank)
+final_rank  = min(after_floor, lowest_maximum_rank_override)
+```
+
+### Design Decisions
+
+- `SkillResolver` is a zero-size struct (pure namespace) to keep all logic as
+  associated functions, avoiding instance-state bugs.
+- Grant slices are passed in rather than database references to prevent circular
+  module dependencies (`skill_resolver` → `skills`, but NOT → `classes`/`races`).
+- `minimum_rank` takes the **most generous** (max) floor across all grants.
+- `maximum_rank_override` takes the **most restrictive** (min) cap across all
+  grants.
+- `SkillBreakdownEntry` records only non-zero contributions, keeping the
+  `entries` vec clean for UI display.
+- `SkillResolver` module registration in `mod.rs` is deferred to a companion
+  agent task; `test_skill_grants_deserialize_from_test_campaign_classes` depends
+  on `ClassDefinition.skill_grants` being added by another agent.
+
+### Tests Added
+
+**In `src/domain/skills.rs` (10 new tests)**
+
+- `test_character_skill_ranks_new_is_empty`
+- `test_character_skill_ranks_set_and_get`
+- `test_character_skill_ranks_set_overwrites`
+- `test_character_skill_ranks_increment_from_zero`
+- `test_character_skill_ranks_increment_existing`
+- `test_character_skill_ranks_remove`
+- `test_character_skill_ranks_remove_missing_is_noop`
+- `test_character_skill_ranks_contains`
+- `test_character_skill_ranks_default_is_empty`
+- `test_character_skill_ranks_serde_roundtrip` (RON round-trip)
+
+**In `src/domain/skill_resolver.rs` (16 tests — active when module is declared)**
+
+- `test_effective_skill_rank_uses_auto_level_scaling`
+- `test_effective_skill_rank_adds_class_grant`
+- `test_effective_skill_rank_adds_race_grant`
+- `test_effective_skill_rank_adds_character_rank`
+- `test_effective_skill_rank_clamps_to_skill_max`
+- `test_effective_skill_rank_missing_skill_returns_error`
+- `test_effective_skill_rank_missing_class_returns_error`
+- `test_effective_skill_rank_missing_race_returns_error`
+- `test_all_effective_skill_ranks_contains_all_database_skills`
+- `test_effective_skill_rank_combines_class_and_race_grants`
+- `test_effective_skill_rank_per_level_bonus_scales`
+- `test_effective_skill_rank_minimum_rank_floor_applied`
+- `test_effective_skill_rank_maximum_rank_override_cap_applied`
+- `test_character_has_skill_rank_true_when_sufficient`
+- `test_character_has_skill_rank_false_when_insufficient`
+- `test_effective_skill_breakdown_returns_correct_entries`
+- `test_skill_grants_deserialize_from_test_campaign_classes` (pending companion agents)
+
+### Quality Gates
+
+```
+cargo fmt        → clean
+cargo check      → Finished (0 errors)
+cargo clippy     → Finished (0 warnings)
+cargo nextest    → 43 passed, 0 failed (skills module)
+```
+
+### Files Changed
+
+- `src/domain/skills.rs` — new error variants, grant types, `CharacterSkillRanks`, breakdowns
+- `src/domain/skill_resolver.rs` — new file (pending `mod.rs` registration)
+- `docs/explanation/implementations.md`
+
+---
+
+## Phase 2 Skill System: Character.skill_ranks, mod.rs Registration, and RON Data Files (Complete)
+
+### Overview
+
+Completed Phase 2 of the Antares skill system by wiring `CharacterSkillRanks`
+into `Character`, registering `skill_resolver` in `mod.rs`, and populating
+`skill_grants` in all six class and race RON data files across three asset
+locations.
+
+### What Was Added
+
+#### `src/domain/character.rs`
+
+- **Import**: `use crate::domain::skills::CharacterSkillRanks;` added at the
+  top of the file.
+- **`Character::skill_ranks: CharacterSkillRanks`** — new last field with
+  `#[serde(default)]`. Existing serialized characters that omit the field
+  deserialize cleanly with an empty map.
+- **`Character::new`** — initialises `skill_ranks: CharacterSkillRanks::new()`.
+- **Test**: `test_character_skill_ranks_field_defaults_on_deserialize` — round-
+  trips a minimal RON string that omits `skill_ranks` and asserts the field
+  defaults to an empty map.
+
+#### `src/domain/mod.rs`
+
+- **`pub mod skill_resolver;`** — module declared after `pub mod skills;`.
+- **Updated re-export block** — comment updated to "Phase 1 + Phase 2";
+  `CharacterSkillRanks`, `SkillBreakdown`, `SkillBreakdownEntry`, `SkillGrant`,
+  and `SkillGrantSource` added to the `pub use skills::{…}` list.
+- **`pub use skill_resolver::SkillResolver;`** — re-exported so callers can
+  reach the resolver via `crate::domain::SkillResolver`.
+
+#### Other files updated (struct literals — no logic change)
+
+| File                                       | What changed                                          |
+| ------------------------------------------ | ----------------------------------------------------- |
+| `src/domain/character_definition.rs`       | Added `skill_ranks` field + import from `skills`      |
+| `src/domain/items/equipment_validation.rs` | Added `skill_ranks` field in test `Character` literal |
+
+#### RON data files — `skill_grants` added to every class and race
+
+| File                                  | Entries added               |
+| ------------------------------------- | --------------------------- |
+| `data/classes.ron`                    | 6 classes (knight → robber) |
+| `data/races.ron`                      | 6 races (human → half_orc)  |
+| `data/test_campaign/data/classes.ron` | 6 classes                   |
+| `data/test_campaign/data/races.ron`   | 6 races                     |
+| `campaigns/tutorial/data/classes.ron` | 7 classes (adds monk)       |
+| `campaigns/tutorial/data/races.ron`   | 6 races                     |
+
+All `skill_grants` fields use the `SkillGrant` struct format:
+`(skill_id, flat_bonus, per_level_bonus, minimum_rank, maximum_rank_override)`.
+Skill IDs reference only skills that exist in the corresponding `skills.ron`.
+
+### Tests Added
+
+**In `src/domain/character.rs`**
+
+- `test_character_skill_ranks_field_defaults_on_deserialize` — proves `#[serde(default)]`
+  works: a RON character without `skill_ranks` deserializes to an empty
+  `CharacterSkillRanks` map.
+
+### Quality Gates
+
+```
+cargo fmt        → clean (no output)
+cargo check      → Finished (0 errors, 0 new warnings)
+```
+
+### Files Changed
+
+- `src/domain/character.rs`
+- `src/domain/character_definition.rs`
+- `src/domain/mod.rs`
+- `src/domain/items/equipment_validation.rs`
+- `data/classes.ron`
+- `data/races.ron`
+- `data/test_campaign/data/classes.ron`
+- `data/test_campaign/data/races.ron`
+- `campaigns/tutorial/data/classes.ron`
+- `campaigns/tutorial/data/races.ron`
+- `docs/explanation/implementations.md`
+
+---
+
 ## Map Editor: Unsaved-Changes Warning Fires on Apply (Complete)
 
 ### Overview
