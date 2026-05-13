@@ -656,6 +656,64 @@ fn evaluate_conditions(
                     return false;
                 }
             }
+            DialogueCondition::SkillCheck {
+                skill_id,
+                minimum_rank,
+                party_scope,
+            } => {
+                use crate::domain::skill_checks::evaluate_party_skill_scope;
+                use crate::domain::skill_resolver::SkillResolverContext;
+
+                // Collect (member, class_grants, race_grants) tuples. All grant
+                // slices borrow from `db` and outlive the context vec below.
+                let member_data: Vec<_> = game_state
+                    .party
+                    .members
+                    .iter()
+                    .filter(|m| m.is_alive())
+                    .map(|member| {
+                        let class_grants = db
+                            .classes
+                            .get_class(&member.class_id)
+                            .map(|c| c.skill_grants.as_slice())
+                            .unwrap_or(&[]);
+                        let race_grants = db
+                            .races
+                            .get_race(&member.race_id)
+                            .map(|r| r.skill_grants.as_slice())
+                            .unwrap_or(&[]);
+                        (member, class_grants, race_grants)
+                    })
+                    .collect();
+
+                let contexts: Vec<SkillResolverContext<'_>> = member_data
+                    .iter()
+                    .map(|(member, class_grants, race_grants)| SkillResolverContext {
+                        level: member.level,
+                        class_id: &member.class_id,
+                        race_id: &member.race_id,
+                        char_ranks: &member.skill_ranks,
+                        class_grants,
+                        race_grants,
+                    })
+                    .collect();
+
+                // Resolve each living member's effective rank for this skill.
+                use crate::domain::skill_resolver::SkillResolver;
+                let member_ranks: Vec<crate::domain::skills::SkillRank> = contexts
+                    .iter()
+                    .map(|ctx| {
+                        SkillResolver::effective_skill_rank(ctx, skill_id, &db.skills).unwrap_or(0)
+                    })
+                    .collect();
+
+                let result =
+                    evaluate_party_skill_scope(&member_ranks, party_scope, None, *minimum_rank);
+
+                if !result.success {
+                    return false;
+                }
+            }
         }
     }
 

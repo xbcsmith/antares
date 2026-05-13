@@ -18,6 +18,7 @@
 //! | [`SkillCategory`] | enum | UI grouping |
 //! | [`SkillScalingMode`] | enum | How a skill's auto-rank grows with level |
 //! | [`SkillGrantSource`] | enum | Which system produced a skill bonus |
+//! | [`PartySkillScope`] | enum | Party scope for skill-gated dialogue conditions |
 //! | [`SkillGrant`] | struct | Data-driven bonus attached to class/race |
 //! | [`CharacterSkillRanks`] | struct | Persistent character-owned skill ranks |
 //! | [`SkillBreakdown`] | struct | Full rank derivation with source breakdown |
@@ -222,6 +223,31 @@ pub enum SkillGrantSource {
     Training,
     /// Bonus is temporary (e.g., spell effect). Not yet implemented.
     Temporary,
+}
+
+/// Scope for party-wide skill checks in dialogue conditions.
+///
+/// Determines which party members' skill ranks are considered when evaluating
+/// a [`crate::domain::dialogue::DialogueCondition::SkillCheck`] condition.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::skills::PartySkillScope;
+///
+/// let scope = PartySkillScope::AnyMember;
+/// assert_eq!(scope, PartySkillScope::AnyMember);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PartySkillScope {
+    /// At least one party member meets the minimum rank threshold.
+    AnyMember,
+    /// The party member currently leading dialogue meets the threshold.
+    ActiveSpeaker,
+    /// Average rank across living members meets the threshold.
+    PartyAverage,
+    /// Sum of ranks across living members meets the threshold.
+    PartyTotal,
 }
 
 /// A data-driven bonus to a single skill, attached to a class or race definition.

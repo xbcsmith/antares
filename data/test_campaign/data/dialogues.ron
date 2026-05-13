@@ -1558,4 +1558,49 @@
         repeatable: true,
         associated_quest: None,
     ),
+    (
+        id: 200,
+        name: "Skill-Gated Ancient Door",
+        root_node: 1,
+        nodes: {
+            1: (
+                id: 1,
+                text: "A faint mechanical clicking emanates from behind the ancient door. You sense something hidden here.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Examine the lock carefully. (Perception 5+)",
+                        target_node: Some(2),
+                        conditions: [
+                            SkillCheck(skill_id: "perception", minimum_rank: 5, party_scope: AnyMember),
+                        ],
+                        actions: [],
+                        ends_dialogue: false,
+                    ),
+                    (
+                        text: "Leave it alone.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
+            2: (
+                id: 2,
+                text: "Your keen eyes spot the hidden mechanism. The trap is disarmed!",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [],
+                is_terminal: true,
+            ),
+        },
+        speaker_name: None,
+        repeatable: true,
+        associated_quest: None,
+    ),
 ]

@@ -2,7 +2,167 @@
 
 ---
 
-## Phase 2: Auto Skills — Character Effective Skill Ranks (Complete)
+## Phase 3: Engine Integration — Skill Checks (Complete)
+
+### Overview
+
+Phase 3 exposes skill ranks to game mechanics through a deterministic skill-check
+API and wires the first real game mechanic — dialogue choice gating — into the
+skill system. A party's effective skill ranks (computed by `SkillResolver`) now
+gate dialogue choices and node conditions via the new
+`DialogueCondition::SkillCheck` variant. All Phase 3 integrations use
+deterministic rank-vs-difficulty comparisons; randomized checks are deferred.
+
+### New Type: `PartySkillScope` in `src/domain/skills.rs`
+
+```antares/src/domain/skills.rs#L230-251
+/// Scope for party-wide skill checks in dialogue conditions.
+pub enum PartySkillScope {
+    AnyMember,      // success if any member's rank >= threshold
+    ActiveSpeaker,  // success if the dialogue-leading member qualifies
+    PartyAverage,   // success if floor(mean rank) >= threshold
+    PartyTotal,     // success if sum of ranks >= threshold
+}
+```
+
+### New Module: `src/domain/skill_checks.rs`
+
+| Item                                | Kind             | Purpose                                                               |
+| ----------------------------------- | ---------------- | --------------------------------------------------------------------- |
+| `SkillCheckDifficulty`              | type alias       | `= SkillRank`; numeric threshold for success                          |
+| `SkillCheckRequest`                 | struct           | `skill_id`, `difficulty`, `modifiers: Vec<i16>`                       |
+| `SkillCheckResult`                  | struct           | `success`, `rank`, `roll: Option<u16>`, `margin: i32`                 |
+| `SkillCheckError`                   | enum (thiserror) | `SkillNotFound`, `ClassNotFound`, `RaceNotFound`, `InvalidDifficulty` |
+| `evaluate_skill_check_without_roll` | fn               | Pure deterministic rank-vs-difficulty; `rank >= difficulty`           |
+| `evaluate_party_skill_scope`        | fn               | Aggregates `member_ranks` by `PartySkillScope` then evaluates         |
+| `skill_check_for_character`         | fn               | Resolves rank via `SkillResolver`, applies modifiers, evaluates       |
+
+#### `evaluate_party_skill_scope` — scope semantics
+
+| `PartySkillScope` | Rank reported in result                         | Success condition               |
+| ----------------- | ----------------------------------------------- | ------------------------------- |
+| `AnyMember`       | Highest rank across all living members          | Any member's rank ≥ difficulty  |
+| `ActiveSpeaker`   | `active_speaker_rank` (falls back to member[0]) | That member's rank ≥ difficulty |
+| `PartyAverage`    | `floor(sum / count)`                            | Average ≥ difficulty            |
+| `PartyTotal`      | `sum`, clamped to `u16::MAX`                    | Sum ≥ difficulty                |
+
+### Changes to `src/domain/skills.rs`
+
+- Module layout table updated to include `PartySkillScope`.
+- `PartySkillScope` enum added after `SkillGrantSource`; derives
+  `Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize`.
+
+### Changes to `src/domain/dialogue.rs`
+
+- Added import: `use crate::domain::skills::{PartySkillScope, SkillId, SkillRank};`
+- New `DialogueCondition::SkillCheck` variant:
+  ```antares/src/domain/dialogue.rs#L1030-1037
+  SkillCheck {
+      skill_id: SkillId,
+      minimum_rank: SkillRank,
+      party_scope: PartySkillScope,
+  },
+  ```
+- `description()` arm: `"Skill check: {skill_id} >= {minimum_rank} ({party_scope:?})"`.
+- New test: `test_dialogue_condition_skill_check_description`.
+
+### Changes to `src/domain/mod.rs`
+
+- Added `pub mod skill_checks;` (alphabetical order, between `skill_resolver` and `transactions`).
+- Skills re-export updated: `PartySkillScope` added.
+- New `skill_checks` re-exports block:
+  `evaluate_party_skill_scope`, `evaluate_skill_check_without_roll`,
+  `skill_check_for_character`, `SkillCheckDifficulty`, `SkillCheckError`,
+  `SkillCheckRequest`, `SkillCheckResult`.
+
+### Changes to `src/game/systems/dialogue.rs`
+
+- `evaluate_conditions` now handles `DialogueCondition::SkillCheck`:
+  builds a `Vec<SkillResolverContext>` from living party members,
+  resolves each member's effective rank via `SkillResolver`, then calls
+  `evaluate_party_skill_scope` with the resolved ranks, scope, `None`
+  active-speaker rank, and the minimum rank as difficulty.
+
+### Configuration Update: `data/test_campaign/data/dialogues.ron`
+
+Added dialogue entry 200 (`"Skill-Gated Ancient Door"`):
+
+- Node 1: root node offering a `Perception 5+` choice gated by
+  `SkillCheck(skill_id: "perception", minimum_rank: 5, party_scope: AnyMember)`.
+- Node 2: terminal success node.
+
+### Tests Added (21 total)
+
+| Test                                                                     | Location          | Validates                                      |
+| ------------------------------------------------------------------------ | ----------------- | ---------------------------------------------- |
+| `test_evaluate_skill_check_without_roll_success_at_threshold`            | `skill_checks.rs` | Rank == difficulty succeeds                    |
+| `test_evaluate_skill_check_without_roll_fails_below_threshold`           | `skill_checks.rs` | Rank below difficulty fails                    |
+| `test_evaluate_skill_check_without_roll_succeeds_above_threshold`        | `skill_checks.rs` | Rank above difficulty succeeds                 |
+| `test_evaluate_skill_check_without_roll_zero_difficulty_always_succeeds` | `skill_checks.rs` | Zero difficulty always passes                  |
+| `test_skill_check_condition_any_member_uses_best_matching_member`        | `skill_checks.rs` | `AnyMember` reports best rank                  |
+| `test_any_member_fails_when_no_member_meets_threshold`                   | `skill_checks.rs` | `AnyMember` fails correctly                    |
+| `test_skill_check_condition_party_total_sums_members`                    | `skill_checks.rs` | `PartyTotal` sums ranks                        |
+| `test_party_total_fails_when_sum_below_threshold`                        | `skill_checks.rs` | `PartyTotal` fails correctly                   |
+| `test_party_average_success`                                             | `skill_checks.rs` | `PartyAverage` computes average                |
+| `test_active_speaker_uses_provided_rank`                                 | `skill_checks.rs` | `ActiveSpeaker` uses supplied rank             |
+| `test_active_speaker_falls_back_to_first_member_when_none`               | `skill_checks.rs` | `ActiveSpeaker` fallback                       |
+| `test_empty_party_returns_failure`                                       | `skill_checks.rs` | Empty party fails                              |
+| `test_skill_gated_dialogue_condition_allows_qualified_party`             | `skill_checks.rs` | Qualified party passes                         |
+| `test_skill_gated_dialogue_condition_blocks_unqualified_party`           | `skill_checks.rs` | Unqualified party fails                        |
+| `test_skill_check_for_character_success_at_threshold`                    | `skill_checks.rs` | Single-character pass                          |
+| `test_skill_check_for_character_failure_below_threshold`                 | `skill_checks.rs` | Single-character fail                          |
+| `test_skill_check_for_character_applies_positive_modifier`               | `skill_checks.rs` | Positive modifier boosts rank                  |
+| `test_skill_check_for_character_applies_negative_modifier`               | `skill_checks.rs` | Negative modifier reduces rank                 |
+| `test_skill_check_for_character_returns_error_for_missing_skill`         | `skill_checks.rs` | `SkillNotFound` propagated                     |
+| `test_skill_check_error_display`                                         | `skill_checks.rs` | Error messages contain context strings         |
+| `test_dialogue_condition_skill_check_description`                        | `dialogue.rs`     | `description()` contains skill_id, rank, scope |
+
+### Phase 3.5 Deliverables Checklist
+
+- [x] `SkillCheckDifficulty` type alias implemented
+- [x] `SkillCheckRequest` struct implemented
+- [x] `SkillCheckResult` struct implemented
+- [x] `SkillCheckError` enum implemented
+- [x] `PartySkillScope` enum implemented in `src/domain/skills.rs`
+- [x] `DialogueCondition::SkillCheck` variant added in `src/domain/dialogue.rs`
+- [x] `evaluate_skill_check_without_roll` — deterministic check implemented
+- [x] `evaluate_party_skill_scope` — party-aggregation check implemented
+- [x] `skill_check_for_character` — single-character resolver + evaluator implemented
+- [x] `roll_skill_check` — deferred (no mechanic requires randomized outcome in Phase 3)
+- [x] One engine mechanic integrated: `DialogueCondition::SkillCheck` evaluated in `dialogue.rs`
+- [x] Tests cover success/failure and all four party scopes
+- [x] `docs/explanation/implementations.md` updated
+
+### Phase 3.6 Success Criteria Verification
+
+| Criterion                                                                | Result                                                        |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| Game systems can query skill ranks through one public resolver/check API | ✅ `skill_check_for_character` + `evaluate_party_skill_scope` |
+| At least one real game mechanic uses a skill threshold                   | ✅ `DialogueCondition::SkillCheck` in `evaluate_conditions`   |
+| Skill checks are deterministic where possible and unit-testable          | ✅ All Phase 3 checks are pure functions with no RNG          |
+| No UI-specific code is required to perform a skill check                 | ✅ All check functions are in `src/domain/skill_checks.rs`    |
+
+### Files Created or Modified
+
+| File                                    | Change                                                                     |
+| --------------------------------------- | -------------------------------------------------------------------------- |
+| `src/domain/skill_checks.rs`            | **New** — full Phase 3 skill check API (21 tests)                          |
+| `src/domain/skills.rs`                  | `PartySkillScope` enum added; module layout table updated                  |
+| `src/domain/dialogue.rs`                | `SkillCheck` variant + import + `description()` arm + 1 test               |
+| `src/domain/mod.rs`                     | `pub mod skill_checks`, updated re-exports for Phase 3 types               |
+| `src/game/systems/dialogue.rs`          | `evaluate_conditions` — `SkillCheck` arm uses `evaluate_party_skill_scope` |
+| `data/test_campaign/data/dialogues.ron` | Dialogue 200 (`Skill-Gated Ancient Door`) added                            |
+
+### Quality Gates
+
+```text
+cargo fmt --all                                       → clean (no output)
+cargo check --all-targets --all-features              → Finished (0 errors)
+cargo clippy --all-targets --all-features -D warnings → Finished (0 warnings)
+cargo nextest run --all-features                      → 4992 passed, 0 failed, 8 skipped
+```
+
+---
 
 ### Overview
 

@@ -12,6 +12,7 @@
 //! See `docs/explanation/sdk_and_campaign_architecture.md` for dialogue specifications.
 
 use crate::domain::quest::QuestId;
+use crate::domain::skills::{PartySkillScope, SkillId, SkillRank};
 use crate::domain::types::{CharacterId, ItemId, SpellId};
 use crate::domain::validation::ValidationError;
 use serde::{Deserialize, Serialize};
@@ -990,7 +991,7 @@ impl DialogueChoice {
 ///
 /// Represents conditions that must be met for a dialogue node or choice to be available.
 /// Conditions can check quest status, inventory, flags, and other game state.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DialogueCondition {
     /// Player has a specific quest
     HasQuest { quest_id: QuestId },
@@ -1024,6 +1025,16 @@ pub enum DialogueCondition {
 
     /// Logical NOT of a condition
     Not(Box<DialogueCondition>),
+
+    /// Party has sufficient skill rank to satisfy a skill gate
+    SkillCheck {
+        /// The skill to check (must exist in the skill database).
+        skill_id: SkillId,
+        /// The minimum effective rank required for success.
+        minimum_rank: SkillRank,
+        /// Which party members' ranks to consider.
+        party_scope: PartySkillScope,
+    },
 }
 
 impl DialogueCondition {
@@ -1057,6 +1068,16 @@ impl DialogueCondition {
             }
             DialogueCondition::Not(condition) => {
                 format!("NOT({})", condition.description())
+            }
+            DialogueCondition::SkillCheck {
+                skill_id,
+                minimum_rank,
+                party_scope,
+            } => {
+                format!(
+                    "Skill check: {} >= {} ({:?})",
+                    skill_id, minimum_rank, party_scope
+                )
             }
         }
     }
@@ -1716,6 +1737,30 @@ mod tests {
 
         let cond3 = DialogueCondition::HasGold { amount: 100 };
         assert!(cond3.description().contains("100 gold"));
+    }
+
+    #[test]
+    fn test_dialogue_condition_skill_check_description() {
+        use crate::domain::skills::PartySkillScope;
+
+        let cond = DialogueCondition::SkillCheck {
+            skill_id: "perception".to_string(),
+            minimum_rank: 5,
+            party_scope: PartySkillScope::AnyMember,
+        };
+        let desc = cond.description();
+        assert!(
+            desc.contains("perception"),
+            "description should contain skill id"
+        );
+        assert!(
+            desc.contains("5"),
+            "description should contain minimum_rank"
+        );
+        assert!(
+            desc.contains("AnyMember"),
+            "description should mention scope"
+        );
     }
 
     #[test]
