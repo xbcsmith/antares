@@ -2,6 +2,83 @@
 
 ---
 
+## Phase 4: Auto Skill UI and Character Display (Complete)
+
+### Overview
+
+Adds a read-only **Skills** section to the Character Sheet single view
+(`src/game/systems/character_sheet_ui.rs`). The section is placed after
+the existing Proficiencies section in the right column of
+`render_single_view`.
+
+Skill ranks are computed on every frame via `SkillResolver::effective_skill_rank`
+(auto-scaling + class/race grants + persistent character ranks) and are never
+mutated by this display path.
+
+### Files Changed
+
+#### `src/game/systems/character_sheet_ui.rs`
+
+- **New imports**: `SkillResolver`, `SkillResolverContext` from
+  `crate::domain::skill_resolver`; `SkillCategory`, `SkillGrantSource` from
+  `crate::domain::skills`.
+
+- **New color constants**:
+
+  - `SKILL_CATEGORY_COLOR` — soft green subheading for each category group.
+  - `SKILL_TRAINABLE_COLOR` — light blue tooltip marker for trainable skills.
+
+- **New function `skill_category_label(cat: SkillCategory) -> &'static str`**
+  — maps each `SkillCategory` variant to a display string.
+
+- **New function `render_skill_section(ui, character, content_db)`**
+  — renders the Skills section. Builds a `SkillResolverContext` from the
+  character's live data (level, class/race grants, persistent `skill_ranks`),
+  iterates the five skill categories in canonical order, and for each skill
+  displays `Name [T]: rank` with an on-hover breakdown tooltip that lists the
+  auto rank, per-source grant bonuses, any min floor or override cap, and a
+  trainability note. Falls back to a grey placeholder when the database is
+  absent or empty.
+
+- **`render_single_view` right column**: calls `render_skill_section` after
+  the Proficiencies block.
+
+### Tests Added (4 new tests)
+
+| Test                                                            | What it verifies                                                                                    |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `test_character_sheet_skill_section_renders_without_panic`      | `render_single_view` does not panic when `ContentDatabase.skills` contains definitions.             |
+| `test_skill_display_uses_effective_rank_not_raw_character_rank` | Effective rank = auto-scale + persistent rank (level 5, linear 0+1 → 4, char rank 2 → effective 6). |
+| `test_skill_breakdown_includes_class_and_race_sources`          | `effective_skill_breakdown` records separate `Class` and `Race` entries for tooltip display.        |
+| `test_skill_display_handles_missing_skill_database_gracefully`  | With `content_db = None` the section renders the placeholder, not a panic.                          |
+
+### Design Decisions
+
+- **Read-only** — the function takes `&Character`, never `&mut Character`.
+  No skill state is modified by this display path.
+- **Lazy resolver construction** — `SkillResolverContext` is built inside
+  `render_skill_section` from the data available in `content_db`; no extra
+  Bevy resources are required.
+- **Stable category order** — categories iterate in the fixed sequence
+  `[Combat, Exploration, Knowledge, Social, Utility]` for a predictable layout.
+- **Per-skill `push_id`** — each skill row is wrapped in `ui.push_id(skill_id)`
+  to prevent egui widget ID collisions between characters with the same skill
+  names.
+- **`id_salt` not required here** — there is no `ScrollArea` inside
+  `render_skill_section`; it is called from within the parent scroll area of
+  the right column.
+
+### Quality Gates
+
+```text
+cargo fmt --all              → no output (clean)
+cargo check --all-targets    → Finished, 0 errors
+cargo clippy -- -D warnings  → Finished, 0 warnings
+cargo nextest run            → 4996 passed, 0 failed
+```
+
+---
+
 ## Phase 3: Engine Integration — Skill Checks (Complete)
 
 ### Overview
