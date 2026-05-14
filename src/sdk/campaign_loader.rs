@@ -301,6 +301,10 @@ pub struct CampaignData {
     /// Furniture definitions data file
     #[serde(default = "default_furniture_path")]
     pub furniture: String,
+
+    /// Skill definitions data file
+    #[serde(default = "default_skills_path")]
+    pub skills: String,
 }
 
 fn default_items_path() -> String {
@@ -345,6 +349,10 @@ fn default_creatures_path() -> String {
 
 fn default_furniture_path() -> String {
     "data/furniture.ron".to_string()
+}
+
+fn default_skills_path() -> String {
+    "data/skills.ron".to_string()
 }
 
 /// Asset paths within campaign
@@ -446,6 +454,7 @@ impl Default for CampaignData {
             characters: default_characters_path(),
             creatures: default_creatures_path(),
             furniture: default_furniture_path(),
+            skills: default_skills_path(),
         }
     }
 }
@@ -595,6 +604,12 @@ pub struct CampaignMetadata {
     /// that lack this field continue to deserialize correctly.
     #[serde(default = "default_furniture_path")]
     pub furniture_file: String,
+    /// Skill definitions data file.
+    ///
+    /// Defaults to `"data/skills.ron"` so existing `campaign.ron` files
+    /// that lack this field continue to deserialize correctly.
+    #[serde(default = "default_skills_path")]
+    pub skills_file: String,
     /// Starting game time for a new campaign (day, hour, minute).
     ///
     /// Defaults to Day 1, 08:00 (morning) if not specified in the RON file.
@@ -667,6 +682,7 @@ impl TryFrom<CampaignMetadata> for Campaign {
                 characters: metadata.characters_file,
                 creatures: metadata.creatures_file,
                 furniture: metadata.furniture_file,
+                skills: metadata.skills_file,
             },
             assets: CampaignAssets {
                 tilesets: "assets/tilesets".to_string(),
@@ -713,7 +729,7 @@ impl Campaign {
 
     /// Load campaign content into ContentDatabase
     pub fn load_content(&self) -> Result<ContentDatabase, CampaignError> {
-        ContentDatabase::load_campaign(&self.root_path)
+        ContentDatabase::load_campaign_with_skills_file(&self.root_path, &self.data.skills)
             .map_err(|e| CampaignError::DatabaseError(e.to_string()))
     }
 
@@ -1081,12 +1097,14 @@ mod tests {
             characters: default_characters_path(),
             creatures: default_creatures_path(),
             furniture: default_furniture_path(),
+            skills: default_skills_path(),
         };
 
         assert_eq!(data.items, "data/items.ron");
         assert_eq!(data.maps, "data/maps");
         assert_eq!(data.quests, "data/quests.ron");
         assert_eq!(data.characters, "data/characters.ron");
+        assert_eq!(data.skills, "data/skills.ron");
     }
 
     #[test]
@@ -1194,6 +1212,7 @@ mod tests {
             characters_file: "data/characters.ron".to_string(),
             creatures_file: "data/creatures.ron".to_string(),
             furniture_file: "data/furniture.ron".to_string(),
+            skills_file: "data/skills.ron".to_string(),
             starting_time: GameTime::new(1, 8, 0),
         };
 

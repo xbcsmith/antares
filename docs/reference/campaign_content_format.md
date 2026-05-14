@@ -19,6 +19,7 @@ campaigns/my_campaign/
     ├── items.ron          # Items and equipment
     ├── spells.ron         # Spells and magic
     ├── monsters.ron       # Monster definitions
+    ├── skills.ron         # Numeric skill definitions and scaling rules
     ├── characters.ron     # Pre-made character definitions
     ├── quests.ron         # Quest definitions
     ├── dialogues.ron      # NPC dialogues
@@ -27,6 +28,83 @@ campaigns/my_campaign/
         ├── map_002.ron
         └── ...
 ```
+
+---
+
+## skills.ron Schema
+
+The `skills.ron` file defines numeric, level-scaled character capabilities.
+Skills are distinct from proficiencies: proficiencies control binary item-use
+permissions, while skills represent ranked capabilities such as perception,
+disarm traps, item lore, and diplomacy.
+
+### File Format
+
+```antares/data/skills.ron#L1-80
+[
+    (
+        id: "perception",
+        name: "Perception",
+        category: Exploration,
+        description: "Notice hidden objects, traps, and threats.",
+        scaling: Linear(base: 0, per_level: 1),
+        max_rank: 50,
+        is_trainable: true,
+    ),
+    (
+        id: "disarm_traps",
+        name: "Disarm Traps",
+        category: Exploration,
+        description: "Safely disarm traps.",
+        scaling: Step(base: 0, per_levels: 2, amount: 1),
+        max_rank: 25,
+        is_trainable: true,
+    ),
+    (
+        id: "diplomacy",
+        name: "Diplomacy",
+        category: Social,
+        description: "Persuasion and negotiation.",
+        scaling: Flat,
+        max_rank: 30,
+        is_trainable: true,
+    ),
+    (
+        id: "arcane_lore",
+        name: "Arcane Lore",
+        category: Knowledge,
+        description: "Knowledge of arcane forces.",
+        scaling: Table(ranks_by_level: [0, 0, 1, 1, 2, 3]),
+        max_rank: 40,
+        is_trainable: true,
+    ),
+]
+```
+
+### SkillDefinition Fields
+
+- **`id`** (`SkillId`/String): Unique lowercase snake_case skill identifier.
+- **`name`** (String): Display name shown in UI.
+- **`category`** (`SkillCategory`): One of `Combat`, `Exploration`, `Knowledge`, `Social`, or `Utility`.
+- **`description`** (String): Tooltip/help text.
+- **`scaling`** (`SkillScalingMode`): Auto-scaling rule. Supported modes are:
+  - `Flat`
+  - `Linear(base, per_level)`
+  - `Step(base, per_levels, amount)`
+  - `Table(ranks_by_level)`
+- **`max_rank`** (`SkillRank`/u16): Hard cap for the effective skill rank.
+- **`is_trainable`** (bool): Whether future NPC skill trainers can improve the skill.
+
+### Validation Rules
+
+1. Skill IDs must be non-empty lowercase snake_case.
+2. Skill names must not be empty.
+3. `max_rank` must be greater than `0`.
+4. `Step.per_levels` must be greater than `0`.
+5. `Table.ranks_by_level` must not be empty.
+6. Table ranks must not exceed `max_rank`.
+7. Class and race `skill_grants` must reference defined skill IDs.
+8. Dialogue `SkillCheck` conditions must reference defined skill IDs and must not require ranks above the skill's `max_rank`.
 
 ---
 

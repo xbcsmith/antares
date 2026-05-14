@@ -2041,6 +2041,114 @@ pub fn extract_proficiency_candidates(
         .collect()
 }
 
+/// Returns display candidates for skill autocomplete selectors.
+///
+/// Each candidate is formatted as `"Name (skill_id)"` while preserving the raw
+/// [`SkillId`](antares::domain::skills::SkillId) for lookup.
+pub fn extract_skill_candidates(
+    skills: &[antares::domain::skills::SkillDefinition],
+) -> Vec<(String, antares::domain::skills::SkillId)> {
+    skills
+        .iter()
+        .map(|skill| (format!("{} ({})", skill.name, skill.id), skill.id.clone()))
+        .collect()
+}
+
+/// Resolves a typed skill autocomplete value into a skill ID.
+///
+/// Accepts exact display strings (`"Name (skill_id)"`) and raw skill IDs.
+pub fn resolve_skill_candidate(
+    text: &str,
+    candidates: &[(String, antares::domain::skills::SkillId)],
+) -> Option<antares::domain::skills::SkillId> {
+    let trimmed = text.trim();
+    candidates
+        .iter()
+        .find(|(display, id)| display == trimmed || id == trimmed)
+        .map(|(_, id)| id.clone())
+}
+
+/// Returns the autocomplete display string for a selected skill ID.
+///
+/// Unknown IDs are returned unchanged so the UI can warn without erasing user data.
+pub fn skill_display_for_id(
+    skill_id: &str,
+    candidates: &[(String, antares::domain::skills::SkillId)],
+) -> String {
+    if skill_id.trim().is_empty() {
+        return String::new();
+    }
+    candidates
+        .iter()
+        .find(|(_, id)| id == skill_id)
+        .map(|(display, _)| display.clone())
+        .unwrap_or_else(|| skill_id.to_string())
+}
+
+/// Shows an autocomplete selector for a skill ID reference.
+///
+/// The selector stores only the stable skill ID in `selected_skill_id`, while
+/// displaying human-readable candidates in the form `"Name (skill_id)"`.
+pub fn autocomplete_skill_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_skill_id: &mut antares::domain::skills::SkillId,
+    skills: &[antares::domain::skills::SkillDefinition],
+) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        if !label.is_empty() {
+            ui.label(label);
+        }
+
+        let candidates = extract_skill_candidates(skills);
+        let displays: Vec<String> = candidates
+            .iter()
+            .map(|(display, _)| display.clone())
+            .collect();
+        let buffer_id = make_autocomplete_id(ui, "skill", id_salt);
+        let current_id = selected_skill_id.clone();
+        let mut text_buffer = load_autocomplete_buffer(ui.ctx(), buffer_id, || {
+            skill_display_for_id(&current_id, &candidates)
+        });
+
+        let response = AutocompleteInput::new(id_salt, &displays)
+            .with_placeholder("Start typing skill name or ID...")
+            .show(ui, &mut text_buffer);
+
+        if response.changed() {
+            if let Some(id) = resolve_skill_candidate(&text_buffer, &candidates) {
+                if *selected_skill_id != id {
+                    *selected_skill_id = id;
+                    changed = true;
+                }
+            }
+        }
+
+        if !selected_skill_id.is_empty() {
+            if let Some((display, _)) = candidates.iter().find(|(_, id)| id == selected_skill_id) {
+                ui.label("ℹ️").on_hover_text(display);
+            } else {
+                ui.colored_label(egui::Color32::YELLOW, "⚠")
+                    .on_hover_text(format!("Unknown skill ID: {}", selected_skill_id));
+            }
+
+            if ui.small_button("✖").on_hover_text("Clear skill").clicked() {
+                selected_skill_id.clear();
+                text_buffer.clear();
+                remove_autocomplete_buffer(ui.ctx(), buffer_id);
+                changed = true;
+            } else {
+                store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+            }
+        } else {
+            store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+        }
+    });
+    changed
+}
+
 /// Loads proficiency definitions with a tri-stage fallback:
 /// 1. Campaign directory RON file
 /// 2. Global data directory RON file

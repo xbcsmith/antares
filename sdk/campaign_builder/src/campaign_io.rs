@@ -954,6 +954,100 @@ impl CampaignBuilderApp {
         results
     }
 
+    /// Validate skill IDs for uniqueness and class/race grant references.
+    pub fn validate_skill_ids(&self) -> Vec<validation::ValidationResult> {
+        let mut results = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+        let mut referenced_skills = std::collections::HashSet::new();
+
+        for skill in &self.campaign_data.skills {
+            if !seen_ids.insert(skill.id.clone()) {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Skills,
+                    format!("Duplicate skill ID: '{}'", skill.id),
+                ));
+            }
+            if skill.id.is_empty() {
+                results.push(validation::ValidationResult::error(
+                    validation::ValidationCategory::Skills,
+                    "Skill has empty ID",
+                ));
+            }
+            if skill.name.is_empty() {
+                results.push(validation::ValidationResult::warning(
+                    validation::ValidationCategory::Skills,
+                    format!("Skill '{}' has empty name", skill.id),
+                ));
+            }
+        }
+
+        for class in &self.editor_registry.classes_editor_state.classes {
+            for grant in &class.skill_grants {
+                referenced_skills.insert(grant.skill_id.clone());
+                if !self
+                    .campaign_data
+                    .skills
+                    .iter()
+                    .any(|s| s.id == grant.skill_id)
+                {
+                    results.push(validation::ValidationResult::error(
+                        validation::ValidationCategory::Skills,
+                        format!(
+                            "Class '{}' references non-existent skill '{}'",
+                            class.id, grant.skill_id
+                        ),
+                    ));
+                }
+            }
+        }
+
+        for race in &self.editor_registry.races_editor_state.races {
+            for grant in &race.skill_grants {
+                referenced_skills.insert(grant.skill_id.clone());
+                if !self
+                    .campaign_data
+                    .skills
+                    .iter()
+                    .any(|s| s.id == grant.skill_id)
+                {
+                    results.push(validation::ValidationResult::error(
+                        validation::ValidationCategory::Skills,
+                        format!(
+                            "Race '{}' references non-existent skill '{}'",
+                            race.id, grant.skill_id
+                        ),
+                    ));
+                }
+            }
+        }
+
+        for skill in &self.campaign_data.skills {
+            if !referenced_skills.contains(&skill.id) {
+                results.push(validation::ValidationResult::info(
+                    validation::ValidationCategory::Skills,
+                    format!("Skill '{}' is not granted by any class or race", skill.id),
+                ));
+            }
+        }
+
+        if self.campaign_data.skills.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Skills,
+                "No skills defined",
+            ));
+        } else if results
+            .iter()
+            .all(|r| r.severity != validation::ValidationSeverity::Error)
+        {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Skills,
+                format!("{} skill(s) validated", self.campaign_data.skills.len()),
+            ));
+        }
+
+        results
+    }
+
     /// Generate category status checks (passed or no data info messages)
     ///
     /// This function checks each data category and adds:
@@ -1085,6 +1179,19 @@ impl CampaignBuilderApp {
                     "{} classes validated",
                     self.editor_registry.classes_editor_state.classes.len()
                 ),
+            ));
+        }
+
+        // Skills category
+        if self.campaign_data.skills.is_empty() {
+            results.push(validation::ValidationResult::info(
+                validation::ValidationCategory::Skills,
+                "No skills loaded - add skills or load from file",
+            ));
+        } else {
+            results.push(validation::ValidationResult::passed(
+                validation::ValidationCategory::Skills,
+                format!("{} skills validated", self.campaign_data.skills.len()),
             ));
         }
 
@@ -1406,6 +1513,59 @@ impl CampaignBuilderApp {
         // If status_message was not updated, the file simply does not exist — silent skip.
     }
 
+    /// Load skills from RON file.
+    pub fn load_skills(&mut self) {
+        self.logger.debug(category::FILE_IO, "load_skills() called");
+        let skills_file = self.campaign.skills_file.clone();
+        let Some(dir) = &self.campaign_dir else {
+            self.logger.debug(
+                category::FILE_IO,
+                "No campaign directory set; skipping skills load",
+            );
+            return;
+        };
+        let path = dir.join(&skills_file);
+        if !path.exists() {
+            self.logger.debug(
+                category::FILE_IO,
+                &format!("Skills file not found (skipping): {}", path.display()),
+            );
+            return;
+        }
+
+        let contents = match std::fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(e) => {
+                let message = format!("Failed to read skills file '{}': {}", path.display(), e);
+                if let Some(ref mut manager) = self.asset_manager {
+                    manager.mark_data_file_error(&skills_file, &message);
+                }
+                self.logger.warn(category::FILE_IO, &message);
+                return;
+            }
+        };
+
+        match ron::from_str::<Vec<antares::domain::skills::SkillDefinition>>(&contents) {
+            Ok(skills) => {
+                let count = skills.len();
+                self.campaign_data.skills = skills;
+                if let Some(ref mut manager) = self.asset_manager {
+                    manager.mark_data_file_loaded(&skills_file, count);
+                }
+                self.logger
+                    .info(category::FILE_IO, &format!("Loaded {} skills", count));
+                self.ui_state.status_message = format!("Loaded {} skills", count);
+            }
+            Err(e) => {
+                let message = format!("Failed to parse skills file '{}': {}", path.display(), e);
+                if let Some(ref mut manager) = self.asset_manager {
+                    manager.mark_data_file_error(&skills_file, &message);
+                }
+                self.logger.warn(category::FILE_IO, &message);
+            }
+        }
+    }
+
     /// Save proficiencies to RON file
     pub fn save_proficiencies(&mut self) -> Result<(), CampaignIoError> {
         self.logger
@@ -1425,6 +1585,25 @@ impl CampaignBuilderApp {
                 "Saved {} proficiencies",
                 self.campaign_data.proficiencies.len()
             ),
+        );
+        self.unsaved_changes = true;
+        Ok(())
+    }
+
+    /// Save skills to RON file.
+    pub fn save_skills(&mut self) -> Result<(), CampaignIoError> {
+        self.logger.debug(category::FILE_IO, "save_skills() called");
+        let mut sorted = self.campaign_data.skills.clone();
+        sorted.sort_by(|a, b| a.id.cmp(&b.id));
+        write_ron_collection(
+            &self.campaign_dir,
+            &self.campaign.skills_file,
+            &sorted,
+            "skills",
+        )?;
+        self.logger.info(
+            category::FILE_IO,
+            &format!("Saved {} skills", self.campaign_data.skills.len()),
         );
         self.unsaved_changes = true;
         Ok(())
@@ -2088,6 +2267,9 @@ impl CampaignBuilderApp {
         self.validation_state
             .validation_errors
             .extend(self.validate_proficiency_ids());
+        self.validation_state
+            .validation_errors
+            .extend(self.validate_skill_ids());
 
         // Spell cross-reference validation (Phase 6)
         self.validation_state
@@ -2547,8 +2729,12 @@ impl CampaignBuilderApp {
         self.editor_registry.spells_editor_state = SpellsEditorState::new();
 
         self.campaign_data.proficiencies.clear();
+        self.campaign_data.skills.clear();
         self.editor_registry.proficiencies_editor_state =
             proficiencies_editor::ProficienciesEditorState::new();
+        self.editor_registry
+            .skills_editor_state
+            .reset_for_new_campaign();
 
         self.campaign_data.monsters.clear();
         self.editor_registry.monsters_editor_state = MonstersEditorState::new();
@@ -2640,6 +2826,10 @@ impl CampaignBuilderApp {
 
         if let Err(e) = self.save_proficiencies() {
             save_warnings.push(format!("Proficiencies: {}", e));
+        }
+
+        if let Err(e) = self.save_skills() {
+            save_warnings.push(format!("Skills: {}", e));
         }
 
         // Flush any active map editor pending changes into campaign_data.maps
@@ -2858,6 +3048,11 @@ impl CampaignBuilderApp {
                     self.load_items();
                     self.load_spells();
                     self.load_proficiencies();
+                    self.editor_registry
+                        .skills_editor_state
+                        .reset_for_new_campaign();
+                    self.campaign_data.skills.clear();
+                    self.load_skills();
                     self.load_monsters();
                     self.load_creatures();
                     self.load_classes_from_campaign();

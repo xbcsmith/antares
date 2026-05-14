@@ -63,6 +63,7 @@ pub mod primitive_generators;
 pub mod proficiencies_editor;
 pub mod quest_editor;
 pub mod races_editor;
+pub mod skills_editor;
 pub mod spells_editor;
 pub mod stock_templates_editor;
 pub mod template_browser;
@@ -236,6 +237,11 @@ pub fn run() -> Result<(), eframe::Error> {
                                 app.load_items();
                                 app.load_spells();
                                 app.load_proficiencies();
+                                app.editor_registry
+                                    .skills_editor_state
+                                    .reset_for_new_campaign();
+                                app.campaign_data.skills.clear();
+                                app.load_skills();
                                 app.load_monsters();
                                 app.load_creatures();
                                 app.load_classes_from_campaign();
@@ -305,6 +311,7 @@ pub fn run() -> Result<(), eframe::Error> {
                                             dialogue_file: &app.campaign.dialogue_file,
                                             npcs_file: &app.campaign.npcs_file,
                                             proficiencies_file: &app.campaign.proficiencies_file,
+                                            skills_file: &app.campaign.skills_file,
                                         };
                                         manager.init_data_files(&data_files_cfg, &map_file_paths);
 
@@ -439,6 +446,8 @@ pub struct CampaignMetadata {
     pub npcs_file: String,
     #[serde(default = "default_proficiencies_file")]
     pub proficiencies_file: String,
+    #[serde(default = "default_skills_file")]
+    pub skills_file: String,
     #[serde(default = "default_creatures_file")]
     pub creatures_file: String,
     /// Relative path to the NPC stock templates RON file
@@ -502,6 +511,10 @@ pub fn default_starting_innkeeper() -> String {
 
 fn default_proficiencies_file() -> String {
     "data/proficiencies.ron".to_string()
+}
+
+fn default_skills_file() -> String {
+    "data/skills.ron".to_string()
 }
 
 fn default_creatures_file() -> String {
@@ -576,6 +589,7 @@ impl Default for CampaignMetadata {
             conditions_file: "data/conditions.ron".to_string(),
             npcs_file: "data/npcs.ron".to_string(),
             proficiencies_file: "data/proficiencies.ron".to_string(),
+            skills_file: "data/skills.ron".to_string(),
             creatures_file: "data/creatures.ron".to_string(),
             stock_templates_file: "data/npc_stock_templates.ron".to_string(),
             furniture_file: "data/furniture.ron".to_string(),
@@ -608,6 +622,7 @@ pub enum EditorTab {
     Dialogues,
     NPCs,
     Proficiencies,
+    Skills,
     StockTemplates,
     Assets,
     Validation,
@@ -635,6 +650,7 @@ impl EditorTab {
             EditorTab::Dialogues => "Dialogues",
             EditorTab::NPCs => "NPCs",
             EditorTab::Proficiencies => "Proficiencies",
+            EditorTab::Skills => "Skills",
             EditorTab::StockTemplates => "Stock Templates",
             EditorTab::Assets => "Assets",
             EditorTab::Validation => "Validation",
@@ -1084,6 +1100,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Dialogues,
                     EditorTab::NPCs,
                     EditorTab::Proficiencies,
+                    EditorTab::Skills,
                     EditorTab::StockTemplates,
                     EditorTab::Assets,
                     EditorTab::Validation,
@@ -1410,6 +1427,7 @@ impl eframe::App for CampaignBuilderApp {
                 self.editor_registry.classes_editor_state.show(
                     ui,
                     &self.campaign_data.items,
+                    &self.campaign_data.skills,
                     &mut classes_ctx,
                 );
             }
@@ -1445,6 +1463,7 @@ impl eframe::App for CampaignBuilderApp {
                 self.editor_registry.races_editor_state.show(
                     ui,
                     &self.campaign_data.items,
+                    &self.campaign_data.skills,
                     &mut races_ctx,
                 );
             }
@@ -1617,6 +1636,22 @@ impl eframe::App for CampaignBuilderApp {
                     &self.editor_registry.races_editor_state.races,
                     &self.campaign_data.items,
                     &mut profs_ctx,
+                );
+            }
+            EditorTab::Skills => {
+                let mut skills_ctx = EditorContext {
+                    campaign_dir: self.campaign_dir.as_ref(),
+                    data_file: &self.campaign.skills_file,
+                    unsaved_changes: &mut self.unsaved_changes,
+                    status_message: &mut self.ui_state.status_message,
+                    file_load_merge_mode: &mut self.ui_state.file_load_merge_mode,
+                };
+                self.editor_registry.skills_editor_state.show(
+                    ui,
+                    &mut self.campaign_data.skills,
+                    &self.editor_registry.classes_editor_state.classes,
+                    &self.editor_registry.races_editor_state.races,
+                    &mut skills_ctx,
                 );
             }
             EditorTab::Assets => self.show_assets_editor(ui),
@@ -2146,6 +2181,7 @@ impl CampaignBuilderApp {
                         dialogue_file: &self.campaign.dialogue_file,
                         npcs_file: &self.campaign.npcs_file,
                         proficiencies_file: &self.campaign.proficiencies_file,
+                        skills_file: &self.campaign.skills_file,
                     };
                     manager.init_data_files(&data_files_cfg, &map_file_paths);
                     // Scan references on initial load so portraits are properly marked as referenced

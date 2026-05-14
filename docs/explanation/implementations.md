@@ -2,6 +2,96 @@
 
 ---
 
+## Phase 5: SDK Skills Editor (Complete)
+
+### Overview
+
+Implemented the Campaign Builder Skills Editor UI for authoring `skills.ron`
+and skill grants. The editor follows the SDK two-column list/detail pattern,
+uses standard list rows, supports category filtering, import/export, scaling
+mode editing, and usage tracking across class/race skill grants.
+
+### What Changed
+
+- Added `sdk/campaign_builder/src/skills_editor.rs` with `SkillsEditorState`,
+  `SkillsEditorMode`, `SkillCategoryFilter`, usage tracking, add/edit forms,
+  import/export dialog, and scaling editors for `Flat`, `Linear`, `Step`, and
+  `Table` modes.
+- Added `EditorTab::Skills`, sidebar entry, central-panel dispatch, and
+  `EditorRegistry.skills_editor_state`.
+- Wired startup/open/new campaign flows to reset and load skills consistently.
+- Added skill ID autocomplete helpers in `ui_helpers/autocomplete.rs`.
+- Added class and race skill-grant editing sections that preserve existing
+  grants instead of dropping them on save.
+- Kept Skills Editor list/detail UI on `TwoColumnLayout`; row loops use
+  `push_id`, list rows use `show_standard_list_item`, combo boxes use
+  `from_id_salt`, and action rows use `horizontal_wrapped`.
+
+### Tests Added / Updated
+
+- Added Skills Editor tests for default state, valid default skill, category
+  filtering, linear/step scaling round-trips, usage tracking, and validation of
+  unknown class/race skill references.
+- Added skill autocomplete helper tests for candidate extraction, display-string
+  resolution, raw skill ID resolution, unknown-ID rejection, and display
+  initialization.
+- Updated class/race editor tests to cover skill-grant round-trips and filtering
+  empty grants during save.
+
+### Quality Gates
+
+- `cargo fmt --all` — completed successfully.
+- `cargo check --all-targets --all-features` — completed successfully.
+- `cargo clippy --all-targets --all-features -- -D warnings` — completed successfully.
+- `cargo nextest run --all-features --status-level fail --failure-output immediate-final` — 4999 passed, 8 skipped.
+
+---
+
+## Skill System Critical Path Follow-up (Complete)
+
+### Overview
+
+Implemented critical follow-up work for the skill system level-scaling plan:
+loader metadata wiring, skill reference validation, compile-clean SDK initializers,
+Campaign Builder skills file tracking, high-level resolver entry points, and
+reference documentation updates.
+
+### What Changed
+
+- Added `skills_file` metadata/default wiring to the SDK campaign metadata and
+  Campaign Builder metadata editor.
+- Added `CampaignData.skills` and Asset Manager tracking for `data/skills.ron`.
+- Added Campaign Builder `load_skills`, `save_skills`, and `validate_skill_ids`
+  support.
+- Added `ContentDatabase::load_campaign_with_skills_file` so campaign metadata
+  can override the default `data/skills.ron` path.
+- Wired `ContentDatabase::validate()` to reject unknown class/race skill grants
+  and unknown or over-cap dialogue `SkillCheck` references.
+- Added high-level `SkillResolver::*_for_character` APIs that perform class/race
+  database lookups and return recoverable `SkillError::ClassNotFound` /
+  `SkillError::RaceNotFound` errors.
+- Fixed SDK compile diagnostics caused by missing `skill_grants` initializers.
+- Updated `docs/reference/architecture.md` and
+  `docs/reference/campaign_content_format.md` with skill data structure and
+  `skills.ron` format documentation.
+
+### Tests Added / Updated
+
+- Added `ContentDatabase` regression tests for unknown class skill grants,
+  unknown dialogue skill checks, and configured skills-file loading.
+- Updated resolver missing-class/missing-race tests to exercise real database
+  lookup failures instead of only constructing error variants.
+- Updated SDK metadata and Asset Manager fixtures to include the skills file.
+
+### Quality Gates
+
+- `cargo fmt --all` — completed successfully.
+- `cargo check --all-targets --all-features` — completed successfully.
+- `cargo clippy --all-targets --all-features -- -D warnings` — completed successfully.
+- `cargo nextest run --all-features --status-level fail --failure-output immediate-final` — 4999 passed, 8 skipped.
+
+---
+
 ## Phase 4: Auto Skill UI and Character Display (Complete)
 
 ### Overview

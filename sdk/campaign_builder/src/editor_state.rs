@@ -55,6 +55,9 @@ pub struct CampaignData {
     /// Proficiency definitions loaded from the proficiencies file.
     pub proficiencies: Vec<ProficiencyDefinition>,
 
+    /// Skill definitions loaded from `data/skills.ron`.
+    pub skills: Vec<antares::domain::skills::SkillDefinition>,
+
     /// Creature definitions loaded from `data/creatures.ron`.
     pub creatures: Vec<antares::domain::visual::CreatureDefinition>,
 
@@ -84,6 +87,9 @@ pub struct EditorRegistry {
 
     /// Proficiencies editor state.
     pub proficiencies_editor_state: proficiencies_editor::ProficienciesEditorState,
+
+    /// Skills editor state.
+    pub skills_editor_state: skills_editor::SkillsEditorState,
 
     /// Monsters editor state.
     pub monsters_editor_state: MonstersEditorState,
@@ -148,6 +154,7 @@ impl Default for EditorRegistry {
             items_editor_state: ItemsEditorState::new(),
             spells_editor_state: SpellsEditorState::new(),
             proficiencies_editor_state: proficiencies_editor::ProficienciesEditorState::new(),
+            skills_editor_state: skills_editor::SkillsEditorState::new(),
             monsters_editor_state: MonstersEditorState::new(),
             creatures_editor_state: creatures_editor::CreaturesEditorState::new(),
             conditions_editor_state: ConditionsEditorState::new(),

@@ -1,6 +1,3 @@
-<!-- SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com> -->
-<!-- SPDX-License-Identifier: Apache-2.0 -->
-
 # Skill System Level Scaling Implementation Plan
 
 ## Overview
@@ -26,6 +23,35 @@ skills as a new domain concept rather than overloading `ProficiencyDefinition`.
 
 ---
 
+## Current Implementation Status
+
+This plan is no longer a greenfield implementation plan. The Auto Skills
+foundation and critical loader/validation wiring are implemented. The remaining
+work is primarily the SDK Skills Editor UI and the NPC skill-training feature
+set.
+
+| Area                                 | Status                            | Notes                                                                                                                                |
+| ------------------------------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Domain skill definitions and scaling | Complete                          | `src/domain/skills.rs`, fixtures, scaling helpers, and validation exist.                                                             |
+| Effective rank resolver              | Complete                          | Resolver supports context-based calls plus high-level character/class/race database APIs.                                            |
+| Skill checks                         | Complete for deterministic checks | Dialogue skill gates exist. Randomized checks remain deferred until a mechanic needs them.                                           |
+| Character sheet skill display        | Complete                          | Read-only skill display is implemented in `CharacterSheetView::Single`.                                                              |
+| Campaign/content loading             | Complete for current needs        | `skills_file` metadata/defaults and configurable skill loading are wired.                                                            |
+| Skill reference validation           | Complete for current references   | Class/race grants and dialogue `SkillCheck` references validate against `SkillDatabase`.                                             |
+| Campaign Builder skills editor       | Complete                          | Skills tab/UI, metadata, asset tracking, load/save, `CampaignData.skills`, `validate_skill_ids`, and class/race grant editing exist. |
+| NPC skill training                   | Not started                       | Domain fields, service, game mode, dialogue action, fixtures, UI, and SDK authoring remain.                                          |
+| Documentation                        | Partially complete                | Architecture and content format docs include skills; final migration/user docs still remain after trainer features.                  |
+
+### Remaining Work Summary
+
+1. Implement Phase 6 NPC skill-training domain and application flow.
+2. Implement Phase 7 player-facing NPC skill-training UI.
+3. Implement Phase 8 SDK skill-trainer authoring and validation.
+4. Finish Phase 9 final balance, migration notes, user-facing SDK docs, and
+   final regression coverage after Phases 6–8 land.
+
+---
+
 ## Current State Analysis
 
 ### Existing Infrastructure
@@ -45,20 +71,30 @@ skills as a new domain concept rather than overloading `ProficiencyDefinition`.
 
 ### Identified Issues
 
-1. There is no first-class `SkillDefinition` domain model.
-2. Characters currently have no numeric skill ranks.
-3. Existing `ProficiencyDefinition` is binary and item-focused, so it should not
-   be reused as a numeric skill system.
-4. No campaign data file exists for skills or skill progression.
-5. Class and race data cannot currently express level-scaled skill growth.
-6. There is no helper for resolving a character's effective skill rank from
-   base grants, level scaling, race bonuses, class bonuses, and temporary effects.
-7. No game systems can query skills for mechanics such as traps, discovery,
-   dialogue checks, or item identification.
-8. No SDK Skills Editor exists.
-9. No NPC skill-training flow exists.
-10. No validation exists for skill IDs referenced by classes, races, NPCs,
-    dialogue checks, maps, or future mechanics.
+Resolved:
+
+1. `SkillDefinition`, `SkillDatabase`, skill scaling modes, skill fixtures, and
+   validation now exist.
+2. Characters now store persistent numeric ranks through `CharacterSkillRanks`.
+3. Proficiencies and skills remain separate systems.
+4. `skills.ron` exists in base, test campaign, and tutorial campaign data.
+5. Class and race data can express skill bonuses through `skill_grants`.
+6. Effective rank resolution exists for auto scaling, class grants, race grants,
+   and persistent character ranks.
+7. Dialogue conditions can query skills through deterministic skill checks.
+8. Validation now covers class/race skill grants and dialogue `SkillCheck`
+   references.
+
+Still open:
+
+1. No Campaign Builder Skills Editor tab exists yet.
+2. Class and race Campaign Builder editors do not yet expose skill-grant editing
+   UI with skill ID autocomplete.
+3. No NPC skill-training flow exists yet.
+4. No player-facing skill-training UI exists yet.
+5. No SDK skill-trainer authoring flow exists yet.
+6. Final balance/migration/user documentation remains after trainer support is
+   implemented.
 
 ---
 
@@ -66,7 +102,7 @@ skills as a new domain concept rather than overloading `ProficiencyDefinition`.
 
 ---
 
-### Phase 1: Domain Foundation — Skill Definitions
+### Phase 1: Domain Foundation — Skill Definitions (Complete)
 
 Create the core data structures and loader for campaign-authored skills. This
 phase does not modify gameplay yet; it establishes `skills.ron` as a validated,
@@ -246,15 +282,15 @@ Required tests:
 
 #### 1.5 Deliverables
 
-- [ ] `src/domain/skills.rs` created with SPDX header and doc comments.
-- [ ] `SkillId`, `SkillRank`, `SkillCategory`, `SkillScalingMode`,
+- [x] `src/domain/skills.rs` created with SPDX header and doc comments.
+- [x] `SkillId`, `SkillRank`, `SkillCategory`, `SkillScalingMode`,
       `SkillDefinition`, `SkillDatabase`, and `SkillError` implemented.
-- [ ] Skill rank scaling helpers implemented as pure functions.
-- [ ] `src/domain/mod.rs` exports skills module.
-- [ ] Base and test skill RON files added.
-- [ ] Campaign/content loader includes skill database.
-- [ ] Unit tests cover scaling and validation.
-- [ ] `docs/explanation/implementations.md` updated with a summary of what was implemented in this phase.
+- [x] Skill rank scaling helpers implemented as pure functions.
+- [x] `src/domain/mod.rs` exports skills module.
+- [x] Base and test skill RON files added.
+- [x] Campaign/content loader includes skill database.
+- [x] Unit tests cover scaling and validation.
+- [x] `docs/explanation/implementations.md` updated with a summary of what was implemented in this phase.
 
 #### 1.6 Success Criteria
 
@@ -266,7 +302,7 @@ Required tests:
 
 ---
 
-### Phase 2: Auto Skills — Character Effective Skill Ranks
+### Phase 2: Auto Skills — Character Effective Skill Ranks (Complete)
 
 Implement the initial gameplay-facing Auto Skills system. Characters should have
 effective skill ranks derived from class, race, level, and optional
@@ -429,17 +465,17 @@ Required tests:
 
 #### 2.5 Deliverables
 
-- [ ] `SkillGrant` and optional breakdown types implemented.
-- [ ] `CharacterSkillRanks` newtype struct with `new`, `get`, `set`, `increment`, `remove`, `contains` methods implemented in `src/domain/skills.rs`.
-- [ ] `ClassDefinition.skill_grants` added with serde default.
-- [ ] `RaceDefinition.skill_grants` added with serde default.
-- [ ] `Character.skill_ranks: CharacterSkillRanks` added with serde default.
-- [ ] `ClassDatabase::validate_with_skill_db` implemented.
-- [ ] `RaceDatabase::validate_with_skill_db` implemented.
-- [ ] Effective skill resolver implemented.
-- [ ] Class/race fixture data updated.
-- [ ] Tests cover auto scaling and grants.
-- [ ] `docs/explanation/implementations.md` updated with a summary of what was implemented in this phase.
+- [x] `SkillGrant` and optional breakdown types implemented.
+- [x] `CharacterSkillRanks` newtype struct with `new`, `get`, `set`, `increment`, `remove`, `contains` methods implemented in `src/domain/skills.rs`.
+- [x] `ClassDefinition.skill_grants` added with serde default.
+- [x] `RaceDefinition.skill_grants` added with serde default.
+- [x] `Character.skill_ranks: CharacterSkillRanks` added with serde default.
+- [x] `ClassDatabase::validate_with_skill_db` implemented.
+- [x] `RaceDatabase::validate_with_skill_db` implemented.
+- [x] Effective skill resolver implemented.
+- [x] Class/race fixture data updated.
+- [x] Tests cover auto scaling and grants.
+- [x] `docs/explanation/implementations.md` updated with a summary of what was implemented in this phase.
 
 #### 2.6 Success Criteria
 
@@ -453,7 +489,7 @@ Required tests:
 
 ---
 
-### Phase 3: Engine Integration — Skill Checks
+### Phase 3: Engine Integration — Skill Checks (Complete for deterministic checks)
 
 Expose skill ranks to game mechanics through a small, deterministic skill-check
 API. This phase should avoid a large gameplay rewrite; it should add reusable
@@ -551,14 +587,14 @@ Required tests:
 
 #### 3.5 Deliverables
 
-- [ ] Skill check request/result types implemented.
-- [ ] Deterministic skill check helper implemented.
-- [ ] `PartySkillScope` enum implemented in `src/domain/skills.rs`.
-- [ ] `DialogueCondition::SkillCheck` variant added in `src/domain/dialogue.rs`.
-- [ ] Deterministic check implemented. Randomized check deferred until a mechanic explicitly requires it.
-- [ ] One engine mechanic integrated with skills.
-- [ ] Tests cover success/failure and party scope.
-- [ ] `docs/explanation/implementations.md` updated with a summary of what was implemented in this phase.
+- [x] Skill check request/result types implemented.
+- [x] Deterministic skill check helper implemented.
+- [x] `PartySkillScope` enum implemented in `src/domain/skills.rs`.
+- [x] `DialogueCondition::SkillCheck` variant added in `src/domain/dialogue.rs`.
+- [x] Deterministic check implemented. Randomized check deferred until a mechanic explicitly requires it.
+- [x] One engine mechanic integrated with skills.
+- [x] Tests cover success/failure and party scope.
+- [x] `docs/explanation/implementations.md` updated with a summary of what was implemented in this phase.
 
 #### 3.6 Success Criteria
 
@@ -569,7 +605,7 @@ Required tests:
 
 ---
 
-### Phase 4: Auto Skill UI and Character Display
+### Phase 4: Auto Skill UI and Character Display (Complete)
 
 Show effective skill ranks to players and campaign authors. This phase should
 make Auto Skills visible before adding paid training.
@@ -638,12 +674,12 @@ Required tests:
 
 #### 4.5 Deliverables
 
-- [ ] Character sheet displays skills inside `CharacterSheetView::Single` after Resistances.
-- [ ] Skill ranks grouped or sortable by category.
-- [ ] Effective rank breakdown available as tooltip or detail text.
-- [ ] `CharacterSheetState` and `CharacterSheetView` are unchanged.
-- [ ] Render tests cover missing/empty skill data.
-- [ ] `docs/explanation/implementations.md` updated with a summary of what was implemented in this phase.
+- [x] Character sheet displays skills inside `CharacterSheetView::Single` after Resistances.
+- [x] Skill ranks grouped or sortable by category.
+- [x] Effective rank breakdown available as tooltip or detail text.
+- [x] `CharacterSheetState` and `CharacterSheetView` are unchanged.
+- [x] Render tests cover missing/empty skill data.
+- [x] `docs/explanation/implementations.md` updated with a summary of what was implemented in this phase.
 
 #### 4.6 Success Criteria
 
@@ -654,10 +690,26 @@ Required tests:
 
 ---
 
-### Phase 5: SDK Skills Editor
+### Phase 5: SDK Skills Editor (Complete)
 
 Add Campaign Builder support for authoring `skills.ron` and skill grants. This
 phase should follow the existing Proficiencies Editor and SDK rules.
+
+Already completed in the critical-path follow-up:
+
+- `skills_file` metadata/default wiring.
+- `CampaignData.skills`.
+- Asset Manager tracking for the skills file.
+- `load_skills`, `save_skills`, and `validate_skill_ids` plumbing.
+- Campaign validation for class/race grants and dialogue `SkillCheck` references.
+
+Completed in this phase:
+
+- Actual `skills_editor.rs` UI.
+- `EditorTab::Skills` and app dispatch.
+- `EditorRegistry.skills_editor_state`.
+- Class/race skill-grant editor UI with skill ID autocomplete.
+- SDK egui ID audit and UI-specific tests for the new editor.
 
 > **MANDATORY**: Read `sdk/AGENTS.md` in full before implementing any code in
 > Phase 5. All SDK egui ID rules, autocomplete patterns, and editor conventions
@@ -762,17 +814,19 @@ Required tests:
 
 #### 5.5 Deliverables
 
-- [ ] `skills_editor.rs` created.
-- [ ] Skills tab added to Campaign Builder.
-- [ ] `CampaignMetadata.skills_file` field added with serde default.
-- [ ] Load/save support for `skills.ron` via `load_skills` and `save_skills`.
-- [ ] `validate_skill_ids` implemented in `campaign_io.rs`.
-- [ ] `CampaignData.skills` and `EditorRegistry.skills_editor_state` added.
-- [ ] `DataFilesConfig.skills_file` added and wired into `init_data_files`.
-- [ ] Class and race editors can edit skill grants.
-- [ ] Skill validation integrated with campaign validation.
-- [ ] SDK tests cover editor and validation behavior.
-- [ ] `docs/explanation/implementations.md` updated with a summary of what was implemented in this phase.
+- [x] `skills_editor.rs` created.
+- [x] Skills tab added to Campaign Builder.
+- [x] `CampaignMetadata.skills_file` field added with serde default.
+- [x] Load/save support for `skills.ron` via `load_skills` and `save_skills`.
+- [x] `validate_skill_ids` implemented in `campaign_io.rs`.
+- [x] `CampaignData.skills` added.
+- [x] `EditorRegistry.skills_editor_state` added.
+- [x] `DataFilesConfig.skills_file` added and wired into `init_data_files`.
+- [x] Class and race editors can edit skill grants.
+- [x] Skill validation integrated with campaign validation for class/race grants and dialogue `SkillCheck` references.
+- [x] SDK tests cover the Skills Editor UI.
+- [x] Regression tests cover configured skills-file loading and skill-reference validation.
+- [x] `docs/explanation/implementations.md` updated with a summary of what was implemented in this phase.
 
 #### 5.6 Success Criteria
 
@@ -784,7 +838,7 @@ Required tests:
 
 ---
 
-### Phase 6: NPC Train Skills Domain and Application Flow
+### Phase 6: NPC Train Skills Domain and Application Flow (Remaining)
 
 Add paid NPC skill training after Auto Skills works. This should mirror the
 existing NPC level-up training route without merging the two flows.
@@ -959,7 +1013,7 @@ Required tests:
 
 ---
 
-### Phase 7: NPC Train Skills UI
+### Phase 7: NPC Train Skills UI (Remaining)
 
 Create the player-facing skill training interface. This phase should mirror
 `training_ui.rs` while remaining separate from level-up training.
@@ -1061,7 +1115,7 @@ Required tests:
 
 ---
 
-### Phase 8: SDK Skill Trainer Authoring
+### Phase 8: SDK Skill Trainer Authoring (Remaining)
 
 Add Campaign Builder support for NPC skill trainers and skill-training dialogue.
 
@@ -1145,10 +1199,26 @@ Required tests:
 
 ---
 
-### Phase 9: Balance, Documentation, and Migration
+### Phase 9: Balance, Documentation, and Migration (Partially Complete — Finalization Remaining)
 
 Finalize skill system rollout with balanced content, migration notes, and
 architecture documentation updates.
+
+Already completed in the critical-path follow-up:
+
+- Architecture documentation now covers skill structures and `skills.ron` in
+  Sections 4, 7.1, and 7.2.
+- Campaign content format documentation now covers `skills.ron`.
+- Base, test campaign, and tutorial skill data exist.
+- Critical validation regression tests now cover configured skills-file loading
+  and skill references.
+
+Still remaining in this phase:
+
+- Section 3.2 module-placement documentation for skill exports.
+- Final balancing after skill trainers are implemented.
+- Migration notes and SDK user docs for Skills Editor / NPC Skill Trainers.
+- Final full-regression coverage after Phases 5–8 are complete.
 
 #### 9.1 Feature Work
 
@@ -1224,12 +1294,14 @@ Regression and integration tests:
 
 #### 9.5 Deliverables
 
-- [ ] Architecture docs updated (Sections 3.2, 4, 7.1, 7.2).
-- [ ] Content format docs updated.
-- [ ] Base and tutorial skill data balanced.
+- [x] Architecture docs updated for skill structures and data files (Sections 4, 7.1, 7.2).
+- [ ] Architecture docs Section 3.2 explicitly lists `src/domain/skills.rs` public exports.
+- [x] Content format docs updated for `skills.ron`.
+- [x] Base and tutorial skill data exist and load.
+- [ ] Final balance pass for base/tutorial skill values after trainer features land.
 - [ ] Migration notes written.
-- [ ] Final regression tests pass.
-- [ ] `docs/explanation/implementations.md` updated with a summary of what was implemented in this phase.
+- [ ] Final regression tests for skill training and existing level training pass after Phases 6–8 land.
+- [x] `docs/explanation/implementations.md` updated with a summary of the critical-path follow-up work.
 
 #### 9.6 Success Criteria
 
@@ -1242,17 +1314,17 @@ Regression and integration tests:
 
 ## Recommended Implementation Order
 
-| Order | Phase                                | Reason                                          |
-| ----- | ------------------------------------ | ----------------------------------------------- |
-| 1     | Phase 1: Domain Foundation           | Establishes stable data model and loader        |
-| 2     | Phase 2: Auto Skills                 | Delivers level scaling with minimal UI risk     |
-| 3     | Phase 3: Engine Skill Checks         | Makes skills useful in gameplay                 |
-| 4     | Phase 4: Auto Skill UI               | Makes the system visible to players             |
-| 5     | Phase 5: SDK Skills Editor           | Lets authors manage skill data safely           |
-| 6     | Phase 6: NPC Train Skills Domain     | Adds paid training after auto skills are proven |
-| 7     | Phase 7: NPC Train Skills UI         | Adds player-facing training workflow            |
-| 8     | Phase 8: SDK Skill Trainer Authoring | Lets authors create trainer NPCs and dialogue   |
-| 9     | Phase 9: Balance and Docs            | Finalizes rollout and migration guidance        |
+| Order | Phase                                | Status / Next Action                                  |
+| ----- | ------------------------------------ | ----------------------------------------------------- |
+| 1     | Phase 1: Domain Foundation           | Complete                                              |
+| 2     | Phase 2: Auto Skills                 | Complete                                              |
+| 3     | Phase 3: Engine Skill Checks         | Complete for deterministic checks                     |
+| 4     | Phase 4: Auto Skill UI               | Complete                                              |
+| 5     | Phase 5: SDK Skills Editor           | Complete                                              |
+| 6     | Phase 6: NPC Train Skills Domain     | Next: add paid skill-training domain/application flow |
+| 7     | Phase 7: NPC Train Skills UI         | Then add player-facing skill-training workflow        |
+| 8     | Phase 8: SDK Skill Trainer Authoring | Then add SDK NPC skill-trainer authoring              |
+| 9     | Phase 9: Balance and Docs            | Finish after Phases 6–8 land                          |
 
 ---
 

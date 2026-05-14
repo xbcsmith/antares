@@ -57,6 +57,9 @@
 //! assert_eq!(rank, 4);
 //! ```
 
+use crate::domain::character::Character;
+use crate::domain::classes::ClassDatabase;
+use crate::domain::races::RaceDatabase;
 use crate::domain::skills::{
     rank_for_level, CharacterSkillRanks, SkillBreakdown, SkillBreakdownEntry, SkillDatabase,
     SkillError, SkillGrant, SkillGrantSource, SkillId, SkillRank,
@@ -121,6 +124,96 @@ pub struct SkillResolverContext<'a> {
 pub struct SkillResolver;
 
 impl SkillResolver {
+    fn context_for_character<'a>(
+        character: &'a Character,
+        classes: &'a ClassDatabase,
+        races: &'a RaceDatabase,
+    ) -> Result<SkillResolverContext<'a>, SkillError> {
+        let class_def = classes
+            .get_class(&character.class_id)
+            .ok_or_else(|| SkillError::ClassNotFound(character.class_id.clone()))?;
+        let race_def = races
+            .get_race(&character.race_id)
+            .ok_or_else(|| SkillError::RaceNotFound(character.race_id.clone()))?;
+
+        Ok(SkillResolverContext {
+            level: character.level,
+            class_id: &character.class_id,
+            race_id: &character.race_id,
+            char_ranks: &character.skill_ranks,
+            class_grants: &class_def.skill_grants,
+            race_grants: &race_def.skill_grants,
+        })
+    }
+
+    /// Computes a character's effective skill rank using the loaded class/race databases.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SkillError::SkillNotFound`] when the skill is missing,
+    /// [`SkillError::ClassNotFound`] when the character's class is missing, or
+    /// [`SkillError::RaceNotFound`] when the character's race is missing.
+    pub fn effective_skill_rank_for_character(
+        character: &Character,
+        skill_id: &SkillId,
+        skills: &SkillDatabase,
+        classes: &ClassDatabase,
+        races: &RaceDatabase,
+    ) -> Result<SkillRank, SkillError> {
+        let ctx = Self::context_for_character(character, classes, races)?;
+        Self::effective_skill_rank(&ctx, skill_id, skills)
+    }
+
+    /// Computes a character's effective skill breakdown using class/race lookups.
+    ///
+    /// # Errors
+    ///
+    /// Returns a recoverable [`SkillError`] for missing skill, class, or race data.
+    pub fn effective_skill_breakdown_for_character(
+        character: &Character,
+        skill_id: &SkillId,
+        skills: &SkillDatabase,
+        classes: &ClassDatabase,
+        races: &RaceDatabase,
+    ) -> Result<SkillBreakdown, SkillError> {
+        let ctx = Self::context_for_character(character, classes, races)?;
+        Self::effective_skill_breakdown(&ctx, skill_id, skills)
+    }
+
+    /// Computes all effective skill ranks for a character using class/race lookups.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SkillError::ClassNotFound`] or [`SkillError::RaceNotFound`] if the
+    /// character references missing class/race definitions.
+    pub fn all_effective_skill_ranks_for_character(
+        character: &Character,
+        skills: &SkillDatabase,
+        classes: &ClassDatabase,
+        races: &RaceDatabase,
+    ) -> Result<HashMap<SkillId, SkillRank>, SkillError> {
+        let ctx = Self::context_for_character(character, classes, races)?;
+        Ok(Self::all_effective_skill_ranks(&ctx, skills))
+    }
+
+    /// Returns whether a character meets a minimum effective skill rank.
+    ///
+    /// # Errors
+    ///
+    /// Returns a recoverable [`SkillError`] for missing skill, class, or race data.
+    pub fn character_has_skill_rank_for_character(
+        character: &Character,
+        skill_id: &SkillId,
+        minimum: SkillRank,
+        skills: &SkillDatabase,
+        classes: &ClassDatabase,
+        races: &RaceDatabase,
+    ) -> Result<bool, SkillError> {
+        let rank =
+            Self::effective_skill_rank_for_character(character, skill_id, skills, classes, races)?;
+        Ok(rank >= minimum)
+    }
+
     /// Computes the effective skill rank for `skill_id`.
     ///
     /// # Arguments
@@ -619,17 +712,67 @@ mod tests {
 
     #[test]
     fn test_effective_skill_rank_missing_class_returns_error() {
-        // The resolver itself does not perform class DB lookup; callers do.
-        // When a caller cannot find the class, they return ClassNotFound.
-        // This test verifies that SkillError::ClassNotFound exists and works.
-        let err = SkillError::ClassNotFound("missing_class".to_string());
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::classes::ClassDatabase;
+        use crate::domain::races::RaceDatabase;
+
+        let skills = make_linear_skills_db();
+        let races = RaceDatabase::new();
+        let classes = ClassDatabase::new();
+        let character = Character::new(
+            "MissingClassHero".to_string(),
+            "human".to_string(),
+            "missing_class".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let err = SkillResolver::effective_skill_rank_for_character(
+            &character,
+            &"perception".to_string(),
+            &skills,
+            &classes,
+            &races,
+        )
+        .expect_err("missing class should be recoverable");
+
         assert!(matches!(err, SkillError::ClassNotFound(_)));
         assert!(err.to_string().contains("missing_class"));
     }
 
     #[test]
     fn test_effective_skill_rank_missing_race_returns_error() {
-        let err = SkillError::RaceNotFound("missing_race".to_string());
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::classes::ClassDatabase;
+        use crate::domain::races::RaceDatabase;
+
+        let skills = make_linear_skills_db();
+        let class_ron = r#"[
+            (id: "knight", name: "Knight",
+             hp_die: (count: 1, sides: 10, bonus: 0),
+             spell_school: None, is_pure_caster: false, spell_stat: None,
+             special_abilities: [], starting_weapon_id: None, starting_armor_id: None,
+             starting_items: [], proficiencies: [], skill_grants: []),
+        ]"#;
+        let classes = ClassDatabase::load_from_string(class_ron).expect("class fixture must parse");
+        let races = RaceDatabase::new();
+        let character = Character::new(
+            "MissingRaceHero".to_string(),
+            "missing_race".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let err = SkillResolver::effective_skill_rank_for_character(
+            &character,
+            &"perception".to_string(),
+            &skills,
+            &classes,
+            &races,
+        )
+        .expect_err("missing race should be recoverable");
+
         assert!(matches!(err, SkillError::RaceNotFound(_)));
         assert!(err.to_string().contains("missing_race"));
     }

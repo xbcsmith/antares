@@ -682,6 +682,7 @@ pub struct AssetManager {
 ///     dialogue_file: "data/dialogues.ron",
 ///     npcs_file: "data/npcs.ron",
 ///     proficiencies_file: "data/proficiencies.ron",
+///     skills_file: "data/skills.ron",
 /// };
 /// assert_eq!(cfg.items_file, "data/items.ron");
 /// ```
@@ -697,6 +698,7 @@ pub struct DataFilesConfig<'a> {
     pub dialogue_file: &'a str,
     pub npcs_file: &'a str,
     pub proficiencies_file: &'a str,
+    pub skills_file: &'a str,
 }
 
 /// Read-only campaign data references for [`AssetManager::scan_references`].
@@ -770,7 +772,7 @@ impl AssetManager {
     pub fn init_data_files(&mut self, cfg: &DataFilesConfig<'_>, maps_file_list: &[String]) {
         self.data_files.clear();
 
-        // Add data files in EditorTab order: Items, Spells, Conditions, Monsters, Maps, Quests, Classes, Races, Characters, Dialogues, NPCs, Proficiencies
+        // Add data files in EditorTab order: Items, Spells, Conditions, Monsters, Maps, Quests, Classes, Races, Characters, Dialogues, NPCs, Proficiencies, Skills
         self.data_files
             .push(DataFileInfo::new(cfg.items_file, "Items"));
         self.data_files
@@ -799,6 +801,8 @@ impl AssetManager {
             .push(DataFileInfo::new(cfg.npcs_file, "NPCs"));
         self.data_files
             .push(DataFileInfo::new(cfg.proficiencies_file, "Proficiencies"));
+        self.data_files
+            .push(DataFileInfo::new(cfg.skills_file, "Skills"));
 
         // Check which files exist
         for file_info in &mut self.data_files {
@@ -1946,6 +1950,7 @@ mod tests {
             dialogue_file: "data/dialogues.ron",
             npcs_file: "data/npcs.ron",
             proficiencies_file: "data/proficiencies.ron",
+            skills_file: "data/skills.ron",
         };
         manager.init_data_files(&cfg, &map_files);
 
@@ -1978,6 +1983,7 @@ mod tests {
             dialogue_file: "data/dialogues.ron",
             npcs_file: "data/npcs.ron",
             proficiencies_file: "data/proficiencies.ron",
+            skills_file: "data/skills.ron",
         };
         manager.init_data_files(&cfg, &[]);
 
@@ -2013,6 +2019,7 @@ mod tests {
             dialogue_file: "data/dialogues.ron",
             npcs_file: "data/npcs.ron",
             proficiencies_file: "data/proficiencies.ron",
+            skills_file: "data/skills.ron",
         };
         manager.init_data_files(&cfg, &[]);
 
@@ -2319,6 +2326,7 @@ mod tests {
             dialogue_file: "data/dialogues.ron",
             npcs_file: "data/npcs.ron",
             proficiencies_file: "data/proficiencies.ron",
+            skills_file: "data/skills.ron",
         };
         manager.init_data_files(&cfg, &[]);
 

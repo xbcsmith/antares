@@ -53,6 +53,8 @@ pub enum ValidationCategory {
     Characters,
     /// Proficiency definitions
     Proficiencies,
+    /// Skill definitions
+    Skills,
     /// Asset files (images, sounds, etc.)
     Assets,
     /// Balance analysis between party power and monster difficulty
@@ -101,6 +103,7 @@ impl ValidationCategory {
             ValidationCategory::Races => "Races",
             ValidationCategory::Characters => "Characters",
             ValidationCategory::Proficiencies => "Proficiencies",
+            ValidationCategory::Skills => "Skills",
             ValidationCategory::Assets => "Assets",
             ValidationCategory::Balance => "Balance",
             ValidationCategory::Economy => "Economy",
@@ -131,6 +134,7 @@ impl ValidationCategory {
             ValidationCategory::Races,
             ValidationCategory::Characters,
             ValidationCategory::Proficiencies,
+            ValidationCategory::Skills,
             ValidationCategory::Assets,
             ValidationCategory::Balance,
             ValidationCategory::Economy,
@@ -158,6 +162,7 @@ impl ValidationCategory {
             ValidationCategory::Races => "👤",
             ValidationCategory::Characters => "🧑",
             ValidationCategory::Proficiencies => "📚",
+            ValidationCategory::Skills => "🎯",
             ValidationCategory::Assets => "📦",
             ValidationCategory::Balance => "⚖️",
             ValidationCategory::Economy => "💰",
