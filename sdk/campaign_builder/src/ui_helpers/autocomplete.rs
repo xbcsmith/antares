@@ -1385,6 +1385,86 @@ pub fn autocomplete_ability_list_selector(
     )
 }
 
+/// Shows an autocomplete multi-selector for skill IDs (`trainable_skill_ids`).
+///
+/// Only shows skills where `skill.is_trainable == true` as candidates.
+/// Selected IDs are stored as `Vec<String>` (`SkillId = String`).
+///
+/// Returns `true` if the selection changed.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI context
+/// * `id_salt` - Unique ID salt for this widget
+/// * `label` - Label to display
+/// * `selected_skill_ids` - Mutable reference to the list of selected skill IDs
+/// * `skills` - Slice of all skill definitions; only trainable skills are shown as candidates
+///
+/// # Returns
+///
+/// `true` if the user changed the selection, `false` otherwise
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// let changed = autocomplete_skill_id_list_selector(
+///     ui,
+///     "trainer_skills",
+///     "Trainable Skills",
+///     &mut trainer.trainable_skill_ids,
+///     &campaign_data.skills,
+/// );
+/// ```
+pub fn autocomplete_skill_id_list_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_skill_ids: &mut Vec<String>,
+    skills: &[antares::domain::skills::SkillDefinition],
+) -> bool {
+    let candidates: Vec<String> = skills
+        .iter()
+        .filter(|s| s.is_trainable)
+        .map(|s| format!("{} \u{2014} {}", s.id, s.name))
+        .collect();
+    let cfg = AutocompleteListSelectorConfig {
+        id_salt,
+        buffer_tag: "skill_add",
+        label,
+        add_label: "Add skill:",
+        placeholder: "Start typing skill name or ID...",
+    };
+    autocomplete_list_selector_generic(
+        ui,
+        &cfg,
+        selected_skill_ids,
+        |id| {
+            skills
+                .iter()
+                .find(|s| s.id == *id)
+                .map(|s| format!("{} \u{2014} {}", s.id, s.name))
+                .unwrap_or_else(|| format!("Unknown skill (id: {})", id))
+        },
+        candidates,
+        |text| {
+            let id = text.splitn(2, " \u{2014} ").next()?.trim().to_string();
+            if skills.iter().any(|s| s.is_trainable && s.id == id) {
+                Some(id)
+            } else {
+                None
+            }
+        },
+        |text| {
+            let id = text.splitn(2, " \u{2014} ").next()?.trim().to_string();
+            if skills.iter().any(|s| s.is_trainable && s.id == id) {
+                Some(id)
+            } else {
+                None
+            }
+        },
+    )
+}
+
 /// Shows an autocomplete input for selecting a race by name.
 ///
 /// Returns `true` if the selection changed.

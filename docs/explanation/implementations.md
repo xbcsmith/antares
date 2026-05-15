@@ -2,6 +2,199 @@
 
 ---
 
+## Phase 8: SDK Skill Trainer Authoring (Complete)
+
+### Overview
+
+Extended `src/domain/dialogue.rs` with skill trainer dialogue support so the
+SDK can generate, augment, and remove skill trainer dialogue branches in the
+same way it already manages regular trainer and merchant branches.
+
+### Deliverables
+
+#### `src/domain/dialogue.rs`
+
+**`DialogueSdkManagedContent` enum** — four new variants:
+
+- `SkillTrainerTemplateTree` — marks a tree generated entirely from the
+  built-in skill trainer template.
+- `SkillTrainerBranchInsertion` — marks a tree where the SDK inserted a skill
+  trainer branch into existing authored content.
+- `SkillTrainerChoice` — marks a choice node inserted by the SDK to route into
+  a skill trainer branch.
+- `SkillTrainerOpenNode` — marks a node inserted by the SDK to fire
+  `OpenSkillTraining`.
+
+**`DialogueSdkManagedContent::is_skill_trainer_marker()`** — returns `true`
+for all four `SkillTrainer*` variants.
+
+**`DialogueSdkMetadata::has_skill_trainer_content()`** — returns `true` when
+any skill-trainer-related SDK marker is present in `managed_content`.
+
+**`DialogueNode::has_sdk_managed_skill_trainer_content()`** — returns `true`
+when the node carries `SkillTrainerOpenNode` or any choice carries
+`SkillTrainerChoice`.
+
+**`DialogueTree::contains_open_skill_training_for_npc(npc_id)`** — returns
+`true` when any node action or choice action in the tree is
+`OpenSkillTraining { npc_id }`.
+
+**`DialogueTree::has_sdk_managed_skill_trainer_content()`** — returns `true`
+when the tree-level metadata or any node contains skill trainer SDK markers.
+
+**`DialogueTree::standard_skill_trainer_template(id, npc_id, npc_name)`** —
+creates a complete two-node dialogue tree (greeting root + skill trainer node)
+marked as `SkillTrainerTemplateTree`, with the standard `"I seek skill
+training."` choice routing to a terminal node that fires
+`OpenSkillTraining { npc_id }`.
+
+**`DialogueTree::ensure_standard_skill_trainer_branch(npc_id, npc_name)`** —
+idempotently inserts a skill trainer branch into the root node; returns `false`
+and is a no-op if `OpenSkillTraining` for `npc_id` is already present.
+
+**`DialogueTree::remove_sdk_managed_skill_trainer_content()`** — removes all
+`SkillTrainer*`-marked nodes, strips `SkillTrainerChoice` entries from choice
+lists, and removes tree-level markers; returns `true` if any content was
+removed; idempotent.
+
+**`DialogueChoice::sdk_managed_skill_trainer_choice(target_node)`** — factory
+that creates a choice with text `"I seek skill training."` tagged with the
+`SkillTrainerChoice` marker.
+
+**`DialogueChoice::is_sdk_managed_skill_trainer_choice()`** — predicate
+checking for the `SkillTrainerChoice` marker.
+
+**Tests added (11 new unit tests):**
+
+| Test name                                                                            | What it verifies                                                                |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `test_standard_skill_trainer_template_contains_open_skill_training_and_metadata`     | Template has `OpenSkillTraining` and `SkillTrainerTemplateTree` marker          |
+| `test_ensure_standard_skill_trainer_branch_inserts_one_branch_for_existing_dialogue` | Branch insertion works on custom tree                                           |
+| `test_ensure_standard_skill_trainer_branch_is_noop_when_open_skill_training_exists`  | Idempotency when already present                                                |
+| `test_remove_sdk_managed_skill_trainer_content_preserves_custom_nodes_and_choices`   | Custom nodes/choices survive removal                                            |
+| `test_remove_sdk_managed_skill_trainer_content_is_idempotent`                        | Second removal is a no-op                                                       |
+| `test_ensure_standard_skill_trainer_branch_is_idempotent`                            | Ensure call twice → only first modifies                                         |
+| `test_dialogue_action_description_open_skill_training`                               | `OpenSkillTraining` description contains npc_id                                 |
+| `test_sdk_metadata_has_skill_trainer_content`                                        | `has_skill_trainer_content()` returns true after inserting `SkillTrainerChoice` |
+| `test_skill_trainer_choice_is_sdk_managed`                                           | Choice is skill-trainer-managed, not trainer/merchant                           |
+| `test_skill_trainer_choice_text`                                                     | Choice text and target node are correct                                         |
+| `test_is_skill_trainer_marker`                                                       | All four variants return `true`; non-skill-trainer variants return `false`      |
+
+### Architecture Compliance
+
+- [x] No new data structures introduced; extends existing `DialogueSdkManagedContent`
+      exactly as `Trainer*` variants extended `Merchant*` variants.
+- [x] `OpenSkillTraining` action variant unchanged — only SDK helper layer added.
+- [x] RON format unaffected; `DialogueSdkManagedContent` is serialisable.
+- [x] No test references `campaigns/tutorial` (Rule 5).
+- [x] All doc comments include runnable `///` examples.
+
+#### `sdk/campaign_builder/src/dialogue_editor.rs`
+
+**`DialogueEditorState::ensure_skill_trainer_dialogue_for_npc(npc)`** — creates
+or augments a skill trainer dialogue tree for a skill trainer NPC using the new
+`standard_skill_trainer_template` / `ensure_standard_skill_trainer_branch`
+methods. Mirrors `ensure_trainer_dialogue_for_npc`.
+
+**`DialogueEditorState::remove_skill_trainer_dialogue_for_npc(npc)`** — removes
+SDK-managed skill trainer content from the assigned dialogue for a non-skill-trainer
+NPC. Non-destructive: custom authored content is preserved. Mirrors
+`remove_trainer_dialogue_for_npc`.
+
+#### `sdk/campaign_builder/src/ui_helpers/autocomplete.rs`
+
+**`autocomplete_skill_id_list_selector(ui, id_salt, label, selected_skill_ids, skills)`** —
+autocomplete multi-selector for `Vec<String>` skill IDs. Only shows skills where
+`is_trainable == true` as candidates. Display format is `"id — name"`; ID
+extraction uses `splitn(2, " — ")`. Integrated into the NPC editor's skill
+trainer section. Mirrors `autocomplete_proficiency_list_selector`.
+
+#### `sdk/campaign_builder/src/npc_editor/mod.rs`
+
+**`SkillTrainerDialogueValidationState` enum** — five variants mirroring
+`TrainerDialogueValidationState`: `NotSkillTrainer`, `Valid`, `Missing`,
+`AssignedDialogueMissing`, `StaleSkillTrainerContent`.
+
+**`NpcEditBuffer` fields added:**
+
+- `is_skill_trainer: bool`
+- `trainable_skill_ids: Vec<String>`
+- `skill_training_fee_base: String` (empty = campaign default)
+- `skill_training_fee_multiplier: String` (empty = campaign default)
+- `skill_training_max_rank: String` (empty = use skill definition max_rank)
+
+**`NpcEditorState` fields added:**
+
+- `filter_skill_trainers: bool` — filter button in list toolbar
+- `available_skills: Vec<SkillDefinition>` — skill definitions for autocomplete
+  (populated by caller before `show()`)
+
+**`validate_edit_buffer()`** — validates skill trainer fields: empty
+`trainable_skill_ids`, unknown skill IDs, non-trainable skills, invalid
+fee multiplier, and max rank exceeding skill definition cap.
+
+**`build_npc_from_edit_buffer()` / `save_npc()`** — replaced hardcoded
+`is_skill_trainer: false` stubs with actual buffer values, including parsed
+`skill_training_fee_base` (u32), `skill_training_fee_multiplier` (f32),
+and `skill_training_max_rank` (u16).
+
+**`matches_filters()`** — `filter_skill_trainers` check after `filter_trainers`.
+
+**`start_edit_npc()`** — loads all five skill trainer fields from `NpcDefinition`
+into the edit buffer.
+
+**Private methods added:**
+
+- `skill_trainer_dialogue_validation_for_definition()` — validates skill
+  trainer dialogue state without mutation.
+- `skill_trainer_dialogue_status_for_buffer()` — human-readable status
+  string from current buffer state.
+- `create_or_repair_skill_trainer_dialogue_for_buffer()` — creates or
+  augments skill trainer dialogue; clears stale IDs; returns actionable
+  message on error.
+- `remove_skill_trainer_dialogue_from_edit_buffer()` — removes SDK-managed
+  skill trainer content non-destructively.
+- `auto_apply_skill_trainer_dialogue_to_edit_buffer()` — auto-creates
+  dialogue when toggling `is_skill_trainer` on.
+
+**`show_edit_view()`** — skill trainer section after the Is Innkeeper
+checkbox: toggle with auto-apply/remove on change, coloured status badge,
+`autocomplete_skill_id_list_selector` multi-select, fee/max-rank text
+fields, Create/Repair/Remove buttons.
+
+**Save button** — adds skill trainer dialogue cleanup block after the
+existing trainer block so skill trainer dialogue is kept consistent on every
+save.
+
+**5 new unit tests (Phase 8):**
+
+| Test name                                                                     | What it verifies                                                                                                |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `test_npc_skill_trainer_validation_rejects_unknown_skill`                     | Unknown skill ID produces a validation error                                                                    |
+| `test_npc_skill_trainer_validation_rejects_non_trainable_skill`               | Non-trainable skill produces a validation error                                                                 |
+| `test_npc_skill_trainer_dialogue_template_creates_open_skill_training_action` | `create_or_repair_skill_trainer_dialogue_for_buffer` creates dialogue with `OpenSkillTraining` and SDK metadata |
+| `test_npc_editor_skill_trainer_defaults_are_safe`                             | Default buffer and state have all skill trainer fields empty/false                                              |
+| `test_skill_id_autocomplete_extracts_candidates`                              | Candidate filter includes only trainable skills                                                                 |
+
+### Architecture Compliance
+
+- [x] No new data structures introduced; extends existing `NpcEditBuffer` and
+      `NpcEditorState` exactly as trainer fields were extended in Phase 7.
+- [x] `SkillTrainerDialogueValidationState` mirrors `TrainerDialogueValidationState`.
+- [x] `available_skills` is `#[serde(skip)]` — not persisted.
+- [x] `skill_training_max_rank` parsed as `u16` matching `SkillRank = u16`.
+- [x] No test references `campaigns/tutorial` (Rule 5).
+- [x] All doc comments follow `///` pattern.
+
+### Quality Gates
+
+- `cargo fmt --all` → no output.
+- `cargo check --all-targets --all-features` → 0 errors.
+- `cargo clippy --all-targets --all-features -- -D warnings` → 0 warnings.
+- `cargo nextest run --all-features` → 5056 passed, 0 failed.
+
+---
+
 ## Phase 7: NPC Train Skills UI (Complete)
 
 ### Overview

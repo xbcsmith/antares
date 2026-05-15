@@ -1495,6 +1495,155 @@ impl DialogueEditorState {
         }
     }
 
+    /// Ensures a skill trainer NPC has a compliant dialogue assignment.
+    ///
+    /// If the skill trainer has no assigned dialogue, this creates a new standard
+    /// skill trainer template tree, appends it to the editor's loaded dialogue
+    /// collection, and assigns the new dialogue ID to the NPC.
+    ///
+    /// If the skill trainer already has an assigned dialogue, the editor loads that
+    /// tree and augments it with the standard SDK-managed skill trainer branch when
+    /// the dialogue does not already contain an explicit
+    /// `DialogueAction::OpenSkillTraining { npc_id }` path for this NPC.
+    ///
+    /// Returns a status describing what action was taken.
+    ///
+    /// # Arguments
+    ///
+    /// * `npc` - Mutable reference to the NPC definition (dialogue_id may be set)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string if the assigned dialogue cannot be found or augmented.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::dialogue_editor::DialogueEditorState;
+    /// use antares::domain::world::NpcDefinition;
+    ///
+    /// let mut editor = DialogueEditorState::new();
+    /// let mut npc = NpcDefinition::new("skill_sage", "Skill Sage", "");
+    /// npc.is_skill_trainer = true;
+    /// npc.trainable_skill_ids = vec!["perception".to_string()];
+    ///
+    /// let result = editor.ensure_skill_trainer_dialogue_for_npc(&mut npc);
+    /// assert!(result.is_ok());
+    /// ```
+    pub fn ensure_skill_trainer_dialogue_for_npc(
+        &mut self,
+        npc: &mut NpcDefinition,
+    ) -> Result<MerchantDialogueUpdate, String> {
+        if !npc.is_skill_trainer {
+            return Ok(MerchantDialogueUpdate::Unchanged);
+        }
+
+        if let Some(dialogue_id) = npc.dialogue_id {
+            let dialogue = self
+                .dialogues
+                .iter_mut()
+                .find(|dialogue| dialogue.id == dialogue_id)
+                .ok_or_else(|| {
+                    format!(
+                        "Assigned dialogue {} for skill trainer '{}' was not found",
+                        dialogue_id, npc.id
+                    )
+                })?;
+
+            if dialogue.contains_open_skill_training_for_npc(&npc.id) {
+                return Ok(MerchantDialogueUpdate::AlreadyValid);
+            }
+
+            if dialogue.ensure_standard_skill_trainer_branch(&npc.id, &npc.name) {
+                self.has_unsaved_changes = true;
+                return Ok(MerchantDialogueUpdate::AugmentedExisting { dialogue_id });
+            }
+
+            return Err(format!(
+                "Assigned dialogue {} for skill trainer '{}' could not be augmented",
+                dialogue_id, npc.id
+            ));
+        }
+
+        let dialogue_id = self.next_available_dialogue_id();
+        let dialogue =
+            DialogueTree::standard_skill_trainer_template(dialogue_id, &npc.id, &npc.name);
+        self.dialogues.push(dialogue);
+        npc.dialogue_id = Some(dialogue_id);
+        self.has_unsaved_changes = true;
+
+        Ok(MerchantDialogueUpdate::CreatedNew { dialogue_id })
+    }
+
+    /// Removes SDK-managed skill trainer content from the assigned dialogue for an
+    /// NPC that is no longer a skill trainer.
+    ///
+    /// This cleanup is intentionally non-destructive:
+    ///
+    /// - only SDK-managed skill trainer nodes and choices are removed
+    /// - unrelated authored dialogue content remains intact
+    /// - the dialogue asset itself is retained
+    /// - the NPC's `dialogue_id` is not cleared automatically
+    ///
+    /// Returns a status describing what action was taken.
+    ///
+    /// # Arguments
+    ///
+    /// * `npc` - Reference to the NPC definition
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string if the assigned dialogue cannot be found.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::dialogue_editor::DialogueEditorState;
+    /// use antares::domain::dialogue::DialogueTree;
+    /// use antares::domain::world::NpcDefinition;
+    ///
+    /// let mut editor = DialogueEditorState::new();
+    /// let tree = DialogueTree::standard_skill_trainer_template(40, "skill_sage", "Skill Sage");
+    /// editor.load_dialogues(vec![tree]);
+    ///
+    /// let mut npc = NpcDefinition::new("skill_sage", "Skill Sage", "");
+    /// npc.dialogue_id = Some(40);
+    /// npc.is_skill_trainer = false;
+    ///
+    /// let result = editor.remove_skill_trainer_dialogue_for_npc(&npc);
+    /// assert!(result.is_ok());
+    /// ```
+    pub fn remove_skill_trainer_dialogue_for_npc(
+        &mut self,
+        npc: &NpcDefinition,
+    ) -> Result<MerchantDialogueUpdate, String> {
+        if npc.is_skill_trainer {
+            return Ok(MerchantDialogueUpdate::Unchanged);
+        }
+
+        let Some(dialogue_id) = npc.dialogue_id else {
+            return Ok(MerchantDialogueUpdate::Unchanged);
+        };
+
+        let dialogue = self
+            .dialogues
+            .iter_mut()
+            .find(|dialogue| dialogue.id == dialogue_id)
+            .ok_or_else(|| {
+                format!(
+                    "Assigned dialogue {} for non-skill-trainer '{}' was not found",
+                    dialogue_id, npc.id
+                )
+            })?;
+
+        if dialogue.remove_sdk_managed_skill_trainer_content() {
+            self.has_unsaved_changes = true;
+            Ok(MerchantDialogueUpdate::RemovedMerchantContent { dialogue_id })
+        } else {
+            Ok(MerchantDialogueUpdate::NoMerchantContentToRemove { dialogue_id })
+        }
+    }
+
     /// Finds the next available node ID for the currently selected dialogue.
     ///
     /// Returns the maximum node ID in the selected dialogue plus 1, or 1 if no nodes exist.
