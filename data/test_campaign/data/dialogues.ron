@@ -1603,4 +1603,40 @@
         repeatable: true,
         associated_quest: None,
     ),
+    (
+        id: 201,
+        name: "Skill Trainer Dialogue",
+        root_node: 1,
+        nodes: {
+            1: (
+                id: 1,
+                text: "Welcome, adventurer! I can train your skills for a fee. What would you like to improve?",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "I would like to train my skills.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [
+                            OpenSkillTraining(npc_id: "test_skill_trainer"),
+                        ],
+                        ends_dialogue: true,
+                    ),
+                    (
+                        text: "Farewell.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
+        },
+        speaker_name: Some("Master of Skills"),
+        repeatable: true,
+        associated_quest: None,
+    ),
 ]

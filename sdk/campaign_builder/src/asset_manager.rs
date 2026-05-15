@@ -2761,6 +2761,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         manager.scan_references(&CampaignRefs {
@@ -2836,6 +2841,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         manager.scan_references(&CampaignRefs {
@@ -3174,6 +3184,11 @@ mod tests {
                 is_trainer: false,
                 training_fee_base: None,
                 training_fee_multiplier: None,
+                is_skill_trainer: false,
+                trainable_skill_ids: Vec::new(),
+                skill_training_fee_base: None,
+                skill_training_fee_multiplier: None,
+                skill_training_max_rank: None,
             },
             antares::domain::world::npc::NpcDefinition {
                 id: "tutorial_merchant_town".to_string(),
@@ -3194,6 +3209,11 @@ mod tests {
                 is_trainer: false,
                 training_fee_base: None,
                 training_fee_multiplier: None,
+                is_skill_trainer: false,
+                trainable_skill_ids: Vec::new(),
+                skill_training_fee_base: None,
+                skill_training_fee_multiplier: None,
+                skill_training_max_rank: None,
             },
             antares::domain::world::npc::NpcDefinition {
                 id: "tutorial_wizard_arcturus_brother".to_string(),
@@ -3214,6 +3234,11 @@ mod tests {
                 is_trainer: false,
                 training_fee_base: None,
                 training_fee_multiplier: None,
+                is_skill_trainer: false,
+                trainable_skill_ids: Vec::new(),
+                skill_training_fee_base: None,
+                skill_training_fee_multiplier: None,
+                skill_training_max_rank: None,
             },
         ];
 

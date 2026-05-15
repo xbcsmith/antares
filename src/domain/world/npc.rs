@@ -36,6 +36,11 @@
 //!     economy: None,
 //!     training_fee_base: None,
 //!     training_fee_multiplier: None,
+//!     is_skill_trainer: false,
+//!     trainable_skill_ids: vec![],
+//!     skill_training_fee_base: None,
+//!     skill_training_fee_multiplier: None,
+//!     skill_training_max_rank: None,
 //! };
 //! ```
 //!
@@ -51,6 +56,7 @@
 use crate::domain::dialogue::DialogueId;
 use crate::domain::inventory::{NpcEconomySettings, ServiceCatalog};
 use crate::domain::quest::QuestId;
+use crate::domain::skills::{SkillId, SkillRank};
 use crate::domain::types::{CreatureId, Direction, Position};
 use crate::domain::world::SpriteReference;
 use serde::{Deserialize, Serialize};
@@ -91,6 +97,11 @@ pub type NpcId = String;
 ///     economy: None,
 ///     training_fee_base: None,
 ///     training_fee_multiplier: None,
+///     is_skill_trainer: false,
+///     trainable_skill_ids: vec![],
+///     skill_training_fee_base: None,
+///     skill_training_fee_multiplier: None,
+///     skill_training_max_rank: None,
 /// };
 ///
 /// assert_eq!(merchant.id, "merchant_tom");
@@ -148,6 +159,11 @@ pub struct NpcDefinition {
     ///     economy: None,
     ///     training_fee_base: None,
     ///     training_fee_multiplier: None,
+    ///     is_skill_trainer: false,
+    ///     trainable_skill_ids: vec![],
+    ///     skill_training_fee_base: None,
+    ///     skill_training_fee_multiplier: None,
+    ///     skill_training_max_rank: None,
     /// };
     /// ```
     #[serde(default)]
@@ -186,6 +202,11 @@ pub struct NpcDefinition {
     ///     economy: None,
     ///     training_fee_base: None,
     ///     training_fee_multiplier: None,
+    ///     is_skill_trainer: false,
+    ///     trainable_skill_ids: vec![],
+    ///     skill_training_fee_base: None,
+    ///     skill_training_fee_multiplier: None,
+    ///     skill_training_max_rank: None,
     /// };
     /// ```
     #[serde(default)]
@@ -256,6 +277,44 @@ pub struct NpcDefinition {
     /// When `None`, the campaign default is used.
     #[serde(default)]
     pub training_fee_multiplier: Option<f32>,
+
+    /// If true, this NPC offers skill training (paid skill rank increase).
+    ///
+    /// Different from [`is_trainer`] which handles character level-up.
+    /// A skill trainer allows party members to pay gold to increase a specific
+    /// skill's persistent rank by 1.
+    ///
+    /// [`is_trainer`]: NpcDefinition::is_trainer
+    #[serde(default)]
+    pub is_skill_trainer: bool,
+
+    /// Skills this NPC can train. Empty means the NPC trains no skills.
+    ///
+    /// Each entry is a `SkillId` (String) referencing a `SkillDefinition`
+    /// with `is_trainable: true` in the skill database.
+    #[serde(default)]
+    pub trainable_skill_ids: Vec<SkillId>,
+
+    /// Per-NPC override for the base gold fee charged per skill training session.
+    ///
+    /// When `Some`, overrides the campaign default of 100 gold.
+    /// When `None`, the campaign default is used.
+    #[serde(default)]
+    pub skill_training_fee_base: Option<u32>,
+
+    /// Per-NPC override for the per-rank fee multiplier applied during skill training.
+    ///
+    /// When `Some`, overrides the campaign default of 1.0.
+    /// When `None`, the campaign default is used.
+    #[serde(default)]
+    pub skill_training_fee_multiplier: Option<f32>,
+
+    /// Per-NPC rank cap for skill training.
+    ///
+    /// When `Some`, the NPC will not train a skill beyond this rank.
+    /// When `None`, the skill definition's `max_rank` is used.
+    #[serde(default)]
+    pub skill_training_max_rank: Option<SkillRank>,
 }
 
 impl NpcDefinition {
@@ -306,6 +365,11 @@ impl NpcDefinition {
             economy: None,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         }
     }
 
@@ -350,6 +414,11 @@ impl NpcDefinition {
             economy: None,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         }
     }
 
@@ -398,6 +467,11 @@ impl NpcDefinition {
             economy: None,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         }
     }
 
@@ -442,6 +516,11 @@ impl NpcDefinition {
             economy: None,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         }
     }
 
@@ -495,6 +574,11 @@ impl NpcDefinition {
             economy: None,
             training_fee_base: Some(fee_base),
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         }
     }
 
@@ -541,6 +625,47 @@ impl NpcDefinition {
             .training_fee_multiplier
             .unwrap_or(campaign_config.training_fee_multiplier);
         (base as f32 * multiplier * level as f32) as u32
+    }
+
+    /// Computes the gold fee for training a skill to the next rank.
+    ///
+    /// Uses the NPC's override values when present, otherwise falls back to
+    /// the campaign defaults (`skill_training_fee_base=100`, multiplier=1.0).
+    ///
+    /// Formula: `floor(base * multiplier * (current_rank + 1))`
+    ///
+    /// # Arguments
+    ///
+    /// * `current_rank` - The character's **current** persistent skill rank
+    /// * `campaign_fee_base` - Campaign default base fee (fallback when NPC has none)
+    /// * `campaign_fee_multiplier` - Campaign default multiplier (fallback when NPC has none)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::npc::NpcDefinition;
+    ///
+    /// let mut npc = NpcDefinition::new("skill_trainer", "Skill Trainer", "trainer.png");
+    /// npc.is_skill_trainer = true;
+    /// npc.trainable_skill_ids = vec!["perception".to_string()];
+    /// npc.skill_training_fee_base = Some(100);
+    ///
+    /// // Training from rank 0 → 1: fee = 100 * 1.0 * 1 = 100
+    /// assert_eq!(npc.skill_training_fee(0, 100, 1.0), 100);
+    /// // Training from rank 3 → 4: fee = 100 * 1.0 * 4 = 400
+    /// assert_eq!(npc.skill_training_fee(3, 100, 1.0), 400);
+    /// ```
+    pub fn skill_training_fee(
+        &self,
+        current_rank: SkillRank,
+        campaign_fee_base: u32,
+        campaign_fee_multiplier: f32,
+    ) -> u32 {
+        let base = self.skill_training_fee_base.unwrap_or(campaign_fee_base);
+        let multiplier = self
+            .skill_training_fee_multiplier
+            .unwrap_or(campaign_fee_multiplier);
+        (base as f32 * multiplier * (current_rank as f32 + 1.0)) as u32
     }
 
     /// Checks if this NPC has a dialogue
@@ -825,6 +950,11 @@ mod tests {
             economy: None,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: vec![],
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         let serialized = ron::to_string(&npc).expect("Failed to serialize");
@@ -969,6 +1099,11 @@ NpcDefinition(
             economy: None,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: vec![],
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         assert_eq!(npc.id, "complete_npc");
@@ -1022,6 +1157,11 @@ NpcDefinition(
             economy: None,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: vec![],
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         let serialized = ron::to_string(&npc).expect("Failed to serialize");
@@ -1229,6 +1369,11 @@ NpcDefinition(
             economy: None,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: vec![],
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         let serialized = ron::to_string(&priest).expect("Failed to serialize");
@@ -1265,6 +1410,11 @@ NpcDefinition(
             economy: Some(NpcEconomySettings::new(0.4, 1.2)),
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: vec![],
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         let serialized = ron::to_string(&npc).expect("Failed to serialize");
@@ -1368,5 +1518,51 @@ NpcDefinition(
         assert!(!npc.is_trainer);
         assert!(npc.training_fee_base.is_none());
         assert!(npc.training_fee_multiplier.is_none());
+    }
+
+    #[test]
+    fn test_npc_definition_is_skill_trainer_defaults_false() {
+        let npc = NpcDefinition::new("test", "Test NPC", "test.png");
+        assert!(!npc.is_skill_trainer);
+        assert!(npc.trainable_skill_ids.is_empty());
+        assert!(npc.skill_training_fee_base.is_none());
+        assert!(npc.skill_training_fee_multiplier.is_none());
+        assert!(npc.skill_training_max_rank.is_none());
+    }
+
+    #[test]
+    fn test_npc_definition_skill_training_fee_uses_npc_override() {
+        let mut npc = NpcDefinition::new("skill_trainer", "Skill Trainer", "trainer.png");
+        npc.is_skill_trainer = true;
+        npc.skill_training_fee_base = Some(200);
+        // current_rank=0: fee = 200 * 1.0 * 1 = 200
+        assert_eq!(npc.skill_training_fee(0, 100, 1.0), 200);
+    }
+
+    #[test]
+    fn test_npc_definition_skill_training_fee_falls_back_to_campaign() {
+        let mut npc = NpcDefinition::new("skill_trainer", "Skill Trainer", "trainer.png");
+        npc.is_skill_trainer = true;
+        // No NPC override; falls back to campaign default 100 * 1.0 * (0+1)=100
+        assert_eq!(npc.skill_training_fee(0, 100, 1.0), 100);
+    }
+
+    #[test]
+    fn test_npc_definition_skill_trainer_serialization_roundtrip() {
+        let mut npc = NpcDefinition::new("skill_trainer", "Skill Trainer", "trainer.png");
+        npc.is_skill_trainer = true;
+        npc.trainable_skill_ids = vec!["perception".to_string(), "disarm_traps".to_string()];
+        npc.skill_training_fee_base = Some(150);
+        npc.skill_training_max_rank = Some(20);
+
+        let ron = ron::to_string(&npc).unwrap();
+        let deserialized: NpcDefinition = ron::from_str(&ron).unwrap();
+        assert!(deserialized.is_skill_trainer);
+        assert_eq!(
+            deserialized.trainable_skill_ids,
+            vec!["perception".to_string(), "disarm_traps".to_string()]
+        );
+        assert_eq!(deserialized.skill_training_fee_base, Some(150));
+        assert_eq!(deserialized.skill_training_max_rank, Some(20));
     }
 }

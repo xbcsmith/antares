@@ -2,6 +2,151 @@
 
 ---
 
+## Phase 6: NPC Train Skills Domain and Application Flow (Complete)
+
+### Overview
+
+Implemented the full NPC skill training domain and application flow: skill
+trainer NPC fields, the atomic `perform_skill_training_service`, a dedicated
+`SkillTrainingState` and `GameMode::SkillTraining` variant, a
+`DialogueAction::OpenSkillTraining` action, and the dialogue system handler
+that enters the new mode. Test campaign fixtures include a skill trainer NPC
+and a dialogue tree with an `OpenSkillTraining` action.
+
+### Files Created
+
+| File                                      | What was added                                                                                          |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `src/application/skill_training_state.rs` | `SkillTrainingState` struct with `new`, `clear`, `select_member`, `select_skill`; 18 unit tests         |
+| `src/application/skill_training.rs`       | `SkillTrainingError` (7 variants), `perform_skill_training_service` (14-step atomic flow); 7 unit tests |
+
+### Files Modified
+
+#### `src/domain/world/npc.rs`
+
+- Added `use crate::domain::skills::{SkillId, SkillRank};` import.
+- Added 5 new `#[serde(default)]` fields to `NpcDefinition` after
+  `training_fee_multiplier`: `is_skill_trainer: bool`,
+  `trainable_skill_ids: Vec<SkillId>`, `skill_training_fee_base: Option<u32>`,
+  `skill_training_fee_multiplier: Option<f32>`,
+  `skill_training_max_rank: Option<SkillRank>`.
+- Updated `new()`, `merchant()`, `priest()`, `innkeeper()`, and `trainer()`
+  constructors with new defaulted fields.
+- Updated all 4 struct-literal doc-comment examples to include the new fields.
+- Added `skill_training_fee(current_rank, campaign_fee_base, campaign_fee_multiplier) -> u32`
+  using formula `floor(base * multiplier * (current_rank + 1))`.
+- Added 4 unit tests (defaults, NPC override, campaign fallback, serde round-trip).
+- Updated all struct literals in test modules that became incomplete (blueprint.rs,
+  creature_binding.rs, types.rs, events.rs, database.rs, campaign_integration_tests.rs).
+
+#### `src/application/mod.rs`
+
+- Registered `pub mod skill_training;` and `pub mod skill_training_state;` (alphabetical).
+- Added `GameMode::SkillTraining(crate::application::skill_training_state::SkillTrainingState)`
+  variant with full doc comment.
+- Added `GameMode::SkillTraining(_)` arm to `close_modal()` returning to Exploration.
+- Added `GameState::enter_skill_training(npc_id, eligible_indices, available_skills)` method.
+- Added `GameState::exit_skill_training()` method (no-op outside SkillTraining mode).
+- Added 4 unit tests: `test_enter_skill_training_sets_skill_training_mode`,
+  `test_exit_skill_training_returns_to_exploration`,
+  `test_exit_skill_training_noop_when_not_in_skill_training_mode`,
+  `test_close_modal_closes_skill_training_to_exploration`.
+
+#### `src/domain/dialogue.rs`
+
+- Added `DialogueAction::OpenSkillTraining { npc_id: String }` variant after
+  `OpenTraining`.
+- Added `"Open skill training session for '{}"` arm in `DialogueAction::description()`.
+
+#### `src/game/systems/dialogue.rs`
+
+- Added `DialogueAction::OpenSkillTraining` arm in `execute_action()` that:
+  - Validates the NPC exists and has `is_skill_trainer: true`.
+  - Builds `eligible_member_indices` (alive party members) and clones
+    `trainable_skill_ids` from the NPC definition.
+  - Calls `game_state.enter_skill_training(...)` to set the new mode.
+- Added 3 tests: `test_open_skill_training_dialogue_enters_skill_training_mode`,
+  `test_open_skill_training_unknown_npc_no_panic`,
+  `test_open_skill_training_non_skill_trainer_npc_no_transition`.
+
+#### `data/test_campaign/data/npcs.ron`
+
+- Added `test_skill_trainer` NPC entry with `is_skill_trainer: true`,
+  `trainable_skill_ids: ["perception", "diplomacy"]`, `skill_training_fee_base: Some(100)`,
+  `skill_training_max_rank: Some(20)`, `creature_id: Some(59)`, `dialogue_id: Some(201)`.
+
+#### `data/test_campaign/data/dialogues.ron`
+
+- Added dialogue `id: 201` — "Skill Trainer Dialogue" — with a branch that
+  fires `OpenSkillTraining(npc_id: "test_skill_trainer")`.
+
+### Key Design Decisions
+
+- **Two separate flows** — `GameMode::Training` (level-up) and
+  `GameMode::SkillTraining` (skill rank increase) are kept completely separate,
+  as specified. They share no state or service functions.
+- **Atomic preconditions** — `perform_skill_training_service` completes all 14
+  checks (NPC lookup, trainer flag, party member alive, skill existence,
+  trainability, NPC offer, rank resolution, rank cap, gold) before modifying
+  any state. A failed check returns an error with no side-effects.
+- **`SkillTrainingState` as a dedicated module** — follows the
+  `character_sheet_state.rs` pattern: separate file, full doc comments, serde
+  round-trip, own test module.
+- **Check ordering** — skill existence/trainability (steps 5-6) is verified
+  before the NPC offer check (step 7) so the player sees "Skill does not
+  exist" rather than "NPC doesn't offer it" for unknown skill IDs.
+- **Fee formula** — `floor(base * multiplier * (current_persistent_rank + 1))`
+  so rank 0→1 costs `base`, rank 1→2 costs `2*base`, etc.
+
+### Tests Added / Updated
+
+| Module                                    | Tests                                                             |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| `src/domain/world/npc.rs`                 | 4 new (skill trainer defaults, fee override, fee fallback, serde) |
+| `src/application/skill_training_state.rs` | 18 new                                                            |
+| `src/application/skill_training.rs`       | 7 new (all 7 required by spec)                                    |
+| `src/application/mod.rs`                  | 4 new (enter, exit, noop exit, close_modal)                       |
+| `src/game/systems/dialogue.rs`            | 3 new (enters mode, unknown NPC, non-trainer NPC)                 |
+
+**Total new tests: 36** — all passing, zero failures.
+
+### Phase 6 Deliverables Checklist
+
+- [x] NPC skill trainer fields added with serde defaults
+- [x] `src/application/skill_training.rs` created with `SkillTrainingError` and
+      `perform_skill_training_service`
+- [x] `src/application/skill_training_state.rs` created with `SkillTrainingState`
+      with `new`, `clear`, `select_member`, `select_skill`
+- [x] `GameMode::SkillTraining` variant added
+- [x] `GameState::close_modal()` handles `GameMode::SkillTraining`
+- [x] `GameState::enter_skill_training` and `exit_skill_training` implemented
+- [x] `DialogueAction::OpenSkillTraining` added
+- [x] Dialogue system `execute_action` handles `OpenSkillTraining`
+- [x] Test campaign includes skill trainer NPC (`test_skill_trainer`) and
+      dialogue 201 with `OpenSkillTraining` action
+- [x] Unit tests cover all required training success/failure cases
+- [x] `docs/explanation/implementations.md` updated
+
+### Phase 6 Success Criteria Verification
+
+| Criterion                                                                       | Status                                                                         |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Skill training is atomic (failed training does not deduct gold or change ranks) | ✅ All 14 checks complete before any mutation                                  |
+| Successful training increases only persistent character skill rank              | ✅ `skill_ranks.increment()` only called after all checks pass                 |
+| Auto skill scaling still applies independently of trained ranks                 | ✅ Resolver combines auto-scaled + trained ranks; only persistent rank changes |
+| Dialogue can open skill training only for valid skill trainer NPCs              | ✅ `execute_action` guards on `is_skill_trainer` before entering mode          |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → No output
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings
+✅ cargo nextest run → 5032 passed; 0 failed; 8 skipped
+```
+
+---
+
 ## Phase 5: SDK Skills Editor (Complete)
 
 ### Overview

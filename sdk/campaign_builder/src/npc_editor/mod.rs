@@ -1955,6 +1955,11 @@ impl NpcEditorState {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         self.merchant_dialogue_status_for_definition(&npc)
@@ -2003,6 +2008,11 @@ impl NpcEditorState {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         self.merchant_dialogue_repair_action_for_definition(&npc)
@@ -2083,6 +2093,11 @@ impl NpcEditorState {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         let update = self
@@ -2260,6 +2275,11 @@ impl NpcEditorState {
                 .trim()
                 .parse::<f32>()
                 .ok(),
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         })
     }
 
@@ -2458,6 +2478,11 @@ impl NpcEditorState {
             is_trainer: self.edit_buffer.is_trainer,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         match self.trainer_dialogue_validation_for_definition(&npc) {
@@ -2549,6 +2574,11 @@ impl NpcEditorState {
             is_trainer: true,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         use crate::dialogue_editor::MerchantDialogueUpdate;
@@ -2630,6 +2660,11 @@ impl NpcEditorState {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         use crate::dialogue_editor::MerchantDialogueUpdate;
@@ -2758,6 +2793,11 @@ impl NpcEditorState {
                 .trim()
                 .parse::<f32>()
                 .ok(),
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         // Perform the in-memory save and remember the result
@@ -3047,6 +3087,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
         state.start_edit_npc(0);
@@ -3576,6 +3621,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         let mut state = NpcEditorState::new();
@@ -3624,6 +3674,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
         // Edit it
@@ -3660,6 +3715,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         assert!(state.matches_filters(&npc));
     }
@@ -3688,6 +3748,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         assert!(state.matches_filters(&npc));
 
@@ -3710,6 +3775,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         assert!(!state.matches_filters(&npc2));
     }
@@ -3738,6 +3808,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         assert!(state.matches_filters(&merchant));
 
@@ -3760,6 +3835,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         assert!(!state.matches_filters(&non_merchant));
     }
@@ -3790,6 +3870,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
         let id2 = state.next_npc_id();
@@ -3841,6 +3926,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
         state.start_edit_npc(0);
@@ -3909,6 +3999,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
         state.mode = NpcEditorMode::Add;
@@ -4065,6 +4160,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
         // Start editing
@@ -4225,6 +4325,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         state.npcs.push(npc);
 
@@ -4299,6 +4404,11 @@ mod tests {
                 is_trainer: false,
                 training_fee_base: None,
                 training_fee_multiplier: None,
+                is_skill_trainer: false,
+                trainable_skill_ids: Vec::new(),
+                skill_training_fee_base: None,
+                skill_training_fee_multiplier: None,
+                skill_training_max_rank: None,
             },
             NpcDefinition {
                 id: "npc_b".to_string(),
@@ -4319,6 +4429,11 @@ mod tests {
                 is_trainer: false,
                 training_fee_base: None,
                 training_fee_multiplier: None,
+                is_skill_trainer: false,
+                trainable_skill_ids: Vec::new(),
+                skill_training_fee_base: None,
+                skill_training_fee_multiplier: None,
+                skill_training_max_rank: None,
             },
         ];
         let ron_str =
@@ -4346,6 +4461,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
         state.selected_npc = Some(0);
         state.mode = NpcEditorMode::Edit;
@@ -4458,6 +4578,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
         let missing_path = std::path::Path::new("/no/such/dir/npcs.ron");
@@ -4947,6 +5072,11 @@ mod tests {
             economy: None,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         let regular = NpcDefinition {
             id: "regular_npc".to_string(),
@@ -4967,6 +5097,11 @@ mod tests {
             economy: None,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         let mut state = NpcEditorState::new();
@@ -5043,6 +5178,11 @@ mod tests {
             economy: None,
             training_fee_base: Some(250),
             training_fee_multiplier: Some(1.25),
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         let mut state = NpcEditorState::new();

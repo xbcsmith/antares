@@ -1331,6 +1331,16 @@ pub enum DialogueAction {
         /// NpcId of the trainer NPC that should conduct the session
         npc_id: String,
     },
+    /// Transitions the game into `GameMode::SkillTraining` for the specified
+    /// skill trainer NPC.
+    ///
+    /// The target NPC must have `is_skill_trainer: true` in its definition.
+    /// The dialogue system will build the list of eligible party members and
+    /// available skills from the NPC definition before transitioning.
+    OpenSkillTraining {
+        /// NpcId of the skill trainer NPC that should conduct the session
+        npc_id: String,
+    },
 }
 
 impl DialogueAction {
@@ -1435,6 +1445,9 @@ impl DialogueAction {
             },
             DialogueAction::OpenTraining { npc_id } => {
                 format!("Open training session for '{}'", npc_id)
+            }
+            DialogueAction::OpenSkillTraining { npc_id } => {
+                format!("Open skill training session for '{}'", npc_id)
             }
         }
     }

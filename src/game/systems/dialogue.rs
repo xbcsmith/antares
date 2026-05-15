@@ -1828,6 +1828,56 @@ fn execute_action(
 
             game_state.mode = GameMode::Training(training_state);
         }
+
+        DialogueAction::OpenSkillTraining { npc_id } => {
+            // Look up and validate the skill trainer NPC.
+            let npc = match db.npcs.get_npc(npc_id) {
+                Some(n) => n,
+                None => {
+                    warn!(
+                        "OpenSkillTraining: NPC '{}' not found in content database",
+                        npc_id
+                    );
+                    if let Some(log) = game_log.as_mut() {
+                        log.add_system(format!("Skill trainer '{}' not found.", npc_id));
+                    }
+                    return;
+                }
+            };
+
+            if !npc.is_skill_trainer {
+                warn!(
+                    "OpenSkillTraining: NPC '{}' is not flagged as a skill trainer; ignoring",
+                    npc_id
+                );
+                if let Some(log) = game_log.as_mut() {
+                    log.add_system(format!("'{}' does not offer skill training.", npc.name));
+                }
+                return;
+            }
+
+            // Build the list of alive party member indices.
+            let eligible_member_indices: Vec<usize> = game_state
+                .party
+                .members
+                .iter()
+                .enumerate()
+                .filter(|(_, member)| member.is_alive())
+                .map(|(i, _)| i)
+                .collect();
+
+            // Clone the available skill IDs from the NPC definition.
+            let available_skill_ids = npc.trainable_skill_ids.clone();
+
+            info!(
+                "OpenSkillTraining: entering skill training mode for NPC '{}' ({} skill(s), {} eligible member(s))",
+                npc_id,
+                available_skill_ids.len(),
+                eligible_member_indices.len()
+            );
+
+            game_state.enter_skill_training(npc_id, eligible_member_indices, available_skill_ids);
+        }
     }
 }
 
@@ -4190,5 +4240,128 @@ mod tests {
 
         // Spellbook unchanged
         assert!(gs.party.members[0].spells.cleric_spells[0].is_empty());
+    }
+
+    // ── OpenSkillTraining dialogue action ─────────────────────────────────
+
+    /// Build a `ContentDatabase` containing a single skill-trainer NPC with
+    /// the given skill IDs.
+    fn make_skill_trainer_npc_db(skill_ids: Vec<String>) -> crate::sdk::database::ContentDatabase {
+        use crate::domain::world::npc::NpcDefinition;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+        db.classes = crate::domain::classes::ClassDatabase::load_from_file("data/classes.ron")
+            .expect("data/classes.ron must exist");
+        db.races = crate::domain::races::RaceDatabase::load_from_file("data/races.ron")
+            .expect("data/races.ron must exist");
+
+        let skill_ron = r#"[
+            (id: "perception", name: "Perception", category: Exploration,
+             description: "Spot hidden traps and enemies",
+             scaling: Flat,
+             max_rank: 50, is_trainable: true),
+        ]"#;
+        db.skills = crate::domain::skills::SkillDatabase::load_from_string(skill_ron)
+            .expect("inline skill RON must parse");
+
+        let mut npc = NpcDefinition::new("test_skill_trainer", "Skill Trainer", "trainer.png");
+        npc.is_skill_trainer = true;
+        npc.trainable_skill_ids = skill_ids;
+        db.npcs.add_npc(npc).expect("NPC must be addable");
+        db
+    }
+
+    fn run_open_skill_training(
+        npc_id: &str,
+        game_state: &mut crate::application::GameState,
+        db: &crate::sdk::database::ContentDatabase,
+    ) {
+        use crate::domain::dialogue::DialogueAction;
+        execute_action(
+            &DialogueAction::OpenSkillTraining {
+                npc_id: npc_id.to_string(),
+            },
+            game_state,
+            db,
+            None,
+            None,
+            None,
+            None,
+            &mut None,
+        );
+    }
+
+    #[test]
+    fn test_open_skill_training_dialogue_enters_skill_training_mode() {
+        use crate::application::GameMode;
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let db = make_skill_trainer_npc_db(vec!["perception".to_string()]);
+        let mut gs = crate::application::GameState::new();
+
+        // Add an alive party member
+        let member = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.members.push(member);
+
+        run_open_skill_training("test_skill_trainer", &mut gs, &db);
+
+        assert!(
+            matches!(gs.mode, GameMode::SkillTraining(_)),
+            "OpenSkillTraining must transition to GameMode::SkillTraining"
+        );
+        if let GameMode::SkillTraining(ref st) = gs.mode {
+            assert_eq!(st.npc_id, "test_skill_trainer");
+            assert_eq!(st.available_skill_ids, vec!["perception".to_string()]);
+            assert_eq!(st.eligible_member_indices, vec![0]);
+        }
+    }
+
+    #[test]
+    fn test_open_skill_training_unknown_npc_no_panic() {
+        use crate::application::GameMode;
+
+        let db = make_skill_trainer_npc_db(vec!["perception".to_string()]);
+        let mut gs = crate::application::GameState::new();
+
+        // NPC does not exist — should warn and not panic
+        run_open_skill_training("nonexistent_npc", &mut gs, &db);
+
+        // Mode must remain Exploration (no transition on failure)
+        assert!(
+            matches!(gs.mode, GameMode::Exploration),
+            "OpenSkillTraining with unknown NPC must not change game mode"
+        );
+    }
+
+    #[test]
+    fn test_open_skill_training_non_skill_trainer_npc_no_transition() {
+        use crate::application::GameMode;
+        use crate::domain::world::npc::NpcDefinition;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+        db.classes = crate::domain::classes::ClassDatabase::load_from_file("data/classes.ron")
+            .expect("data/classes.ron must exist");
+        db.races = crate::domain::races::RaceDatabase::load_from_file("data/races.ron")
+            .expect("data/races.ron must exist");
+
+        // NPC is NOT a skill trainer
+        let npc = NpcDefinition::new("just_a_guard", "Guard", "guard.png");
+        db.npcs.add_npc(npc).unwrap();
+
+        let mut gs = crate::application::GameState::new();
+        run_open_skill_training("just_a_guard", &mut gs, &db);
+
+        assert!(
+            matches!(gs.mode, GameMode::Exploration),
+            "OpenSkillTraining for non-skill-trainer NPC must not change game mode"
+        );
     }
 }
