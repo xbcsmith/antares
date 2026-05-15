@@ -2,6 +2,101 @@
 
 ---
 
+## Phase 7: NPC Train Skills UI (Complete)
+
+### Overview
+
+Implemented the player-facing NPC skill training screen (`skill_training_ui.rs`)
+that allows players to select a party member, choose a skill, and pay gold to
+raise a skill's persistent rank by one. The UI follows the three-column
+`allocate_ui` layout rule from `AGENTS.md` Rule 6.
+
+### Deliverables
+
+#### `src/game/systems/skill_training_ui.rs` (new)
+
+- **`SkillTrainingPlugin`** — Registers four events (`TrainSkill`,
+  `SelectSkillTrainingMember`, `SelectSkillTrainingSkill`, `ExitSkillTraining`),
+  the `SkillTrainingNavState` resource, and six chained systems.
+- **Events** — `TrainSkill { party_index, skill_id }`, `SelectSkillTrainingMember`,
+  `SelectSkillTrainingSkill`, `ExitSkillTraining`.
+- **`FocusedSkillList`** / **`SkillTrainingNavState`** — Keyboard focus state
+  tracking which list (Members or Skills) is active and which row is highlighted.
+- **`eligible_skill_training_members`** (pub) — Pure helper that maps
+  `SkillTrainingState::eligible_member_indices` to alive `&Character` tuples,
+  silently dropping dead or out-of-bounds entries.
+- **`skill_training_ui_system`** — Three-column `allocate_ui` layout: left
+  column (party members), centre column (available skills), right column
+  (detail: rank preview, fee, Train/Leave buttons, status message). Title bar
+  carries all navigation hints right-aligned; no bottom hint bar.
+- **`skill_training_selection_system`** — Updates `SkillTrainingState` from
+  both member and skill selection events; run twice per frame (before and after
+  the UI system) to handle both keyboard and click selections.
+- **`skill_training_action_system`** — Calls `perform_skill_training_service`
+  on `TrainSkill` events, writes success/failure to `status_message` and the
+  game log; transitions to Exploration on `ExitSkillTraining`.
+- **`skill_training_input_system`** — Escape, Tab, Arrow Up/Down, Enter
+  keyboard navigation across both lists.
+- **`skill_training_cleanup_system`** — Despawns `SkillTrainingUiRoot` entities
+  and resets `SkillTrainingNavState` when leaving `SkillTraining` mode.
+- **10 unit tests** covering default state, dead-member filtering, skill list
+  filtering, plugin build, mode transitions (escape, success, failure, no-op).
+
+#### `src/game/systems/mod.rs`
+
+Added `pub mod skill_training_ui;`.
+
+#### `src/bin/antares.rs`
+
+Registered `SkillTrainingPlugin` in `AntaresPlugin::build` immediately after
+`TrainingPlugin`.
+
+#### `src/game/systems/input/mode_guards.rs`
+
+Added `GameMode::SkillTraining(_)` to `movement_blocked_for_mode` so player
+cannot walk while the skill training panel is open. Added a corresponding
+`test_movement_blocked_for_skill_training_true` test.
+
+#### `src/game/systems/input/global_toggles.rs`
+
+- Inventory toggle: added `GameMode::SkillTraining(_)` to the no-op arm
+  (alongside `Menu` and `Combat`).
+- Character sheet toggle: added `GameMode::SkillTraining(_)` to the blocked arm
+  (alongside `Training`, `Combat`, `Dialogue`, `MerchantInventory`).
+- Character select: added `GameMode::SkillTraining(_)` to `is_blocked`
+  (alongside `Training`, `Combat`, `Dialogue`, `MerchantInventory`).
+- Added `test_global_toggles_ignored_in_skill_training` covering both inventory
+  and character sheet toggle blocking.
+
+#### `src/game/systems/hud.rs`
+
+Added `test_portrait_click_ignored_in_skill_training` — verifies that
+`portrait_click_allowed` returns `false` for `GameMode::SkillTraining`
+(`SkillTraining` is already absent from the allow-list, this test documents
+the invariant).
+
+### Architecture Compliance
+
+- [x] Data structures match `architecture.md` — uses `SkillTrainingState`,
+      `GameMode::SkillTraining` as defined in Phase 6.
+- [x] egui multi-column layout follows Rule 6 exactly: `allocate_ui` with
+      explicit column rects, `auto_shrink([true, false])` on every `ScrollArea`,
+      hints in the title bar, no bottom hint bar.
+- [x] Every loop row uses `push_id` (`skill_train_member_*`, `skill_train_skill_*`).
+- [x] Every `ScrollArea` has a unique `id_salt`.
+- [x] No test references `campaigns/tutorial` (Rule 5).
+- [x] `perform_skill_training_service` unchanged — UI delegates all business
+      logic to the application layer.
+
+### Quality Gates
+
+- `cargo fmt --all` → no output.
+- `cargo check --all-targets --all-features` → 0 errors.
+- `cargo clippy --all-targets --all-features -- -D warnings` → 0 warnings.
+- `cargo nextest run --all-features` → 5045 passed, 0 failed.
+
+---
+
 ## Phase 6: NPC Train Skills Domain and Application Flow (Complete)
 
 ### Overview

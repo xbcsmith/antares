@@ -144,9 +144,9 @@ pub fn handle_global_mode_toggles(
                     }
                 }
             }
-            GameMode::Menu(_) | GameMode::Combat(_) => {
-                // Inventory toggle is ignored in menu and combat, but still
-                // consumes the frame to preserve top-of-function behavior.
+            GameMode::Menu(_) | GameMode::Combat(_) | GameMode::SkillTraining(_) => {
+                // Inventory toggle is ignored in menu, combat, and skill training, but
+                // still consumes the frame to preserve top-of-function behavior.
             }
             _ => {
                 game_state.enter_inventory();
@@ -229,6 +229,7 @@ pub fn handle_global_mode_toggles(
             GameMode::Combat(_)
             | GameMode::Dialogue(_)
             | GameMode::Training(_)
+            | GameMode::SkillTraining(_)
             | GameMode::MerchantInventory(_) => {
                 bevy::prelude::info!(
                     "Character sheet key pressed but mode is {:?} — ignoring",
@@ -249,6 +250,7 @@ pub fn handle_global_mode_toggles(
             GameMode::Combat(_)
                 | GameMode::Dialogue(_)
                 | GameMode::Training(_)
+                | GameMode::SkillTraining(_)
                 | GameMode::MerchantInventory(_)
         );
 
@@ -961,6 +963,38 @@ mod tests {
 
         assert!(consumed);
         assert!(matches!(state.mode, GameMode::Training(_)));
+    }
+
+    /// All global UI toggles (inventory, character sheet, character select) must
+    /// be ignored while the game is in `GameMode::SkillTraining`.
+    #[test]
+    fn test_global_toggles_ignored_in_skill_training() {
+        let mut state = GameState::new();
+        state.enter_skill_training("skill_trainer", vec![], vec!["perception".to_string()]);
+        assert!(matches!(state.mode, GameMode::SkillTraining(_)));
+
+        // Inventory toggle must be a no-op.
+        let consumed = handle_global_mode_toggles(&mut state, inventory_toggle_intent(), None);
+        assert!(
+            consumed,
+            "inventory toggle must consume frame in SkillTraining"
+        );
+        assert!(
+            matches!(state.mode, GameMode::SkillTraining(_)),
+            "mode must remain SkillTraining after inventory toggle"
+        );
+
+        // Character sheet toggle must be a no-op.
+        let consumed =
+            handle_global_mode_toggles(&mut state, character_sheet_toggle_intent(true), None);
+        assert!(
+            consumed,
+            "character sheet toggle must consume frame in SkillTraining"
+        );
+        assert!(
+            matches!(state.mode, GameMode::SkillTraining(_)),
+            "mode must remain SkillTraining after character sheet toggle"
+        );
     }
 
     #[test]
