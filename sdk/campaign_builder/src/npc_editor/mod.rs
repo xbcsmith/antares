@@ -66,6 +66,7 @@ use crate::ui_helpers::{
 use antares::domain::dialogue::{DialogueAction, DialogueId, DialogueTree};
 use antares::domain::inventory::{NpcEconomySettings, ServiceCatalog};
 use antares::domain::quest::{Quest, QuestId};
+use antares::domain::skills::SkillDefinition;
 use antares::domain::world::npc_runtime::MerchantStockTemplate;
 use antares::domain::world::{NpcDefinition, SpriteReference};
 use antares::domain::CreatureId;
@@ -165,6 +166,23 @@ pub enum TrainerDialogueValidationState {
     StaleTrainerContent,
 }
 
+/// Skill trainer dialogue validation state derived from an NPC plus its assigned
+/// dialogue tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillTrainerDialogueValidationState {
+    /// The NPC is not a skill trainer and no skill trainer-specific issue applies.
+    NotSkillTrainer,
+    /// The skill trainer has a valid assigned dialogue with an `OpenSkillTraining` path.
+    Valid,
+    /// The skill trainer has no assigned dialogue tree.
+    Missing,
+    /// The NPC references a dialogue ID that does not exist in the loaded data.
+    AssignedDialogueMissing,
+    /// The assigned dialogue contains SDK-managed skill trainer content while the NPC
+    /// is not a skill trainer.
+    StaleSkillTrainerContent,
+}
+
 /// Editor state for NPC editing.
 ///
 /// Merchant dialogue lifecycle work integrates here in later phases because the
@@ -221,6 +239,9 @@ pub struct NpcEditorState {
     /// Filter: Show only trainers
     pub filter_trainers: bool,
 
+    /// Filter: Show only skill trainers
+    pub filter_skill_trainers: bool,
+
     /// Available portrait IDs (cached from directory scan)
     #[serde(skip)]
     pub available_portraits: Vec<String>,
@@ -264,6 +285,10 @@ pub struct NpcEditorState {
     /// Stock templates available for merchant assignment (populated by caller)
     #[serde(skip)]
     pub available_stock_templates: Vec<MerchantStockTemplate>,
+
+    /// Available skill definitions for autocomplete (populated by caller before show()).
+    #[serde(skip)]
+    pub available_skills: Vec<SkillDefinition>,
 
     /// Set by the UI when the user clicks "✏ Edit template"; consumed by
     /// `CampaignBuilderApp` to switch tab and open the named template.
@@ -337,6 +362,16 @@ pub struct NpcEditBuffer {
     pub training_fee_base: String,
     /// Per-NPC training fee multiplier; empty string = use campaign default.
     pub training_fee_multiplier: String,
+    /// Whether this NPC is a skill trainer offering paid skill rank increases.
+    pub is_skill_trainer: bool,
+    /// Skill IDs this NPC can train (SkillId = String). Empty = no skill training.
+    pub trainable_skill_ids: Vec<String>,
+    /// Per-NPC skill training fee base (gold); empty string = use campaign default.
+    pub skill_training_fee_base: String,
+    /// Per-NPC skill training fee multiplier; empty string = use campaign default.
+    pub skill_training_fee_multiplier: String,
+    /// Per-NPC skill training max rank; empty string = use skill definition max_rank.
+    pub skill_training_max_rank: String,
 }
 
 impl Default for NpcEditorState {
@@ -358,6 +393,7 @@ impl Default for NpcEditorState {
             filter_innkeepers: false,
             filter_quest_givers: false,
             filter_trainers: false,
+            filter_skill_trainers: false,
             available_portraits: Vec::new(),
             portrait_picker_open: false,
             available_sprite_sheets: Vec::new(),
@@ -369,6 +405,7 @@ impl Default for NpcEditorState {
             last_npcs_file: None,
             reset_autocomplete_buffers: false,
             available_stock_templates: Vec::new(),
+            available_skills: Vec::new(),
             requested_template_edit: None,
             pending_status: None,
             merchant_dialogue_editor: DialogueEditorState::default(),
@@ -547,6 +584,13 @@ impl NpcEditorState {
                     self.filter_trainers = !self.filter_trainers;
                 }
 
+                if ui
+                    .selectable_label(self.filter_skill_trainers, "🧠 Skill Trainers")
+                    .clicked()
+                {
+                    self.filter_skill_trainers = !self.filter_skill_trainers;
+                }
+
                 ui.separator();
 
                 if ui.button("🔄 Clear Filters").clicked() {
@@ -555,6 +599,7 @@ impl NpcEditorState {
                     self.filter_innkeepers = false;
                     self.filter_quest_givers = false;
                     self.filter_trainers = false;
+                    self.filter_skill_trainers = false;
                 }
             });
 
@@ -939,11 +984,16 @@ impl NpcEditorState {
                 ctx,
                 egui::Id::new("autocomplete:creature:npc_creature".to_string()),
             );
+            crate::ui_helpers::remove_autocomplete_buffer(
+                ctx,
+                egui::Id::new("autocomplete:skill_add:npc_trainable_skills".to_string()),
+            );
             self.reset_autocomplete_buffers = false;
         }
 
         egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
+            .id_salt("npc_edit_form_scroll")
+            .auto_shrink([true, false])
             .show(ui, |ui| {
                 ui.group(|ui| {
                     ui.heading("Basic Information");
@@ -1511,6 +1561,235 @@ impl NpcEditorState {
 
                     ui.add_space(4.0);
                     ui.checkbox(&mut self.edit_buffer.is_innkeeper, "🛏️ Is Innkeeper");
+
+                    ui.add_space(4.0);
+                    ui.separator();
+
+                    let was_skill_trainer = self.edit_buffer.is_skill_trainer;
+                    ui.checkbox(&mut self.edit_buffer.is_skill_trainer, "🧠 Is Skill Trainer");
+
+                    if self.edit_buffer.is_skill_trainer && !was_skill_trainer {
+                        match self.auto_apply_skill_trainer_dialogue_to_edit_buffer() {
+                            Ok(message) => {
+                                self.pending_status = Some(message);
+                                needs_save = true;
+                                ui.ctx().request_repaint();
+                            }
+                            Err(error) => {
+                                self.validation_errors.push(error.clone());
+                                self.pending_status = Some(error);
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                    } else if !self.edit_buffer.is_skill_trainer && was_skill_trainer {
+                        match self.remove_skill_trainer_dialogue_from_edit_buffer() {
+                            Ok(message) => {
+                                self.pending_status = Some(message);
+                                needs_save = true;
+                                ui.ctx().request_repaint();
+                            }
+                            Err(error) => {
+                                self.validation_errors.push(error.clone());
+                                self.pending_status = Some(error);
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                    }
+
+                    if self.edit_buffer.is_skill_trainer {
+                        let skill_trainer_status = self.skill_trainer_dialogue_status_for_buffer();
+                        let skill_trainer_color =
+                            if skill_trainer_status == "Skill trainer dialogue valid" {
+                                egui::Color32::from_rgb(80, 200, 120)
+                            } else if skill_trainer_status == "No dialogue assigned" {
+                                egui::Color32::from_rgb(220, 120, 120)
+                            } else {
+                                egui::Color32::from_rgb(160, 200, 255)
+                            };
+                        ui.add_space(4.0);
+                        ui.label(
+                            egui::RichText::new(skill_trainer_status)
+                                .color(skill_trainer_color)
+                                .strong(),
+                        );
+
+                        // Trainable skill IDs multi-selector
+                        let skills_clone = self.available_skills.clone();
+                        if crate::ui_helpers::autocomplete_skill_id_list_selector(
+                            ui,
+                            "npc_trainable_skills",
+                            "Trainable Skills:",
+                            &mut self.edit_buffer.trainable_skill_ids,
+                            &skills_clone,
+                        ) {
+                            needs_save = true;
+                            ui.ctx().request_repaint();
+                        }
+
+                        ui.horizontal(|ui| {
+                            let mut has_override =
+                                !self.edit_buffer.skill_training_fee_base.trim().is_empty();
+                            if ui.checkbox(&mut has_override, "Override skill fee base").changed()
+                            {
+                                self.edit_buffer.skill_training_fee_base = if has_override {
+                                    "100".to_string()
+                                } else {
+                                    String::new()
+                                };
+                                needs_save = true;
+                                ui.ctx().request_repaint();
+                            }
+                            if has_override {
+                                let mut fee_base = self
+                                    .edit_buffer
+                                    .skill_training_fee_base
+                                    .trim()
+                                    .parse::<u32>()
+                                    .unwrap_or(100);
+                                if ui
+                                    .add(
+                                        egui::DragValue::new(&mut fee_base)
+                                            .range(0..=1_000_000)
+                                            .prefix("Base gold: "),
+                                    )
+                                    .changed()
+                                {
+                                    self.edit_buffer.skill_training_fee_base = fee_base.to_string();
+                                    needs_save = true;
+                                }
+                            } else {
+                                ui.small("campaign default");
+                            }
+                        });
+
+                        ui.horizontal(|ui| {
+                            let mut has_override = !self
+                                .edit_buffer
+                                .skill_training_fee_multiplier
+                                .trim()
+                                .is_empty();
+                            if ui
+                                .checkbox(&mut has_override, "Override skill fee multiplier")
+                                .changed()
+                            {
+                                self.edit_buffer.skill_training_fee_multiplier = if has_override {
+                                    "1.0".to_string()
+                                } else {
+                                    String::new()
+                                };
+                                needs_save = true;
+                                ui.ctx().request_repaint();
+                            }
+                            if has_override {
+                                let mut multiplier = self
+                                    .edit_buffer
+                                    .skill_training_fee_multiplier
+                                    .trim()
+                                    .parse::<f32>()
+                                    .unwrap_or(1.0)
+                                    .max(0.01);
+                                if ui
+                                    .add(
+                                        egui::DragValue::new(&mut multiplier)
+                                            .range(0.01..=1000.0)
+                                            .speed(0.05)
+                                            .prefix("× "),
+                                    )
+                                    .changed()
+                                {
+                                    self.edit_buffer.skill_training_fee_multiplier =
+                                        format!("{:.2}", multiplier);
+                                    needs_save = true;
+                                }
+                            } else {
+                                ui.small("campaign default");
+                            }
+                        });
+
+                        ui.horizontal(|ui| {
+                            let mut has_override =
+                                !self.edit_buffer.skill_training_max_rank.trim().is_empty();
+                            if ui.checkbox(&mut has_override, "Override max trainable rank").changed()
+                            {
+                                self.edit_buffer.skill_training_max_rank = if has_override {
+                                    "20".to_string()
+                                } else {
+                                    String::new()
+                                };
+                                needs_save = true;
+                                ui.ctx().request_repaint();
+                            }
+                            if has_override {
+                                let mut max_rank = self
+                                    .edit_buffer
+                                    .skill_training_max_rank
+                                    .trim()
+                                    .parse::<u16>()
+                                    .unwrap_or(20);
+                                if ui
+                                    .add(
+                                        egui::DragValue::new(&mut max_rank)
+                                            .range(0..=u16::MAX)
+                                            .prefix("Max rank: "),
+                                    )
+                                    .changed()
+                                {
+                                    self.edit_buffer.skill_training_max_rank = max_rank.to_string();
+                                    needs_save = true;
+                                }
+                            } else {
+                                ui.small("skill definition max_rank");
+                            }
+                        });
+
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button("Create skill trainer dialogue").clicked() {
+                                match self.create_or_repair_skill_trainer_dialogue_for_buffer() {
+                                    Ok(message) => {
+                                        self.pending_status = Some(message);
+                                        needs_save = true;
+                                    }
+                                    Err(error) => {
+                                        self.validation_errors.push(error.clone());
+                                        self.pending_status = Some(error);
+                                    }
+                                }
+                            }
+
+                            if ui.button("Repair skill trainer dialogue").clicked() {
+                                match self.create_or_repair_skill_trainer_dialogue_for_buffer() {
+                                    Ok(message) => {
+                                        self.pending_status = Some(message);
+                                        needs_save = true;
+                                    }
+                                    Err(error) => {
+                                        self.validation_errors.push(error.clone());
+                                        self.pending_status = Some(error);
+                                    }
+                                }
+                            }
+
+                            if ui.button("Remove skill trainer branch").clicked() {
+                                match self.remove_skill_trainer_dialogue_from_edit_buffer() {
+                                    Ok(message) => {
+                                        self.pending_status = Some(message);
+                                        needs_save = true;
+                                    }
+                                    Err(error) => {
+                                        self.validation_errors.push(error.clone());
+                                        self.pending_status = Some(error);
+                                    }
+                                }
+                            }
+                        });
+
+                        ui.small(
+                            "SDK workflow: enabling skill trainer creates or auto-applies a skill \
+                             training dialogue, existing custom dialogue is augmented where \
+                             possible, and disabling skill trainer removes only SDK-managed skill \
+                             trainer content.",
+                        );
+                    }
                 });
 
                 ui.add_space(10.0);
@@ -1562,6 +1841,27 @@ impl NpcEditorState {
                                 };
 
                                 match trainer_result {
+                                    Ok(message) => {
+                                        if !message.is_empty() {
+                                            self.pending_status = Some(message);
+                                        }
+                                    }
+                                    Err(error) => {
+                                        self.validation_errors.push(error.clone());
+                                        self.pending_status = Some(error);
+                                    }
+                                }
+                            }
+
+                            if self.validation_errors.is_empty() {
+                                let skill_trainer_result =
+                                    if self.edit_buffer.is_skill_trainer {
+                                        self.auto_apply_skill_trainer_dialogue_to_edit_buffer()
+                                    } else {
+                                        self.remove_skill_trainer_dialogue_from_edit_buffer()
+                                    };
+
+                                match skill_trainer_result {
                                     Ok(message) => {
                                         if !message.is_empty() {
                                             self.pending_status = Some(message);
@@ -1647,6 +1947,11 @@ impl NpcEditorState {
             return false;
         }
 
+        // Skill trainer filter
+        if self.filter_skill_trainers && !npc.is_skill_trainer {
+            return false;
+        }
+
         true
     }
 
@@ -1693,6 +1998,20 @@ impl NpcEditorState {
                     .unwrap_or_default(),
                 training_fee_multiplier: npc
                     .training_fee_multiplier
+                    .map(|v| v.to_string())
+                    .unwrap_or_default(),
+                is_skill_trainer: npc.is_skill_trainer,
+                trainable_skill_ids: npc.trainable_skill_ids.clone(),
+                skill_training_fee_base: npc
+                    .skill_training_fee_base
+                    .map(|v| v.to_string())
+                    .unwrap_or_default(),
+                skill_training_fee_multiplier: npc
+                    .skill_training_fee_multiplier
+                    .map(|v| v.to_string())
+                    .unwrap_or_default(),
+                skill_training_max_rank: npc
+                    .skill_training_max_rank
                     .map(|v| v.to_string())
                     .unwrap_or_default(),
             };
@@ -1770,6 +2089,80 @@ impl NpcEditorState {
             if !quest_exists {
                 self.validation_errors
                     .push(format!("Quest ID '{}' does not exist", quest_id_str));
+            }
+        }
+
+        // Validate skill trainer fields
+        if self.edit_buffer.is_skill_trainer {
+            if self.edit_buffer.trainable_skill_ids.is_empty() {
+                self.validation_errors
+                    .push("Skill trainer must have at least one trainable skill ID".to_string());
+            }
+            for skill_id in &self.edit_buffer.trainable_skill_ids {
+                if let Some(skill) = self.available_skills.iter().find(|s| s.id == *skill_id) {
+                    if !skill.is_trainable {
+                        self.validation_errors
+                            .push(format!("Skill '{}' is not marked as trainable", skill_id));
+                    }
+                } else {
+                    self.validation_errors.push(format!(
+                        "Skill ID '{}' does not exist in the skill database",
+                        skill_id
+                    ));
+                }
+            }
+            if !self
+                .edit_buffer
+                .skill_training_fee_multiplier
+                .trim()
+                .is_empty()
+            {
+                match self
+                    .edit_buffer
+                    .skill_training_fee_multiplier
+                    .trim()
+                    .parse::<f32>()
+                {
+                    Ok(v) if v <= 0.0 => {
+                        self.validation_errors.push(
+                            "Skill training fee multiplier must be greater than zero".to_string(),
+                        );
+                    }
+                    Err(_) => {
+                        self.validation_errors.push(
+                            "Skill training fee multiplier must be a valid number".to_string(),
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            if !self.edit_buffer.skill_training_max_rank.trim().is_empty() {
+                match self
+                    .edit_buffer
+                    .skill_training_max_rank
+                    .trim()
+                    .parse::<u16>()
+                {
+                    Err(_) => {
+                        self.validation_errors.push(
+                            "Skill training max rank must be a valid number (0-65535)".to_string(),
+                        );
+                    }
+                    Ok(max_rank) => {
+                        for skill_id in &self.edit_buffer.trainable_skill_ids {
+                            if let Some(skill) =
+                                self.available_skills.iter().find(|s| s.id == *skill_id)
+                            {
+                                if max_rank > skill.max_rank {
+                                    self.validation_errors.push(format!(
+                                        "Skill training max rank {} exceeds skill '{}' max rank {}",
+                                        max_rank, skill_id, skill.max_rank
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -1955,6 +2348,11 @@ impl NpcEditorState {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         self.merchant_dialogue_status_for_definition(&npc)
@@ -2003,6 +2401,11 @@ impl NpcEditorState {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         self.merchant_dialogue_repair_action_for_definition(&npc)
@@ -2083,6 +2486,11 @@ impl NpcEditorState {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         let update = self
@@ -2259,6 +2667,26 @@ impl NpcEditorState {
                 .training_fee_multiplier
                 .trim()
                 .parse::<f32>()
+                .ok(),
+            is_skill_trainer: self.edit_buffer.is_skill_trainer,
+            trainable_skill_ids: self.edit_buffer.trainable_skill_ids.clone(),
+            skill_training_fee_base: self
+                .edit_buffer
+                .skill_training_fee_base
+                .trim()
+                .parse::<u32>()
+                .ok(),
+            skill_training_fee_multiplier: self
+                .edit_buffer
+                .skill_training_fee_multiplier
+                .trim()
+                .parse::<f32>()
+                .ok(),
+            skill_training_max_rank: self
+                .edit_buffer
+                .skill_training_max_rank
+                .trim()
+                .parse::<u16>()
                 .ok(),
         })
     }
@@ -2458,6 +2886,11 @@ impl NpcEditorState {
             is_trainer: self.edit_buffer.is_trainer,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         match self.trainer_dialogue_validation_for_definition(&npc) {
@@ -2549,6 +2982,11 @@ impl NpcEditorState {
             is_trainer: true,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         use crate::dialogue_editor::MerchantDialogueUpdate;
@@ -2630,6 +3068,11 @@ impl NpcEditorState {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         use crate::dialogue_editor::MerchantDialogueUpdate;
@@ -2686,6 +3129,345 @@ impl NpcEditorState {
 
         Ok(format!(
             "Trainer dialogue already valid for '{}'",
+            self.edit_buffer.id
+        ))
+    }
+
+    /// Returns the skill trainer dialogue validation state for an NPC definition.
+    ///
+    /// Used by the list view and edit view to surface skill-trainer-dialogue health
+    /// without destructively modifying any data.
+    fn skill_trainer_dialogue_validation_for_definition(
+        &self,
+        npc: &NpcDefinition,
+    ) -> SkillTrainerDialogueValidationState {
+        let assigned_dialogue = npc.dialogue_id.and_then(|dialogue_id| {
+            self.available_dialogues
+                .iter()
+                .find(|dialogue| dialogue.id == dialogue_id)
+        });
+
+        if !npc.is_skill_trainer {
+            if assigned_dialogue.is_some_and(DialogueTree::has_sdk_managed_skill_trainer_content) {
+                return SkillTrainerDialogueValidationState::StaleSkillTrainerContent;
+            }
+            return SkillTrainerDialogueValidationState::NotSkillTrainer;
+        }
+
+        let Some(dialogue_id) = npc.dialogue_id else {
+            return SkillTrainerDialogueValidationState::Missing;
+        };
+
+        let Some(dialogue) = self
+            .available_dialogues
+            .iter()
+            .find(|dialogue| dialogue.id == dialogue_id)
+        else {
+            return SkillTrainerDialogueValidationState::AssignedDialogueMissing;
+        };
+
+        if dialogue.contains_open_skill_training_for_npc(&npc.id) {
+            SkillTrainerDialogueValidationState::Valid
+        } else {
+            // Has an assigned dialogue but it lacks an OpenSkillTraining action.
+            SkillTrainerDialogueValidationState::Missing
+        }
+    }
+
+    /// Returns a human-readable skill trainer dialogue status string for the
+    /// current edit buffer, built into a temporary `NpcDefinition` for validation.
+    fn skill_trainer_dialogue_status_for_buffer(&self) -> &'static str {
+        let npc = NpcDefinition {
+            id: self.edit_buffer.id.clone(),
+            name: self.edit_buffer.name.clone(),
+            description: self.edit_buffer.description.clone(),
+            portrait_id: self.edit_buffer.portrait_id.clone(),
+            dialogue_id: if self.edit_buffer.dialogue_id.trim().is_empty() {
+                None
+            } else {
+                self.edit_buffer.dialogue_id.parse::<DialogueId>().ok()
+            },
+            creature_id: if self.edit_buffer.creature_id.is_empty() {
+                None
+            } else {
+                self.edit_buffer.creature_id.parse::<CreatureId>().ok()
+            },
+            sprite: None,
+            quest_ids: self
+                .edit_buffer
+                .quest_ids
+                .iter()
+                .filter_map(|s| s.parse::<QuestId>().ok())
+                .collect(),
+            faction: if self.edit_buffer.faction.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.faction.clone())
+            },
+            is_merchant: self.edit_buffer.is_merchant,
+            is_innkeeper: self.edit_buffer.is_innkeeper,
+            is_priest: false,
+            stock_template: if self.edit_buffer.stock_template.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.stock_template.clone())
+            },
+            service_catalog: None,
+            economy: None,
+            is_trainer: self.edit_buffer.is_trainer,
+            training_fee_base: None,
+            training_fee_multiplier: None,
+            is_skill_trainer: self.edit_buffer.is_skill_trainer,
+            trainable_skill_ids: self.edit_buffer.trainable_skill_ids.clone(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
+        };
+
+        match self.skill_trainer_dialogue_validation_for_definition(&npc) {
+            SkillTrainerDialogueValidationState::NotSkillTrainer => "Not a skill trainer",
+            SkillTrainerDialogueValidationState::Valid => "Skill trainer dialogue valid",
+            SkillTrainerDialogueValidationState::Missing => "No dialogue assigned",
+            SkillTrainerDialogueValidationState::AssignedDialogueMissing => {
+                "Assigned skill trainer dialogue missing"
+            }
+            SkillTrainerDialogueValidationState::StaleSkillTrainerContent => {
+                "Non-skill-trainer has stale skill trainer content"
+            }
+        }
+    }
+
+    /// Creates or repairs the skill trainer dialogue for the NPC in the edit buffer.
+    ///
+    /// When `is_skill_trainer` is `false`, returns an actionable guidance message
+    /// instead of a silent no-op.
+    ///
+    /// When a stale `dialogue_id` is present (tree deleted externally), clears
+    /// it first so a fresh tree is created rather than returning an error.
+    fn create_or_repair_skill_trainer_dialogue_for_buffer(&mut self) -> Result<String, String> {
+        if !self.edit_buffer.is_skill_trainer {
+            return Ok(
+                "Enable 'Is Skill Trainer' before creating skill trainer dialogue for this NPC."
+                    .to_string(),
+            );
+        }
+
+        // Clear a stale dialogue_id (tree no longer exists) so that
+        // ensure_skill_trainer_dialogue_for_npc creates a fresh tree instead.
+        if !self.edit_buffer.dialogue_id.trim().is_empty() {
+            if let Ok(stale_id) = self.edit_buffer.dialogue_id.parse::<DialogueId>() {
+                if !self
+                    .merchant_dialogue_editor
+                    .dialogues
+                    .iter()
+                    .any(|d| d.id == stale_id)
+                {
+                    self.edit_buffer.dialogue_id.clear();
+                }
+            }
+        }
+
+        let mut npc = NpcDefinition {
+            id: self.edit_buffer.id.clone(),
+            name: self.edit_buffer.name.clone(),
+            description: self.edit_buffer.description.clone(),
+            portrait_id: self.edit_buffer.portrait_id.clone(),
+            dialogue_id: if self.edit_buffer.dialogue_id.trim().is_empty() {
+                None
+            } else {
+                Some(
+                    self.edit_buffer
+                        .dialogue_id
+                        .parse::<DialogueId>()
+                        .map_err(|_| {
+                            "Dialogue ID must be numeric before skill trainer repair".to_string()
+                        })?,
+                )
+            },
+            creature_id: if self.edit_buffer.creature_id.is_empty() {
+                None
+            } else {
+                self.edit_buffer.creature_id.parse::<CreatureId>().ok()
+            },
+            sprite: None,
+            quest_ids: self
+                .edit_buffer
+                .quest_ids
+                .iter()
+                .filter_map(|s| s.parse::<QuestId>().ok())
+                .collect(),
+            faction: if self.edit_buffer.faction.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.faction.clone())
+            },
+            is_merchant: self.edit_buffer.is_merchant,
+            is_innkeeper: self.edit_buffer.is_innkeeper,
+            is_priest: false,
+            stock_template: if self.edit_buffer.stock_template.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.stock_template.clone())
+            },
+            service_catalog: None,
+            economy: None,
+            is_trainer: self.edit_buffer.is_trainer,
+            training_fee_base: None,
+            training_fee_multiplier: None,
+            is_skill_trainer: true,
+            trainable_skill_ids: self.edit_buffer.trainable_skill_ids.clone(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
+        };
+
+        use crate::dialogue_editor::MerchantDialogueUpdate;
+        let update = self
+            .merchant_dialogue_editor
+            .ensure_skill_trainer_dialogue_for_npc(&mut npc)?;
+
+        self.available_dialogues = self.merchant_dialogue_editor.dialogues.clone();
+        self.edit_buffer.dialogue_id = npc.dialogue_id.map(|id| id.to_string()).unwrap_or_default();
+        self.has_unsaved_changes = true;
+
+        let message = match update {
+            MerchantDialogueUpdate::Unchanged => String::new(),
+            MerchantDialogueUpdate::AlreadyValid => {
+                format!("Skill trainer dialogue already valid for '{}'", npc.id)
+            }
+            MerchantDialogueUpdate::CreatedNew { dialogue_id } => {
+                format!(
+                    "Created skill trainer dialogue {} for '{}'",
+                    dialogue_id, npc.id
+                )
+            }
+            MerchantDialogueUpdate::AugmentedExisting { dialogue_id } => format!(
+                "Repaired skill trainer dialogue {} for '{}'",
+                dialogue_id, npc.id
+            ),
+            MerchantDialogueUpdate::RemovedMerchantContent { dialogue_id } => format!(
+                "Removed skill trainer dialogue content from {} for '{}'",
+                dialogue_id, npc.id
+            ),
+            MerchantDialogueUpdate::NoMerchantContentToRemove { dialogue_id } => format!(
+                "No SDK-managed skill trainer dialogue content to remove from {} for '{}'",
+                dialogue_id, npc.id
+            ),
+        };
+
+        Ok(message)
+    }
+
+    /// Removes SDK-managed skill trainer content from the edit buffer's assigned dialogue.
+    ///
+    /// Non-destructive: only SDK-managed skill trainer nodes/choices are removed;
+    /// unrelated authored content is preserved.
+    fn remove_skill_trainer_dialogue_from_edit_buffer(&mut self) -> Result<String, String> {
+        let npc = NpcDefinition {
+            id: self.edit_buffer.id.clone(),
+            name: self.edit_buffer.name.clone(),
+            description: self.edit_buffer.description.clone(),
+            portrait_id: self.edit_buffer.portrait_id.clone(),
+            dialogue_id: if self.edit_buffer.dialogue_id.trim().is_empty() {
+                None
+            } else {
+                self.edit_buffer.dialogue_id.parse::<DialogueId>().ok()
+            },
+            creature_id: if self.edit_buffer.creature_id.is_empty() {
+                None
+            } else {
+                self.edit_buffer.creature_id.parse::<CreatureId>().ok()
+            },
+            sprite: None,
+            quest_ids: self
+                .edit_buffer
+                .quest_ids
+                .iter()
+                .filter_map(|s| s.parse::<QuestId>().ok())
+                .collect(),
+            faction: if self.edit_buffer.faction.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.faction.clone())
+            },
+            is_merchant: self.edit_buffer.is_merchant,
+            is_innkeeper: self.edit_buffer.is_innkeeper,
+            is_priest: false,
+            stock_template: if self.edit_buffer.stock_template.is_empty() {
+                None
+            } else {
+                Some(self.edit_buffer.stock_template.clone())
+            },
+            service_catalog: None,
+            economy: None,
+            is_trainer: self.edit_buffer.is_trainer,
+            training_fee_base: None,
+            training_fee_multiplier: None,
+            // Intentionally false so remove_skill_trainer_dialogue_for_npc proceeds.
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
+        };
+
+        use crate::dialogue_editor::MerchantDialogueUpdate;
+        let update = self
+            .merchant_dialogue_editor
+            .remove_skill_trainer_dialogue_for_npc(&npc)?;
+
+        self.available_dialogues = self.merchant_dialogue_editor.dialogues.clone();
+        self.has_unsaved_changes = true;
+
+        let message = match update {
+            MerchantDialogueUpdate::Unchanged => {
+                "Skill trainer cleanup not required for current NPC state".to_string()
+            }
+            MerchantDialogueUpdate::AlreadyValid => {
+                format!("Skill trainer dialogue already valid for '{}'", npc.id)
+            }
+            MerchantDialogueUpdate::CreatedNew { dialogue_id } => {
+                format!(
+                    "Created skill trainer dialogue {} for '{}'",
+                    dialogue_id, npc.id
+                )
+            }
+            MerchantDialogueUpdate::AugmentedExisting { dialogue_id } => format!(
+                "Repaired skill trainer dialogue {} for '{}'",
+                dialogue_id, npc.id
+            ),
+            MerchantDialogueUpdate::RemovedMerchantContent { dialogue_id } => format!(
+                "Removed SDK-managed skill trainer content from dialogue {} for '{}'; non-skill-trainer dialogue content was preserved",
+                dialogue_id, npc.id
+            ),
+            MerchantDialogueUpdate::NoMerchantContentToRemove { dialogue_id } => format!(
+                "Dialogue {} for '{}' had no SDK-managed skill trainer content to remove",
+                dialogue_id, npc.id
+            ),
+        };
+
+        Ok(message)
+    }
+
+    /// Auto-applies a skill trainer dialogue to the edit buffer when the buffer's
+    /// current dialogue state is missing or incomplete.
+    ///
+    /// Called automatically when `is_skill_trainer` is toggled on.
+    fn auto_apply_skill_trainer_dialogue_to_edit_buffer(&mut self) -> Result<String, String> {
+        let status = self.skill_trainer_dialogue_status_for_buffer();
+        if !self.edit_buffer.is_skill_trainer {
+            return Ok(String::new());
+        }
+
+        if matches!(
+            status,
+            "No dialogue assigned" | "Assigned skill trainer dialogue missing"
+        ) {
+            return self.create_or_repair_skill_trainer_dialogue_for_buffer();
+        }
+
+        Ok(format!(
+            "Skill trainer dialogue already valid for '{}'",
             self.edit_buffer.id
         ))
     }
@@ -2757,6 +3539,26 @@ impl NpcEditorState {
                 .training_fee_multiplier
                 .trim()
                 .parse::<f32>()
+                .ok(),
+            is_skill_trainer: self.edit_buffer.is_skill_trainer,
+            trainable_skill_ids: self.edit_buffer.trainable_skill_ids.clone(),
+            skill_training_fee_base: self
+                .edit_buffer
+                .skill_training_fee_base
+                .trim()
+                .parse::<u32>()
+                .ok(),
+            skill_training_fee_multiplier: self
+                .edit_buffer
+                .skill_training_fee_multiplier
+                .trim()
+                .parse::<f32>()
+                .ok(),
+            skill_training_max_rank: self
+                .edit_buffer
+                .skill_training_max_rank
+                .trim()
+                .parse::<u16>()
                 .ok(),
         };
 
@@ -3047,6 +3849,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
         state.start_edit_npc(0);
@@ -3576,6 +4383,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         let mut state = NpcEditorState::new();
@@ -3624,6 +4436,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
         // Edit it
@@ -3660,6 +4477,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         assert!(state.matches_filters(&npc));
     }
@@ -3688,6 +4510,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         assert!(state.matches_filters(&npc));
 
@@ -3710,6 +4537,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         assert!(!state.matches_filters(&npc2));
     }
@@ -3738,6 +4570,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         assert!(state.matches_filters(&merchant));
 
@@ -3760,6 +4597,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         assert!(!state.matches_filters(&non_merchant));
     }
@@ -3790,6 +4632,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
         let id2 = state.next_npc_id();
@@ -3841,6 +4688,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
         state.start_edit_npc(0);
@@ -3909,6 +4761,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
         state.mode = NpcEditorMode::Add;
@@ -4065,6 +4922,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
         // Start editing
@@ -4225,6 +5087,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         state.npcs.push(npc);
 
@@ -4299,6 +5166,11 @@ mod tests {
                 is_trainer: false,
                 training_fee_base: None,
                 training_fee_multiplier: None,
+                is_skill_trainer: false,
+                trainable_skill_ids: Vec::new(),
+                skill_training_fee_base: None,
+                skill_training_fee_multiplier: None,
+                skill_training_max_rank: None,
             },
             NpcDefinition {
                 id: "npc_b".to_string(),
@@ -4319,6 +5191,11 @@ mod tests {
                 is_trainer: false,
                 training_fee_base: None,
                 training_fee_multiplier: None,
+                is_skill_trainer: false,
+                trainable_skill_ids: Vec::new(),
+                skill_training_fee_base: None,
+                skill_training_fee_multiplier: None,
+                skill_training_max_rank: None,
             },
         ];
         let ron_str =
@@ -4346,6 +5223,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
         state.selected_npc = Some(0);
         state.mode = NpcEditorMode::Edit;
@@ -4458,6 +5340,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
         let missing_path = std::path::Path::new("/no/such/dir/npcs.ron");
@@ -4947,6 +5834,11 @@ mod tests {
             economy: None,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         let regular = NpcDefinition {
             id: "regular_npc".to_string(),
@@ -4967,6 +5859,11 @@ mod tests {
             economy: None,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         let mut state = NpcEditorState::new();
@@ -5043,6 +5940,11 @@ mod tests {
             economy: None,
             training_fee_base: Some(250),
             training_fee_multiplier: Some(1.25),
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         let mut state = NpcEditorState::new();
@@ -5207,6 +6109,188 @@ mod tests {
             state.available_dialogues.len(),
             2,
             "two separate dialogues must exist (one merchant, one trainer)"
+        );
+    }
+
+    // ── Phase 8 Skill Trainer Tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_npc_skill_trainer_validation_rejects_unknown_skill() {
+        let mut state = NpcEditorState::new();
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "skill_trainer_01".to_string();
+        state.edit_buffer.name = "Skill Trainer".to_string();
+        state.edit_buffer.is_skill_trainer = true;
+        state.edit_buffer.trainable_skill_ids = vec!["nonexistent_skill".to_string()];
+        // available_skills is empty → ID will be treated as unknown
+
+        state.validate_edit_buffer();
+
+        assert!(
+            state
+                .validation_errors
+                .iter()
+                .any(|e| e.contains("nonexistent_skill")),
+            "must reject unknown skill ID; errors: {:?}",
+            state.validation_errors
+        );
+    }
+
+    #[test]
+    fn test_npc_skill_trainer_validation_rejects_non_trainable_skill() {
+        use antares::domain::skills::{SkillCategory, SkillScalingMode};
+
+        let non_trainable = SkillDefinition {
+            id: "ancient_lore".to_string(),
+            name: "Ancient Lore".to_string(),
+            category: SkillCategory::Knowledge,
+            description: String::new(),
+            scaling: SkillScalingMode::Linear {
+                base: 0,
+                per_level: 1,
+            },
+            max_rank: 10,
+            is_trainable: false,
+        };
+
+        let mut state = NpcEditorState::new();
+        state.available_skills = vec![non_trainable];
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "skill_trainer_02".to_string();
+        state.edit_buffer.name = "Skill Trainer".to_string();
+        state.edit_buffer.is_skill_trainer = true;
+        state.edit_buffer.trainable_skill_ids = vec!["ancient_lore".to_string()];
+
+        state.validate_edit_buffer();
+
+        assert!(
+            state
+                .validation_errors
+                .iter()
+                .any(|e| e.contains("ancient_lore") && e.contains("trainable")),
+            "must reject non-trainable skill; errors: {:?}",
+            state.validation_errors
+        );
+    }
+
+    #[test]
+    fn test_npc_skill_trainer_dialogue_template_creates_open_skill_training_action() {
+        let mut state = NpcEditorState::new();
+        state.available_dialogues = Vec::new();
+        state.merchant_dialogue_editor.load_dialogues(Vec::new());
+
+        state.mode = NpcEditorMode::Add;
+        state.edit_buffer.id = "perception_sage".to_string();
+        state.edit_buffer.name = "Perception Sage".to_string();
+        state.edit_buffer.portrait_id = "sage".to_string();
+        state.edit_buffer.is_skill_trainer = true;
+        state.edit_buffer.trainable_skill_ids = vec!["perception".to_string()];
+
+        let result = state.create_or_repair_skill_trainer_dialogue_for_buffer();
+        assert!(result.is_ok(), "create should succeed: {:?}", result);
+
+        let message = result.unwrap();
+        assert!(
+            message.contains("Created skill trainer dialogue"),
+            "expected 'Created skill trainer dialogue', got: {message}"
+        );
+        assert_eq!(state.available_dialogues.len(), 1);
+
+        let generated = &state.available_dialogues[0];
+        assert!(
+            generated.contains_open_skill_training_for_npc("perception_sage"),
+            "generated dialogue must contain OpenSkillTraining for 'perception_sage'"
+        );
+        assert!(
+            generated.has_sdk_managed_skill_trainer_content(),
+            "generated dialogue must be marked as SDK-managed skill trainer content"
+        );
+
+        let generated_id_str = generated.id.to_string();
+        assert_eq!(
+            state.edit_buffer.dialogue_id, generated_id_str,
+            "buffer.dialogue_id must point to the generated dialogue"
+        );
+    }
+
+    #[test]
+    fn test_npc_editor_skill_trainer_defaults_are_safe() {
+        let state = NpcEditorState::new();
+        assert!(
+            !state.edit_buffer.is_skill_trainer,
+            "default NPC buffer must not be a skill trainer"
+        );
+        assert!(
+            state.edit_buffer.trainable_skill_ids.is_empty(),
+            "default trainable_skill_ids must be empty"
+        );
+        assert!(
+            state.edit_buffer.skill_training_fee_base.is_empty(),
+            "default skill_training_fee_base must be empty"
+        );
+        assert!(
+            state.edit_buffer.skill_training_fee_multiplier.is_empty(),
+            "default skill_training_fee_multiplier must be empty"
+        );
+        assert!(
+            state.edit_buffer.skill_training_max_rank.is_empty(),
+            "default skill_training_max_rank must be empty"
+        );
+        assert!(
+            !state.filter_skill_trainers,
+            "default filter_skill_trainers must be false"
+        );
+    }
+
+    #[test]
+    fn test_skill_id_autocomplete_extracts_candidates() {
+        use antares::domain::skills::{SkillCategory, SkillScalingMode};
+
+        let trainable = SkillDefinition {
+            id: "perception".to_string(),
+            name: "Perception".to_string(),
+            category: SkillCategory::Exploration,
+            description: String::new(),
+            scaling: SkillScalingMode::Linear {
+                base: 0,
+                per_level: 1,
+            },
+            max_rank: 10,
+            is_trainable: true,
+        };
+        let non_trainable = SkillDefinition {
+            id: "ancient_lore".to_string(),
+            name: "Ancient Lore".to_string(),
+            category: SkillCategory::Knowledge,
+            description: String::new(),
+            scaling: SkillScalingMode::Linear {
+                base: 0,
+                per_level: 1,
+            },
+            max_rank: 10,
+            is_trainable: false,
+        };
+
+        let skills = [trainable.clone(), non_trainable.clone()];
+
+        // The autocomplete_skill_id_list_selector only offers trainable skills.
+        // We validate candidate extraction by checking the filter predicate directly.
+        let trainable_candidates: Vec<String> = skills
+            .iter()
+            .filter(|s| s.is_trainable)
+            .map(|s| format!("{} \u{2014} {}", s.id, s.name))
+            .collect();
+
+        assert_eq!(trainable_candidates.len(), 1);
+        assert!(
+            trainable_candidates[0].contains("perception"),
+            "trainable candidate must include 'perception'"
+        );
+        assert!(
+            !trainable_candidates
+                .iter()
+                .any(|c| c.contains("ancient_lore")),
+            "non-trainable skill must not appear in candidates"
         );
     }
 }

@@ -17,6 +17,7 @@
 //! - `visual`: Visual system (creature meshes, procedural geometry)
 //! - `campaign`: Campaign system (campaign definitions, metadata)
 //! - `campaign_loader`: Campaign loading system (game data loading)
+//! - `skills`: Skill system (level-scaled numeric character capabilities)
 
 pub mod campaign;
 pub mod campaign_loader;
@@ -37,6 +38,9 @@ pub mod progression;
 pub mod quest;
 pub mod races;
 pub mod resources;
+pub mod skill_checks;
+pub mod skill_resolver;
+pub mod skills;
 pub mod transactions;
 pub mod types;
 pub mod validation;
@@ -59,6 +63,23 @@ pub use types::{
     MeshId, MonsterId, RaceId, SpellId,
 };
 pub use types::{DiceRoll, Direction, GameTime, Position};
+
+// Re-export skill types (Phase 1 + Phase 2 + Phase 3)
+pub use skills::{
+    rank_for_level, rank_for_level_with_bonus, validate_skill_id, validate_skill_rank,
+    CharacterSkillRanks, PartySkillScope, SkillBreakdown, SkillBreakdownEntry, SkillCategory,
+    SkillDatabase, SkillDefinition, SkillError, SkillGrant, SkillGrantSource, SkillId, SkillRank,
+    SkillScalingMode,
+};
+
+// Re-export skill resolver
+pub use skill_resolver::{SkillResolver, SkillResolverContext};
+
+// Re-export skill check types (Phase 3)
+pub use skill_checks::{
+    evaluate_party_skill_scope, evaluate_skill_check_without_roll, skill_check_for_character,
+    SkillCheckDifficulty, SkillCheckError, SkillCheckRequest, SkillCheckResult,
+};
 
 // Re-export proficiency types
 pub use proficiency::{

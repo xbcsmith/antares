@@ -1135,6 +1135,7 @@ mod tests {
             starting_armor_id: None,
             starting_items: vec![],
             proficiencies: proficiencies.iter().map(|s| s.to_string()).collect(),
+            skill_grants: vec![],
         })
         .unwrap();
         db

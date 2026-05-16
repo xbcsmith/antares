@@ -2,6 +2,1415 @@
 
 ---
 
+## Phase 10: Audit Closure — Remaining Deliverables (Complete)
+
+### Overview
+
+Phase 10 closed the post-audit gaps for the skill system: campaign-level NPC
+skill-trainer validation, NPC editor skill autocomplete wiring, SDK egui audit
+fixes, cap-aware skill-training previews, atomic training-service behavior,
+fixture cleanup, and documentation corrections.
+
+### Key Updates
+
+- Added campaign validation for NPC skill-trainer fields and `OpenSkillTraining`
+  dialogue targets.
+- Synced loaded `skills.ron` definitions into the NPC editor skill autocomplete
+  cache before rendering the NPC tab.
+- Added an `id_salt` to the NPC edit scroll area, cleared the skill autocomplete
+  buffer on record switches, and replaced skill-training fee/max-rank text
+  inputs with optional numeric controls.
+- Made `perform_skill_training_service` resolve the post-training rank before
+  mutating gold or persistent skill ranks.
+- Made the player-facing skill-training rank preview cap-aware and disabled
+  impossible training attempts at the trainer cap.
+- Added regression tests for validation, Escape handling, global toggle gating,
+  cap-aware previews, and skill candidate syncing.
+- Added explicit `skills_file` entries to campaign metadata fixtures and fixed
+  the test skill trainer description.
+- Corrected migration guidance so `OpenSkillTraining` is documented as the
+  dialogue action and `TrainSkill` as the UI/service request.
+
+### Notes
+
+Tutorial live skill-trainer NPC/dialogue content remains intentionally deferred;
+Phase 10 keeps automated tests on `data/test_campaign` per AGENTS.md Rule 5 and
+only validates tutorial skill data manually or through fixture-equivalent paths.
+
+---
+
+## Phase 9: Balance, Documentation, and Migration (Complete)
+
+### Overview
+
+Phase 9 finalizes the skill system rollout with balanced content, architecture
+documentation updates, migration guidance, and full regression coverage. All
+five required regression tests pass against the test campaign fixture.
+
+### Documentation Updates
+
+#### `docs/reference/architecture.md` — Section 3.2
+
+Updated the domain module structure listing to explicitly document the three
+skill-system modules added in Phases 1–3:
+
+| Module                         | Public Exports                                                                                                                                                                                                                                                                                                  |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/skills.rs`         | `SkillId`, `SkillRank`, `SkillDefinition`, `SkillDatabase`, `CharacterSkillRanks`, `SkillGrant`, `SkillScalingMode`, `SkillCategory`, `SkillGrantSource`, `PartySkillScope`, `SkillBreakdown`, `SkillBreakdownEntry`, `rank_for_level`, `rank_for_level_with_bonus`, `validate_skill_id`, `validate_skill_rank` |
+| `src/domain/skill_resolver.rs` | `SkillResolver`, `SkillResolverContext`                                                                                                                                                                                                                                                                         |
+| `src/domain/skill_checks.rs`   | `SkillCheckDifficulty`, `SkillCheckError`, `SkillCheckRequest`, `SkillCheckResult`, `evaluate_party_skill_scope`, `evaluate_skill_check_without_roll`, `skill_check_for_character`                                                                                                                              |
+
+Also documented `levels.rs`, `validation.rs`, and `database_common.rs` which were
+present but unlisted.
+
+### Migration Guidance: Skills vs. Proficiencies
+
+Campaign authors who encounter the skill system for the first time can use this
+table to decide which mechanism to use:
+
+| Old Concept                                                             | New Guidance                                                                                                        |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Item use permission (can a class wield a longsword?)                    | Keep using **proficiencies** — `proficiencies.ron`, `ClassDefinition.proficiencies`, `RaceDefinition.proficiencies` |
+| Level-scaled capability (how good is the character at disarming traps?) | Use **skills** — define in `skills.ron`, grant via `skill_grants`                                                   |
+| Race or class natural expertise (elves are perceptive)                  | Use `skill_grants` on `ClassDefinition` or `RaceDefinition`                                                         |
+| Paid level advancement (NPC trainer raises character level)             | Use the existing **NPC level trainer** flow (`TrainLevel` dialogue action)                                          |
+| Paid skill improvement (NPC trainer improves a specific skill)          | Use the **NPC skill trainer** flow: dialogue opens with `OpenSkillTraining`; the UI submits `TrainSkill` requests.  |
+
+Skills and proficiencies are intentionally separate systems. Mixing them (e.g.
+using a skill to gate item use) is not supported and should be avoided.
+
+### Balance Pass: New Skills and Updated Class Grants
+
+Added two new skills to base, tutorial, and test-campaign data files:
+
+| Skill      | Category    | Scaling                                   | Max Rank | Purpose                                         |
+| ---------- | ----------- | ----------------------------------------- | -------- | ----------------------------------------------- |
+| `stealth`  | Utility     | `Step(base: 0, per_levels: 2, amount: 1)` | 30       | Staying hidden; primary Robber skill            |
+| `tracking` | Exploration | `Linear(base: 0, per_level: 1)`           | 30       | Finding trails and quarry; primary Archer skill |
+
+#### Files Modified
+
+**`data/skills.ron`** — Added `stealth` (Utility, after `athletics`) and
+`tracking` (Exploration, after `disarm_traps`).
+
+**`campaigns/tutorial/data/skills.ron`** — Same two entries with
+campaign-flavored descriptions. The robber-art stealth flavour and the
+archer-reads-the-land tracking flavour distinguish them from the generic
+base descriptions.
+
+**`data/test_campaign/data/skills.ron`** — Added four entries to ensure the
+test fixture covers every skill ID referenced by the updated
+`test_campaign/data/classes.ron`:
+
+| Skill         | Category    | Scaling                                     | Max Rank |
+| ------------- | ----------- | ------------------------------------------- | -------- |
+| `leadership`  | Combat      | `Flat`                                      | 20       |
+| `divine_lore` | Knowledge   | `Table([0,0,1,1,2,2,3,3,4,4,5,6,7,8,9,10])` | 40       |
+| `stealth`     | Utility     | `Step(base: 0, per_levels: 2, amount: 1)`   | 30       |
+| `tracking`    | Exploration | `Linear(base: 0, per_level: 1)`             | 30       |
+
+**`data/classes.ron`** — Skill grants updated (Paladin, Archer, Robber):
+
+| Class   | Added Grant                                  |
+| ------- | -------------------------------------------- |
+| Paladin | `athletics` flat_bonus: 1                    |
+| Archer  | `tracking` flat_bonus: 2, per_level_bonus: 1 |
+| Robber  | `stealth` flat_bonus: 2                      |
+
+**`campaigns/tutorial/data/classes.ron`** — Same three grants applied.
+The `monk` class (tutorial-only) was intentionally left unchanged.
+
+**`data/test_campaign/data/classes.ron`** — Full recommended baseline
+grants added to bring the fixture up to parity:
+
+| Class   | Added Grant(s)                                              |
+| ------- | ----------------------------------------------------------- |
+| Knight  | `leadership` flat_bonus: 1                                  |
+| Paladin | `divine_lore` flat_bonus: 1 · `athletics` flat_bonus: 1     |
+| Archer  | `tracking` flat_bonus: 2, per_level_bonus: 1                |
+| Cleric  | `divine_lore` flat_bonus: 2 (prepended; diplomacy retained) |
+| Robber  | `stealth` flat_bonus: 2                                     |
+
+Recommended rank-range interpretation published for campaign authors:
+
+| Rank Range | Meaning                       |
+| ---------- | ----------------------------- |
+| 0          | Untrained                     |
+| 1–5        | Novice                        |
+| 6–15       | Skilled                       |
+| 16–30      | Expert                        |
+| 31–50      | Master                        |
+| 51+        | Legendary / campaign-specific |
+
+### Regression Tests Added (`tests/skill_system_regression_tests.rs`)
+
+Five integration tests were added (all use `data/test_campaign`, never `campaigns/tutorial`):
+
+| Test                                                 | Assertion                                                                                                                         |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `test_test_campaign_loads_with_skills`               | Full test campaign loads; skill database is non-empty; all expected skills including new `stealth` and `tracking` are present     |
+| `test_campaign_validation_includes_skill_references` | `ContentDatabase::validate()` passes on the test campaign, confirming skill-reference cross-validation runs without error         |
+| `test_existing_proficiency_item_usage_unchanged`     | `has_proficiency_union` still correctly grants/denies item use for Knight, Sorcerer, Human, Elf — skill system has no side effect |
+| `test_existing_level_training_flow_unchanged`        | Level database loads; level-1 XP is 0 for all classes; level-2 XP is positive; content database coexists with skills              |
+| `test_campaign_skill_data_validates`                 | Test campaign content validates end-to-end, skill grants in all classes and races are consistent with the skills database         |
+
+### Architecture Compliance
+
+- [x] `src/domain/skills.rs` placement documented in Section 3.2
+- [x] All public types listed in Section 3.2 table
+- [x] Skills remain separate from proficiencies
+- [x] Test data uses `data/test_campaign`, never `campaigns/tutorial`
+- [x] RON format used for all data files
+- [x] SPDX headers on all `.rs` files
+
+### Quality Gates
+
+```text
+cargo fmt --all          → clean
+cargo check --all-targets --all-features  → 0 errors
+cargo clippy --all-targets --all-features -- -D warnings  → 0 warnings
+cargo nextest run --all-features          → all tests pass
+```
+
+---
+
+## Phase 8: SDK Skill Trainer Authoring (Complete)
+
+### Overview
+
+Extended `src/domain/dialogue.rs` with skill trainer dialogue support so the
+SDK can generate, augment, and remove skill trainer dialogue branches in the
+same way it already manages regular trainer and merchant branches.
+
+### Deliverables
+
+#### `src/domain/dialogue.rs`
+
+**`DialogueSdkManagedContent` enum** — four new variants:
+
+- `SkillTrainerTemplateTree` — marks a tree generated entirely from the
+  built-in skill trainer template.
+- `SkillTrainerBranchInsertion` — marks a tree where the SDK inserted a skill
+  trainer branch into existing authored content.
+- `SkillTrainerChoice` — marks a choice node inserted by the SDK to route into
+  a skill trainer branch.
+- `SkillTrainerOpenNode` — marks a node inserted by the SDK to fire
+  `OpenSkillTraining`.
+
+**`DialogueSdkManagedContent::is_skill_trainer_marker()`** — returns `true`
+for all four `SkillTrainer*` variants.
+
+**`DialogueSdkMetadata::has_skill_trainer_content()`** — returns `true` when
+any skill-trainer-related SDK marker is present in `managed_content`.
+
+**`DialogueNode::has_sdk_managed_skill_trainer_content()`** — returns `true`
+when the node carries `SkillTrainerOpenNode` or any choice carries
+`SkillTrainerChoice`.
+
+**`DialogueTree::contains_open_skill_training_for_npc(npc_id)`** — returns
+`true` when any node action or choice action in the tree is
+`OpenSkillTraining { npc_id }`.
+
+**`DialogueTree::has_sdk_managed_skill_trainer_content()`** — returns `true`
+when the tree-level metadata or any node contains skill trainer SDK markers.
+
+**`DialogueTree::standard_skill_trainer_template(id, npc_id, npc_name)`** —
+creates a complete two-node dialogue tree (greeting root + skill trainer node)
+marked as `SkillTrainerTemplateTree`, with the standard `"I seek skill
+training."` choice routing to a terminal node that fires
+`OpenSkillTraining { npc_id }`.
+
+**`DialogueTree::ensure_standard_skill_trainer_branch(npc_id, npc_name)`** —
+idempotently inserts a skill trainer branch into the root node; returns `false`
+and is a no-op if `OpenSkillTraining` for `npc_id` is already present.
+
+**`DialogueTree::remove_sdk_managed_skill_trainer_content()`** — removes all
+`SkillTrainer*`-marked nodes, strips `SkillTrainerChoice` entries from choice
+lists, and removes tree-level markers; returns `true` if any content was
+removed; idempotent.
+
+**`DialogueChoice::sdk_managed_skill_trainer_choice(target_node)`** — factory
+that creates a choice with text `"I seek skill training."` tagged with the
+`SkillTrainerChoice` marker.
+
+**`DialogueChoice::is_sdk_managed_skill_trainer_choice()`** — predicate
+checking for the `SkillTrainerChoice` marker.
+
+**Tests added (11 new unit tests):**
+
+| Test name                                                                            | What it verifies                                                                |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `test_standard_skill_trainer_template_contains_open_skill_training_and_metadata`     | Template has `OpenSkillTraining` and `SkillTrainerTemplateTree` marker          |
+| `test_ensure_standard_skill_trainer_branch_inserts_one_branch_for_existing_dialogue` | Branch insertion works on custom tree                                           |
+| `test_ensure_standard_skill_trainer_branch_is_noop_when_open_skill_training_exists`  | Idempotency when already present                                                |
+| `test_remove_sdk_managed_skill_trainer_content_preserves_custom_nodes_and_choices`   | Custom nodes/choices survive removal                                            |
+| `test_remove_sdk_managed_skill_trainer_content_is_idempotent`                        | Second removal is a no-op                                                       |
+| `test_ensure_standard_skill_trainer_branch_is_idempotent`                            | Ensure call twice → only first modifies                                         |
+| `test_dialogue_action_description_open_skill_training`                               | `OpenSkillTraining` description contains npc_id                                 |
+| `test_sdk_metadata_has_skill_trainer_content`                                        | `has_skill_trainer_content()` returns true after inserting `SkillTrainerChoice` |
+| `test_skill_trainer_choice_is_sdk_managed`                                           | Choice is skill-trainer-managed, not trainer/merchant                           |
+| `test_skill_trainer_choice_text`                                                     | Choice text and target node are correct                                         |
+| `test_is_skill_trainer_marker`                                                       | All four variants return `true`; non-skill-trainer variants return `false`      |
+
+### Architecture Compliance
+
+- [x] No new data structures introduced; extends existing `DialogueSdkManagedContent`
+      exactly as `Trainer*` variants extended `Merchant*` variants.
+- [x] `OpenSkillTraining` action variant unchanged — only SDK helper layer added.
+- [x] RON format unaffected; `DialogueSdkManagedContent` is serialisable.
+- [x] No test references `campaigns/tutorial` (Rule 5).
+- [x] All doc comments include runnable `///` examples.
+
+#### `sdk/campaign_builder/src/dialogue_editor.rs`
+
+**`DialogueEditorState::ensure_skill_trainer_dialogue_for_npc(npc)`** — creates
+or augments a skill trainer dialogue tree for a skill trainer NPC using the new
+`standard_skill_trainer_template` / `ensure_standard_skill_trainer_branch`
+methods. Mirrors `ensure_trainer_dialogue_for_npc`.
+
+**`DialogueEditorState::remove_skill_trainer_dialogue_for_npc(npc)`** — removes
+SDK-managed skill trainer content from the assigned dialogue for a non-skill-trainer
+NPC. Non-destructive: custom authored content is preserved. Mirrors
+`remove_trainer_dialogue_for_npc`.
+
+#### `sdk/campaign_builder/src/ui_helpers/autocomplete.rs`
+
+**`autocomplete_skill_id_list_selector(ui, id_salt, label, selected_skill_ids, skills)`** —
+autocomplete multi-selector for `Vec<String>` skill IDs. Only shows skills where
+`is_trainable == true` as candidates. Display format is `"id — name"`; ID
+extraction uses `splitn(2, " — ")`. Integrated into the NPC editor's skill
+trainer section. Mirrors `autocomplete_proficiency_list_selector`.
+
+#### `sdk/campaign_builder/src/npc_editor/mod.rs`
+
+**`SkillTrainerDialogueValidationState` enum** — five variants mirroring
+`TrainerDialogueValidationState`: `NotSkillTrainer`, `Valid`, `Missing`,
+`AssignedDialogueMissing`, `StaleSkillTrainerContent`.
+
+**`NpcEditBuffer` fields added:**
+
+- `is_skill_trainer: bool`
+- `trainable_skill_ids: Vec<String>`
+- `skill_training_fee_base: String` (empty = campaign default)
+- `skill_training_fee_multiplier: String` (empty = campaign default)
+- `skill_training_max_rank: String` (empty = use skill definition max_rank)
+
+**`NpcEditorState` fields added:**
+
+- `filter_skill_trainers: bool` — filter button in list toolbar
+- `available_skills: Vec<SkillDefinition>` — skill definitions for autocomplete
+  (populated by caller before `show()`)
+
+**`validate_edit_buffer()`** — validates skill trainer fields: empty
+`trainable_skill_ids`, unknown skill IDs, non-trainable skills, invalid
+fee multiplier, and max rank exceeding skill definition cap.
+
+**`build_npc_from_edit_buffer()` / `save_npc()`** — replaced hardcoded
+`is_skill_trainer: false` stubs with actual buffer values, including parsed
+`skill_training_fee_base` (u32), `skill_training_fee_multiplier` (f32),
+and `skill_training_max_rank` (u16).
+
+**`matches_filters()`** — `filter_skill_trainers` check after `filter_trainers`.
+
+**`start_edit_npc()`** — loads all five skill trainer fields from `NpcDefinition`
+into the edit buffer.
+
+**Private methods added:**
+
+- `skill_trainer_dialogue_validation_for_definition()` — validates skill
+  trainer dialogue state without mutation.
+- `skill_trainer_dialogue_status_for_buffer()` — human-readable status
+  string from current buffer state.
+- `create_or_repair_skill_trainer_dialogue_for_buffer()` — creates or
+  augments skill trainer dialogue; clears stale IDs; returns actionable
+  message on error.
+- `remove_skill_trainer_dialogue_from_edit_buffer()` — removes SDK-managed
+  skill trainer content non-destructively.
+- `auto_apply_skill_trainer_dialogue_to_edit_buffer()` — auto-creates
+  dialogue when toggling `is_skill_trainer` on.
+
+**`show_edit_view()`** — skill trainer section after the Is Innkeeper
+checkbox: toggle with auto-apply/remove on change, coloured status badge,
+`autocomplete_skill_id_list_selector` multi-select, fee/max-rank text
+fields, Create/Repair/Remove buttons.
+
+**Save button** — adds skill trainer dialogue cleanup block after the
+existing trainer block so skill trainer dialogue is kept consistent on every
+save.
+
+**5 new unit tests (Phase 8):**
+
+| Test name                                                                     | What it verifies                                                                                                |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `test_npc_skill_trainer_validation_rejects_unknown_skill`                     | Unknown skill ID produces a validation error                                                                    |
+| `test_npc_skill_trainer_validation_rejects_non_trainable_skill`               | Non-trainable skill produces a validation error                                                                 |
+| `test_npc_skill_trainer_dialogue_template_creates_open_skill_training_action` | `create_or_repair_skill_trainer_dialogue_for_buffer` creates dialogue with `OpenSkillTraining` and SDK metadata |
+| `test_npc_editor_skill_trainer_defaults_are_safe`                             | Default buffer and state have all skill trainer fields empty/false                                              |
+| `test_skill_id_autocomplete_extracts_candidates`                              | Candidate filter includes only trainable skills                                                                 |
+
+### Architecture Compliance
+
+- [x] No new data structures introduced; extends existing `NpcEditBuffer` and
+      `NpcEditorState` exactly as trainer fields were extended in Phase 7.
+- [x] `SkillTrainerDialogueValidationState` mirrors `TrainerDialogueValidationState`.
+- [x] `available_skills` is `#[serde(skip)]` — not persisted.
+- [x] `skill_training_max_rank` parsed as `u16` matching `SkillRank = u16`.
+- [x] No test references `campaigns/tutorial` (Rule 5).
+- [x] All doc comments follow `///` pattern.
+
+### Quality Gates
+
+- `cargo fmt --all` → no output.
+- `cargo check --all-targets --all-features` → 0 errors.
+- `cargo clippy --all-targets --all-features -- -D warnings` → 0 warnings.
+- `cargo nextest run --all-features` → 5056 passed, 0 failed.
+
+---
+
+## Phase 7: NPC Train Skills UI (Complete)
+
+### Overview
+
+Implemented the player-facing NPC skill training screen (`skill_training_ui.rs`)
+that allows players to select a party member, choose a skill, and pay gold to
+raise a skill's persistent rank by one. The UI follows the three-column
+`allocate_ui` layout rule from `AGENTS.md` Rule 6.
+
+### Deliverables
+
+#### `src/game/systems/skill_training_ui.rs` (new)
+
+- **`SkillTrainingPlugin`** — Registers four events (`TrainSkill`,
+  `SelectSkillTrainingMember`, `SelectSkillTrainingSkill`, `ExitSkillTraining`),
+  the `SkillTrainingNavState` resource, and six chained systems.
+- **Events** — `TrainSkill { party_index, skill_id }`, `SelectSkillTrainingMember`,
+  `SelectSkillTrainingSkill`, `ExitSkillTraining`.
+- **`FocusedSkillList`** / **`SkillTrainingNavState`** — Keyboard focus state
+  tracking which list (Members or Skills) is active and which row is highlighted.
+- **`eligible_skill_training_members`** (pub) — Pure helper that maps
+  `SkillTrainingState::eligible_member_indices` to alive `&Character` tuples,
+  silently dropping dead or out-of-bounds entries.
+- **`skill_training_ui_system`** — Three-column `allocate_ui` layout: left
+  column (party members), centre column (available skills), right column
+  (detail: rank preview, fee, Train/Leave buttons, status message). Title bar
+  carries all navigation hints right-aligned; no bottom hint bar.
+- **`skill_training_selection_system`** — Updates `SkillTrainingState` from
+  both member and skill selection events; run twice per frame (before and after
+  the UI system) to handle both keyboard and click selections.
+- **`skill_training_action_system`** — Calls `perform_skill_training_service`
+  on `TrainSkill` events, writes success/failure to `status_message` and the
+  game log; transitions to Exploration on `ExitSkillTraining`.
+- **`skill_training_input_system`** — Escape, Tab, Arrow Up/Down, Enter
+  keyboard navigation across both lists.
+- **`skill_training_cleanup_system`** — Despawns `SkillTrainingUiRoot` entities
+  and resets `SkillTrainingNavState` when leaving `SkillTraining` mode.
+- **10 unit tests** covering default state, dead-member filtering, skill list
+  filtering, plugin build, mode transitions (escape, success, failure, no-op).
+
+#### `src/game/systems/mod.rs`
+
+Added `pub mod skill_training_ui;`.
+
+#### `src/bin/antares.rs`
+
+Registered `SkillTrainingPlugin` in `AntaresPlugin::build` immediately after
+`TrainingPlugin`.
+
+#### `src/game/systems/input/mode_guards.rs`
+
+Added `GameMode::SkillTraining(_)` to `movement_blocked_for_mode` so player
+cannot walk while the skill training panel is open. Added a corresponding
+`test_movement_blocked_for_skill_training_true` test.
+
+#### `src/game/systems/input/global_toggles.rs`
+
+- Inventory toggle: added `GameMode::SkillTraining(_)` to the no-op arm
+  (alongside `Menu` and `Combat`).
+- Character sheet toggle: added `GameMode::SkillTraining(_)` to the blocked arm
+  (alongside `Training`, `Combat`, `Dialogue`, `MerchantInventory`).
+- Character select: added `GameMode::SkillTraining(_)` to `is_blocked`
+  (alongside `Training`, `Combat`, `Dialogue`, `MerchantInventory`).
+- Added `test_global_toggles_ignored_in_skill_training` covering both inventory
+  and character sheet toggle blocking.
+
+#### `src/game/systems/hud.rs`
+
+Added `test_portrait_click_ignored_in_skill_training` — verifies that
+`portrait_click_allowed` returns `false` for `GameMode::SkillTraining`
+(`SkillTraining` is already absent from the allow-list, this test documents
+the invariant).
+
+### Architecture Compliance
+
+- [x] Data structures match `architecture.md` — uses `SkillTrainingState`,
+      `GameMode::SkillTraining` as defined in Phase 6.
+- [x] egui multi-column layout follows Rule 6 exactly: `allocate_ui` with
+      explicit column rects, `auto_shrink([true, false])` on every `ScrollArea`,
+      hints in the title bar, no bottom hint bar.
+- [x] Every loop row uses `push_id` (`skill_train_member_*`, `skill_train_skill_*`).
+- [x] Every `ScrollArea` has a unique `id_salt`.
+- [x] No test references `campaigns/tutorial` (Rule 5).
+- [x] `perform_skill_training_service` unchanged — UI delegates all business
+      logic to the application layer.
+
+### Quality Gates
+
+- `cargo fmt --all` → no output.
+- `cargo check --all-targets --all-features` → 0 errors.
+- `cargo clippy --all-targets --all-features -- -D warnings` → 0 warnings.
+- `cargo nextest run --all-features` → 5045 passed, 0 failed.
+
+---
+
+## Phase 6: NPC Train Skills Domain and Application Flow (Complete)
+
+### Overview
+
+Implemented the full NPC skill training domain and application flow: skill
+trainer NPC fields, the atomic `perform_skill_training_service`, a dedicated
+`SkillTrainingState` and `GameMode::SkillTraining` variant, a
+`DialogueAction::OpenSkillTraining` action, and the dialogue system handler
+that enters the new mode. Test campaign fixtures include a skill trainer NPC
+and a dialogue tree with an `OpenSkillTraining` action.
+
+### Files Created
+
+| File                                      | What was added                                                                                          |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `src/application/skill_training_state.rs` | `SkillTrainingState` struct with `new`, `clear`, `select_member`, `select_skill`; 18 unit tests         |
+| `src/application/skill_training.rs`       | `SkillTrainingError` (7 variants), `perform_skill_training_service` (14-step atomic flow); 7 unit tests |
+
+### Files Modified
+
+#### `src/domain/world/npc.rs`
+
+- Added `use crate::domain::skills::{SkillId, SkillRank};` import.
+- Added 5 new `#[serde(default)]` fields to `NpcDefinition` after
+  `training_fee_multiplier`: `is_skill_trainer: bool`,
+  `trainable_skill_ids: Vec<SkillId>`, `skill_training_fee_base: Option<u32>`,
+  `skill_training_fee_multiplier: Option<f32>`,
+  `skill_training_max_rank: Option<SkillRank>`.
+- Updated `new()`, `merchant()`, `priest()`, `innkeeper()`, and `trainer()`
+  constructors with new defaulted fields.
+- Updated all 4 struct-literal doc-comment examples to include the new fields.
+- Added `skill_training_fee(current_rank, campaign_fee_base, campaign_fee_multiplier) -> u32`
+  using formula `floor(base * multiplier * (current_rank + 1))`.
+- Added 4 unit tests (defaults, NPC override, campaign fallback, serde round-trip).
+- Updated all struct literals in test modules that became incomplete (blueprint.rs,
+  creature_binding.rs, types.rs, events.rs, database.rs, campaign_integration_tests.rs).
+
+#### `src/application/mod.rs`
+
+- Registered `pub mod skill_training;` and `pub mod skill_training_state;` (alphabetical).
+- Added `GameMode::SkillTraining(crate::application::skill_training_state::SkillTrainingState)`
+  variant with full doc comment.
+- Added `GameMode::SkillTraining(_)` arm to `close_modal()` returning to Exploration.
+- Added `GameState::enter_skill_training(npc_id, eligible_indices, available_skills)` method.
+- Added `GameState::exit_skill_training()` method (no-op outside SkillTraining mode).
+- Added 4 unit tests: `test_enter_skill_training_sets_skill_training_mode`,
+  `test_exit_skill_training_returns_to_exploration`,
+  `test_exit_skill_training_noop_when_not_in_skill_training_mode`,
+  `test_close_modal_closes_skill_training_to_exploration`.
+
+#### `src/domain/dialogue.rs`
+
+- Added `DialogueAction::OpenSkillTraining { npc_id: String }` variant after
+  `OpenTraining`.
+- Added `"Open skill training session for '{}"` arm in `DialogueAction::description()`.
+
+#### `src/game/systems/dialogue.rs`
+
+- Added `DialogueAction::OpenSkillTraining` arm in `execute_action()` that:
+  - Validates the NPC exists and has `is_skill_trainer: true`.
+  - Builds `eligible_member_indices` (alive party members) and clones
+    `trainable_skill_ids` from the NPC definition.
+  - Calls `game_state.enter_skill_training(...)` to set the new mode.
+- Added 3 tests: `test_open_skill_training_dialogue_enters_skill_training_mode`,
+  `test_open_skill_training_unknown_npc_no_panic`,
+  `test_open_skill_training_non_skill_trainer_npc_no_transition`.
+
+#### `data/test_campaign/data/npcs.ron`
+
+- Added `test_skill_trainer` NPC entry with `is_skill_trainer: true`,
+  `trainable_skill_ids: ["perception", "diplomacy"]`, `skill_training_fee_base: Some(100)`,
+  `skill_training_max_rank: Some(20)`, `creature_id: Some(59)`, `dialogue_id: Some(201)`.
+
+#### `data/test_campaign/data/dialogues.ron`
+
+- Added dialogue `id: 201` — "Skill Trainer Dialogue" — with a branch that
+  fires `OpenSkillTraining(npc_id: "test_skill_trainer")`.
+
+### Key Design Decisions
+
+- **Two separate flows** — `GameMode::Training` (level-up) and
+  `GameMode::SkillTraining` (skill rank increase) are kept completely separate,
+  as specified. They share no state or service functions.
+- **Atomic preconditions** — `perform_skill_training_service` completes all 14
+  checks (NPC lookup, trainer flag, party member alive, skill existence,
+  trainability, NPC offer, rank resolution, rank cap, gold) before modifying
+  any state. A failed check returns an error with no side-effects.
+- **`SkillTrainingState` as a dedicated module** — follows the
+  `character_sheet_state.rs` pattern: separate file, full doc comments, serde
+  round-trip, own test module.
+- **Check ordering** — skill existence/trainability (steps 5-6) is verified
+  before the NPC offer check (step 7) so the player sees "Skill does not
+  exist" rather than "NPC doesn't offer it" for unknown skill IDs.
+- **Fee formula** — `floor(base * multiplier * (current_persistent_rank + 1))`
+  so rank 0→1 costs `base`, rank 1→2 costs `2*base`, etc.
+
+### Tests Added / Updated
+
+| Module                                    | Tests                                                             |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| `src/domain/world/npc.rs`                 | 4 new (skill trainer defaults, fee override, fee fallback, serde) |
+| `src/application/skill_training_state.rs` | 18 new                                                            |
+| `src/application/skill_training.rs`       | 7 new (all 7 required by spec)                                    |
+| `src/application/mod.rs`                  | 4 new (enter, exit, noop exit, close_modal)                       |
+| `src/game/systems/dialogue.rs`            | 3 new (enters mode, unknown NPC, non-trainer NPC)                 |
+
+**Total new tests: 36** — all passing, zero failures.
+
+### Phase 6 Deliverables Checklist
+
+- [x] NPC skill trainer fields added with serde defaults
+- [x] `src/application/skill_training.rs` created with `SkillTrainingError` and
+      `perform_skill_training_service`
+- [x] `src/application/skill_training_state.rs` created with `SkillTrainingState`
+      with `new`, `clear`, `select_member`, `select_skill`
+- [x] `GameMode::SkillTraining` variant added
+- [x] `GameState::close_modal()` handles `GameMode::SkillTraining`
+- [x] `GameState::enter_skill_training` and `exit_skill_training` implemented
+- [x] `DialogueAction::OpenSkillTraining` added
+- [x] Dialogue system `execute_action` handles `OpenSkillTraining`
+- [x] Test campaign includes skill trainer NPC (`test_skill_trainer`) and
+      dialogue 201 with `OpenSkillTraining` action
+- [x] Unit tests cover all required training success/failure cases
+- [x] `docs/explanation/implementations.md` updated
+
+### Phase 6 Success Criteria Verification
+
+| Criterion                                                                       | Status                                                                         |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Skill training is atomic (failed training does not deduct gold or change ranks) | ✅ All 14 checks complete before any mutation                                  |
+| Successful training increases only persistent character skill rank              | ✅ `skill_ranks.increment()` only called after all checks pass                 |
+| Auto skill scaling still applies independently of trained ranks                 | ✅ Resolver combines auto-scaled + trained ranks; only persistent rank changes |
+| Dialogue can open skill training only for valid skill trainer NPCs              | ✅ `execute_action` guards on `is_skill_trainer` before entering mode          |
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → No output
+✅ cargo check       → Finished with 0 errors
+✅ cargo clippy      → Finished with 0 warnings
+✅ cargo nextest run → 5032 passed; 0 failed; 8 skipped
+```
+
+---
+
+## Phase 5: SDK Skills Editor (Complete)
+
+### Overview
+
+Implemented the Campaign Builder Skills Editor UI for authoring `skills.ron`
+and skill grants. The editor follows the SDK two-column list/detail pattern,
+uses standard list rows, supports category filtering, import/export, scaling
+mode editing, and usage tracking across class/race skill grants.
+
+### What Changed
+
+- Added `sdk/campaign_builder/src/skills_editor.rs` with `SkillsEditorState`,
+  `SkillsEditorMode`, `SkillCategoryFilter`, usage tracking, add/edit forms,
+  import/export dialog, and scaling editors for `Flat`, `Linear`, `Step`, and
+  `Table` modes.
+- Added `EditorTab::Skills`, sidebar entry, central-panel dispatch, and
+  `EditorRegistry.skills_editor_state`.
+- Wired startup/open/new campaign flows to reset and load skills consistently.
+- Added skill ID autocomplete helpers in `ui_helpers/autocomplete.rs`.
+- Added class and race skill-grant editing sections that preserve existing
+  grants instead of dropping them on save.
+- Kept Skills Editor list/detail UI on `TwoColumnLayout`; row loops use
+  `push_id`, list rows use `show_standard_list_item`, combo boxes use
+  `from_id_salt`, and action rows use `horizontal_wrapped`.
+
+### Tests Added / Updated
+
+- Added Skills Editor tests for default state, valid default skill, category
+  filtering, linear/step scaling round-trips, usage tracking, and validation of
+  unknown class/race skill references.
+- Added skill autocomplete helper tests for candidate extraction, display-string
+  resolution, raw skill ID resolution, unknown-ID rejection, and display
+  initialization.
+- Updated class/race editor tests to cover skill-grant round-trips and filtering
+  empty grants during save.
+
+### Quality Gates
+
+- `cargo fmt --all` — completed successfully.
+- `cargo check --all-targets --all-features` — completed successfully.
+- `cargo clippy --all-targets --all-features -- -D warnings` — completed successfully.
+- `cargo nextest run --all-features --status-level fail --failure-output immediate-final` — 4999 passed, 8 skipped.
+
+---
+
+## Skill System Critical Path Follow-up (Complete)
+
+### Overview
+
+Implemented critical follow-up work for the skill system level-scaling plan:
+loader metadata wiring, skill reference validation, compile-clean SDK initializers,
+Campaign Builder skills file tracking, high-level resolver entry points, and
+reference documentation updates.
+
+### What Changed
+
+- Added `skills_file` metadata/default wiring to the SDK campaign metadata and
+  Campaign Builder metadata editor.
+- Added `CampaignData.skills` and Asset Manager tracking for `data/skills.ron`.
+- Added Campaign Builder `load_skills`, `save_skills`, and `validate_skill_ids`
+  support.
+- Added `ContentDatabase::load_campaign_with_skills_file` so campaign metadata
+  can override the default `data/skills.ron` path.
+- Wired `ContentDatabase::validate()` to reject unknown class/race skill grants
+  and unknown or over-cap dialogue `SkillCheck` references.
+- Added high-level `SkillResolver::*_for_character` APIs that perform class/race
+  database lookups and return recoverable `SkillError::ClassNotFound` /
+  `SkillError::RaceNotFound` errors.
+- Fixed SDK compile diagnostics caused by missing `skill_grants` initializers.
+- Updated `docs/reference/architecture.md` and
+  `docs/reference/campaign_content_format.md` with skill data structure and
+  `skills.ron` format documentation.
+
+### Tests Added / Updated
+
+- Added `ContentDatabase` regression tests for unknown class skill grants,
+  unknown dialogue skill checks, and configured skills-file loading.
+- Updated resolver missing-class/missing-race tests to exercise real database
+  lookup failures instead of only constructing error variants.
+- Updated SDK metadata and Asset Manager fixtures to include the skills file.
+
+### Quality Gates
+
+- `cargo fmt --all` — completed successfully.
+- `cargo check --all-targets --all-features` — completed successfully.
+- `cargo clippy --all-targets --all-features -- -D warnings` — completed successfully.
+- `cargo nextest run --all-features --status-level fail --failure-output immediate-final` — 4999 passed, 8 skipped.
+
+---
+
+## Phase 4: Auto Skill UI and Character Display (Complete)
+
+### Overview
+
+Adds a read-only **Skills** section to the Character Sheet single view
+(`src/game/systems/character_sheet_ui.rs`). The section is placed after
+the existing Proficiencies section in the right column of
+`render_single_view`.
+
+Skill ranks are computed on every frame via `SkillResolver::effective_skill_rank`
+(auto-scaling + class/race grants + persistent character ranks) and are never
+mutated by this display path.
+
+### Files Changed
+
+#### `src/game/systems/character_sheet_ui.rs`
+
+- **New imports**: `SkillResolver`, `SkillResolverContext` from
+  `crate::domain::skill_resolver`; `SkillCategory`, `SkillGrantSource` from
+  `crate::domain::skills`.
+
+- **New color constants**:
+
+  - `SKILL_CATEGORY_COLOR` — soft green subheading for each category group.
+  - `SKILL_TRAINABLE_COLOR` — light blue tooltip marker for trainable skills.
+
+- **New function `skill_category_label(cat: SkillCategory) -> &'static str`**
+  — maps each `SkillCategory` variant to a display string.
+
+- **New function `render_skill_section(ui, character, content_db)`**
+  — renders the Skills section. Builds a `SkillResolverContext` from the
+  character's live data (level, class/race grants, persistent `skill_ranks`),
+  iterates the five skill categories in canonical order, and for each skill
+  displays `Name [T]: rank` with an on-hover breakdown tooltip that lists the
+  auto rank, per-source grant bonuses, any min floor or override cap, and a
+  trainability note. Falls back to a grey placeholder when the database is
+  absent or empty.
+
+- **`render_single_view` right column**: calls `render_skill_section` after
+  the Proficiencies block.
+
+### Tests Added (4 new tests)
+
+| Test                                                            | What it verifies                                                                                    |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `test_character_sheet_skill_section_renders_without_panic`      | `render_single_view` does not panic when `ContentDatabase.skills` contains definitions.             |
+| `test_skill_display_uses_effective_rank_not_raw_character_rank` | Effective rank = auto-scale + persistent rank (level 5, linear 0+1 → 4, char rank 2 → effective 6). |
+| `test_skill_breakdown_includes_class_and_race_sources`          | `effective_skill_breakdown` records separate `Class` and `Race` entries for tooltip display.        |
+| `test_skill_display_handles_missing_skill_database_gracefully`  | With `content_db = None` the section renders the placeholder, not a panic.                          |
+
+### Design Decisions
+
+- **Read-only** — the function takes `&Character`, never `&mut Character`.
+  No skill state is modified by this display path.
+- **Lazy resolver construction** — `SkillResolverContext` is built inside
+  `render_skill_section` from the data available in `content_db`; no extra
+  Bevy resources are required.
+- **Stable category order** — categories iterate in the fixed sequence
+  `[Combat, Exploration, Knowledge, Social, Utility]` for a predictable layout.
+- **Per-skill `push_id`** — each skill row is wrapped in `ui.push_id(skill_id)`
+  to prevent egui widget ID collisions between characters with the same skill
+  names.
+- **`id_salt` not required here** — there is no `ScrollArea` inside
+  `render_skill_section`; it is called from within the parent scroll area of
+  the right column.
+
+### Quality Gates
+
+```text
+cargo fmt --all              → no output (clean)
+cargo check --all-targets    → Finished, 0 errors
+cargo clippy -- -D warnings  → Finished, 0 warnings
+cargo nextest run            → 4996 passed, 0 failed
+```
+
+---
+
+## Phase 3: Engine Integration — Skill Checks (Complete)
+
+### Overview
+
+Phase 3 exposes skill ranks to game mechanics through a deterministic skill-check
+API and wires the first real game mechanic — dialogue choice gating — into the
+skill system. A party's effective skill ranks (computed by `SkillResolver`) now
+gate dialogue choices and node conditions via the new
+`DialogueCondition::SkillCheck` variant. All Phase 3 integrations use
+deterministic rank-vs-difficulty comparisons; randomized checks are deferred.
+
+### New Type: `PartySkillScope` in `src/domain/skills.rs`
+
+```antares/src/domain/skills.rs#L230-251
+/// Scope for party-wide skill checks in dialogue conditions.
+pub enum PartySkillScope {
+    AnyMember,      // success if any member's rank >= threshold
+    ActiveSpeaker,  // success if the dialogue-leading member qualifies
+    PartyAverage,   // success if floor(mean rank) >= threshold
+    PartyTotal,     // success if sum of ranks >= threshold
+}
+```
+
+### New Module: `src/domain/skill_checks.rs`
+
+| Item                                | Kind             | Purpose                                                               |
+| ----------------------------------- | ---------------- | --------------------------------------------------------------------- |
+| `SkillCheckDifficulty`              | type alias       | `= SkillRank`; numeric threshold for success                          |
+| `SkillCheckRequest`                 | struct           | `skill_id`, `difficulty`, `modifiers: Vec<i16>`                       |
+| `SkillCheckResult`                  | struct           | `success`, `rank`, `roll: Option<u16>`, `margin: i32`                 |
+| `SkillCheckError`                   | enum (thiserror) | `SkillNotFound`, `ClassNotFound`, `RaceNotFound`, `InvalidDifficulty` |
+| `evaluate_skill_check_without_roll` | fn               | Pure deterministic rank-vs-difficulty; `rank >= difficulty`           |
+| `evaluate_party_skill_scope`        | fn               | Aggregates `member_ranks` by `PartySkillScope` then evaluates         |
+| `skill_check_for_character`         | fn               | Resolves rank via `SkillResolver`, applies modifiers, evaluates       |
+
+#### `evaluate_party_skill_scope` — scope semantics
+
+| `PartySkillScope` | Rank reported in result                         | Success condition               |
+| ----------------- | ----------------------------------------------- | ------------------------------- |
+| `AnyMember`       | Highest rank across all living members          | Any member's rank ≥ difficulty  |
+| `ActiveSpeaker`   | `active_speaker_rank` (falls back to member[0]) | That member's rank ≥ difficulty |
+| `PartyAverage`    | `floor(sum / count)`                            | Average ≥ difficulty            |
+| `PartyTotal`      | `sum`, clamped to `u16::MAX`                    | Sum ≥ difficulty                |
+
+### Changes to `src/domain/skills.rs`
+
+- Module layout table updated to include `PartySkillScope`.
+- `PartySkillScope` enum added after `SkillGrantSource`; derives
+  `Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize`.
+
+### Changes to `src/domain/dialogue.rs`
+
+- Added import: `use crate::domain::skills::{PartySkillScope, SkillId, SkillRank};`
+- New `DialogueCondition::SkillCheck` variant:
+  ```antares/src/domain/dialogue.rs#L1030-1037
+  SkillCheck {
+      skill_id: SkillId,
+      minimum_rank: SkillRank,
+      party_scope: PartySkillScope,
+  },
+  ```
+- `description()` arm: `"Skill check: {skill_id} >= {minimum_rank} ({party_scope:?})"`.
+- New test: `test_dialogue_condition_skill_check_description`.
+
+### Changes to `src/domain/mod.rs`
+
+- Added `pub mod skill_checks;` (alphabetical order, between `skill_resolver` and `transactions`).
+- Skills re-export updated: `PartySkillScope` added.
+- New `skill_checks` re-exports block:
+  `evaluate_party_skill_scope`, `evaluate_skill_check_without_roll`,
+  `skill_check_for_character`, `SkillCheckDifficulty`, `SkillCheckError`,
+  `SkillCheckRequest`, `SkillCheckResult`.
+
+### Changes to `src/game/systems/dialogue.rs`
+
+- `evaluate_conditions` now handles `DialogueCondition::SkillCheck`:
+  builds a `Vec<SkillResolverContext>` from living party members,
+  resolves each member's effective rank via `SkillResolver`, then calls
+  `evaluate_party_skill_scope` with the resolved ranks, scope, `None`
+  active-speaker rank, and the minimum rank as difficulty.
+
+### Configuration Update: `data/test_campaign/data/dialogues.ron`
+
+Added dialogue entry 200 (`"Skill-Gated Ancient Door"`):
+
+- Node 1: root node offering a `Perception 5+` choice gated by
+  `SkillCheck(skill_id: "perception", minimum_rank: 5, party_scope: AnyMember)`.
+- Node 2: terminal success node.
+
+### Tests Added (21 total)
+
+| Test                                                                     | Location          | Validates                                      |
+| ------------------------------------------------------------------------ | ----------------- | ---------------------------------------------- |
+| `test_evaluate_skill_check_without_roll_success_at_threshold`            | `skill_checks.rs` | Rank == difficulty succeeds                    |
+| `test_evaluate_skill_check_without_roll_fails_below_threshold`           | `skill_checks.rs` | Rank below difficulty fails                    |
+| `test_evaluate_skill_check_without_roll_succeeds_above_threshold`        | `skill_checks.rs` | Rank above difficulty succeeds                 |
+| `test_evaluate_skill_check_without_roll_zero_difficulty_always_succeeds` | `skill_checks.rs` | Zero difficulty always passes                  |
+| `test_skill_check_condition_any_member_uses_best_matching_member`        | `skill_checks.rs` | `AnyMember` reports best rank                  |
+| `test_any_member_fails_when_no_member_meets_threshold`                   | `skill_checks.rs` | `AnyMember` fails correctly                    |
+| `test_skill_check_condition_party_total_sums_members`                    | `skill_checks.rs` | `PartyTotal` sums ranks                        |
+| `test_party_total_fails_when_sum_below_threshold`                        | `skill_checks.rs` | `PartyTotal` fails correctly                   |
+| `test_party_average_success`                                             | `skill_checks.rs` | `PartyAverage` computes average                |
+| `test_active_speaker_uses_provided_rank`                                 | `skill_checks.rs` | `ActiveSpeaker` uses supplied rank             |
+| `test_active_speaker_falls_back_to_first_member_when_none`               | `skill_checks.rs` | `ActiveSpeaker` fallback                       |
+| `test_empty_party_returns_failure`                                       | `skill_checks.rs` | Empty party fails                              |
+| `test_skill_gated_dialogue_condition_allows_qualified_party`             | `skill_checks.rs` | Qualified party passes                         |
+| `test_skill_gated_dialogue_condition_blocks_unqualified_party`           | `skill_checks.rs` | Unqualified party fails                        |
+| `test_skill_check_for_character_success_at_threshold`                    | `skill_checks.rs` | Single-character pass                          |
+| `test_skill_check_for_character_failure_below_threshold`                 | `skill_checks.rs` | Single-character fail                          |
+| `test_skill_check_for_character_applies_positive_modifier`               | `skill_checks.rs` | Positive modifier boosts rank                  |
+| `test_skill_check_for_character_applies_negative_modifier`               | `skill_checks.rs` | Negative modifier reduces rank                 |
+| `test_skill_check_for_character_returns_error_for_missing_skill`         | `skill_checks.rs` | `SkillNotFound` propagated                     |
+| `test_skill_check_error_display`                                         | `skill_checks.rs` | Error messages contain context strings         |
+| `test_dialogue_condition_skill_check_description`                        | `dialogue.rs`     | `description()` contains skill_id, rank, scope |
+
+### Phase 3.5 Deliverables Checklist
+
+- [x] `SkillCheckDifficulty` type alias implemented
+- [x] `SkillCheckRequest` struct implemented
+- [x] `SkillCheckResult` struct implemented
+- [x] `SkillCheckError` enum implemented
+- [x] `PartySkillScope` enum implemented in `src/domain/skills.rs`
+- [x] `DialogueCondition::SkillCheck` variant added in `src/domain/dialogue.rs`
+- [x] `evaluate_skill_check_without_roll` — deterministic check implemented
+- [x] `evaluate_party_skill_scope` — party-aggregation check implemented
+- [x] `skill_check_for_character` — single-character resolver + evaluator implemented
+- [x] `roll_skill_check` — deferred (no mechanic requires randomized outcome in Phase 3)
+- [x] One engine mechanic integrated: `DialogueCondition::SkillCheck` evaluated in `dialogue.rs`
+- [x] Tests cover success/failure and all four party scopes
+- [x] `docs/explanation/implementations.md` updated
+
+### Phase 3.6 Success Criteria Verification
+
+| Criterion                                                                | Result                                                        |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| Game systems can query skill ranks through one public resolver/check API | ✅ `skill_check_for_character` + `evaluate_party_skill_scope` |
+| At least one real game mechanic uses a skill threshold                   | ✅ `DialogueCondition::SkillCheck` in `evaluate_conditions`   |
+| Skill checks are deterministic where possible and unit-testable          | ✅ All Phase 3 checks are pure functions with no RNG          |
+| No UI-specific code is required to perform a skill check                 | ✅ All check functions are in `src/domain/skill_checks.rs`    |
+
+### Files Created or Modified
+
+| File                                    | Change                                                                     |
+| --------------------------------------- | -------------------------------------------------------------------------- |
+| `src/domain/skill_checks.rs`            | **New** — full Phase 3 skill check API (21 tests)                          |
+| `src/domain/skills.rs`                  | `PartySkillScope` enum added; module layout table updated                  |
+| `src/domain/dialogue.rs`                | `SkillCheck` variant + import + `description()` arm + 1 test               |
+| `src/domain/mod.rs`                     | `pub mod skill_checks`, updated re-exports for Phase 3 types               |
+| `src/game/systems/dialogue.rs`          | `evaluate_conditions` — `SkillCheck` arm uses `evaluate_party_skill_scope` |
+| `data/test_campaign/data/dialogues.ron` | Dialogue 200 (`Skill-Gated Ancient Door`) added                            |
+
+### Quality Gates
+
+```text
+cargo fmt --all                                       → clean (no output)
+cargo check --all-targets --all-features              → Finished (0 errors)
+cargo clippy --all-targets --all-features -D warnings → Finished (0 warnings)
+cargo nextest run --all-features                      → 4992 passed, 0 failed, 8 skipped
+```
+
+---
+
+### Overview
+
+Phase 2 implements the gameplay-facing Auto Skills system. Characters now have
+an **effective skill rank** derived from four additive sources:
+
+1. **Auto-scaling** from the skill's `SkillScalingMode` at the character's level.
+2. **Class grants** — flat and/or per-level bonuses defined on the `ClassDefinition`.
+3. **Race grants** — flat and/or per-level bonuses defined on the `RaceDefinition`.
+4. **Persistent character ranks** — stored in `Character::skill_ranks` and updated
+   through NPC training or manual assignment.
+
+The computed rank is clamped to the skill's `max_rank`, then optionally raised by
+`minimum_rank` floors and lowered by `maximum_rank_override` caps declared on
+individual grants.
+
+### New Public Types
+
+| Type                       | Module           | Purpose                                                                                                         |
+| -------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------- |
+| `SkillGrantSource`         | `skills`         | Identifies origin of a rank contribution (`Class`, `Race`, `Character`, `Training`, `Temporary`)                |
+| `SkillGrant`               | `skills`         | Data-driven bonus: `skill_id`, `flat_bonus`, `per_level_bonus`, `minimum_rank`, `maximum_rank_override`         |
+| `CharacterSkillRanks`      | `skills`         | Newtype `HashMap<SkillId, SkillRank>` with `new/get/set/increment/remove/contains` methods                      |
+| `SkillBreakdownEntry`      | `skills`         | One contribution line: `(source, bonus)`                                                                        |
+| `SkillBreakdown`           | `skills`         | Full derivation record for UI/debugging                                                                         |
+| `SkillResolverContext<'a>` | `skill_resolver` | Bundles `level`, `class_id`, `race_id`, `char_ranks`, `class_grants`, `race_grants` to avoid too-many-arguments |
+| `SkillResolver`            | `skill_resolver` | Stateless resolver with four associated functions                                                               |
+
+### New Error Variants (added to `SkillError`)
+
+| Variant                         | Meaning                                           |
+| ------------------------------- | ------------------------------------------------- |
+| `ClassNotFound(String)`         | Character's class ID is missing from the database |
+| `RaceNotFound(String)`          | Character's race ID is missing from the database  |
+| `InvalidSkillReference(String)` | A skill grant references a non-existent skill ID  |
+
+### Effective Rank Formula
+
+```
+auto_rank   = rank_for_level(definition, character.level)
+additive    = auto_rank
+            + Σ class grants (flat_bonus + per_level_bonus × level)
+            + Σ race grants  (flat_bonus + per_level_bonus × level)
+            + character.skill_ranks[skill_id]
+clamped     = clamp(additive, 0, definition.max_rank)
+after_floor = max(clamped, max_of_all_minimum_ranks).min(max_rank)
+final_rank  = min(after_floor, min_of_all_maximum_rank_overrides)
+```
+
+### `SkillResolver` API
+
+All methods are associated functions; callers build a `SkillResolverContext` and pass it in.
+
+| Function                                                                   | Return                               |
+| -------------------------------------------------------------------------- | ------------------------------------ |
+| `SkillResolver::effective_skill_rank(&ctx, skill_id, skills)`              | `Result<SkillRank, SkillError>`      |
+| `SkillResolver::effective_skill_breakdown(&ctx, skill_id, skills)`         | `Result<SkillBreakdown, SkillError>` |
+| `SkillResolver::all_effective_skill_ranks(&ctx, skills)`                   | `HashMap<SkillId, SkillRank>`        |
+| `SkillResolver::character_has_skill_rank(&ctx, skill_id, minimum, skills)` | `bool`                               |
+
+### Files Created or Modified
+
+| File                                  | Change                                                                                                               |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/skills.rs`                | New error variants, `SkillGrantSource`, `SkillGrant`, `CharacterSkillRanks`, `SkillBreakdownEntry`, `SkillBreakdown` |
+| `src/domain/skill_resolver.rs`        | **New file** — `SkillResolverContext`, `SkillResolver`, 16 tests                                                     |
+| `src/domain/classes.rs`               | `ClassDefinition::skill_grants`, `ClassDatabase::validate_with_skill_db`                                             |
+| `src/domain/races.rs`                 | `RaceDefinition::skill_grants`, `RaceDatabase::validate_with_skill_db`                                               |
+| `src/domain/character.rs`             | `Character::skill_ranks: CharacterSkillRanks` with `#[serde(default)]`                                               |
+| `src/domain/mod.rs`                   | `pub mod skill_resolver;`, `SkillResolverContext`, all Phase 2 types re-exported                                     |
+| `data/classes.ron`                    | `skill_grants` added to all 6 base classes                                                                           |
+| `data/races.ron`                      | `skill_grants` added to all 6 base races                                                                             |
+| `data/test_campaign/data/classes.ron` | `skill_grants` added (test fixture)                                                                                  |
+| `data/test_campaign/data/races.ron`   | `skill_grants` added (test fixture)                                                                                  |
+| `campaigns/tutorial/data/classes.ron` | `skill_grants` added (7 classes including monk)                                                                      |
+| `campaigns/tutorial/data/races.ron`   | `skill_grants` added (6 races)                                                                                       |
+
+Cascading struct literal fixes were also applied to:
+`src/sdk/cli/class_editor.rs`, `src/sdk/cli/race_editor.rs`,
+`src/domain/character_definition.rs`, `src/domain/items/equipment_validation.rs`,
+`src/domain/transactions.rs`, `src/game/systems/inventory_ui.rs`,
+`tests/cli_editor_tests.rs`.
+
+### Tests Added (Phase 2.4 Required Tests ✅)
+
+| Test                                                               | Location            | Status |
+| ------------------------------------------------------------------ | ------------------- | ------ |
+| `test_effective_skill_rank_uses_auto_level_scaling`                | `skill_resolver.rs` | ✅     |
+| `test_effective_skill_rank_adds_class_grant`                       | `skill_resolver.rs` | ✅     |
+| `test_effective_skill_rank_adds_race_grant`                        | `skill_resolver.rs` | ✅     |
+| `test_effective_skill_rank_adds_character_rank`                    | `skill_resolver.rs` | ✅     |
+| `test_effective_skill_rank_clamps_to_skill_max`                    | `skill_resolver.rs` | ✅     |
+| `test_effective_skill_rank_missing_skill_returns_error`            | `skill_resolver.rs` | ✅     |
+| `test_effective_skill_rank_missing_class_returns_error`            | `skill_resolver.rs` | ✅     |
+| `test_effective_skill_rank_missing_race_returns_error`             | `skill_resolver.rs` | ✅     |
+| `test_all_effective_skill_ranks_contains_all_database_skills`      | `skill_resolver.rs` | ✅     |
+| `test_skill_grants_deserialize_from_test_campaign_classes`         | `skill_resolver.rs` | ✅     |
+| `test_class_database_validate_with_skill_db_rejects_unknown_skill` | `classes.rs`        | ✅     |
+| `test_race_database_validate_with_skill_db_rejects_unknown_skill`  | `races.rs`          | ✅     |
+
+Additional tests added beyond the required set:
+
+- 10 `CharacterSkillRanks` method tests (`skills.rs`)
+- 3 character-level skill rank tests (`character.rs`)
+- 5 extra resolver integration tests (`skill_resolver.rs`)
+
+### Phase 2.5 Deliverables Checklist
+
+- [x] `SkillGrant` and breakdown types implemented
+- [x] `CharacterSkillRanks` newtype with `new/get/set/increment/remove/contains` implemented
+- [x] `ClassDefinition.skill_grants` added with `#[serde(default)]`
+- [x] `RaceDefinition.skill_grants` added with `#[serde(default)]`
+- [x] `Character.skill_ranks: CharacterSkillRanks` added with `#[serde(default)]`
+- [x] `ClassDatabase::validate_with_skill_db` implemented
+- [x] `RaceDatabase::validate_with_skill_db` implemented
+- [x] Effective skill resolver (`SkillResolver`) implemented in `skill_resolver.rs`
+- [x] Class/race fixture data updated (all 6 data files)
+- [x] Tests cover auto scaling, class grants, race grants, character ranks, and clamping
+- [x] `docs/explanation/implementations.md` updated
+
+### Phase 2.6 Success Criteria Verification
+
+| Criterion                                                                    | Result                                                           |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Level 1 and level 10 of same class resolve different ranks for linear skills | ✅ (`test_effective_skill_rank_uses_auto_level_scaling`)         |
+| Robber has higher `disarm_traps` rank than knight at equal level (fixture)   | ✅ (robber gets flat_bonus: 3, knight gets 0 for `disarm_traps`) |
+| Race grants combine with class grants                                        | ✅ (`test_effective_skill_rank_combines_class_and_race_grants`)  |
+| Existing proficiency-based item usage unchanged                              | ✅ (all 4971 tests pass)                                         |
+| Old saves/RON without `skill_grants` or `skill_ranks` still deserialize      | ✅ (`#[serde(default)]` on all new fields)                       |
+
+### Quality Gates
+
+```
+cargo fmt --all                                    → clean (no output)
+cargo check --all-targets --all-features           → Finished (0 errors, 0 warnings)
+cargo clippy --all-targets --all-features -D warnings → Finished (0 warnings)
+cargo nextest run --all-features                   → 4971 passed, 0 failed, 8 skipped
+```
+
+---
+
+### Overview
+
+Extended `ClassDefinition` (in `src/domain/classes.rs`) and `RaceDefinition`
+(in `src/domain/races.rs`) to carry a `skill_grants: Vec<SkillGrant>` field,
+and added `validate_with_skill_db` to both `ClassDatabase` and `RaceDatabase`
+so that cross-reference errors (grants pointing at unknown skill IDs) are
+collected and reported in one pass.
+
+### What Was Added
+
+#### `src/domain/classes.rs`
+
+- **Import**: `use crate::domain::skills::{SkillDatabase, SkillGrant};`
+- **`ClassError::InvalidSkill(String, String)`** — new error variant (class ID,
+  skill ID) for future use in single-error-returning validators.
+- **`ClassDefinition::skill_grants: Vec<SkillGrant>`** — `#[serde(default)]`
+  field; deserializes to `[]` when absent, so all existing RON data files
+  remain valid without modification.
+- **`ClassDefinition::new`** — initialises `skill_grants: vec![]`.
+- **`ClassDatabase::validate_with_skill_db(&self, skill_db: &SkillDatabase)
+-> Vec<SkillError>`** — iterates every class's grants and pushes an
+  `InvalidSkillReference` entry for each unknown skill ID. Collects all errors
+  rather than short-circuiting on the first.
+- All struct-literal doc examples and in-module test helpers updated to include
+  `skill_grants: vec![]`.
+
+#### `src/domain/races.rs`
+
+- **Import**: `use crate::domain::skills::{SkillDatabase, SkillGrant};`
+- **`RaceDefinition::skill_grants: Vec<SkillGrant>`** — `#[serde(default)]`
+  field; identical backward-compatibility guarantee.
+- **`RaceDefinition::new`** — initialises `skill_grants: vec![]`.
+- **`RaceDatabase::validate_with_skill_db(&self, skill_db: &SkillDatabase)
+-> Vec<SkillError>`** — same collect-all-errors pattern as the class side.
+- All struct-literal doc examples and in-module test helpers updated.
+
+#### Other files updated (struct literals only — no logic change)
+
+| File                                       | What changed                                                |
+| ------------------------------------------ | ----------------------------------------------------------- |
+| `src/sdk/cli/class_editor.rs`              | `ClassDefinition { … }` literal                             |
+| `src/sdk/cli/race_editor.rs`               | `RaceDefinition { … }` literal                              |
+| `src/domain/character_definition.rs`       | 9× `ClassDefinition` + 5× `RaceDefinition` in tests         |
+| `src/domain/items/equipment_validation.rs` | 2× `ClassDefinition` + 2× `RaceDefinition` in test helpers  |
+| `src/domain/transactions.rs`               | 1× `ClassDefinition` in test helper                         |
+| `src/game/systems/inventory_ui.rs`         | 1× `ClassDefinition` in test                                |
+| `tests/cli_editor_tests.rs`                | 2× `ClassDefinition` + 2× `RaceDefinition` in test builders |
+
+### Tests Added
+
+**In `src/domain/classes.rs`**
+
+- `test_class_database_validate_with_skill_db_rejects_unknown_skill` — verifies
+  that a class with a grant referencing a skill absent from the database
+  produces a non-empty error vec whose message contains the unknown skill ID.
+- `test_class_database_validate_with_skill_db_accepts_known_skill` — verifies
+  that a class grant pointing at an existing skill produces no errors.
+
+**In `src/domain/races.rs`**
+
+- `test_race_database_validate_with_skill_db_rejects_unknown_skill` — same
+  pattern for races.
+- `test_race_database_validate_with_skill_db_accepts_known_skill` — same
+  pattern for races.
+
+### Design Decisions
+
+- `#[serde(default)]` ensures forward-compatibility: existing campaign data
+  files that omit `skill_grants` load without error.
+- `validate_with_skill_db` returns `Vec<SkillError>` (collect-all) rather than
+  `Result<(), SkillError>` (fail-fast) so callers can report the full set of
+  broken references in one pass — consistent with how the SDK's campaign
+  builder surfaces validation feedback.
+- The top-level `ClassError::InvalidSkill` variant is added for completeness
+  and future single-error use; `validate_with_skill_db` intentionally uses
+  `SkillError::InvalidSkillReference` to keep error types consistent with the
+  skills module.
+
+### Quality Gates
+
+```
+cargo fmt        → clean (no output)
+cargo check      → Finished (0 errors)
+cargo clippy     → Finished (0 warnings)
+```
+
+### Files Changed
+
+- `src/domain/classes.rs`
+- `src/domain/races.rs`
+- `src/sdk/cli/class_editor.rs`
+- `src/sdk/cli/race_editor.rs`
+- `src/domain/character_definition.rs`
+- `src/domain/items/equipment_validation.rs`
+- `src/domain/transactions.rs`
+- `src/game/systems/inventory_ui.rs`
+- `tests/cli_editor_tests.rs`
+- `docs/explanation/implementations.md`
+
+---
+
+## Phase 2 Skill System: SkillResolver and Grant Types (Complete)
+
+### Overview
+
+Implemented Phase 2 of the Antares skill system, adding data-driven grant types
+(`SkillGrant`, `SkillGrantSource`), persistent character rank storage
+(`CharacterSkillRanks`), diagnostic breakdown types (`SkillBreakdownEntry`,
+`SkillBreakdown`), and the stateless `SkillResolver` that computes each
+character's effective skill rank from all contributing sources.
+
+### What Was Added
+
+#### `src/domain/skills.rs` — New Types
+
+**`SkillError` — 3 new variants**
+
+- `ClassNotFound(String)` — the character's class ID was not found in the class
+  database.
+- `RaceNotFound(String)` — the character's race ID was not found in the race
+  database.
+- `InvalidSkillReference(String)` — a grant references a skill ID that does not
+  exist in the database.
+
+**`SkillGrantSource` (enum)** — identifies which system contributed a bonus:
+`Class`, `Race`, `Character`, `Training`, `Temporary`.
+
+**`SkillGrant` (struct)** — a data-driven bonus attached to a class or race
+definition. Fields: `skill_id`, `flat_bonus`, `per_level_bonus`,
+`minimum_rank`, `maximum_rank_override`. Fully serializable via RON.
+
+**`CharacterSkillRanks` (struct)** — a `HashMap<SkillId, SkillRank>` newtype
+for persistent, character-owned skill ranks. Provides `new`, `get`, `set`,
+`increment`, `remove`, `contains`. Derives `Default`, `Serialize`,
+`Deserialize`.
+
+**`SkillBreakdownEntry` (struct)** — one contribution line in a breakdown:
+`source: SkillGrantSource`, `bonus: i32`.
+
+**`SkillBreakdown` (struct)** — full derivation record returned by
+`SkillResolver::effective_skill_breakdown`: `skill_id`, `auto_rank`, `entries`,
+`character_rank`, `final_rank`, `applied_minimum_rank`,
+`applied_maximum_rank_override`.
+
+#### `src/domain/skill_resolver.rs` — New File
+
+**`SkillResolver` (struct)** — stateless resolver with four associated
+functions:
+
+1. `effective_skill_rank(level, class_id, race_id, char_ranks, skill_id, skills,
+class_grants, race_grants) -> Result<SkillRank, SkillError>` — computes
+   effective rank with the 8-step formula:
+
+   - Auto rank from `rank_for_level`
+   - Additive class grants (flat + per_level × level)
+   - Additive race grants
+   - Additive character persistent rank
+   - Clamp to `[0, max_rank]`
+   - Apply `minimum_rank` floor (most generous across all grants)
+   - Apply `maximum_rank_override` cap (most restrictive across all grants)
+
+2. `effective_skill_breakdown(…) -> Result<SkillBreakdown, SkillError>` —
+   identical computation, but returns a full `SkillBreakdown` with per-source
+   `entries` for UI display and debugging.
+
+3. `all_effective_skill_ranks(…) -> HashMap<SkillId, SkillRank>` — iterates
+   every skill in the database and returns a map of all effective ranks.
+
+4. `character_has_skill_rank(…, minimum) -> bool` — convenience predicate.
+
+### Effective Rank Formula (canonical)
+
+```
+auto_rank = rank_for_level(definition, level)
+additive  = auto_rank
+           + Σ(class grants: flat + per_level × level)
+           + Σ(race grants:  flat + per_level × level)
+           + character_persistent_rank
+clamped   = clamp(additive, 0, definition.max_rank)
+after_floor = max(clamped, highest_minimum_rank).min(max_rank)
+final_rank  = min(after_floor, lowest_maximum_rank_override)
+```
+
+### Design Decisions
+
+- `SkillResolver` is a zero-size struct (pure namespace) to keep all logic as
+  associated functions, avoiding instance-state bugs.
+- Grant slices are passed in rather than database references to prevent circular
+  module dependencies (`skill_resolver` → `skills`, but NOT → `classes`/`races`).
+- `minimum_rank` takes the **most generous** (max) floor across all grants.
+- `maximum_rank_override` takes the **most restrictive** (min) cap across all
+  grants.
+- `SkillBreakdownEntry` records only non-zero contributions, keeping the
+  `entries` vec clean for UI display.
+- `SkillResolver` module registration in `mod.rs` is deferred to a companion
+  agent task; `test_skill_grants_deserialize_from_test_campaign_classes` depends
+  on `ClassDefinition.skill_grants` being added by another agent.
+
+### Tests Added
+
+**In `src/domain/skills.rs` (10 new tests)**
+
+- `test_character_skill_ranks_new_is_empty`
+- `test_character_skill_ranks_set_and_get`
+- `test_character_skill_ranks_set_overwrites`
+- `test_character_skill_ranks_increment_from_zero`
+- `test_character_skill_ranks_increment_existing`
+- `test_character_skill_ranks_remove`
+- `test_character_skill_ranks_remove_missing_is_noop`
+- `test_character_skill_ranks_contains`
+- `test_character_skill_ranks_default_is_empty`
+- `test_character_skill_ranks_serde_roundtrip` (RON round-trip)
+
+**In `src/domain/skill_resolver.rs` (16 tests — active when module is declared)**
+
+- `test_effective_skill_rank_uses_auto_level_scaling`
+- `test_effective_skill_rank_adds_class_grant`
+- `test_effective_skill_rank_adds_race_grant`
+- `test_effective_skill_rank_adds_character_rank`
+- `test_effective_skill_rank_clamps_to_skill_max`
+- `test_effective_skill_rank_missing_skill_returns_error`
+- `test_effective_skill_rank_missing_class_returns_error`
+- `test_effective_skill_rank_missing_race_returns_error`
+- `test_all_effective_skill_ranks_contains_all_database_skills`
+- `test_effective_skill_rank_combines_class_and_race_grants`
+- `test_effective_skill_rank_per_level_bonus_scales`
+- `test_effective_skill_rank_minimum_rank_floor_applied`
+- `test_effective_skill_rank_maximum_rank_override_cap_applied`
+- `test_character_has_skill_rank_true_when_sufficient`
+- `test_character_has_skill_rank_false_when_insufficient`
+- `test_effective_skill_breakdown_returns_correct_entries`
+- `test_skill_grants_deserialize_from_test_campaign_classes` (pending companion agents)
+
+### Quality Gates
+
+```
+cargo fmt        → clean
+cargo check      → Finished (0 errors)
+cargo clippy     → Finished (0 warnings)
+cargo nextest    → 43 passed, 0 failed (skills module)
+```
+
+### Files Changed
+
+- `src/domain/skills.rs` — new error variants, grant types, `CharacterSkillRanks`, breakdowns
+- `src/domain/skill_resolver.rs` — new file (pending `mod.rs` registration)
+- `docs/explanation/implementations.md`
+
+---
+
+## Phase 2 Skill System: Character.skill_ranks, mod.rs Registration, and RON Data Files (Complete)
+
+### Overview
+
+Completed Phase 2 of the Antares skill system by wiring `CharacterSkillRanks`
+into `Character`, registering `skill_resolver` in `mod.rs`, and populating
+`skill_grants` in all six class and race RON data files across three asset
+locations.
+
+### What Was Added
+
+#### `src/domain/character.rs`
+
+- **Import**: `use crate::domain::skills::CharacterSkillRanks;` added at the
+  top of the file.
+- **`Character::skill_ranks: CharacterSkillRanks`** — new last field with
+  `#[serde(default)]`. Existing serialized characters that omit the field
+  deserialize cleanly with an empty map.
+- **`Character::new`** — initialises `skill_ranks: CharacterSkillRanks::new()`.
+- **Test**: `test_character_skill_ranks_field_defaults_on_deserialize` — round-
+  trips a minimal RON string that omits `skill_ranks` and asserts the field
+  defaults to an empty map.
+
+#### `src/domain/mod.rs`
+
+- **`pub mod skill_resolver;`** — module declared after `pub mod skills;`.
+- **Updated re-export block** — comment updated to "Phase 1 + Phase 2";
+  `CharacterSkillRanks`, `SkillBreakdown`, `SkillBreakdownEntry`, `SkillGrant`,
+  and `SkillGrantSource` added to the `pub use skills::{…}` list.
+- **`pub use skill_resolver::SkillResolver;`** — re-exported so callers can
+  reach the resolver via `crate::domain::SkillResolver`.
+
+#### Other files updated (struct literals — no logic change)
+
+| File                                       | What changed                                          |
+| ------------------------------------------ | ----------------------------------------------------- |
+| `src/domain/character_definition.rs`       | Added `skill_ranks` field + import from `skills`      |
+| `src/domain/items/equipment_validation.rs` | Added `skill_ranks` field in test `Character` literal |
+
+#### RON data files — `skill_grants` added to every class and race
+
+| File                                  | Entries added               |
+| ------------------------------------- | --------------------------- |
+| `data/classes.ron`                    | 6 classes (knight → robber) |
+| `data/races.ron`                      | 6 races (human → half_orc)  |
+| `data/test_campaign/data/classes.ron` | 6 classes                   |
+| `data/test_campaign/data/races.ron`   | 6 races                     |
+| `campaigns/tutorial/data/classes.ron` | 7 classes (adds monk)       |
+| `campaigns/tutorial/data/races.ron`   | 6 races                     |
+
+All `skill_grants` fields use the `SkillGrant` struct format:
+`(skill_id, flat_bonus, per_level_bonus, minimum_rank, maximum_rank_override)`.
+Skill IDs reference only skills that exist in the corresponding `skills.ron`.
+
+### Tests Added
+
+**In `src/domain/character.rs`**
+
+- `test_character_skill_ranks_field_defaults_on_deserialize` — proves `#[serde(default)]`
+  works: a RON character without `skill_ranks` deserializes to an empty
+  `CharacterSkillRanks` map.
+
+### Quality Gates
+
+```
+cargo fmt        → clean (no output)
+cargo check      → Finished (0 errors, 0 new warnings)
+```
+
+### Files Changed
+
+- `src/domain/character.rs`
+- `src/domain/character_definition.rs`
+- `src/domain/mod.rs`
+- `src/domain/items/equipment_validation.rs`
+- `data/classes.ron`
+- `data/races.ron`
+- `data/test_campaign/data/classes.ron`
+- `data/test_campaign/data/races.ron`
+- `campaigns/tutorial/data/classes.ron`
+- `campaigns/tutorial/data/races.ron`
+- `docs/explanation/implementations.md`
+
+---
+
 ## Map Editor: Unsaved-Changes Warning Fires on Apply (Complete)
 
 ### Overview
@@ -707,6 +2116,119 @@ The plan addresses the reported vegetation issues:
 ### Files Added
 
 - `docs/explanation/vegetation_visual_quality_implementation_plan.md`
+
+---
+
+## Skill System — Phase 1: Domain Foundation — Skill Definitions (Complete)
+
+### Overview
+
+Implemented the complete domain foundation for the Antares skill system. Introduces
+`src/domain/skills.rs` as a new module with all skill types, a RON-backed
+`SkillDatabase`, and pure scaling helpers. Wired the database into `ContentDatabase`
+in `src/sdk/database.rs`. Created RON data files for base game, test campaign
+fixture, and tutorial campaign.
+
+### Files Created
+
+| File                                 | Purpose                                                   |
+| ------------------------------------ | --------------------------------------------------------- |
+| `src/domain/skills.rs`               | Full skill domain module (types, DB, scaling, validation) |
+| `data/skills.ron`                    | Base game skill definitions (8 skills, all categories)    |
+| `data/test_campaign/data/skills.ron` | Stable test fixture (6 skills, all 4 scaling modes)       |
+| `campaigns/tutorial/data/skills.ron` | Live campaign skill definitions                           |
+
+### Files Modified
+
+| File                  | Changes                                                                                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/domain/mod.rs`   | Added `pub mod skills;` and Phase 1 re-exports                                                                                                                           |
+| `src/sdk/database.rs` | Added `SkillLoadError`, `ContentDatabase.skills`, loading in `load_campaign`/`load_core`, skill validation in `validate()`, `ContentStats.skill_count`, `stats()` update |
+
+### New Types
+
+| Type               | Kind       | Purpose                                                                                                                |
+| ------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `SkillId`          | type alias | `String` — stable campaign-authored identifier                                                                         |
+| `SkillRank`        | type alias | `u16` — numeric rank value                                                                                             |
+| `SkillCategory`    | enum       | `Combat`, `Exploration`, `Knowledge`, `Social`, `Utility`                                                              |
+| `SkillScalingMode` | enum       | `Flat`, `Linear{base,per_level}`, `Step{base,per_levels,amount}`, `Table{ranks_by_level}`                              |
+| `SkillDefinition`  | struct     | Single campaign-authored skill with validation                                                                         |
+| `SkillDatabase`    | struct     | RON-backed database with `get`, `has`, `all`, `all_ids`, `by_category`, `validate`, `add`, `remove`, `len`, `is_empty` |
+| `SkillError`       | enum       | `SkillNotFound`, `LoadError`, `ParseError`, `ValidationError`, `DuplicateId`                                           |
+
+### New Functions
+
+| Function                                              | Purpose                                                                                                                                                                                    |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `rank_for_level(definition, level)`                   | Pure deterministic scaling — `Flat→0`, `Linear→base + per_level*(level-1)`, `Step→base + ((level-1)/per_levels)*amount`, `Table→ranks_by_level[min(level-1, last)]`; clamped to `max_rank` |
+| `rank_for_level_with_bonus(definition, level, bonus)` | Auto rank + signed bonus, clamped to `0..=max_rank`                                                                                                                                        |
+| `validate_skill_id(id)`                               | Enforces non-empty lowercase snake*case (`a-z`, `0-9`, `*`; must start with `a-z`)                                                                                                         |
+| `validate_skill_rank(rank, max_rank)`                 | Asserts `rank <= max_rank`                                                                                                                                                                 |
+
+### Scaling Mode Formulas
+
+| Mode                                   | Formula                   | Example (perception level 5) |
+| -------------------------------------- | ------------------------- | ---------------------------- |
+| `Flat`                                 | always 0                  | 0                            |
+| `Linear(base:0, per_level:1)`          | `0 + 1*(5-1) = 4`         | 4                            |
+| `Step(base:0, per_levels:2, amount:1)` | `0 + (4/2)*1 = 2`         | 2                            |
+| `Table([0,0,1,1,2,...])`               | `table[min(4, last)] = 2` | 2                            |
+
+### ContentDatabase Integration
+
+- Added `DatabaseError::SkillLoadError(String)` variant.
+- Added `pub skills: SkillDatabase` field to `ContentDatabase`.
+- Both `load_campaign()` and `load_core()` load `data/skills.ron` when present; a missing file is not an error (skill support is opt-in per campaign).
+- `validate()` now calls `self.skills.validate()` — catches step `per_levels == 0`, empty tables, table entries exceeding `max_rank`.
+- `ContentStats` gains `pub skill_count: usize` included in `total()`.
+
+### Tests
+
+Added 30 unit tests in `src/domain/skills.rs` and 1 integration test in `src/sdk/database.rs`.
+
+All Phase 1 required tests from the plan:
+
+| Test                                                       | Location          | Status |
+| ---------------------------------------------------------- | ----------------- | ------ |
+| `test_skill_definition_validate_rejects_empty_id`          | `skills.rs`       | ✅     |
+| `test_skill_definition_validate_rejects_non_snake_case_id` | `skills.rs`       | ✅     |
+| `test_skill_database_rejects_duplicate_id`                 | `skills.rs`       | ✅     |
+| `test_rank_for_level_flat_returns_base_rank`               | `skills.rs`       | ✅     |
+| `test_rank_for_level_linear_scales_by_level`               | `skills.rs`       | ✅     |
+| `test_rank_for_level_step_scales_at_interval`              | `skills.rs`       | ✅     |
+| `test_rank_for_level_table_clamps_after_last_entry`        | `skills.rs`       | ✅     |
+| `test_rank_for_level_clamps_to_max_rank`                   | `skills.rs`       | ✅     |
+| `test_skill_database_loads_test_campaign_fixture`          | `skills.rs`       | ✅     |
+| `test_content_stats_includes_skill_count`                  | `sdk/database.rs` | ✅     |
+
+### Phase 1 Deliverables Checklist
+
+- [x] `src/domain/skills.rs` created with SPDX header and doc comments.
+- [x] `SkillId`, `SkillRank`, `SkillCategory`, `SkillScalingMode`, `SkillDefinition`, `SkillDatabase`, and `SkillError` implemented.
+- [x] Skill rank scaling helpers implemented as pure functions.
+- [x] `src/domain/mod.rs` exports skills module.
+- [x] Base and test skill RON files added.
+- [x] Campaign/content loader includes skill database.
+- [x] Unit tests cover scaling and validation.
+- [x] `docs/explanation/implementations.md` updated.
+
+### Quality Gates
+
+```
+cargo fmt --all          → No output (all files formatted)
+cargo check              → Finished with 0 errors
+cargo clippy             → Finished with 0 warnings
+cargo nextest run        → 4939 passed, 0 failed, 8 skipped
+```
+
+### Architecture Compliance
+
+- `ProficiencyDefinition` was not modified; skills are a strictly additive module.
+- `SkillId` is `String`-typed, consistent with `ProficiencyId` and other ID aliases.
+- RON format used for all data files; no JSON or YAML created.
+- Test fixtures live under `data/test_campaign/data/`, not `campaigns/tutorial`.
+- SPDX copyright/license header on `skills.rs`.
 
 ---
 

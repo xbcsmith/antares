@@ -251,6 +251,7 @@ impl ClassEditor {
             starting_armor_id: None,
             starting_items: Vec::new(),
             proficiencies,
+            skill_grants: vec![],
         };
 
         self.classes.push(class_def);

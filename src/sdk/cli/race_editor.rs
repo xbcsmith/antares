@@ -255,6 +255,7 @@ impl RaceEditor {
             size,
             proficiencies,
             incompatible_item_tags,
+            skill_grants: vec![],
         };
 
         self.races.push(race_def);

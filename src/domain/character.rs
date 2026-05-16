@@ -12,6 +12,7 @@
 //! See `docs/reference/stat_ranges.md` for detailed stat range documentation.
 
 use crate::domain::classes::{ClassDatabase, ClassId, SpellSchool as ClassSpellSchool};
+use crate::domain::skills::CharacterSkillRanks;
 use crate::domain::types::{CharacterId, InnkeeperId, ItemId, MapId, RaceId, SpellId};
 use bevy::prelude::Component;
 use serde::{Deserialize, Serialize};
@@ -1142,6 +1143,12 @@ pub struct Character {
     pub gold: u32,
     /// Individual gems (0-max)
     pub gems: u32,
+    /// Character-owned persistent skill ranks from NPC training.
+    ///
+    /// Auto-derived ranks (from class/race grants and level scaling) are
+    /// computed on demand and are NOT stored here. Defaults to empty.
+    #[serde(default)]
+    pub skill_ranks: CharacterSkillRanks,
 }
 
 impl Character {
@@ -1207,6 +1214,7 @@ impl Character {
             worthiness: 0,
             gold: 0,
             gems: 0,
+            skill_ranks: CharacterSkillRanks::new(),
         }
     }
 
@@ -2827,6 +2835,42 @@ mod tests {
         assert!(c.active_conditions.is_empty());
         c.tick_conditions_rest();
         assert!(c.active_conditions.is_empty());
+    }
+
+    #[test]
+    fn test_character_skill_ranks_field_defaults_on_deserialize() {
+        // Test 1: A freshly constructed character has empty skill_ranks.
+        let hero = Character::new(
+            "TestHero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        assert!(
+            !hero.skill_ranks.contains(&"perception".to_string()),
+            "new character should have empty skill_ranks"
+        );
+
+        // Test 2: A round-trip through RON preserves an empty skill_ranks field.
+        let serialized = ron::to_string(&hero).expect("serialization should succeed");
+        let deserialized: Character =
+            ron::from_str(&serialized).expect("deserialization should succeed");
+        assert!(
+            !deserialized.skill_ranks.contains(&"perception".to_string()),
+            "deserialized character should still have empty skill_ranks"
+        );
+
+        // Test 3: Round-trip preserves a populated skill_ranks.
+        let mut hero2 = hero.clone();
+        hero2.skill_ranks.set("perception".to_string(), 5);
+        let ser2 = ron::to_string(&hero2).expect("serialization should succeed");
+        let deser2: Character = ron::from_str(&ser2).expect("deserialization should succeed");
+        assert_eq!(
+            deser2.skill_ranks.get(&"perception".to_string()),
+            Some(5),
+            "populated skill_ranks should survive a round-trip"
+        );
     }
 
     #[test]

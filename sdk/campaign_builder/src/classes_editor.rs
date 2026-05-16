@@ -21,6 +21,7 @@ use crate::ui_helpers::{
 use antares::domain::classes::{ClassDefinition, SpellSchool, SpellStat};
 use antares::domain::items::types::Item;
 use antares::domain::proficiency::ProficiencyId;
+use antares::domain::skills::{SkillDefinition, SkillGrant};
 use antares::domain::types::{DiceRoll, ItemId};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
@@ -113,6 +114,8 @@ pub struct ClassEditBuffer {
     pub proficiencies: Vec<ProficiencyId>,
     /// Persisted UI search query for proficiencies selector
     pub proficiencies_query: String,
+    /// Skill grants applied by this class.
+    pub skill_grants: Vec<SkillGrant>,
 }
 
 impl Default for ClassEditBuffer {
@@ -135,6 +138,7 @@ impl Default for ClassEditBuffer {
             starting_items_query: String::new(),
             proficiencies: Vec::new(),
             proficiencies_query: String::new(),
+            skill_grants: Vec::new(),
         }
     }
 }
@@ -191,6 +195,7 @@ impl ClassesEditorState {
                 starting_items_query: String::new(),
                 proficiencies: class.proficiencies.clone(),
                 proficiencies_query: String::new(),
+                skill_grants: class.skill_grants.clone(),
             };
             self.reset_autocomplete_buffers = true;
         }
@@ -246,6 +251,26 @@ impl ClassesEditorState {
             .filter(|s| !s.is_empty())
             .collect();
 
+        let skill_grants: Vec<SkillGrant> = self
+            .buffer
+            .skill_grants
+            .iter()
+            .filter_map(|grant| {
+                let skill_id = grant.skill_id.trim().to_string();
+                if skill_id.is_empty() {
+                    None
+                } else {
+                    Some(SkillGrant {
+                        skill_id,
+                        flat_bonus: grant.flat_bonus,
+                        per_level_bonus: grant.per_level_bonus,
+                        minimum_rank: grant.minimum_rank,
+                        maximum_rank_override: grant.maximum_rank_override,
+                    })
+                }
+            })
+            .collect();
+
         let starting_weapon_id = self.buffer.starting_weapon_id;
         let starting_armor_id = self.buffer.starting_armor_id;
         let starting_items: Vec<ItemId> = self.buffer.starting_items.clone();
@@ -263,6 +288,7 @@ impl ClassesEditorState {
             starting_armor_id,
             starting_items,
             proficiencies,
+            skill_grants,
         };
 
         if let Some(idx) = self.selected_class {
@@ -371,8 +397,15 @@ impl ClassesEditorState {
     ///
     /// * `ui` - The egui UI context
     /// * `items` - Available items for starting equipment selection
+    /// * `skills` - Available skills for skill-grant autocomplete selection
     /// * `ctx` - Shared editor context (campaign dir, data file, unsaved flag, status, merge mode)
-    pub fn show(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        items: &[Item],
+        skills: &[SkillDefinition],
+        ctx: &mut EditorContext<'_>,
+    ) {
         ui.heading("🛡️ Classes Editor");
         ui.add_space(5.0);
 
@@ -625,6 +658,22 @@ impl ClassesEditorState {
                                     }
 
                                     ui.add_space(10.0);
+                                    ui.heading("Skill Grants");
+                                    ui.separator();
+                                    if class.skill_grants.is_empty() {
+                                        ui.label("None");
+                                    } else {
+                                        for grant in &class.skill_grants {
+                                            ui.label(format!(
+                                                "• {} ({:+}, per level {:+})",
+                                                grant.skill_id,
+                                                grant.flat_bonus,
+                                                grant.per_level_bonus
+                                            ));
+                                        }
+                                    }
+
+                                    ui.add_space(10.0);
                                     ui.heading("Special Abilities");
                                     ui.separator();
                                     if class.special_abilities.is_empty() {
@@ -694,13 +743,19 @@ impl ClassesEditorState {
                 }
             }
             ClassesEditorMode::Creating | ClassesEditorMode::Editing => {
-                self.show_class_form(ui, items, ctx);
+                self.show_class_form(ui, items, skills, ctx);
             }
         }
     }
 
     /// Shows the class edit form
-    fn show_class_form(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
+    fn show_class_form(
+        &mut self,
+        ui: &mut egui::Ui,
+        items: &[Item],
+        skills: &[SkillDefinition],
+        ctx: &mut EditorContext<'_>,
+    ) {
         // If requested, reset persistent autocomplete buffers so the form displays
         // values from the newly loaded buffer rather than stale typed text.
         if self.reset_autocomplete_buffers {
@@ -717,6 +772,12 @@ impl ClassesEditorState {
                 ctx,
                 egui::Id::new("autocomplete:item-list:class_starting_items".to_string()),
             );
+            for idx in 0..self.buffer.skill_grants.len() {
+                crate::ui_helpers::remove_autocomplete_buffer(
+                    ctx,
+                    egui::Id::new(format!("autocomplete:skill:class_skill_grant_{idx}")),
+                );
+            }
             self.reset_autocomplete_buffers = false;
         }
 
@@ -934,6 +995,10 @@ impl ClassesEditorState {
 
                 ui.add_space(10.0);
 
+                self.show_skill_grants_editor(ui, skills);
+
+                ui.add_space(10.0);
+
                 ui.group(|ui| {
                     // Build suggestion list from existing classes (dedupe)
                     let abilities_list: Vec<String> = {
@@ -984,6 +1049,97 @@ impl ClassesEditorState {
                 });
             });
     }
+
+    fn show_skill_grants_editor(&mut self, ui: &mut egui::Ui, skills: &[SkillDefinition]) {
+        ui.group(|ui| {
+            ui.heading("Skill Grants");
+            ui.label("Class skill bonuses resolved by the Auto Skills system.");
+
+            let mut remove_idx: Option<usize> = None;
+            for (idx, grant) in self.buffer.skill_grants.iter_mut().enumerate() {
+                ui.push_id(format!("class_skill_grant_row_{idx}"), |ui| {
+                    ui.separator();
+                    ui.horizontal_wrapped(|ui| {
+                        let id_salt = format!("class_skill_grant_{idx}");
+                        if crate::ui_helpers::autocomplete_skill_selector(
+                            ui,
+                            &id_salt,
+                            "Skill:",
+                            &mut grant.skill_id,
+                            skills,
+                        ) {
+                            self.has_unsaved_changes = true;
+                        }
+                        if ui.small_button("✖ Remove").clicked() {
+                            remove_idx = Some(idx);
+                        }
+                    });
+
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Flat:");
+                        if ui
+                            .add(egui::DragValue::new(&mut grant.flat_bonus))
+                            .changed()
+                        {
+                            self.has_unsaved_changes = true;
+                        }
+                        ui.label("Per Level:");
+                        if ui
+                            .add(egui::DragValue::new(&mut grant.per_level_bonus))
+                            .changed()
+                        {
+                            self.has_unsaved_changes = true;
+                        }
+
+                        let mut has_min = grant.minimum_rank.is_some();
+                        if ui.checkbox(&mut has_min, "Min").changed() {
+                            grant.minimum_rank = has_min.then_some(0);
+                            self.has_unsaved_changes = true;
+                        }
+                        if let Some(minimum) = grant.minimum_rank.as_mut() {
+                            if ui
+                                .add(egui::DragValue::new(minimum).range(0..=u16::MAX))
+                                .changed()
+                            {
+                                self.has_unsaved_changes = true;
+                            }
+                        }
+
+                        let mut has_max = grant.maximum_rank_override.is_some();
+                        if ui.checkbox(&mut has_max, "Cap").changed() {
+                            grant.maximum_rank_override = has_max.then_some(0);
+                            self.has_unsaved_changes = true;
+                        }
+                        if let Some(maximum) = grant.maximum_rank_override.as_mut() {
+                            if ui
+                                .add(egui::DragValue::new(maximum).range(0..=u16::MAX))
+                                .changed()
+                            {
+                                self.has_unsaved_changes = true;
+                            }
+                        }
+                    });
+                });
+            }
+
+            if let Some(idx) = remove_idx {
+                self.buffer.skill_grants.remove(idx);
+                self.has_unsaved_changes = true;
+            }
+
+            if ui.button("➕ Add Skill Grant").clicked() {
+                self.buffer.skill_grants.push(SkillGrant {
+                    skill_id: String::new(),
+                    flat_bonus: 0,
+                    per_level_bonus: 0,
+                    minimum_rank: None,
+                    maximum_rank_override: None,
+                });
+                self.has_unsaved_changes = true;
+                ui.ctx().request_repaint();
+            }
+        });
+    }
 }
 
 #[cfg(test)]
@@ -1002,6 +1158,13 @@ mod tests {
         // Populate typed vectors in the edit buffer
         state.buffer.special_abilities = vec!["backstab".to_string()];
         state.buffer.proficiencies = vec!["simple_weapon".to_string()];
+        state.buffer.skill_grants = vec![SkillGrant {
+            skill_id: "athletics".to_string(),
+            flat_bonus: 2,
+            per_level_bonus: 0,
+            minimum_rank: None,
+            maximum_rank_override: None,
+        }];
 
         // Act: save the class via the editor
         state
@@ -1020,6 +1183,8 @@ mod tests {
 
         assert_eq!(saved.special_abilities, vec!["backstab".to_string()]);
         assert_eq!(saved.proficiencies, vec!["simple_weapon".to_string()]);
+        assert_eq!(saved.skill_grants.len(), 1);
+        assert_eq!(saved.skill_grants[0].skill_id, "athletics");
 
         // Serialize to RON and deserialize again to ensure Vec fields persist
         let ron_str = ron::ser::to_string(&saved).expect("Failed to serialize class to RON");
@@ -1028,6 +1193,38 @@ mod tests {
 
         assert_eq!(parsed.special_abilities, vec!["backstab".to_string()]);
         assert_eq!(parsed.proficiencies, vec!["simple_weapon".to_string()]);
+        assert_eq!(parsed.skill_grants[0].skill_id, "athletics");
+    }
+
+    #[test]
+    fn test_save_class_filters_empty_skill_grants() {
+        let mut state = ClassesEditorState::new();
+        state.start_new_class();
+        state.buffer.id = "skill_filter".to_string();
+        state.buffer.name = "Skill Filter".to_string();
+        state.buffer.skill_grants = vec![
+            SkillGrant {
+                skill_id: "".to_string(),
+                flat_bonus: 10,
+                per_level_bonus: 0,
+                minimum_rank: None,
+                maximum_rank_override: None,
+            },
+            SkillGrant {
+                skill_id: "perception".to_string(),
+                flat_bonus: 1,
+                per_level_bonus: 0,
+                minimum_rank: None,
+                maximum_rank_override: None,
+            },
+        ];
+
+        state
+            .save_class(None, "classes.ron", &mut String::new())
+            .expect("class with one valid grant should save");
+
+        assert_eq!(state.classes[0].skill_grants.len(), 1);
+        assert_eq!(state.classes[0].skill_grants[0].skill_id, "perception");
     }
 
     #[test]

@@ -1,0 +1,116 @@
+// skills.ron — Base game skill definitions for Antares.
+//
+// These are the core skills available in all campaigns that do not define
+// their own skills.ron. Campaign-specific skills go in the campaign's
+// data/skills.ron file.
+[
+    // ── Exploration ──────────────────────────────────────────────────────────
+
+    (
+        id: "perception",
+        name: "Perception",
+        category: Exploration,
+        description: "The ability to notice hidden objects, traps, and threats.",
+        scaling: Linear(base: 0, per_level: 1),
+        max_rank: 50,
+        is_trainable: true,
+    ),
+
+    (
+        id: "disarm_traps",
+        name: "Disarm Traps",
+        category: Exploration,
+        description: "Skill at safely disarming mechanical and magical traps.",
+        scaling: Step(base: 0, per_levels: 2, amount: 1),
+        max_rank: 25,
+        is_trainable: true,
+    ),
+
+    (
+        id: "tracking",
+        name: "Tracking",
+        category: Exploration,
+        description: "Reading trails, signs, and spoor to locate quarry or navigate the wilds.",
+        scaling: Linear(base: 0, per_level: 1),
+        max_rank: 30,
+        is_trainable: true,
+    ),
+
+    // ── Knowledge ────────────────────────────────────────────────────────────
+
+    (
+        id: "item_lore",
+        name: "Item Lore",
+        category: Knowledge,
+        description: "Knowledge of magical and mundane items.",
+        scaling: Linear(base: 0, per_level: 1),
+        max_rank: 50,
+        is_trainable: true,
+    ),
+
+    (
+        id: "arcane_lore",
+        name: "Arcane Lore",
+        category: Knowledge,
+        description: "Understanding of arcane forces, spells, and magical creatures.",
+        scaling: Table(ranks_by_level: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 6, 7, 8, 9, 10]),
+        max_rank: 40,
+        is_trainable: true,
+    ),
+
+    (
+        id: "divine_lore",
+        name: "Divine Lore",
+        category: Knowledge,
+        description: "Understanding of divine forces, holy creatures, and sacred sites.",
+        scaling: Table(ranks_by_level: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 6, 7, 8, 9, 10]),
+        max_rank: 40,
+        is_trainable: true,
+    ),
+
+    // ── Social ───────────────────────────────────────────────────────────────
+
+    (
+        id: "diplomacy",
+        name: "Diplomacy",
+        category: Social,
+        description: "The art of negotiation, persuasion, and peaceful conflict resolution.",
+        scaling: Flat,
+        max_rank: 30,
+        is_trainable: true,
+    ),
+
+    // ── Utility ──────────────────────────────────────────────────────────────
+
+    (
+        id: "athletics",
+        name: "Athletics",
+        category: Utility,
+        description: "Physical fitness covering climbing, swimming, and jumping.",
+        scaling: Step(base: 1, per_levels: 3, amount: 1),
+        max_rank: 20,
+        is_trainable: true,
+    ),
+
+    (
+        id: "stealth",
+        name: "Stealth",
+        category: Utility,
+        description: "Moving silently and remaining unseen. Vital for ambushes and avoiding detection.",
+        scaling: Step(base: 0, per_levels: 2, amount: 1),
+        max_rank: 30,
+        is_trainable: true,
+    ),
+
+    // ── Combat ───────────────────────────────────────────────────────────────
+
+    (
+        id: "leadership",
+        name: "Leadership",
+        category: Combat,
+        description: "The ability to inspire and direct allies in battle.",
+        scaling: Flat,
+        max_rank: 20,
+        is_trainable: true,
+    ),
+]

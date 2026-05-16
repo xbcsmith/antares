@@ -3942,6 +3942,7 @@ mod tests {
             starting_armor_id: None,
             starting_items: vec![],
             proficiencies: vec![],
+            skill_grants: vec![],
         };
         let cleric_class = ClassDefinition {
             id: "cleric".to_string(),
@@ -3956,6 +3957,7 @@ mod tests {
             starting_armor_id: None,
             starting_items: vec![],
             proficiencies: vec![],
+            skill_grants: vec![],
         };
 
         // Both schools have a spell named "Awaken" — the classic disambiguation case.
@@ -4201,6 +4203,7 @@ mod tests {
             starting_armor_id: None,
             starting_items: vec![],
             proficiencies: vec![],
+            skill_grants: vec![],
         };
         let classes = [knight];
 
@@ -4240,6 +4243,7 @@ mod tests {
             starting_armor_id: None,
             starting_items: vec![],
             proficiencies: vec![],
+            skill_grants: vec![],
         };
         let classes = [cleric];
 

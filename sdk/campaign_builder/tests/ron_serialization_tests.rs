@@ -51,6 +51,7 @@ fn test_ron_serialization() {
         conditions_file: "data/conditions.ron".to_string(),
         npcs_file: "data/npcs.ron".to_string(),
         proficiencies_file: "data/proficiencies.ron".to_string(),
+        skills_file: "data/skills.ron".to_string(),
         stock_templates_file: "data/npc_stock_templates.ron".to_string(),
         furniture_file: "data/furniture.ron".to_string(),
         levels_file: "data/levels.ron".to_string(),
@@ -130,6 +131,7 @@ npcs_file: "data/npcs.ron",
     let campaign = result.unwrap();
     assert_eq!(campaign.id, "legacy_campaign");
     assert_eq!(campaign.proficiencies_file, "data/proficiencies.ron");
+    assert_eq!(campaign.skills_file, "data/skills.ron");
 }
 
 #[test]

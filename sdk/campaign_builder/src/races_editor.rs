@@ -18,6 +18,7 @@ use crate::ui_helpers::{
 use antares::domain::items::types::Item;
 use antares::domain::proficiency::ProficiencyId;
 use antares::domain::races::{RaceDefinition, Resistances, SizeCategory, StatModifiers};
+use antares::domain::skills::{SkillDefinition, SkillGrant};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
@@ -65,6 +66,10 @@ pub struct RacesEditorState {
 
     /// Import/export buffer for RON data
     pub import_export_buffer: String,
+
+    /// Whether autocomplete buffers should be reset on next form render.
+    #[serde(skip)]
+    pub reset_autocomplete_buffers: bool,
 }
 
 /// Editor mode
@@ -106,6 +111,8 @@ pub struct RaceEditBuffer {
     pub proficiencies: Vec<ProficiencyId>,
     /// Typed vector of item tag IDs considered incompatible with the race
     pub incompatible_item_tags: Vec<String>,
+    /// Skill grants applied by this race.
+    pub skill_grants: Vec<SkillGrant>,
 }
 
 impl Default for RaceEditBuffer {
@@ -133,6 +140,7 @@ impl Default for RaceEditBuffer {
             special_abilities: Vec::new(),
             proficiencies: Vec::new(),
             incompatible_item_tags: Vec::new(),
+            skill_grants: Vec::new(),
         }
     }
 }
@@ -148,6 +156,7 @@ impl Default for RacesEditorState {
             has_unsaved_changes: false,
             show_import_dialog: false,
             import_export_buffer: String::new(),
+            reset_autocomplete_buffers: false,
         }
     }
 }
@@ -163,6 +172,7 @@ impl RacesEditorState {
         self.mode = RacesEditorMode::Creating;
         self.selected_race = None;
         self.buffer = RaceEditBuffer::default();
+        self.reset_autocomplete_buffers = true;
     }
 
     /// Starts editing an existing race
@@ -194,7 +204,9 @@ impl RacesEditorState {
                 special_abilities: race.special_abilities.clone(),
                 proficiencies: race.proficiencies.clone(),
                 incompatible_item_tags: race.incompatible_item_tags.clone(),
+                skill_grants: race.skill_grants.clone(),
             };
+            self.reset_autocomplete_buffers = true;
         }
     }
 
@@ -312,6 +324,26 @@ impl RacesEditorState {
             .filter(|s| !s.is_empty())
             .collect();
 
+        let skill_grants: Vec<SkillGrant> = self
+            .buffer
+            .skill_grants
+            .iter()
+            .filter_map(|grant| {
+                let skill_id = grant.skill_id.trim().to_string();
+                if skill_id.is_empty() {
+                    None
+                } else {
+                    Some(SkillGrant {
+                        skill_id,
+                        flat_bonus: grant.flat_bonus,
+                        per_level_bonus: grant.per_level_bonus,
+                        minimum_rank: grant.minimum_rank,
+                        maximum_rank_override: grant.maximum_rank_override,
+                    })
+                }
+            })
+            .collect();
+
         let race_def = RaceDefinition {
             id: id.clone(),
             name,
@@ -339,6 +371,7 @@ impl RacesEditorState {
             size: self.buffer.size,
             proficiencies,
             incompatible_item_tags,
+            skill_grants,
         };
 
         if let Some(idx) = self.selected_race {
@@ -436,8 +469,15 @@ impl RacesEditorState {
     ///
     /// * `ui` - The egui UI context
     /// * `items` - Available items for starting equipment selection
+    /// * `skills` - Available skills for skill-grant autocomplete selection
     /// * `ctx` - Shared editor context (campaign dir, data file, unsaved flag, status, merge mode)
-    pub fn show(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        items: &[Item],
+        skills: &[SkillDefinition],
+        ctx: &mut EditorContext<'_>,
+    ) {
         ui.heading("🧬 Races Editor");
         ui.add_space(5.0);
 
@@ -665,6 +705,19 @@ impl RacesEditorState {
                                             }
                                         }
 
+                                        if !race.skill_grants.is_empty() {
+                                            ui.add_space(10.0);
+                                            ui.heading("Skill Grants");
+                                            for grant in &race.skill_grants {
+                                                ui.label(format!(
+                                                    "• {} ({:+}, per level {:+})",
+                                                    grant.skill_id,
+                                                    grant.flat_bonus,
+                                                    grant.per_level_bonus
+                                                ));
+                                            }
+                                        }
+
                                         if !race.incompatible_item_tags.is_empty() {
                                             ui.add_space(10.0);
                                             ui.heading("Incompatible Item Tags");
@@ -740,13 +793,30 @@ impl RacesEditorState {
                 }
             }
             RacesEditorMode::Creating | RacesEditorMode::Editing => {
-                self.show_race_form(ui, items, ctx);
+                self.show_race_form(ui, items, skills, ctx);
             }
         }
     }
 
-    /// Shows the race editing form
-    fn show_race_form(&mut self, ui: &mut egui::Ui, items: &[Item], ctx: &mut EditorContext<'_>) {
+    /// Shows the race edit form
+    fn show_race_form(
+        &mut self,
+        ui: &mut egui::Ui,
+        items: &[Item],
+        skills: &[SkillDefinition],
+        ctx: &mut EditorContext<'_>,
+    ) {
+        if self.reset_autocomplete_buffers {
+            let ctx = ui.ctx();
+            for idx in 0..self.buffer.skill_grants.len() {
+                crate::ui_helpers::remove_autocomplete_buffer(
+                    ctx,
+                    egui::Id::new(format!("autocomplete:skill:race_skill_grant_{idx}")),
+                );
+            }
+            self.reset_autocomplete_buffers = false;
+        }
+
         let title = if self.mode == RacesEditorMode::Creating {
             "Create New Race"
         } else {
@@ -991,6 +1061,9 @@ impl RacesEditorState {
                 }
 
                 ui.add_space(10.0);
+                self.show_skill_grants_editor(ui, skills);
+
+                ui.add_space(10.0);
                 ui.heading("Incompatible Item Tags");
 
                 // Build a unique list of existing tags from all items
@@ -1167,6 +1240,97 @@ impl RacesEditorState {
 
         self.show_import_dialog = open;
     }
+
+    fn show_skill_grants_editor(&mut self, ui: &mut egui::Ui, skills: &[SkillDefinition]) {
+        ui.group(|ui| {
+            ui.heading("Skill Grants");
+            ui.label("Race skill bonuses resolved by the Auto Skills system.");
+
+            let mut remove_idx: Option<usize> = None;
+            for (idx, grant) in self.buffer.skill_grants.iter_mut().enumerate() {
+                ui.push_id(format!("race_skill_grant_row_{idx}"), |ui| {
+                    ui.separator();
+                    ui.horizontal_wrapped(|ui| {
+                        let id_salt = format!("race_skill_grant_{idx}");
+                        if crate::ui_helpers::autocomplete_skill_selector(
+                            ui,
+                            &id_salt,
+                            "Skill:",
+                            &mut grant.skill_id,
+                            skills,
+                        ) {
+                            self.has_unsaved_changes = true;
+                        }
+                        if ui.small_button("✖ Remove").clicked() {
+                            remove_idx = Some(idx);
+                        }
+                    });
+
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Flat:");
+                        if ui
+                            .add(egui::DragValue::new(&mut grant.flat_bonus))
+                            .changed()
+                        {
+                            self.has_unsaved_changes = true;
+                        }
+                        ui.label("Per Level:");
+                        if ui
+                            .add(egui::DragValue::new(&mut grant.per_level_bonus))
+                            .changed()
+                        {
+                            self.has_unsaved_changes = true;
+                        }
+
+                        let mut has_min = grant.minimum_rank.is_some();
+                        if ui.checkbox(&mut has_min, "Min").changed() {
+                            grant.minimum_rank = has_min.then_some(0);
+                            self.has_unsaved_changes = true;
+                        }
+                        if let Some(minimum) = grant.minimum_rank.as_mut() {
+                            if ui
+                                .add(egui::DragValue::new(minimum).range(0..=u16::MAX))
+                                .changed()
+                            {
+                                self.has_unsaved_changes = true;
+                            }
+                        }
+
+                        let mut has_max = grant.maximum_rank_override.is_some();
+                        if ui.checkbox(&mut has_max, "Cap").changed() {
+                            grant.maximum_rank_override = has_max.then_some(0);
+                            self.has_unsaved_changes = true;
+                        }
+                        if let Some(maximum) = grant.maximum_rank_override.as_mut() {
+                            if ui
+                                .add(egui::DragValue::new(maximum).range(0..=u16::MAX))
+                                .changed()
+                            {
+                                self.has_unsaved_changes = true;
+                            }
+                        }
+                    });
+                });
+            }
+
+            if let Some(idx) = remove_idx {
+                self.buffer.skill_grants.remove(idx);
+                self.has_unsaved_changes = true;
+            }
+
+            if ui.button("➕ Add Skill Grant").clicked() {
+                self.buffer.skill_grants.push(SkillGrant {
+                    skill_id: String::new(),
+                    flat_bonus: 0,
+                    per_level_bonus: 0,
+                    minimum_rank: None,
+                    maximum_rank_override: None,
+                });
+                self.has_unsaved_changes = true;
+                ui.ctx().request_repaint();
+            }
+        });
+    }
 }
 
 #[cfg(test)]
@@ -1311,6 +1475,13 @@ mod tests {
             size: SizeCategory::Medium,
             proficiencies: vec!["simple_weapon".to_string()],
             incompatible_item_tags: vec!["heavy_armor".to_string()],
+            skill_grants: vec![SkillGrant {
+                skill_id: "perception".to_string(),
+                flat_bonus: 1,
+                per_level_bonus: 0,
+                minimum_rank: None,
+                maximum_rank_override: None,
+            }],
         };
 
         let ron_str = ron::ser::to_string_pretty(&race, Default::default()).unwrap();
@@ -1323,6 +1494,7 @@ mod tests {
         assert_eq!(parsed_race.id, "imported_race");
         assert_eq!(parsed_race.name, "Imported Race");
         assert_eq!(parsed_race.proficiencies, vec!["simple_weapon"]);
+        assert_eq!(parsed_race.skill_grants[0].skill_id, "perception");
     }
 
     #[test]
@@ -1378,6 +1550,7 @@ mod tests {
             size: SizeCategory::Medium,
             proficiencies: Vec::new(),
             incompatible_item_tags: Vec::new(),
+            skill_grants: vec![],
         });
 
         // Next should be "2"
@@ -1400,6 +1573,7 @@ mod tests {
             size: SizeCategory::Medium,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
+            skill_grants: vec![],
         });
         state.races.push(RaceDefinition {
             id: "elf".to_string(),
@@ -1411,6 +1585,7 @@ mod tests {
             size: SizeCategory::Medium,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
+            skill_grants: vec![],
         });
 
         // No filter - should return both
@@ -1444,6 +1619,13 @@ mod tests {
             size: SizeCategory::Medium,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
+            skill_grants: vec![SkillGrant {
+                skill_id: "athletics".to_string(),
+                flat_bonus: 2,
+                per_level_bonus: 0,
+                minimum_rank: None,
+                maximum_rank_override: None,
+            }],
         });
 
         state.start_edit_race(0);
@@ -1453,6 +1635,7 @@ mod tests {
         assert_eq!(state.buffer.id, "human");
         assert_eq!(state.buffer.name, "Human");
         assert_eq!(state.buffer.description, "A versatile race");
+        assert_eq!(state.buffer.skill_grants[0].skill_id, "athletics");
     }
 
     #[test]
@@ -1468,6 +1651,7 @@ mod tests {
             size: SizeCategory::Medium,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
+            skill_grants: vec![],
         });
 
         state.start_edit_race(0);
@@ -1475,6 +1659,37 @@ mod tests {
         state.save_race().unwrap();
 
         assert_eq!(state.races[0].name, "Updated Human");
+    }
+
+    #[test]
+    fn test_save_race_filters_empty_skill_grants() {
+        let mut state = RacesEditorState::new();
+        state.start_new_race();
+        state.buffer.id = "skill_filter_race".to_string();
+        state.buffer.name = "Skill Filter Race".to_string();
+        state.buffer.skill_grants = vec![
+            SkillGrant {
+                skill_id: "".to_string(),
+                flat_bonus: 10,
+                per_level_bonus: 0,
+                minimum_rank: None,
+                maximum_rank_override: None,
+            },
+            SkillGrant {
+                skill_id: "perception".to_string(),
+                flat_bonus: 1,
+                per_level_bonus: 0,
+                minimum_rank: None,
+                maximum_rank_override: None,
+            },
+        ];
+
+        state
+            .save_race()
+            .expect("race with one valid grant should save");
+
+        assert_eq!(state.races[0].skill_grants.len(), 1);
+        assert_eq!(state.races[0].skill_grants[0].skill_id, "perception");
     }
 
     #[test]

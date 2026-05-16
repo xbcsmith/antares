@@ -375,6 +375,7 @@ mod tests {
                 "martial_melee".to_string(),
                 "heavy_armor".to_string(),
             ],
+            skill_grants: vec![],
         }
     }
 
@@ -397,6 +398,7 @@ mod tests {
                 "light_armor".to_string(),
                 "arcane_item".to_string(),
             ],
+            skill_grants: vec![],
         }
     }
 
@@ -421,6 +423,7 @@ mod tests {
             size: SizeCategory::Medium,
             proficiencies: vec![],
             incompatible_item_tags: vec!["heavy_armor".to_string()],
+            skill_grants: vec![],
         }
     }
 
@@ -436,6 +439,7 @@ mod tests {
             size: SizeCategory::Small,
             proficiencies: vec![],
             incompatible_item_tags: vec!["large_weapon".to_string(), "heavy_armor".to_string()],
+            skill_grants: vec![],
         }
     }
 
@@ -694,6 +698,7 @@ mod tests {
             worthiness: 0,
             gold: 0,
             gems: 0,
+            skill_ranks: crate::domain::CharacterSkillRanks::new(),
         };
 
         let mut items = ItemDatabase::new();
