@@ -2337,11 +2337,12 @@ impl GameState {
     /// use antares::application::{GameState, GameMode};
     ///
     /// let mut state = GameState::new();
-    /// state.enter_skill_training(
+    /// let training_state = state.enter_skill_training(
     ///     "perception_sage",
     ///     vec![0, 1],
     ///     vec!["perception".to_string()],
     /// );
+    /// assert_eq!(training_state.npc_id, "perception_sage");
     /// assert!(matches!(state.mode, GameMode::SkillTraining(_)));
     /// ```
     pub fn enter_skill_training(
@@ -2349,13 +2350,11 @@ impl GameState {
         npc_id: &str,
         eligible_indices: Vec<usize>,
         available_skills: Vec<crate::domain::skills::SkillId>,
-    ) {
+    ) -> crate::application::skill_training_state::SkillTrainingState {
         use crate::application::skill_training_state::SkillTrainingState;
-        self.mode = GameMode::SkillTraining(SkillTrainingState::new(
-            npc_id,
-            eligible_indices,
-            available_skills,
-        ));
+        let training_state = SkillTrainingState::new(npc_id, eligible_indices, available_skills);
+        self.mode = GameMode::SkillTraining(training_state.clone());
+        training_state
     }
 
     /// Exits skill training mode, returning to [`GameMode::Exploration`].

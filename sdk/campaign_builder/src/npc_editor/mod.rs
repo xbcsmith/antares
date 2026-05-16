@@ -984,11 +984,16 @@ impl NpcEditorState {
                 ctx,
                 egui::Id::new("autocomplete:creature:npc_creature".to_string()),
             );
+            crate::ui_helpers::remove_autocomplete_buffer(
+                ctx,
+                egui::Id::new("autocomplete:skill_add:npc_trainable_skills".to_string()),
+            );
             self.reset_autocomplete_buffers = false;
         }
 
         egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
+            .id_salt("npc_edit_form_scroll")
+            .auto_shrink([true, false])
             .show(ui, |ui| {
                 ui.group(|ui| {
                     ui.heading("Basic Information");
@@ -1568,10 +1573,12 @@ impl NpcEditorState {
                             Ok(message) => {
                                 self.pending_status = Some(message);
                                 needs_save = true;
+                                ui.ctx().request_repaint();
                             }
                             Err(error) => {
                                 self.validation_errors.push(error.clone());
                                 self.pending_status = Some(error);
+                                ui.ctx().request_repaint();
                             }
                         }
                     } else if !self.edit_buffer.is_skill_trainer && was_skill_trainer {
@@ -1579,10 +1586,12 @@ impl NpcEditorState {
                             Ok(message) => {
                                 self.pending_status = Some(message);
                                 needs_save = true;
+                                ui.ctx().request_repaint();
                             }
                             Err(error) => {
                                 self.validation_errors.push(error.clone());
                                 self.pending_status = Some(error);
+                                ui.ctx().request_repaint();
                             }
                         }
                     }
@@ -1614,39 +1623,123 @@ impl NpcEditorState {
                             &skills_clone,
                         ) {
                             needs_save = true;
+                            ui.ctx().request_repaint();
                         }
 
                         ui.horizontal(|ui| {
-                            ui.label("Skill Training Fee Base (gold):");
-                            ui.add(
-                                egui::TextEdit::singleline(
-                                    &mut self.edit_buffer.skill_training_fee_base,
-                                )
-                                .id_salt("npc_edit_skill_fee_base"),
-                            );
-                            ui.small("empty = campaign default");
+                            let mut has_override =
+                                !self.edit_buffer.skill_training_fee_base.trim().is_empty();
+                            if ui.checkbox(&mut has_override, "Override skill fee base").changed()
+                            {
+                                self.edit_buffer.skill_training_fee_base = if has_override {
+                                    "100".to_string()
+                                } else {
+                                    String::new()
+                                };
+                                needs_save = true;
+                                ui.ctx().request_repaint();
+                            }
+                            if has_override {
+                                let mut fee_base = self
+                                    .edit_buffer
+                                    .skill_training_fee_base
+                                    .trim()
+                                    .parse::<u32>()
+                                    .unwrap_or(100);
+                                if ui
+                                    .add(
+                                        egui::DragValue::new(&mut fee_base)
+                                            .range(0..=1_000_000)
+                                            .prefix("Base gold: "),
+                                    )
+                                    .changed()
+                                {
+                                    self.edit_buffer.skill_training_fee_base = fee_base.to_string();
+                                    needs_save = true;
+                                }
+                            } else {
+                                ui.small("campaign default");
+                            }
                         });
 
                         ui.horizontal(|ui| {
-                            ui.label("Skill Training Fee Multiplier:");
-                            ui.add(
-                                egui::TextEdit::singleline(
-                                    &mut self.edit_buffer.skill_training_fee_multiplier,
-                                )
-                                .id_salt("npc_edit_skill_fee_multiplier"),
-                            );
-                            ui.small("empty = campaign default");
+                            let mut has_override = !self
+                                .edit_buffer
+                                .skill_training_fee_multiplier
+                                .trim()
+                                .is_empty();
+                            if ui
+                                .checkbox(&mut has_override, "Override skill fee multiplier")
+                                .changed()
+                            {
+                                self.edit_buffer.skill_training_fee_multiplier = if has_override {
+                                    "1.0".to_string()
+                                } else {
+                                    String::new()
+                                };
+                                needs_save = true;
+                                ui.ctx().request_repaint();
+                            }
+                            if has_override {
+                                let mut multiplier = self
+                                    .edit_buffer
+                                    .skill_training_fee_multiplier
+                                    .trim()
+                                    .parse::<f32>()
+                                    .unwrap_or(1.0)
+                                    .max(0.01);
+                                if ui
+                                    .add(
+                                        egui::DragValue::new(&mut multiplier)
+                                            .range(0.01..=1000.0)
+                                            .speed(0.05)
+                                            .prefix("× "),
+                                    )
+                                    .changed()
+                                {
+                                    self.edit_buffer.skill_training_fee_multiplier =
+                                        format!("{:.2}", multiplier);
+                                    needs_save = true;
+                                }
+                            } else {
+                                ui.small("campaign default");
+                            }
                         });
 
                         ui.horizontal(|ui| {
-                            ui.label("Skill Training Max Rank:");
-                            ui.add(
-                                egui::TextEdit::singleline(
-                                    &mut self.edit_buffer.skill_training_max_rank,
-                                )
-                                .id_salt("npc_edit_skill_max_rank"),
-                            );
-                            ui.small("empty = use skill definition max_rank");
+                            let mut has_override =
+                                !self.edit_buffer.skill_training_max_rank.trim().is_empty();
+                            if ui.checkbox(&mut has_override, "Override max trainable rank").changed()
+                            {
+                                self.edit_buffer.skill_training_max_rank = if has_override {
+                                    "20".to_string()
+                                } else {
+                                    String::new()
+                                };
+                                needs_save = true;
+                                ui.ctx().request_repaint();
+                            }
+                            if has_override {
+                                let mut max_rank = self
+                                    .edit_buffer
+                                    .skill_training_max_rank
+                                    .trim()
+                                    .parse::<u16>()
+                                    .unwrap_or(20);
+                                if ui
+                                    .add(
+                                        egui::DragValue::new(&mut max_rank)
+                                            .range(0..=u16::MAX)
+                                            .prefix("Max rank: "),
+                                    )
+                                    .changed()
+                                {
+                                    self.edit_buffer.skill_training_max_rank = max_rank.to_string();
+                                    needs_save = true;
+                                }
+                            } else {
+                                ui.small("skill definition max_rank");
+                            }
                         });
 
                         ui.horizontal_wrapped(|ui| {
@@ -6178,7 +6271,7 @@ mod tests {
             is_trainable: false,
         };
 
-        let skills = vec![trainable.clone(), non_trainable.clone()];
+        let skills = [trainable.clone(), non_trainable.clone()];
 
         // The autocomplete_skill_id_list_selector only offers trainable skills.
         // We validate candidate extraction by checking the filter predicate directly.

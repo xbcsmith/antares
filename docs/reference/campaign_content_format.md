@@ -93,7 +93,7 @@ disarm traps, item lore, and diplomacy.
   - `Step(base, per_levels, amount)`
   - `Table(ranks_by_level)`
 - **`max_rank`** (`SkillRank`/u16): Hard cap for the effective skill rank.
-- **`is_trainable`** (bool): Whether future NPC skill trainers can improve the skill.
+- **`is_trainable`** (bool): Whether NPC skill trainers may improve the skill through paid skill-training services.
 
 ### Validation Rules
 
@@ -103,8 +103,23 @@ disarm traps, item lore, and diplomacy.
 4. `Step.per_levels` must be greater than `0`.
 5. `Table.ranks_by_level` must not be empty.
 6. Table ranks must not exceed `max_rank`.
-7. Class and race `skill_grants` must reference defined skill IDs.
-8. Dialogue `SkillCheck` conditions must reference defined skill IDs and must not require ranks above the skill's `max_rank`.
+7. NPC skill trainers may only reference skills with `is_trainable: true`.
+8. Class and race `skill_grants` must reference defined skill IDs.
+9. Dialogue `SkillCheck` conditions must reference defined skill IDs and must not require ranks above the skill's `max_rank`.
+
+### NPC Skill Trainer Authoring
+
+Campaign authors can create paid skill trainers in the Campaign Builder NPC
+editor by enabling **Is Skill Trainer**, selecting one or more trainable skill
+IDs from the skill autocomplete selector, and optionally overriding the fee base,
+fee multiplier, or trainer-specific max rank. The SDK can create or repair the
+matching dialogue branch; in runtime data that branch uses `OpenSkillTraining`
+to enter the skill-training screen. The in-game UI then submits `TrainSkill`
+requests to purchase individual rank increases.
+
+Use `skill_grants` on classes/races for automatic expertise and NPC skill
+trainers for paid persistent improvements. Do not use skills as item-use
+permissions; keep item restrictions in proficiencies.
 
 ---
 

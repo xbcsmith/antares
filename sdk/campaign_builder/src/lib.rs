@@ -1516,8 +1516,11 @@ impl eframe::App for CampaignBuilderApp {
                 // the NPC editor's ComboBox and validation both see the live list.
                 self.campaign_data.stock_templates = self.editor_registry.stock_templates_editor_state.templates.clone();
 
-                // Thread available stock templates into the NPC editor before rendering
+                // Thread available stock templates and skill definitions into the NPC
+                // editor before rendering so validation/autocomplete sees loaded data
+                // even when the author opens the NPC tab before visiting related tabs.
                 self.editor_registry.npc_editor_state.available_stock_templates = self.campaign_data.stock_templates.clone();
+                self.sync_npc_editor_skill_candidates();
 
                 let npc_creature_manager = self
                     .campaign_dir
@@ -1835,6 +1838,11 @@ impl eframe::App for CampaignBuilderApp {
 }
 
 impl CampaignBuilderApp {
+    /// Synchronises loaded skill definitions into the NPC editor autocomplete cache.
+    fn sync_npc_editor_skill_candidates(&mut self) {
+        self.editor_registry.npc_editor_state.available_skills = self.campaign_data.skills.clone();
+    }
+
     /// Show the metadata editor (delegates to the campaign_editor module)
     fn show_metadata_editor(&mut self, ui: &mut egui::Ui) {
         // Delegate the UI rendering and editing behavior to the dedicated editor
@@ -2875,5 +2883,37 @@ impl CampaignBuilderApp {
             .max()
             .unwrap_or(0)
             + 1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_npc_editor_receives_loaded_skill_candidates() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign_data
+            .skills
+            .push(antares::domain::skills::SkillDefinition {
+                id: "perception".to_string(),
+                name: "Perception".to_string(),
+                category: antares::domain::skills::SkillCategory::Exploration,
+                description: "Notice hidden things.".to_string(),
+                scaling: antares::domain::skills::SkillScalingMode::Flat,
+                max_rank: 10,
+                is_trainable: true,
+            });
+
+        app.sync_npc_editor_skill_candidates();
+
+        assert_eq!(
+            app.editor_registry.npc_editor_state.available_skills.len(),
+            1
+        );
+        assert_eq!(
+            app.editor_registry.npc_editor_state.available_skills[0].id,
+            "perception"
+        );
     }
 }

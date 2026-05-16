@@ -2,6 +2,43 @@
 
 ---
 
+## Phase 10: Audit Closure — Remaining Deliverables (Complete)
+
+### Overview
+
+Phase 10 closed the post-audit gaps for the skill system: campaign-level NPC
+skill-trainer validation, NPC editor skill autocomplete wiring, SDK egui audit
+fixes, cap-aware skill-training previews, atomic training-service behavior,
+fixture cleanup, and documentation corrections.
+
+### Key Updates
+
+- Added campaign validation for NPC skill-trainer fields and `OpenSkillTraining`
+  dialogue targets.
+- Synced loaded `skills.ron` definitions into the NPC editor skill autocomplete
+  cache before rendering the NPC tab.
+- Added an `id_salt` to the NPC edit scroll area, cleared the skill autocomplete
+  buffer on record switches, and replaced skill-training fee/max-rank text
+  inputs with optional numeric controls.
+- Made `perform_skill_training_service` resolve the post-training rank before
+  mutating gold or persistent skill ranks.
+- Made the player-facing skill-training rank preview cap-aware and disabled
+  impossible training attempts at the trainer cap.
+- Added regression tests for validation, Escape handling, global toggle gating,
+  cap-aware previews, and skill candidate syncing.
+- Added explicit `skills_file` entries to campaign metadata fixtures and fixed
+  the test skill trainer description.
+- Corrected migration guidance so `OpenSkillTraining` is documented as the
+  dialogue action and `TrainSkill` as the UI/service request.
+
+### Notes
+
+Tutorial live skill-trainer NPC/dialogue content remains intentionally deferred;
+Phase 10 keeps automated tests on `data/test_campaign` per AGENTS.md Rule 5 and
+only validates tutorial skill data manually or through fixture-equivalent paths.
+
+---
+
 ## Phase 9: Balance, Documentation, and Migration (Complete)
 
 ### Overview
@@ -37,7 +74,7 @@ table to decide which mechanism to use:
 | Level-scaled capability (how good is the character at disarming traps?) | Use **skills** — define in `skills.ron`, grant via `skill_grants`                                                   |
 | Race or class natural expertise (elves are perceptive)                  | Use `skill_grants` on `ClassDefinition` or `RaceDefinition`                                                         |
 | Paid level advancement (NPC trainer raises character level)             | Use the existing **NPC level trainer** flow (`TrainLevel` dialogue action)                                          |
-| Paid skill improvement (NPC trainer improves a specific skill)          | Use the **NPC skill trainer** flow (`TrainSkill` dialogue action, Phase 6–8)                                        |
+| Paid skill improvement (NPC trainer improves a specific skill)          | Use the **NPC skill trainer** flow: dialogue opens with `OpenSkillTraining`; the UI submits `TrainSkill` requests.  |
 
 Skills and proficiencies are intentionally separate systems. Mixing them (e.g.
 using a skill to gate item use) is not supported and should be avoided.

@@ -1698,6 +1698,236 @@ pub fn validate_npc_stock_template_refs(
     results
 }
 
+/// Validates NPC skill-trainer fields and `OpenSkillTraining` dialogue targets.
+///
+/// This pure validator is used by Campaign Builder validation so invalid skill
+/// trainer data is caught even when the NPC editor screen was never opened.
+///
+/// # Arguments
+///
+/// * `npcs` - NPC definitions loaded for the campaign.
+/// * `dialogues` - Dialogue trees loaded for the campaign.
+/// * `skills` - Skill definitions loaded from `skills.ron`.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::validation::validate_npc_skill_trainer_refs;
+/// use antares::domain::skills::{SkillCategory, SkillDefinition, SkillScalingMode};
+/// use antares::domain::world::NpcDefinition;
+///
+/// let skill = SkillDefinition {
+///     id: "perception".to_string(),
+///     name: "Perception".to_string(),
+///     category: SkillCategory::Exploration,
+///     description: "Notice hidden things.".to_string(),
+///     scaling: SkillScalingMode::Flat,
+///     max_rank: 10,
+///     is_trainable: true,
+/// };
+///
+/// let mut npc = NpcDefinition::new("sage", "Sage", "sage.png");
+/// npc.is_skill_trainer = true;
+/// npc.trainable_skill_ids = vec!["perception".to_string()];
+///
+/// let results = validate_npc_skill_trainer_refs(&[npc], &[], &[skill]);
+/// assert!(results.iter().any(|r| r.is_error())); // missing dialogue path
+/// ```
+pub fn validate_npc_skill_trainer_refs(
+    npcs: &[antares::domain::world::NpcDefinition],
+    dialogues: &[antares::domain::dialogue::DialogueTree],
+    skills: &[antares::domain::skills::SkillDefinition],
+) -> Vec<ValidationResult> {
+    use antares::domain::dialogue::DialogueAction;
+    use std::collections::{HashMap, HashSet};
+
+    let skill_by_id: HashMap<&str, &antares::domain::skills::SkillDefinition> = skills
+        .iter()
+        .map(|skill| (skill.id.as_str(), skill))
+        .collect();
+    let npc_by_id: HashMap<&str, &antares::domain::world::NpcDefinition> =
+        npcs.iter().map(|npc| (npc.id.as_str(), npc)).collect();
+    let dialogue_by_id: HashMap<
+        antares::domain::dialogue::DialogueId,
+        &antares::domain::dialogue::DialogueTree,
+    > = dialogues
+        .iter()
+        .map(|dialogue| (dialogue.id, dialogue))
+        .collect();
+
+    let mut results = Vec::new();
+    let mut seen_dialogue_targets = HashSet::new();
+
+    for npc in npcs {
+        if npc.is_skill_trainer {
+            if npc.trainable_skill_ids.is_empty() {
+                results.push(ValidationResult::error(
+                    ValidationCategory::NPCs,
+                    format!(
+                        "Skill trainer NPC '{}' must offer at least one trainable skill",
+                        npc.id
+                    ),
+                ));
+            }
+
+            for skill_id in &npc.trainable_skill_ids {
+                match skill_by_id.get(skill_id.as_str()) {
+                    Some(skill) if !skill.is_trainable => results.push(ValidationResult::error(
+                        ValidationCategory::NPCs,
+                        format!(
+                            "Skill trainer NPC '{}' offers skill '{}' but that skill is not trainable",
+                            npc.id, skill_id
+                        ),
+                    )),
+                    Some(skill) => {
+                        if let Some(max_rank) = npc.skill_training_max_rank {
+                            if max_rank > skill.max_rank {
+                                results.push(ValidationResult::error(
+                                    ValidationCategory::NPCs,
+                                    format!(
+                                        "Skill trainer NPC '{}' max rank {} exceeds skill '{}' max_rank {}",
+                                        npc.id, max_rank, skill_id, skill.max_rank
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+                    None => results.push(ValidationResult::error(
+                        ValidationCategory::NPCs,
+                        format!(
+                            "Skill trainer NPC '{}' references unknown skill '{}'",
+                            npc.id, skill_id
+                        ),
+                    )),
+                }
+            }
+
+            if let Some(multiplier) = npc.skill_training_fee_multiplier {
+                if !multiplier.is_finite() || multiplier <= 0.0 {
+                    results.push(ValidationResult::error(
+                        ValidationCategory::NPCs,
+                        format!(
+                            "Skill trainer NPC '{}' has invalid skill training fee multiplier {}",
+                            npc.id, multiplier
+                        ),
+                    ));
+                }
+            }
+
+            match npc.dialogue_id.and_then(|dialogue_id| dialogue_by_id.get(&dialogue_id)) {
+                Some(dialogue) if dialogue.contains_open_skill_training_for_npc(&npc.id) => {}
+                Some(dialogue) => results.push(ValidationResult::error(
+                    ValidationCategory::NPCs,
+                    format!(
+                        "Skill trainer NPC '{}' uses dialogue {} without an OpenSkillTraining path for itself",
+                        npc.id, dialogue.id
+                    ),
+                )),
+                None if npc.dialogue_id.is_some() => results.push(ValidationResult::error(
+                    ValidationCategory::NPCs,
+                    format!(
+                        "Skill trainer NPC '{}' references missing dialogue {}",
+                        npc.id,
+                        npc.dialogue_id.unwrap_or_default()
+                    ),
+                )),
+                None => results.push(ValidationResult::error(
+                    ValidationCategory::NPCs,
+                    format!("Skill trainer NPC '{}' has no dialogue assigned", npc.id),
+                )),
+            }
+        } else if let Some(dialogue_id) = npc.dialogue_id {
+            if let Some(dialogue) = dialogue_by_id.get(&dialogue_id) {
+                if dialogue.has_sdk_managed_skill_trainer_content() {
+                    results.push(ValidationResult::error(
+                        ValidationCategory::NPCs,
+                        format!(
+                            "Non-skill-trainer NPC '{}' still references dialogue {} with SDK-managed skill trainer content",
+                            npc.id, dialogue.id
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    for dialogue in dialogues {
+        for (node_id, node) in &dialogue.nodes {
+            for action in &node.actions {
+                if let DialogueAction::OpenSkillTraining { npc_id } = action {
+                    validate_open_skill_training_target(
+                        &mut results,
+                        &mut seen_dialogue_targets,
+                        dialogue.id,
+                        *node_id,
+                        npc_id,
+                        &npc_by_id,
+                    );
+                }
+            }
+            for choice in &node.choices {
+                for action in &choice.actions {
+                    if let DialogueAction::OpenSkillTraining { npc_id } = action {
+                        validate_open_skill_training_target(
+                            &mut results,
+                            &mut seen_dialogue_targets,
+                            dialogue.id,
+                            *node_id,
+                            npc_id,
+                            &npc_by_id,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    if results.is_empty() {
+        results.push(ValidationResult::passed(
+            ValidationCategory::NPCs,
+            "All NPC skill trainer references are valid".to_string(),
+        ));
+    }
+
+    results
+}
+
+fn validate_open_skill_training_target(
+    results: &mut Vec<ValidationResult>,
+    seen_targets: &mut std::collections::HashSet<(
+        antares::domain::dialogue::DialogueId,
+        antares::domain::dialogue::NodeId,
+        String,
+    )>,
+    dialogue_id: antares::domain::dialogue::DialogueId,
+    node_id: antares::domain::dialogue::NodeId,
+    npc_id: &str,
+    npc_by_id: &std::collections::HashMap<&str, &antares::domain::world::NpcDefinition>,
+) {
+    let key = (dialogue_id, node_id, npc_id.to_string());
+    if !seen_targets.insert(key) {
+        return;
+    }
+
+    match npc_by_id.get(npc_id) {
+        Some(npc) if npc.is_skill_trainer => {}
+        Some(_) => results.push(ValidationResult::error(
+            ValidationCategory::Dialogues,
+            format!(
+                "Dialogue {} node {} OpenSkillTraining references non-skill-trainer NPC '{}'",
+                dialogue_id, node_id, npc_id
+            ),
+        )),
+        None => results.push(ValidationResult::error(
+            ValidationCategory::Dialogues,
+            format!(
+                "Dialogue {} node {} OpenSkillTraining references unknown NPC '{}'",
+                dialogue_id, node_id, npc_id
+            ),
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3099,5 +3329,120 @@ mod tests {
             results.iter().all(|r| !r.is_passed()),
             "unknown stock template must not produce a Passed result"
         );
+    }
+
+    fn make_trainable_skill(id: &str) -> antares::domain::skills::SkillDefinition {
+        antares::domain::skills::SkillDefinition {
+            id: id.to_string(),
+            name: id.to_string(),
+            category: antares::domain::skills::SkillCategory::Utility,
+            description: String::new(),
+            scaling: antares::domain::skills::SkillScalingMode::Flat,
+            max_rank: 10,
+            is_trainable: true,
+        }
+    }
+
+    fn make_valid_skill_trainer_fixture() -> (
+        antares::domain::world::NpcDefinition,
+        antares::domain::dialogue::DialogueTree,
+        antares::domain::skills::SkillDefinition,
+    ) {
+        let mut npc =
+            antares::domain::world::NpcDefinition::new("skill_sage", "Skill Sage", "sage.png");
+        npc.is_skill_trainer = true;
+        npc.trainable_skill_ids = vec!["perception".to_string()];
+        npc.dialogue_id = Some(1);
+        let dialogue = antares::domain::dialogue::DialogueTree::standard_skill_trainer_template(
+            1,
+            "skill_sage",
+            "Skill Sage",
+        );
+        (npc, dialogue, make_trainable_skill("perception"))
+    }
+
+    // --- Phase 10: NPC skill trainer validation ---
+
+    #[test]
+    fn test_validate_npc_skill_trainer_rejects_unknown_skill() {
+        let (mut npc, dialogue, skill) = make_valid_skill_trainer_fixture();
+        npc.trainable_skill_ids = vec!["missing_skill".to_string()];
+        let results = validate_npc_skill_trainer_refs(&[npc], &[dialogue], &[skill]);
+        assert!(results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("missing_skill")));
+    }
+
+    #[test]
+    fn test_validate_npc_skill_trainer_rejects_non_trainable_skill() {
+        let (npc, dialogue, mut skill) = make_valid_skill_trainer_fixture();
+        skill.is_trainable = false;
+        let results = validate_npc_skill_trainer_refs(&[npc], &[dialogue], &[skill]);
+        assert!(results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("not trainable")));
+    }
+
+    #[test]
+    fn test_validate_npc_skill_trainer_rejects_empty_skill_list() {
+        let (mut npc, dialogue, skill) = make_valid_skill_trainer_fixture();
+        npc.trainable_skill_ids.clear();
+        let results = validate_npc_skill_trainer_refs(&[npc], &[dialogue], &[skill]);
+        assert!(results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("at least one")));
+    }
+
+    #[test]
+    fn test_validate_npc_skill_trainer_rejects_invalid_fee_multiplier() {
+        let (mut npc, dialogue, skill) = make_valid_skill_trainer_fixture();
+        npc.skill_training_fee_multiplier = Some(0.0);
+        let results = validate_npc_skill_trainer_refs(&[npc], &[dialogue], &[skill]);
+        assert!(results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("fee multiplier")));
+    }
+
+    #[test]
+    fn test_validate_npc_skill_trainer_rejects_max_rank_above_skill_cap() {
+        let (mut npc, dialogue, skill) = make_valid_skill_trainer_fixture();
+        npc.skill_training_max_rank = Some(skill.max_rank + 1);
+        let results = validate_npc_skill_trainer_refs(&[npc], &[dialogue], &[skill]);
+        assert!(results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("exceeds")));
+    }
+
+    #[test]
+    fn test_validate_open_skill_training_rejects_unknown_npc() {
+        use antares::domain::dialogue::{DialogueAction, DialogueNode, DialogueTree};
+        let skill = make_trainable_skill("perception");
+        let mut tree = DialogueTree::new(1, "Broken".to_string(), 1);
+        let mut node = DialogueNode::new(1, "Open missing trainer.");
+        node.add_action(DialogueAction::OpenSkillTraining {
+            npc_id: "missing_trainer".to_string(),
+        });
+        tree.add_node(node);
+        let results = validate_npc_skill_trainer_refs(&[], &[tree], &[skill]);
+        assert!(results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("unknown NPC")));
+    }
+
+    #[test]
+    fn test_validate_open_skill_training_rejects_non_skill_trainer_npc() {
+        use antares::domain::dialogue::{DialogueAction, DialogueNode, DialogueTree};
+        let skill = make_trainable_skill("perception");
+        let npc = antares::domain::world::NpcDefinition::new("villager", "Villager", "v.png");
+        let mut tree = DialogueTree::new(1, "Broken".to_string(), 1);
+        let mut node = DialogueNode::new(1, "Open non-trainer.");
+        node.add_action(DialogueAction::OpenSkillTraining {
+            npc_id: "villager".to_string(),
+        });
+        tree.add_node(node);
+        let results = validate_npc_skill_trainer_refs(&[npc], &[tree], &[skill]);
+        assert!(results
+            .iter()
+            .any(|r| r.is_error() && r.message.contains("non-skill-trainer")));
     }
 }

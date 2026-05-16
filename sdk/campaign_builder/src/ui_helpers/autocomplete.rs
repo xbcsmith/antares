@@ -1447,7 +1447,7 @@ pub fn autocomplete_skill_id_list_selector(
         },
         candidates,
         |text| {
-            let id = text.splitn(2, " \u{2014} ").next()?.trim().to_string();
+            let id = text.split(" \u{2014} ").next()?.trim().to_string();
             if skills.iter().any(|s| s.is_trainable && s.id == id) {
                 Some(id)
             } else {
@@ -1455,7 +1455,7 @@ pub fn autocomplete_skill_id_list_selector(
             }
         },
         |text| {
-            let id = text.splitn(2, " \u{2014} ").next()?.trim().to_string();
+            let id = text.split(" \u{2014} ").next()?.trim().to_string();
             if skills.iter().any(|s| s.is_trainable && s.id == id) {
                 Some(id)
             } else {

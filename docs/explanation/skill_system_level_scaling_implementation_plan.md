@@ -26,29 +26,29 @@ skills as a new domain concept rather than overloading `ProficiencyDefinition`.
 ## Current Implementation Status
 
 This plan is no longer a greenfield implementation plan. The Auto Skills
-foundation and critical loader/validation wiring are implemented. The remaining
-work is primarily the SDK Skills Editor UI and the NPC skill-training feature
-set.
+foundation, skill editor, runtime skill-training path, and much of the NPC
+skill-trainer authoring flow are implemented. Phase 10 audit closure has now
+closed the validation, SDK wiring, egui rule compliance, runtime polish, data
+cleanup, and final documentation gaps identified after Phases 1–9.
 
-| Area                                 | Status                            | Notes                                                                                                                                |
-| ------------------------------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Domain skill definitions and scaling | Complete                          | `src/domain/skills.rs`, fixtures, scaling helpers, and validation exist.                                                             |
-| Effective rank resolver              | Complete                          | Resolver supports context-based calls plus high-level character/class/race database APIs.                                            |
-| Skill checks                         | Complete for deterministic checks | Dialogue skill gates exist. Randomized checks remain deferred until a mechanic needs them.                                           |
-| Character sheet skill display        | Complete                          | Read-only skill display is implemented in `CharacterSheetView::Single`.                                                              |
-| Campaign/content loading             | Complete for current needs        | `skills_file` metadata/defaults and configurable skill loading are wired.                                                            |
-| Skill reference validation           | Complete for current references   | Class/race grants and dialogue `SkillCheck` references validate against `SkillDatabase`.                                             |
-| Campaign Builder skills editor       | Complete                          | Skills tab/UI, metadata, asset tracking, load/save, `CampaignData.skills`, `validate_skill_ids`, and class/race grant editing exist. |
-| NPC skill training                   | Not started                       | Domain fields, service, game mode, dialogue action, fixtures, UI, and SDK authoring remain.                                          |
-| Documentation                        | Partially complete                | Architecture and content format docs include skills; final migration/user docs still remain after trainer features.                  |
+| Area                                 | Status                            | Notes                                                                                                                                                  |
+| ------------------------------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Domain skill definitions and scaling | Complete                          | `src/domain/skills.rs`, fixtures, scaling helpers, and validation exist.                                                                               |
+| Effective rank resolver              | Complete                          | Resolver supports context-based calls plus high-level character/class/race database APIs.                                                              |
+| Skill checks                         | Complete for deterministic checks | Dialogue skill gates exist. Randomized checks remain deferred until a mechanic needs them.                                                             |
+| Character sheet skill display        | Complete                          | Read-only skill display is implemented in `CharacterSheetView::Single`.                                                                                |
+| Campaign/content loading             | Complete                          | `skills_file` metadata/defaults and configurable skill loading are wired; Phase 10 documented the domain-loader/content-database responsibility split. |
+| Skill reference validation           | Complete                          | Class/race grants, dialogue `SkillCheck`, NPC skill-trainer fields, and `OpenSkillTraining` references validate.                                       |
+| Campaign Builder skills editor       | Complete                          | Skills tab/UI, metadata, asset tracking, load/save, `CampaignData.skills`, `validate_skill_ids`, and class/race grant editing exist.                   |
+| NPC skill training                   | Complete                          | Domain fields, service, game mode, dialogue action, fixtures, UI, SDK authoring, validation, tests, and polish are implemented.                        |
+| Documentation                        | Complete for current scope        | Architecture, content format, implementation notes, migration guidance, and Phase 10 audit notes are updated.                                          |
 
 ### Remaining Work Summary
 
-1. Implement Phase 6 NPC skill-training domain and application flow.
-2. Implement Phase 7 player-facing NPC skill-training UI.
-3. Implement Phase 8 SDK skill-trainer authoring and validation.
-4. Finish Phase 9 final balance, migration notes, user-facing SDK docs, and
-   final regression coverage after Phases 6–8 land.
+1. Phase 10 audit-closure deliverables are complete for the current scope.
+2. Future work should treat tutorial live skill-trainer content as a separate
+   content-design task unless explicitly requested.
+3. Re-run all quality gates after any future implementation changes.
 
 ---
 
@@ -1312,19 +1312,173 @@ Regression and integration tests:
 
 ---
 
+### Phase 10: Audit Closure — Remaining Deliverables (Complete)
+
+Close the gaps found after Phases 1–9 were partially or fully implemented. This
+phase should not introduce a new gameplay system; it should make the existing
+skill system implementation match the plan, SDK rules, and architecture docs.
+
+#### 10.1 SDK Validation and Authoring Closure
+
+Add campaign-level validation for NPC skill trainers and skill-training dialogue.
+Editor-local validation is not enough; the campaign validation flow must catch
+invalid authored data even when a user never opens the NPC editor.
+
+Required validation rules:
+
+| Rule                                                              | Severity |
+| ----------------------------------------------------------------- | -------- |
+| `is_skill_trainer` true and no `trainable_skill_ids`              | Error    |
+| Unknown skill ID in `trainable_skill_ids`                         | Error    |
+| Skill ID references non-trainable skill                           | Error    |
+| Skill training fee multiplier is zero, negative, or NaN           | Error    |
+| Skill training max rank exceeds the referenced skill cap          | Error    |
+| `OpenSkillTraining` references an unknown NPC                     | Error    |
+| `OpenSkillTraining` references an NPC that is not a skill trainer | Error    |
+| Skill-trainer NPC has no dialogue path that opens training        | Error    |
+| Non-skill-trainer NPC retains SDK-managed skill-trainer dialogue  | Error    |
+
+Required SDK wiring:
+
+| File                                         | Required Change                                                                                                     |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/lib.rs`            | Populate `npc_editor_state.available_skills` from `campaign_data.skills` before rendering the NPC editor.           |
+| `sdk/campaign_builder/src/npc_editor/mod.rs` | Keep edit-buffer validation, but ensure it uses the populated skill cache and does not reject valid loaded skills.  |
+| `sdk/campaign_builder/src/campaign_io.rs`    | Add or wire a campaign-level skill-trainer validator from `validate_campaign()`.                                    |
+| SDK validation module                        | Add pure validation helpers for NPC skill-trainer references and `OpenSkillTraining` target checks where practical. |
+
+#### 10.2 SDK egui Audit Fixes
+
+Finish the SDK-specific egui audit for every NPC editor change related to skill
+trainers.
+
+Required fixes:
+
+| Area                  | Required Change                                                                                                               |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| NPC edit `ScrollArea` | Add a distinct `.id_salt(...)` and avoid `.auto_shrink([false, false])` in layouts where it can consume adjacent UI.          |
+| Skill autocomplete    | Clear the skill autocomplete buffer when `reset_autocomplete_buffers` is set.                                                 |
+| Skill cache lifecycle | Ensure skill candidate data is rebuilt/synced when campaign data changes, not loaded inside the widget render loop.           |
+| Fee/max-rank widgets  | Replace raw text fields with optional numeric widgets, or document why parsing-backed text fields are intentionally retained. |
+| Repaint behavior      | Any skill-trainer toggle or layout-driving edit must call `request_repaint()` when required by SDK egui rules.                |
+
+#### 10.3 Runtime Skill Training Polish
+
+Polish the runtime training path without merging it into the existing level-up
+trainer flow.
+
+Required work:
+
+| Area                    | Required Change                                                                                                                                 |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Atomic service behavior | Ensure `perform_skill_training_service` cannot return an error after deducting gold or incrementing persistent rank.                            |
+| Enter-mode API          | Either make `GameState::enter_skill_training` return `SkillTrainingState` as originally specified, or document the chosen mutation-only API.    |
+| Rank preview            | Make the UI preview cap-aware and based on the same rules as the service (`current effective rank → actual next rank`).                         |
+| Invalid selections      | Disable training, or show clear recoverable status, when the selected skill/member is at cap or otherwise invalid.                              |
+| Keyboard tests          | Add a test that exercises actual Escape key handling through the skill-training input system.                                                   |
+| Global toggle tests     | Expand coverage for every blocked global toggle listed in Phase 7: inventory, character sheet, spellbook, automap, and related modal conflicts. |
+
+#### 10.4 Data and Content Cleanup
+
+Clean up authored data and fixture consistency while respecting AGENTS.md Rule 5:
+automated tests must use `data/test_campaign`, not `campaigns/tutorial`.
+
+Required cleanup:
+
+| File / Area                             | Required Change                                                                                                                                            |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data/test_campaign/data/npcs.ron`      | Fix the `test_skill_trainer` description so it matches `trainable_skill_ids`, or change the IDs to match the text.                                         |
+| `data/test_campaign/campaign.ron`       | Add explicit `skills_file: "data/skills.ron"` if campaign metadata templates enumerate data files.                                                         |
+| `campaigns/tutorial/campaign.ron`       | Add explicit `skills_file: "data/skills.ron"` if live campaign metadata templates enumerate data files.                                                    |
+| `campaigns/tutorial/data/npcs.ron`      | Decide whether Phase 10 includes live skill trainer content; if yes, add a tutorial skill trainer in RON.                                                  |
+| `campaigns/tutorial/data/dialogues.ron` | If live trainer content is added, add a matching dialogue branch with `OpenSkillTraining`.                                                                 |
+| Live campaign validation                | Do not add automated tests that load `campaigns/tutorial`; use `data/test_campaign` for tests and document any manual live-campaign validation separately. |
+
+#### 10.5 Documentation and Architecture Closure
+
+Update documentation so it matches the implemented system and the remaining
+architecture requirements.
+
+Required documentation updates:
+
+| File                                            | Required Update                                                                                                                              |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/reference/architecture.md` Section 3.2    | Explicitly list all public exports from `src/domain/skills.rs`, including errors, breakdown types, and public helper functions.              |
+| `docs/reference/architecture.md` skill sections | Verify that NPC skill trainers and `OpenSkillTraining` are represented if the architecture now treats them as implemented.                   |
+| `docs/reference/campaign_content_format.md`     | Replace stale “future NPC skill trainers” wording for `is_trainable`.                                                                        |
+| `docs/explanation/implementations.md`           | Correct migration guidance: paid skill improvement opens via `OpenSkillTraining`; `TrainSkill` is a UI/event request, not a dialogue action. |
+| SDK user docs, if present                       | Add author-facing guidance for Skills Editor and NPC Skill Trainer setup.                                                                    |
+| Domain campaign loader docs                     | Resolve or document the difference between SDK `ContentDatabase` skill loading and `src/domain/campaign_loader.rs` visual-data loading.      |
+
+#### 10.6 Testing Requirements
+
+Required tests or test updates:
+
+| Test Name / Area                                                        | Assertion                                                                         |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `test_validate_npc_skill_trainer_rejects_unknown_skill`                 | Campaign validation catches unknown NPC trainable skill IDs.                      |
+| `test_validate_npc_skill_trainer_rejects_non_trainable_skill`           | Campaign validation catches skills with `is_trainable == false`.                  |
+| `test_validate_npc_skill_trainer_rejects_empty_skill_list`              | Skill trainers must offer at least one skill.                                     |
+| `test_validate_npc_skill_trainer_rejects_invalid_fee_multiplier`        | Zero, negative, or invalid multipliers fail validation.                           |
+| `test_validate_npc_skill_trainer_rejects_max_rank_above_skill_cap`      | Per-NPC rank cap cannot exceed the referenced skill max rank.                     |
+| `test_validate_open_skill_training_rejects_unknown_npc`                 | Dialogue action target must exist.                                                |
+| `test_validate_open_skill_training_rejects_non_skill_trainer_npc`       | Dialogue action target must be a skill trainer.                                   |
+| `test_npc_editor_receives_loaded_skill_candidates`                      | NPC editor autocomplete sees skills from loaded campaign data.                    |
+| `test_skill_training_service_is_atomic_when_final_resolution_fails`     | Failed training cannot deduct gold or alter persistent rank.                      |
+| `test_skill_training_escape_key_exits_mode`                             | Actual keyboard Escape path emits/handles exit behavior.                          |
+| `test_global_toggles_ignored_in_skill_training_for_all_blocked_toggles` | Inventory, character sheet, spellbook, automap, and modal conflicts stay blocked. |
+| `test_skill_training_preview_clamps_to_cap`                             | UI/helper preview does not show impossible rank gains.                            |
+
+All new tests that need campaign content must use `data/test_campaign`. Do not
+add test references to `campaigns/tutorial`.
+
+#### 10.7 Deliverables
+
+- [x] NPC editor receives loaded skill candidates from `campaign_data.skills`.
+- [x] Campaign validation covers NPC skill-trainer fields.
+- [x] Campaign validation covers `OpenSkillTraining` target references.
+- [x] NPC editor skill-trainer UI passes SDK egui ID and autocomplete audit.
+- [x] Skill-training service is atomic across all error paths.
+- [x] Skill-training UI preview is cap-aware and service-consistent.
+- [x] Required Escape/global-toggle tests exercise the actual systems.
+- [x] `data/test_campaign` skill-trainer fixture text matches its data.
+- [x] Campaign metadata templates explicitly include `skills_file` where appropriate.
+- [x] Tutorial live skill-trainer content is either added or explicitly deferred.
+- [x] Architecture Section 3.2 lists all `src/domain/skills.rs` public exports.
+- [x] Stale migration/content-format wording is corrected.
+- [x] SDK user-facing guidance for Skills Editor / NPC Skill Trainers is added if a user-doc location exists.
+- [x] `docs/explanation/implementations.md` is updated with a Phase 10 summary.
+
+#### 10.8 Success Criteria
+
+- Campaign Builder authors can create NPC skill trainers without hand-editing
+  RON and without false validation errors from empty skill autocomplete data.
+- Invalid skill-trainer NPCs and invalid `OpenSkillTraining` dialogue actions
+  fail campaign validation before runtime.
+- Skill training remains separate from level-up training and is atomic on every
+  recoverable error path.
+- The player-facing skill-training UI never previews impossible rank gains.
+- SDK egui ID audit passes for all skill-trainer authoring UI.
+- Documentation accurately distinguishes `OpenSkillTraining` dialogue actions
+  from `TrainSkill` UI/service requests.
+- No automated tests load fixtures from `campaigns/tutorial`.
+
+---
+
 ## Recommended Implementation Order
 
-| Order | Phase                                | Status / Next Action                                  |
-| ----- | ------------------------------------ | ----------------------------------------------------- |
-| 1     | Phase 1: Domain Foundation           | Complete                                              |
-| 2     | Phase 2: Auto Skills                 | Complete                                              |
-| 3     | Phase 3: Engine Skill Checks         | Complete for deterministic checks                     |
-| 4     | Phase 4: Auto Skill UI               | Complete                                              |
-| 5     | Phase 5: SDK Skills Editor           | Complete                                              |
-| 6     | Phase 6: NPC Train Skills Domain     | Next: add paid skill-training domain/application flow |
-| 7     | Phase 7: NPC Train Skills UI         | Then add player-facing skill-training workflow        |
-| 8     | Phase 8: SDK Skill Trainer Authoring | Then add SDK NPC skill-trainer authoring              |
-| 9     | Phase 9: Balance and Docs            | Finish after Phases 6–8 land                          |
+| Order | Phase                                | Status / Next Action              |
+| ----- | ------------------------------------ | --------------------------------- |
+| 1     | Phase 1: Domain Foundation           | Complete                          |
+| 2     | Phase 2: Auto Skills                 | Complete                          |
+| 3     | Phase 3: Engine Skill Checks         | Complete for deterministic checks |
+| 4     | Phase 4: Auto Skill UI               | Complete                          |
+| 5     | Phase 5: SDK Skills Editor           | Complete                          |
+| 6     | Phase 6: NPC Train Skills Domain     | Complete                          |
+| 7     | Phase 7: NPC Train Skills UI         | Complete                          |
+| 8     | Phase 8: SDK Skill Trainer Authoring | Complete                          |
+| 9     | Phase 9: Balance and Docs            | Complete for current scope        |
+| 10    | Phase 10: Audit Closure              | Complete                          |
 
 ---
 

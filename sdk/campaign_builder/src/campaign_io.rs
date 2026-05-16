@@ -331,6 +331,15 @@ impl CampaignBuilderApp {
         );
 
         errors.extend(self.validate_merchant_dialogue_rules());
+        errors.extend(
+            validation::validate_npc_skill_trainer_refs(
+                &self.editor_registry.npc_editor_state.npcs,
+                &self.campaign_data.dialogues,
+                &self.campaign_data.skills,
+            )
+            .into_iter()
+            .filter(|r| !r.is_passed()),
+        );
         errors
     }
 

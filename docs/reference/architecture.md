@@ -99,7 +99,7 @@ src/
 │   ├── resources.rs
 │   ├── skill_checks.rs          # `SkillCheckDifficulty`, `SkillCheckRequest`, `SkillCheckResult`, `skill_check_for_character`, `evaluate_party_skill_scope`
 │   ├── skill_resolver.rs        # `SkillResolver`, `SkillResolverContext` — effective rank computation
-│   ├── skills.rs                # `SkillId`, `SkillRank`, `SkillDefinition`, `SkillDatabase`, `CharacterSkillRanks`, `SkillGrant`, `SkillScalingMode`, `SkillCategory`, `PartySkillScope`
+│   ├── skills.rs                # `SkillId`, `SkillRank`, `SkillError`, `SkillCategory`, `SkillScalingMode`, `SkillGrantSource`, `PartySkillScope`, `SkillGrant`, `CharacterSkillRanks`, `SkillBreakdownEntry`, `SkillBreakdown`, `SkillDefinition`, `SkillDatabase`, `rank_for_level`, `rank_for_level_with_bonus`, `validate_skill_id`, `validate_skill_rank`
 │   ├── transactions.rs
 │   ├── types.rs
 │   ├── validation.rs            # `ValidationError` — unified domain validation error type
@@ -137,6 +137,13 @@ sdk/campaign_builder/            # Separate workspace member (eframe/egui GUI SD
     ├── main.rs                  # `campaign-builder` entrypoint
     └── ...                      # assets/maps/items/classes/races/etc. editor modules
 ```
+
+Runtime campaign content that affects gameplay (`items`, `spells`, `classes`,
+`races`, `dialogues`, `NPCs`, `skills`, and related databases) is loaded through
+the SDK `ContentDatabase` path used by `GameState::new_game`. The legacy
+`src/domain/campaign_loader.rs` `GameData` type is limited to visual/runtime
+asset support such as creature visuals, item meshes, furniture, and level tables;
+do not treat it as the authoritative gameplay-content database for skills.
 
 #### 3.3 Layer Architecture Details
 
@@ -1419,6 +1426,8 @@ pub enum DialogueAction {
     LearnSpell { spell_id: SpellId },
     HealParty,
     RestParty,
+    OpenTraining { npc_id: String },
+    OpenSkillTraining { npc_id: String },
 }
 
 /// Dialogue conditions for conditional logic
@@ -1431,6 +1440,11 @@ pub enum Condition {
     CharacterLevel { character_id: CharacterId, level: u32 },
     CharacterAlignment { character_id: CharacterId, alignment: Alignment },
     RandomChance { percentage: u8 },
+    SkillCheck {
+        skill_id: SkillId,
+        minimum_rank: SkillRank,
+        scope: PartySkillScope,
+    },
     And(Vec<Condition>),
     Or(Vec<Condition>),
     Not(Box<Condition>),

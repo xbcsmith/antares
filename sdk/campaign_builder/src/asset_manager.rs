@@ -1954,9 +1954,10 @@ mod tests {
         };
         manager.init_data_files(&cfg, &map_files);
 
-        // All files should be marked as missing since they don't exist
-        // Expected: Items, Spells, Conditions, Monsters, 2 Maps, Quests, Classes, Races, Characters, Dialogues, NPCs, Proficiencies = 13
-        assert_eq!(manager.data_files().len(), 13);
+        // All files should be marked as missing since they don't exist.
+        // Expected: Items, Spells, Conditions, Monsters, 2 Maps, Quests,
+        // Classes, Races, Characters, Dialogues, NPCs, Proficiencies, Skills = 14.
+        assert_eq!(manager.data_files().len(), 14);
         for file_info in manager.data_files() {
             assert_eq!(file_info.status, DataFileStatus::Missing);
         }
@@ -2038,6 +2039,7 @@ mod tests {
             "data/dialogues.ron",
             "data/npcs.ron",
             "data/proficiencies.ron",
+            "data/skills.ron",
         ] {
             manager.mark_data_file_loaded(path, 1);
         }

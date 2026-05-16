@@ -53,7 +53,7 @@ use crate::application::skill_training_state::SkillTrainingState;
 use crate::application::GameMode;
 use crate::domain::character::{Character, Party};
 use crate::domain::skill_resolver::SkillResolver;
-use crate::domain::skills::SkillId;
+use crate::domain::skills::{SkillId, SkillRank};
 use crate::game::resources::GlobalState;
 use crate::game::systems::ui::GameLog;
 use bevy::prelude::*;
@@ -92,6 +92,92 @@ pub const SKILL_TRAINING_SELECTED_ROW_FILL: egui::Color32 =
 
 /// Foreground text colour for mouse-selected rows.
 pub const SKILL_TRAINING_SELECTED_ROW_TEXT: egui::Color32 = egui::Color32::YELLOW;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SkillTrainingPreview {
+    current_rank: SkillRank,
+    next_rank: SkillRank,
+    at_cap: bool,
+    fee: u32,
+}
+
+fn skill_training_rank_preview(
+    member: &Character,
+    skill_id: &str,
+    npc_id: &str,
+    content: Option<&crate::sdk::database::ContentDatabase>,
+) -> SkillTrainingPreview {
+    let skill_key = skill_id.to_string();
+    let current_persistent_rank = member.skill_ranks.get(&skill_key).unwrap_or(0);
+    let default_fee = (SKILL_TRAINING_FEE_BASE_DEFAULT as f32
+        * SKILL_TRAINING_FEE_MULTIPLIER_DEFAULT
+        * (current_persistent_rank as f32 + 1.0)) as u32;
+
+    let Some(db) = content else {
+        return SkillTrainingPreview {
+            current_rank: current_persistent_rank,
+            next_rank: current_persistent_rank.saturating_add(1),
+            at_cap: false,
+            fee: default_fee,
+        };
+    };
+
+    let current_rank = SkillResolver::effective_skill_rank_for_character(
+        member,
+        &skill_key,
+        &db.skills,
+        &db.classes,
+        &db.races,
+    )
+    .unwrap_or(current_persistent_rank);
+
+    let rank_cap = db
+        .npcs
+        .get_npc(npc_id)
+        .and_then(|npc| npc.skill_training_max_rank)
+        .or_else(|| db.skills.get(skill_id).map(|skill| skill.max_rank))
+        .unwrap_or(SkillRank::MAX);
+
+    let fee = db
+        .npcs
+        .get_npc(npc_id)
+        .map(|npc| {
+            npc.skill_training_fee(
+                current_persistent_rank,
+                SKILL_TRAINING_FEE_BASE_DEFAULT,
+                SKILL_TRAINING_FEE_MULTIPLIER_DEFAULT,
+            )
+        })
+        .unwrap_or(default_fee);
+
+    if current_rank >= rank_cap {
+        return SkillTrainingPreview {
+            current_rank,
+            next_rank: current_rank,
+            at_cap: true,
+            fee,
+        };
+    }
+
+    let mut trained_member = member.clone();
+    trained_member.skill_ranks.increment(&skill_key);
+    let next_rank = SkillResolver::effective_skill_rank_for_character(
+        &trained_member,
+        &skill_key,
+        &db.skills,
+        &db.classes,
+        &db.races,
+    )
+    .unwrap_or_else(|_| current_rank.saturating_add(1))
+    .min(rank_cap);
+
+    SkillTrainingPreview {
+        current_rank,
+        next_rank,
+        at_cap: false,
+        fee,
+    }
+}
 
 // ── Marker component ──────────────────────────────────────────────────────────
 
@@ -556,61 +642,45 @@ fn render_detail_column(
 
             ui.add_space(8.0);
 
-            // Resolve current effective rank for the preview.
-            let current_rank = if let Some(cnt) = content {
-                SkillResolver::effective_skill_rank_for_character(
-                    member,
-                    skill_id,
-                    &cnt.db().skills,
-                    &cnt.db().classes,
-                    &cnt.db().races,
-                )
-                .unwrap_or_else(|_| member.skill_ranks.get(skill_id).unwrap_or(0))
-            } else {
-                member.skill_ranks.get(skill_id).unwrap_or(0)
-            };
+            let preview = skill_training_rank_preview(
+                member,
+                skill_id,
+                &state.npc_id,
+                content.map(GameContent::db),
+            );
 
             ui.label(
                 egui::RichText::new(format!(
                     "Rank:    {} \u{2192} {}",
-                    current_rank,
-                    current_rank + 1
+                    preview.current_rank, preview.next_rank
                 ))
                 .color(egui::Color32::WHITE),
             );
 
-            // Compute fee.
-            let current_persistent_rank = member.skill_ranks.get(skill_id).unwrap_or(0);
-            let fee = content
-                .and_then(|c| c.db().npcs.get_npc(&state.npc_id))
-                .map(|npc| {
-                    npc.skill_training_fee(
-                        current_persistent_rank,
-                        SKILL_TRAINING_FEE_BASE_DEFAULT,
-                        SKILL_TRAINING_FEE_MULTIPLIER_DEFAULT,
-                    )
-                })
-                .unwrap_or_else(|| {
-                    (SKILL_TRAINING_FEE_BASE_DEFAULT as f32
-                        * SKILL_TRAINING_FEE_MULTIPLIER_DEFAULT
-                        * (current_persistent_rank as f32 + 1.0)) as u32
-                });
-
-            let can_afford = party.gold >= fee;
+            let can_afford = party.gold >= preview.fee;
+            let can_train = can_afford && !preview.at_cap;
 
             ui.label(
-                egui::RichText::new(format!("Cost:    {} gold", fee)).color(if can_afford {
-                    SKILL_TRAINING_GOLD_COLOR
-                } else {
-                    SKILL_TRAINING_ERROR_COLOR
-                }),
+                egui::RichText::new(format!("Cost:    {} gold", preview.fee)).color(
+                    if can_afford {
+                        SKILL_TRAINING_GOLD_COLOR
+                    } else {
+                        SKILL_TRAINING_ERROR_COLOR
+                    },
+                ),
             );
 
-            if !can_afford {
+            if preview.at_cap {
+                ui.label(
+                    egui::RichText::new("This skill is already at the trainer's cap.")
+                        .small()
+                        .color(SKILL_TRAINING_ERROR_COLOR),
+                );
+            } else if !can_afford {
                 ui.label(
                     egui::RichText::new(format!(
                         "Need {} more gold.",
-                        fee.saturating_sub(party.gold)
+                        preview.fee.saturating_sub(party.gold)
                     ))
                     .small()
                     .color(SKILL_TRAINING_ERROR_COLOR),
@@ -620,11 +690,11 @@ fn render_detail_column(
             ui.add_space(10.0);
 
             // Train button
-            let train_label = format!("Train \u{2014} {} gold", fee);
+            let train_label = format!("Train \u{2014} {} gold", preview.fee);
             if ui
                 .add_enabled(
-                    can_afford,
-                    egui::Button::new(egui::RichText::new(&train_label).color(if can_afford {
+                    can_train,
+                    egui::Button::new(egui::RichText::new(&train_label).color(if can_train {
                         SKILL_TRAINING_SUCCESS_COLOR
                     } else {
                         egui::Color32::GRAY
@@ -1297,6 +1367,72 @@ mod tests {
             matches!(gs.0.mode, GameMode::Exploration),
             "mode must be Exploration after ExitSkillTraining"
         );
+    }
+
+    #[test]
+    fn test_skill_training_escape_key_exits_mode() {
+        use crate::application::resources::GameContent;
+        use crate::game::resources::GlobalState;
+        use crate::game::systems::ui::GameLog;
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<TrainSkill>();
+        app.add_message::<SelectSkillTrainingMember>();
+        app.add_message::<SelectSkillTrainingSkill>();
+        app.add_message::<ExitSkillTraining>();
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.init_resource::<SkillTrainingNavState>();
+        app.init_resource::<GameLog>();
+        app.add_systems(
+            Update,
+            (skill_training_input_system, skill_training_action_system).chain(),
+        );
+
+        let mut game_state = GameState::new();
+        game_state.enter_skill_training("trainer", vec![], vec![]);
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(ContentDatabase::new()));
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        assert!(
+            matches!(gs.0.mode, GameMode::Exploration),
+            "actual Escape key input must leave SkillTraining mode"
+        );
+    }
+
+    #[test]
+    fn test_skill_training_preview_clamps_to_cap() {
+        let mut db = make_skill_trainer_db();
+        db.npcs = {
+            let mut npcs = crate::sdk::database::NpcDatabase::new();
+            let mut npc = crate::domain::world::npc::NpcDefinition::new(
+                "perception_sage",
+                "Sage",
+                "sage.png",
+            );
+            npc.is_skill_trainer = true;
+            npc.trainable_skill_ids = vec!["perception".to_string()];
+            npc.skill_training_max_rank = Some(5);
+            npcs.add_npc(npc).unwrap();
+            npcs
+        };
+
+        let mut hero = make_alive_member("Capped Hero");
+        hero.skill_ranks.set("perception".to_string(), 5);
+
+        let preview =
+            skill_training_rank_preview(&hero, "perception", "perception_sage", Some(&db));
+
+        assert!(preview.at_cap);
+        assert_eq!(preview.current_rank, 5);
+        assert_eq!(preview.next_rank, 5);
     }
 
     // ── Action system: success ────────────────────────────────────────────────

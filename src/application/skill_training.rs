@@ -102,9 +102,10 @@ pub enum SkillTrainingError {
 /// 10. Checks `current_effective_rank < cap`. At cap → `SkillRankAtMaximum`.
 /// 11. Computes fee using the NPC's override or campaign defaults.
 /// 12. Checks `party.gold >= fee`. Insufficient → `InsufficientGold`.
-/// 13. **Modifies state**: deducts gold, increments the character's persistent
-///     skill rank by 1.
-/// 14. Resolves the new effective rank and returns `Ok((new_rank, fee_paid))`.
+/// 13. Resolves the would-be post-training effective rank using a cloned
+///     character. Error → `SkillResolutionFailed` with no state mutation.
+/// 14. **Modifies state**: deducts gold and increments the character's
+///     persistent skill rank by 1, then returns `Ok((new_rank, fee_paid))`.
 ///
 /// # Arguments
 ///
@@ -251,21 +252,24 @@ pub fn perform_skill_training_service(
         });
     }
 
-    // Step 13: Modify state — all checks passed.
-    game_state.party.gold -= fee;
-    game_state.party.members[party_index]
-        .skill_ranks
-        .increment(&skill_id.to_string());
-
-    // Step 14: Resolve the new effective rank.
+    // Step 13: Resolve the would-be new rank using a cloned character before
+    // mutating game state, preserving atomic failure semantics.
+    let mut trained_member = member.clone();
+    trained_member.skill_ranks.increment(&skill_id.to_string());
     let new_effective_rank = SkillResolver::effective_skill_rank_for_character(
-        &game_state.party.members[party_index],
+        &trained_member,
         &skill_id.to_string(),
         &db.skills,
         &db.classes,
         &db.races,
     )
     .map_err(|e| SkillTrainingError::SkillResolutionFailed(e.to_string()))?;
+
+    // Step 14: Modify state — all checks passed.
+    game_state.party.gold -= fee;
+    game_state.party.members[party_index]
+        .skill_ranks
+        .increment(&skill_id.to_string());
 
     Ok((new_effective_rank, fee))
 }
@@ -494,6 +498,36 @@ mod tests {
             "expected SkillRankAtMaximum, got {result:?}"
         );
         assert_eq!(state.party.gold, 500, "gold must not change on error");
+    }
+
+    #[test]
+    fn test_skill_training_service_is_atomic_when_final_resolution_fails() {
+        let mut state = GameState::new();
+        let member = make_alive_character();
+        state.party.members.push(member);
+        state.party.gold = 500;
+
+        let mut db = make_skill_trainer_db();
+        db.classes = crate::domain::classes::ClassDatabase::default();
+
+        let result =
+            perform_skill_training_service(&mut state, "perception_sage", 0, "perception", &db);
+
+        assert!(
+            matches!(result, Err(SkillTrainingError::SkillResolutionFailed(_))),
+            "expected SkillResolutionFailed, got {result:?}"
+        );
+        assert_eq!(
+            state.party.gold, 500,
+            "gold must not change on resolver error"
+        );
+        assert_eq!(
+            state.party.members[0]
+                .skill_ranks
+                .get(&"perception".to_string()),
+            None,
+            "persistent rank must not change on resolver error"
+        );
     }
 
     // ── Success tests ─────────────────────────────────────────────────────────
