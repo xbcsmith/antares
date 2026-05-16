@@ -63,6 +63,7 @@ use crate::domain::items::types::{ConsumableEffect, ItemType};
 use crate::domain::items::ItemDatabase;
 use crate::domain::magic::types::SpellSchool;
 use crate::domain::races::{RaceDatabase, RaceDefinition};
+use crate::domain::skills::CharacterSkillRanks;
 use crate::domain::transactions::equip_item;
 use crate::domain::types::{CreatureId, ItemId, RaceId, SpellId};
 use crate::sdk::database::SpellDatabase;
@@ -886,6 +887,7 @@ impl CharacterDefinition {
             worthiness: 0,
             gold: self.starting_gold,
             gems: self.starting_gems,
+            skill_ranks: CharacterSkillRanks::new(),
         };
 
         // Two-pass starting equipment:
@@ -2844,6 +2846,7 @@ mod tests {
             size: SizeCategory::Medium,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
+            skill_grants: vec![],
         };
 
         let stats = apply_race_modifiers(&base_stats, &race_def);
@@ -2879,6 +2882,7 @@ mod tests {
             size: SizeCategory::Medium,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
+            skill_grants: vec![],
         };
 
         let stats = apply_race_modifiers(&base_stats, &race_def);
@@ -2915,6 +2919,7 @@ mod tests {
             size: SizeCategory::Medium,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
+            skill_grants: vec![],
         };
 
         let stats = apply_race_modifiers(&low_stats, &race_def);
@@ -2940,6 +2945,7 @@ mod tests {
             size: SizeCategory::Medium,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
+            skill_grants: vec![],
         };
 
         let stats = apply_race_modifiers(&high_stats, &race_def_bonus);
@@ -2965,6 +2971,7 @@ mod tests {
             starting_armor_id: None,
             starting_items: vec![],
             proficiencies: vec![],
+            skill_grants: vec![],
         };
 
         // Endurance 10 = 0 modifier, HP = 10 + 0 = 10
@@ -3000,6 +3007,7 @@ mod tests {
             starting_armor_id: None,
             starting_items: vec![],
             proficiencies: vec![],
+            skill_grants: vec![],
         };
 
         // Very low endurance should still give minimum 1 HP
@@ -3025,6 +3033,7 @@ mod tests {
             starting_armor_id: None,
             starting_items: vec![],
             proficiencies: vec![],
+            skill_grants: vec![],
         };
 
         let stats = Stats::new(10, 16, 10, 10, 10, 10, 10);
@@ -3051,6 +3060,7 @@ mod tests {
             starting_armor_id: None,
             starting_items: vec![],
             proficiencies: vec![],
+            skill_grants: vec![],
         };
 
         // Intellect 16 = SP = 16 - 10 = 6
@@ -3083,6 +3093,7 @@ mod tests {
             starting_armor_id: None,
             starting_items: vec![],
             proficiencies: vec![],
+            skill_grants: vec![],
         };
 
         // Personality 16 = SP = (16 - 10) / 2 = 3
@@ -3109,6 +3120,7 @@ mod tests {
             starting_armor_id: None,
             starting_items: vec![],
             proficiencies: vec![],
+            skill_grants: vec![],
         };
 
         let paladin = ClassDefinition {
@@ -3124,6 +3136,7 @@ mod tests {
             starting_armor_id: None,
             starting_items: vec![],
             proficiencies: vec![],
+            skill_grants: vec![],
         };
 
         let knight = ClassDefinition {
@@ -3139,6 +3152,7 @@ mod tests {
             starting_armor_id: None,
             starting_items: vec![],
             proficiencies: vec![],
+            skill_grants: vec![],
         };
 
         assert_eq!(calculate_starting_spell_level(&sorcerer), 1);
@@ -3169,6 +3183,7 @@ mod tests {
             size: SizeCategory::Medium,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
+            skill_grants: vec![],
         };
 
         let resistances = apply_race_resistances(&race_def);

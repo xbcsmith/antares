@@ -1022,6 +1022,82 @@ fn test_extract_proficiency_candidates_empty() {
     assert_eq!(candidates.len(), 0);
 }
 
+fn make_skill_definition(id: &str, name: &str) -> antares::domain::skills::SkillDefinition {
+    antares::domain::skills::SkillDefinition {
+        id: id.to_string(),
+        name: name.to_string(),
+        category: antares::domain::skills::SkillCategory::Utility,
+        description: String::new(),
+        scaling: antares::domain::skills::SkillScalingMode::Flat,
+        max_rank: 10,
+        is_trainable: true,
+    }
+}
+
+#[test]
+fn test_extract_skill_candidates_empty() {
+    let skills = vec![];
+    let candidates = extract_skill_candidates(&skills);
+    assert!(candidates.is_empty());
+}
+
+#[test]
+fn test_extract_skill_candidates_returns_name_and_id() {
+    let skills = vec![make_skill_definition("perception", "Perception")];
+    let candidates = extract_skill_candidates(&skills);
+    assert_eq!(
+        candidates,
+        vec![(
+            "Perception (perception)".to_string(),
+            "perception".to_string()
+        )]
+    );
+}
+
+#[test]
+fn test_resolve_skill_candidate_resolves_display_string() {
+    let skills = vec![make_skill_definition("item_lore", "Item Lore")];
+    let candidates = extract_skill_candidates(&skills);
+    assert_eq!(
+        resolve_skill_candidate("Item Lore (item_lore)", &candidates),
+        Some("item_lore".to_string())
+    );
+}
+
+#[test]
+fn test_resolve_skill_candidate_accepts_raw_skill_id() {
+    let skills = vec![make_skill_definition("athletics", "Athletics")];
+    let candidates = extract_skill_candidates(&skills);
+    assert_eq!(
+        resolve_skill_candidate("athletics", &candidates),
+        Some("athletics".to_string())
+    );
+}
+
+#[test]
+fn test_resolve_skill_candidate_rejects_unknown_id() {
+    let skills = vec![make_skill_definition("athletics", "Athletics")];
+    let candidates = extract_skill_candidates(&skills);
+    assert_eq!(resolve_skill_candidate("unknown", &candidates), None);
+}
+
+#[test]
+fn test_skill_display_for_id_initializes_known_id() {
+    let skills = vec![make_skill_definition("perception", "Perception")];
+    let candidates = extract_skill_candidates(&skills);
+    assert_eq!(
+        skill_display_for_id("perception", &candidates),
+        "Perception (perception)"
+    );
+}
+
+#[test]
+fn test_skill_display_for_id_initializes_unknown_id() {
+    let skills = vec![make_skill_definition("perception", "Perception")];
+    let candidates = extract_skill_candidates(&skills);
+    assert_eq!(skill_display_for_id("unknown", &candidates), "unknown");
+}
+
 #[test]
 fn test_load_proficiencies_synthetic_fallback() {
     use antares::domain::items::types::{
@@ -1185,6 +1261,7 @@ fn test_extract_special_ability_candidates() {
             special_abilities: vec!["lucky".to_string(), "brave".to_string()],
             proficiencies: vec![],
             incompatible_item_tags: vec![],
+            skill_grants: vec![],
         },
         RaceDefinition {
             id: "elf".to_string(),
@@ -1196,6 +1273,7 @@ fn test_extract_special_ability_candidates() {
             special_abilities: vec!["infravision".to_string(), "keen_senses".to_string()],
             proficiencies: vec![],
             incompatible_item_tags: vec![],
+            skill_grants: vec![],
         },
     ];
 

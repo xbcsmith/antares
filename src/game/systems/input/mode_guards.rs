@@ -55,6 +55,7 @@ pub fn movement_blocked_for_mode(mode: &GameMode) -> bool {
             | GameMode::GameLog
             | GameMode::SpellCasting(_)
             | GameMode::TrapNotification(_)
+            | GameMode::SkillTraining(_)
     )
 }
 
@@ -192,6 +193,16 @@ mod tests {
     #[test]
     fn test_movement_blocked_for_mode_game_log_true() {
         assert!(movement_blocked_for_mode(&GameMode::GameLog));
+    }
+
+    #[test]
+    fn test_movement_blocked_for_skill_training_true() {
+        let mut state = GameState::new();
+        state.enter_skill_training("trainer", vec![], vec![]);
+        assert!(
+            movement_blocked_for_mode(&state.mode),
+            "movement must be blocked while in SkillTraining mode"
+        );
     }
 
     #[test]

@@ -43,6 +43,11 @@ fn test_handle_maps_open_npc_request_success() {
         is_trainer: false,
         training_fee_base: None,
         training_fee_multiplier: None,
+        is_skill_trainer: false,
+        trainable_skill_ids: Vec::new(),
+        skill_training_fee_base: None,
+        skill_training_fee_multiplier: None,
+        skill_training_max_rank: None,
     };
     app.editor_registry.npc_editor_state.npcs.push(npc);
 
@@ -113,6 +118,11 @@ fn test_handle_validation_open_npc_request_success() {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
     app.editor_registry.npc_editor_state.requested_open_npc = Some("merchant_tom".to_string());
 
@@ -165,6 +175,11 @@ fn test_validate_merchant_dialogue_rules_reports_missing_dialogue() {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
     let results = app.validate_merchant_dialogue_rules();
@@ -203,6 +218,11 @@ fn test_validate_merchant_dialogue_rules_reports_missing_dialogue_tree() {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
     let results = app.validate_merchant_dialogue_rules();
@@ -252,6 +272,11 @@ fn test_validate_merchant_dialogue_rules_reports_wrong_open_merchant_target() {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
     let results = app.validate_merchant_dialogue_rules();
@@ -293,6 +318,11 @@ fn test_validate_merchant_dialogue_rules_reports_stale_sdk_content_for_non_merch
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
     let results = app.validate_merchant_dialogue_rules();
@@ -330,6 +360,11 @@ fn test_repair_merchant_dialogue_validation_issues_creates_missing_dialogue() {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
     let result = app.repair_merchant_dialogue_validation_issues();
@@ -380,6 +415,11 @@ fn test_repair_merchant_dialogue_validation_issues_rebinds_wrong_target() {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
     let result = app.repair_merchant_dialogue_validation_issues();
@@ -439,6 +479,11 @@ fn test_repair_merchant_dialogue_validation_issues_removes_stale_non_merchant_co
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: Vec::new(),
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         });
 
     let result = app.repair_merchant_dialogue_validation_issues();
@@ -1570,6 +1615,7 @@ conditions_file: "data/conditions.ron",
 quests_file: "data/quests.ron",
 dialogue_file: "data/dialogues.ron",
 proficiencies_file: "data/proficiencies.ron",
+skills_file: "data/skills.ron",
 creatures_file: "data/creatures.ron",
 stock_templates_file: "data/npc_stock_templates.ron",
 starting_time: GameTime(year: 1, month: 1, day: 1, hour: 8, minute: 0),

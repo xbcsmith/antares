@@ -61,6 +61,7 @@ fn create_test_class_with_proficiencies() -> ClassDefinition {
             "martial_melee".to_string(),
             "heavy_armor".to_string(),
         ],
+        skill_grants: vec![],
     }
 }
 
@@ -80,6 +81,7 @@ fn create_test_spellcasting_class() -> ClassDefinition {
         starting_armor_id: None,
         starting_items: vec![],
         proficiencies: vec!["simple_weapon".to_string(), "light_armor".to_string()],
+        skill_grants: vec![],
     }
 }
 
@@ -261,6 +263,7 @@ fn create_test_race_with_modifiers() -> RaceDefinition {
 
         proficiencies: vec!["martial_ranged".to_string(), "martial_melee".to_string()],
         incompatible_item_tags: vec!["heavy_weapon".to_string()],
+        skill_grants: vec![],
     }
 }
 
@@ -294,6 +297,7 @@ fn create_test_race_with_resistances() -> RaceDefinition {
 
         proficiencies: vec!["axe".to_string(), "hammer".to_string()],
         incompatible_item_tags: vec![],
+        skill_grants: vec![],
     }
 }
 

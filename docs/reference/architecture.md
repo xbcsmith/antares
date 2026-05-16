@@ -85,9 +85,11 @@ src/
 │   ├── classes.rs
 │   ├── combat/
 │   ├── conditions.rs
+│   ├── database_common.rs       # `impl_ron_database!` macro shared by all domain databases
 │   ├── dialogue.rs
 │   ├── inventory.rs
 │   ├── items/
+│   ├── levels.rs                # `LevelDatabase`, `ClassLevelThresholds` — per-class XP tables
 │   ├── magic/
 │   ├── party_manager.rs
 │   ├── proficiency.rs
@@ -95,8 +97,12 @@ src/
 │   ├── quest.rs
 │   ├── races.rs
 │   ├── resources.rs
+│   ├── skill_checks.rs          # `SkillCheckDifficulty`, `SkillCheckRequest`, `SkillCheckResult`, `skill_check_for_character`, `evaluate_party_skill_scope`
+│   ├── skill_resolver.rs        # `SkillResolver`, `SkillResolverContext` — effective rank computation
+│   ├── skills.rs                # `SkillId`, `SkillRank`, `SkillError`, `SkillCategory`, `SkillScalingMode`, `SkillGrantSource`, `PartySkillScope`, `SkillGrant`, `CharacterSkillRanks`, `SkillBreakdownEntry`, `SkillBreakdown`, `SkillDefinition`, `SkillDatabase`, `rank_for_level`, `rank_for_level_with_bonus`, `validate_skill_id`, `validate_skill_rank`
 │   ├── transactions.rs
 │   ├── types.rs
+│   ├── validation.rs            # `ValidationError` — unified domain validation error type
 │   ├── visual/
 │   └── world/
 ├── game/                        # Bevy ECS integration (components/systems/resources)
@@ -131,6 +137,13 @@ sdk/campaign_builder/            # Separate workspace member (eframe/egui GUI SD
     ├── main.rs                  # `campaign-builder` entrypoint
     └── ...                      # assets/maps/items/classes/races/etc. editor modules
 ```
+
+Runtime campaign content that affects gameplay (`items`, `spells`, `classes`,
+`races`, `dialogues`, `NPCs`, `skills`, and related databases) is loaded through
+the SDK `ContentDatabase` path used by `GameState::new_game`. The legacy
+`src/domain/campaign_loader.rs` `GameData` type is limited to visual/runtime
+asset support such as creature visuals, item meshes, furniture, and level tables;
+do not treat it as the authoritative gameplay-content database for skills.
 
 #### 3.3 Layer Architecture Details
 
@@ -1137,6 +1150,62 @@ impl RaceDefinition {
 - Legacy `disablement_bit_index` preserved for backward compatibility
 - New system uses proficiency IDs and tags instead of bit flags
 
+#### 4.6.2 Skill System
+
+Skills are numeric, level-scaled character capabilities. They are distinct from
+proficiencies: proficiencies remain binary item-use permissions, while skills
+represent ranked capabilities such as perception, disarm traps, item lore, and
+diplomacy.
+
+```antares/src/domain/skills.rs#L1-80
+pub type SkillId = String;
+pub type SkillRank = u16;
+
+pub enum SkillCategory {
+    Combat,
+    Exploration,
+    Knowledge,
+    Social,
+    Utility,
+}
+
+pub enum SkillScalingMode {
+    Flat,
+    Linear { base: SkillRank, per_level: u16 },
+    Step { base: SkillRank, per_levels: u16, amount: u16 },
+    Table { ranks_by_level: Vec<SkillRank> },
+}
+
+pub struct SkillDefinition {
+    pub id: SkillId,
+    pub name: String,
+    pub category: SkillCategory,
+    pub description: String,
+    pub scaling: SkillScalingMode,
+    pub max_rank: SkillRank,
+    pub is_trainable: bool,
+}
+
+pub struct SkillGrant {
+    pub skill_id: SkillId,
+    pub flat_bonus: i16,
+    pub per_level_bonus: i16,
+    pub minimum_rank: Option<SkillRank>,
+    pub maximum_rank_override: Option<SkillRank>,
+}
+
+pub struct CharacterSkillRanks(pub HashMap<SkillId, SkillRank>);
+
+pub struct SkillDatabase {
+    skills: HashMap<SkillId, SkillDefinition>,
+}
+```
+
+Classes and races may grant skill bonuses through `skill_grants`. Runtime
+characters store only persistent trained/manual ranks in `CharacterSkillRanks`;
+auto-scaled ranks and class/race grants are resolved on demand by the skill
+resolver.
+
 #### 4.7 Character Definition (Data-Driven Templates)
 
 Character definitions are data-driven templates stored in RON files that can be
@@ -1357,6 +1426,8 @@ pub enum DialogueAction {
     LearnSpell { spell_id: SpellId },
     HealParty,
     RestParty,
+    OpenTraining { npc_id: String },
+    OpenSkillTraining { npc_id: String },
 }
 
 /// Dialogue conditions for conditional logic
@@ -1369,6 +1440,11 @@ pub enum Condition {
     CharacterLevel { character_id: CharacterId, level: u32 },
     CharacterAlignment { character_id: CharacterId, alignment: Alignment },
     RandomChance { percentage: u8 },
+    SkillCheck {
+        skill_id: SkillId,
+        minimum_rank: SkillRank,
+        scope: PartySkillScope,
+    },
     And(Vec<Condition>),
     Or(Vec<Condition>),
     Not(Box<Condition>),
@@ -1462,6 +1538,7 @@ pub struct GameData {
     pub quests: QuestDatabase,
     pub conditions: ConditionDatabase,
     pub proficiencies: ProficiencyDatabase,
+    pub skills: SkillDatabase,
 }
 
 /// Campaign validation errors
@@ -2171,6 +2248,7 @@ data/                                    # Base game data
 ├── races.ron                      # Race definitions with stat modifiers
 ├── conditions.ron                 # Status condition definitions
 ├── proficiencies.ron              # Proficiency system definitions
+├── skills.ron                     # Numeric skill definitions and scaling rules
 ├── npcs.ron                        # NPC definitions
 ├── npc_stock_templates.ron         # Merchant stock templates
 ├── creatures.ron                   # Creature visual registry
@@ -2191,6 +2269,7 @@ campaigns/                            # Campaign-specific content
     │   ├── items.ron               # Override base items
     │   ├── npcs.ron                # Campaign NPC overrides
     │   ├── creatures.ron           # Campaign creature registry override
+    │   ├── skills.ron              # Campaign skill definitions
     │   ├── maps/                   # Campaign-specific maps
     │   │   └── tutorial_dungeon.ron
     │   └── dialogues.ron          # Campaign dialogues
@@ -2216,6 +2295,50 @@ campaigns/                            # Campaign-specific content
 4. **Caching** improves loading performance for repeated access
 
 #### 7.2 Example Data Format (RON)
+
+**Skill Definitions:**
+
+```antares/data/skills.ron#L1-80
+// skills.ron
+[
+    (
+        id: "perception",
+        name: "Perception",
+        category: Exploration,
+        description: "Notice hidden objects, traps, and threats.",
+        scaling: Linear(base: 0, per_level: 1),
+        max_rank: 50,
+        is_trainable: true,
+    ),
+    (
+        id: "disarm_traps",
+        name: "Disarm Traps",
+        category: Exploration,
+        description: "Safely disarm mechanical and magical traps.",
+        scaling: Step(base: 0, per_levels: 2, amount: 1),
+        max_rank: 25,
+        is_trainable: true,
+    ),
+    (
+        id: "diplomacy",
+        name: "Diplomacy",
+        category: Social,
+        description: "Persuasion and peaceful negotiation.",
+        scaling: Flat,
+        max_rank: 30,
+        is_trainable: true,
+    ),
+    (
+        id: "arcane_lore",
+        name: "Arcane Lore",
+        category: Knowledge,
+        description: "Knowledge of arcane forces and spellcraft.",
+        scaling: Table(ranks_by_level: [0, 0, 1, 1, 2, 3, 5, 8]),
+        max_rank: 40,
+        is_trainable: true,
+    ),
+]
+```
 
 **Monster Definition:**
 

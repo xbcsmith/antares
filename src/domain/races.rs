@@ -13,6 +13,7 @@
 //! See `docs/explanation/hardcoded_removal_implementation_plan.md` for implementation details.
 
 use crate::domain::proficiency::ProficiencyDatabase;
+use crate::domain::skills::{SkillDatabase, SkillGrant};
 use crate::domain::validation::ValidationError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -294,6 +295,13 @@ pub struct RaceDefinition {
     /// Item tags that are incompatible with this race (forward-compatible)
     #[serde(default)]
     pub incompatible_item_tags: Vec<String>,
+
+    /// Skill grants this race provides to characters of this race.
+    ///
+    /// Each grant adds a flat bonus and/or a per-level bonus to the named skill.
+    /// Defaults to empty for backward compatibility with existing data files.
+    #[serde(default)]
+    pub skill_grants: Vec<SkillGrant>,
 }
 
 impl RaceDefinition {
@@ -329,6 +337,7 @@ impl RaceDefinition {
             size: SizeCategory::Medium,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
+            skill_grants: vec![],
         }
     }
 
@@ -349,6 +358,7 @@ impl RaceDefinition {
     ///     size: SizeCategory::Medium,
     ///     proficiencies: vec!["martial_ranged".to_string()],
     ///     incompatible_item_tags: vec![],
+    ///     skill_grants: vec![],
     /// };
     ///
     /// assert!(elf.has_ability("infravision"));
@@ -399,6 +409,7 @@ impl RaceDefinition {
     ///     size: SizeCategory::Medium,
     ///     proficiencies: vec![],
     ///     incompatible_item_tags: vec!["large_weapon".to_string(), "heavy_armor".to_string()],
+    ///     skill_grants: vec![],
     /// };
     ///
     /// // Gnome cannot use large weapons
@@ -618,6 +629,58 @@ impl RaceDatabase {
         Ok(())
     }
 
+    /// Validates that every `skill_id` in every race's `skill_grants` exists in `skill_db`.
+    ///
+    /// Collects all errors rather than failing on the first.
+    ///
+    /// # Arguments
+    ///
+    /// * `skill_db` — The loaded [`SkillDatabase`] to validate references against.
+    ///
+    /// # Returns
+    ///
+    /// An empty `Vec` when all skill IDs are valid; a non-empty `Vec` of
+    /// [`SkillError::InvalidSkillReference`] entries otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::races::RaceDatabase;
+    /// use antares::domain::skills::SkillDatabase;
+    ///
+    /// let race_ron = r#"[
+    ///     (id: "human", name: "Human",
+    ///      stat_modifiers: (might: 0, intellect: 0, personality: 0,
+    ///                       endurance: 0, speed: 0, accuracy: 0, luck: 0),
+    ///      resistances: (magic: 0, fire: 0, cold: 0, electricity: 0,
+    ///                    acid: 0, fear: 0, poison: 0, psychic: 0),
+    ///      special_abilities: [], size: Medium,
+    ///      proficiencies: [], incompatible_item_tags: [], skill_grants: []),
+    /// ]"#;
+    /// let race_db = RaceDatabase::load_from_string(race_ron).unwrap();
+    /// let skill_db = SkillDatabase::new();
+    /// let errors = race_db.validate_with_skill_db(&skill_db);
+    /// assert!(errors.is_empty());
+    /// ```
+    pub fn validate_with_skill_db(
+        &self,
+        skill_db: &SkillDatabase,
+    ) -> Vec<crate::domain::skills::SkillError> {
+        use crate::domain::skills::SkillError;
+        let mut errors = Vec::new();
+        for race_def in self.races.values() {
+            for grant in &race_def.skill_grants {
+                if !skill_db.has(&grant.skill_id) {
+                    errors.push(SkillError::InvalidSkillReference(format!(
+                        "Race '{}' references unknown skill '{}'",
+                        race_def.id, grant.skill_id
+                    )));
+                }
+            }
+        }
+        errors
+    }
+
     /// Returns true if a race with the given ID exists
     ///
     /// # Arguments
@@ -692,6 +755,7 @@ mod tests {
             size: SizeCategory::Medium,
             proficiencies: vec![],
             incompatible_item_tags: vec![],
+            skill_grants: vec![],
         }
     }
 
@@ -723,6 +787,7 @@ mod tests {
             size: SizeCategory::Medium,
             proficiencies: vec!["martial_ranged".to_string()],
             incompatible_item_tags: vec![],
+            skill_grants: vec![],
         }
     }
 
@@ -754,6 +819,7 @@ mod tests {
             size: SizeCategory::Medium,
             proficiencies: vec!["martial_melee".to_string(), "blunt_weapon".to_string()],
             incompatible_item_tags: vec![],
+            skill_grants: vec![],
         }
     }
 
@@ -785,6 +851,7 @@ mod tests {
             size: SizeCategory::Small,
             proficiencies: vec!["simple_weapon".to_string(), "martial_ranged".to_string()],
             incompatible_item_tags: vec!["large_weapon".to_string(), "heavy_armor".to_string()],
+            skill_grants: vec![],
         }
     }
 
@@ -1228,5 +1295,62 @@ mod tests {
                 result.err()
             );
         }
+    }
+
+    #[test]
+    fn test_race_database_validate_with_skill_db_rejects_unknown_skill() {
+        use crate::domain::skills::SkillDatabase;
+
+        let race_ron = r#"[
+            (id: "elf", name: "Elf",
+             stat_modifiers: (might: -1, intellect: 2, personality: 0,
+                              endurance: -1, speed: 1, accuracy: 2, luck: 0),
+             resistances: (magic: 5, fire: 0, cold: 0, electricity: 0,
+                           acid: 0, fear: 0, poison: 0, psychic: 5),
+             special_abilities: ["infravision"], size: Medium,
+             proficiencies: [], incompatible_item_tags: [],
+             skill_grants: [(skill_id: "nonexistent_skill", flat_bonus: 2,
+                             per_level_bonus: 0, minimum_rank: None,
+                             maximum_rank_override: None)]),
+        ]"#;
+
+        let race_db = RaceDatabase::load_from_string(race_ron).unwrap();
+        let skill_db = SkillDatabase::new(); // empty — no skills
+
+        let errors = race_db.validate_with_skill_db(&skill_db);
+        assert!(
+            !errors.is_empty(),
+            "expected errors for unknown skill reference"
+        );
+        assert!(errors[0].to_string().contains("nonexistent_skill"));
+    }
+
+    #[test]
+    fn test_race_database_validate_with_skill_db_accepts_known_skill() {
+        use crate::domain::skills::SkillDatabase;
+
+        let race_ron = r#"[
+            (id: "elf", name: "Elf",
+             stat_modifiers: (might: -1, intellect: 2, personality: 0,
+                              endurance: -1, speed: 1, accuracy: 2, luck: 0),
+             resistances: (magic: 5, fire: 0, cold: 0, electricity: 0,
+                           acid: 0, fear: 0, poison: 0, psychic: 5),
+             special_abilities: ["infravision"], size: Medium,
+             proficiencies: [], incompatible_item_tags: [],
+             skill_grants: [(skill_id: "perception", flat_bonus: 2,
+                             per_level_bonus: 0, minimum_rank: None,
+                             maximum_rank_override: None)]),
+        ]"#;
+
+        let skill_ron = r#"[
+            (id: "perception", name: "Perception", category: Exploration,
+             description: "", scaling: Flat, max_rank: 50, is_trainable: true),
+        ]"#;
+
+        let race_db = RaceDatabase::load_from_string(race_ron).unwrap();
+        let skill_db = SkillDatabase::load_from_string(skill_ron).unwrap();
+
+        let errors = race_db.validate_with_skill_db(&skill_db);
+        assert!(errors.is_empty(), "no errors expected when skill exists");
     }
 }

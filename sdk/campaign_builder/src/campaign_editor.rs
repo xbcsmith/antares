@@ -130,6 +130,7 @@ pub struct CampaignMetadataEditBuffer {
     pub npcs_file: String,
     pub conditions_file: String,
     pub proficiencies_file: String,
+    pub skills_file: String,
     pub creatures_file: String,
     pub stock_templates_file: String,
     pub furniture_file: String,
@@ -179,6 +180,7 @@ impl CampaignMetadataEditBuffer {
             npcs_file: m.npcs_file.clone(),
             conditions_file: m.conditions_file.clone(),
             proficiencies_file: m.proficiencies_file.clone(),
+            skills_file: m.skills_file.clone(),
             creatures_file: m.creatures_file.clone(),
             stock_templates_file: m.stock_templates_file.clone(),
             furniture_file: m.furniture_file.clone(),
@@ -229,6 +231,7 @@ impl CampaignMetadataEditBuffer {
         dest.npcs_file = self.npcs_file.clone();
         dest.conditions_file = self.conditions_file.clone();
         dest.proficiencies_file = self.proficiencies_file.clone();
+        dest.skills_file = self.skills_file.clone();
         dest.creatures_file = self.creatures_file.clone();
         dest.stock_templates_file = self.stock_templates_file.clone();
         dest.furniture_file = self.furniture_file.clone();
@@ -1007,6 +1010,29 @@ impl CampaignMetadataEditorState {
                                             {
                                                 self.buffer.proficiencies_file =
                                                     p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    // Skills File
+                                    ui.label("Skills File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.skills_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.skills_file = p.display().to_string();
                                                 self.has_unsaved_changes = true;
                                                 *ctx.unsaved_changes = true;
                                             }

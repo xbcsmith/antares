@@ -20,6 +20,8 @@ pub mod merchant_inventory_state;
 pub mod quests;
 pub mod resources;
 pub mod save_game;
+pub mod skill_training;
+pub mod skill_training_state;
 pub mod spell_book_state;
 pub mod spell_casting_state;
 
@@ -144,6 +146,15 @@ pub enum GameMode {
     /// mode. Tab / Shift-Tab cycles through party members. Esc returns to the
     /// previous [`GameMode`].
     CharacterSheet(crate::application::character_sheet_state::CharacterSheetState),
+    /// NPC skill trainer session.
+    ///
+    /// Entered when a dialogue node fires
+    /// [`crate::domain::dialogue::DialogueAction::OpenSkillTraining`] for an
+    /// NPC with `is_skill_trainer: true`. The UI presents alive party members
+    /// and the skills the NPC can train, and calls
+    /// [`crate::application::skill_training::perform_skill_training_service`]
+    /// when the player confirms a training purchase.
+    SkillTraining(crate::application::skill_training_state::SkillTrainingState),
 }
 
 // ===== Rest State =====
@@ -2061,6 +2072,10 @@ impl GameState {
                 self.mode = cs_state.get_resume_mode();
                 true
             }
+            GameMode::SkillTraining(_) => {
+                self.mode = GameMode::Exploration;
+                true
+            }
             _ => false,
         }
     }
@@ -2302,6 +2317,68 @@ impl GameState {
     /// Enters dialogue mode
     pub fn enter_dialogue(&mut self) {
         self.mode = GameMode::Dialogue(crate::application::dialogue::DialogueState::new());
+    }
+
+    /// Enters [`GameMode::SkillTraining`] for the specified skill trainer NPC.
+    ///
+    /// Call this when a dialogue fires
+    /// [`crate::domain::dialogue::DialogueAction::OpenSkillTraining`] for an
+    /// NPC with `is_skill_trainer: true`.
+    ///
+    /// # Arguments
+    ///
+    /// * `npc_id` – ID of the skill trainer NPC.
+    /// * `eligible_indices` – Indices into `party.members` for alive members.
+    /// * `available_skills` – The `SkillId`s the NPC can train.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// let training_state = state.enter_skill_training(
+    ///     "perception_sage",
+    ///     vec![0, 1],
+    ///     vec!["perception".to_string()],
+    /// );
+    /// assert_eq!(training_state.npc_id, "perception_sage");
+    /// assert!(matches!(state.mode, GameMode::SkillTraining(_)));
+    /// ```
+    pub fn enter_skill_training(
+        &mut self,
+        npc_id: &str,
+        eligible_indices: Vec<usize>,
+        available_skills: Vec<crate::domain::skills::SkillId>,
+    ) -> crate::application::skill_training_state::SkillTrainingState {
+        use crate::application::skill_training_state::SkillTrainingState;
+        let training_state = SkillTrainingState::new(npc_id, eligible_indices, available_skills);
+        self.mode = GameMode::SkillTraining(training_state.clone());
+        training_state
+    }
+
+    /// Exits skill training mode, returning to [`GameMode::Exploration`].
+    ///
+    /// This is the programmatic counterpart to pressing Escape while in the
+    /// skill training screen.  It is a no-op when the current mode is not
+    /// `SkillTraining`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::{GameState, GameMode};
+    ///
+    /// let mut state = GameState::new();
+    /// state.enter_skill_training("trainer", vec![], vec![]);
+    /// assert!(matches!(state.mode, GameMode::SkillTraining(_)));
+    ///
+    /// state.exit_skill_training();
+    /// assert!(matches!(state.mode, GameMode::Exploration));
+    /// ```
+    pub fn exit_skill_training(&mut self) {
+        if matches!(self.mode, GameMode::SkillTraining(_)) {
+            self.mode = GameMode::Exploration;
+        }
     }
 
     /// Enters the merchant buy/sell split-screen inventory.
@@ -6512,6 +6589,65 @@ mod tests {
         assert!(
             matches!(state.mode, GameMode::Automap),
             "exit_spellbook must restore the mode that was active before SpellBook"
+        );
+    }
+
+    // ── SkillTraining mode ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_enter_skill_training_sets_skill_training_mode() {
+        let mut state = GameState::new();
+        state.enter_skill_training(
+            "perception_sage",
+            vec![0, 1],
+            vec!["perception".to_string()],
+        );
+        assert!(
+            matches!(state.mode, GameMode::SkillTraining(_)),
+            "enter_skill_training must set GameMode::SkillTraining"
+        );
+        if let GameMode::SkillTraining(ref st) = state.mode {
+            assert_eq!(st.npc_id, "perception_sage");
+            assert_eq!(st.eligible_member_indices, vec![0, 1]);
+            assert_eq!(st.available_skill_ids, vec!["perception".to_string()]);
+        }
+    }
+
+    #[test]
+    fn test_exit_skill_training_returns_to_exploration() {
+        let mut state = GameState::new();
+        state.enter_skill_training("trainer", vec![], vec![]);
+        assert!(matches!(state.mode, GameMode::SkillTraining(_)));
+        state.exit_skill_training();
+        assert!(
+            matches!(state.mode, GameMode::Exploration),
+            "exit_skill_training must restore Exploration mode"
+        );
+    }
+
+    #[test]
+    fn test_exit_skill_training_noop_when_not_in_skill_training_mode() {
+        let mut state = GameState::new();
+        // mode is Exploration by default
+        state.exit_skill_training();
+        assert!(
+            matches!(state.mode, GameMode::Exploration),
+            "exit_skill_training is a no-op outside SkillTraining mode"
+        );
+    }
+
+    #[test]
+    fn test_close_modal_closes_skill_training_to_exploration() {
+        let mut state = GameState::new();
+        state.enter_skill_training("trainer", vec![], vec![]);
+        let closed = state.close_modal();
+        assert!(
+            closed,
+            "close_modal must return true for SkillTraining mode"
+        );
+        assert!(
+            matches!(state.mode, GameMode::Exploration),
+            "close_modal must restore Exploration after SkillTraining"
         );
     }
 }

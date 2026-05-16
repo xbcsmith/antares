@@ -5615,6 +5615,7 @@ mod tests {
                 starting_armor_id: None,
                 starting_items: vec![],
                 proficiencies: vec!["martial_melee".to_string()],
+                skill_grants: vec![],
             })
             .unwrap();
 

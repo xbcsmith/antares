@@ -144,9 +144,9 @@ pub fn handle_global_mode_toggles(
                     }
                 }
             }
-            GameMode::Menu(_) | GameMode::Combat(_) => {
-                // Inventory toggle is ignored in menu and combat, but still
-                // consumes the frame to preserve top-of-function behavior.
+            GameMode::Menu(_) | GameMode::Combat(_) | GameMode::SkillTraining(_) => {
+                // Inventory toggle is ignored in menu, combat, and skill training, but
+                // still consumes the frame to preserve top-of-function behavior.
             }
             _ => {
                 game_state.enter_inventory();
@@ -229,6 +229,7 @@ pub fn handle_global_mode_toggles(
             GameMode::Combat(_)
             | GameMode::Dialogue(_)
             | GameMode::Training(_)
+            | GameMode::SkillTraining(_)
             | GameMode::MerchantInventory(_) => {
                 bevy::prelude::info!(
                     "Character sheet key pressed but mode is {:?} — ignoring",
@@ -249,6 +250,7 @@ pub fn handle_global_mode_toggles(
             GameMode::Combat(_)
                 | GameMode::Dialogue(_)
                 | GameMode::Training(_)
+                | GameMode::SkillTraining(_)
                 | GameMode::MerchantInventory(_)
         );
 
@@ -961,6 +963,40 @@ mod tests {
 
         assert!(consumed);
         assert!(matches!(state.mode, GameMode::Training(_)));
+    }
+
+    /// All global UI toggles that conflict with skill training must be ignored
+    /// while still consuming the frame in `GameMode::SkillTraining`.
+    #[test]
+    fn test_global_toggles_ignored_in_skill_training_for_all_blocked_toggles() {
+        let cases = [
+            ("inventory", inventory_toggle_intent()),
+            ("character sheet", character_sheet_toggle_intent(true)),
+            ("spellbook", spell_book_toggle_intent()),
+            ("automap", automap_toggle_intent()),
+            ("character select", character_select_intent(0)),
+        ];
+
+        for (name, intent) in cases {
+            let mut state = GameState::new();
+            state.enter_skill_training("skill_trainer", vec![], vec!["perception".to_string()]);
+            assert!(matches!(state.mode, GameMode::SkillTraining(_)));
+
+            let consumed = handle_global_mode_toggles(&mut state, intent, None);
+            assert!(
+                consumed,
+                "{name} toggle must consume frame in SkillTraining"
+            );
+            assert!(
+                matches!(state.mode, GameMode::SkillTraining(_)),
+                "mode must remain SkillTraining after {name} toggle"
+            );
+        }
+    }
+
+    #[test]
+    fn test_global_toggles_ignored_in_skill_training() {
+        test_global_toggles_ignored_in_skill_training_for_all_blocked_toggles();
     }
 
     #[test]

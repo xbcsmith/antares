@@ -4762,6 +4762,17 @@ mod portrait_click_tests {
     }
 
     #[test]
+    fn test_portrait_click_ignored_in_skill_training() {
+        let mut state = two_member_state();
+        state.enter_skill_training("skill_trainer", vec![0, 1], vec!["perception".to_string()]);
+        assert!(
+            !portrait_click_allowed(&state.mode),
+            "portrait click must be blocked while in SkillTraining mode"
+        );
+        assert!(matches!(state.mode, GameMode::SkillTraining(_)));
+    }
+
+    #[test]
     fn test_handle_portrait_click_selects_correct_party_index() {
         let mut state = two_member_state();
         assert!(portrait_click_allowed(&state.mode));

@@ -1,5 +1,22 @@
 [
     (
+        id: "test_skill_trainer",
+        name: "Master of Skills",
+        description: "A seasoned instructor who can train perception and diplomacy skills for a fee.",
+        portrait_id: "elder_1",
+        dialogue_id: Some(201),
+        creature_id: Some(59),
+        is_merchant: false,
+        is_innkeeper: false,
+        is_priest: false,
+        is_trainer: false,
+        is_skill_trainer: true,
+        trainable_skill_ids: ["perception", "diplomacy"],
+        skill_training_fee_base: Some(100),
+        skill_training_fee_multiplier: Some(1.0),
+        skill_training_max_rank: Some(20),
+    ),
+    (
         id: "temple_priest",
         name: "Temple Priest",
         description: "A devoted priest of the temple who can restore life to the fallen for a price.",

@@ -1742,6 +1742,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: vec![],
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         db.npcs.add_npc(npc).unwrap();
 
@@ -1815,6 +1820,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: vec![],
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         db.npcs.add_npc(npc).unwrap();
 
@@ -2257,6 +2267,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: vec![],
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         db.npcs.add_npc(npc).unwrap();
 
@@ -2341,6 +2356,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: vec![],
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
         db.npcs.add_npc(npc).unwrap();
 
@@ -2425,6 +2445,11 @@ mod tests {
                 is_trainer: false,
                 training_fee_base: None,
                 training_fee_multiplier: None,
+                is_skill_trainer: false,
+                trainable_skill_ids: vec![],
+                skill_training_fee_base: None,
+                skill_training_fee_multiplier: None,
+                skill_training_max_rank: None,
             })
             .unwrap();
 

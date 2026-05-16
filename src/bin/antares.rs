@@ -302,6 +302,9 @@ impl Plugin for AntaresPlugin {
         // NPC trainer level-up UI
         app.add_plugins(antares::game::systems::training_ui::TrainingPlugin);
 
+        // NPC skill trainer UI
+        app.add_plugins(antares::game::systems::skill_training_ui::SkillTrainingPlugin);
+
         // Character sheet read-only viewer
         app.add_plugins(antares::game::systems::character_sheet_ui::CharacterSheetPlugin);
 

@@ -35,11 +35,12 @@ use crate::domain::classes::ClassDatabase;
 use crate::domain::combat::monster::Monster;
 use crate::domain::conditions::{ConditionDefinition, ConditionId};
 use crate::domain::database_common::load_ron_entries;
-use crate::domain::dialogue::{DialogueId, DialogueTree};
+use crate::domain::dialogue::{DialogueCondition, DialogueId, DialogueTree, NodeId};
 use crate::domain::items::ItemDatabase;
 use crate::domain::magic::types::Spell;
 use crate::domain::quest::{Quest, QuestId};
 use crate::domain::races::{RaceDatabase, RaceError};
+use crate::domain::skills::SkillDatabase;
 use crate::domain::types::{MapId, MonsterId, SpellId};
 use crate::domain::world::furniture::FurnitureDatabase;
 use crate::domain::world::{Map, MapBlueprint};
@@ -91,6 +92,9 @@ pub enum DatabaseError {
 
     #[error("Failed to load furniture: {0}")]
     FurnitureLoadError(String),
+
+    #[error("Failed to load skills: {0}")]
+    SkillLoadError(String),
 
     #[error("Failed to load map {map_id}: {error}")]
     MapLoadError { map_id: String, error: String },
@@ -1081,6 +1085,12 @@ pub struct ContentDatabase {
     /// Loaded from `data/furniture.ron` in the campaign directory.
     /// Missing file is not an error — furniture support is opt-in per campaign.
     pub furniture: FurnitureDatabase,
+
+    /// Skill definitions database.
+    ///
+    /// Loaded from `data/skills.ron` in the campaign directory.
+    /// Missing file is not an error — skills are added progressively.
+    pub skills: SkillDatabase,
 }
 
 impl ContentDatabase {
@@ -1111,6 +1121,7 @@ impl ContentDatabase {
             npc_stock_templates:
                 crate::domain::world::npc_runtime::MerchantStockTemplateDatabase::new(),
             furniture: FurnitureDatabase::new(),
+            skills: SkillDatabase::new(),
         }
     }
 
@@ -1160,6 +1171,22 @@ impl ContentDatabase {
     /// # }
     /// ```
     pub fn load_campaign<P: AsRef<Path>>(campaign_dir: P) -> Result<Self, DatabaseError> {
+        Self::load_campaign_with_skills_file(campaign_dir, "data/skills.ron")
+    }
+
+    /// Loads content from a campaign directory with a configurable skills file path.
+    ///
+    /// `skills_file` is resolved relative to `campaign_dir` unless it is an
+    /// absolute path. Missing skill files still produce an empty skill database.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DatabaseError`] if any required campaign content cannot be loaded
+    /// or if the configured skills file exists but cannot be parsed.
+    pub fn load_campaign_with_skills_file<P: AsRef<Path>>(
+        campaign_dir: P,
+        skills_file: &str,
+    ) -> Result<Self, DatabaseError> {
         let campaign_path = campaign_dir.as_ref();
 
         if !campaign_path.exists() {
@@ -1277,6 +1304,20 @@ impl ContentDatabase {
             FurnitureDatabase::new()
         };
 
+        // Load skill definitions (opt-in per campaign; missing file is not an error)
+        let configured_skills_path = Path::new(skills_file);
+        let skills_path = if configured_skills_path.is_absolute() {
+            configured_skills_path.to_path_buf()
+        } else {
+            campaign_path.join(configured_skills_path)
+        };
+        let skills = if skills_path.exists() {
+            SkillDatabase::load_from_file(&skills_path)
+                .map_err(|e| DatabaseError::SkillLoadError(e.to_string()))?
+        } else {
+            SkillDatabase::new()
+        };
+
         Ok(Self {
             classes,
             races,
@@ -1292,6 +1333,7 @@ impl ContentDatabase {
             npc_stock_templates,
             creatures,
             furniture,
+            skills,
         })
     }
 
@@ -1428,6 +1470,14 @@ impl ContentDatabase {
             FurnitureDatabase::new()
         };
 
+        // Load skill definitions (opt-in; missing file is not an error)
+        let skills = if data_path.join("skills.ron").exists() {
+            SkillDatabase::load_from_file(data_path.join("skills.ron"))
+                .map_err(|e| DatabaseError::SkillLoadError(e.to_string()))?
+        } else {
+            SkillDatabase::new()
+        };
+
         Ok(Self {
             classes,
             races,
@@ -1443,7 +1493,65 @@ impl ContentDatabase {
             npc_stock_templates,
             creatures,
             furniture,
+            skills,
         })
+    }
+
+    fn validate_skill_conditions(
+        dialogue_id: DialogueId,
+        node_id: NodeId,
+        condition_owner: &str,
+        conditions: &[DialogueCondition],
+        skills: &SkillDatabase,
+    ) -> Result<(), DatabaseError> {
+        for condition in conditions {
+            match condition {
+                DialogueCondition::SkillCheck {
+                    skill_id,
+                    minimum_rank,
+                    ..
+                } => {
+                    let Some(skill) = skills.get(skill_id) else {
+                        return Err(DatabaseError::ValidationError(format!(
+                            "Dialogue {} node {} {} references non-existent skill '{}'",
+                            dialogue_id, node_id, condition_owner, skill_id
+                        )));
+                    };
+                    if *minimum_rank > skill.max_rank {
+                        return Err(DatabaseError::ValidationError(format!(
+                            "Dialogue {} node {} {} requires skill '{}' rank {}, above max_rank {}",
+                            dialogue_id,
+                            node_id,
+                            condition_owner,
+                            skill_id,
+                            minimum_rank,
+                            skill.max_rank
+                        )));
+                    }
+                }
+                DialogueCondition::And(inner) | DialogueCondition::Or(inner) => {
+                    Self::validate_skill_conditions(
+                        dialogue_id,
+                        node_id,
+                        condition_owner,
+                        inner,
+                        skills,
+                    )?;
+                }
+                DialogueCondition::Not(inner) => {
+                    Self::validate_skill_conditions(
+                        dialogue_id,
+                        node_id,
+                        condition_owner,
+                        std::slice::from_ref(inner.as_ref()),
+                        skills,
+                    )?;
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
     }
 
     /// Validates all content in the database
@@ -1470,12 +1578,57 @@ impl ContentDatabase {
             .validate()
             .map_err(|e| DatabaseError::ValidationError(e.to_string()))?;
 
+        // Validate skills
+        self.skills
+            .validate()
+            .map_err(|e| DatabaseError::ValidationError(e.to_string()))?;
+
+        // Validate class and race skill grant references.
+        if let Some(err) = self
+            .classes
+            .validate_with_skill_db(&self.skills)
+            .into_iter()
+            .next()
+        {
+            return Err(DatabaseError::ValidationError(err.to_string()));
+        }
+        if let Some(err) = self
+            .races
+            .validate_with_skill_db(&self.skills)
+            .into_iter()
+            .next()
+        {
+            return Err(DatabaseError::ValidationError(err.to_string()));
+        }
+
         // Validate dialogues
         self.dialogues
             .validate()
             .map_err(|e| DatabaseError::ValidationError(e.to_string()))?;
 
         // Cross-reference validation
+
+        // Check dialogue skill gates.
+        for dialogue in self.dialogues.dialogues.values() {
+            for node in dialogue.nodes.values() {
+                Self::validate_skill_conditions(
+                    dialogue.id,
+                    node.id,
+                    "node",
+                    &node.conditions,
+                    &self.skills,
+                )?;
+                for choice in &node.choices {
+                    Self::validate_skill_conditions(
+                        dialogue.id,
+                        node.id,
+                        "choice",
+                        &choice.conditions,
+                        &self.skills,
+                    )?;
+                }
+            }
+        }
 
         // Check quests
         for quest in self.quests.quests.values() {
@@ -1611,6 +1764,7 @@ impl ContentDatabase {
             npc_count: self.npcs.count(),
             creature_count: self.creatures.count(),
             npc_stock_template_count: self.npc_stock_templates.len(),
+            skill_count: self.skills.len(),
         }
     }
 }
@@ -1677,6 +1831,9 @@ pub struct ContentStats {
 
     /// Number of merchant stock template definitions
     pub npc_stock_template_count: usize,
+
+    /// Number of skill definitions
+    pub skill_count: usize,
 }
 
 impl ContentStats {
@@ -1701,6 +1858,7 @@ impl ContentStats {
     ///     npc_count: 12,
     ///     creature_count: 0,
     ///     npc_stock_template_count: 0,
+    ///     skill_count: 0,
     /// };
     /// assert_eq!(stats.total(), 263);
     /// ```
@@ -1718,12 +1876,123 @@ impl ContentStats {
             + self.npc_count
             + self.creature_count
             + self.npc_stock_template_count
+            + self.skill_count
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_content_stats_includes_skill_count() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let db = ContentDatabase::load_campaign(
+            std::path::Path::new(manifest_dir).join("data/test_campaign"),
+        )
+        .expect("test_campaign must load");
+
+        let stats = db.stats();
+
+        // The test campaign fixture defines 5 Phase 1 skills.
+        assert_eq!(
+            stats.skill_count,
+            db.skills.len(),
+            "stats().skill_count must match skills.len()"
+        );
+        // At least the 5 canonical skills must be present.
+        assert!(
+            stats.skill_count >= 5,
+            "test campaign must have at least 5 skills, got {}",
+            stats.skill_count
+        );
+        // skill_count is included in total().
+        assert_eq!(
+            stats.total(),
+            stats.class_count
+                + stats.race_count
+                + stats.item_count
+                + stats.monster_count
+                + stats.spell_count
+                + stats.map_count
+                + stats.quest_count
+                + stats.dialogue_count
+                + stats.condition_count
+                + stats.character_count
+                + stats.npc_count
+                + stats.creature_count
+                + stats.npc_stock_template_count
+                + stats.skill_count,
+        );
+    }
+
+    #[test]
+    fn test_content_database_validate_rejects_unknown_class_skill_reference() {
+        let mut db = ContentDatabase::new();
+        let class_ron = r#"[
+            (id: "knight", name: "Knight",
+             hp_die: (count: 1, sides: 10, bonus: 0),
+             spell_school: None, is_pure_caster: false, spell_stat: None,
+             special_abilities: [], starting_weapon_id: None, starting_armor_id: None,
+             starting_items: [], proficiencies: [],
+             skill_grants: [(skill_id: "missing_skill", flat_bonus: 1, per_level_bonus: 0,
+                             minimum_rank: None, maximum_rank_override: None)]),
+        ]"#;
+        db.classes = ClassDatabase::load_from_string(class_ron).expect("class fixture must parse");
+
+        let err = db
+            .validate()
+            .expect_err("unknown class skill grant must fail validation");
+
+        assert!(err.to_string().contains("missing_skill"));
+    }
+
+    #[test]
+    fn test_content_database_validate_rejects_unknown_dialogue_skill_check() {
+        use crate::domain::dialogue::{DialogueCondition, DialogueNode, DialogueTree};
+        use crate::domain::skills::PartySkillScope;
+
+        let mut db = ContentDatabase::new();
+        let mut dialogue = DialogueTree::new(1, "Skill Gate", 1);
+        let mut root = DialogueNode::new(1, "A locked door waits.");
+        root.add_condition(DialogueCondition::SkillCheck {
+            skill_id: "missing_skill".to_string(),
+            minimum_rank: 1,
+            party_scope: PartySkillScope::AnyMember,
+        });
+        dialogue.add_node(root);
+        db.dialogues.add_dialogue(dialogue);
+
+        let err = db
+            .validate()
+            .expect_err("unknown dialogue skill check must fail validation");
+
+        assert!(err.to_string().contains("missing_skill"));
+    }
+
+    #[test]
+    fn test_load_campaign_with_skills_file_uses_configured_path() {
+        let dir = tempfile::TempDir::new().expect("tempdir should be created");
+        let custom_dir = dir.path().join("custom_data");
+        std::fs::create_dir_all(&custom_dir).expect("custom data dir should be created");
+        std::fs::write(
+            custom_dir.join("custom_skills.ron"),
+            r#"[
+                (id: "custom_skill", name: "Custom Skill", category: Utility,
+                 description: "Loaded from configured path.", scaling: Flat,
+                 max_rank: 10, is_trainable: true),
+            ]"#,
+        )
+        .expect("custom skills fixture should be written");
+
+        let db = ContentDatabase::load_campaign_with_skills_file(
+            dir.path(),
+            "custom_data/custom_skills.ron",
+        )
+        .expect("content database should load custom skills path");
+
+        assert!(db.skills.has("custom_skill"));
+    }
 
     #[test]
     fn test_content_database_new() {
@@ -1766,6 +2035,7 @@ mod tests {
             npc_count: 0,
             creature_count: 0,
             npc_stock_template_count: 0,
+            skill_count: 0,
         };
         assert_eq!(stats.total(), 17);
     }
@@ -2549,6 +2819,7 @@ mod tests {
             npc_count: 0,
             creature_count: 0,
             npc_stock_template_count: 0,
+            skill_count: 0,
         };
 
         // Total should include character_count, npc_count, and creature_count
@@ -2598,6 +2869,11 @@ mod tests {
             is_trainer: false,
             training_fee_base: None,
             training_fee_multiplier: None,
+            is_skill_trainer: false,
+            trainable_skill_ids: vec![],
+            skill_training_fee_base: None,
+            skill_training_fee_multiplier: None,
+            skill_training_max_rank: None,
         };
 
         db.add_npc(npc.clone()).expect("Failed to add NPC");
@@ -2860,6 +3136,7 @@ mod tests {
             creature_count: 0,
             npc_count: 15,
             npc_stock_template_count: 0,
+            skill_count: 0,
         };
 
         assert_eq!(stats.total(), 181);

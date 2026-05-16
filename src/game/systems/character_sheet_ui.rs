@@ -49,6 +49,8 @@ use crate::application::GameMode;
 use crate::domain::campaign::LevelUpMode;
 use crate::domain::character::{Alignment, Sex};
 use crate::domain::progression::experience_for_level_with_config;
+use crate::domain::skill_resolver::{SkillResolver, SkillResolverContext};
+use crate::domain::skills::{SkillCategory, SkillGrantSource};
 use crate::game::resources::game_data::GameDataResource;
 use crate::game::resources::GlobalState;
 use crate::game::systems::hud::{get_portrait_color, FullPortraitAssets};
@@ -71,6 +73,10 @@ const TRAINER_NEEDED_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 215, 0)
 const TITLE_COLOR: egui::Color32 = egui::Color32::from_rgb(204, 217, 255);
 /// Hint bar colour.
 const HINT_COLOR: egui::Color32 = egui::Color32::from_rgb(140, 140, 166);
+/// Color for skill category subheadings.
+const SKILL_CATEGORY_COLOR: egui::Color32 = egui::Color32::from_rgb(180, 220, 180);
+/// Color for the trainable marker on skills.
+const SKILL_TRAINABLE_COLOR: egui::Color32 = egui::Color32::from_rgb(100, 200, 255);
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
@@ -673,6 +679,7 @@ fn render_single_view(
                             profs.sort();
                             ui.label(profs.join(", "));
                         }
+                        render_skill_section(ui, &character, content_db);
                     });
                 });
         });
@@ -766,6 +773,146 @@ fn alignment_display(alignment: Alignment) -> &'static str {
         Alignment::Good => "Good",
         Alignment::Neutral => "Neutral",
         Alignment::Evil => "Evil",
+    }
+}
+
+/// Returns a display label for a [`SkillCategory`].
+fn skill_category_label(cat: SkillCategory) -> &'static str {
+    match cat {
+        SkillCategory::Combat => "Combat",
+        SkillCategory::Exploration => "Exploration",
+        SkillCategory::Knowledge => "Knowledge",
+        SkillCategory::Social => "Social",
+        SkillCategory::Utility => "Utility",
+    }
+}
+
+/// Renders the read-only Skills section inside the character sheet.
+///
+/// Shows effective (level-scaled + grant-modified) ranks for every skill in
+/// the skill database, grouped by [`SkillCategory`].  Each row offers a hover
+/// tooltip that breaks down the rank by source.
+///
+/// Does not mutate any game state; all calls into [`SkillResolver`] are
+/// read-only queries.
+///
+/// # Arguments
+///
+/// * `ui`          – egui context for this frame.
+/// * `character`   – The character whose ranks are being displayed.
+/// * `content_db`  – Optional content database that carries the skill definitions.
+///   When `None`, a placeholder is rendered instead.
+fn render_skill_section(
+    ui: &mut egui::Ui,
+    character: &crate::domain::character::Character,
+    content_db: Option<&ContentDatabase>,
+) {
+    ui.add_space(8.0);
+    ui.colored_label(TITLE_COLOR, "Skills");
+    ui.separator();
+
+    let db = match content_db {
+        Some(db) if !db.skills.is_empty() => db,
+        _ => {
+            ui.colored_label(STAT_EMPTY_COLOR, "No skills defined.");
+            return;
+        }
+    };
+
+    let empty_grants: &[crate::domain::skills::SkillGrant] = &[];
+    let class_grants = db
+        .classes
+        .get_class(&character.class_id)
+        .map(|c| c.skill_grants.as_slice())
+        .unwrap_or(empty_grants);
+    let race_grants = db
+        .races
+        .get_race(&character.race_id)
+        .map(|r| r.skill_grants.as_slice())
+        .unwrap_or(empty_grants);
+
+    let ctx = SkillResolverContext {
+        level: character.level,
+        class_id: &character.class_id,
+        race_id: &character.race_id,
+        char_ranks: &character.skill_ranks,
+        class_grants,
+        race_grants,
+    };
+
+    const CATEGORIES: &[SkillCategory] = &[
+        SkillCategory::Combat,
+        SkillCategory::Exploration,
+        SkillCategory::Knowledge,
+        SkillCategory::Social,
+        SkillCategory::Utility,
+    ];
+
+    let mut any_shown = false;
+    for &category in CATEGORIES {
+        let mut skills_in_cat = db.skills.by_category(category);
+        if skills_in_cat.is_empty() {
+            continue;
+        }
+        // Sort by name for stable display order.
+        skills_in_cat.sort_by(|a, b| a.name.cmp(&b.name));
+        any_shown = true;
+
+        ui.colored_label(
+            SKILL_CATEGORY_COLOR,
+            egui::RichText::new(skill_category_label(category)).italics(),
+        );
+
+        for skill_def in &skills_in_cat {
+            let skill_id = &skill_def.id;
+            let effective_rank =
+                SkillResolver::effective_skill_rank(&ctx, skill_id, &db.skills).unwrap_or(0);
+            let breakdown =
+                SkillResolver::effective_skill_breakdown(&ctx, skill_id, &db.skills).ok();
+
+            ui.push_id(skill_id.as_str(), |ui| {
+                let trainable_marker = if skill_def.is_trainable { " [T]" } else { "" };
+                let row_label =
+                    format!("{}{}: {}", skill_def.name, trainable_marker, effective_rank);
+
+                let response = ui.label(row_label);
+
+                if let Some(bd) = &breakdown {
+                    response.on_hover_ui(|ui| {
+                        ui.label(format!("Base (level scaling): {}", bd.auto_rank));
+                        for entry in &bd.entries {
+                            let src = match entry.source {
+                                SkillGrantSource::Class => "Class grant",
+                                SkillGrantSource::Race => "Race grant",
+                                SkillGrantSource::Character => "Trained",
+                                SkillGrantSource::Training => "Training",
+                                SkillGrantSource::Temporary => "Temporary",
+                            };
+                            let sign = if entry.bonus >= 0 { "+" } else { "" };
+                            ui.label(format!("  {src}: {sign}{}", entry.bonus));
+                        }
+                        ui.separator();
+                        ui.label(format!("Effective rank: {}", bd.final_rank));
+                        if let Some(floor) = bd.applied_minimum_rank {
+                            ui.label(format!("  Min floor: {floor}"));
+                        }
+                        if let Some(cap) = bd.applied_maximum_rank_override {
+                            ui.label(format!("  Override cap: {cap}"));
+                        }
+                        if skill_def.is_trainable {
+                            ui.colored_label(
+                                SKILL_TRAINABLE_COLOR,
+                                "[Trainable at an NPC trainer]",
+                            );
+                        }
+                    });
+                }
+            });
+        }
+    }
+
+    if !any_shown {
+        ui.colored_label(STAT_EMPTY_COLOR, "No skills defined.");
     }
 }
 
@@ -1264,5 +1411,226 @@ mod tests {
             });
         });
         // Reaching here without panic = About block and Resistances rendered correctly.
+    }
+
+    /// Verifies `render_single_view` does not panic when the content database
+    /// contains skills.  The skills section must render all categories without
+    /// panicking even when the character has no persistent skill ranks.
+    #[test]
+    fn test_character_sheet_skill_section_renders_without_panic() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::skills::{SkillCategory, SkillDatabase, SkillScalingMode};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut state = crate::application::GameState::new();
+        let ch = Character::new(
+            "Aldric".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(ch).unwrap();
+        state.enter_character_sheet();
+
+        let mut gs = crate::game::resources::GlobalState(state);
+        let campaign_config = crate::domain::campaign::CampaignConfig::default();
+
+        // Build a minimal skill database
+        let skill_ron = r#"[
+            (id: "perception", name: "Perception", category: Exploration,
+             description: "Noticing things", scaling: Linear(base: 0, per_level: 1),
+             max_rank: 50, is_trainable: true),
+            (id: "athletics", name: "Athletics", category: Utility,
+             description: "Running and jumping", scaling: Flat,
+             max_rank: 20, is_trainable: false),
+        ]"#;
+        let mut content_db = ContentDatabase::new();
+        content_db.skills = SkillDatabase::load_from_string(skill_ron).unwrap();
+
+        // Suppress unused import warning — SkillCategory and SkillScalingMode are
+        // referenced in the RON string above and imported for documentation clarity.
+        let _: Option<SkillCategory> = None;
+        let _: Option<SkillScalingMode> = None;
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_single_view(
+                    ui,
+                    &mut gs,
+                    1,
+                    0,
+                    &campaign_config,
+                    None,
+                    Some(&content_db),
+                    None,
+                    "aldric",
+                );
+            });
+        });
+        // Reaching here without panic = pass
+    }
+
+    /// Verifies that the effective rank displayed for a skill is the resolver's
+    /// derived rank (auto-scaling + grants) rather than the raw persistent rank.
+    ///
+    /// At level 5 with `Linear(base: 0, per_level: 1)` the auto rank is 4.
+    /// With a character-owned persistent rank of 2 the effective rank is 6.
+    /// A naive display of the raw rank would show 2; the correct display is 6.
+    #[test]
+    fn test_skill_display_uses_effective_rank_not_raw_character_rank() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::skill_resolver::{SkillResolver, SkillResolverContext};
+        use crate::domain::skills::{SkillDatabase, SkillGrant};
+
+        let skill_ron = r#"[
+            (id: "perception", name: "Perception", category: Exploration,
+             description: "", scaling: Linear(base: 0, per_level: 1),
+             max_rank: 50, is_trainable: true),
+        ]"#;
+        let skills_db = SkillDatabase::load_from_string(skill_ron).unwrap();
+
+        let mut ch = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.level = 5;
+        ch.skill_ranks.set("perception".to_string(), 2);
+
+        let empty_grants: Vec<SkillGrant> = vec![];
+        let ctx = SkillResolverContext {
+            level: ch.level,
+            class_id: &ch.class_id,
+            race_id: &ch.race_id,
+            char_ranks: &ch.skill_ranks,
+            class_grants: &empty_grants,
+            race_grants: &empty_grants,
+        };
+
+        let effective =
+            SkillResolver::effective_skill_rank(&ctx, &"perception".to_string(), &skills_db)
+                .unwrap();
+
+        // Auto rank = 4 (level 5, linear 0+1/level), char rank = 2 → effective = 6
+        assert_eq!(
+            effective, 6,
+            "effective rank must include auto-scaling (4) + char rank (2)"
+        );
+        // Raw persistent rank alone is just 2 — the UI must show 6, not 2.
+        assert_ne!(
+            effective,
+            ch.skill_ranks.get(&"perception".to_string()).unwrap_or(0),
+            "effective rank must differ from raw persistent rank"
+        );
+    }
+
+    /// Verifies that `effective_skill_breakdown` records separate Class and Race
+    /// grant entries so the tooltip can show per-source contributions.
+    #[test]
+    fn test_skill_breakdown_includes_class_and_race_sources() {
+        use crate::domain::skill_resolver::{SkillResolver, SkillResolverContext};
+        use crate::domain::skills::{
+            CharacterSkillRanks, SkillDatabase, SkillGrant, SkillGrantSource,
+        };
+
+        let skill_ron = r#"[
+            (id: "athletics", name: "Athletics", category: Utility,
+             description: "", scaling: Flat, max_rank: 20, is_trainable: true),
+        ]"#;
+        let skills_db = SkillDatabase::load_from_string(skill_ron).unwrap();
+
+        let class_grants = vec![SkillGrant {
+            skill_id: "athletics".to_string(),
+            flat_bonus: 3,
+            per_level_bonus: 0,
+            minimum_rank: None,
+            maximum_rank_override: None,
+        }];
+        let race_grants = vec![SkillGrant {
+            skill_id: "athletics".to_string(),
+            flat_bonus: 1,
+            per_level_bonus: 0,
+            minimum_rank: None,
+            maximum_rank_override: None,
+        }];
+        let char_ranks = CharacterSkillRanks::new();
+
+        let ctx = SkillResolverContext {
+            level: 3,
+            class_id: "knight",
+            race_id: "human",
+            char_ranks: &char_ranks,
+            class_grants: &class_grants,
+            race_grants: &race_grants,
+        };
+
+        let bd =
+            SkillResolver::effective_skill_breakdown(&ctx, &"athletics".to_string(), &skills_db)
+                .unwrap();
+
+        assert_eq!(bd.final_rank, 4, "Flat(0) + class +3 + race +1 = 4");
+
+        let has_class = bd
+            .entries
+            .iter()
+            .any(|e| e.source == SkillGrantSource::Class && e.bonus == 3);
+        let has_race = bd
+            .entries
+            .iter()
+            .any(|e| e.source == SkillGrantSource::Race && e.bonus == 1);
+
+        assert!(
+            has_class,
+            "breakdown must include Class grant entry with bonus 3"
+        );
+        assert!(
+            has_race,
+            "breakdown must include Race grant entry with bonus 1"
+        );
+    }
+
+    /// Verifies that `render_single_view` renders without panic when
+    /// `content_db` is `None` — the skills section should show the
+    /// "No skills defined." placeholder rather than panicking.
+    #[test]
+    fn test_skill_display_handles_missing_skill_database_gracefully() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut state = crate::application::GameState::new();
+        let ch = Character::new(
+            "Gareth".to_string(),
+            "dwarf".to_string(),
+            "paladin".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(ch).unwrap();
+        state.enter_character_sheet();
+
+        let mut gs = crate::game::resources::GlobalState(state);
+        let campaign_config = crate::domain::campaign::CampaignConfig::default();
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // content_db = None simulates missing skill database
+                render_single_view(
+                    ui,
+                    &mut gs,
+                    1,
+                    0,
+                    &campaign_config,
+                    None,
+                    None,
+                    None,
+                    "gareth",
+                );
+            });
+        });
+        // Reaching here without panic = pass
     }
 }

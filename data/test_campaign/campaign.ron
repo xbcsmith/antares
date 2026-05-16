@@ -30,6 +30,7 @@ CampaignMetadata(
     conditions_file: "data/conditions.ron",
     npcs_file: "data/npcs.ron",
     proficiencies_file: "data/proficiencies.ron",
+    skills_file: "data/skills.ron",
     creatures_file: "data/creatures.ron",
     furniture_file: "data/furniture.ron",
     starting_time: (day: 1, hour: 8, minute: 0),

@@ -47,6 +47,7 @@
         size: Medium,
         proficiencies: [],
         incompatible_item_tags: [],
+        skill_grants: [],
     ),
 
     // ===== Elf - Agile and intelligent, but less sturdy =====
@@ -77,6 +78,10 @@
         size: Medium,
         proficiencies: ["martial_ranged", "martial_melee", "longsword"],
         incompatible_item_tags: [],
+        skill_grants: [
+            (skill_id: "perception", flat_bonus: 2, per_level_bonus: 0, minimum_rank: None, maximum_rank_override: None),
+            (skill_id: "arcane_lore", flat_bonus: 1, per_level_bonus: 0, minimum_rank: None, maximum_rank_override: None),
+        ],
     ),
 
     // ===== Dwarf - Tough and strong, but slower =====
@@ -107,6 +112,10 @@
         size: Medium,
         proficiencies: ["martial_melee", "blunt_weapon"],
         incompatible_item_tags: [],
+        skill_grants: [
+            (skill_id: "athletics", flat_bonus: 2, per_level_bonus: 0, minimum_rank: None, maximum_rank_override: None),
+            (skill_id: "disarm_traps", flat_bonus: 1, per_level_bonus: 0, minimum_rank: None, maximum_rank_override: None),
+        ],
     ),
 
     // ===== Gnome - Clever and lucky, but weaker =====
@@ -137,6 +146,10 @@
         size: Small,
         proficiencies: ["simple_weapon", "martial_ranged"],
         incompatible_item_tags: ["large_weapon", "heavy_armor"],
+        skill_grants: [
+            (skill_id: "item_lore", flat_bonus: 2, per_level_bonus: 0, minimum_rank: None, maximum_rank_override: None),
+            (skill_id: "disarm_traps", flat_bonus: 1, per_level_bonus: 0, minimum_rank: None, maximum_rank_override: None),
+        ],
     ),
 
     // ===== Half-Elf - Blend of human and elf traits =====
@@ -167,6 +180,9 @@
         size: Medium,
         proficiencies: ["martial_melee"],
         incompatible_item_tags: [],
+        skill_grants: [
+            (skill_id: "perception", flat_bonus: 1, per_level_bonus: 0, minimum_rank: None, maximum_rank_override: None),
+        ],
     ),
 
     // ===== Half-Orc - Strong and tough, but less charismatic =====
@@ -197,5 +213,8 @@
         size: Medium,
         proficiencies: ["martial_melee", "blunt_weapon"],
         incompatible_item_tags: [],
+        skill_grants: [
+            (skill_id: "athletics", flat_bonus: 1, per_level_bonus: 0, minimum_rank: None, maximum_rank_override: None),
+        ],
     ),
 ]
