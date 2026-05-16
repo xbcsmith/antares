@@ -67,6 +67,7 @@
         skill_grants: [
             (skill_id: "diplomacy", flat_bonus: 1, per_level_bonus: 0, minimum_rank: None, maximum_rank_override: None),
             (skill_id: "divine_lore", flat_bonus: 1, per_level_bonus: 0, minimum_rank: None, maximum_rank_override: None),
+            (skill_id: "athletics", flat_bonus: 1, per_level_bonus: 0, minimum_rank: None, maximum_rank_override: None),
         ],
     ),
     (
@@ -98,6 +99,7 @@
         ],
         skill_grants: [
             (skill_id: "perception", flat_bonus: 2, per_level_bonus: 0, minimum_rank: None, maximum_rank_override: None),
+            (skill_id: "tracking", flat_bonus: 2, per_level_bonus: 1, minimum_rank: None, maximum_rank_override: None),
         ],
     ),
     (
@@ -192,6 +194,7 @@
         skill_grants: [
             (skill_id: "disarm_traps", flat_bonus: 3, per_level_bonus: 0, minimum_rank: None, maximum_rank_override: None),
             (skill_id: "perception", flat_bonus: 0, per_level_bonus: 1, minimum_rank: None, maximum_rank_override: None),
+            (skill_id: "stealth", flat_bonus: 2, per_level_bonus: 0, minimum_rank: None, maximum_rank_override: None),
         ],
     ),
     (

@@ -85,9 +85,11 @@ src/
 │   ├── classes.rs
 │   ├── combat/
 │   ├── conditions.rs
+│   ├── database_common.rs       # `impl_ron_database!` macro shared by all domain databases
 │   ├── dialogue.rs
 │   ├── inventory.rs
 │   ├── items/
+│   ├── levels.rs                # `LevelDatabase`, `ClassLevelThresholds` — per-class XP tables
 │   ├── magic/
 │   ├── party_manager.rs
 │   ├── proficiency.rs
@@ -95,8 +97,12 @@ src/
 │   ├── quest.rs
 │   ├── races.rs
 │   ├── resources.rs
+│   ├── skill_checks.rs          # `SkillCheckDifficulty`, `SkillCheckRequest`, `SkillCheckResult`, `skill_check_for_character`, `evaluate_party_skill_scope`
+│   ├── skill_resolver.rs        # `SkillResolver`, `SkillResolverContext` — effective rank computation
+│   ├── skills.rs                # `SkillId`, `SkillRank`, `SkillDefinition`, `SkillDatabase`, `CharacterSkillRanks`, `SkillGrant`, `SkillScalingMode`, `SkillCategory`, `PartySkillScope`
 │   ├── transactions.rs
 │   ├── types.rs
+│   ├── validation.rs            # `ValidationError` — unified domain validation error type
 │   ├── visual/
 │   └── world/
 ├── game/                        # Bevy ECS integration (components/systems/resources)

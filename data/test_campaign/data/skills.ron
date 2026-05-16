@@ -75,4 +75,52 @@
         max_rank: 40,
         is_trainable: true,
     ),
+
+    // ── Combat ───────────────────────────────────────────────────────────────────────
+
+    (
+        id: "leadership",
+        name: "Leadership",
+        category: Combat,
+        description: "Commanding presence that bolsters allies in battle.",
+        scaling: Flat,
+        max_rank: 20,
+        is_trainable: true,
+    ),
+
+    // ── Knowledge (second) ───────────────────────────────────────────────────────────
+
+    (
+        id: "divine_lore",
+        name: "Divine Lore",
+        category: Knowledge,
+        description: "Knowledge of divine forces, holy creatures, and sacred sites.",
+        scaling: Table(ranks_by_level: [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 6, 7, 8, 9, 10]),
+        max_rank: 40,
+        is_trainable: true,
+    ),
+
+    // ── Utility (second) ───────────────────────────────────────────────────────────────────
+
+    (
+        id: "stealth",
+        name: "Stealth",
+        category: Utility,
+        description: "Moving silently and remaining unseen.",
+        scaling: Step(base: 0, per_levels: 2, amount: 1),
+        max_rank: 30,
+        is_trainable: true,
+    ),
+
+    // ── Exploration (second) ─────────────────────────────────────────────────────────────
+
+    (
+        id: "tracking",
+        name: "Tracking",
+        category: Exploration,
+        description: "Reading trails and signs to locate quarry.",
+        scaling: Linear(base: 0, per_level: 1),
+        max_rank: 30,
+        is_trainable: true,
+    ),
 ]

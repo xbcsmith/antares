@@ -2,6 +2,141 @@
 
 ---
 
+## Phase 9: Balance, Documentation, and Migration (Complete)
+
+### Overview
+
+Phase 9 finalizes the skill system rollout with balanced content, architecture
+documentation updates, migration guidance, and full regression coverage. All
+five required regression tests pass against the test campaign fixture.
+
+### Documentation Updates
+
+#### `docs/reference/architecture.md` — Section 3.2
+
+Updated the domain module structure listing to explicitly document the three
+skill-system modules added in Phases 1–3:
+
+| Module                         | Public Exports                                                                                                                                                                                                                                                                                                  |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/skills.rs`         | `SkillId`, `SkillRank`, `SkillDefinition`, `SkillDatabase`, `CharacterSkillRanks`, `SkillGrant`, `SkillScalingMode`, `SkillCategory`, `SkillGrantSource`, `PartySkillScope`, `SkillBreakdown`, `SkillBreakdownEntry`, `rank_for_level`, `rank_for_level_with_bonus`, `validate_skill_id`, `validate_skill_rank` |
+| `src/domain/skill_resolver.rs` | `SkillResolver`, `SkillResolverContext`                                                                                                                                                                                                                                                                         |
+| `src/domain/skill_checks.rs`   | `SkillCheckDifficulty`, `SkillCheckError`, `SkillCheckRequest`, `SkillCheckResult`, `evaluate_party_skill_scope`, `evaluate_skill_check_without_roll`, `skill_check_for_character`                                                                                                                              |
+
+Also documented `levels.rs`, `validation.rs`, and `database_common.rs` which were
+present but unlisted.
+
+### Migration Guidance: Skills vs. Proficiencies
+
+Campaign authors who encounter the skill system for the first time can use this
+table to decide which mechanism to use:
+
+| Old Concept                                                             | New Guidance                                                                                                        |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Item use permission (can a class wield a longsword?)                    | Keep using **proficiencies** — `proficiencies.ron`, `ClassDefinition.proficiencies`, `RaceDefinition.proficiencies` |
+| Level-scaled capability (how good is the character at disarming traps?) | Use **skills** — define in `skills.ron`, grant via `skill_grants`                                                   |
+| Race or class natural expertise (elves are perceptive)                  | Use `skill_grants` on `ClassDefinition` or `RaceDefinition`                                                         |
+| Paid level advancement (NPC trainer raises character level)             | Use the existing **NPC level trainer** flow (`TrainLevel` dialogue action)                                          |
+| Paid skill improvement (NPC trainer improves a specific skill)          | Use the **NPC skill trainer** flow (`TrainSkill` dialogue action, Phase 6–8)                                        |
+
+Skills and proficiencies are intentionally separate systems. Mixing them (e.g.
+using a skill to gate item use) is not supported and should be avoided.
+
+### Balance Pass: New Skills and Updated Class Grants
+
+Added two new skills to base, tutorial, and test-campaign data files:
+
+| Skill      | Category    | Scaling                                   | Max Rank | Purpose                                         |
+| ---------- | ----------- | ----------------------------------------- | -------- | ----------------------------------------------- |
+| `stealth`  | Utility     | `Step(base: 0, per_levels: 2, amount: 1)` | 30       | Staying hidden; primary Robber skill            |
+| `tracking` | Exploration | `Linear(base: 0, per_level: 1)`           | 30       | Finding trails and quarry; primary Archer skill |
+
+#### Files Modified
+
+**`data/skills.ron`** — Added `stealth` (Utility, after `athletics`) and
+`tracking` (Exploration, after `disarm_traps`).
+
+**`campaigns/tutorial/data/skills.ron`** — Same two entries with
+campaign-flavored descriptions. The robber-art stealth flavour and the
+archer-reads-the-land tracking flavour distinguish them from the generic
+base descriptions.
+
+**`data/test_campaign/data/skills.ron`** — Added four entries to ensure the
+test fixture covers every skill ID referenced by the updated
+`test_campaign/data/classes.ron`:
+
+| Skill         | Category    | Scaling                                     | Max Rank |
+| ------------- | ----------- | ------------------------------------------- | -------- |
+| `leadership`  | Combat      | `Flat`                                      | 20       |
+| `divine_lore` | Knowledge   | `Table([0,0,1,1,2,2,3,3,4,4,5,6,7,8,9,10])` | 40       |
+| `stealth`     | Utility     | `Step(base: 0, per_levels: 2, amount: 1)`   | 30       |
+| `tracking`    | Exploration | `Linear(base: 0, per_level: 1)`             | 30       |
+
+**`data/classes.ron`** — Skill grants updated (Paladin, Archer, Robber):
+
+| Class   | Added Grant                                  |
+| ------- | -------------------------------------------- |
+| Paladin | `athletics` flat_bonus: 1                    |
+| Archer  | `tracking` flat_bonus: 2, per_level_bonus: 1 |
+| Robber  | `stealth` flat_bonus: 2                      |
+
+**`campaigns/tutorial/data/classes.ron`** — Same three grants applied.
+The `monk` class (tutorial-only) was intentionally left unchanged.
+
+**`data/test_campaign/data/classes.ron`** — Full recommended baseline
+grants added to bring the fixture up to parity:
+
+| Class   | Added Grant(s)                                              |
+| ------- | ----------------------------------------------------------- |
+| Knight  | `leadership` flat_bonus: 1                                  |
+| Paladin | `divine_lore` flat_bonus: 1 · `athletics` flat_bonus: 1     |
+| Archer  | `tracking` flat_bonus: 2, per_level_bonus: 1                |
+| Cleric  | `divine_lore` flat_bonus: 2 (prepended; diplomacy retained) |
+| Robber  | `stealth` flat_bonus: 2                                     |
+
+Recommended rank-range interpretation published for campaign authors:
+
+| Rank Range | Meaning                       |
+| ---------- | ----------------------------- |
+| 0          | Untrained                     |
+| 1–5        | Novice                        |
+| 6–15       | Skilled                       |
+| 16–30      | Expert                        |
+| 31–50      | Master                        |
+| 51+        | Legendary / campaign-specific |
+
+### Regression Tests Added (`tests/skill_system_regression_tests.rs`)
+
+Five integration tests were added (all use `data/test_campaign`, never `campaigns/tutorial`):
+
+| Test                                                 | Assertion                                                                                                                         |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `test_test_campaign_loads_with_skills`               | Full test campaign loads; skill database is non-empty; all expected skills including new `stealth` and `tracking` are present     |
+| `test_campaign_validation_includes_skill_references` | `ContentDatabase::validate()` passes on the test campaign, confirming skill-reference cross-validation runs without error         |
+| `test_existing_proficiency_item_usage_unchanged`     | `has_proficiency_union` still correctly grants/denies item use for Knight, Sorcerer, Human, Elf — skill system has no side effect |
+| `test_existing_level_training_flow_unchanged`        | Level database loads; level-1 XP is 0 for all classes; level-2 XP is positive; content database coexists with skills              |
+| `test_campaign_skill_data_validates`                 | Test campaign content validates end-to-end, skill grants in all classes and races are consistent with the skills database         |
+
+### Architecture Compliance
+
+- [x] `src/domain/skills.rs` placement documented in Section 3.2
+- [x] All public types listed in Section 3.2 table
+- [x] Skills remain separate from proficiencies
+- [x] Test data uses `data/test_campaign`, never `campaigns/tutorial`
+- [x] RON format used for all data files
+- [x] SPDX headers on all `.rs` files
+
+### Quality Gates
+
+```text
+cargo fmt --all          → clean
+cargo check --all-targets --all-features  → 0 errors
+cargo clippy --all-targets --all-features -- -D warnings  → 0 warnings
+cargo nextest run --all-features          → all tests pass
+```
+
+---
+
 ## Phase 8: SDK Skill Trainer Authoring (Complete)
 
 ### Overview

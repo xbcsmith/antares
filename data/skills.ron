@@ -26,6 +26,16 @@
         is_trainable: true,
     ),
 
+    (
+        id: "tracking",
+        name: "Tracking",
+        category: Exploration,
+        description: "Reading trails, signs, and spoor to locate quarry or navigate the wilds.",
+        scaling: Linear(base: 0, per_level: 1),
+        max_rank: 30,
+        is_trainable: true,
+    ),
+
     // ── Knowledge ────────────────────────────────────────────────────────────
 
     (
@@ -79,6 +89,16 @@
         description: "Physical fitness covering climbing, swimming, and jumping.",
         scaling: Step(base: 1, per_levels: 3, amount: 1),
         max_rank: 20,
+        is_trainable: true,
+    ),
+
+    (
+        id: "stealth",
+        name: "Stealth",
+        category: Utility,
+        description: "Moving silently and remaining unseen. Vital for ambushes and avoiding detection.",
+        scaling: Step(base: 0, per_levels: 2, amount: 1),
+        max_rank: 30,
         is_trainable: true,
     ),
 

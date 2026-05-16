@@ -26,6 +26,16 @@
         is_trainable: true,
     ),
 
+    (
+        id: "tracking",
+        name: "Tracking",
+        category: Exploration,
+        description: "An archer reads the land like a page — disturbed brush, crushed moss, the warmth of a footprint.",
+        scaling: Linear(base: 0, per_level: 1),
+        max_rank: 30,
+        is_trainable: true,
+    ),
+
     // ── Knowledge ────────────────────────────────────────────────────────────
 
     (
@@ -79,6 +89,16 @@
         description: "Raw physical capability — climbing walls, swimming rivers, leaping chasms.",
         scaling: Step(base: 1, per_levels: 3, amount: 1),
         max_rank: 20,
+        is_trainable: true,
+    ),
+
+    (
+        id: "stealth",
+        name: "Stealth",
+        category: Utility,
+        description: "Silent movement and concealment. The robber's art: be there, then not be there.",
+        scaling: Step(base: 0, per_levels: 2, amount: 1),
+        max_rank: 30,
         is_trainable: true,
     ),
 
