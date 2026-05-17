@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! OBJ importer tab UI and RON export workflow.
+//! OBJ and GLB importer tab UI.
 //!
 //! This module renders the Campaign Builder Importer tab, lets users inspect
-//! imported OBJ meshes, edit per-mesh colors, manage custom palette entries,
-//! and export the result as a `CreatureDefinition` RON asset.
+//! imported OBJ and GLB meshes, edit per-mesh colors, manage custom palette
+//! entries, and export the result as a `CreatureDefinition` RON asset.
 //!
 //! # Examples
 //!
@@ -30,8 +30,8 @@ use crate::color_palette::{palette_entries, PaletteEntry};
 use crate::creature_assets::{CreatureAssetError, CreatureAssetManager};
 use crate::logging::{category, Logger};
 use crate::obj_importer::{
-    ExportType, ImportedMaterialSwatch, ImportedMeshColorSource, ImportedMtlSourceKind,
-    ImporterMode, ObjImporterState,
+    ExportType, ImportSourceFormat, ImportedMaterialSwatch, ImportedMeshColorSource,
+    ImportedMtlSourceKind, ImporterMode, ObjImporterState,
 };
 use crate::ui_helpers::TwoColumnLayout;
 use antares::domain::visual::{CreatureDefinition, MeshTransform};
@@ -41,12 +41,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-/// Errors that can occur when importing an OBJ file into editor state.
+/// Errors that can occur when importing a model file into editor state.
 #[derive(Debug, thiserror::Error)]
 enum ObjImportError {
-    /// The OBJ file could not be loaded or parsed.
-    #[error("Failed to load OBJ '{path}': {message}")]
+    /// The file could not be loaded or parsed.
+    #[error("Failed to load '{path}': {message}")]
     LoadFailed { path: String, message: String },
+    /// The file extension is not a supported import format.
+    #[error("Unsupported file format '.{extension}'; supported formats are .obj and .glb")]
+    UnknownFormat { extension: String },
 }
 
 /// Signal emitted by the importer tab when an export completes.
@@ -112,8 +115,8 @@ pub(crate) fn show_obj_importer_tab(
     campaign_dir: Option<&PathBuf>,
     logger: &mut Logger,
 ) -> Option<ObjImporterUiSignal> {
-    ui.heading("OBJ Importer");
-    ui.label("Load a Wavefront OBJ, adjust mesh colors, then export a creature, item, or furniture RON asset.");
+    ui.heading("Model Importer");
+    ui.label("Load a Wavefront OBJ or binary glTF (GLB) model, adjust mesh colors, then export a creature, item, or furniture RON asset.");
 
     if !state.status_message.is_empty() {
         ui.add_space(4.0);
@@ -148,30 +151,26 @@ fn render_idle_mode(ui: &mut egui::Ui, state: &mut ObjImporterState, logger: &mu
         .source_path
         .as_ref()
         .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "No OBJ selected".to_string());
+        .unwrap_or_else(|| "No model selected".to_string());
 
     egui::Grid::new("obj_importer_idle_grid")
         .num_columns(2)
         .spacing([12.0, 8.0])
         .show(ui, |ui| {
-            ui.label("Source OBJ:");
+            ui.label("Source File:");
             ui.horizontal(|ui| {
                 ui.monospace(selected_path.as_str());
                 if ui.button("Browse...").clicked() {
-                    if let Some(path) = pick_obj_file(state.source_path.as_deref()) {
+                    if let Some(path) = pick_model_file(state.source_path.as_deref()) {
                         state.source_path = Some(path.clone());
                         if state.creature_name.trim().is_empty() {
                             state.creature_name = display_name_from_path(&path);
                         }
-                        state.status_message = format!("Selected OBJ file: {}", path.display());
+                        state.status_message = format!("Selected file: {}", path.display());
                         ui.ctx().request_repaint();
                     }
                 }
             });
-            ui.end_row();
-
-            ui.label("MTL Source:");
-            render_mtl_source_controls(ui, state, logger, false);
             ui.end_row();
 
             ui.label("Export Type:");
@@ -226,22 +225,22 @@ fn render_idle_mode(ui: &mut egui::Ui, state: &mut ObjImporterState, logger: &mu
 
     ui.add_space(8.0);
 
-    if ui.button("Load OBJ").clicked() {
+    if ui.button("Load Model").clicked() {
         let path = if let Some(path) = state.source_path.clone() {
             path
-        } else if let Some(path) = pick_obj_file(None) {
+        } else if let Some(path) = pick_model_file(None) {
             state.source_path = Some(path.clone());
             path
         } else {
-            state.status_message = "Choose an OBJ file before loading.".to_string();
+            state.status_message = "Choose a model file before loading.".to_string();
             return;
         };
 
-        match load_obj_into_state(state, &path) {
+        match load_model_into_state(state, &path) {
             Ok(()) => {
                 logger.info(
                     category::EDITOR,
-                    &format!("Loaded OBJ importer source {}", path.display()),
+                    &format!("Loaded model importer source {}", path.display()),
                 );
                 ui.ctx().request_repaint();
             }
@@ -282,9 +281,30 @@ fn render_loaded_mode(
         .num_columns(2)
         .spacing([12.0, 8.0])
         .show(ui, |ui| {
-            ui.label("MTL Source:");
-            render_mtl_source_controls(ui, state, logger, true);
+            ui.label("Format:");
+            match state.source_format {
+                ImportSourceFormat::Obj => {
+                    ui.label("OBJ");
+                }
+                ImportSourceFormat::Glb => {
+                    ui.label("GLB (binary glTF)");
+                }
+            }
             ui.end_row();
+
+            if state.source_format == ImportSourceFormat::Obj {
+                ui.label("MTL Source:");
+                render_mtl_source_controls(ui, state, logger, true);
+                ui.end_row();
+            }
+
+            if state.source_format == ImportSourceFormat::Glb {
+                if let Some(count) = parse_glb_embedded_image_count(&state.status_message) {
+                    ui.label("Embedded textures:");
+                    ui.label(count.to_string());
+                    ui.end_row();
+                }
+            }
 
             ui.label("Export Type:");
             ui.horizontal(|ui| {
@@ -369,6 +389,16 @@ fn render_loaded_mode(
             ui.end_row();
         });
 
+    if state.source_format == ImportSourceFormat::Glb
+        && state.status_message.contains("[skinning ignored]")
+    {
+        ui.add_space(4.0);
+        ui.colored_label(
+            egui::Color32::from_rgb(220, 170, 90),
+            "\u{26a0} Skinning/animations present but not imported",
+        );
+    }
+
     ui.add_space(6.0);
     let mut export_signal = None;
     let mut cleared_importer = false;
@@ -387,13 +417,13 @@ fn render_loaded_mode(
             ui.ctx().request_repaint();
         }
 
-        if ui.button("Load Another OBJ").clicked() {
-            if let Some(path) = pick_obj_file(state.source_path.as_deref()) {
-                match load_obj_into_state(state, &path) {
+        if ui.button("Load Another Model").clicked() {
+            if let Some(path) = pick_model_file(state.source_path.as_deref()) {
+                match load_model_into_state(state, &path) {
                     Ok(()) => {
                         logger.info(
                             category::EDITOR,
-                            &format!("Reloaded importer OBJ {}", path.display()),
+                            &format!("Reloaded importer model {}", path.display()),
                         );
                         ui.ctx().request_repaint();
                     }
@@ -854,23 +884,60 @@ fn persist_custom_palette(
     }
 }
 
-fn load_obj_into_state(state: &mut ObjImporterState, path: &Path) -> Result<(), ObjImportError> {
-    state
-        .load_obj_file(path)
-        .map_err(|error| ObjImportError::LoadFailed {
-            path: path.display().to_string(),
-            message: error.to_string(),
-        })?;
+/// Loads a model file (OBJ or GLB) into importer state, dispatching on file extension.
+///
+/// # Errors
+///
+/// Returns [`ObjImportError::LoadFailed`] when parsing fails.
+/// Returns [`ObjImportError::UnknownFormat`] when the extension is not `.obj` or `.glb`.
+fn load_model_into_state(state: &mut ObjImporterState, path: &Path) -> Result<(), ObjImportError> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
 
-    if state.creature_name.trim().is_empty() {
-        state.creature_name = display_name_from_path(path);
+    match ext.as_deref() {
+        Some("obj") => {
+            state
+                .load_obj_file(path)
+                .map_err(|error| ObjImportError::LoadFailed {
+                    path: path.display().to_string(),
+                    message: error.to_string(),
+                })?;
+            if state.creature_name.trim().is_empty() {
+                state.creature_name = display_name_from_path(path);
+            }
+            state.set_active_mesh((!state.meshes.is_empty()).then_some(0));
+            state.status_message = format!(
+                "Loaded {} mesh(es) from {}",
+                state.meshes.len(),
+                path.display()
+            );
+        }
+        Some("glb") => {
+            state
+                .load_glb_file(path)
+                .map_err(|error| ObjImportError::LoadFailed {
+                    path: path.display().to_string(),
+                    message: error.to_string(),
+                })?;
+            if state.creature_name.trim().is_empty() {
+                state.creature_name = display_name_from_path(path);
+            }
+            state.set_active_mesh((!state.meshes.is_empty()).then_some(0));
+            // GLB sets its own rich status_message via load_imported_glb_scene.
+        }
+        _ => {
+            return Err(ObjImportError::UnknownFormat {
+                extension: path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_string(),
+            });
+        }
     }
-    state.set_active_mesh((!state.meshes.is_empty()).then_some(0));
-    state.status_message = format!(
-        "Loaded {} mesh(es) from {}",
-        state.meshes.len(),
-        path.display()
-    );
+
     Ok(())
 }
 
@@ -954,7 +1021,7 @@ fn reload_obj_after_mtl_change(
         return;
     };
 
-    match load_obj_into_state(state, &source_path) {
+    match load_model_into_state(state, &source_path) {
         Ok(()) => {
             state.status_message = format!(
                 "Reloaded {} using {}.",
@@ -1066,8 +1133,11 @@ fn stage_imported_swatch_as_custom_draft(
     );
 }
 
-fn pick_obj_file(initial_path: Option<&Path>) -> Option<PathBuf> {
-    let mut dialog = rfd::FileDialog::new().add_filter("Wavefront OBJ", &["obj"]);
+/// Opens a file-picker dialog that accepts both Wavefront OBJ and binary glTF (GLB) files.
+fn pick_model_file(initial_path: Option<&Path>) -> Option<PathBuf> {
+    let mut dialog = rfd::FileDialog::new()
+        .add_filter("Wavefront OBJ", &["obj"])
+        .add_filter("Binary glTF", &["glb"]);
     if let Some(path) = initial_path {
         let directory = if path.is_dir() {
             path.to_path_buf()
@@ -1449,18 +1519,33 @@ fn export_type_label(export_type: ExportType) -> &'static str {
     }
 }
 
+/// Extracts the embedded image count from a GLB status message.
+///
+/// The status message format produced by `load_imported_glb_scene` is:
+/// `"GLB: N mesh(es), M embedded image(s), K material(s)..."`.  This helper
+/// finds the token immediately before the literal `" embedded image"` substring
+/// and parses it as a [`u32`].
+///
+/// Returns `None` when the substring is absent or the preceding token is not a
+/// valid integer.
+fn parse_glb_embedded_image_count(status: &str) -> Option<u32> {
+    let pos = status.find(" embedded image")?;
+    let before = &status[..pos];
+    before.split_whitespace().last()?.parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         build_creature_definition, describe_mesh_color_source, export_state_to_campaign,
-        format_mtl_source_detail, format_mtl_source_summary, persist_custom_palette,
-        preview_export_relative_path, show_obj_importer_tab, stage_imported_swatch_as_custom_draft,
-        ObjImporterExportError,
+        format_mtl_source_detail, format_mtl_source_summary, load_model_into_state,
+        persist_custom_palette, preview_export_relative_path, show_obj_importer_tab,
+        stage_imported_swatch_as_custom_draft, ObjImportError, ObjImporterExportError,
     };
     use crate::logging::Logger;
     use crate::obj_importer::{
-        ExportType, ImportedMaterialSwatch, ImportedMeshColorSource, ImportedMtlSourceKind,
-        ImportedTexturePayload, ImporterMode, ObjImporterState,
+        ExportType, ImportSourceFormat, ImportedMaterialSwatch, ImportedMeshColorSource,
+        ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
     };
     use antares::domain::visual::{AlphaMode, CreatureDefinition, MaterialDefinition};
     use eframe::egui;
@@ -1758,5 +1843,97 @@ mod tests {
         });
 
         assert_eq!(state.mode, ImporterMode::Loaded);
+    }
+
+    // ─── GLB builder helpers (local copies for UI-layer tests) ──────────────
+
+    /// Build a minimal valid GLB binary from a JSON chunk and optional binary chunk.
+    fn build_test_glb(json: &str, bin: Option<&[u8]>) -> Vec<u8> {
+        let mut json_bytes = json.as_bytes().to_vec();
+        while !json_bytes.len().is_multiple_of(4) {
+            json_bytes.push(b' ');
+        }
+        let bin_chunk_total = bin.map_or(0usize, |b| {
+            let padded = (b.len() + 3) & !3;
+            8 + padded
+        });
+        let total_len = 12 + 8 + json_bytes.len() + bin_chunk_total;
+        let mut out = Vec::with_capacity(total_len);
+        out.extend_from_slice(&0x46546C67u32.to_le_bytes()); // magic "glTF"
+        out.extend_from_slice(&2u32.to_le_bytes()); // version
+        out.extend_from_slice(&(total_len as u32).to_le_bytes());
+        out.extend_from_slice(&(json_bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(&0x4E4F534Au32.to_le_bytes()); // "JSON"
+        out.extend_from_slice(&json_bytes);
+        if let Some(bin_data) = bin {
+            let padded = (bin_data.len() + 3) & !3;
+            out.extend_from_slice(&(padded as u32).to_le_bytes());
+            out.extend_from_slice(&0x004E4942u32.to_le_bytes()); // "BIN\0"
+            out.extend_from_slice(bin_data);
+            let pad = padded - bin_data.len();
+            out.resize(out.len() + pad, 0x00);
+        }
+        out
+    }
+
+    /// A minimal GLB with one triangle mesh and no texture.
+    fn build_minimal_triangle_glb() -> Vec<u8> {
+        let mut bin = Vec::new();
+        for pos in [[-1.0f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]] {
+            for f in pos {
+                bin.extend_from_slice(&f.to_le_bytes());
+            }
+        }
+        for idx in [0u16, 1, 2] {
+            bin.extend_from_slice(&idx.to_le_bytes());
+        }
+        build_test_glb(
+            r#"{"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],"meshes":[{"name":"TestMesh","primitives":[{"attributes":{"POSITION":0},"indices":1,"mode":4}]}],"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[-1,0,0],"max":[1,1,0]},{"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36},{"buffer":0,"byteOffset":36,"byteLength":6}],"buffers":[{"byteLength":42}]}"#,
+            Some(&bin),
+        )
+    }
+
+    // ─── Phase 3 tests ────────────────────────────────────────────────────────
+
+    /// OBJ path dispatches to the OBJ loader and leaves `source_format == Obj`.
+    #[test]
+    fn test_load_model_into_state_dispatches_obj() {
+        let path = fixture_path("data/test_fixtures/skeleton.obj");
+        let mut state = ObjImporterState::new();
+
+        let result = load_model_into_state(&mut state, &path);
+
+        assert!(result.is_ok(), "Expected Ok, got {result:?}");
+        assert_eq!(state.source_format, ImportSourceFormat::Obj);
+        assert_eq!(state.mode, ImporterMode::Loaded);
+    }
+
+    /// GLB path dispatches to the GLB loader and leaves `source_format == Glb`.
+    #[test]
+    fn test_load_model_into_state_dispatches_glb() {
+        let temp_dir = tempdir().unwrap();
+        let glb_path = temp_dir.path().join("model.glb");
+        fs::write(&glb_path, build_minimal_triangle_glb()).unwrap();
+        let mut state = ObjImporterState::new();
+
+        let result = load_model_into_state(&mut state, &glb_path);
+
+        assert!(result.is_ok(), "Expected Ok, got {result:?}");
+        assert_eq!(state.source_format, ImportSourceFormat::Glb);
+        assert_eq!(state.mode, ImporterMode::Loaded);
+    }
+
+    /// An unrecognised extension returns `ObjImportError::UnknownFormat`.
+    #[test]
+    fn test_load_model_into_state_rejects_unknown_extension() {
+        let mut state = ObjImporterState::new();
+        let path = PathBuf::from("model.fbx");
+
+        let result = load_model_into_state(&mut state, &path);
+
+        assert!(
+            matches!(result, Err(ObjImportError::UnknownFormat { ref extension }) if extension == "fbx"),
+            "Expected UnknownFormat{{extension: fbx}}, got {result:?}"
+        );
     }
 }

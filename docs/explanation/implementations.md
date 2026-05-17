@@ -2,6 +2,92 @@
 
 ---
 
+## GLB Importer UI for GLB Selection — Phase 3 (Complete)
+
+### Overview
+
+Implemented Phase 3 of the GLB file support plan for the Campaign Builder
+importer. This phase updates `obj_importer_ui.rs` to present a multi-format
+importer that handles both Wavefront OBJ and binary glTF (GLB) files through a
+unified UI. The file is **not** renamed — `obj_importer_ui.rs` remains the
+canonical module name as required by the plan.
+
+### Deliverables
+
+- **`show_obj_importer_tab` heading** updated from `"OBJ Importer"` to
+  `"Model Importer"`.
+- **Help label** updated to mention both OBJ and GLB formats.
+- **`pick_obj_file` renamed to `pick_model_file`** with a second
+  `.add_filter("Binary glTF", &["glb"])` entry added after the existing OBJ
+  filter.
+- **`load_obj_into_state` replaced by `load_model_into_state`** — dispatches on
+  lowercased file extension: `.obj` → `state.load_obj_file`, `.glb` →
+  `state.load_glb_file`, any other extension → `ObjImportError::UnknownFormat`.
+  OBJ path writes a "Loaded N mesh(es)" status message; GLB path preserves the
+  richer metadata summary written by `load_imported_glb_scene`.
+- **`ObjImportError::UnknownFormat { extension: String }`** added with Display
+  message: `"Unsupported file format '.{extension}'; supported formats are .obj
+and .glb"`.
+- **`render_idle_mode`** updated: `"Source OBJ:"` → `"Source File:"`,
+  `"No OBJ selected"` → `"No model selected"`, `"Load OBJ"` → `"Load Model"`;
+  MTL Source row **removed** (it is now only shown in loaded mode for OBJ
+  format); `pick_model_file` and `load_model_into_state` used throughout.
+- **`render_loaded_mode` metadata grid** gained:
+  - `"Format:"` row (first in grid) showing `"OBJ"` or `"GLB (binary glTF)"`
+    based on `state.source_format`.
+  - MTL Source row is now **conditionally rendered** only when
+    `source_format == ImportSourceFormat::Obj`.
+  - `"Embedded textures: N"` row (GLB only), parsed from `status_message` via
+    `parse_glb_embedded_image_count`.
+  - Orange warning label `"⚠ Skinning/animations present but not imported"`
+    shown outside the grid when `status_message` contains
+    `"[skinning ignored]"`.
+- **`"Load Another OBJ"` button** renamed to `"Load Another Model"`; uses
+  `pick_model_file` and `load_model_into_state`.
+- **`reload_obj_after_mtl_change`** migrated from `load_obj_into_state` to
+  `load_model_into_state` (only ever called for OBJ state; OBJ extension still
+  dispatches correctly).
+- **`parse_glb_embedded_image_count(status: &str) -> Option<u32>`** — private
+  helper that extracts the image count from the GLB status message format
+  `"GLB: N mesh(es), M embedded image(s), K material(s)..."`.
+- **Module-level `//!` doc comment** updated to `"OBJ and GLB importer tab UI."`.
+- **3 new tests** in `obj_importer_ui::tests` (all pass):
+  - `test_load_model_into_state_dispatches_obj` — OBJ path → `Obj` format,
+    `Loaded` mode.
+  - `test_load_model_into_state_dispatches_glb` — GLB path → `Glb` format,
+    `Loaded` mode.
+  - `test_load_model_into_state_rejects_unknown_extension` — `.fbx` path →
+    `ObjImportError::UnknownFormat { extension: "fbx" }`.
+- **Local GLB builder helpers** (`build_test_glb`, `build_minimal_triangle_glb`)
+  copied into the test module (not public; no shared module created).
+- **egui ID audit** passed: no new `ScrollArea` without `id_salt`, every loop
+  uses `push_id`, all state mutations that affect layout call
+  `request_repaint()`.
+
+### Key Design Decisions
+
+- `load_model_into_state` does **not** overwrite `status_message` after a
+  successful GLB load because `load_imported_glb_scene` already writes a rich
+  metadata summary (`"GLB: N mesh(es), M embedded image(s), ..."`) that the UI
+  parses for display.
+- The `"MTL Source:"` row was removed from `render_idle_mode` (not just
+  guarded) because the plan states `render_mtl_source_controls` is
+  `"only called from render_loaded_mode for OBJ format"`.
+- `parse_glb_embedded_image_count` uses `str::find` on the literal
+  `" embedded image"` suffix rather than a regex to keep the dependency
+  footprint minimal.
+
+### Quality Gates
+
+```
+cargo fmt         ✔ no output
+cargo check       ✔ 0 errors, 0 warnings
+cargo clippy      ✔ 0 warnings (-D warnings)
+cargo nextest run ✔ 5065 passed, 0 failed (3 new Phase 3 tests + 5062 existing)
+```
+
+---
+
 ## GLB Format-Neutral Importer State — Phase 2 (Complete)
 
 ### Overview
