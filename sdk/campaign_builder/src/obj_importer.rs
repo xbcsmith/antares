@@ -89,6 +89,8 @@ pub struct ImportedMaterialSwatch {
     pub color: [f32; 4],
     /// Optional texture metadata preserved from `map_Kd` when portable.
     pub texture_path: Option<String>,
+    /// Resolved source texture path used for export-time asset copying.
+    pub texture_source_path: Option<PathBuf>,
 }
 
 /// A mesh loaded into the importer, along with editable per-mesh metadata.
@@ -108,6 +110,8 @@ pub struct ImportedMesh {
     pub selected: bool,
     /// Backing mesh definition used for export.
     pub mesh_def: MeshDefinition,
+    /// Resolved source texture path used for export-time asset copying.
+    pub texture_source_path: Option<PathBuf>,
 }
 
 /// State owned by the OBJ importer tab.
@@ -185,11 +189,27 @@ impl ImportedMesh {
             ImportedObjMeshColorSource::HeuristicFallback => ImportedMeshColorSource::AutoAssigned,
         };
 
-        Self::from_mesh_definition_with_color_source(imported_mesh.mesh_def, color_source)
+        Self::from_mesh_definition_with_color_source_and_texture_source(
+            imported_mesh.mesh_def,
+            imported_mesh.texture_source_path,
+            color_source,
+        )
     }
 
     fn from_mesh_definition_with_color_source(
+        mesh_def: MeshDefinition,
+        color_source: ImportedMeshColorSource,
+    ) -> Self {
+        Self::from_mesh_definition_with_color_source_and_texture_source(
+            mesh_def,
+            None,
+            color_source,
+        )
+    }
+
+    fn from_mesh_definition_with_color_source_and_texture_source(
         mut mesh_def: MeshDefinition,
+        texture_source_path: Option<PathBuf>,
         color_source: ImportedMeshColorSource,
     ) -> Self {
         let name = mesh_def.name.clone().unwrap_or_else(|| "mesh".to_string());
@@ -209,6 +229,7 @@ impl ImportedMesh {
             color_source,
             selected: true,
             mesh_def,
+            texture_source_path,
         }
     }
 
@@ -233,6 +254,7 @@ impl ImportedMaterialSwatch {
             label: swatch.label,
             color: swatch.color,
             texture_path: swatch.texture_path,
+            texture_source_path: swatch.texture_source_path,
         }
     }
 }

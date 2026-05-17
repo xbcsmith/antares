@@ -160,28 +160,28 @@
         filepath: "assets/creatures/dwarfcleric.ron",
     ),
     /*[32]*/ (
-        id: 3000,
-        name: "DyingGoblin",
-        filepath: "assets/creatures/dyinggoblin.ron",
-    ),
-    /*[33]*/ (
-        id: 3001,
-        name: "SkeletonWarrior",
-        filepath: "assets/creatures/skeletonwarrior.ron",
-    ),
-    /*[34]*/ (
-        id: 3002,
-        name: "EvilLich",
-        filepath: "assets/creatures/evillich.ron",
-    ),
-    /*[35]*/ (
-        id: 2032,
-        name: "AncientSkeleton",
-        filepath: "assets/creatures/ancientskeleton.ron",
-    ),
-    /*[36]*/ (
         id: 2021,
         name: "AncientWolf",
         filepath: "assets/creatures/ancientwolf.ron",
     ),
+    /*[33]*/ (
+        id: 2032,
+        name: "AncientSkeleton",
+        filepath: "assets/creatures/ancientskeleton.ron",
+    ),
+    /*[34]*/ (
+        id: 3000,
+        name: "DyingGoblin",
+        filepath: "assets/creatures/dyinggoblin.ron",
+    ),
+    /*[35]*/ (
+        id: 3001,
+        name: "SkeletonWarrior",
+        filepath: "assets/creatures/skeletonwarrior.ron",
+    ),
+    /*[36]*/ (
+        id: 3002,
+        name: "EvilLich",
+        filepath: "assets/creatures/evillich.ron",
+    )
 ]

@@ -47,6 +47,7 @@ pub mod lod_editor;
 pub mod logging;
 pub mod map_editor;
 pub mod material_editor;
+pub mod mesh_glb_io;
 pub mod mesh_index_editor;
 pub mod mesh_normal_editor;
 pub mod mesh_obj_io;

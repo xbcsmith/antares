@@ -293,6 +293,12 @@ impl Plugin for AntaresPlugin {
         // Item world spawn / despawn systems
         app.add_plugins(antares::game::systems::item_world_events::ItemWorldPlugin);
 
+        // Apply imported creature mesh textures after mesh entities spawn.
+        app.add_systems(
+            Update,
+            antares::game::systems::creature_meshes::texture_loading_system,
+        );
+
         // Lock prompt UI and lock action handler
         app.add_plugins(antares::game::systems::lock_ui::LockUiPlugin);
 

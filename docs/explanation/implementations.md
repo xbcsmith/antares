@@ -2,6 +2,104 @@
 
 ---
 
+## GLB Parser Foundation — Phase 1 (Complete)
+
+### Overview
+
+Implemented Phase 1 of the GLB (binary glTF) file support plan for the Campaign
+Builder importer. This phase creates the pure parser backend `mesh_glb_io.rs`
+with no UI dependencies, following the same structure as `mesh_obj_io.rs`.
+
+### Deliverables
+
+- **`sdk/campaign_builder/src/mesh_glb_io.rs`** — new module containing:
+  - Public types: `GlbImportOptions`, `GlbImportError`, `ImportedGlbScene`,
+    `ImportedGlbMesh`, `ImportedGlbTexturePayload`.
+  - Public entry point: `import_glb_scene_from_file` (file I/O wrapper).
+  - Crate-internal entry point: `import_glb_scene_from_bytes` (testable, no I/O).
+  - Private helpers: `glb_primitive_to_mesh_definition`,
+    `extract_base_color_texture_payload`, `convert_gltf_material`,
+    `sanitize_glb_file_name`.
+  - 11 unit tests, all passing, all using in-memory fixtures.
+- **`sdk/campaign_builder/Cargo.toml`** — `gltf = { version = "1",
+features = ["import"] }` dependency added.
+- **`sdk/campaign_builder/src/lib.rs`** — `pub mod mesh_glb_io;` registered in
+  alphabetical order.
+
+### Key Design Decisions
+
+- **`Gltf::from_slice` + raw blob access** instead of `import_slice` avoids
+  automatic image decoding (which would fail on non-valid test PNG bytes). Raw
+  buffer-view bytes are stored in `ImportedGlbTexturePayload.bytes`—original
+  encoded PNG/JPEG ready for direct disk write in Phase 4.
+- **Pre-validation** of external URI buffers and images before any mesh
+  processing; returns `GlbImportError::MissingBuffer` immediately so the error
+  message is actionable.
+- **Explicit `'doc` lifetime** on `glb_primitive_to_mesh_definition` and
+  `extract_base_color_texture_payload` ties the blob slice and primitive
+  lifetimes together so the gltf `reader` closure satisfies its `Fn(Buffer<'a>)
+-> Option<&'a [u8]>` constraint without unsafe code.
+- **Empty-blob guard** in the reader closure (`!blob.is_empty()`) returns
+  `None` for buffer 0 when the GLB has no binary chunk, causing
+  `read_positions()` to return `None` and triggering `MissingPositions`
+  (the gltf crate's strict validator rejects truly attribute-free primitives
+  before we can check).
+- **Texture placeholder** `"__glb_texture_{mesh_doc_index}_{prim_index}"`
+  written to `MeshDefinition.texture_path` during parsing; rewritten to a
+  campaign-relative path in Phase 4.
+- **Node transforms preserved** as `node_transform: Option<[[f32; 4]; 4]>` on
+  `ImportedGlbMesh`; not flattened into vertex positions (the export pipeline
+  uses `CreatureDefinition.mesh_transforms` for that).
+- `TRIANGLE_STRIP` and `TRIANGLE_FAN` return `UnsupportedPrimitive` rather than
+  being triangulated silently. Callers should pre-process meshes.
+
+### Quality Gates
+
+```
+cargo fmt         ✔ no output
+cargo check       ✔ 0 errors, 0 warnings
+cargo clippy      ✔ 0 warnings (-D warnings)
+cargo nextest run ✔ 2404 passed, 0 failed (11 new GLB tests)
+```
+
+---
+
+## Campaign Builder OBJ Texture Map Import (Complete)
+
+### Overview
+
+Updated the Campaign Builder OBJ importer so MTL diffuse texture maps are
+preserved, copied into the active campaign, and applied to exported custom model
+meshes instead of leaving imported models white.
+
+### Key Updates
+
+- Parsed `map_Kd` texture directives with common MTL options such as `-s` and
+  `-clamp` instead of treating the whole option string as the filename.
+- Preserved resolved source texture paths from MTL files in importer metadata.
+- Supported models with multiple material sections by preserving one diffuse
+  texture per imported mesh/material segment.
+- Copied imported texture files to `assets/textures/imported/<asset_name>/` on
+  export and rewrote exported mesh `texture_path` values to campaign-relative
+  paths.
+- Added export errors for missing texture source files so failed texture imports
+  do not silently produce white models.
+- Registered the runtime creature texture-loading system so exported
+  `texture_path` values are applied to spawned creature mesh materials.
+- Added regression tests for MTL option parsing, source texture preservation,
+  multiple material texture maps, export-time texture copying, and missing
+  texture errors.
+
+### Notes
+
+This implementation supports the common OBJ/MTL workflow where different model
+parts use different `usemtl` material sections, each with its own `map_Kd`
+diffuse texture. Additional PBR texture channels such as normal, metallic, or
+roughness maps remain future enhancements because the current domain material
+schema exposes a single applied mesh texture path.
+
+---
+
 ## Phase 10: Audit Closure — Remaining Deliverables (Complete)
 
 ### Overview

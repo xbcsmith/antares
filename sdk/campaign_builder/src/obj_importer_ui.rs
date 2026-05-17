@@ -36,6 +36,7 @@ use crate::obj_importer::{
 use crate::ui_helpers::TwoColumnLayout;
 use antares::domain::visual::{CreatureDefinition, MeshTransform};
 use eframe::egui;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -93,6 +94,12 @@ enum ObjImporterExportError {
 
     #[error("Failed to serialize RON asset: {0}")]
     Serialization(#[from] ron::Error),
+
+    #[error("Texture for mesh '{mesh_name}' was not found: {path}")]
+    MissingTexture { mesh_name: String, path: PathBuf },
+
+    #[error("Texture source path has no filename: {0}")]
+    TextureMissingFileName(PathBuf),
 
     #[error("Failed to write asset file: {0}")]
     Io(#[from] std::io::Error),
@@ -1157,6 +1164,7 @@ fn export_state_to_campaign(
         creature.id,
         &state.category,
     );
+    copy_imported_textures_into_campaign(state, &mut creature, campaign_dir, &relative_path)?;
     let absolute_path = campaign_dir.join(&relative_path);
 
     match state.export_type {
@@ -1190,6 +1198,172 @@ fn export_state_to_campaign(
             absolute_path.display()
         ),
     })
+}
+
+fn copy_imported_textures_into_campaign(
+    state: &ObjImporterState,
+    creature: &mut CreatureDefinition,
+    campaign_dir: &Path,
+    exported_asset_relative_path: &str,
+) -> Result<(), ObjImporterExportError> {
+    let export_stem = Path::new(exported_asset_relative_path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("imported_model");
+    let texture_dir = PathBuf::from("assets/textures/imported").join(export_stem);
+    let mut copied_sources = HashMap::<PathBuf, String>::new();
+    let mut used_destinations = std::collections::HashSet::<String>::new();
+
+    for (mesh_index, mesh_def) in creature.meshes.iter_mut().enumerate() {
+        let Some(texture_path) = mesh_def.texture_path.clone() else {
+            continue;
+        };
+
+        if campaign_dir.join(&texture_path).exists() {
+            used_destinations.insert(texture_path);
+            continue;
+        }
+
+        let mesh_name = mesh_def
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("mesh_{}", mesh_index));
+        let source_path =
+            resolve_imported_texture_source(state, mesh_index, &texture_path, campaign_dir)
+                .ok_or_else(|| ObjImporterExportError::MissingTexture {
+                    mesh_name: mesh_name.clone(),
+                    path: PathBuf::from(&texture_path),
+                })?;
+
+        let source_key = source_path
+            .canonicalize()
+            .unwrap_or_else(|_| source_path.clone());
+        if let Some(existing_destination) = copied_sources.get(&source_key) {
+            mesh_def.texture_path = Some(existing_destination.clone());
+            continue;
+        }
+
+        let destination_relative =
+            unique_texture_destination(&texture_dir, &source_path, &mut used_destinations)?;
+        let destination_absolute = campaign_dir.join(&destination_relative);
+        if let Some(parent) = destination_absolute.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(&source_path, &destination_absolute)?;
+        let destination_relative = destination_relative.to_string_lossy().replace('\\', "/");
+        copied_sources.insert(source_key, destination_relative.clone());
+        mesh_def.texture_path = Some(destination_relative);
+    }
+
+    Ok(())
+}
+
+fn resolve_imported_texture_source(
+    state: &ObjImporterState,
+    mesh_index: usize,
+    texture_path: &str,
+    campaign_dir: &Path,
+) -> Option<PathBuf> {
+    if let Some(source_path) = state
+        .meshes
+        .get(mesh_index)
+        .and_then(|mesh| mesh.texture_source_path.as_ref())
+        .filter(|path| path.exists())
+    {
+        return Some(source_path.clone());
+    }
+
+    let texture_path_ref = Path::new(texture_path);
+    if texture_path_ref.is_absolute() && texture_path_ref.exists() {
+        return Some(texture_path_ref.to_path_buf());
+    }
+
+    let campaign_relative = campaign_dir.join(texture_path_ref);
+    if campaign_relative.exists() {
+        return None;
+    }
+
+    for mtl_path in &state.resolved_mtl_paths {
+        if let Some(parent) = mtl_path.parent() {
+            let candidate = parent.join(texture_path_ref);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    if let Some(parent) = state.source_path.as_ref().and_then(|path| path.parent()) {
+        let candidate = parent.join(texture_path_ref);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+fn unique_texture_destination(
+    texture_dir: &Path,
+    source_path: &Path,
+    used_destinations: &mut std::collections::HashSet<String>,
+) -> Result<PathBuf, ObjImporterExportError> {
+    let file_name = source_path
+        .file_name()
+        .and_then(|file_name| file_name.to_str())
+        .ok_or_else(|| ObjImporterExportError::TextureMissingFileName(source_path.to_path_buf()))?;
+    let source_file_stem = Path::new(file_name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("texture");
+    let sanitized_stem = sanitized_texture_stem(source_file_stem);
+    let extension = Path::new(file_name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase());
+
+    for suffix in 0.. {
+        let candidate_name = if suffix == 0 {
+            format_texture_file_name(&sanitized_stem, extension.as_deref())
+        } else {
+            format_texture_file_name(
+                &format!("{}_{}", sanitized_stem, suffix + 1),
+                extension.as_deref(),
+            )
+        };
+        let candidate = texture_dir.join(candidate_name);
+        let candidate_string = candidate.to_string_lossy().replace('\\', "/");
+        if used_destinations.insert(candidate_string.clone()) {
+            return Ok(PathBuf::from(candidate_string));
+        }
+    }
+
+    unreachable!("unbounded suffix loop must return a unique texture destination")
+}
+
+fn sanitized_texture_stem(stem: &str) -> String {
+    let sanitized = stem
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect::<String>();
+    let mut collapsed = sanitized;
+    while collapsed.contains("__") {
+        collapsed = collapsed.replace("__", "_");
+    }
+    let collapsed = collapsed.trim_matches('_').to_string();
+    if collapsed.is_empty() {
+        "texture".to_string()
+    } else {
+        collapsed
+    }
+}
+
+fn format_texture_file_name(stem: &str, extension: Option<&str>) -> String {
+    extension
+        .filter(|extension| !extension.is_empty())
+        .map(|extension| format!("{}.{}", stem, extension))
+        .unwrap_or_else(|| stem.to_string())
 }
 
 fn preview_export_relative_path(
@@ -1280,6 +1454,7 @@ mod tests {
         build_creature_definition, describe_mesh_color_source, export_state_to_campaign,
         format_mtl_source_detail, format_mtl_source_summary, persist_custom_palette,
         preview_export_relative_path, show_obj_importer_tab, stage_imported_swatch_as_custom_draft,
+        ObjImporterExportError,
     };
     use crate::logging::Logger;
     use crate::obj_importer::{
@@ -1403,6 +1578,52 @@ mod tests {
     }
 
     #[test]
+    fn test_export_creature_copies_imported_texture_maps_and_updates_paths() {
+        let campaign_dir = tempdir().unwrap();
+        let source_dir = tempdir().unwrap();
+        let body_texture = source_dir.path().join("Body Texture.PNG");
+        let wing_texture = source_dir.path().join("wing-diffuse.jpg");
+        fs::write(&body_texture, b"body texture").unwrap();
+        fs::write(&wing_texture, b"wing texture").unwrap();
+
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("textures/body.png".to_string());
+        state.meshes[0].texture_source_path = Some(body_texture.clone());
+        let mut second_mesh = state.meshes[0].clone();
+        second_mesh.name = "wing".to_string();
+        second_mesh.mesh_def.name = Some("wing".to_string());
+        second_mesh.mesh_def.texture_path = Some("textures/wing.jpg".to_string());
+        second_mesh.texture_source_path = Some(wing_texture.clone());
+        state.meshes.push(second_mesh);
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        let body_path = round_trip.meshes[0].texture_path.as_ref().unwrap();
+        let wing_path = round_trip.meshes[1].texture_path.as_ref().unwrap();
+        assert!(body_path.starts_with("assets/textures/imported/test_import/"));
+        assert!(wing_path.starts_with("assets/textures/imported/test_import/"));
+        assert_ne!(body_path, wing_path);
+        assert!(campaign_dir.path().join(body_path).exists());
+        assert!(campaign_dir.path().join(wing_path).exists());
+    }
+
+    #[test]
+    fn test_export_creature_errors_when_imported_texture_is_missing() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("textures/missing.png".to_string());
+        state.meshes[0].texture_source_path = Some(campaign_dir.path().join("missing.png"));
+
+        let error = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap_err();
+        assert!(matches!(
+            error,
+            ObjImporterExportError::MissingTexture { .. }
+        ));
+    }
+
+    #[test]
     fn test_preview_export_relative_path_uses_expected_directories() {
         assert_eq!(
             preview_export_relative_path(ExportType::Creature, "Stone Golem", 44, ""),
@@ -1466,6 +1687,7 @@ mod tests {
             label: "HeroSkin".to_string(),
             color: [0.7, 0.6, 0.5, 1.0],
             texture_path: Some("textures/hero.png".to_string()),
+            texture_source_path: None,
         };
 
         stage_imported_swatch_as_custom_draft(&mut state, &swatch);
@@ -1503,6 +1725,7 @@ mod tests {
             label: "HeroSkin".to_string(),
             color: [0.7, 0.6, 0.5, 1.0],
             texture_path: Some("textures/hero.png".to_string()),
+            texture_source_path: None,
         }];
         state.meshes[0].color_source = ImportedMeshColorSource::ImportedMaterial;
         let ctx = egui::Context::default();
