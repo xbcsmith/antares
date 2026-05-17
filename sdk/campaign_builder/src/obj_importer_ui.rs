@@ -31,7 +31,7 @@ use crate::creature_assets::{CreatureAssetError, CreatureAssetManager};
 use crate::logging::{category, Logger};
 use crate::obj_importer::{
     ExportType, ImportSourceFormat, ImportedMaterialSwatch, ImportedMeshColorSource,
-    ImportedMtlSourceKind, ImporterMode, ObjImporterState,
+    ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
 };
 use crate::ui_helpers::TwoColumnLayout;
 use antares::domain::visual::{CreatureDefinition, MeshTransform};
@@ -1270,6 +1270,40 @@ fn export_state_to_campaign(
     })
 }
 
+/// Describes how a mesh texture will be obtained during campaign export.
+///
+/// Returned by [`resolve_imported_texture_source`] and consumed by
+/// [`copy_imported_textures_into_campaign`] to determine which write strategy
+/// to apply without mixing resolution logic into the copy loop.
+#[derive(Debug)]
+enum ResolvedTextureSource {
+    /// The texture path already points inside the campaign directory; no copy needed.
+    AlreadyCampaignRelative,
+    /// Copy (or write) from this filesystem path into the campaign texture directory.
+    FilesystemPath(PathBuf),
+    /// Write these raw bytes to a new destination file.
+    EmbeddedBytes {
+        /// Raw image bytes extracted from a GLB buffer view.
+        bytes: Vec<u8>,
+        /// Preferred export filename including extension (e.g. `"albedo_0.png"`).
+        /// May be empty; [`embedded_texture_file_name`] handles the fallback chain.
+        file_name_hint: String,
+    },
+    /// No valid source was found; export must fail with `MissingTexture`.
+    Missing,
+}
+
+/// Writes campaign texture files for every mesh that declares a texture path,
+/// then rewrites `mesh_def.texture_path` to the new campaign-relative destination.
+///
+/// Textures are deduplicated by content hash: two mesh payloads whose bytes are
+/// identical will both point at the same destination file without writing it twice.
+///
+/// # Errors
+///
+/// Returns [`ObjImporterExportError::MissingTexture`] when a mesh has a texture
+/// path but no usable source (no embedded bytes, no resolvable filesystem path).
+/// This error fires **before** any RON write.
 fn copy_imported_textures_into_campaign(
     state: &ObjImporterState,
     creature: &mut CreatureDefinition,
@@ -1281,98 +1315,169 @@ fn copy_imported_textures_into_campaign(
         .and_then(|stem| stem.to_str())
         .unwrap_or("imported_model");
     let texture_dir = PathBuf::from("assets/textures/imported").join(export_stem);
-    let mut copied_sources = HashMap::<PathBuf, String>::new();
-    let mut used_destinations = std::collections::HashSet::<String>::new();
+    // Keyed on a 64-bit hash of the file/byte content to deduplicate identical payloads.
+    let mut content_hash_to_dest: HashMap<u64, String> = HashMap::new();
+    let mut used_destinations: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for (mesh_index, mesh_def) in creature.meshes.iter_mut().enumerate() {
         let Some(texture_path) = mesh_def.texture_path.clone() else {
             continue;
         };
 
-        if campaign_dir.join(&texture_path).exists() {
-            used_destinations.insert(texture_path);
-            continue;
-        }
-
         let mesh_name = mesh_def
             .name
             .clone()
             .unwrap_or_else(|| format!("mesh_{}", mesh_index));
-        let source_path =
-            resolve_imported_texture_source(state, mesh_index, &texture_path, campaign_dir)
-                .ok_or_else(|| ObjImporterExportError::MissingTexture {
-                    mesh_name: mesh_name.clone(),
+
+        match resolve_imported_texture_source(state, mesh_index, &texture_path, campaign_dir) {
+            ResolvedTextureSource::AlreadyCampaignRelative => {
+                // Reserve the existing path so no other mesh can collide with it.
+                used_destinations.insert(texture_path);
+            }
+            ResolvedTextureSource::FilesystemPath(source_path) => {
+                // Read once for both hashing and writing.
+                let content = fs::read(&source_path)?;
+                let hash = compute_content_hash(&content);
+                if let Some(existing_dest) = content_hash_to_dest.get(&hash) {
+                    mesh_def.texture_path = Some(existing_dest.clone());
+                } else {
+                    let dest_relative = unique_texture_destination(
+                        &texture_dir,
+                        &source_path,
+                        &mut used_destinations,
+                    )?;
+                    let dest_absolute = campaign_dir.join(&dest_relative);
+                    if let Some(parent) = dest_absolute.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::write(&dest_absolute, &content)?;
+                    let dest_str = dest_relative.to_string_lossy().replace('\\', "/");
+                    content_hash_to_dest.insert(hash, dest_str.clone());
+                    mesh_def.texture_path = Some(dest_str);
+                }
+            }
+            ResolvedTextureSource::EmbeddedBytes {
+                bytes,
+                file_name_hint,
+            } => {
+                let hash = compute_content_hash(&bytes);
+                if let Some(existing_dest) = content_hash_to_dest.get(&hash) {
+                    mesh_def.texture_path = Some(existing_dest.clone());
+                } else {
+                    // Use the enum-captured hint as the primary naming source;
+                    // fall back to the full payload when the hint is empty
+                    // (source_label + MIME extension).
+                    let hint = if !file_name_hint.is_empty() {
+                        file_name_hint
+                    } else {
+                        let payload = state
+                            .meshes
+                            .get(mesh_index)
+                            .and_then(|m| m.texture_payload.as_ref());
+                        embedded_texture_file_name(payload, mesh_index)
+                    };
+                    let dest_relative = unique_texture_destination_by_hint(
+                        &texture_dir,
+                        &hint,
+                        &mut used_destinations,
+                    );
+                    let dest_absolute = campaign_dir.join(&dest_relative);
+                    if let Some(parent) = dest_absolute.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::write(&dest_absolute, &bytes)?;
+                    let dest_str = dest_relative.to_string_lossy().replace('\\', "/");
+                    content_hash_to_dest.insert(hash, dest_str.clone());
+                    mesh_def.texture_path = Some(dest_str);
+                }
+            }
+            ResolvedTextureSource::Missing => {
+                return Err(ObjImporterExportError::MissingTexture {
+                    mesh_name,
                     path: PathBuf::from(&texture_path),
-                })?;
-
-        let source_key = source_path
-            .canonicalize()
-            .unwrap_or_else(|_| source_path.clone());
-        if let Some(existing_destination) = copied_sources.get(&source_key) {
-            mesh_def.texture_path = Some(existing_destination.clone());
-            continue;
+                });
+            }
         }
-
-        let destination_relative =
-            unique_texture_destination(&texture_dir, &source_path, &mut used_destinations)?;
-        let destination_absolute = campaign_dir.join(&destination_relative);
-        if let Some(parent) = destination_absolute.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::copy(&source_path, &destination_absolute)?;
-        let destination_relative = destination_relative.to_string_lossy().replace('\\', "/");
-        copied_sources.insert(source_key, destination_relative.clone());
-        mesh_def.texture_path = Some(destination_relative);
     }
 
     Ok(())
 }
 
+/// Resolves the texture source for a single mesh during campaign export.
+///
+/// Checks in priority order:
+/// 1. If the texture path is already campaign-relative, returns
+///    [`ResolvedTextureSource::AlreadyCampaignRelative`].
+/// 2. If the mesh payload carries embedded bytes, returns
+///    [`ResolvedTextureSource::EmbeddedBytes`].
+/// 3. If the mesh payload or fallback paths point at an existing file, returns
+///    [`ResolvedTextureSource::FilesystemPath`].
+/// 4. Returns [`ResolvedTextureSource::Missing`] when no usable source exists.
 fn resolve_imported_texture_source(
     state: &ObjImporterState,
     mesh_index: usize,
     texture_path: &str,
     campaign_dir: &Path,
-) -> Option<PathBuf> {
-    if let Some(source_path) = state
+) -> ResolvedTextureSource {
+    // 1. Already inside the campaign directory — nothing to copy.
+    if campaign_dir.join(texture_path).exists() {
+        return ResolvedTextureSource::AlreadyCampaignRelative;
+    }
+
+    // 2. Embedded GLB bytes take priority over filesystem paths.
+    if let Some(payload) = state
         .meshes
         .get(mesh_index)
         .and_then(|mesh| mesh.texture_payload.as_ref())
-        .and_then(|p| p.source_path.as_ref())
-        .filter(|path| path.exists())
     {
-        return Some(source_path.clone());
+        if let Some(bytes) = payload.bytes.clone() {
+            return ResolvedTextureSource::EmbeddedBytes {
+                bytes,
+                file_name_hint: payload.file_name_hint.clone(),
+            };
+        }
+
+        // 3a. Payload carries an OBJ filesystem source path.
+        if let Some(source_path) = payload.source_path.as_ref().filter(|p| p.exists()) {
+            return ResolvedTextureSource::FilesystemPath(source_path.clone());
+        }
     }
 
+    // 3b. Absolute path encoded directly in the texture_path string.
     let texture_path_ref = Path::new(texture_path);
     if texture_path_ref.is_absolute() && texture_path_ref.exists() {
-        return Some(texture_path_ref.to_path_buf());
+        return ResolvedTextureSource::FilesystemPath(texture_path_ref.to_path_buf());
     }
 
-    let campaign_relative = campaign_dir.join(texture_path_ref);
-    if campaign_relative.exists() {
-        return None;
-    }
-
+    // 3c. Paths relative to MTL file directories.
     for mtl_path in &state.resolved_mtl_paths {
         if let Some(parent) = mtl_path.parent() {
             let candidate = parent.join(texture_path_ref);
             if candidate.exists() {
-                return Some(candidate);
+                return ResolvedTextureSource::FilesystemPath(candidate);
             }
         }
     }
 
-    if let Some(parent) = state.source_path.as_ref().and_then(|path| path.parent()) {
+    // 3d. Path relative to the source OBJ/GLB file's parent directory.
+    if let Some(parent) = state.source_path.as_ref().and_then(|p| p.parent()) {
         let candidate = parent.join(texture_path_ref);
         if candidate.exists() {
-            return Some(candidate);
+            return ResolvedTextureSource::FilesystemPath(candidate);
         }
     }
 
-    None
+    ResolvedTextureSource::Missing
 }
 
+/// Finds a unique campaign-relative destination path for a texture file, given
+/// its source path. Delegates filename derivation to
+/// [`unique_texture_destination_by_hint`] after extracting the filename component.
+///
+/// # Errors
+///
+/// Returns [`ObjImporterExportError::TextureMissingFileName`] when `source_path`
+/// has no filename component (e.g. a bare root path).
 fn unique_texture_destination(
     texture_dir: &Path,
     source_path: &Path,
@@ -1380,17 +1485,38 @@ fn unique_texture_destination(
 ) -> Result<PathBuf, ObjImporterExportError> {
     let file_name = source_path
         .file_name()
-        .and_then(|file_name| file_name.to_str())
+        .and_then(|n| n.to_str())
         .ok_or_else(|| ObjImporterExportError::TextureMissingFileName(source_path.to_path_buf()))?;
-    let source_file_stem = Path::new(file_name)
+    Ok(unique_texture_destination_by_hint(
+        texture_dir,
+        file_name,
+        used_destinations,
+    ))
+}
+
+/// Finds a unique campaign-relative destination path for a texture file given a
+/// filename hint string (stem + optional extension).
+///
+/// Sanitizes the stem with [`sanitized_texture_stem`], lowercases the extension,
+/// and appends a numeric suffix (`_2`, `_3`, …) until a name not present in
+/// `used_destinations` is found.
+///
+/// The returned path is inserted into `used_destinations` before returning.
+fn unique_texture_destination_by_hint(
+    texture_dir: &Path,
+    file_name_hint: &str,
+    used_destinations: &mut std::collections::HashSet<String>,
+) -> PathBuf {
+    let hint_path = Path::new(file_name_hint);
+    let stem = hint_path
         .file_stem()
-        .and_then(|stem| stem.to_str())
+        .and_then(|s| s.to_str())
         .unwrap_or("texture");
-    let sanitized_stem = sanitized_texture_stem(source_file_stem);
-    let extension = Path::new(file_name)
+    let extension = hint_path
         .extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| extension.to_ascii_lowercase());
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    let sanitized_stem = sanitized_texture_stem(stem);
 
     for suffix in 0.. {
         let candidate_name = if suffix == 0 {
@@ -1404,7 +1530,7 @@ fn unique_texture_destination(
         let candidate = texture_dir.join(candidate_name);
         let candidate_string = candidate.to_string_lossy().replace('\\', "/");
         if used_destinations.insert(candidate_string.clone()) {
-            return Ok(PathBuf::from(candidate_string));
+            return PathBuf::from(candidate_string);
         }
     }
 
@@ -1435,6 +1561,70 @@ fn format_texture_file_name(stem: &str, extension: Option<&str>) -> String {
         .filter(|extension| !extension.is_empty())
         .map(|extension| format!("{}.{}", stem, extension))
         .unwrap_or_else(|| stem.to_string())
+}
+
+/// Computes a 64-bit content hash for deduplication of texture payloads.
+///
+/// Two payloads with identical bytes produce the same hash and will be mapped
+/// to the same destination file by [`copy_imported_textures_into_campaign`].
+fn compute_content_hash(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Maps a MIME type string to a lowercase file extension.
+///
+/// | MIME           | Extension |
+/// |----------------|-----------|
+/// | `image/png`    | `png`     |
+/// | `image/jpeg`   | `jpg`     |
+/// | anything else  | `bin`     |
+fn mime_to_extension(mime: Option<&str>) -> &'static str {
+    match mime {
+        Some("image/png") => "png",
+        Some("image/jpeg") | Some("image/jpg") => "jpg",
+        _ => "bin",
+    }
+}
+
+/// Derives a sanitized export filename (with extension) for a GLB embedded
+/// texture, applying the following priority chain:
+///
+/// 1. `payload.file_name_hint` if non-empty — sanitized stem, lowercased extension.
+/// 2. `payload.source_label` if non-empty — sanitized stem, extension from MIME.
+/// 3. Fallback: `"texture_{mesh_index}"` plus extension from MIME (or `.bin`).
+fn embedded_texture_file_name(
+    payload: Option<&ImportedTexturePayload>,
+    mesh_index: usize,
+) -> String {
+    let Some(p) = payload else {
+        return format!("texture_{}.bin", mesh_index);
+    };
+
+    // 1. Prefer the pre-computed file_name_hint (already includes extension).
+    if !p.file_name_hint.is_empty() {
+        let hint_path = Path::new(&p.file_name_hint);
+        let stem = hint_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("texture");
+        let ext = hint_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase());
+        return format_texture_file_name(&sanitized_texture_stem(stem), ext.as_deref());
+    }
+
+    // 2. Fall back to source_label + MIME-derived extension.
+    let ext = mime_to_extension(p.mime_type.as_deref());
+    if !p.source_label.is_empty() {
+        return format!("{}.{}", sanitized_texture_stem(&p.source_label), ext);
+    }
+
+    // 3. Last resort: positional name.
+    format!("texture_{}.{}", mesh_index, ext)
 }
 
 fn preview_export_relative_path(
@@ -1934,6 +2124,215 @@ mod tests {
         assert!(
             matches!(result, Err(ObjImportError::UnknownFormat { ref extension }) if extension == "fbx"),
             "Expected UnknownFormat{{extension: fbx}}, got {result:?}"
+        );
+    }
+
+    // ─── Phase 4 tests: Embedded Texture Export ───────────────────────────────
+
+    /// Returns a minimal `ImportedTexturePayload` with embedded PNG bytes.
+    fn glb_embedded_payload(file_name_hint: &str, bytes: Vec<u8>) -> ImportedTexturePayload {
+        ImportedTexturePayload {
+            source_label: "albedo".to_string(),
+            file_name_hint: file_name_hint.to_string(),
+            bytes: Some(bytes),
+            source_path: None,
+            mime_type: Some("image/png".to_string()),
+        }
+    }
+
+    /// After exporting a GLB creature, the embedded texture bytes are written to
+    /// `assets/textures/imported/<asset>/<hint>` with the expected content.
+    #[test]
+    fn test_export_glb_embedded_texture_writes_campaign_texture_file() {
+        let campaign_dir = tempdir().unwrap();
+        let texture_bytes = b"PNG_FAKE_BYTES_FOR_TEST".to_vec();
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload =
+            Some(glb_embedded_payload("texture_0.png", texture_bytes.clone()));
+
+        let _outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+
+        let expected = campaign_dir
+            .path()
+            .join("assets/textures/imported/test_import/texture_0.png");
+        assert!(expected.exists(), "Texture file should have been written");
+        assert_eq!(
+            fs::read(&expected).unwrap(),
+            texture_bytes,
+            "Texture file content must match the embedded bytes"
+        );
+    }
+
+    /// The RON creature file must reference the campaign-relative texture path
+    /// produced during export, not the placeholder embedded in the GLB.
+    #[test]
+    fn test_export_glb_rewrites_mesh_texture_path_to_campaign_relative() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload = Some(glb_embedded_payload(
+            "texture_0.png",
+            b"fake_png_data".to_vec(),
+        ));
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        let texture_path = round_trip.meshes[0].texture_path.as_ref().unwrap();
+        assert_eq!(
+            texture_path,
+            "assets/textures/imported/test_import/texture_0.png"
+        );
+    }
+
+    /// Two meshes with distinct embedded payloads must produce two distinct
+    /// texture files under the same asset directory.
+    #[test]
+    fn test_export_glb_multiple_embedded_textures_get_distinct_paths() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload = Some(glb_embedded_payload(
+            "texture_0.png",
+            b"body_bytes".to_vec(),
+        ));
+
+        let mut wing = state.meshes[0].clone();
+        wing.name = "wing".to_string();
+        wing.mesh_def.name = Some("wing".to_string());
+        wing.mesh_def.texture_path = Some("__glb_embedded_1".to_string());
+        wing.texture_payload = Some(glb_embedded_payload(
+            "texture_1.png",
+            b"wing_bytes".to_vec(),
+        ));
+        state.meshes.push(wing);
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        let path0 = round_trip.meshes[0].texture_path.as_ref().unwrap();
+        let path1 = round_trip.meshes[1].texture_path.as_ref().unwrap();
+        assert_ne!(
+            path0, path1,
+            "Distinct payloads must produce distinct texture paths"
+        );
+        assert!(
+            campaign_dir.path().join(path0).exists(),
+            "First texture file must exist"
+        );
+        assert!(
+            campaign_dir.path().join(path1).exists(),
+            "Second texture file must exist"
+        );
+    }
+
+    /// Two meshes whose embedded byte payloads are **identical** must both
+    /// reference the same destination file; only one file should be written.
+    #[test]
+    fn test_export_glb_deduplicates_identical_texture_payload() {
+        let campaign_dir = tempdir().unwrap();
+        let shared_bytes = b"shared_texture_data".to_vec();
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload =
+            Some(glb_embedded_payload("texture_0.png", shared_bytes.clone()));
+
+        let mut second = state.meshes[0].clone();
+        second.name = "detail".to_string();
+        second.mesh_def.name = Some("detail".to_string());
+        second.mesh_def.texture_path = Some("__glb_embedded_1".to_string());
+        second.texture_payload = Some(glb_embedded_payload("texture_0.png", shared_bytes));
+        state.meshes.push(second);
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        let path0 = round_trip.meshes[0].texture_path.as_ref().unwrap();
+        let path1 = round_trip.meshes[1].texture_path.as_ref().unwrap();
+        assert_eq!(
+            path0, path1,
+            "Identical payloads must deduplicate to the same path"
+        );
+
+        let texture_dir = campaign_dir
+            .path()
+            .join("assets/textures/imported/test_import");
+        let file_count = fs::read_dir(&texture_dir).map(|d| d.count()).unwrap_or(0);
+        assert_eq!(
+            file_count, 1,
+            "Only one texture file should be written for identical payloads"
+        );
+    }
+
+    /// When a mesh declares a texture path but the payload has neither embedded
+    /// bytes nor a valid filesystem path, export must fail with `MissingTexture`
+    /// **before** any RON file is created.
+    #[test]
+    fn test_export_glb_missing_texture_payload_fails_before_ron_write() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload = Some(ImportedTexturePayload {
+            source_label: "missing".to_string(),
+            file_name_hint: "texture_0.png".to_string(),
+            bytes: None,       // No embedded bytes
+            source_path: None, // No filesystem path
+            mime_type: Some("image/png".to_string()),
+        });
+
+        let error = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap_err();
+
+        assert!(
+            matches!(error, ObjImporterExportError::MissingTexture { .. }),
+            "Expected MissingTexture, got {error:?}"
+        );
+        let ron_path = campaign_dir.path().join("assets/creatures/test_import.ron");
+        assert!(
+            !ron_path.exists(),
+            "RON file must not be created when texture resolution fails"
+        );
+    }
+
+    /// OBJ-style texture export (filesystem `source_path`, no embedded bytes)
+    /// must continue to work after the Phase 4 refactor.
+    #[test]
+    fn test_export_obj_texture_copy_still_passes() {
+        let campaign_dir = tempdir().unwrap();
+        let source_dir = tempdir().unwrap();
+        let body_texture = source_dir.path().join("body.png");
+        fs::write(&body_texture, b"obj_body_texture").unwrap();
+
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("textures/body.png".to_string());
+        state.meshes[0].texture_payload = Some(ImportedTexturePayload {
+            source_label: "body.png".to_string(),
+            file_name_hint: "body.png".to_string(),
+            bytes: None,                             // OBJ: no embedded bytes
+            source_path: Some(body_texture.clone()), // OBJ: resolved filesystem path
+            mime_type: None,
+        });
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        let texture_path = round_trip.meshes[0].texture_path.as_ref().unwrap();
+        assert!(
+            texture_path.starts_with("assets/textures/imported/test_import/"),
+            "Expected campaign-relative prefix, got: {texture_path}"
+        );
+        assert!(
+            campaign_dir.path().join(texture_path).exists(),
+            "Exported texture file must exist"
+        );
+        assert_eq!(
+            fs::read(campaign_dir.path().join(texture_path)).unwrap(),
+            b"obj_body_texture",
+            "Copied texture content must match the source file"
         );
     }
 }

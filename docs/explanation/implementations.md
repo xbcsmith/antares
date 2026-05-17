@@ -2,6 +2,124 @@
 
 ---
 
+## GLB Embedded Texture Export — Phase 4 (Complete)
+
+### Overview
+
+Implemented Phase 4 of the GLB file support plan for the Campaign Builder
+importer. This phase extends `obj_importer_ui.rs` to write embedded GLB image
+bytes to campaign texture asset files during export, while fully preserving all
+existing OBJ texture copy behaviour. No changes were made to `mesh_glb_io.rs`
+or `obj_importer.rs`.
+
+### Deliverables
+
+- **`ResolvedTextureSource` enum** — new private enum added in
+  `obj_importer_ui.rs`:
+
+  - `AlreadyCampaignRelative` — texture already lives in campaign dir; skip.
+  - `FilesystemPath(PathBuf)` — copy from this filesystem path.
+  - `EmbeddedBytes { bytes: Vec<u8>, file_name_hint: String }` — write these
+    bytes to a new campaign texture file.
+  - `Missing` — no usable source; export fails with `MissingTexture`.
+
+- **`resolve_imported_texture_source` refactored** — return type changed from
+  `Option<PathBuf>` to `ResolvedTextureSource`. Priority order:
+
+  1. Campaign-relative check → `AlreadyCampaignRelative`.
+  2. `payload.bytes.is_some()` → `EmbeddedBytes`.
+  3. `payload.source_path` exists on disk → `FilesystemPath`.
+  4. Absolute `texture_path` exists → `FilesystemPath`.
+  5. MTL-relative fallback paths → `FilesystemPath`.
+  6. Source file parent directory → `FilesystemPath`.
+  7. None of the above → `Missing`.
+
+- **`copy_imported_textures_into_campaign` rewritten** — uses `match` on
+  `ResolvedTextureSource`. Deduplication switched from
+  `HashMap<PathBuf, String>` (by canonicalized source path) to
+  `HashMap<u64, String>` (by 64-bit content hash via
+  `std::collections::hash_map::DefaultHasher`). Both `FilesystemPath` and
+  `EmbeddedBytes` branches read or carry the full byte content, hash it, and
+  write via `fs::write`. The `MissingTexture` error fires before any
+  downstream RON write — the `export_state_to_campaign` call order is
+  unchanged: `build_creature_definition` → `copy_imported_textures_into_campaign`
+  → RON serialisation and `fs::write`.
+
+- **`unique_texture_destination` refactored** — now a thin wrapper that
+  extracts the filename from a `&Path` and delegates to the new
+  `unique_texture_destination_by_hint`.
+
+- **`unique_texture_destination_by_hint` added** — takes a `file_name_hint:
+&str`, applies `sanitized_texture_stem` to the stem, lowercases the
+  extension, and finds a unique destination with numeric suffix (`_2`, `_3`,
+  …). Infallible (always returns `Ok`); inserted into `used_destinations`
+  before returning.
+
+- **`compute_content_hash(bytes: &[u8]) -> u64`** — private helper using
+  `DefaultHasher` for payload deduplication.
+
+- **`mime_to_extension(mime: Option<&str>) -> &'static str`** — maps
+  `"image/png"` → `"png"`, `"image/jpeg"` → `"jpg"`, anything else → `"bin"`.
+
+- **`embedded_texture_file_name(payload, mesh_index) -> String`** — derives a
+  sanitized export filename from the payload using the priority chain:
+
+  1. `payload.file_name_hint` if non-empty (sanitize stem, lowercase ext).
+  2. `payload.source_label` if non-empty + MIME extension.
+  3. Fallback `"texture_{mesh_index}.{ext_from_mime}"`.
+
+- **`ImportedTexturePayload`** added to the top-level `use` block in
+  `obj_importer_ui.rs` (was already imported only in `mod tests`).
+
+- **6 new tests** in `obj_importer_ui::tests` (all pass):
+  - `test_export_glb_embedded_texture_writes_campaign_texture_file` — bytes
+    written to `assets/textures/imported/<asset>/texture_0.png` with correct
+    content.
+  - `test_export_glb_rewrites_mesh_texture_path_to_campaign_relative` — RON
+    `texture_path` equals
+    `"assets/textures/imported/test_import/texture_0.png"`.
+  - `test_export_glb_multiple_embedded_textures_get_distinct_paths` — two
+    meshes with different payloads produce two distinct files, both existing.
+  - `test_export_glb_deduplicates_identical_texture_payload` — two meshes with
+    identical byte payloads produce exactly one file; both RON entries reference
+    the same path.
+  - `test_export_glb_missing_texture_payload_fails_before_ron_write` — no
+    bytes and no source path → `MissingTexture` error; RON file is never
+    written.
+  - `test_export_obj_texture_copy_still_passes` — OBJ-style payload
+    (`source_path` set, `bytes: None`) copies correctly; content verified.
+
+### Key Design Decisions
+
+- **Content hash over path canonicalisation** — two meshes that import different
+  filenames but carry identical bytes now correctly deduplicate to a single
+  campaign texture file. The old path-based approach couldn't handle this case
+  (embedded GLB textures have no filesystem path).
+- **`fs::write` instead of `fs::copy` for `FilesystemPath`** — reading the
+  file into memory for hashing is unavoidable; using the same bytes for writing
+  eliminates a second system call. For the textures involved in a game
+  campaign (typically KBs to low MBs), the memory overhead is acceptable.
+- **`EmbeddedBytes.file_name_hint` read directly in match arm** — avoids a
+  `dead_code` lint by using the destructured field as the primary naming
+  source, falling back to `embedded_texture_file_name(full_payload)` only
+  when the hint is empty.
+- **Export call order preserved** — `MissingTexture` is returned from
+  `copy_imported_textures_into_campaign`, which is called before any
+  `fs::write` of the RON creature file. This invariant is confirmed by
+  `test_export_glb_missing_texture_payload_fails_before_ron_write`.
+
+### Quality Gates
+
+```
+cargo fmt         ✔ no output
+cargo check       ✔ 0 errors, 0 warnings
+cargo clippy      ✔ 0 warnings (-D warnings)
+cargo nextest run ✔ 2418 tests run: 2418 passed, 0 failed
+                    (6 new Phase 4 tests + 2412 existing)
+```
+
+---
+
 ## GLB Importer UI for GLB Selection — Phase 3 (Complete)
 
 ### Overview
