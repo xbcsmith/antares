@@ -1267,7 +1267,8 @@ fn resolve_imported_texture_source(
     if let Some(source_path) = state
         .meshes
         .get(mesh_index)
-        .and_then(|mesh| mesh.texture_source_path.as_ref())
+        .and_then(|mesh| mesh.texture_payload.as_ref())
+        .and_then(|p| p.source_path.as_ref())
         .filter(|path| path.exists())
     {
         return Some(source_path.clone());
@@ -1459,7 +1460,7 @@ mod tests {
     use crate::logging::Logger;
     use crate::obj_importer::{
         ExportType, ImportedMaterialSwatch, ImportedMeshColorSource, ImportedMtlSourceKind,
-        ImporterMode, ObjImporterState,
+        ImportedTexturePayload, ImporterMode, ObjImporterState,
     };
     use antares::domain::visual::{AlphaMode, CreatureDefinition, MaterialDefinition};
     use eframe::egui;
@@ -1588,12 +1589,24 @@ mod tests {
 
         let mut state = triangle_mesh_state();
         state.meshes[0].mesh_def.texture_path = Some("textures/body.png".to_string());
-        state.meshes[0].texture_source_path = Some(body_texture.clone());
+        state.meshes[0].texture_payload = Some(ImportedTexturePayload {
+            source_label: "Body Texture.PNG".to_string(),
+            file_name_hint: "Body Texture.PNG".to_string(),
+            bytes: None,
+            source_path: Some(body_texture.clone()),
+            mime_type: None,
+        });
         let mut second_mesh = state.meshes[0].clone();
         second_mesh.name = "wing".to_string();
         second_mesh.mesh_def.name = Some("wing".to_string());
         second_mesh.mesh_def.texture_path = Some("textures/wing.jpg".to_string());
-        second_mesh.texture_source_path = Some(wing_texture.clone());
+        second_mesh.texture_payload = Some(ImportedTexturePayload {
+            source_label: "wing-diffuse.jpg".to_string(),
+            file_name_hint: "wing-diffuse.jpg".to_string(),
+            bytes: None,
+            source_path: Some(wing_texture.clone()),
+            mime_type: None,
+        });
         state.meshes.push(second_mesh);
 
         let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
@@ -1614,7 +1627,13 @@ mod tests {
         let campaign_dir = tempdir().unwrap();
         let mut state = triangle_mesh_state();
         state.meshes[0].mesh_def.texture_path = Some("textures/missing.png".to_string());
-        state.meshes[0].texture_source_path = Some(campaign_dir.path().join("missing.png"));
+        state.meshes[0].texture_payload = Some(ImportedTexturePayload {
+            source_label: "missing.png".to_string(),
+            file_name_hint: "missing.png".to_string(),
+            bytes: None,
+            source_path: Some(campaign_dir.path().join("missing.png")),
+            mime_type: None,
+        });
 
         let error = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap_err();
         assert!(matches!(

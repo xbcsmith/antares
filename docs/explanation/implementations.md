@@ -2,6 +2,76 @@
 
 ---
 
+## GLB Format-Neutral Importer State — Phase 2 (Complete)
+
+### Overview
+
+Implemented Phase 2 of the GLB (binary glTF) file support plan for the Campaign
+Builder importer. This phase extends `obj_importer.rs` with a format-neutral
+importer state so OBJ and GLB sources both converge into the same
+`ObjImporterState` and export code paths. No UI changes in this phase; existing
+OBJ workflow is entirely unchanged.
+
+### Deliverables
+
+- **`ImportSourceFormat` enum** — `Obj | Glb`; added to `obj_importer.rs` after
+  `ImportedMtlSourceKind`; `Default` is `Obj`.
+- **`ImportedTexturePayload` struct** — generalized texture source covering both
+  OBJ filesystem paths (`source_path: Option<PathBuf>`) and GLB embedded image
+  bytes (`bytes: Option<Vec<u8>>`); added after `ImportedMaterialSwatch`.
+- **`ImportedMesh.texture_payload`** — replaces the OBJ-only
+  `texture_source_path: Option<PathBuf>` field. All OBJ call sites updated to
+  construct an `ImportedTexturePayload` with `source_path` populated and
+  `bytes = None`. UI code updated to use
+  `texture_payload.as_ref().and_then(|p| p.source_path.as_ref())`.
+- **`ObjImporterState.source_format`** — new `ImportSourceFormat` field;
+  initialized to `Obj` in `Default`; reset to `Obj` by `clear()`; set to `Glb`
+  by `load_imported_glb_scene`.
+- **`ObjImporterError::Glb`** — new `#[from] GlbImportError` variant.
+- **`ObjImporterState::load_glb_file`** — public method parallel to
+  `load_obj_file`; reads a `.glb` file using `import_glb_scene_from_file`,
+  delegates to `load_imported_glb_scene`.
+- **`ObjImporterState::load_imported_glb_scene`** — private helper; converts
+  `ImportedGlbScene` meshes into `ImportedMesh` rows, builds metadata summary
+  into `status_message`.
+- **`ImportedMesh::from_imported_glb_mesh`** — private constructor; maps GLB
+  PBR color to `color_source` (non-white → `ImportedMaterial`, white →
+  `AutoAssigned`); defaults `selected: false`.
+- **5 new tests** in `obj_importer::tests` (all pass):
+  - `test_obj_importer_state_load_glb_file_sets_loaded_mode`
+  - `test_obj_importer_state_load_glb_preserves_texture_payload`
+  - `test_obj_importer_state_load_glb_metadata_summary_in_status`
+  - `test_obj_importer_clear_resets_source_format_to_obj`
+  - `test_obj_importer_load_obj_still_works_after_glb_fields_added`
+- **`obj_importer_ui.rs`** — `resolve_imported_texture_source` updated to use
+  `mesh.texture_payload.as_ref().and_then(|p| p.source_path.as_ref())`. Two
+  existing texture-copy tests updated to construct `ImportedTexturePayload`
+  instead of setting `texture_source_path` directly.
+
+### Key Design Decisions
+
+- `ImportedTexturePayload.bytes` is `Option<Vec<u8>>` (not `Vec<u8>`) so OBJ
+  payloads can be constructed without stub byte data (`bytes: None`).
+- `from_imported_glb_mesh` does **not** call `auto_assigned_color`; GLB meshes
+  carry their PBR base-color factor directly. Users may invoke
+  `auto_assign_colors()` post-load.
+- `clear()` resets `source_format` to `Obj` via `..Self::default()` — no
+  explicit assignment needed in the clear body.
+- `status_message` is overwritten **after** `load_imported_mesh_rows` because
+  `load_imported_mesh_rows` sets a generic "Loaded N meshes" message that the
+  richer GLB metadata summary must replace.
+
+### Quality Gates
+
+```
+cargo fmt         ✔ no output
+cargo check       ✔ 0 errors, 0 warnings
+cargo clippy      ✔ 0 warnings (-D warnings)
+cargo nextest run ✔ 2409 passed, 0 failed (5 new Phase 2 tests + 2404 existing)
+```
+
+---
+
 ## GLB Parser Foundation — Phase 1 (Complete)
 
 ### Overview
