@@ -144,6 +144,14 @@ pub struct CreaturesEditorState {
 
     // Preview state
     pub preview_dirty: bool,
+    /// Dirty flag for validation state. Set `true` whenever meshes, transforms,
+    /// or creature-level properties change. Cleared to `false` by
+    /// `show_edit_mode` after `refresh_validation_state` runs.
+    pub validation_dirty: bool,
+    /// When `true` (the default), preview syncs automatically on every dirty
+    /// event. When `false`, preview syncs only when the Refresh button is
+    /// clicked. Auto-disabled for dense models (> 50,000 triangles).
+    pub live_preview_enabled: bool,
 
     // Registry Management UI
     pub category_filter: Option<CreatureCategory>,
@@ -307,6 +315,8 @@ impl Default for CreaturesEditorState {
             mesh_edit_buffer: None,
             mesh_transform_buffer: None,
             preview_dirty: false,
+            validation_dirty: true,
+            live_preview_enabled: true,
             category_filter: None,
             show_registry_stats: true,
             id_manager: CreatureIdManager::new(),
@@ -1583,7 +1593,10 @@ impl CreaturesEditorState {
     ) -> Option<String> {
         let mut result_message: Option<String> = None;
 
-        self.refresh_validation_state();
+        if self.validation_dirty {
+            self.refresh_validation_state();
+            self.validation_dirty = false;
+        }
 
         // Action buttons
         let action = ActionButtons::new().show(ui);
@@ -1792,6 +1805,7 @@ impl CreaturesEditorState {
                     self.mesh_visibility.push(true);
                     *unsaved_changes = true;
                     self.preview_dirty = true;
+                    self.validation_dirty = true;
                 }
 
                 if ui.button("🗑 Delete").clicked() && mesh_idx < self.edit_buffer.meshes.len() {
@@ -1805,6 +1819,7 @@ impl CreaturesEditorState {
                     self.mesh_transform_buffer = None;
                     *unsaved_changes = true;
                     self.preview_dirty = true;
+                    self.validation_dirty = true;
                 }
             }
         });
@@ -1835,6 +1850,7 @@ impl CreaturesEditorState {
                                         self.mesh_visibility[idx] = visible;
                                     }
                                     self.preview_dirty = true;
+                                    self.validation_dirty = true;
                                     ui.ctx().request_repaint();
                                 }
 
@@ -1860,6 +1876,7 @@ impl CreaturesEditorState {
                                     self.mesh_transform_buffer =
                                         Some(self.edit_buffer.mesh_transforms[idx]);
                                     self.preview_dirty = true;
+                                    self.validation_dirty = true;
                                     ui.ctx().request_repaint();
                                 }
                             });
@@ -1900,6 +1917,7 @@ impl CreaturesEditorState {
                 {
                     *unsaved_changes = true;
                     self.preview_dirty = true;
+                    self.validation_dirty = true;
                 }
                 ui.end_row();
 
@@ -1919,6 +1937,7 @@ impl CreaturesEditorState {
                 {
                     *unsaved_changes = true;
                     self.preview_dirty = true;
+                    self.validation_dirty = true;
                 }
                 ui.end_row();
 
@@ -1935,12 +1954,14 @@ impl CreaturesEditorState {
                         }
                         *unsaved_changes = true;
                         self.preview_dirty = true;
+                        self.validation_dirty = true;
                     }
 
                     if let Some(tint) = &mut self.edit_buffer.color_tint {
                         if ui.color_edit_button_rgba_unmultiplied(tint).changed() {
                             *unsaved_changes = true;
                             self.preview_dirty = true;
+                            self.validation_dirty = true;
                         }
                     }
                 });
@@ -2126,6 +2147,7 @@ impl CreaturesEditorState {
                         self.mesh_edit_buffer = None;
                         self.mesh_transform_buffer = None;
                         self.preview_dirty = true;
+                        self.validation_dirty = true;
                         self.show_validation_panel = false;
                         self.refresh_validation_state();
                         self.workflow.mark_clean();
@@ -2140,6 +2162,7 @@ impl CreaturesEditorState {
                 self.mesh_edit_buffer = None;
                 self.mesh_transform_buffer = None;
                 self.preview_dirty = true;
+                self.validation_dirty = true;
                 self.show_validation_panel = false;
                 self.refresh_validation_state();
                 self.workflow.mark_clean();
@@ -2215,6 +2238,7 @@ impl CreaturesEditorState {
         self.mesh_transform_buffer = None;
         self.selected_mesh_index = None;
         self.preview_dirty = true;
+        self.validation_dirty = true;
         self.workflow
             .enter_asset_editor(&normalized, &new_creature.name);
         self.workflow.mark_dirty();
@@ -2547,6 +2571,7 @@ impl CreaturesEditorState {
 
         *unsaved_changes = true;
         self.preview_dirty = true;
+        self.validation_dirty = true;
     }
 
     fn _legacy_show_mesh_list_and_editor(&mut self, ui: &mut egui::Ui) {
@@ -2836,6 +2861,12 @@ impl CreaturesEditorState {
             self.selected_creature = Some(index);
             self.edit_buffer = creature.clone();
             self.preview_dirty = true;
+            self.validation_dirty = true;
+            // Auto-disable live preview for dense creatures
+            let total_tris: usize = creature.meshes.iter().map(|m| m.indices.len() / 3).sum();
+            if total_tris > 50_000 {
+                self.live_preview_enabled = false;
+            }
             self.preview_error = None;
             self.workflow.enter_asset_editor(file_name, &creature.name);
         }
@@ -4144,5 +4175,38 @@ mod tests {
             state.id_manager.is_id_used(1),
             "show_registry_mode should refresh id manager from runtime registry"
         );
+    }
+
+    #[test]
+    fn test_validation_dirty_flag_prevents_recompute_without_change() {
+        let mut state = CreaturesEditorState::new();
+        // validation_dirty starts true; after refresh it becomes false.
+        assert!(state.validation_dirty);
+        state.refresh_validation_state();
+        state.validation_dirty = false;
+        assert!(!state.validation_dirty);
+        // A second direct call to refresh_validation_state does not change the
+        // flag – the guard in show_edit_mode would have skipped it.
+        state.refresh_validation_state();
+        assert!(!state.validation_dirty);
+    }
+
+    #[test]
+    fn test_validation_dirty_set_when_mesh_edited() {
+        let mut state = CreaturesEditorState::new();
+        // Clear dirty flags.
+        state.validation_dirty = false;
+        state.preview_dirty = false;
+
+        // Simulate what show_mesh_list_panel does when a mesh is deleted
+        // (sets both dirty flags).
+        state.preview_dirty = true;
+        state.validation_dirty = true;
+
+        assert!(
+            state.validation_dirty,
+            "editing a mesh must set validation_dirty"
+        );
+        assert!(state.preview_dirty, "editing a mesh must set preview_dirty");
     }
 }

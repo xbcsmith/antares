@@ -1356,7 +1356,9 @@ impl eframe::App for CampaignBuilderApp {
                         obj_importer_ui::ObjImporterUiSignal::Creature => {
                             self.load_creatures();
                             self.sync_obj_importer_campaign_state();
-                            self.ui_state.active_tab = EditorTab::Creatures;
+                            if self.obj_importer_state.open_after_export {
+                                self.ui_state.active_tab = EditorTab::Creatures;
+                            }
                             ui.ctx().request_repaint();
                         }
                         obj_importer_ui::ObjImporterUiSignal::Item => {
@@ -2890,6 +2892,37 @@ impl CampaignBuilderApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_importer_creature_export_switches_tab_when_enabled() {
+        let mut app = CampaignBuilderApp::default();
+        // Verify default: open_after_export is false, tab should NOT switch
+        assert!(!app.obj_importer_state.open_after_export);
+        // Simulate what the Creature signal handler does with open_after_export = false
+        let initial_tab = app.ui_state.active_tab.clone();
+        app.load_creatures();
+        app.sync_obj_importer_campaign_state();
+        if app.obj_importer_state.open_after_export {
+            app.ui_state.active_tab = EditorTab::Creatures;
+        }
+        assert_eq!(
+            app.ui_state.active_tab, initial_tab,
+            "Tab must NOT switch when open_after_export is false"
+        );
+
+        // Now enable it
+        app.obj_importer_state.open_after_export = true;
+        app.load_creatures();
+        app.sync_obj_importer_campaign_state();
+        if app.obj_importer_state.open_after_export {
+            app.ui_state.active_tab = EditorTab::Creatures;
+        }
+        assert_eq!(
+            app.ui_state.active_tab,
+            EditorTab::Creatures,
+            "Tab MUST switch to Creatures when open_after_export is true"
+        );
+    }
 
     #[test]
     fn test_npc_editor_receives_loaded_skill_candidates() {

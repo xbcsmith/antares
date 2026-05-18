@@ -206,6 +206,10 @@ pub struct ObjImporterState {
     pub new_custom_color_label: String,
     /// Draft color used by the custom-palette add form.
     pub new_custom_color: [f32; 4],
+    /// When `true`, exporting a creature automatically switches the active tab
+    /// to the Creatures editor. Defaults to `false` to keep the user in the
+    /// Importer tab after export.
+    pub open_after_export: bool,
 }
 
 /// Errors that can occur while preparing importer state.
@@ -416,6 +420,7 @@ impl Default for ObjImporterState {
             active_mesh_index: None,
             new_custom_color_label: String::new(),
             new_custom_color: [0.8, 0.8, 0.8, 1.0],
+            open_after_export: false,
         }
     }
 }
@@ -427,6 +432,11 @@ impl ObjImporterState {
     }
 
     /// Clears any loaded OBJ data and returns the importer to idle mode.
+    ///
+    /// The following fields survive a clear and are restored into the new
+    /// default state: `scale`, `custom_palette`, `creature_id`,
+    /// `furniture_id`, `export_type`, `category`, `new_custom_color`,
+    /// `manual_mtl_path`, and `open_after_export`.
     pub fn clear(&mut self) {
         let scale = self.scale;
         let custom_palette = self.custom_palette.clone();
@@ -436,6 +446,7 @@ impl ObjImporterState {
         let category = self.category.clone();
         let new_custom_color = self.new_custom_color;
         let manual_mtl_path = self.manual_mtl_path.clone();
+        let open_after_export = self.open_after_export;
 
         *self = Self {
             scale,
@@ -446,6 +457,7 @@ impl ObjImporterState {
             category,
             new_custom_color,
             manual_mtl_path,
+            open_after_export,
             ..Self::default()
         };
     }
@@ -1267,6 +1279,28 @@ mod tests {
             "source_format must reset to Obj after clear()"
         );
         assert_eq!(state.mode, ImporterMode::Idle);
+    }
+
+    #[test]
+    fn test_importer_creature_export_stays_in_importer_by_default() {
+        let state = ObjImporterState::default();
+        assert!(
+            !state.open_after_export,
+            "open_after_export must default to false"
+        );
+    }
+
+    #[test]
+    fn test_open_after_export_preserved_across_clear() {
+        let mut state = ObjImporterState::default();
+        state.open_after_export = true;
+        // Load a mesh so clear() is meaningful
+        state.creature_name = "Test".to_string();
+        state.clear();
+        assert!(
+            state.open_after_export,
+            "open_after_export must survive clear()"
+        );
     }
 
     #[test]

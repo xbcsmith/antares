@@ -230,6 +230,11 @@ pub struct PreviewRenderer {
 
     /// Last mouse position for drag interactions
     _last_mouse_pos: Option<(f32, f32)>,
+
+    /// Last render signature stored after calling `render_preview`.
+    /// When this matches the current camera+needs_update signature, the
+    /// expensive `render_preview` pass is skipped.
+    last_rendered_signature: Option<u64>,
 }
 
 impl Default for PreviewRenderer {
@@ -258,6 +263,7 @@ impl PreviewRenderer {
             mesh_visibility: Vec::new(),
             projected_mesh_cache: RefCell::new(Vec::new()),
             _last_mouse_pos: None,
+            last_rendered_signature: None,
         }
     }
 
@@ -331,6 +337,22 @@ impl PreviewRenderer {
         &self.mesh_visibility
     }
 
+    /// Compute a hash that uniquely identifies the current render state.
+    ///
+    /// When this value matches `last_rendered_signature` and `needs_update` is
+    /// `false`, the expensive `render_preview` drawing pass can be skipped.
+    fn compute_render_signature(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        Self::hash_f32(&mut hasher, self.camera.distance);
+        Self::hash_f32(&mut hasher, self.camera.azimuth);
+        Self::hash_f32(&mut hasher, self.camera.elevation);
+        Self::hash_f32(&mut hasher, self.camera.fov);
+        for v in self.camera.target {
+            Self::hash_f32(&mut hasher, v);
+        }
+        hasher.finish()
+    }
+
     /// Show the preview renderer UI
     ///
     /// Renders the 3D preview and camera controls in an egui panel.
@@ -394,8 +416,14 @@ impl PreviewRenderer {
             self.needs_update = true;
         }
 
-        // Render simplified 3D preview
-        self.render_preview(&painter, response.rect);
+        // Render 3D preview only when camera or data changed
+        let render_sig = self.compute_render_signature();
+        let should_render = self.needs_update || self.last_rendered_signature != Some(render_sig);
+        if should_render {
+            self.render_preview(&painter, response.rect);
+            self.last_rendered_signature = Some(render_sig);
+            self.needs_update = false;
+        }
 
         // Show preview info overlay
         let builder = egui::UiBuilder::new().max_rect(response.rect);
@@ -1155,5 +1183,56 @@ mod tests {
         let (drawn, skipped) = observed.expect("draw result should be captured");
         assert_eq!(drawn, 1);
         assert_eq!(skipped, 1);
+    }
+
+    #[test]
+    fn test_preview_renderer_skips_render_when_signature_unchanged() {
+        let mut renderer = PreviewRenderer::new();
+        let creature = CreatureDefinition {
+            id: 1,
+            name: "Sig Test".to_string(),
+            meshes: vec![],
+            mesh_transforms: vec![],
+            scale: 1.0,
+            color_tint: None,
+        };
+        renderer.update_creature(Some(creature));
+
+        // needs_update starts true; first show should render and store signature.
+        assert!(renderer.needs_update);
+        assert!(renderer.last_rendered_signature.is_none());
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                renderer.show(ui);
+            });
+        });
+
+        let sig_after_first = renderer.last_rendered_signature;
+        assert!(
+            sig_after_first.is_some(),
+            "Signature must be recorded after first render"
+        );
+        assert!(
+            !renderer.needs_update,
+            "needs_update must be cleared after render"
+        );
+
+        // Second show with identical camera and no needs_update must NOT re-render.
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                renderer.show(ui);
+            });
+        });
+
+        assert_eq!(
+            renderer.last_rendered_signature, sig_after_first,
+            "Signature must be unchanged after a skipped render"
+        );
+        assert!(
+            !renderer.needs_update,
+            "needs_update must remain false after skipped render"
+        );
     }
 }

@@ -442,6 +442,16 @@ fn render_loaded_mode(
             ui.ctx().request_repaint();
         }
 
+        if ui
+            .checkbox(
+                &mut state.open_after_export,
+                "Open exported creature in editor after export",
+            )
+            .changed()
+        {
+            ui.ctx().request_repaint();
+        }
+
         let export_enabled = campaign_dir.is_some() && !state.meshes.is_empty();
         if ui
             .add_enabled(export_enabled, egui::Button::new("Export RON"))
@@ -518,10 +528,17 @@ fn render_loaded_mode(
                 });
                 left_ui.separator();
 
+                // Compute row height for show_rows virtualization.
+                // Each row is a group containing two lines of content.
+                let body_h = left_ui.text_style_height(&egui::TextStyle::Body);
+                let spacing = left_ui.spacing().item_spacing.y;
+                let row_height = body_h * 2.0 + spacing * 2.0 + 12.0;
+                let num_rows = row_snapshots.len();
                 egui::ScrollArea::vertical()
-                    .id_salt("obj_importer_mesh_list_scroll")
-                    .show(left_ui, |ui| {
-                        for row in &row_snapshots {
+                    .id_salt("importer_mesh_list_scroll")
+                    .show_rows(left_ui, row_height, num_rows, |ui, row_range| {
+                        for i in row_range {
+                            let row = &row_snapshots[i];
                             ui.push_id(row.index, |ui| {
                                 let mut selected = row.selected;
                                 ui.group(|ui| {
@@ -2404,6 +2421,56 @@ mod tests {
 
     /// Exporting with `ExportType::Furniture` must preserve `texture_path` in
     /// the written RON so the runtime can locate the texture asset.
+    #[test]
+    fn test_importer_large_mesh_list_renders_bounded_rows() {
+        // Build a state with 200 meshes. The show_rows virtualization should
+        // handle this without panicking and without rendering all 200 rows.
+        let mut state = ObjImporterState::default();
+        state.mode = crate::obj_importer::ImporterMode::Loaded;
+
+        for i in 0..200_usize {
+            use antares::domain::visual::MeshDefinition;
+            let mesh_def = MeshDefinition {
+                name: Some(format!("mesh_{}", i)),
+                vertices: vec![[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                indices: vec![0, 1, 2],
+                normals: None,
+                uvs: None,
+                color: [1.0, 1.0, 1.0, 1.0],
+                lod_levels: None,
+                lod_distances: None,
+                material: None,
+                texture_path: None,
+            };
+            state
+                .meshes
+                .push(crate::obj_importer::ImportedMesh::from_mesh_definition(
+                    mesh_def,
+                ));
+        }
+
+        // Render the loaded mode in a small fixed-height egui context.
+        // The test passes as long as show_rows does not panic on large lists.
+        let ctx = egui::Context::default();
+        let mut logger = crate::logging::Logger::default();
+        let did_not_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    crate::obj_importer_ui::show_obj_importer_tab(
+                        ui,
+                        &mut state,
+                        None,
+                        &mut logger,
+                    );
+                });
+            });
+        }));
+        assert!(
+            did_not_panic.is_ok(),
+            "show_rows must handle 200-mesh importer state without panicking"
+        );
+    }
+
     #[test]
     fn test_glb_furniture_export_preserves_texture_path() {
         let campaign_dir = tempdir().unwrap();

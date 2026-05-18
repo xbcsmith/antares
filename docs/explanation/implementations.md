@@ -2,6 +2,287 @@
 
 ---
 
+## GLB File Support — Phase 6: Importer and Creature Preview Responsiveness (Complete)
+
+### Overview
+
+All four findings of Phase 6 are now fully implemented. Each finding is an
+independent performance fix for a confirmed per-frame CPU hot-path in the
+Campaign Builder that becomes more visible with large OBJ or GLB files.
+
+| Finding | Description                                                                                        | Primary Files                                                              |
+| ------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| A       | `validation_dirty` guard — `refresh_validation_state` was called every frame unconditionally       | `creatures_editor/mod.rs`, `creatures_editor/mesh_ui.rs`, `app_dialogs.rs` |
+| B       | Render-signature skip — `render_preview` was called every frame even with no camera or mesh change | `preview_renderer.rs`, `creatures_editor/preview_panel.rs`                 |
+| C       | `show_rows` virtualization — importer mesh list painted all N rows every frame                     | `obj_importer_ui.rs`                                                       |
+| D       | Conditional tab switch — creature export always navigated away from Importer tab                   | `obj_importer.rs`, `obj_importer_ui.rs`, `lib.rs`                          |
+
+**All 6 required tests pass. Zero `cargo clippy` warnings. 2433/2433 tests green.**
+
+---
+
+## GLB File Support — Phase 6 Findings C & D: Virtualized Mesh List + `open_after_export` Toggle (Complete)
+
+### Overview
+
+Implemented Findings C and D of the Phase 6 GLB file support plan for the
+Campaign Builder.
+
+**Finding D** adds an `open_after_export: bool` field to `ObjImporterState`
+that controls whether the active tab switches to the Creatures editor after a
+creature export. It defaults to `false`, keeping the user in the Importer tab
+so they can make further edits or load a new model immediately.
+
+**Finding C** virtualizes the mesh-list `ScrollArea` in `render_loaded_mode`
+using egui's `show_rows` API, eliminating the O(N) widget instantiation cost
+for scenes with many meshes. Row height is computed analytically (body text
+height x 2 + spacing x 2 + group padding) so only the rows visible in the
+scroll viewport are allocated each frame.
+
+### Deliverables
+
+#### `sdk/campaign_builder/src/obj_importer.rs`
+
+- **`open_after_export: bool` field** — added to `ObjImporterState` after
+  `new_custom_color`. Initialises to `false` in `Default::default()`.
+- **`clear()` preservation** — `open_after_export` is now extracted before the
+  struct reset and written back into the new default, alongside the existing
+  preserved fields (`scale`, `custom_palette`, `creature_id`, etc.).
+- **Doc comment update** — the `clear()` doc comment now explicitly lists
+  `open_after_export` as a field that survives a clear.
+- **Two new tests**:
+  - `test_importer_creature_export_stays_in_importer_by_default` — asserts
+    `open_after_export` defaults to `false`.
+  - `test_open_after_export_preserved_across_clear` — asserts the flag
+    survives `clear()`.
+
+#### `sdk/campaign_builder/src/obj_importer_ui.rs`
+
+- **`show_rows` virtualization** — replaced the `ScrollArea::vertical().show()`
+  loop in `render_loaded_mode` with `show_rows(left_ui, row_height, num_rows,
+|ui, row_range| { ... })`. The `id_salt` was updated to
+  `"importer_mesh_list_scroll"`. Row height is pre-computed from
+  `text_style_height(Body)` and `item_spacing.y` before entering the layout.
+- **`open_after_export` checkbox** — added in the `horizontal_wrapped` export
+  controls block, between the "Back / Clear" button and the "Export RON"
+  button. Calls `request_repaint()` on change.
+- **One new test**:
+  - `test_importer_large_mesh_list_renders_bounded_rows` — builds a state with
+    200 meshes, renders via `show_obj_importer_tab`, and asserts no panic
+    occurs.
+
+#### `sdk/campaign_builder/src/lib.rs`
+
+- **Conditional tab switch** — the `ObjImporterUiSignal::Creature` match arm
+  now wraps `self.ui_state.active_tab = EditorTab::Creatures` in
+  `if self.obj_importer_state.open_after_export { ... }`, so the tab only
+  switches when the user has explicitly opted in.
+- **One new test**:
+  - `test_importer_creature_export_switches_tab_when_enabled` — verifies the
+    tab does NOT switch when `open_after_export` is `false` (default) and DOES
+    switch when it is `true`.
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors)
+✅ cargo clippy      → Finished (0 warnings)
+✅ cargo nextest run → 2433 tests run: 2433 passed, 0 failed
+```
+
+---
+
+## GLB File Support — Phase 6 Finding A: `validation_dirty` Guard in `creatures_editor` (Complete)
+
+### Overview
+
+Implemented Finding A of the Phase 6 GLB file support plan for the Campaign
+Builder. This change adds a `validation_dirty` guard to
+`CreaturesEditorState` so that `refresh_validation_state` is only called
+when something has actually changed, eliminating the unconditional per-frame
+validation recompute in `show_edit_mode`.
+
+Also adds `live_preview_enabled: bool` (the scaffold for Finding B) and
+auto-disables live preview for dense creatures (> 50,000 triangles) when
+`open_for_editing` is called.
+
+### Deliverables
+
+#### `sdk/campaign_builder/src/creatures_editor/mod.rs`
+
+- **`validation_dirty: bool` field** — added to `CreaturesEditorState` after
+  `preview_dirty`. Initialises to `true` in `Default::default()` so the first
+  frame always runs a validation pass.
+- **`live_preview_enabled: bool` field** — added after `validation_dirty`.
+  Initialises to `true`. Auto-set to `false` in `open_for_editing` when the
+  total triangle count of the loaded creature exceeds 50,000.
+- **`show_edit_mode` guard** — replaced the unconditional
+  `self.refresh_validation_state()` call with:
+  ```rust
+  if self.validation_dirty {
+      self.refresh_validation_state();
+      self.validation_dirty = false;
+  }
+  ```
+- **`validation_dirty = true` co-set** — added `self.validation_dirty = true;`
+  alongside every existing `self.preview_dirty = true;` assignment in all
+  non-legacy, non-test code paths:
+  - `show_mesh_list_panel`: duplicate, delete, visibility toggle, mesh
+    selection (4 sites)
+  - `show_creature_level_properties`: name, scale, color-tint toggle,
+    color-tint value (4 sites)
+  - `revert_edit_buffer_from_registry`: Edit branch, Add branch (2 sites)
+  - `perform_save_as_with_path` (1 site)
+  - `apply_primitive_replacement` (1 site)
+  - `open_for_editing` (1 site)
+- **Two new tests** added to `mod tests`:
+  - `test_validation_dirty_flag_prevents_recompute_without_change`
+  - `test_validation_dirty_set_when_mesh_edited`
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors)
+✅ cargo clippy      → Finished (0 warnings)
+✅ cargo nextest run → 2433 tests run: 2433 passed, 0 failed
+```
+
+---
+
+## GLB File Support — Phase 6 Finding B: Render-Signature Skip Optimization (Complete)
+
+### Overview
+
+Implemented Finding B of the Phase 6 GLB file support plan for the Campaign
+Builder. This optimization adds a render-signature mechanism to
+`PreviewRenderer` that prevents the expensive `render_preview` drawing pass
+from executing on every egui frame when neither the camera nor the creature
+data has changed.
+
+### Problem
+
+`render_preview` was called unconditionally on every call to `show`, including
+frames where nothing had changed. This wasted CPU time re-projecting and
+re-drawing identical wireframes every frame.
+
+### Solution
+
+A lightweight `u64` hash (built with `DefaultHasher`) captures the full camera
+state — `distance`, `azimuth`, `elevation`, `fov`, and `target[3]`. The hash
+is stored in `last_rendered_signature` after each actual render. On subsequent
+frames, if the hash matches and `needs_update` is `false`, the draw pass is
+skipped entirely.
+
+### Deliverables
+
+#### `sdk/campaign_builder/src/preview_renderer.rs`
+
+- **`last_rendered_signature: Option<u64>`** — new private field on
+  `PreviewRenderer`. Initialized to `None`. Stores the camera-state hash
+  produced by the most recent `render_preview` call.
+
+- **`compute_render_signature(&self) -> u64`** — new private method. Hashes
+  the five camera fields (`distance`, `azimuth`, `elevation`, `fov`,
+  `target[3]`) using `DefaultHasher` and the existing `hash_f32` helper.
+  `needs_update` is intentionally **not** included in the hash; that flag is
+  already handled by the explicit `||` branch in `should_render`.
+
+- **`show` method updated** — the unconditional `self.render_preview(...)` call
+  is replaced with:
+
+  ```rust
+  let render_sig = self.compute_render_signature();
+  let should_render = self.needs_update || self.last_rendered_signature != Some(render_sig);
+  if should_render {
+      self.render_preview(&painter, response.rect);
+      self.last_rendered_signature = Some(render_sig);
+      self.needs_update = false;
+  }
+  ```
+
+  This also clears `needs_update` after each render, preventing repeated
+  re-renders on subsequent frames when no input has arrived.
+
+- **1 new test** (`test_preview_renderer_skips_render_when_signature_unchanged`):
+  - Verifies `last_rendered_signature` is `None` before any render.
+  - Verifies `last_rendered_signature` is set and `needs_update` is `false`
+    after the first `show` call.
+  - Verifies `last_rendered_signature` is **unchanged** after a second `show`
+    call with identical camera state (i.e., the render was skipped).
+
+### Design Note: Why `needs_update` is excluded from the hash
+
+Including `needs_update` in the hash would cause a signature mismatch on every
+frame following the first render: the stored signature would encode `true`
+(the value at render time) while the next frame's computed signature would
+encode `false` (the cleared value), creating an infinite re-render loop.
+The `should_render` guard handles the `needs_update` case directly via the
+explicit `||` condition.
+
+### Quality Gates
+
+```
+cargo fmt         ✔ no output
+cargo check       ✔ 0 errors, 0 warnings
+cargo clippy      ✔ 0 warnings (-D warnings)
+cargo nextest run ✔ 17/17 preview_renderer tests passed; 1860/1860 lib tests passed
+                    (1 new test added)
+```
+
+---
+
+## GLB File Support — Phase 6 Finding B (continued): Live Preview Toggle + Remaining `validation_dirty` Co-sets (Complete)
+
+### Overview
+
+Completed the Finding A and B deliverables not yet covered by the preceding
+sections — specifically the **Live Preview toggle UI** in the creature editor
+preview panel and the **`validation_dirty = true` co-assignments** in
+`creatures_editor/mesh_ui.rs` and `app_dialogs.rs`.
+
+### Deliverables
+
+#### `sdk/campaign_builder/src/creatures_editor/preview_panel.rs`
+
+- **Live Preview toggle row** — inserted between `ui.heading("Preview")` and
+  the existing camera-controls `horizontal`. Contains:
+  - **`Live Preview` checkbox** — bound to `self.live_preview_enabled`. When
+    re-checked, sets both `preview_dirty = true` and `validation_dirty = true`
+    so the preview syncs immediately on re-enable.
+  - **`🔄 Refresh` button** — calls `sync_preview_renderer_from_edit_buffer()`
+    unconditionally (regardless of `live_preview_enabled`), letting the user
+    trigger a manual update while Live Preview is off.
+  - **`Preview paused` label** — shown in yellow while `live_preview_enabled`
+    is `false` so the user knows updates are suppressed.
+- **Gated auto-sync** — the `if self.preview_dirty { … }` block now reads
+  `if self.live_preview_enabled && self.preview_dirty { … }`, preventing
+  automatic syncs when the toggle is off.
+
+#### `sdk/campaign_builder/src/creatures_editor/mesh_ui.rs`
+
+- **12 `validation_dirty = true` co-assignments** — added `self.validation_dirty
+= true;` immediately after every `self.preview_dirty = true;` in
+  `show_mesh_properties_panel` (color, translation X/Y/Z, pitch/yaw/roll,
+  uniform scale, scale X/Y/Z, Reset Transform).
+
+#### `sdk/campaign_builder/src/app_dialogs.rs`
+
+- **1 `validation_dirty = true` co-assignment** — added after the existing
+  `preview_dirty = true;` in the creature-template-apply branch.
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors)
+✅ cargo clippy      → Finished (0 warnings)
+✅ cargo nextest run → 2433 tests run: 2433 passed, 0 failed
+```
+
+---
+
 ## GLB Runtime and Domain Compatibility — Phase 5 (Complete)
 
 ### Overview

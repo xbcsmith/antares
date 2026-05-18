@@ -389,6 +389,7 @@ impl CampaignBuilderApp {
                             .edit_buffer
                             .color_tint = template_creature.color_tint;
                         self.editor_registry.creatures_editor_state.preview_dirty = true;
+                        self.editor_registry.creatures_editor_state.validation_dirty = true;
                         self.ui_state.status_message = format!(
                             "Applied template '{}' mesh data to '{}'.",
                             template_id, current_name
