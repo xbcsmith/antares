@@ -81,12 +81,33 @@ struct ExportOutcome {
     status_message: String,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct TextureExportReport {
+    unknown_mime_texture_count: usize,
+}
+
+impl TextureExportReport {
+    fn merge_unknown_mime(&mut self) {
+        self.unknown_mime_texture_count += 1;
+    }
+
+    fn warning_suffix(self) -> String {
+        match self.unknown_mime_texture_count {
+            0 => String::new(),
+            1 => " Warning: 1 embedded GLB texture had an unknown MIME type and was exported with a .bin extension.".to_string(),
+            count => format!(
+                " Warning: {count} embedded GLB textures had unknown MIME types and were exported with .bin extensions."
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 enum ObjImporterExportError {
     #[error("Open a campaign before exporting importer output")]
     MissingCampaignDir,
 
-    #[error("Load an OBJ file before exporting")]
+    #[error("Load a model file before exporting")]
     NoMeshesLoaded,
 
     #[error("Enter a name before exporting")]
@@ -98,8 +119,8 @@ enum ObjImporterExportError {
     #[error("Failed to serialize RON asset: {0}")]
     Serialization(#[from] ron::Error),
 
-    #[error("Texture for mesh '{mesh_name}' was not found: {path}")]
-    MissingTexture { mesh_name: String, path: PathBuf },
+    #[error("Texture for mesh '{mesh_name}' could not be resolved.")]
+    MissingTexture { mesh_name: String },
 
     #[error("Texture source path has no filename: {0}")]
     TextureMissingFileName(PathBuf),
@@ -428,6 +449,7 @@ fn render_loaded_mode(
             if let Some(path) = pick_model_file(state.source_path.as_deref()) {
                 match load_model_into_state(state, &path) {
                     Ok(()) => {
+                        state.is_error = false;
                         logger.info(
                             category::EDITOR,
                             &format!("Reloaded importer model {}", path.display()),
@@ -436,7 +458,9 @@ fn render_loaded_mode(
                     }
                     Err(error) => {
                         state.status_message = error.to_string();
+                        state.is_error = true;
                         logger.error(category::FILE_IO, &state.status_message);
+                        ui.ctx().request_repaint();
                     }
                 }
             }
@@ -1260,7 +1284,8 @@ fn export_state_to_campaign(
         creature.id,
         &state.category,
     );
-    copy_imported_textures_into_campaign(state, &mut creature, campaign_dir, &relative_path)?;
+    let texture_report =
+        copy_imported_textures_into_campaign(state, &mut creature, campaign_dir, &relative_path)?;
     let absolute_path = campaign_dir.join(&relative_path);
 
     match state.export_type {
@@ -1288,10 +1313,11 @@ fn export_state_to_campaign(
         export_type: state.export_type,
         absolute_path: absolute_path.clone(),
         status_message: format!(
-            "Exported {} '{}' to {}",
+            "Exported {} '{}' to {}{}",
             export_type_label(state.export_type),
             creature.name,
-            absolute_path.display()
+            absolute_path.display(),
+            texture_report.warning_suffix()
         ),
     })
 }
@@ -1314,6 +1340,8 @@ enum ResolvedTextureSource {
         /// Preferred export filename including extension (e.g. `"albedo_0.png"`).
         /// May be empty; [`embedded_texture_file_name`] handles the fallback chain.
         file_name_hint: String,
+        /// Whether the source MIME type was unknown and therefore exported as `.bin`.
+        unknown_mime: bool,
     },
     /// No valid source was found; export must fail with `MissingTexture`.
     Missing,
@@ -1335,7 +1363,7 @@ fn copy_imported_textures_into_campaign(
     creature: &mut CreatureDefinition,
     campaign_dir: &Path,
     exported_asset_relative_path: &str,
-) -> Result<(), ObjImporterExportError> {
+) -> Result<TextureExportReport, ObjImporterExportError> {
     let export_stem = Path::new(exported_asset_relative_path)
         .file_stem()
         .and_then(|stem| stem.to_str())
@@ -1344,6 +1372,7 @@ fn copy_imported_textures_into_campaign(
     // Keyed on a 64-bit hash of the file/byte content to deduplicate identical payloads.
     let mut content_hash_to_dest: HashMap<u64, String> = HashMap::new();
     let mut used_destinations: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut report = TextureExportReport::default();
 
     for (mesh_index, mesh_def) in creature.meshes.iter_mut().enumerate() {
         let Some(texture_path) = mesh_def.texture_path.clone() else {
@@ -1385,7 +1414,11 @@ fn copy_imported_textures_into_campaign(
             ResolvedTextureSource::EmbeddedBytes {
                 bytes,
                 file_name_hint,
+                unknown_mime,
             } => {
+                if unknown_mime {
+                    report.merge_unknown_mime();
+                }
                 let hash = compute_content_hash(&bytes);
                 if let Some(existing_dest) = content_hash_to_dest.get(&hash) {
                     mesh_def.texture_path = Some(existing_dest.clone());
@@ -1418,15 +1451,12 @@ fn copy_imported_textures_into_campaign(
                 }
             }
             ResolvedTextureSource::Missing => {
-                return Err(ObjImporterExportError::MissingTexture {
-                    mesh_name,
-                    path: PathBuf::from(&texture_path),
-                });
+                return Err(ObjImporterExportError::MissingTexture { mesh_name });
             }
         }
     }
 
-    Ok(())
+    Ok(report)
 }
 
 /// Resolves the texture source for a single mesh during campaign export.
@@ -1460,6 +1490,7 @@ fn resolve_imported_texture_source(
             return ResolvedTextureSource::EmbeddedBytes {
                 bytes,
                 file_name_hint: payload.file_name_hint.clone(),
+                unknown_mime: mime_to_extension(payload.mime_type.as_deref()) == "bin",
             };
         }
 
@@ -2370,6 +2401,60 @@ mod tests {
             !ron_path.exists(),
             "RON file must not be created when texture resolution fails"
         );
+    }
+
+    #[test]
+    fn test_export_glb_unknown_mime_writes_bin_and_warns() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload = Some(ImportedTexturePayload {
+            source_label: "Mystery Texture".to_string(),
+            file_name_hint: "mystery_texture.bin".to_string(),
+            bytes: Some(b"unknown_mime_texture".to_vec()),
+            source_path: None,
+            mime_type: Some("image/webp".to_string()),
+        });
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+        let texture_path = round_trip.meshes[0].texture_path.as_ref().unwrap();
+
+        assert!(
+            texture_path.ends_with("mystery_texture.bin"),
+            "unknown MIME textures must export with .bin, got: {texture_path}"
+        );
+        assert!(campaign_dir.path().join(texture_path).exists());
+        assert!(
+            outcome.status_message.contains("unknown MIME type")
+                && outcome.status_message.contains(".bin"),
+            "unknown MIME export should warn in status_message, got: {}",
+            outcome.status_message
+        );
+    }
+
+    #[test]
+    fn test_missing_texture_display_message_matches_spec() {
+        let error = ObjImporterExportError::MissingTexture {
+            mesh_name: "body".to_string(),
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "Texture for mesh 'body' could not be resolved."
+        );
+    }
+
+    #[test]
+    fn test_no_meshes_loaded_display_message_mentions_model() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = ObjImporterState::new();
+        state.creature_name = "Empty Export".to_string();
+
+        let error = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap_err();
+
+        assert_eq!(error.to_string(), "Load a model file before exporting");
     }
 
     /// OBJ-style texture export (filesystem `source_path`, no embedded bytes)

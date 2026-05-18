@@ -148,6 +148,9 @@ pub struct CreaturesEditorState {
     /// or creature-level properties change. Cleared to `false` by
     /// `show_edit_mode` after `refresh_validation_state` runs.
     pub validation_dirty: bool,
+    /// Counts validation refreshes in tests so dirty-guard behaviour is asserted.
+    #[cfg(test)]
+    pub validation_refresh_count: usize,
     /// When `true` (the default), preview syncs automatically on every dirty
     /// event. When `false`, preview syncs only when the Refresh button is
     /// clicked. Auto-disabled for dense models (> 50,000 triangles).
@@ -316,6 +319,8 @@ impl Default for CreaturesEditorState {
             mesh_transform_buffer: None,
             preview_dirty: false,
             validation_dirty: true,
+            #[cfg(test)]
+            validation_refresh_count: 0,
             live_preview_enabled: true,
             category_filter: None,
             show_registry_stats: true,
@@ -1593,10 +1598,7 @@ impl CreaturesEditorState {
     ) -> Option<String> {
         let mut result_message: Option<String> = None;
 
-        if self.validation_dirty {
-            self.refresh_validation_state();
-            self.validation_dirty = false;
-        }
+        self.refresh_validation_state_if_dirty();
 
         // Action buttons
         let action = ActionButtons::new().show(ui);
@@ -2048,7 +2050,18 @@ impl CreaturesEditorState {
         result_message
     }
 
+    fn refresh_validation_state_if_dirty(&mut self) {
+        if self.validation_dirty {
+            self.refresh_validation_state();
+            self.validation_dirty = false;
+        }
+    }
+
     fn refresh_validation_state(&mut self) {
+        #[cfg(test)]
+        {
+            self.validation_refresh_count += 1;
+        }
         self.validation_errors.clear();
         self.validation_warnings.clear();
         self.validation_info.clear();
@@ -2862,9 +2875,13 @@ impl CreaturesEditorState {
             self.edit_buffer = creature.clone();
             self.preview_dirty = true;
             self.validation_dirty = true;
-            // Auto-disable live preview for dense creatures
+            // Live Preview defaults on for small creatures and auto-disables
+            // for dense imports. Mid-sized creatures preserve the user's current
+            // preference so manual pause/resume choices are not overwritten.
             let total_tris: usize = creature.meshes.iter().map(|m| m.indices.len() / 3).sum();
-            if total_tris > 50_000 {
+            if total_tris <= 5_000 {
+                self.live_preview_enabled = true;
+            } else if total_tris > 50_000 {
                 self.live_preview_enabled = false;
             }
             self.preview_error = None;
@@ -4180,33 +4197,80 @@ mod tests {
     #[test]
     fn test_validation_dirty_flag_prevents_recompute_without_change() {
         let mut state = CreaturesEditorState::new();
-        // validation_dirty starts true; after refresh it becomes false.
+
         assert!(state.validation_dirty);
-        state.refresh_validation_state();
-        state.validation_dirty = false;
+        assert_eq!(state.validation_refresh_count, 0);
+
+        state.refresh_validation_state_if_dirty();
+
         assert!(!state.validation_dirty);
-        // A second direct call to refresh_validation_state does not change the
-        // flag – the guard in show_edit_mode would have skipped it.
-        state.refresh_validation_state();
+        assert_eq!(
+            state.validation_refresh_count, 1,
+            "dirty validation should recompute once"
+        );
+
+        state.refresh_validation_state_if_dirty();
+
         assert!(!state.validation_dirty);
+        assert_eq!(
+            state.validation_refresh_count, 1,
+            "clean validation state must skip validate_mesh recomputation"
+        );
     }
 
     #[test]
     fn test_validation_dirty_set_when_mesh_edited() {
         let mut state = CreaturesEditorState::new();
-        // Clear dirty flags.
+        state.edit_buffer.meshes = vec![make_mesh("body")];
+        state.edit_buffer.mesh_transforms = vec![MeshTransform::identity()];
         state.validation_dirty = false;
         state.preview_dirty = false;
 
-        // Simulate what show_mesh_list_panel does when a mesh is deleted
-        // (sets both dirty flags).
+        state.edit_buffer.meshes[0].color = [0.25, 0.5, 0.75, 1.0];
         state.preview_dirty = true;
         state.validation_dirty = true;
 
         assert!(
             state.validation_dirty,
-            "editing a mesh must set validation_dirty"
+            "mutating edit_buffer.meshes[0] must set validation_dirty"
         );
-        assert!(state.preview_dirty, "editing a mesh must set preview_dirty");
+        assert!(
+            state.preview_dirty,
+            "mutating edit_buffer.meshes[0] must set preview_dirty"
+        );
+    }
+
+    #[test]
+    fn test_open_for_editing_small_creature_reenables_live_preview() {
+        let mut state = CreaturesEditorState::new();
+        state.live_preview_enabled = false;
+        let mut creature = make_creature(1, "Small Preview");
+        creature.meshes = vec![make_mesh("body")];
+        creature.mesh_transforms = vec![MeshTransform::identity()];
+
+        state.open_for_editing(&[creature], 0, "assets/creatures/small_preview.ron");
+
+        assert!(
+            state.live_preview_enabled,
+            "small creatures should restore the default live preview setting"
+        );
+    }
+
+    #[test]
+    fn test_open_for_editing_dense_creature_disables_live_preview() {
+        let mut state = CreaturesEditorState::new();
+        let mut creature = make_creature(1, "Dense Preview");
+        let mut mesh = make_mesh("dense_body");
+        mesh.vertices = (0..150_003).map(|i| [i as f32, 0.0, 0.0]).collect();
+        mesh.indices = (0..150_003_u32).collect();
+        creature.meshes = vec![mesh];
+        creature.mesh_transforms = vec![MeshTransform::identity()];
+
+        state.open_for_editing(&[creature], 0, "assets/creatures/dense_preview.ron");
+
+        assert!(
+            !state.live_preview_enabled,
+            "creatures above 50,000 triangles should auto-disable live preview"
+        );
     }
 }

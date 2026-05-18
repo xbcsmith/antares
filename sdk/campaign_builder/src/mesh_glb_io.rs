@@ -644,20 +644,12 @@ fn convert_gltf_material(material: &gltf::Material<'_>) -> MaterialDefinition {
 /// |----------------|-----------|
 /// | `image/png`    | `.png`    |
 /// | `image/jpeg`   | `.jpg`    |
-/// | `image/webp`   | `.webp`   |
-/// | `image/gif`    | `.gif`    |
-/// | `image/bmp`    | `.bmp`    |
-/// | other `image/` | sub-type  |
-/// | `None`         | `.bin`    |
+/// | other / `None` | `.bin`    |
 fn sanitize_glb_file_name(label: &str, mime_type: Option<&str>) -> String {
     let ext = match mime_type {
         Some("image/png") => "png",
         Some("image/jpeg") | Some("image/jpg") => "jpg",
-        Some("image/webp") => "webp",
-        Some("image/gif") => "gif",
-        Some("image/bmp") => "bmp",
-        Some(other) => other.strip_prefix("image/").unwrap_or("bin"),
-        None => "bin",
+        _ => "bin",
     };
 
     // Lower-case; replace non-alphanumeric/non-underscore with '_'.
@@ -1344,6 +1336,30 @@ mod tests {
     }
 
     // ── Phase 5 tests: Runtime and Domain Compatibility ─────────────────────
+
+    #[test]
+    fn test_sanitize_glb_file_name_unknown_mime_uses_bin() {
+        assert_eq!(
+            sanitize_glb_file_name("Mystery Texture", Some("image/webp")),
+            "mystery_texture.bin"
+        );
+        assert_eq!(
+            sanitize_glb_file_name("Custom Image", Some("application/octet-stream")),
+            "custom_image.bin"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_glb_file_name_supported_mime_extensions() {
+        assert_eq!(
+            sanitize_glb_file_name("Albedo", Some("image/png")),
+            "albedo.png"
+        );
+        assert_eq!(
+            sanitize_glb_file_name("Albedo", Some("image/jpeg")),
+            "albedo.jpg"
+        );
+    }
 
     /// PBR `baseColorFactor: [0.8, 0.2, 0.1, 1.0]` must map to both
     /// `MeshDefinition.color` and `MaterialDefinition.base_color`.

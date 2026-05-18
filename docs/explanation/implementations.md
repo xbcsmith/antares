@@ -551,20 +551,32 @@ modification.
 
 `src/game/systems/creature_meshes.rs::texture_loading_system` reads
 `MeshDefinition.texture_path` as a campaign-relative `&str` and passes it
-directly to `asset_server.load(texture_path)`. GLB exports produce paths with
-the same `assets/textures/imported/…` prefix as OBJ exports. **No runtime code
-changes are required.** Item and Furniture assets use the same
-`CreatureDefinition` format (same `meshes: Vec<MeshDefinition>` field), so the
-system handles all three `ExportType` variants uniformly.
+directly to `asset_server.load(texture_path)`. GLB creature exports produce
+paths with the same `assets/textures/imported/…` prefix as OBJ exports, so
+creature runtime texture loading requires no GLB-specific code.
 
-### Known Limitations (Documented, Not Gaps)
+Item and Furniture exports preserve `MeshDefinition.texture_path` in their RON
+files and copy embedded texture assets into the campaign tree, but runtime
+rendering does **not** currently apply those texture paths uniformly:
 
-| Channel                    | Status                                          |
-| -------------------------- | ----------------------------------------------- |
-| `normalTexture`            | Ignored; flag set, warning shown in UI status   |
-| `occlusionTexture`         | Ignored; flag set, warning shown in UI status   |
-| `metallicRoughnessTexture` | Ignored; flag set, warning shown in UI status   |
-| Skinning / animations      | Ignored since Phase 2; status message unchanged |
+- Dropped item meshes are spawned from `CreatureDefinition` data through
+  `spawn_creature`, whose initial material creation uses `MaterialDefinition` or
+  flat color and does not load `mesh_def.texture_path` during spawn.
+- Furniture rendering currently builds `StandardMaterial` from furniture material
+  metadata/color tint and does not read `mesh_def.texture_path`.
+
+### Known Limitations
+
+| Area                       | Status                                                                        |
+| -------------------------- | ----------------------------------------------------------------------------- |
+| Creature GLB textures      | Runtime-compatible through `texture_loading_system`                           |
+| Item GLB textures          | Exported RON and copied files preserve paths; runtime application is deferred |
+| Furniture GLB textures     | Exported RON and copied files preserve paths; runtime application is deferred |
+| Unknown embedded MIME      | Export proceeds with `.bin`; importer status includes a warning               |
+| `normalTexture`            | Ignored; flag set, warning shown in UI status                                 |
+| `occlusionTexture`         | Ignored; flag set, warning shown in UI status                                 |
+| `metallicRoughnessTexture` | Ignored; flag set, warning shown in UI status                                 |
+| Skinning / animations      | Ignored since Phase 2; status message unchanged                               |
 
 ### Quality Gates
 

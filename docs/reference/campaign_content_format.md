@@ -497,8 +497,12 @@ File extension is derived from the glTF image `mimeType` field:
 | ------------ | --------- |
 | `image/png`  | `.png`    |
 | `image/jpeg` | `.jpg`    |
-| `image/webp` | `.webp`   |
-| other        | subtype   |
+| unknown      | `.bin`    |
+| other        | `.bin`    |
+
+Unknown or unsupported MIME types still export successfully, but Campaign
+Builder appends a status warning that the embedded texture was written with a
+`.bin` extension.
 
 ### RON texture_path Field
 
@@ -556,8 +560,11 @@ uses only:
    `MeshDefinition` entries with campaign-relative `texture_path` strings.
 2. The copied texture files under `assets/textures/imported/`.
 
-This is the same path convention used for OBJ imports, so the runtime
-`texture_loading_system` handles both formats identically.
+This is the same path convention used for OBJ imports. Creature rendering uses
+`texture_loading_system` to load these paths. Item and Furniture exports also
+preserve the same campaign-relative `texture_path` strings in RON and copy the
+texture files, but their current runtime rendering paths do not yet apply those
+textures uniformly; those runtime integrations are tracked as deferred work.
 
 ---
 

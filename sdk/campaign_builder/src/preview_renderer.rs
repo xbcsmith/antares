@@ -235,6 +235,10 @@ pub struct PreviewRenderer {
     /// When this matches the current camera+needs_update signature, the
     /// expensive `render_preview` pass is skipped.
     last_rendered_signature: Option<u64>,
+
+    /// Number of expensive preview render passes invoked during tests.
+    #[cfg(test)]
+    render_preview_call_count: usize,
 }
 
 impl Default for PreviewRenderer {
@@ -264,6 +268,8 @@ impl PreviewRenderer {
             projected_mesh_cache: RefCell::new(Vec::new()),
             _last_mouse_pos: None,
             last_rendered_signature: None,
+            #[cfg(test)]
+            render_preview_call_count: 0,
         }
     }
 
@@ -420,6 +426,10 @@ impl PreviewRenderer {
         let render_sig = self.compute_render_signature();
         let should_render = self.needs_update || self.last_rendered_signature != Some(render_sig);
         if should_render {
+            #[cfg(test)]
+            {
+                self.render_preview_call_count += 1;
+            }
             self.render_preview(&painter, response.rect);
             self.last_rendered_signature = Some(render_sig);
             self.needs_update = false;
@@ -1229,6 +1239,10 @@ mod tests {
         assert_eq!(
             renderer.last_rendered_signature, sig_after_first,
             "Signature must be unchanged after a skipped render"
+        );
+        assert_eq!(
+            renderer.render_preview_call_count, 1,
+            "render_preview must be called only once for two identical frames"
         );
         assert!(
             !renderer.needs_update,
