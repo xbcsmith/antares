@@ -2335,4 +2335,104 @@ mod tests {
             "Copied texture content must match the source file"
         );
     }
+
+    // ── Phase 5 tests: Runtime and Domain Compatibility ─────────────────────
+
+    /// A `CreatureDefinition` whose `texture_path` follows the GLB-import
+    /// campaign-relative convention (`assets/textures/imported/<name>/<file>`)
+    /// must survive a full RON serialization/deserialization round-trip without
+    /// any path corruption (back-slash conversion, extra escaping, etc.).
+    #[test]
+    fn test_glb_exported_texture_path_round_trips_through_ron() {
+        let original_path = "assets/textures/imported/dragon/dragon_albedo.png";
+
+        // Pre-create the texture so resolve_imported_texture_source recognises
+        // it as AlreadyCampaignRelative and leaves mesh_def.texture_path intact.
+        let campaign_dir = tempdir().unwrap();
+        let texture_file = campaign_dir.path().join(original_path);
+        fs::create_dir_all(texture_file.parent().unwrap()).unwrap();
+        fs::write(&texture_file, b"dummy").unwrap();
+
+        let mut state = triangle_mesh_state();
+        state.creature_name = "Dragon".to_string();
+        state.meshes[0].mesh_def.texture_path = Some(original_path.to_string());
+        state.meshes[0].texture_payload = None; // already campaign-relative, no copy needed
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        assert_eq!(
+            round_trip.meshes[0].texture_path.as_deref(),
+            Some(original_path),
+            "texture_path must survive RON round-trip without path corruption"
+        );
+    }
+
+    /// Exporting with `ExportType::Item` must preserve `texture_path` in the
+    /// written RON so the runtime can locate the texture asset.
+    #[test]
+    fn test_glb_item_export_preserves_texture_path() {
+        let campaign_dir = tempdir().unwrap();
+        let texture_bytes = b"fake_sword_texture".to_vec();
+
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Item;
+        state.creature_name = "Magic Sword".to_string();
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload =
+            Some(glb_embedded_payload("sword_albedo.png", texture_bytes));
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        let texture_path = round_trip.meshes[0]
+            .texture_path
+            .as_ref()
+            .expect("Item export must preserve texture_path in RON");
+        assert!(
+            texture_path.starts_with("assets/textures/imported/magic_sword/"),
+            "Item texture_path must be campaign-relative under \
+             assets/textures/imported/, got: {texture_path}"
+        );
+        assert!(
+            campaign_dir.path().join(texture_path).exists(),
+            "Item texture file must exist at the exported campaign-relative path"
+        );
+    }
+
+    /// Exporting with `ExportType::Furniture` must preserve `texture_path` in
+    /// the written RON so the runtime can locate the texture asset.
+    #[test]
+    fn test_glb_furniture_export_preserves_texture_path() {
+        let campaign_dir = tempdir().unwrap();
+        let texture_bytes = b"fake_wood_texture".to_vec();
+
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Furniture;
+        state.creature_name = "Oak Table".to_string();
+        state.furniture_id = 10042;
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload =
+            Some(glb_embedded_payload("table_wood.png", texture_bytes));
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        let texture_path = round_trip.meshes[0]
+            .texture_path
+            .as_ref()
+            .expect("Furniture export must preserve texture_path in RON");
+        assert!(
+            texture_path.starts_with("assets/textures/imported/oak_table/"),
+            "Furniture texture_path must be campaign-relative under \
+             assets/textures/imported/, got: {texture_path}"
+        );
+        assert!(
+            campaign_dir.path().join(texture_path).exists(),
+            "Furniture texture file must exist at the exported campaign-relative path"
+        );
+    }
 }

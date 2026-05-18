@@ -2,6 +2,128 @@
 
 ---
 
+## GLB Runtime and Domain Compatibility — Phase 5 (Complete)
+
+### Overview
+
+Implemented Phase 5 of the GLB file support plan for the Campaign Builder
+importer. This phase verifies that GLB-exported Creature, Item, and Furniture
+RON files are compatible with the game runtime, adds an
+`has_unsupported_pbr_channels` flag to surface silent channel skips in the
+importer UI status message, and documents the GLB texture export convention in
+the campaign content format reference. No geometry-parsing or export-pipeline
+changes were required — runtime compatibility was confirmed without code
+modification.
+
+### Deliverables
+
+#### `sdk/campaign_builder/src/mesh_glb_io.rs`
+
+- **`ImportedGlbScene::has_unsupported_pbr_channels: bool`** — new public
+  field. Set to `true` when any material in the glTF document has
+  `normalTexture`, `occlusionTexture`, or
+  `pbrMetallicRoughness.metallicRoughnessTexture`. Detection uses a single
+  `.any()` pass over `gltf.document.materials()` after document-level metadata
+  collection; this avoids touching the per-primitive traversal loop. The flag
+  is `Copy` (`bool`), so the partial-move pattern already established by other
+  `usize`/`bool` fields continues to work unmodified.
+
+- **Unsupported PBR channel detection** — three glTF channels are now actively
+  detected and flagged rather than silently ignored:
+
+  | Channel                | gltf crate API                               |
+  | ---------------------- | -------------------------------------------- |
+  | Normal map             | `material.normal_texture().is_some()`        |
+  | Ambient occlusion      | `material.occlusion_texture().is_some()`     |
+  | Metallic-roughness map | `pbr.metallic_roughness_texture().is_some()` |
+
+- **3 new test-helper functions** — `build_triangle_full_material_glb`,
+  `build_normal_texture_glb`, `build_occlusion_texture_glb` — added to the
+  in-module test section alongside the existing factory helpers.
+
+- **5 new tests** (all pass):
+  - `test_glb_material_base_color_maps_to_domain_material` — `[0.8, 0.2, 0.1,
+1.0]` maps to `mesh_def.color` and `material.base_color`.
+  - `test_glb_material_metallic_roughness_maps_to_domain` — `metallicFactor:
+0.3` and `roughnessFactor: 0.7` map to `MaterialDefinition` fields.
+  - `test_glb_normal_texture_sets_unsupported_pbr_channels_flag` — scene flag
+    is `true` when `normalTexture` present; geometry imports normally.
+  - `test_glb_occlusion_texture_sets_unsupported_pbr_channels_flag` — same for
+    `occlusionTexture`.
+  - `test_glb_standard_pbr_leaves_unsupported_channels_flag_false` — scalar-only
+    PBR material leaves flag `false`.
+
+#### `sdk/campaign_builder/src/obj_importer.rs`
+
+- **`load_imported_glb_scene` metadata summary updated** — a sixth token is
+  appended to the `format!` string when `scene.has_unsupported_pbr_channels`
+  is `true`:
+
+  ```text
+  [unsupported PBR: normal/occlusion/metallic-roughness textures ignored]
+  ```
+
+  This follows the same pattern as the existing `[skinning ignored]` and
+  `[animations ignored]` tokens.
+
+#### `sdk/campaign_builder/src/obj_importer_ui.rs`
+
+- **3 new tests** (all pass):
+  - `test_glb_exported_texture_path_round_trips_through_ron` — verifies that
+    a campaign-relative `texture_path` (the `assets/textures/imported/<name>/…`
+    convention) survives a full RON serialization/deserialization cycle without
+    path corruption.
+  - `test_glb_item_export_preserves_texture_path` — `ExportType::Item` export
+    with an embedded GLB texture writes a campaign-relative `texture_path` to
+    the RON output and creates the texture file on disk.
+  - `test_glb_furniture_export_preserves_texture_path` — same for
+    `ExportType::Furniture`.
+
+#### `docs/reference/campaign_content_format.md`
+
+- **New section: "GLB Texture Export Convention"** — documents:
+  - Texture destination path format
+    (`assets/textures/imported/<asset_name>/<image_file>`).
+  - File name derivation rules (glTF image name → sanitized stem; MIME →
+    extension; fallback `image_<index>.<ext>`).
+  - `texture_path` RON field format (campaign-relative string).
+  - Content-hash deduplication behaviour.
+  - Unsupported PBR channel table (normal, occlusion, metallic-roughness)
+    and the UI warning format.
+  - Runtime compatibility note (no GLB file needed after export; Bevy asset
+    server loads the copied texture files identically for OBJ and GLB imports).
+
+### Runtime Compatibility Confirmation
+
+`src/game/systems/creature_meshes.rs::texture_loading_system` reads
+`MeshDefinition.texture_path` as a campaign-relative `&str` and passes it
+directly to `asset_server.load(texture_path)`. GLB exports produce paths with
+the same `assets/textures/imported/…` prefix as OBJ exports. **No runtime code
+changes are required.** Item and Furniture assets use the same
+`CreatureDefinition` format (same `meshes: Vec<MeshDefinition>` field), so the
+system handles all three `ExportType` variants uniformly.
+
+### Known Limitations (Documented, Not Gaps)
+
+| Channel                    | Status                                          |
+| -------------------------- | ----------------------------------------------- |
+| `normalTexture`            | Ignored; flag set, warning shown in UI status   |
+| `occlusionTexture`         | Ignored; flag set, warning shown in UI status   |
+| `metallicRoughnessTexture` | Ignored; flag set, warning shown in UI status   |
+| Skinning / animations      | Ignored since Phase 2; status message unchanged |
+
+### Quality Gates
+
+```
+cargo fmt         ✔ no output
+cargo check       ✔ 0 errors, 0 warnings
+cargo clippy      ✔ 0 warnings (-D warnings)
+cargo nextest run ✔ 5065 tests run: 5065 passed, 0 failed
+                    (8 new Phase 5 tests: 5 required + 3 bonus)
+```
+
+---
+
 ## GLB Embedded Texture Export — Phase 4 (Complete)
 
 ### Overview

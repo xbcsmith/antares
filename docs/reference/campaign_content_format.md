@@ -462,6 +462,105 @@ The validator performs:
 
 ---
 
+## GLB Texture Export Convention
+
+When a `.glb` file is imported via the Campaign Builder importer and exported as
+a Creature, Item, or Furniture asset, embedded textures are extracted and written
+to the campaign directory following a predictable path convention.
+
+### Texture Destination Path
+
+Embedded GLB base-color textures are written to:
+
+```text
+assets/textures/imported/<asset_name>/<image_file>
+```
+
+- `<asset_name>` is derived from the exported RON file stem. For example, a
+  creature exported to `assets/creatures/stone_golem.ron` places its textures
+  under `assets/textures/imported/stone_golem/`.
+- `<image_file>` is derived from the glTF image `name` field when present,
+  sanitized to lowercase with non-alphanumeric characters replaced by `_`. When
+  no name is present the fallback is `image_<index>.<ext>`.
+
+### File Name Derivation
+
+| Source                         | Resulting filename example |
+| ------------------------------ | -------------------------- |
+| glTF image `name: "AlbedoMap"` | `albedo_map.png`           |
+| No name, index 0, PNG MIME     | `image_0.png`              |
+| No name, index 1, JPEG MIME    | `image_1.jpg`              |
+
+File extension is derived from the glTF image `mimeType` field:
+
+| MIME type    | Extension |
+| ------------ | --------- |
+| `image/png`  | `.png`    |
+| `image/jpeg` | `.jpg`    |
+| `image/webp` | `.webp`   |
+| other        | subtype   |
+
+### RON texture_path Field
+
+After export, each `MeshDefinition` in the written RON file contains a
+`texture_path` field that is a **campaign-relative** path string:
+
+```ron
+// In assets/creatures/stone_golem.ron
+meshes: [
+    (
+        // ...
+        texture_path: Some("assets/textures/imported/stone_golem/albedo_map.png"),
+    ),
+]
+```
+
+The game runtime (`texture_loading_system` in `src/game/systems/creature_meshes.rs`)
+loads this path directly via Bevy's asset server. The path is relative to the
+Bevy asset root (the campaign directory), so no further processing is required.
+
+### Deduplication
+
+When two or more mesh primitives within the same export reference identical
+byte-for-byte texture data, only one file is written to disk and all affected
+`texture_path` fields point to the same destination.
+
+### Unsupported PBR Channels
+
+The following glTF PBR material texture channels are **not imported**:
+
+| Channel                                         | Status                            |
+| ----------------------------------------------- | --------------------------------- |
+| `pbrMetallicRoughness.baseColorTexture`         | ✅ Supported (Phase 4)            |
+| `normalTexture`                                 | ❌ Ignored — warning in UI status |
+| `occlusionTexture`                              | ❌ Ignored                        |
+| `pbrMetallicRoughness.metallicRoughnessTexture` | ❌ Ignored                        |
+
+When any of these channels are present in the imported GLB, the Campaign Builder
+importer displays a status warning:
+
+```text
+GLB: 2 mesh(es), 3 embedded image(s), 2 material(s)
+  [unsupported PBR: normal/occlusion/metallic-roughness textures ignored]
+```
+
+The geometry and supported material properties (base color, metallic factor,
+roughness factor, emissive factor, alpha mode) are still imported normally.
+
+### Runtime Compatibility
+
+After export, the game runtime does **not** require the original `.glb` file. It
+uses only:
+
+1. The exported RON file (`CreatureDefinition` / item / furniture) containing
+   `MeshDefinition` entries with campaign-relative `texture_path` strings.
+2. The copied texture files under `assets/textures/imported/`.
+
+This is the same path convention used for OBJ imports, so the runtime
+`texture_loading_system` handles both formats identically.
+
+---
+
 ## See Also
 
 - `docs/how-to/create_campaign.md` - Campaign creation guide

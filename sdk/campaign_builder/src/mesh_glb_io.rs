@@ -167,6 +167,15 @@ pub struct ImportedGlbScene {
 
     /// `true` if the document contains any animation clip definitions.
     pub has_animations: bool,
+
+    /// `true` if any material in the document uses PBR texture channels that
+    /// Antares does not support: `normalTexture`, `occlusionTexture`, or
+    /// `pbrMetallicRoughness.metallicRoughnessTexture`.
+    ///
+    /// These channels are detected but **not** imported — their texture data is
+    /// silently ignored.  The importer UI surfaces this flag in the metadata
+    /// status message so users know what was skipped.
+    pub has_unsupported_pbr_channels: bool,
 }
 
 /// A single imported mesh row, corresponding to one glTF primitive.
@@ -336,6 +345,15 @@ pub(crate) fn import_glb_scene_from_bytes(
     let embedded_image_count = gltf.document.images().count();
     let has_skinning = gltf.document.skins().count() > 0;
     let has_animations = gltf.document.animations().count() > 0;
+    // Detect unsupported PBR texture channels across all materials.
+    // normalTexture, occlusionTexture, and metallicRoughnessTexture are not
+    // mapped to Antares domain fields; set a flag so the UI can warn the user.
+    let has_unsupported_pbr_channels = gltf.document.materials().any(|mat| {
+        let pbr = mat.pbr_metallic_roughness();
+        mat.normal_texture().is_some()
+            || mat.occlusion_texture().is_some()
+            || pbr.metallic_roughness_texture().is_some()
+    });
 
     // ── Step 5: depth-first node traversal ───────────────────────────────
     let mut imported_meshes: Vec<ImportedGlbMesh> = Vec::new();
@@ -386,6 +404,7 @@ pub(crate) fn import_glb_scene_from_bytes(
         scene_count,
         has_skinning,
         has_animations,
+        has_unsupported_pbr_channels,
     })
 }
 
@@ -783,7 +802,7 @@ mod tests {
         )
     }
 
-    /// GLB with a triangle and a PBR material with the given `base_color_factor`.
+    /// GLB with a triangle, a PBR material with the given `base_color_factor`.
     ///
     /// Binary layout (42 bytes):
     /// - offset  0: positions (36 bytes)
@@ -935,6 +954,95 @@ mod tests {
             Some(&bin),
         )
     }
+
+    /// GLB with one triangle and a full PBR material: `base_color_factor`,
+    /// `metallicFactor`, and `roughnessFactor` all specified.
+    ///
+    /// Binary layout (42 bytes): same geometry as [`build_triangle_material_glb`].
+    fn build_triangle_full_material_glb(
+        base_color: [f32; 4],
+        metallic: f32,
+        roughness: f32,
+    ) -> Vec<u8> {
+        let mut bin = Vec::new();
+        for pos in [[-1.0f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]] {
+            push_vec3(&mut bin, pos);
+        }
+        for idx in [0u16, 1, 2] {
+            push_u16(&mut bin, idx);
+        }
+        assert_eq!(bin.len(), 42);
+
+        let [r, g, b, a] = base_color;
+        let json = format!(
+            r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],"nodes":[{{"mesh":0}}],"meshes":[{{"primitives":[{{"attributes":{{"POSITION":0}},"indices":1,"material":0,"mode":4}}]}}],"materials":[{{"pbrMetallicRoughness":{{"baseColorFactor":[{r},{g},{b},{a}],"metallicFactor":{metallic},"roughnessFactor":{roughness}}}}}],"accessors":[{{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[-1.0,0.0,0.0],"max":[1.0,1.0,0.0]}},{{"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}}],"bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":36}},{{"buffer":0,"byteOffset":36,"byteLength":6}}],"buffers":[{{"byteLength":42}}]}}"#
+        );
+        build_glb(&json, Some(&bin))
+    }
+
+    /// GLB with one triangle and a material that has `normalTexture` set.
+    ///
+    /// The normal-map image is fake embedded bytes.  Used to test
+    /// `ImportedGlbScene::has_unsupported_pbr_channels` detection.
+    ///
+    /// Binary layout:
+    /// - offset  0: positions (36 bytes)
+    /// - offset 36: indices   (6 bytes)
+    /// - offset 42: padding   (2 bytes — aligns image to offset 44)
+    /// - offset 44: fake normal-map image bytes
+    fn build_normal_texture_glb() -> Vec<u8> {
+        const FAKE_NORMAL: &[u8] = b"FAKE_NORMAL_MAP_DATA";
+        let img_offset: usize = 44;
+        let img_len = FAKE_NORMAL.len();
+        let total = img_offset + img_len;
+
+        let mut bin = Vec::new();
+        for pos in [[-1.0f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]] {
+            push_vec3(&mut bin, pos);
+        }
+        for idx in [0u16, 1, 2] {
+            push_u16(&mut bin, idx);
+        }
+        bin.push(0x00);
+        bin.push(0x00); // pad positions(36) + indices(6) to offset 44
+        bin.extend_from_slice(FAKE_NORMAL);
+        assert_eq!(bin.len(), total);
+
+        let json = format!(
+            r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],"nodes":[{{"mesh":0}}],"meshes":[{{"primitives":[{{"attributes":{{"POSITION":0}},"indices":1,"material":0,"mode":4}}]}}],"materials":[{{"pbrMetallicRoughness":{{"baseColorFactor":[1.0,1.0,1.0,1.0]}},"normalTexture":{{"index":0}}}}],"textures":[{{"source":0}}],"images":[{{"bufferView":2,"mimeType":"image/png"}}],"accessors":[{{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[-1.0,0.0,0.0],"max":[1.0,1.0,0.0]}},{{"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}}],"bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":36}},{{"buffer":0,"byteOffset":36,"byteLength":6}},{{"buffer":0,"byteOffset":{img_offset},"byteLength":{img_len}}}],"buffers":[{{"byteLength":{total}}}]}}"#
+        );
+        build_glb(&json, Some(&bin))
+    }
+
+    /// GLB with one triangle and a material that has `occlusionTexture` set.
+    ///
+    /// Used to test `has_unsupported_pbr_channels` detection for the occlusion
+    /// channel variant.
+    fn build_occlusion_texture_glb() -> Vec<u8> {
+        const FAKE_OCC: &[u8] = b"FAKE_OCCLUSION_DATA";
+        let img_offset: usize = 44;
+        let img_len = FAKE_OCC.len();
+        let total = img_offset + img_len;
+
+        let mut bin = Vec::new();
+        for pos in [[-1.0f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]] {
+            push_vec3(&mut bin, pos);
+        }
+        for idx in [0u16, 1, 2] {
+            push_u16(&mut bin, idx);
+        }
+        bin.push(0x00);
+        bin.push(0x00); // pad to offset 44
+        bin.extend_from_slice(FAKE_OCC);
+        assert_eq!(bin.len(), total);
+
+        let json = format!(
+            r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],"nodes":[{{"mesh":0}}],"meshes":[{{"primitives":[{{"attributes":{{"POSITION":0}},"indices":1,"material":0,"mode":4}}]}}],"materials":[{{"pbrMetallicRoughness":{{"baseColorFactor":[1.0,1.0,1.0,1.0]}},"occlusionTexture":{{"index":0}}}}],"textures":[{{"source":0}}],"images":[{{"bufferView":2,"mimeType":"image/png"}}],"accessors":[{{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[-1.0,0.0,0.0],"max":[1.0,1.0,0.0]}},{{"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}}],"bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":36}},{{"buffer":0,"byteOffset":36,"byteLength":6}},{{"buffer":0,"byteOffset":{img_offset},"byteLength":{img_len}}}],"buffers":[{{"byteLength":{total}}}]}}"#
+        );
+        build_glb(&json, Some(&bin))
+    }
+
+    // ── Phase 5 test helpers end; file-based fixture helper below ─────────────────
 
     /// Path helper for binary GLB fixture files in `data/test_fixtures/`.
     ///
@@ -1212,6 +1320,115 @@ mod tests {
         assert!(
             (uvs[2][0] - 0.5_f32).abs() < 1e-5,
             "UV[2].u should be unchanged"
+        );
+    }
+
+    // ── Phase 5 tests: Runtime and Domain Compatibility ─────────────────────
+
+    /// PBR `baseColorFactor: [0.8, 0.2, 0.1, 1.0]` must map to both
+    /// `MeshDefinition.color` and `MaterialDefinition.base_color`.
+    #[test]
+    fn test_glb_material_base_color_maps_to_domain_material() {
+        let color = [0.8_f32, 0.2, 0.1, 1.0];
+        let glb = build_triangle_material_glb(color);
+        let scene =
+            import_glb_scene_from_bytes(&glb, &default_options()).expect("valid GLB should parse");
+
+        assert_eq!(scene.meshes.len(), 1, "expected exactly one mesh");
+        let mesh = &scene.meshes[0].mesh_def;
+
+        for (i, (&expected, &actual)) in color.iter().zip(mesh.color.iter()).enumerate() {
+            assert!(
+                (actual - expected).abs() < f32::EPSILON,
+                "mesh_def.color[{i}] should be {expected:.4}, got {actual:.4}"
+            );
+        }
+        let mat = mesh.material.as_ref().expect("material must be present");
+        for (i, (&expected, &actual)) in color.iter().zip(mat.base_color.iter()).enumerate() {
+            assert!(
+                (actual - expected).abs() < f32::EPSILON,
+                "material.base_color[{i}] should be {expected:.4}, got {actual:.4}"
+            );
+        }
+    }
+
+    /// `metallicFactor: 0.3` and `roughnessFactor: 0.7` must map to
+    /// `MaterialDefinition.metallic` and `MaterialDefinition.roughness`.
+    #[test]
+    fn test_glb_material_metallic_roughness_maps_to_domain() {
+        let glb = build_triangle_full_material_glb([1.0, 1.0, 1.0, 1.0], 0.3, 0.7);
+        let scene =
+            import_glb_scene_from_bytes(&glb, &default_options()).expect("valid GLB should parse");
+
+        assert_eq!(scene.meshes.len(), 1, "expected exactly one mesh");
+        let mat = scene.meshes[0]
+            .mesh_def
+            .material
+            .as_ref()
+            .expect("material must be present");
+
+        assert!(
+            (mat.metallic - 0.3_f32).abs() < f32::EPSILON,
+            "metallic should be 0.3, got {}",
+            mat.metallic
+        );
+        assert!(
+            (mat.roughness - 0.7_f32).abs() < f32::EPSILON,
+            "roughness should be 0.7, got {}",
+            mat.roughness
+        );
+    }
+
+    /// A GLB whose material has `normalTexture` must set
+    /// `ImportedGlbScene::has_unsupported_pbr_channels = true` and geometry
+    /// must still import normally.
+    #[test]
+    fn test_glb_normal_texture_sets_unsupported_pbr_channels_flag() {
+        let glb = build_normal_texture_glb();
+        let scene =
+            import_glb_scene_from_bytes(&glb, &default_options()).expect("valid GLB should parse");
+
+        assert!(
+            scene.has_unsupported_pbr_channels,
+            "normalTexture must set has_unsupported_pbr_channels=true"
+        );
+        assert_eq!(
+            scene.meshes.len(),
+            1,
+            "geometry must still import with one mesh"
+        );
+    }
+
+    /// A GLB whose material has `occlusionTexture` must also set the flag.
+    #[test]
+    fn test_glb_occlusion_texture_sets_unsupported_pbr_channels_flag() {
+        let glb = build_occlusion_texture_glb();
+        let scene =
+            import_glb_scene_from_bytes(&glb, &default_options()).expect("valid GLB should parse");
+
+        assert!(
+            scene.has_unsupported_pbr_channels,
+            "occlusionTexture must set has_unsupported_pbr_channels=true"
+        );
+        assert_eq!(
+            scene.meshes.len(),
+            1,
+            "geometry must still import with one mesh"
+        );
+    }
+
+    /// A standard PBR material (color, metallic, roughness scalars only — no
+    /// texture maps) must leave `has_unsupported_pbr_channels = false`.
+    #[test]
+    fn test_glb_standard_pbr_leaves_unsupported_channels_flag_false() {
+        let glb = build_triangle_full_material_glb([0.8, 0.2, 0.1, 1.0], 0.3, 0.7);
+        let scene =
+            import_glb_scene_from_bytes(&glb, &default_options()).expect("valid GLB should parse");
+
+        assert!(
+            !scene.has_unsupported_pbr_channels,
+            "a material with only color/metallic/roughness scalars must leave \
+             has_unsupported_pbr_channels=false"
         );
     }
 }

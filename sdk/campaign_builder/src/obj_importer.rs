@@ -598,7 +598,7 @@ impl ObjImporterState {
             .collect();
 
         let glb_metadata_summary = format!(
-            "GLB: {} mesh(es), {} embedded image(s), {} material(s){}{}",
+            "GLB: {} mesh(es), {} embedded image(s), {} material(s){}{}{}",
             meshes.len(),
             scene.embedded_image_count,
             scene.material_count,
@@ -609,6 +609,11 @@ impl ObjImporterState {
             },
             if scene.has_animations {
                 " [animations ignored]"
+            } else {
+                ""
+            },
+            if scene.has_unsupported_pbr_channels {
+                " [unsupported PBR: normal/occlusion/metallic-roughness textures ignored]"
             } else {
                 ""
             },
