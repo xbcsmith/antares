@@ -116,14 +116,15 @@ pub enum GlbImportError {
     /// A primitive uses a mode other than `TRIANGLES`.
     ///
     /// `mode` is the human-readable name of the unsupported mode, e.g. `"Lines"`.
-    #[error("Unsupported primitive mode: {mode}")]
-    UnsupportedPrimitive { mode: String },
+    /// `mesh` is the name of the glTF mesh containing the primitive.
+    #[error("Unsupported primitive mode '{mode}' in mesh '{mesh}'.")]
+    UnsupportedPrimitive { mode: String, mesh: String },
 
     /// The required `POSITION` attribute is absent from a primitive.
     ///
     /// `mesh` is the glTF mesh name and `primitive` is the zero-based primitive
     /// index within that mesh.
-    #[error("Missing POSITION attribute in mesh '{mesh}', primitive {primitive}")]
+    #[error("Mesh '{mesh}' primitive {primitive} has no position data.")]
     MissingPositions { mesh: String, primitive: usize },
 
     /// A required buffer or image buffer view is missing or inaccessible.
@@ -140,6 +141,10 @@ pub enum GlbImportError {
     /// An accessor index is out of range.
     #[error("Invalid index in accessor")]
     InvalidIndex,
+
+    /// The selected scene contains no mesh primitives.
+    #[error("No mesh primitives found in GLB file.")]
+    NoMeshPrimitives,
 }
 
 // ─── Result types ─────────────────────────────────────────────────────────────
@@ -319,8 +324,8 @@ pub(crate) fn import_glb_scene_from_bytes(
             if !uri.starts_with("data:") {
                 return Err(GlbImportError::MissingBuffer {
                     detail: format!(
-                        "external URI textures are not supported; embed textures in \
-                         the GLB file (found URI: {uri})"
+                        "Embedded textures required; external URI textures are not \
+                         supported (found URI: {uri})"
                     ),
                 });
             }
@@ -397,6 +402,10 @@ pub(crate) fn import_glb_scene_from_bytes(
         }
     }
 
+    if imported_meshes.is_empty() {
+        return Err(GlbImportError::NoMeshPrimitives);
+    }
+
     Ok(ImportedGlbScene {
         meshes: imported_meshes,
         embedded_image_count,
@@ -442,6 +451,7 @@ fn glb_primitive_to_mesh_definition<'doc>(
     if let Some(name) = mode_name {
         return Err(GlbImportError::UnsupportedPrimitive {
             mode: name.to_string(),
+            mesh: mesh_name.to_string(),
         });
     }
 
@@ -577,8 +587,8 @@ fn extract_base_color_texture_payload<'doc>(
             // Defensive: should have been caught in pre-validation.
             Err(GlbImportError::MissingBuffer {
                 detail: format!(
-                    "external URI textures are not supported; embed textures in the \
-                     GLB file (found URI: {uri})"
+                    "Embedded textures required; external URI textures are not \
+                     supported (found URI: {uri})"
                 ),
             })
         }
@@ -955,6 +965,16 @@ mod tests {
         )
     }
 
+    /// GLB with a scene that contains a node but no mesh (simulates a scene
+    /// with camera/light nodes only, producing zero mesh primitives).
+    fn build_scene_without_meshes_glb() -> Vec<u8> {
+        // Scene has one node; the node has no "mesh" property.
+        build_glb(
+            r#"{"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"name":"CameraOnly"}]}"#,
+            None,
+        )
+    }
+
     /// GLB with one triangle and a full PBR material: `base_color_factor`,
     /// `metallicFactor`, and `roughnessFactor` all specified.
     ///
@@ -1236,7 +1256,7 @@ mod tests {
         assert!(
             matches!(
                 result,
-                Err(GlbImportError::UnsupportedPrimitive { ref mode }) if mode == "Lines"
+                Err(GlbImportError::UnsupportedPrimitive { ref mode, .. }) if mode == "Lines"
             ),
             "expected UnsupportedPrimitive {{ mode: \"Lines\" }}, got {result:?}"
         );
@@ -1429,6 +1449,50 @@ mod tests {
             !scene.has_unsupported_pbr_channels,
             "a material with only color/metallic/roughness scalars must leave \
              has_unsupported_pbr_channels=false"
+        );
+    }
+
+    #[test]
+    fn test_import_glb_no_mesh_primitives_returns_error() {
+        let glb = build_scene_without_meshes_glb();
+        let result = import_glb_scene_from_bytes(&glb, &default_options());
+        assert!(
+            matches!(result, Err(GlbImportError::NoMeshPrimitives)),
+            "expected NoMeshPrimitives, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_import_glb_error_messages_match_spec() {
+        // MissingPositions message format
+        let glb = build_no_position_glb();
+        let err = import_glb_scene_from_bytes(&glb, &default_options()).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("has no position data"),
+            "MissingPositions message should contain 'has no position data', got: {msg}"
+        );
+
+        // UnsupportedPrimitive message format
+        let glb = build_lines_glb();
+        let err = import_glb_scene_from_bytes(&glb, &default_options()).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Unsupported primitive mode"),
+            "UnsupportedPrimitive message should start with 'Unsupported primitive mode', got: {msg}"
+        );
+        assert!(
+            msg.contains("in mesh"),
+            "UnsupportedPrimitive message should contain 'in mesh', got: {msg}"
+        );
+
+        // NoMeshPrimitives message
+        let glb = build_scene_without_meshes_glb();
+        let err = import_glb_scene_from_bytes(&glb, &default_options()).unwrap_err();
+        let msg = err.to_string();
+        assert_eq!(
+            msg, "No mesh primitives found in GLB file.",
+            "NoMeshPrimitives message should match spec"
         );
     }
 }

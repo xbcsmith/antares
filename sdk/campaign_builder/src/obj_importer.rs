@@ -210,6 +210,10 @@ pub struct ObjImporterState {
     /// to the Creatures editor. Defaults to `false` to keep the user in the
     /// Importer tab after export.
     pub open_after_export: bool,
+    /// When `true`, the `status_message` describes a load or export error;
+    /// the UI renders it in red. When `false`, it is an informational message
+    /// rendered in italic text.
+    pub is_error: bool,
 }
 
 /// Errors that can occur while preparing importer state.
@@ -421,6 +425,7 @@ impl Default for ObjImporterState {
             new_custom_color_label: String::new(),
             new_custom_color: [0.8, 0.8, 0.8, 1.0],
             open_after_export: false,
+            is_error: false,
         }
     }
 }
@@ -609,27 +614,32 @@ impl ObjImporterState {
             })
             .collect();
 
-        let glb_metadata_summary = format!(
-            "GLB: {} mesh(es), {} embedded image(s), {} material(s){}{}{}",
+        let mut status_parts: Vec<String> = vec![format!(
+            "GLB: {} mesh(es), {} embedded image(s), {} material(s)",
             meshes.len(),
             scene.embedded_image_count,
             scene.material_count,
-            if scene.has_skinning {
-                " [skinning ignored]"
-            } else {
-                ""
-            },
-            if scene.has_animations {
-                " [animations ignored]"
-            } else {
-                ""
-            },
-            if scene.has_unsupported_pbr_channels {
-                " [unsupported PBR: normal/occlusion/metallic-roughness textures ignored]"
-            } else {
-                ""
-            },
-        );
+        )];
+
+        if scene.scene_count > 1 {
+            status_parts.push(format!(
+                "GLB contains {} scene(s); importing default scene.",
+                scene.scene_count
+            ));
+        }
+
+        if scene.has_skinning || scene.has_animations {
+            status_parts.push("Skinning/animations present but not imported.".to_string());
+        }
+
+        if scene.has_unsupported_pbr_channels {
+            status_parts.push(
+                "Unsupported PBR channels (normal/occlusion/metallic-roughness) ignored."
+                    .to_string(),
+            );
+        }
+
+        let glb_metadata_summary = status_parts.join(" ");
 
         self.load_imported_mesh_rows(
             source_path,
@@ -640,6 +650,7 @@ impl ObjImporterState {
             Vec::new(),                  // no imported_material_palette
         );
         self.source_format = ImportSourceFormat::Glb;
+        self.is_error = false;
         self.status_message = glb_metadata_summary;
     }
 
@@ -1292,10 +1303,11 @@ mod tests {
 
     #[test]
     fn test_open_after_export_preserved_across_clear() {
-        let mut state = ObjImporterState::default();
-        state.open_after_export = true;
-        // Load a mesh so clear() is meaningful
-        state.creature_name = "Test".to_string();
+        let mut state = ObjImporterState {
+            open_after_export: true,
+            creature_name: "Test".to_string(),
+            ..Default::default()
+        };
         state.clear();
         assert!(
             state.open_after_export,
@@ -1334,6 +1346,115 @@ mod tests {
         assert!(
             state.meshes[0].texture_payload.is_none(),
             "no MTL texture means texture_payload must be None"
+        );
+    }
+
+    #[test]
+    fn test_obj_importer_state_is_error_defaults_to_false() {
+        let state = ObjImporterState::new();
+        assert!(!state.is_error, "is_error should default to false");
+    }
+
+    #[test]
+    fn test_obj_importer_state_is_error_resets_on_clear() {
+        let mut state = ObjImporterState::new();
+        state.is_error = true;
+        state.clear();
+        assert!(!state.is_error, "is_error should reset to false on clear");
+    }
+
+    #[test]
+    fn test_obj_importer_state_load_glb_multi_scene_status() {
+        use crate::mesh_glb_io::{ImportedGlbMesh, ImportedGlbScene};
+        use antares::domain::visual::MeshDefinition;
+
+        let scene = ImportedGlbScene {
+            meshes: vec![ImportedGlbMesh {
+                mesh_def: MeshDefinition {
+                    name: Some("TestMesh".to_string()),
+                    vertices: vec![],
+                    indices: vec![],
+                    normals: None,
+                    uvs: None,
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    lod_levels: None,
+                    lod_distances: None,
+                    material: None,
+                    texture_path: None,
+                },
+                texture_payload: None,
+                node_name: None,
+                material_name: None,
+                node_transform: None,
+            }],
+            embedded_image_count: 0,
+            material_count: 0,
+            scene_count: 3,
+            has_skinning: false,
+            has_animations: false,
+            has_unsupported_pbr_channels: false,
+        };
+
+        let mut state = ObjImporterState::new();
+        state.load_imported_glb_scene(None, scene);
+
+        assert!(
+            state.status_message.contains("GLB contains 3 scene(s)"),
+            "status_message should mention multi-scene count, got: {}",
+            state.status_message
+        );
+        assert!(
+            state.status_message.contains("importing default scene"),
+            "status_message should mention importing default scene, got: {}",
+            state.status_message
+        );
+    }
+
+    #[test]
+    fn test_obj_importer_state_load_glb_skinning_status() {
+        use crate::mesh_glb_io::{ImportedGlbMesh, ImportedGlbScene};
+        use antares::domain::visual::MeshDefinition;
+
+        let scene = ImportedGlbScene {
+            meshes: vec![ImportedGlbMesh {
+                mesh_def: MeshDefinition {
+                    name: Some("SkinMesh".to_string()),
+                    vertices: vec![],
+                    indices: vec![],
+                    normals: None,
+                    uvs: None,
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    lod_levels: None,
+                    lod_distances: None,
+                    material: None,
+                    texture_path: None,
+                },
+                texture_payload: None,
+                node_name: None,
+                material_name: None,
+                node_transform: None,
+            }],
+            embedded_image_count: 0,
+            material_count: 0,
+            scene_count: 1,
+            has_skinning: true,
+            has_animations: false,
+            has_unsupported_pbr_channels: false,
+        };
+
+        let mut state = ObjImporterState::new();
+        state.load_imported_glb_scene(None, scene);
+
+        assert!(
+            state
+                .status_message
+                .contains("Skinning/animations present but not imported"),
+            "status_message should contain skinning warning, got: {}",
+            state.status_message
+        );
+        assert!(
+            !state.is_error,
+            "is_error should be false for successful load"
         );
     }
 }

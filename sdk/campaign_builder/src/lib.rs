@@ -2899,7 +2899,7 @@ mod tests {
         // Verify default: open_after_export is false, tab should NOT switch
         assert!(!app.obj_importer_state.open_after_export);
         // Simulate what the Creature signal handler does with open_after_export = false
-        let initial_tab = app.ui_state.active_tab.clone();
+        let initial_tab = app.ui_state.active_tab;
         app.load_creatures();
         app.sync_obj_importer_campaign_state();
         if app.obj_importer_state.open_after_export {

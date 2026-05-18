@@ -2883,6 +2883,19 @@ All CLI tools are available via the unified `antares-sdk` binary (`src/bin/antar
 - Visual quest dependency graphs
 - Validate quest progression paths
 
+**Model Importer** (Campaign Builder GUI — Importer tab)
+
+- Import `.obj` (Wavefront OBJ + MTL) and `.glb` (binary glTF) 3D model files
+- Per-mesh color editing with imported material palette and custom color swatches
+- Export as Creature, Item, or Furniture RON asset with campaign-relative texture paths
+- GLB embedded textures automatically extracted and written to `assets/textures/imported/`
+- OBJ MTL texture maps copied to campaign texture directory on export
+- Format-neutral importer state: `ObjImporterState` handles both OBJ and GLB workflows
+- User-facing error messages for unsupported GLB features (external URI textures,
+  missing POSITION data, unsupported primitive modes, no mesh primitives)
+- Informational status messages for non-blocking features (multiple scenes, skinning,
+  unsupported PBR channels)
+
 #### 8.3 Validation Framework
 
 **Campaign Validator** (`cargo run --bin antares-sdk -- campaign validate`)

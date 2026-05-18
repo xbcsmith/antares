@@ -2,6 +2,179 @@
 
 ---
 
+## GLB File Support in Campaign Builder Importer — Full Feature Summary (Complete)
+
+All seven phases of GLB file support in the Campaign Builder Importer are
+complete. Campaign Builder users can import `.glb` files, adjust per-mesh
+colors, and export self-contained Creature, Item, or Furniture RON assets with
+embedded textures written to `assets/textures/imported/`.
+
+### Feature Components
+
+| Phase | Scope                                     | Key Files                                                                        |
+| ----- | ----------------------------------------- | -------------------------------------------------------------------------------- |
+| 1     | GLB parser foundation                     | `mesh_glb_io.rs`                                                                 |
+| 2     | Format-neutral importer state             | `obj_importer.rs`                                                                |
+| 3     | UI dispatch for GLB selection             | `obj_importer_ui.rs`                                                             |
+| 4     | Embedded texture export                   | `obj_importer_ui.rs`                                                             |
+| 5     | Runtime and domain compatibility          | `mesh_glb_io.rs`, `obj_importer.rs`, `obj_importer_ui.rs`                        |
+| 6     | Importer and creature preview performance | `creatures_editor/mod.rs`, `preview_renderer.rs`, `obj_importer_ui.rs`, `lib.rs` |
+| 7     | Documentation, validation, and QA         | `mesh_glb_io.rs`, `obj_importer.rs`, `obj_importer_ui.rs`                        |
+
+### Success Criteria (All Met)
+
+- Campaign Builder users can import a `.glb`, export as Creature/Item/Furniture
+  RON, and get self-contained embedded texture files in `assets/textures/imported/`
+  without manually managing sidecar files.
+- Textured GLB assets produce exported RON plus campaign texture files that are
+  self-contained inside the campaign directory.
+- OBJ import remains fully functional with zero regressions.
+- Unsupported GLB features fail or warn clearly rather than producing silently
+  untextured models.
+- Campaign Builder remains responsive when loading and exporting large GLB models.
+
+### Error Message Specification
+
+| GLB Problem                 | User-Facing Behavior                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------------ |
+| No mesh primitives          | Load error: `"No mesh primitives found in GLB file."`                                |
+| Missing POSITION attribute  | Load error: `"Mesh '<name>' primitive <N> has no position data."`                    |
+| Unsupported primitive mode  | Load error: `"Unsupported primitive mode '<mode>' in mesh '<name>'."`                |
+| External URI texture        | Load error: `"Embedded textures required; external URI textures are not supported."` |
+| Unknown MIME type           | Export warning in `status_message`; file saved with `.bin` extension                 |
+| Texture missing at export   | Export error: `"Texture for mesh '<name>' could not be resolved."`                   |
+| Multiple scenes             | Info in `status_message`: `"GLB contains N scene(s); importing default scene."`      |
+| Skinning/animations present | Info in `status_message`: `"Skinning/animations present but not imported."`          |
+
+### Quality Gates (Final)
+
+All four quality gates pass on the complete workspace:
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt --all              → no output (all files formatted)
+cargo check --all-targets    → Finished, 0 errors
+cargo clippy -D warnings     → Finished, 0 warnings
+cargo nextest run            → 2441 passed, 0 failed
+```
+
+---
+
+## GLB Importer — Phase 7: `is_error` Status Flag and Improved Status Message Format (Complete)
+
+### Overview
+
+Phase 7 adds a boolean `is_error` field to `ObjImporterState` so the UI can
+distinguish error messages (rendered in red) from informational status messages
+(rendered in italics). It also rewrites the GLB metadata summary in
+`load_imported_glb_scene` to use a `Vec<String>` parts-joining approach,
+adding explicit sentences for multi-scene GLB files and for skinning/animations.
+
+| Change | File                 | Description                                                                                                                                 |
+| ------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1      | `obj_importer.rs`    | `is_error: bool` field added to `ObjImporterState`; `Default` impl initializes to `false`                                                   |
+| 2      | `obj_importer.rs`    | `load_imported_glb_scene` rewrites status to `status_parts.join(" ")` with multi-scene and skinning sentences; sets `self.is_error = false` |
+| 3      | `obj_importer.rs`    | Four new tests: defaults, clear reset, multi-scene message, skinning message                                                                |
+| 4      | `obj_importer_ui.rs` | `show_obj_importer_tab` renders `status_message` red when `is_error`, italic otherwise                                                      |
+| 5      | `obj_importer_ui.rs` | `render_idle_mode`: Browse sets `is_error=false`; load Ok sets `is_error=false`; load Err sets `is_error=true`                              |
+| 6      | `obj_importer_ui.rs` | `render_loaded_mode`: export Err sets `is_error=true`; `[skinning ignored]` check updated to `"Skinning/animations present"`                |
+| 7      | `obj_importer_ui.rs` | `reload_obj_after_mtl_change`: Err arm sets `is_error=true`                                                                                 |
+| 8      | `obj_importer_ui.rs` | Two new tests: red error render, unknown-format sets `is_error`                                                                             |
+| 9      | `lib.rs`             | Pre-existing `clone_on_copy` lint fixed (`EditorTab` is `Copy`)                                                                             |
+| 10     | `obj_importer.rs`    | Pre-existing `field_reassign_with_default` lint fixed in `test_open_after_export_preserved_across_clear`                                    |
+| 11     | `obj_importer_ui.rs` | Pre-existing `field_reassign_with_default` lint fixed in `test_importer_large_mesh_list_renders_bounded_rows`                               |
+
+**2441/2441 tests green. Zero `cargo clippy` warnings.**
+
+### Deliverables
+
+#### `sdk/campaign_builder/src/obj_importer.rs`
+
+- **`ObjImporterState::is_error`** — new `pub is_error: bool` field; `Default`
+  and `new()` initialize it `false`; `clear()` resets it to `false` via
+  `..Self::default()`.
+- **`load_imported_glb_scene`** — status message now built from a
+  `Vec<String>` joined with `" "`. Base sentence always present. Extra
+  sentences appended for `scene_count > 1` ("GLB contains N scene(s);
+  importing default scene.") and `has_skinning || has_animations`
+  ("Skinning/animations present but not imported.") and
+  `has_unsupported_pbr_channels`. Sets `self.is_error = false` before writing
+  the message.
+- **New tests**: `test_obj_importer_state_is_error_defaults_to_false`,
+  `test_obj_importer_state_is_error_resets_on_clear`,
+  `test_obj_importer_state_load_glb_multi_scene_status`,
+  `test_obj_importer_state_load_glb_skinning_status`.
+
+#### `sdk/campaign_builder/src/obj_importer_ui.rs`
+
+- **`show_obj_importer_tab`** — `status_message` rendered via
+  `ui.colored_label(Color32::RED, ...)` when `state.is_error`, italic
+  `RichText` otherwise.
+- **`render_idle_mode`** — Browse button sets `is_error = false`; load
+  `Ok` arm sets `is_error = false`; load `Err` arm sets `is_error = true`.
+- **`render_loaded_mode`** — export `Err` arm sets `is_error = true`;
+  skinning badge check updated from `"[skinning ignored]"` to
+  `"Skinning/animations present"` to match new message format.
+- **`reload_obj_after_mtl_change`** — `Err` arm sets `is_error = true`.
+- **New tests**: `test_show_obj_importer_tab_renders_error_status_in_red`,
+  `test_render_idle_mode_sets_is_error_on_unknown_format`.
+
+---
+
+## GLB File Support — Phase 7: Error Message Specification Compliance (Complete)
+
+### Overview
+
+All 8 changes of the Phase 7 error message specification compliance update are
+implemented in `sdk/campaign_builder/src/mesh_glb_io.rs`.
+
+| Change | Description                                                                     |
+| ------ | ------------------------------------------------------------------------------- |
+| 1      | `UnsupportedPrimitive` gains a `mesh: String` field; display updated            |
+| 2      | `MissingPositions` display message updated to spec format                       |
+| 3      | New `NoMeshPrimitives` variant added after `InvalidIndex`                       |
+| 4      | External URI image error in step 2b pre-validation updated to spec wording      |
+| 5      | `NoMeshPrimitives` guard added before `Ok(ImportedGlbScene { ... })`            |
+| 6      | `glb_primitive_to_mesh_definition` passes `mesh_name` to `UnsupportedPrimitive` |
+| 7      | Defensive URI error in `extract_base_color_texture_payload` updated             |
+| 8      | `build_scene_without_meshes_glb` helper + 2 new tests added to `mod tests`      |
+
+**2435/2435 tests green. Zero `cargo clippy` warnings in `mesh_glb_io.rs`.**
+
+### Deliverables
+
+#### `sdk/campaign_builder/src/mesh_glb_io.rs`
+
+- **`GlbImportError::UnsupportedPrimitive`** — new `mesh: String` field added;
+  display string changed to `"Unsupported primitive mode '{mode}' in mesh
+'{mesh}'."`. Existing pattern-match test updated with `..` wildcard.
+- **`GlbImportError::MissingPositions`** — display string changed from
+  `"Missing POSITION attribute in mesh '{mesh}', primitive {primitive}"` to
+  `"Mesh '{mesh}' primitive {primitive} has no position data."`.
+- **`GlbImportError::NoMeshPrimitives`** — new unit variant with display
+  `"No mesh primitives found in GLB file."`, placed after `InvalidIndex`.
+- **Step 2b pre-validation** — external URI texture error detail changed from
+  `"external URI textures are not supported; embed textures in the GLB file
+(found URI: {uri})"` to `"Embedded textures required; external URI textures
+are not supported (found URI: {uri})"`.
+- **`import_glb_scene_from_bytes`** — `NoMeshPrimitives` guard inserted
+  immediately after the node-traversal loop and before `Ok(ImportedGlbScene
+{ ... })`, so a scene containing only non-mesh nodes (cameras, lights, etc.)
+  returns an error rather than an empty mesh list.
+- **`glb_primitive_to_mesh_definition`** — passes `mesh: mesh_name.to_string()`
+  when constructing `GlbImportError::UnsupportedPrimitive`.
+- **`extract_base_color_texture_payload`** — defensive URI branch error detail
+  updated to match the step 2b wording.
+- **New test helpers and tests**:
+  - `build_scene_without_meshes_glb()` — GLB with a single no-mesh node
+    (`CameraOnly`), producing zero primitives.
+  - `test_import_glb_no_mesh_primitives_returns_error` — asserts
+    `NoMeshPrimitives` is returned for a mesh-free scene.
+  - `test_import_glb_error_messages_match_spec` — verifies exact display
+    strings for `MissingPositions`, `UnsupportedPrimitive`, and
+    `NoMeshPrimitives`.
+
+---
+
 ## GLB File Support — Phase 6: Importer and Creature Preview Responsiveness (Complete)
 
 ### Overview

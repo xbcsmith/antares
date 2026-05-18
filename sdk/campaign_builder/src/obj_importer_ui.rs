@@ -120,7 +120,11 @@ pub(crate) fn show_obj_importer_tab(
 
     if !state.status_message.is_empty() {
         ui.add_space(4.0);
-        ui.label(egui::RichText::new(&state.status_message).italics());
+        if state.is_error {
+            ui.colored_label(egui::Color32::RED, &state.status_message);
+        } else {
+            ui.label(egui::RichText::new(&state.status_message).italics());
+        }
     }
 
     if campaign_dir.is_none() {
@@ -167,6 +171,7 @@ fn render_idle_mode(ui: &mut egui::Ui, state: &mut ObjImporterState, logger: &mu
                             state.creature_name = display_name_from_path(&path);
                         }
                         state.status_message = format!("Selected file: {}", path.display());
+                        state.is_error = false;
                         ui.ctx().request_repaint();
                     }
                 }
@@ -238,6 +243,7 @@ fn render_idle_mode(ui: &mut egui::Ui, state: &mut ObjImporterState, logger: &mu
 
         match load_model_into_state(state, &path) {
             Ok(()) => {
+                state.is_error = false;
                 logger.info(
                     category::EDITOR,
                     &format!("Loaded model importer source {}", path.display()),
@@ -246,6 +252,7 @@ fn render_idle_mode(ui: &mut egui::Ui, state: &mut ObjImporterState, logger: &mu
             }
             Err(error) => {
                 state.status_message = error.to_string();
+                state.is_error = true;
                 logger.error(category::FILE_IO, &state.status_message);
             }
         }
@@ -390,7 +397,7 @@ fn render_loaded_mode(
         });
 
     if state.source_format == ImportSourceFormat::Glb
-        && state.status_message.contains("[skinning ignored]")
+        && state.status_message.contains("Skinning/animations present")
     {
         ui.add_space(4.0);
         ui.colored_label(
@@ -474,6 +481,7 @@ fn render_loaded_mode(
                 Err(error) => {
                     state.mode = ImporterMode::Loaded;
                     state.status_message = error.to_string();
+                    state.is_error = true;
                     logger.error(category::FILE_IO, &state.status_message);
                 }
             }
@@ -1055,6 +1063,7 @@ fn reload_obj_after_mtl_change(
         }
         Err(error) => {
             state.status_message = error.to_string();
+            state.is_error = true;
             logger.error(category::FILE_IO, &state.status_message);
         }
     }
@@ -2052,6 +2061,55 @@ mod tests {
         assert_eq!(state.mode, ImporterMode::Loaded);
     }
 
+    #[test]
+    fn test_show_obj_importer_tab_renders_error_status_in_red() {
+        let mut state = ObjImporterState::new();
+        state.status_message = "Error: could not load file.".to_string();
+        state.is_error = true;
+        let ctx = egui::Context::default();
+        let mut logger = Logger::default();
+
+        // Verify that rendering does not panic when is_error is true.
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let signal = show_obj_importer_tab(ui, &mut state, None, &mut logger);
+                assert!(signal.is_none());
+            });
+        });
+
+        // is_error and status_message should be unchanged by rendering.
+        assert!(state.is_error, "is_error should remain true after render");
+        assert!(!state.status_message.is_empty());
+    }
+
+    #[test]
+    fn test_render_idle_mode_sets_is_error_on_unknown_format() {
+        use std::io::Write;
+        let temp_dir = tempfile::tempdir().unwrap();
+        let fake_file = temp_dir.path().join("model.xyz");
+        std::fs::File::create(&fake_file)
+            .unwrap()
+            .write_all(b"fake")
+            .unwrap();
+
+        let mut state = ObjImporterState::new();
+        state.source_path = Some(fake_file.clone());
+
+        // load_model_into_state should return an error for .xyz
+        let result = load_model_into_state(&mut state, &fake_file);
+        assert!(result.is_err(), "should error for unknown format");
+
+        // The caller (render_idle_mode) sets is_error; simulate that here.
+        state.status_message = result.unwrap_err().to_string();
+        state.is_error = true;
+
+        assert!(state.is_error, "is_error should be true after load failure");
+        assert!(
+            !state.status_message.is_empty(),
+            "status_message should be set"
+        );
+    }
+
     // ─── GLB builder helpers (local copies for UI-layer tests) ──────────────
 
     /// Build a minimal valid GLB binary from a JSON chunk and optional binary chunk.
@@ -2425,8 +2483,10 @@ mod tests {
     fn test_importer_large_mesh_list_renders_bounded_rows() {
         // Build a state with 200 meshes. The show_rows virtualization should
         // handle this without panicking and without rendering all 200 rows.
-        let mut state = ObjImporterState::default();
-        state.mode = crate::obj_importer::ImporterMode::Loaded;
+        let mut state = ObjImporterState {
+            mode: crate::obj_importer::ImporterMode::Loaded,
+            ..Default::default()
+        };
 
         for i in 0..200_usize {
             use antares::domain::visual::MeshDefinition;

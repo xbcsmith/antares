@@ -28,11 +28,9 @@ Write a plan with a phased approach to implementing skill system level scaling i
 
 ✅ PLAN WRITTEN - [Skill System Level Scaling Implementation Plan](./skill_system_level_scaling_implementation_plan.md)
 
-
 ## Notes
 
 Month Year Date in Game Engine View looks horrible.
-
 
 Campaign Builder --> Importer --> Import Obj with an MTL file that has a tecture map. The texture map is not applied so all the models are white. The importer should import the texture map and apply it to the model. This will allow us to use custom textures for our models in the campaign builder. We should also add support for importing models with multiple texture maps, so that we can have more complex models with different textures for different parts of the model. This will be a big improvement for the campaign builder and will allow us to create more visually appealing campaigns.
 
@@ -40,4 +38,4 @@ Campaign Builder --> Importer --> GLB files should be supported. A single file i
 
 Write a plan to implement GLB file support in the campaign builder importer. THINK HARD and follow the rules in @PLAN.md
 
-[GLB File Support in Campaign Builder Importer](./glb_file_support_in_campaign_builder_importer_plan.md)
+✅ COMPLETE (Phases 1–7) — [GLB File Support in Campaign Builder Importer](./glb_file_support_in_campaign_builder_importer_plan.md)
