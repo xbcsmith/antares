@@ -254,6 +254,7 @@ impl Resistances {
 ///     special_abilities: vec![],
 ///     size: SizeCategory::Small,
 ///     proficiencies: vec![],
+///     skill_grants: vec![],
 ///     incompatible_item_tags: vec!["large_weapon".to_string(), "heavy_armor".to_string()],
 /// };
 ///

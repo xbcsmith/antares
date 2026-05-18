@@ -2502,23 +2502,10 @@ impl ResolvedNpc {
     /// use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
     /// use antares::domain::types::Position;
     ///
-    /// let definition = NpcDefinition {
-    ///     id: "guard".to_string(),
-    ///     name: "City Guard".to_string(),
-    ///     description: "A vigilant guard".to_string(),
-    ///     portrait_id: "guard.png".to_string(),
-    ///     sprite: None,
-    ///     dialogue_id: Some(10),
-    ///     creature_id: None,
-    ///     quest_ids: vec![],
-    ///     faction: Some("City Watch".to_string()),
-    ///     is_merchant: false,
-    ///     is_innkeeper: false,
-    ///     is_priest: false,
-    ///     stock_template: None,
-    ///     service_catalog: None,
-    ///     economy: None,
-    /// };
+    /// let mut definition = NpcDefinition::new("guard", "City Guard", "guard.png");
+    /// definition.description = "A vigilant guard".to_string();
+    /// definition.dialogue_id = Some(10);
+    /// definition.faction = Some("City Watch".to_string());
     ///
     /// let placement = NpcPlacement::new("guard", Position::new(5, 5));
     ///

@@ -486,7 +486,7 @@ pub fn level_up_with_level_db(
 /// ```
 /// use antares::domain::character::{Character, Sex, Alignment};
 /// use antares::domain::classes::ClassDatabase;
-/// use antares::domain::magic::database::SpellDatabase;
+/// use antares::sdk::database::SpellDatabase;
 /// use antares::domain::progression::{award_experience, level_up_and_grant_spells};
 /// use rand::rng;
 ///
@@ -546,7 +546,7 @@ pub fn level_up_and_grant_spells(
 /// ```
 /// use antares::domain::character::{Character, Sex, Alignment};
 /// use antares::domain::classes::ClassDatabase;
-/// use antares::domain::magic::database::SpellDatabase;
+/// use antares::sdk::database::SpellDatabase;
 /// use antares::domain::progression::{award_experience, level_up_and_grant_spells_with_level_db};
 /// use rand::rng;
 ///

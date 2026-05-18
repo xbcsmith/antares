@@ -158,7 +158,7 @@ pub enum EventResult {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::world::events::UnlockMethod;
+/// use antares::domain::world::UnlockMethod;
 ///
 /// let method = UnlockMethod::Key { item_id: 42 };
 /// ```

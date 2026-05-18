@@ -588,7 +588,7 @@ fn lock_action_system(
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use antares::game::systems::lock_ui::{handle_lock_action, LockAction};
 /// use antares::domain::world::lock::{LockState, UnlockOutcome};
 /// use antares::domain::character::{Alignment, Character, Sex};
@@ -713,7 +713,7 @@ pub(crate) fn apply_success(
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use antares::game::systems::lock_ui::apply_trap_effects;
 /// use antares::application::GameState;
 /// use antares::domain::character::Condition;

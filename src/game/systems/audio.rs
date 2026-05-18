@@ -37,6 +37,7 @@
 //! let mut app = App::new();
 //! app.add_plugins(AudioPlugin {
 //!     config: audio_config,
+//!     audio_dir: "assets/audio".to_string(),
 //! });
 //! # }
 //! ```
@@ -317,6 +318,7 @@ impl AudioSettings {
 /// let mut app = App::new();
 /// app.add_plugins(AudioPlugin {
 ///     config: audio_config,
+///     audio_dir: "assets/audio".to_string(),
 /// });
 /// # }
 /// ```

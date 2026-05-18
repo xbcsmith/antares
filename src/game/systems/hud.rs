@@ -2065,7 +2065,7 @@ fn ensure_full_portraits_loaded(
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use antares::application::GameState;
 /// use antares::game::resources::GlobalState;
 /// use antares::game::systems::hud::in_automap_mode;

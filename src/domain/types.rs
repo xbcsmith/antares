@@ -761,9 +761,9 @@ impl GameTime {
     /// ```
     /// use antares::domain::types::GameTime;
     ///
-    /// // Advancing 31 days from Month 1, Day 1 should land on Month 2, Day 1
+    /// // Advancing 30 full days from Month 1, Day 1 lands on Month 2, Day 1.
     /// let mut time = GameTime::new(1, 0, 0);
-    /// time.advance_days(31);
+    /// time.advance_days(30);
     /// assert_eq!(time.month, 2);
     /// assert_eq!(time.day, 1);
     /// ```

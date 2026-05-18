@@ -2533,6 +2533,7 @@ impl GameState {
     ///     icon_path: None,
     ///     tags: vec![],
     ///     mesh_descriptor_override: None,
+    ///     mesh_id: None,
     /// };
     /// item_db.add_item(ration).unwrap();
     ///
