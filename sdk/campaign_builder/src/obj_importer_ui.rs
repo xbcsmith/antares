@@ -30,7 +30,7 @@ use crate::color_palette::{palette_entries, PaletteEntry};
 use crate::creature_assets::{CreatureAssetError, CreatureAssetManager};
 use crate::logging::{category, Logger};
 use crate::obj_importer::{
-    ExportType, ImportSourceFormat, ImportedMaterialSwatch, ImportedMeshColorSource,
+    ExportType, ImportSourceFormat, ImportedMaterialSwatch, ImportedMesh, ImportedMeshColorSource,
     ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
 };
 use crate::ui_helpers::TwoColumnLayout;
@@ -430,6 +430,7 @@ fn render_loaded_mode(
     ui.add_space(6.0);
     let mut export_signal = None;
     let mut cleared_importer = false;
+    let has_textured_glb_meshes = has_texture_backed_glb_meshes(state);
 
     ui.horizontal_wrapped(|ui| {
         ui.label(format!(
@@ -439,7 +440,14 @@ fn render_loaded_mode(
             total_triangles
         ));
 
-        if ui.button("Auto-Assign All").clicked() {
+        if has_textured_glb_meshes {
+            ui.label(
+                egui::RichText::new(
+                    "Textured GLB meshes keep neutral texture tint; Auto-Assign is disabled.",
+                )
+                .italics(),
+            );
+        } else if ui.button("Auto-Assign All").clicked() {
             state.auto_assign_colors();
             state.status_message = "Reapplied automatic colors to all meshes.".to_string();
             ui.ctx().request_repaint();
@@ -648,7 +656,18 @@ fn render_color_editor(
     campaign_dir: Option<&PathBuf>,
     logger: &mut Logger,
 ) {
-    ui.heading("Color Editor");
+    let active_mesh_texture_backed_glb = state
+        .active_mesh_index
+        .and_then(|index| state.meshes.get(index))
+        .is_some_and(|mesh| {
+            state.source_format == ImportSourceFormat::Glb && is_texture_backed_importer_mesh(mesh)
+        });
+
+    ui.heading(if active_mesh_texture_backed_glb {
+        "Texture Tint Editor"
+    } else {
+        "Color Editor"
+    });
     ui.separator();
 
     let Some(active_index) = state.active_mesh_index else {
@@ -669,6 +688,14 @@ fn render_color_editor(
     ui.small(describe_mesh_color_source(&state.meshes[active_index]));
     if let Some(texture_path) = state.meshes[active_index].mesh_def.texture_path.as_deref() {
         ui.small(format!("Texture: {}", texture_path));
+    }
+    if active_mesh_texture_backed_glb {
+        ui.small(
+            egui::RichText::new(
+                "Texture-backed GLB meshes export with neutral white tint by default. Change colors only when you want an explicit tint override.",
+            )
+            .italics(),
+        );
     }
     let ctx = ui.ctx().clone();
 
@@ -719,7 +746,11 @@ fn render_color_editor(
     render_custom_palette_section(ui, state, campaign_dir, logger, active_index);
 
     ui.add_space(8.0);
-    if ui.button("Auto-Assign All").clicked() {
+    if active_mesh_texture_backed_glb {
+        ui.small(
+            "Auto-Assign is disabled for textured GLB meshes to avoid tinting baked textures.",
+        );
+    } else if ui.button("Auto-Assign All").clicked() {
         state.auto_assign_colors();
         state.status_message = "Reapplied automatic colors to all meshes.".to_string();
         ctx.request_repaint();
@@ -1157,10 +1188,22 @@ fn describe_mesh_color_source(mesh: &crate::obj_importer::ImportedMesh) -> &'sta
         ImportedMeshColorSource::AutoAssigned => {
             "Color Source: built-in mesh-name fallback; imported alpha and other material metadata may still be preserved."
         }
+        ImportedMeshColorSource::TextureNeutral => {
+            "Color Source: texture-backed GLB neutral tint; texture color is preserved unless you apply an explicit tint override."
+        }
         ImportedMeshColorSource::ManualOverride => {
             "Color Source: manual importer override from the color picker or palette."
         }
     }
+}
+
+fn has_texture_backed_glb_meshes(state: &ObjImporterState) -> bool {
+    state.source_format == ImportSourceFormat::Glb
+        && state.meshes.iter().any(is_texture_backed_importer_mesh)
+}
+
+fn is_texture_backed_importer_mesh(mesh: &ImportedMesh) -> bool {
+    mesh.mesh_def.texture_path.is_some() || mesh.texture_payload.is_some()
 }
 
 fn imported_swatch_hover_text(swatch: &ImportedMaterialSwatch) -> String {
@@ -2026,6 +2069,9 @@ mod tests {
 
         state.meshes[0].color_source = ImportedMeshColorSource::AutoAssigned;
         assert!(describe_mesh_color_source(&state.meshes[0]).contains("mesh-name fallback"));
+
+        state.meshes[0].color_source = ImportedMeshColorSource::TextureNeutral;
+        assert!(describe_mesh_color_source(&state.meshes[0]).contains("neutral tint"));
 
         state.meshes[0].color_source = ImportedMeshColorSource::ManualOverride;
         assert!(describe_mesh_color_source(&state.meshes[0]).contains("manual importer override"));

@@ -18,6 +18,8 @@
 //! - Index buffers; sequential indices are generated for unindexed primitives.
 //! - PBR metallic-roughness materials (base color, metallic, roughness, emissive, alpha mode).
 //! - Embedded base-color textures (PNG, JPEG) extracted as raw encoded bytes from GLB buffer views.
+//! - Texture-backed GLB materials use neutral tint/PBR defaults so baked base-color
+//!   textures remain the source of truth in the runtime.
 //! - Per-primitive scale and UV-V-flip import options.
 //!
 //! # Unsupported Features
@@ -48,6 +50,10 @@
 use antares::domain::visual::{AlphaMode, MaterialDefinition, MeshDefinition};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+
+const TEXTURED_GLB_NEUTRAL_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+const TEXTURED_GLB_DEFAULT_METALLIC: f32 = 0.0;
+const TEXTURED_GLB_DEFAULT_ROUGHNESS: f32 = 0.8;
 
 // ─── Public-visible option and error types ───────────────────────────────────
 
@@ -497,10 +503,15 @@ fn glb_primitive_to_mesh_definition<'doc>(
     // ── Material ──────────────────────────────────────────────────────────
     let material_ref = primitive.material();
     let pbr = material_ref.pbr_metallic_roughness();
-    let base_color = pbr.base_color_factor();
+    let has_base_color_texture = pbr.base_color_texture().is_some();
+    let color = if has_base_color_texture {
+        TEXTURED_GLB_NEUTRAL_COLOR
+    } else {
+        pbr.base_color_factor()
+    };
 
     // Texture placeholder: rewritten to campaign-relative path in Phase 4.
-    let texture_path: Option<String> = if pbr.base_color_texture().is_some() {
+    let texture_path: Option<String> = if has_base_color_texture {
         Some(format!("__glb_texture_{mesh_doc_index}_{prim_index}"))
     } else {
         None
@@ -512,10 +523,10 @@ fn glb_primitive_to_mesh_definition<'doc>(
         indices,
         normals,
         uvs,
-        color: base_color,
+        color,
         lod_levels: None,
         lod_distances: None,
-        material: Some(convert_gltf_material(&material_ref)),
+        material: Some(convert_gltf_material(&material_ref, has_base_color_texture)),
         texture_path,
     })
 }
@@ -607,13 +618,24 @@ fn extract_base_color_texture_payload<'doc>(
 /// | `emissiveFactor` (when non-zero)              | `emissive`                |
 /// | `alphaMode`                                   | `alpha_mode`              |
 ///
+/// When a material has a base-color texture, the imported runtime material is
+/// intentionally neutral: white base color, non-metallic roughness defaults, and
+/// no emissive glow. This keeps baked GLB textures from being washed out by
+/// scalar material factors that Antares does not currently expose as explicit
+/// import options.
+///
 /// Advanced PBR channels (normal map, metallic-roughness map, occlusion map,
 /// emissive map textures) are deferred to a later compatibility phase.
-fn convert_gltf_material(material: &gltf::Material<'_>) -> MaterialDefinition {
+fn convert_gltf_material(
+    material: &gltf::Material<'_>,
+    has_base_color_texture: bool,
+) -> MaterialDefinition {
     let pbr = material.pbr_metallic_roughness();
 
     let emissive = material.emissive_factor();
-    let emissive_opt = if emissive[0] > 0.0 || emissive[1] > 0.0 || emissive[2] > 0.0 {
+    let emissive_opt = if has_base_color_texture {
+        None
+    } else if emissive[0] > 0.0 || emissive[1] > 0.0 || emissive[2] > 0.0 {
         Some(emissive)
     } else {
         None
@@ -626,9 +648,21 @@ fn convert_gltf_material(material: &gltf::Material<'_>) -> MaterialDefinition {
     };
 
     MaterialDefinition {
-        base_color: pbr.base_color_factor(),
-        metallic: pbr.metallic_factor(),
-        roughness: pbr.roughness_factor(),
+        base_color: if has_base_color_texture {
+            TEXTURED_GLB_NEUTRAL_COLOR
+        } else {
+            pbr.base_color_factor()
+        },
+        metallic: if has_base_color_texture {
+            TEXTURED_GLB_DEFAULT_METALLIC
+        } else {
+            pbr.metallic_factor()
+        },
+        roughness: if has_base_color_texture {
+            TEXTURED_GLB_DEFAULT_ROUGHNESS
+        } else {
+            pbr.roughness_factor()
+        },
         emissive: emissive_opt,
         alpha_mode,
     }
@@ -841,6 +875,15 @@ mod tests {
     /// - offset 42: padding   (2 bytes, aligns image to offset 44)
     /// - offset 44: image     (FAKE_IMAGE_BYTES.len() bytes)
     fn build_triangle_texture_glb() -> Vec<u8> {
+        build_triangle_texture_material_glb([1.0, 1.0, 1.0, 1.0], 1.0, 1.0, [0.0, 0.0, 0.0])
+    }
+
+    fn build_triangle_texture_material_glb(
+        base_color: [f32; 4],
+        metallic: f32,
+        roughness: f32,
+        emissive: [f32; 3],
+    ) -> Vec<u8> {
         let img_len = FAKE_IMAGE_BYTES.len(); // 24 bytes
         let img_offset = 44usize;
 
@@ -858,8 +901,10 @@ mod tests {
         let total = img_offset + img_len;
         assert_eq!(bin.len(), total);
 
+        let [r, g, b, a] = base_color;
+        let [er, eg, eb] = emissive;
         let json = format!(
-            r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],"nodes":[{{"mesh":0}}],"meshes":[{{"primitives":[{{"attributes":{{"POSITION":0}},"indices":1,"material":0,"mode":4}}]}}],"materials":[{{"pbrMetallicRoughness":{{"baseColorTexture":{{"index":0}}}}}}],"textures":[{{"source":0}}],"images":[{{"bufferView":2,"mimeType":"image/png"}}],"accessors":[{{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[-1.0,0.0,0.0],"max":[1.0,1.0,0.0]}},{{"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}}],"bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":36}},{{"buffer":0,"byteOffset":36,"byteLength":6}},{{"buffer":0,"byteOffset":{img_offset},"byteLength":{img_len}}}],"buffers":[{{"byteLength":{total}}}]}}"#
+            r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"nodes":[0]}}],"nodes":[{{"mesh":0}}],"meshes":[{{"primitives":[{{"attributes":{{"POSITION":0}},"indices":1,"material":0,"mode":4}}]}}],"materials":[{{"pbrMetallicRoughness":{{"baseColorFactor":[{r},{g},{b},{a}],"baseColorTexture":{{"index":0}},"metallicFactor":{metallic},"roughnessFactor":{roughness}}},"emissiveFactor":[{er},{eg},{eb}]}}],"textures":[{{"source":0}}],"images":[{{"bufferView":2,"mimeType":"image/png"}}],"accessors":[{{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[-1.0,0.0,0.0],"max":[1.0,1.0,0.0]}},{{"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}}],"bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":36}},{{"buffer":0,"byteOffset":36,"byteLength":6}},{{"buffer":0,"byteOffset":{img_offset},"byteLength":{img_len}}}],"buffers":[{{"byteLength":{total}}}]}}"#
         );
         build_glb(&json, Some(&bin))
     }
@@ -1205,6 +1250,23 @@ mod tests {
                 .starts_with("__glb_texture_"),
             "texture_path should start with __glb_texture_"
         );
+    }
+
+    #[test]
+    fn test_import_glb_texture_backed_material_uses_neutral_runtime_defaults() {
+        let glb =
+            build_triangle_texture_material_glb([0.2, 0.3, 0.4, 0.5], 1.0, 0.2, [1.0, 1.0, 1.0]);
+        let scene =
+            import_glb_scene_from_bytes(&glb, &default_options()).expect("valid GLB should parse");
+
+        let mesh = &scene.meshes[0].mesh_def;
+        assert_eq!(mesh.color, TEXTURED_GLB_NEUTRAL_COLOR);
+
+        let material = mesh.material.as_ref().expect("material must be present");
+        assert_eq!(material.base_color, TEXTURED_GLB_NEUTRAL_COLOR);
+        assert_eq!(material.metallic, TEXTURED_GLB_DEFAULT_METALLIC);
+        assert_eq!(material.roughness, TEXTURED_GLB_DEFAULT_ROUGHNESS);
+        assert_eq!(material.emissive, None);
     }
 
     #[test]

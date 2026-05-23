@@ -26,7 +26,7 @@ Next task will be to tackle skill system level scaling. Currently the skill syst
 
 Write a plan with a phased approach to implementing skill system level scaling in the game engine. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [Skill System Level Scaling Implementation Plan](./skill_system_level_scaling_implementation_plan.md)
+✅ COMPLETED - [Skill System Level Scaling Implementation Plan](./skill_system_level_scaling_implementation_plan.md)
 
 ## Notes
 
@@ -39,3 +39,116 @@ Campaign Builder --> Importer --> GLB files should be supported. A single file i
 Write a plan to implement GLB file support in the campaign builder importer. THINK HARD and follow the rules in @PLAN.md
 
 ✅ COMPLETE (Phases 1–7) — [GLB File Support in Campaign Builder Importer](./glb_file_support_in_campaign_builder_importer_plan.md)
+
+In the game the new imported models are white washed. I think the color system in the Campaign Builder SDK Model Importer is not doing what we want it to. THe model in the game is imported from a fully textured .glb that has all the colors. Do we really need the color stuff in the Importer? How do we fix the textures getting washed out?
+
+I checked the importer/runtime path, and your suspicion is mostly right: for a fully textured `.glb`, the Campaign Builder’s color system should **not** be driving the final look by default.
+
+## Short answer
+
+- **Keep the color system for OBJ / untextured meshes.**
+- **Do not let it tint textured GLB imports by default.**
+- The washed-out look is most likely coming from exported material fields, especially:
+  - `emissive: Some((1.0, 1.0, 1.0))`
+  - `metallic: 1.0`
+  - and potentially non-neutral mesh vertex color/tint data.
+
+Your current `whisper_new.ron` has this on the imported mesh:
+
+- `color: (0.0, 0.0, 0.0, 0.0)`
+- `material.base_color: (1.0, 1.0, 1.0, 1.0)`
+- `material.metallic: 1.0`
+- `material.roughness: 1.0`
+- `material.emissive: Some((1.0, 1.0, 1.0))`
+- `texture_path: Some("assets/textures/imported/whisper_new/baked_basecolor.png")`
+
+That `emissive: Some((1.0, 1.0, 1.0))` is a major red flag: it makes the material glow white and can absolutely make a textured model look white-washed. `metallic: 1.0` can also make a character/creature look wrong under the game’s lighting.
+
+## Immediate manual fix for the exported model
+
+For the affected exported creature RON, set the textured mesh material to something neutral:
+
+- `color: (1.0, 1.0, 1.0, 1.0)`
+- `material.base_color: (1.0, 1.0, 1.0, 1.0)`
+- `material.metallic: 0.0`
+- `material.roughness: 0.8` or `1.0`
+- `material.emissive: None`
+
+That should make the texture show normally instead of being brightened/glowed.
+
+## Proper code fix
+
+The importer should treat textured GLB imports differently from OBJ imports:
+
+### 1. GLB textured meshes should default to neutral color
+
+When a GLB primitive has a base-color texture, the importer should export:
+
+- `MeshDefinition.color = [1.0, 1.0, 1.0, 1.0]`
+- `MaterialDefinition.base_color = [1.0, 1.0, 1.0, 1.0]`
+
+That way the texture is the source of truth.
+
+The color editor can still exist, but for textured GLB it should be labeled as an optional **tint override**, not normal import color.
+
+### 2. Disable imported emissive by default
+
+For normal textured character/creature assets, importing `emissiveFactor` directly is risky. A GLB with emissive white becomes a glowing white material in Bevy.
+
+Recommended default:
+
+- Ignore GLB emissive unless the user explicitly enables “Import emissive”.
+- Or only preserve emissive when there is a real emissive workflow/flag.
+
+### 3. Default metallic to `0.0` for baked texture imports
+
+A baked base-color texture is usually not enough to reproduce PBR correctly. Without metallic/roughness maps, carrying `metallic: 1.0` over from the GLB can make characters look wrong.
+
+Recommended default for textured creature imports:
+
+- `metallic: 0.0`
+- `roughness: 0.8` or `1.0`
+- `emissive: None`
+
+### 4. Avoid auto-assign colors for GLB textures
+
+The `Auto-Assign All` palette behavior is useful for OBJ meshes with no textures, but it should not apply to textured GLB meshes by default. For GLB, the UI should probably either:
+
+- Hide `Auto-Assign All`, or
+- Rename it to “Apply Palette Tint” and warn that it will tint textures.
+
+## Why this is not really a “texture extraction” problem
+
+The importer appears to be exporting the embedded GLB texture to:
+
+`assets/textures/imported/whisper_new/baked_basecolor.png`
+
+And the runtime loads `MeshDefinition.texture_path` through Bevy’s `AssetServer`. So the issue is probably not that the PNG bytes are bad.
+
+The issue is that the exported material is telling Bevy:
+
+> “Use this texture, but also make the surface metallic and emit white light.”
+
+That causes the visible washed-out result.
+
+## Recommended fix order
+
+1. Patch existing bad exported assets:
+   - set `color` to white/opaque
+   - set `metallic` to `0.0`
+   - set `emissive` to `None`
+
+2. Update `sdk/campaign_builder/src/mesh_glb_io.rs`:
+   - textured GLB meshes export neutral color/base color
+   - no emissive by default
+   - metallic defaults to `0.0` for texture-backed importer output
+
+3. Update `sdk/campaign_builder/src/obj_importer_ui.rs`:
+   - keep palette/color editing for OBJ
+   - make it optional tinting for GLB
+   - prevent `Auto-Assign All` from silently tinting textured GLB meshes
+
+✅ COMPLETED - So: **yes, keep the color stuff for OBJ/untextured imports, but don’t let it drive fully textured GLB imports unless the user explicitly asks for tinting.
+
+
+✅ COMPLETED - Walking over a Recruitable Character mesh makes them disappear from the screen without triggering a recruiting dialogue. The Recruitable Character should remain on the map until recruited. Once recruited then the mesh should disapear.

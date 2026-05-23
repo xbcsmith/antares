@@ -5878,6 +5878,61 @@ mod tests {
     }
 
     #[test]
+    fn test_moving_onto_recruitable_character_keeps_event_until_recruited() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+
+        let recruit_pos = Position::new(1, 0);
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            recruit_pos,
+            MapEvent::RecruitableCharacter {
+                name: "Wandering Knight".to_string(),
+                description: "A recruitable knight".to_string(),
+                character_id: "wandering_knight".to_string(),
+                dialogue_id: Some(42),
+                time_condition: None,
+                facing: None,
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let result =
+            state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        assert!(result.is_ok());
+        assert!(
+            matches!(
+                state
+                    .world
+                    .get_current_map()
+                    .and_then(|map| map.get_event(recruit_pos)),
+                Some(MapEvent::RecruitableCharacter { character_id, .. })
+                    if character_id == "wandering_knight"
+            ),
+            "Walking onto a recruitable must not remove the map event or hide the mesh"
+        );
+        assert!(
+            !state.encountered_characters.contains("wandering_knight"),
+            "Encounter tracking should update only after successful recruitment"
+        );
+    }
+
+    #[test]
     fn test_npc_dialogue_carries_npc_id() {
         use crate::domain::character::{Alignment, Character, Sex};
         use crate::domain::types::Position;

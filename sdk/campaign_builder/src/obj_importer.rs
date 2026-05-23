@@ -73,6 +73,8 @@ pub enum ImportedMeshColorSource {
     ImportedMaterial,
     /// The current color came from the built-in mesh-name heuristic.
     AutoAssigned,
+    /// A texture-backed GLB mesh is using neutral white so the texture is untinted.
+    TextureNeutral,
     /// The current color was changed by the user after import.
     ManualOverride,
 }
@@ -296,6 +298,7 @@ impl ImportedMesh {
                 mesh_def.color
             }
             ImportedMeshColorSource::AutoAssigned => auto_assigned_color(&name, mesh_def.color[3]),
+            ImportedMeshColorSource::TextureNeutral => [1.0, 1.0, 1.0, 1.0],
         };
         apply_color_to_mesh_definition(&mut mesh_def, color);
 
@@ -328,17 +331,28 @@ impl ImportedMesh {
     /// Creates an importer mesh row from an imported GLB mesh definition.
     ///
     /// GLB meshes are not auto-color-assigned on load; they carry their PBR
-    /// base-color factor directly.  The user can call
-    /// [`ObjImporterState::auto_assign_colors`] to apply name-based heuristics.
+    /// base-color factor directly unless they are texture-backed. Texture-backed
+    /// GLB meshes use neutral white so the texture remains untinted; the user can
+    /// still call [`ImportedMesh::set_color`] for an explicit tint override.
     ///
     /// Meshes default to `selected: false`; the UI must opt-in to bulk selection.
     fn from_imported_glb_mesh(
         index: usize,
-        mesh_def: MeshDefinition,
+        mut mesh_def: MeshDefinition,
         payload: Option<ImportedTexturePayload>,
     ) -> Self {
-        let color = mesh_def.color;
-        let color_source = if color != [1.0, 1.0, 1.0, 1.0] {
+        let is_texture_backed = is_texture_backed_mesh(&mesh_def, payload.as_ref());
+        let color = if is_texture_backed {
+            [1.0, 1.0, 1.0, 1.0]
+        } else {
+            mesh_def.color
+        };
+        if is_texture_backed {
+            apply_color_to_mesh_definition(&mut mesh_def, color);
+        }
+        let color_source = if is_texture_backed {
+            ImportedMeshColorSource::TextureNeutral
+        } else if color != [1.0, 1.0, 1.0, 1.0] {
             ImportedMeshColorSource::ImportedMaterial
         } else {
             ImportedMeshColorSource::AutoAssigned
@@ -399,6 +413,13 @@ fn apply_color_to_mesh_definition(mesh_def: &mut MeshDefinition, color: [f32; 4]
 
 fn has_imported_material_color(mesh_def: &MeshDefinition) -> bool {
     mesh_def.color != [1.0, 1.0, 1.0, 1.0]
+}
+
+fn is_texture_backed_mesh(
+    mesh_def: &MeshDefinition,
+    texture_payload: Option<&ImportedTexturePayload>,
+) -> bool {
+    mesh_def.texture_path.is_some() || texture_payload.is_some()
 }
 
 impl Default for ObjImporterState {
@@ -657,6 +678,11 @@ impl ObjImporterState {
     /// Re-runs automatic built-in color assignment for every loaded mesh.
     pub fn auto_assign_colors(&mut self) {
         for mesh in &mut self.meshes {
+            if self.source_format == ImportSourceFormat::Glb
+                && is_texture_backed_mesh(&mesh.mesh_def, mesh.texture_payload.as_ref())
+            {
+                continue;
+            }
             mesh.reapply_auto_color();
         }
     }
@@ -707,7 +733,7 @@ impl ObjImporterState {
 mod tests {
     use super::{
         ExportType, ImportSourceFormat, ImportedMesh, ImportedMeshColorSource,
-        ImportedMtlSourceKind, ImporterMode, ObjImporterState,
+        ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
     };
     use antares::domain::visual::{AlphaMode, MaterialDefinition, MeshDefinition};
     use std::fs;
@@ -782,6 +808,32 @@ mod tests {
             mesh.mesh_def.material.as_ref().unwrap().alpha_mode,
             AlphaMode::Blend
         );
+    }
+
+    #[test]
+    fn test_imported_glb_texture_mesh_uses_neutral_texture_color_source() {
+        let mut mesh_def = named_triangle("TexturedBody");
+        mesh_def.texture_path = Some("__glb_texture_0_0".to_string());
+        mesh_def.material = Some(MaterialDefinition {
+            base_color: [1.0, 1.0, 1.0, 1.0],
+            metallic: 0.0,
+            roughness: 0.8,
+            emissive: None,
+            alpha_mode: AlphaMode::Opaque,
+        });
+        let payload = ImportedTexturePayload {
+            source_label: "albedo".to_string(),
+            file_name_hint: "albedo.png".to_string(),
+            bytes: Some(b"png".to_vec()),
+            source_path: None,
+            mime_type: Some("image/png".to_string()),
+        };
+
+        let mesh = ImportedMesh::from_imported_glb_mesh(0, mesh_def, Some(payload));
+
+        assert_eq!(mesh.color, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(mesh.mesh_def.color, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(mesh.color_source, ImportedMeshColorSource::TextureNeutral);
     }
 
     #[test]
@@ -953,6 +1005,24 @@ mod tests {
         assert_eq!(state.meshes[0].color, [0.8, 0.6, 0.4, 1.0]);
         assert_eq!(state.imported_material_palette.len(), 1);
         assert_eq!(state.imported_material_palette[0].label, "Override");
+    }
+
+    #[test]
+    fn test_obj_importer_state_auto_assign_colors_skips_textured_glb_meshes() {
+        let mut mesh_def = named_triangle("EM3D_Base_Body");
+        mesh_def.texture_path = Some("__glb_texture_0_0".to_string());
+        let mesh = ImportedMesh::from_imported_glb_mesh(0, mesh_def, None);
+        let mut state = ObjImporterState::new();
+        state.source_format = ImportSourceFormat::Glb;
+        state.meshes = vec![mesh];
+
+        state.auto_assign_colors();
+
+        assert_eq!(state.meshes[0].color, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(
+            state.meshes[0].color_source,
+            ImportedMeshColorSource::TextureNeutral
+        );
     }
 
     #[test]

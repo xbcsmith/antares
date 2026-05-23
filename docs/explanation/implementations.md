@@ -2,6 +2,50 @@
 
 ---
 
+## Campaign Builder GLB Texture Material Neutralization
+
+Textured GLB imports now preserve the baked base-color texture as the source of
+truth instead of letting scalar material fields wash out the model. When a GLB
+primitive has a base-color texture, `mesh_glb_io` now exports neutral runtime
+material defaults: white opaque mesh color, white material base color,
+non-metallic surfaces, roughness `0.8`, and no emissive glow. Untextured GLB and
+OBJ imports continue to preserve or assign colors through the existing importer
+color workflow.
+
+The Campaign Builder importer state now records texture-backed GLB meshes with a
+neutral texture color source. Bulk auto-assignment skips those meshes, and the UI
+labels their color controls as optional texture tinting rather than normal import
+coloring. Existing palette and color picker controls remain available for
+explicit user tint overrides.
+
+The affected tutorial `whisper_new` creature asset was also patched to use
+neutral material values so the already-exported texture is no longer rendered
+with white emissive/metallic washout.
+
+Regression coverage was added for texture-backed GLB material defaults, neutral
+GLB importer color sources, and auto-assignment skipping textured GLB meshes.
+
+---
+
+## Recruitable Character Map Event Persistence Fix
+
+Recruitable character map events now remain in the map when the party merely
+walks onto their tile or otherwise triggers the event without completing
+recruitment. Previously, `trigger_event` removed `RecruitableCharacter` events as
+soon as they were triggered, which caused cleanup systems to despawn the visible
+mesh even though no recruitment dialogue had completed.
+
+The domain event handler now returns `EventResult::RecruitableCharacter` without
+removing the backing `MapEvent::RecruitableCharacter`. The dialogue recruitment
+flow remains responsible for removing that event and despawning the visual only
+after the character is added to the party or sent to an inn.
+
+Regression coverage was added for both the domain event handler and
+`GameState::move_party_and_handle_events` so recruitable meshes stay visible
+until successful recruitment.
+
+---
+
 ## GLB File Support in Campaign Builder Importer — Full Feature Summary (Complete)
 
 All seven phases of GLB file support in the Campaign Builder Importer are
