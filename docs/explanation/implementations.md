@@ -2,6 +2,93 @@
 
 ---
 
+## Sky System — Phase 1: Domain Foundation (2026)
+
+**Goal:** Add `is_outdoor` and `SkyConfig` to the `Map` domain struct and RON
+format with full backward compatibility. No rendering changes — pure data
+foundation for Phases 2–5.
+
+### What Was Built
+
+#### `SkyConfig` struct (`src/domain/world/types.rs`)
+
+New public struct inserted before `pub struct Map`, carrying twelve fields that
+describe per-map sky rendering:
+
+| Field                 | Type       | Default                   | Purpose                            |
+| --------------------- | ---------- | ------------------------- | ---------------------------------- |
+| `day_sky_color`       | `[f32; 4]` | `[0.53, 0.81, 0.98, 1.0]` | RGBA sky during Morning/Afternoon  |
+| `dusk_dawn_sky_color` | `[f32; 4]` | `[0.98, 0.60, 0.20, 1.0]` | RGBA sky during Dawn/Dusk          |
+| `night_sky_color`     | `[f32; 4]` | `[0.02, 0.02, 0.08, 1.0]` | RGBA sky during Evening/Night      |
+| `sun_count`           | `u8`       | `1`                       | Number of sun discs (0 = overcast) |
+| `sun_color`           | `[f32; 4]` | `[1.0, 0.95, 0.80, 1.0]`  | Sun disc RGBA                      |
+| `sun_size`            | `f32`      | `1.0`                     | Sun disc scale multiplier          |
+| `star_count`          | `u32`      | `2000`                    | Total stars in night sky           |
+| `star_density`        | `f32`      | `0.5`                     | 0–1 density distribution           |
+| `cloud_coverage`      | `f32`      | `0.3`                     | 0–1 sky fraction covered           |
+| `cloud_color`         | `[f32; 4]` | `[0.9, 0.9, 0.9, 0.8]`    | Cloud layer RGBA                   |
+| `cloud_density`       | `f32`      | `0.5`                     | 0–1 cloud opacity/thickness        |
+| `cloud_speed`         | `f32`      | `1.0`                     | Cloud animation speed multiplier   |
+
+All fields carry `#[serde(default = "…")]` so existing RON files that omit the
+block continue to deserialize without error.
+
+#### `Map` struct additions (`src/domain/world/types.rs`)
+
+- `pub is_outdoor: bool` — `#[serde(default)]` → `false`; enables sky
+  rendering for outdoor maps.
+- `pub sky: Option<SkyConfig>` — `#[serde(default,
+skip_serializing_if = "Option::is_none")]`; per-map sky config, `None`
+  for indoor maps. `Map::new()` initialises both fields to their defaults.
+
+#### Export (`src/domain/world/mod.rs`)
+
+`SkyConfig` added to the `pub use types::{ … }` block, making it available
+as `antares::domain::world::SkyConfig`.
+
+#### Struct-literal fixes
+
+Four files that construct `Map` using struct-literal syntax were updated to
+include the two new fields:
+
+- `src/domain/world/blueprint.rs` — `is_outdoor: false, sky: None`
+- `src/sdk/templates.rs` — `town_map` / `forest_map` get `is_outdoor: true`;
+  `dungeon_map` gets `is_outdoor: false`
+- `src/sdk/cli/map_validator.rs` (two helpers) — `is_outdoor: false, sky: None`
+
+#### Test campaign fixture (`data/test_campaign/data/maps/map_1.ron`)
+
+Added `is_outdoor: true` and a full `sky: Some(( … ))` block to the Town
+Square map so integration tests exercise the new sky data path. All other
+fixture maps (`map_2.ron` – `map_7.ron`) remain untouched and continue to
+load correctly via serde defaults.
+
+### Tests Added (4 new unit tests in `mod tests`)
+
+| Test                                          | What it verifies                                                                |
+| --------------------------------------------- | ------------------------------------------------------------------------------- |
+| `test_sky_config_default_values`              | All 12 `SkyConfig::default()` fields match documented defaults                  |
+| `test_map_with_sky_config_ron_roundtrip`      | `Map` with `sky: Some(…)` survives `ron::to_string` → `ron::from_str` roundtrip |
+| `test_map_without_sky_config_backward_compat` | RON without `is_outdoor`/`sky` deserializes to `false`/`None`                   |
+| `test_sky_config_partial_fields_deserialize`  | Omitting `cloud_speed` from RON yields the `1.0` default                        |
+
+### RON Format Note
+
+The `ron` crate serialises Rust `[f32; 4]` fixed-size arrays as RON **tuple**
+syntax `(r, g, b, a)` — not list syntax `[r, g, b, a]`. All RON files and test
+strings use parentheses accordingly.
+
+### Quality Gates
+
+```text
+cargo fmt     → clean (no output)
+cargo check   → Finished 0 errors
+cargo clippy  → Finished 0 warnings
+cargo nextest → 5095 passed, 8 skipped, 0 failed
+```
+
+---
+
 ## Rest Menu Digit Choices No Longer Open Character Sheets (2026)
 
 **Problem**: Pressing **1**, **2**, or **3** in the Rest menu opened the

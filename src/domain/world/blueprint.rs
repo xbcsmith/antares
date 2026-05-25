@@ -242,6 +242,8 @@ impl From<MapBlueprint> for Map {
             npc_placements,
             dropped_items: Vec::new(),
             lock_states: std::collections::HashMap::new(),
+            is_outdoor: false,
+            sky: None,
         }
     }
 }
