@@ -6011,6 +6011,7 @@ mod tests {
                 dialogue_id: Some(42),
                 time_condition: None,
                 facing: None,
+                face_on_dialogue: false,
             },
         );
         state.world = World::new();

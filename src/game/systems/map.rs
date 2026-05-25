@@ -2885,6 +2885,7 @@ mod tests {
                 dialogue_id: None,
                 time_condition: None,
                 facing: None,
+                face_on_dialogue: false,
             },
         );
 
@@ -2978,6 +2979,7 @@ mod tests {
                 dialogue_id: None,
                 time_condition: None,
                 facing: None,
+                face_on_dialogue: false,
             },
         );
         game_state.world.add_map(map);
@@ -3541,6 +3543,7 @@ mod tests {
             dialogue_id: Some(42),
             time_condition: None,
             facing: Some(Direction::North),
+            face_on_dialogue: false,
         };
 
         let ron_str = ron::to_string(&event).expect("serialize to RON");
@@ -3568,10 +3571,18 @@ mod tests {
 
         let parsed: MapEvent = ron::from_str(ron_str).expect("parse from RON");
         match parsed {
-            MapEvent::RecruitableCharacter { facing, .. } => {
+            MapEvent::RecruitableCharacter {
+                facing,
+                face_on_dialogue,
+                ..
+            } => {
                 assert_eq!(
                     facing, None,
                     "Missing facing field must default to None for backward compat"
+                );
+                assert!(
+                    !face_on_dialogue,
+                    "Missing face_on_dialogue field must default to false so recruitable orientation stays authored"
                 );
             }
             other => panic!("expected RecruitableCharacter, got {:?}", other),
@@ -3687,6 +3698,7 @@ mod tests {
                 dialogue_id: None,
                 time_condition: None,
                 facing: Some(Direction::East),
+                face_on_dialogue: false,
             },
         );
 
@@ -3746,6 +3758,7 @@ mod tests {
                 dialogue_id: None,
                 time_condition: None,
                 facing: None,
+                face_on_dialogue: false,
             },
         );
 
@@ -3797,6 +3810,7 @@ mod tests {
                 dialogue_id: None,
                 time_condition: None,
                 facing: None,
+                face_on_dialogue: false,
             },
         );
 

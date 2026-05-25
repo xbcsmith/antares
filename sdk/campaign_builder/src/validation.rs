@@ -2580,6 +2580,7 @@ mod tests {
                 dialogue_id: Some(1000),
                 time_condition: None,
                 facing: None,
+                face_on_dialogue: false,
             },
         );
 
@@ -2610,6 +2611,7 @@ mod tests {
                 dialogue_id: None,
                 time_condition: None,
                 facing: None,
+                face_on_dialogue: false,
             },
         );
 
@@ -2641,6 +2643,7 @@ mod tests {
                 dialogue_id: Some(9999), // Invalid
                 time_condition: None,
                 facing: None,
+                face_on_dialogue: false,
             },
         );
 

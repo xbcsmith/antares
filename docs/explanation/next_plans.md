@@ -201,12 +201,12 @@ Party Inventory screen Mouse does not work on the Next Back or Party Overview bu
 
 Party Overview only shows the character that opened the inventory. It should show the whole party.
 
-Characters turn there back on the party when talking to them. There is no way to turn off auto rotate towards party in the SDK. For some reason the models seem to be oriented backwards causing the user to set which direction they face in the SDK. This causes the model to turn the other direction when facing the party and dialogue is engaged.
+Recruitable Characters 3d models turn there back on the party when talking to them. There is no way to turn off auto rotate towards party in the SDK. For some reason the models seem to be oriented backwards causing the user to set which direction they face in the SDK. This causes the model to turn the other direction when facing the party and dialogue is engaged.
 
 Sorcerer Spell point bar does not go down as spell points are used.
 
-Can not select a Rest option of (1) (2) or (3) because it opens the 1,2, or 3 character inventory.
+Can not select a Rest option of (1) (2) or (3) because it opens the 1,2, or 3 character sheet. Remove triggering character sheet by number
 
 ### SDK Bugs
 
-Campaign Builder --> Monster Editor --> Edit save button at the bottom of the editor does not Save the monster when it returns to the list
+Campaign Builder --> Monster Editor --> Edit save button at the bottom of the editor does not always Save the monster when it returns to the list

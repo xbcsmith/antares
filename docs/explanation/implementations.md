@@ -2,6 +2,91 @@
 
 ---
 
+## Rest Menu Digit Choices No Longer Open Character Sheets (2026)
+
+**Problem**: Pressing **1**, **2**, or **3** in the Rest menu opened the
+corresponding character sheet instead of selecting the rest duration.
+
+**Root Cause**: The global input-toggle handler treated configured
+`SelectCharacter(0..5)` keys as top-level character-sheet shortcuts in every
+non-blocked mode. That global handling ran before the Rest menu input system, so
+RestMenu never received its local digit choices.
+
+**Fix**:
+
+- Removed global number-key character-sheet opening from
+  `handle_global_mode_toggles`.
+- Digit keys are now left for local screens such as RestMenu to handle.
+- The Character Sheet screen can still use configured `SelectCharacter` keys
+  locally after it is already open.
+- Updated control comments so `character_select_1..6` are described as
+  in-character-sheet selection keys, not global open shortcuts.
+
+**Tests Added/Updated**:
+
+- `test_handle_global_mode_toggles_character_select_does_not_open_sheet`
+- `test_handle_global_mode_toggles_character_select_does_not_steal_rest_menu_options`
+
+---
+
+## Recruitable Dialogue Auto-Facing Can Be Disabled (2026)
+
+**Problem**: Recruitable 3D character models could turn their backs on the
+party when dialogue started. Some imported models use a local forward axis that
+is opposite the engine convention, so authors compensate with an explicit facing
+direction in the SDK. Dialogue startup then forced the entity to rotate toward
+the party, undoing that authored correction.
+
+**Fix**:
+
+- Added `face_on_dialogue: bool` to `MapEvent::RecruitableCharacter`.
+- Recruitable events default this value to `false`, preserving the SDK-authored
+  facing direction during conversations unless the author explicitly opts in.
+- Added `face_speaker_to_party` to `StartDialogue`, so callers decide whether a
+  speaker should rotate on dialogue start.
+- Kept normal NPC, merchant, and innkeeper dialogue auto-facing enabled.
+- Added a Campaign Builder checkbox for recruitable events:
+  **Turn to face party when dialogue starts**.
+- The Campaign Builder inspector now shows when a recruitable event has this
+  behavior enabled.
+
+**Tests Added**:
+
+- `test_dialogue_start_respects_face_speaker_to_party_false`
+- `test_event_editor_state_recruitable_face_on_dialogue_roundtrip`
+- RON default coverage now asserts missing `face_on_dialogue` deserializes to
+  `false`.
+
+---
+
+## Sorcerer Combat SP Bar Updates After Spell Casts (2026)
+
+**Problem**: Sorcerers could spend spell points in combat, but the bottom HUD SP
+bar did not visibly decrease as the spell points were consumed. Cleric SP bars
+appeared correct because their common spell use path was exploration/healing,
+where `party.members` was mutated directly before the HUD read it.
+
+**Root Cause**: Combat spell casting deducts SP inside `CombatResource` first.
+The HUD reads `GameState.party.members`, which is updated by the combat-to-party
+mirror system. The HUD update system had no explicit ordering after that mirror,
+so it could read stale party SP values during the same frame as a sorcerer
+combat cast.
+
+**Fix**:
+
+- Made `sync_party_hp_during_combat` visible within the crate for system-ordering
+  dependencies.
+- Ordered `update_hud` after `sync_party_hp_during_combat`, so live combat HP/SP
+  is mirrored into `party.members` before the HUD calculates bar widths.
+- Added a sorcerer-specific regression test proving combat SP current values are
+  mirrored into `party.members` without mutating SP base values.
+
+**Tests Added**:
+
+- `test_sync_party_hp_during_combat_updates_party_sp_for_sorcerer`
+
+---
+
 ## Character Sheet Header Mouse Buttons Use Full Hit Regions (2026)
 
 **Problem**: The Character Sheet header buttons **< Prev**, **Next >**, and

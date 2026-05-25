@@ -458,11 +458,12 @@ fn handle_events(
                             );
                         }
 
-                        // Send StartDialogue message to trigger dialogue system
+                        // Send StartDialogue message to trigger dialogue system.
                         dialogue_writer.write(StartDialogue {
                             dialogue_id,
                             speaker_entity,
                             fallback_position: Some(trigger.position),
+                            face_speaker_to_party: true,
                         });
 
                         let msg = format!("{} speaks.", npc_def.name);
@@ -515,6 +516,7 @@ fn handle_events(
                 dialogue_id,
                 time_condition: _,
                 facing: _,
+                face_on_dialogue,
             } => {
                 let msg = format!("Met {}.", name);
                 tracing::info!("{}", msg);
@@ -584,11 +586,13 @@ fn handle_events(
                         pending.0 = Some(recruitment_context);
                     }
 
-                    // Send StartDialogue message
+                    // Send StartDialogue message. Recruitables can opt out of
+                    // dialogue-start auto-facing so authored model orientation remains stable.
                     dialogue_writer.write(StartDialogue {
                         dialogue_id: *dlg_id,
                         speaker_entity,
                         fallback_position: Some(event_pos),
+                        face_speaker_to_party: *face_on_dialogue,
                     });
 
                     if speaker_entity.is_some() {
@@ -640,6 +644,7 @@ fn handle_events(
                             dialogue_id,
                             speaker_entity,
                             fallback_position: Some(trigger.position),
+                            face_speaker_to_party: true,
                         });
 
                         if let Some(ref mut writer) = game_log_writer {
@@ -1116,6 +1121,7 @@ fn handle_event_result(
                 dialogue_id,
                 speaker_entity,
                 fallback_position: Some(*trigger_position),
+                face_speaker_to_party: true,
             });
 
             let msg = format!("Visiting {}.", npc_def.name);
@@ -1456,6 +1462,7 @@ mod tests {
                 dialogue_id: None,
                 time_condition: None,
                 facing: None,
+                face_on_dialogue: false,
             },
         );
 
@@ -1885,6 +1892,7 @@ mod tests {
                 dialogue_id: Some(101u16),
                 time_condition: None,
                 facing: None,
+                face_on_dialogue: false,
             },
         );
 
@@ -1959,6 +1967,7 @@ mod tests {
             dialogue_id: Some(102u16),
             time_condition: None,
             facing: None,
+            face_on_dialogue: false,
         };
 
         let mut map = Map::new(
@@ -2086,6 +2095,7 @@ mod tests {
             dialogue_id: Some(200u16),
             time_condition: None,
             facing: None,
+            face_on_dialogue: false,
         };
 
         let mut map = Map::new(1, "Adjacent Test".to_string(), "Desc".to_string(), 20, 20);

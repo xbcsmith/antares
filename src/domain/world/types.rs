@@ -2179,6 +2179,14 @@ pub enum MapEvent {
         /// thanks to `#[serde(default)]`.
         #[serde(default)]
         facing: Option<Direction>,
+        /// Whether dialogue start should rotate the recruitable visual toward the party.
+        ///
+        /// Defaults to `false` so authored recruitable-facing directions remain stable
+        /// during conversations. This is useful for imported 3D models whose local
+        /// forward axis is opposite the engine's convention and must be compensated
+        /// with an explicit `facing` value in the SDK.
+        #[serde(default)]
+        face_on_dialogue: bool,
     },
     /// Enter an inn for party management
     EnterInn {
@@ -4226,6 +4234,7 @@ mod time_condition_tests {
             dialogue_id: None,
             time_condition: Some(TimeCondition::AfterDay(3)),
             facing: None,
+            face_on_dialogue: false,
         };
         match event {
             MapEvent::RecruitableCharacter {

@@ -436,10 +436,15 @@ impl Plugin for HudPlugin {
                 )
                     .chain(),
             )
-            // update_hud must run during combat too so party HP bars reflect live
-            // damage.  The exploration-only overlays (compass, clock, portraits) stay
-            // gated so they don't render on top of the combat HUD.
-            .add_systems(Update, update_hud)
+            // update_hud must run during combat too so party HP/SP bars reflect live
+            // damage and spell costs. Run it after the combat-resource mirror so
+            // sorcerer combat casts (the common SP-consuming case) are visible in
+            // the bottom HUD during the same frame instead of reading stale party
+            // values.
+            .add_systems(
+                Update,
+                update_hud.after(super::combat::sync_party_hp_during_combat),
+            )
             .add_systems(Update, handle_portrait_click_system)
             .add_systems(Update, update_automap_visibility)
             .add_systems(Update, bind_mini_map_canvas_image)

@@ -2283,6 +2283,9 @@ pub struct EventEditorState {
     /// Rotation speed in degrees per second for smooth proximity-facing transitions.
     /// `None` means snap (instant). Applies to Encounter and NpcDialogue only.
     pub event_rotation_speed: Option<f32>,
+    /// Whether a recruitable character should turn toward the party when dialogue starts.
+    /// Applies to RecruitableCharacter only.
+    pub event_face_on_dialogue: bool,
 
     // Container event fields
     /// Items in the container's initial inventory (item IDs)
@@ -2345,6 +2348,7 @@ impl Default for EventEditorState {
             event_facing: None,
             event_proximity_facing: false,
             event_rotation_speed: None,
+            event_face_on_dialogue: false,
             container_items: Vec::new(),
             container_item_input: String::new(),
             container_locked: false,
@@ -2587,6 +2591,7 @@ impl EventEditorState {
                     dialogue_id,
                     time_condition: None,
                     facing,
+                    face_on_dialogue: self.event_face_on_dialogue,
                 })
             }
             EventType::EnterInn => {
@@ -2791,6 +2796,7 @@ impl EventEditorState {
                 character_id,
                 dialogue_id,
                 facing,
+                face_on_dialogue,
                 ..
             } => {
                 s.event_type = EventType::RecruitableCharacter;
@@ -2801,6 +2807,7 @@ impl EventEditorState {
                 s.recruitable_dialogue_id =
                     dialogue_id.map(|id| id.to_string()).unwrap_or_default();
                 s.event_facing = facing.map(|d| format!("{:?}", d));
+                s.event_face_on_dialogue = *face_on_dialogue;
             }
             MapEvent::EnterInn {
                 name,
@@ -4762,11 +4769,15 @@ impl MapsEditorState {
                             character_id,
                             name,
                             facing,
+                            face_on_dialogue,
                             ..
                         } => {
                             ui.label(format!("Recruitable: {} ({})", character_id, name));
                             if let Some(dir) = facing {
                                 ui.label(format!("Facing: {:?}", dir));
+                            }
+                            if *face_on_dialogue {
+                                ui.label("🔄 Turns toward party when dialogue starts");
                             }
                         }
                         MapEvent::EnterInn {
@@ -6000,6 +6011,22 @@ impl MapsEditorState {
                         }
                     });
                     if event_editor.event_facing.is_some() {
+                        editor.has_changes = true;
+                    }
+
+                    ui.separator();
+                    ui.label("🔄 Behaviour:");
+                    if ui
+                        .checkbox(
+                            &mut event_editor.event_face_on_dialogue,
+                            "Turn to face party when dialogue starts",
+                        )
+                        .on_hover_text(
+                            "Disable this for imported 3D recruitable models whose local forward \
+                             axis is backwards and whose facing is already corrected in the SDK.",
+                        )
+                        .changed()
+                    {
                         editor.has_changes = true;
                     }
                 }
@@ -7902,12 +7929,14 @@ mod tests {
                 description,
                 character_id,
                 dialogue_id,
+                face_on_dialogue,
                 ..
             } => {
                 assert_eq!(name, "Old Gareth".to_string());
                 assert_eq!(description, "A grizzled dwarf".to_string());
                 assert_eq!(character_id, "old_gareth".to_string());
                 assert_eq!(dialogue_id, None);
+                assert!(!face_on_dialogue);
             }
             _ => panic!("Expected RecruitableCharacter event"),
         }
@@ -7922,6 +7951,7 @@ mod tests {
             dialogue_id: None,
             time_condition: None,
             facing: None,
+            face_on_dialogue: false,
         };
 
         let state = EventEditorState::from_map_event(Position::new(0, 0), &event);
@@ -7932,6 +7962,30 @@ mod tests {
             "whisper".to_string()
         );
         assert_eq!(state.recruitable_dialogue_id, "");
+        assert!(!state.event_face_on_dialogue);
+    }
+
+    #[test]
+    fn test_event_editor_state_recruitable_face_on_dialogue_roundtrip() {
+        let editor = EventEditorState {
+            event_type: EventType::RecruitableCharacter,
+            name: "Mira".to_string(),
+            description: "A recruitable sorcerer".to_string(),
+            recruit_character_id_input_buffer: "mira".to_string(),
+            event_face_on_dialogue: true,
+            ..Default::default()
+        };
+
+        let event = editor.to_map_event().unwrap();
+        match &event {
+            MapEvent::RecruitableCharacter {
+                face_on_dialogue, ..
+            } => assert!(*face_on_dialogue),
+            _ => panic!("Expected RecruitableCharacter event"),
+        }
+
+        let restored = EventEditorState::from_map_event(Position::new(0, 0), &event);
+        assert!(restored.event_face_on_dialogue);
     }
 
     #[test]
