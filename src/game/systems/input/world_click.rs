@@ -39,7 +39,7 @@ use bevy::prelude::{ButtonInput, MouseButton, Vec2, Window};
 /// # Examples
 ///
 /// ```
-/// use antares::game::systems::input::world_click::mouse_center_interact_pressed;
+/// use antares::game::systems::input::mouse_center_interact_pressed;
 /// use bevy::prelude::{ButtonInput, MouseButton};
 ///
 /// let mouse = ButtonInput::<MouseButton>::default();
@@ -81,7 +81,7 @@ pub fn mouse_center_interact_pressed(
 /// # Examples
 ///
 /// ```
-/// use antares::game::systems::input::world_click::is_cursor_in_center_third;
+/// use antares::game::systems::input::is_cursor_in_center_third;
 /// use bevy::prelude::{Vec2, Window};
 ///
 /// let mut window = Window::default();

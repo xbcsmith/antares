@@ -162,9 +162,13 @@ pub struct MeshDefinition {
     #[serde(default)]
     pub material: Option<MaterialDefinition>,
 
-    /// Optional texture path relative to campaign directory
+    /// Optional texture path relative to the campaign root.
     ///
-    /// Example: "textures/dragon_scales.png"
+    /// The path **must** start with `"assets/"` so that the Bevy `AssetServer`
+    /// can resolve it correctly when `BEVY_ASSET_ROOT` is set to the campaign
+    /// directory.  Omitting the prefix causes a silent load failure at runtime.
+    ///
+    /// Example: `"assets/textures/dragon_scales.png"`
     #[serde(default)]
     pub texture_path: Option<String>,
 }

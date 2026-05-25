@@ -158,7 +158,7 @@ pub enum EventResult {
 /// # Examples
 ///
 /// ```
-/// use antares::domain::world::events::UnlockMethod;
+/// use antares::domain::world::UnlockMethod;
 ///
 /// let method = UnlockMethod::Key { item_id: 42 };
 /// ```
@@ -201,8 +201,10 @@ pub enum EventError {
 ///
 /// This function checks if there's an event at the given position on the current map
 /// and processes it, returning the result. Events are typically one-time occurrences
-/// and are removed from the map after being triggered (except for repeatable events
-/// like signs and NPC dialogues).
+/// and are removed from the map after being triggered, except for repeatable or
+/// interaction-completion events like signs, NPC dialogues, and recruitable
+/// characters. Recruitable characters stay on the map until a successful
+/// recruitment action removes their event.
 ///
 /// If the event carries a `time_condition`, it is evaluated against `game_time`.
 /// When the condition is not satisfied the function returns
@@ -398,12 +400,11 @@ pub fn trigger_event(
             time_condition: _,
             ..
         } => {
-            // Recruitment encounters are one-time - remove after triggered
-            world
-                .get_current_map_mut()
-                .ok_or(EventError::MapNotFound(current_map_id))?
-                .remove_event(position);
-
+            // Recruitables are not consumed by merely standing on or triggering
+            // their tile. The event must remain in the map so the visible mesh
+            // stays present until a dialogue recruitment action succeeds. The
+            // dialogue system removes the event after adding the character to the
+            // party or sending them to an inn.
             EventResult::RecruitableCharacter {
                 character_id: character_id.clone(),
             }
@@ -711,6 +712,46 @@ mod tests {
         // Trap should be removed after triggering
         let result2 = trigger_event(&mut world, pos, &noon());
         assert_eq!(result2.unwrap(), EventResult::None);
+    }
+
+    #[test]
+    fn test_recruitable_character_event_remains_until_recruited() {
+        let mut world = World::new();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 20, 20);
+
+        let pos = Position::new(10, 10);
+        map.add_event(
+            pos,
+            MapEvent::RecruitableCharacter {
+                name: "Wandering Knight".to_string(),
+                description: "A knight waits for a party to join.".to_string(),
+                character_id: "wandering_knight".to_string(),
+                dialogue_id: Some(42),
+                time_condition: None,
+                facing: None,
+                face_on_dialogue: false,
+            },
+        );
+
+        world.add_map(map);
+        world.set_current_map(1);
+
+        let result = trigger_event(&mut world, pos, &noon()).unwrap();
+
+        assert_eq!(
+            result,
+            EventResult::RecruitableCharacter {
+                character_id: "wandering_knight".to_string()
+            }
+        );
+        assert!(
+            matches!(
+                world.get_current_map().and_then(|map| map.get_event(pos)),
+                Some(MapEvent::RecruitableCharacter { character_id, .. })
+                    if character_id == "wandering_knight"
+            ),
+            "RecruitableCharacter event must remain until recruitment succeeds"
+        );
     }
 
     #[test]

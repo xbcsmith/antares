@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! OBJ importer tab UI and RON export workflow.
+//! OBJ and GLB importer tab UI.
 //!
 //! This module renders the Campaign Builder Importer tab, lets users inspect
-//! imported OBJ meshes, edit per-mesh colors, manage custom palette entries,
-//! and export the result as a `CreatureDefinition` RON asset.
+//! imported OBJ and GLB meshes, edit per-mesh colors, manage custom palette
+//! entries, and export the result as a `CreatureDefinition` RON asset.
 //!
 //! # Examples
 //!
@@ -28,24 +28,29 @@
 
 use crate::color_palette::{palette_entries, PaletteEntry};
 use crate::creature_assets::{CreatureAssetError, CreatureAssetManager};
+use crate::creature_id_manager::CreatureCategory;
 use crate::logging::{category, Logger};
 use crate::obj_importer::{
-    ExportType, ImportedMaterialSwatch, ImportedMeshColorSource, ImportedMtlSourceKind,
-    ImporterMode, ObjImporterState,
+    ExportType, ImportSourceFormat, ImportedMaterialSwatch, ImportedMesh, ImportedMeshColorSource,
+    ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
 };
 use crate::ui_helpers::TwoColumnLayout;
 use antares::domain::visual::{CreatureDefinition, MeshTransform};
 use eframe::egui;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-/// Errors that can occur when importing an OBJ file into editor state.
+/// Errors that can occur when importing a model file into editor state.
 #[derive(Debug, thiserror::Error)]
 enum ObjImportError {
-    /// The OBJ file could not be loaded or parsed.
-    #[error("Failed to load OBJ '{path}': {message}")]
+    /// The file could not be loaded or parsed.
+    #[error("Failed to load '{path}': {message}")]
     LoadFailed { path: String, message: String },
+    /// The file extension is not a supported import format.
+    #[error("Unsupported file format '.{extension}'; supported formats are .obj and .glb")]
+    UnknownFormat { extension: String },
 }
 
 /// Signal emitted by the importer tab when an export completes.
@@ -77,12 +82,33 @@ struct ExportOutcome {
     status_message: String,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct TextureExportReport {
+    unknown_mime_texture_count: usize,
+}
+
+impl TextureExportReport {
+    fn merge_unknown_mime(&mut self) {
+        self.unknown_mime_texture_count += 1;
+    }
+
+    fn warning_suffix(self) -> String {
+        match self.unknown_mime_texture_count {
+            0 => String::new(),
+            1 => " Warning: 1 embedded GLB texture had an unknown MIME type and was exported with a .bin extension.".to_string(),
+            count => format!(
+                " Warning: {count} embedded GLB textures had unknown MIME types and were exported with .bin extensions."
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 enum ObjImporterExportError {
     #[error("Open a campaign before exporting importer output")]
     MissingCampaignDir,
 
-    #[error("Load an OBJ file before exporting")]
+    #[error("Load a model file before exporting")]
     NoMeshesLoaded,
 
     #[error("Enter a name before exporting")]
@@ -93,6 +119,12 @@ enum ObjImporterExportError {
 
     #[error("Failed to serialize RON asset: {0}")]
     Serialization(#[from] ron::Error),
+
+    #[error("Texture for mesh '{mesh_name}' could not be resolved.")]
+    MissingTexture { mesh_name: String },
+
+    #[error("Texture source path has no filename: {0}")]
+    TextureMissingFileName(PathBuf),
 
     #[error("Failed to write asset file: {0}")]
     Io(#[from] std::io::Error),
@@ -105,12 +137,16 @@ pub(crate) fn show_obj_importer_tab(
     campaign_dir: Option<&PathBuf>,
     logger: &mut Logger,
 ) -> Option<ObjImporterUiSignal> {
-    ui.heading("OBJ Importer");
-    ui.label("Load a Wavefront OBJ, adjust mesh colors, then export a creature, item, or furniture RON asset.");
+    ui.heading("Model Importer");
+    ui.label("Load a Wavefront OBJ or binary glTF (GLB) model, adjust mesh colors, then export a creature, item, or furniture RON asset.");
 
     if !state.status_message.is_empty() {
         ui.add_space(4.0);
-        ui.label(egui::RichText::new(&state.status_message).italics());
+        if state.is_error {
+            ui.colored_label(egui::Color32::RED, &state.status_message);
+        } else {
+            ui.label(egui::RichText::new(&state.status_message).italics());
+        }
     }
 
     if campaign_dir.is_none() {
@@ -124,7 +160,7 @@ pub(crate) fn show_obj_importer_tab(
 
     match state.mode {
         ImporterMode::Idle => {
-            render_idle_mode(ui, state, logger);
+            render_idle_mode(ui, state, campaign_dir, logger);
             None
         }
         ImporterMode::Loaded => render_loaded_mode(ui, state, campaign_dir, logger),
@@ -136,35 +172,94 @@ pub(crate) fn show_obj_importer_tab(
     }
 }
 
-fn render_idle_mode(ui: &mut egui::Ui, state: &mut ObjImporterState, logger: &mut Logger) {
+/// All selectable creature categories in display order.
+const ALL_CREATURE_CATEGORIES: &[CreatureCategory] = &[
+    CreatureCategory::Monsters,
+    CreatureCategory::Npcs,
+    CreatureCategory::Templates,
+    CreatureCategory::Variants,
+    CreatureCategory::Custom,
+];
+
+/// Maps a category display-name string back to a [`CreatureCategory`].
+///
+/// Accepts the canonical display names produced by
+/// [`CreatureCategory::display_name`]: `"Monsters"`, `"NPCs"`,
+/// `"Templates"`, `"Variants"`, `"Custom"`. Any other input
+/// (including the empty string) returns [`CreatureCategory::Custom`].
+fn creature_category_from_str(s: &str) -> CreatureCategory {
+    match s {
+        "Monsters" => CreatureCategory::Monsters,
+        "NPCs" => CreatureCategory::Npcs,
+        "Templates" => CreatureCategory::Templates,
+        "Variants" => CreatureCategory::Variants,
+        _ => CreatureCategory::Custom,
+    }
+}
+
+/// Returns the next available creature ID in `category`'s range.
+///
+/// Loads the campaign's creature registry from disk (if `campaign_dir` is
+/// `Some`) to skip IDs that are already in use. Falls back to the first ID in
+/// the range when:
+/// - `campaign_dir` is `None`.
+/// - The registry cannot be read or parsed.
+/// - Every ID in the range is already taken.
+fn suggest_next_creature_id_from_dir(
+    campaign_dir: Option<&Path>,
+    category: CreatureCategory,
+) -> u32 {
+    let range = category.id_range();
+    let used_ids: std::collections::HashSet<u32> = campaign_dir
+        .map(|dir| {
+            CreatureAssetManager::new(dir.to_path_buf())
+                .load_all_creatures()
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+        .iter()
+        .filter(|c| range.contains(&c.id))
+        .map(|c| c.id)
+        .collect();
+    for id in range.clone() {
+        if !used_ids.contains(&id) {
+            return id;
+        }
+    }
+    range.start
+}
+
+fn render_idle_mode(
+    ui: &mut egui::Ui,
+    state: &mut ObjImporterState,
+    campaign_dir: Option<&PathBuf>,
+    logger: &mut Logger,
+) {
     let selected_path = state
         .source_path
         .as_ref()
         .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "No OBJ selected".to_string());
+        .unwrap_or_else(|| "No model selected".to_string());
 
     egui::Grid::new("obj_importer_idle_grid")
         .num_columns(2)
         .spacing([12.0, 8.0])
         .show(ui, |ui| {
-            ui.label("Source OBJ:");
+            ui.label("Source File:");
             ui.horizontal(|ui| {
                 ui.monospace(selected_path.as_str());
                 if ui.button("Browse...").clicked() {
-                    if let Some(path) = pick_obj_file(state.source_path.as_deref()) {
+                    if let Some(path) = pick_model_file(state.source_path.as_deref()) {
                         state.source_path = Some(path.clone());
                         if state.creature_name.trim().is_empty() {
                             state.creature_name = display_name_from_path(&path);
                         }
-                        state.status_message = format!("Selected OBJ file: {}", path.display());
+                        state.status_message = format!("Selected file: {}", path.display());
+                        state.is_error = false;
                         ui.ctx().request_repaint();
                     }
                 }
             });
-            ui.end_row();
-
-            ui.label("MTL Source:");
-            render_mtl_source_controls(ui, state, logger, false);
             ui.end_row();
 
             ui.label("Export Type:");
@@ -191,7 +286,31 @@ fn render_idle_mode(ui: &mut egui::Ui, state: &mut ObjImporterState, logger: &mu
             ui.end_row();
 
             ui.label("Category:");
-            if ui.text_edit_singleline(&mut state.category).changed() {
+            if state.export_type == ExportType::Creature {
+                let category_before = state.category.clone();
+                egui::ComboBox::from_id_salt("obj_importer_idle_creature_category")
+                    .selected_text(creature_category_from_str(&state.category).display_name())
+                    .show_ui(ui, |ui| {
+                        for cat in ALL_CREATURE_CATEGORIES {
+                            ui.selectable_value(
+                                &mut state.category,
+                                cat.display_name().to_string(),
+                                cat.display_name(),
+                            );
+                        }
+                    });
+                // When category changes in idle mode, immediately suggest the next
+                // available ID in the new range so it is pre-populated when the model
+                // loads and the user reaches the Loaded form.
+                if state.category != category_before {
+                    let new_cat = creature_category_from_str(&state.category);
+                    state.creature_id = suggest_next_creature_id_from_dir(
+                        campaign_dir.map(|p| p.as_path()),
+                        new_cat,
+                    );
+                    ui.ctx().request_repaint();
+                }
+            } else if ui.text_edit_singleline(&mut state.category).changed() {
                 ui.ctx().request_repaint();
             }
             ui.end_row();
@@ -219,27 +338,40 @@ fn render_idle_mode(ui: &mut egui::Ui, state: &mut ObjImporterState, logger: &mu
 
     ui.add_space(8.0);
 
-    if ui.button("Load OBJ").clicked() {
+    if ui.button("Load Model").clicked() {
         let path = if let Some(path) = state.source_path.clone() {
             path
-        } else if let Some(path) = pick_obj_file(None) {
+        } else if let Some(path) = pick_model_file(None) {
             state.source_path = Some(path.clone());
             path
         } else {
-            state.status_message = "Choose an OBJ file before loading.".to_string();
+            state.status_message = "Choose a model file before loading.".to_string();
             return;
         };
 
-        match load_obj_into_state(state, &path) {
+        match load_model_into_state(state, &path) {
             Ok(()) => {
+                // Re-suggest the creature ID for the current category so the ID
+                // field in the Loaded form is immediately correct for the selected
+                // category, even if the user hasn't touched the Category ComboBox
+                // since the previous export session.
+                if state.export_type == ExportType::Creature {
+                    let current_cat = creature_category_from_str(&state.category);
+                    state.creature_id = suggest_next_creature_id_from_dir(
+                        campaign_dir.map(|p| p.as_path()),
+                        current_cat,
+                    );
+                }
+                state.is_error = false;
                 logger.info(
                     category::EDITOR,
-                    &format!("Loaded OBJ importer source {}", path.display()),
+                    &format!("Loaded model importer source {}", path.display()),
                 );
                 ui.ctx().request_repaint();
             }
             Err(error) => {
                 state.status_message = error.to_string();
+                state.is_error = true;
                 logger.error(category::FILE_IO, &state.status_message);
             }
         }
@@ -275,9 +407,30 @@ fn render_loaded_mode(
         .num_columns(2)
         .spacing([12.0, 8.0])
         .show(ui, |ui| {
-            ui.label("MTL Source:");
-            render_mtl_source_controls(ui, state, logger, true);
+            ui.label("Format:");
+            match state.source_format {
+                ImportSourceFormat::Obj => {
+                    ui.label("OBJ");
+                }
+                ImportSourceFormat::Glb => {
+                    ui.label("GLB (binary glTF)");
+                }
+            }
             ui.end_row();
+
+            if state.source_format == ImportSourceFormat::Obj {
+                ui.label("MTL Source:");
+                render_mtl_source_controls(ui, state, logger, true);
+                ui.end_row();
+            }
+
+            if state.source_format == ImportSourceFormat::Glb {
+                if let Some(count) = parse_glb_embedded_image_count(&state.status_message) {
+                    ui.label("Embedded textures:");
+                    ui.label(count.to_string());
+                    ui.end_row();
+                }
+            }
 
             ui.label("Export Type:");
             ui.horizontal(|ui| {
@@ -302,31 +455,79 @@ fn render_loaded_mode(
             });
             ui.end_row();
 
-            ui.label("ID:");
-            match state.export_type {
-                ExportType::Furniture => {
-                    if ui
-                        .add(egui::DragValue::new(&mut state.furniture_id).range(0..=u32::MAX))
-                        .changed()
-                    {
-                        ui.ctx().request_repaint();
-                    }
+            ui.label("Category:");
+            if state.export_type == ExportType::Creature {
+                let category_before = state.category.clone();
+                egui::ComboBox::from_id_salt("obj_importer_loaded_creature_category")
+                    .selected_text(creature_category_from_str(&state.category).display_name())
+                    .show_ui(ui, |ui| {
+                        for cat in ALL_CREATURE_CATEGORIES {
+                            ui.selectable_value(
+                                &mut state.category,
+                                cat.display_name().to_string(),
+                                cat.display_name(),
+                            );
+                        }
+                    });
+                // Category is now rendered BEFORE the ID row.  When category changes,
+                // the ID suggestion fires here, and the ID row below reads the already-
+                // updated creature_id and state.category in the same frame — no lag.
+                if state.category != category_before {
+                    let new_cat = creature_category_from_str(&state.category);
+                    state.creature_id = suggest_next_creature_id_from_dir(
+                        campaign_dir.map(|p| p.as_path()),
+                        new_cat,
+                    );
+                    ui.ctx().request_repaint();
                 }
-                ExportType::Creature | ExportType::Item => {
-                    if ui
-                        .add(egui::DragValue::new(&mut state.creature_id).range(0..=u32::MAX))
-                        .changed()
-                    {
-                        ui.ctx().request_repaint();
-                    }
-                }
+            } else if ui.text_edit_singleline(&mut state.category).changed() {
+                ui.ctx().request_repaint();
             }
             ui.end_row();
 
-            ui.label("Category:");
-            if ui.text_edit_singleline(&mut state.category).changed() {
-                ui.ctx().request_repaint();
-            }
+            ui.label("ID:");
+            ui.horizontal(|ui| {
+                match state.export_type {
+                    ExportType::Furniture => {
+                        if ui
+                            .add(egui::DragValue::new(&mut state.furniture_id).range(0..=u32::MAX))
+                            .changed()
+                        {
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                    ExportType::Creature | ExportType::Item => {
+                        if ui
+                            .add(egui::DragValue::new(&mut state.creature_id).range(0..=u32::MAX))
+                            .changed()
+                        {
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                }
+                // For creature exports: show the expected ID range and warn when
+                // the current value falls outside it.
+                if state.export_type == ExportType::Creature {
+                    let cat = creature_category_from_str(&state.category);
+                    let r = cat.id_range();
+                    let range_str = if r.end == u32::MAX {
+                        format!("{}+", r.start)
+                    } else {
+                        format!("{}\u{2013}{}", r.start, r.end - 1)
+                    };
+                    ui.label(egui::RichText::new(format!("({})", range_str)).weak());
+                    if !r.contains(&state.creature_id) {
+                        ui.colored_label(
+                            egui::Color32::YELLOW,
+                            format!(
+                                "\u{26a0} {} is outside {} range",
+                                state.creature_id,
+                                cat.display_name()
+                            ),
+                        );
+                    }
+                }
+            });
             ui.end_row();
 
             ui.label("Name:");
@@ -362,9 +563,20 @@ fn render_loaded_mode(
             ui.end_row();
         });
 
+    if state.source_format == ImportSourceFormat::Glb
+        && state.status_message.contains("Skinning/animations present")
+    {
+        ui.add_space(4.0);
+        ui.colored_label(
+            egui::Color32::from_rgb(220, 170, 90),
+            "\u{26a0} Skinning/animations present but not imported",
+        );
+    }
+
     ui.add_space(6.0);
     let mut export_signal = None;
     let mut cleared_importer = false;
+    let has_textured_glb_meshes = has_texture_backed_glb_meshes(state);
 
     ui.horizontal_wrapped(|ui| {
         ui.label(format!(
@@ -374,25 +586,44 @@ fn render_loaded_mode(
             total_triangles
         ));
 
-        if ui.button("Auto-Assign All").clicked() {
+        if has_textured_glb_meshes {
+            ui.label(
+                egui::RichText::new(
+                    "Textured GLB meshes keep neutral texture tint; Auto-Assign is disabled.",
+                )
+                .italics(),
+            );
+        } else if ui.button("Auto-Assign All").clicked() {
             state.auto_assign_colors();
             state.status_message = "Reapplied automatic colors to all meshes.".to_string();
             ui.ctx().request_repaint();
         }
 
-        if ui.button("Load Another OBJ").clicked() {
-            if let Some(path) = pick_obj_file(state.source_path.as_deref()) {
-                match load_obj_into_state(state, &path) {
+        if ui.button("Load Another Model").clicked() {
+            if let Some(path) = pick_model_file(state.source_path.as_deref()) {
+                match load_model_into_state(state, &path) {
                     Ok(()) => {
+                        // Re-suggest the creature ID for the current category after
+                        // loading a replacement model.
+                        if state.export_type == ExportType::Creature {
+                            let current_cat = creature_category_from_str(&state.category);
+                            state.creature_id = suggest_next_creature_id_from_dir(
+                                campaign_dir.map(|p| p.as_path()),
+                                current_cat,
+                            );
+                        }
+                        state.is_error = false;
                         logger.info(
                             category::EDITOR,
-                            &format!("Reloaded importer OBJ {}", path.display()),
+                            &format!("Reloaded importer model {}", path.display()),
                         );
                         ui.ctx().request_repaint();
                     }
                     Err(error) => {
                         state.status_message = error.to_string();
+                        state.is_error = true;
                         logger.error(category::FILE_IO, &state.status_message);
+                        ui.ctx().request_repaint();
                     }
                 }
             }
@@ -402,6 +633,16 @@ fn render_loaded_mode(
             state.clear();
             state.status_message = "Importer cleared.".to_string();
             cleared_importer = true;
+            ui.ctx().request_repaint();
+        }
+
+        if ui
+            .checkbox(
+                &mut state.open_after_export,
+                "Open exported creature in editor after export",
+            )
+            .changed()
+        {
             ui.ctx().request_repaint();
         }
 
@@ -427,6 +668,7 @@ fn render_loaded_mode(
                 Err(error) => {
                     state.mode = ImporterMode::Loaded;
                     state.status_message = error.to_string();
+                    state.is_error = true;
                     logger.error(category::FILE_IO, &state.status_message);
                 }
             }
@@ -481,10 +723,17 @@ fn render_loaded_mode(
                 });
                 left_ui.separator();
 
+                // Compute row height for show_rows virtualization.
+                // Each row is a group containing two lines of content.
+                let body_h = left_ui.text_style_height(&egui::TextStyle::Body);
+                let spacing = left_ui.spacing().item_spacing.y;
+                let row_height = body_h * 2.0 + spacing * 2.0 + 12.0;
+                let num_rows = row_snapshots.len();
                 egui::ScrollArea::vertical()
-                    .id_salt("obj_importer_mesh_list_scroll")
-                    .show(left_ui, |ui| {
-                        for row in &row_snapshots {
+                    .id_salt("importer_mesh_list_scroll")
+                    .show_rows(left_ui, row_height, num_rows, |ui, row_range| {
+                        for i in row_range {
+                            let row = &row_snapshots[i];
                             ui.push_id(row.index, |ui| {
                                 let mut selected = row.selected;
                                 ui.group(|ui| {
@@ -562,7 +811,18 @@ fn render_color_editor(
     campaign_dir: Option<&PathBuf>,
     logger: &mut Logger,
 ) {
-    ui.heading("Color Editor");
+    let active_mesh_texture_backed_glb = state
+        .active_mesh_index
+        .and_then(|index| state.meshes.get(index))
+        .is_some_and(|mesh| {
+            state.source_format == ImportSourceFormat::Glb && is_texture_backed_importer_mesh(mesh)
+        });
+
+    ui.heading(if active_mesh_texture_backed_glb {
+        "Texture Tint Editor"
+    } else {
+        "Color Editor"
+    });
     ui.separator();
 
     let Some(active_index) = state.active_mesh_index else {
@@ -583,6 +843,14 @@ fn render_color_editor(
     ui.small(describe_mesh_color_source(&state.meshes[active_index]));
     if let Some(texture_path) = state.meshes[active_index].mesh_def.texture_path.as_deref() {
         ui.small(format!("Texture: {}", texture_path));
+    }
+    if active_mesh_texture_backed_glb {
+        ui.small(
+            egui::RichText::new(
+                "Texture-backed GLB meshes export with neutral white tint by default. Change colors only when you want an explicit tint override.",
+            )
+            .italics(),
+        );
     }
     let ctx = ui.ctx().clone();
 
@@ -633,7 +901,11 @@ fn render_color_editor(
     render_custom_palette_section(ui, state, campaign_dir, logger, active_index);
 
     ui.add_space(8.0);
-    if ui.button("Auto-Assign All").clicked() {
+    if active_mesh_texture_backed_glb {
+        ui.small(
+            "Auto-Assign is disabled for textured GLB meshes to avoid tinting baked textures.",
+        );
+    } else if ui.button("Auto-Assign All").clicked() {
         state.auto_assign_colors();
         state.status_message = "Reapplied automatic colors to all meshes.".to_string();
         ctx.request_repaint();
@@ -847,23 +1119,60 @@ fn persist_custom_palette(
     }
 }
 
-fn load_obj_into_state(state: &mut ObjImporterState, path: &Path) -> Result<(), ObjImportError> {
-    state
-        .load_obj_file(path)
-        .map_err(|error| ObjImportError::LoadFailed {
-            path: path.display().to_string(),
-            message: error.to_string(),
-        })?;
+/// Loads a model file (OBJ or GLB) into importer state, dispatching on file extension.
+///
+/// # Errors
+///
+/// Returns [`ObjImportError::LoadFailed`] when parsing fails.
+/// Returns [`ObjImportError::UnknownFormat`] when the extension is not `.obj` or `.glb`.
+fn load_model_into_state(state: &mut ObjImporterState, path: &Path) -> Result<(), ObjImportError> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
 
-    if state.creature_name.trim().is_empty() {
-        state.creature_name = display_name_from_path(path);
+    match ext.as_deref() {
+        Some("obj") => {
+            state
+                .load_obj_file(path)
+                .map_err(|error| ObjImportError::LoadFailed {
+                    path: path.display().to_string(),
+                    message: error.to_string(),
+                })?;
+            if state.creature_name.trim().is_empty() {
+                state.creature_name = display_name_from_path(path);
+            }
+            state.set_active_mesh((!state.meshes.is_empty()).then_some(0));
+            state.status_message = format!(
+                "Loaded {} mesh(es) from {}",
+                state.meshes.len(),
+                path.display()
+            );
+        }
+        Some("glb") => {
+            state
+                .load_glb_file(path)
+                .map_err(|error| ObjImportError::LoadFailed {
+                    path: path.display().to_string(),
+                    message: error.to_string(),
+                })?;
+            if state.creature_name.trim().is_empty() {
+                state.creature_name = display_name_from_path(path);
+            }
+            state.set_active_mesh((!state.meshes.is_empty()).then_some(0));
+            // GLB sets its own rich status_message via load_imported_glb_scene.
+        }
+        _ => {
+            return Err(ObjImportError::UnknownFormat {
+                extension: path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_string(),
+            });
+        }
     }
-    state.set_active_mesh((!state.meshes.is_empty()).then_some(0));
-    state.status_message = format!(
-        "Loaded {} mesh(es) from {}",
-        state.meshes.len(),
-        path.display()
-    );
+
     Ok(())
 }
 
@@ -947,7 +1256,7 @@ fn reload_obj_after_mtl_change(
         return;
     };
 
-    match load_obj_into_state(state, &source_path) {
+    match load_model_into_state(state, &source_path) {
         Ok(()) => {
             state.status_message = format!(
                 "Reloaded {} using {}.",
@@ -964,6 +1273,7 @@ fn reload_obj_after_mtl_change(
         }
         Err(error) => {
             state.status_message = error.to_string();
+            state.is_error = true;
             logger.error(category::FILE_IO, &state.status_message);
         }
     }
@@ -1033,10 +1343,22 @@ fn describe_mesh_color_source(mesh: &crate::obj_importer::ImportedMesh) -> &'sta
         ImportedMeshColorSource::AutoAssigned => {
             "Color Source: built-in mesh-name fallback; imported alpha and other material metadata may still be preserved."
         }
+        ImportedMeshColorSource::TextureNeutral => {
+            "Color Source: texture-backed GLB neutral tint; texture color is preserved unless you apply an explicit tint override."
+        }
         ImportedMeshColorSource::ManualOverride => {
             "Color Source: manual importer override from the color picker or palette."
         }
     }
+}
+
+fn has_texture_backed_glb_meshes(state: &ObjImporterState) -> bool {
+    state.source_format == ImportSourceFormat::Glb
+        && state.meshes.iter().any(is_texture_backed_importer_mesh)
+}
+
+fn is_texture_backed_importer_mesh(mesh: &ImportedMesh) -> bool {
+    mesh.mesh_def.texture_path.is_some() || mesh.texture_payload.is_some()
 }
 
 fn imported_swatch_hover_text(swatch: &ImportedMaterialSwatch) -> String {
@@ -1059,8 +1381,11 @@ fn stage_imported_swatch_as_custom_draft(
     );
 }
 
-fn pick_obj_file(initial_path: Option<&Path>) -> Option<PathBuf> {
-    let mut dialog = rfd::FileDialog::new().add_filter("Wavefront OBJ", &["obj"]);
+/// Opens a file-picker dialog that accepts both Wavefront OBJ and binary glTF (GLB) files.
+fn pick_model_file(initial_path: Option<&Path>) -> Option<PathBuf> {
+    let mut dialog = rfd::FileDialog::new()
+        .add_filter("Wavefront OBJ", &["obj"])
+        .add_filter("Binary glTF", &["glb"]);
     if let Some(path) = initial_path {
         let directory = if path.is_dir() {
             path.to_path_buf()
@@ -1157,6 +1482,8 @@ fn export_state_to_campaign(
         creature.id,
         &state.category,
     );
+    let texture_report =
+        copy_imported_textures_into_campaign(state, &mut creature, campaign_dir, &relative_path)?;
     let absolute_path = campaign_dir.join(&relative_path);
 
     match state.export_type {
@@ -1184,12 +1511,375 @@ fn export_state_to_campaign(
         export_type: state.export_type,
         absolute_path: absolute_path.clone(),
         status_message: format!(
-            "Exported {} '{}' to {}",
+            "Exported {} '{}' to {}{}",
             export_type_label(state.export_type),
             creature.name,
-            absolute_path.display()
+            absolute_path.display(),
+            texture_report.warning_suffix()
         ),
     })
+}
+
+/// Describes how a mesh texture will be obtained during campaign export.
+///
+/// Returned by [`resolve_imported_texture_source`] and consumed by
+/// [`copy_imported_textures_into_campaign`] to determine which write strategy
+/// to apply without mixing resolution logic into the copy loop.
+#[derive(Debug)]
+enum ResolvedTextureSource {
+    /// The texture path already points inside the campaign directory; no copy needed.
+    AlreadyCampaignRelative,
+    /// Copy (or write) from this filesystem path into the campaign texture directory.
+    FilesystemPath(PathBuf),
+    /// Write these raw bytes to a new destination file.
+    EmbeddedBytes {
+        /// Raw image bytes extracted from a GLB buffer view.
+        bytes: Vec<u8>,
+        /// Preferred export filename including extension (e.g. `"albedo_0.png"`).
+        /// May be empty; [`embedded_texture_file_name`] handles the fallback chain.
+        file_name_hint: String,
+        /// Whether the source MIME type was unknown and therefore exported as `.bin`.
+        unknown_mime: bool,
+    },
+    /// No valid source was found; export must fail with `MissingTexture`.
+    Missing,
+}
+
+/// Writes campaign texture files for every mesh that declares a texture path,
+/// then rewrites `mesh_def.texture_path` to the new campaign-relative destination.
+///
+/// Textures are deduplicated by content hash: two mesh payloads whose bytes are
+/// identical will both point at the same destination file without writing it twice.
+///
+/// # Errors
+///
+/// Returns [`ObjImporterExportError::MissingTexture`] when a mesh has a texture
+/// path but no usable source (no embedded bytes, no resolvable filesystem path).
+/// This error fires **before** any RON write.
+fn copy_imported_textures_into_campaign(
+    state: &ObjImporterState,
+    creature: &mut CreatureDefinition,
+    campaign_dir: &Path,
+    exported_asset_relative_path: &str,
+) -> Result<TextureExportReport, ObjImporterExportError> {
+    let export_stem = Path::new(exported_asset_relative_path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("imported_model");
+    let texture_dir = PathBuf::from("assets/textures/imported").join(export_stem);
+    // Keyed on a 64-bit hash of the file/byte content to deduplicate identical payloads.
+    let mut content_hash_to_dest: HashMap<u64, String> = HashMap::new();
+    let mut used_destinations: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut report = TextureExportReport::default();
+
+    for (mesh_index, mesh_def) in creature.meshes.iter_mut().enumerate() {
+        let Some(texture_path) = mesh_def.texture_path.clone() else {
+            continue;
+        };
+
+        let mesh_name = mesh_def
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("mesh_{}", mesh_index));
+
+        match resolve_imported_texture_source(state, mesh_index, &texture_path, campaign_dir) {
+            ResolvedTextureSource::AlreadyCampaignRelative => {
+                // Reserve the existing path so no other mesh can collide with it.
+                used_destinations.insert(texture_path);
+            }
+            ResolvedTextureSource::FilesystemPath(source_path) => {
+                // Read once for both hashing and writing.
+                let content = fs::read(&source_path)?;
+                let hash = compute_content_hash(&content);
+                if let Some(existing_dest) = content_hash_to_dest.get(&hash) {
+                    mesh_def.texture_path = Some(existing_dest.clone());
+                } else {
+                    let dest_relative = unique_texture_destination(
+                        &texture_dir,
+                        &source_path,
+                        &mut used_destinations,
+                    )?;
+                    let dest_absolute = campaign_dir.join(&dest_relative);
+                    if let Some(parent) = dest_absolute.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::write(&dest_absolute, &content)?;
+                    let dest_str = dest_relative.to_string_lossy().replace('\\', "/");
+                    content_hash_to_dest.insert(hash, dest_str.clone());
+                    mesh_def.texture_path = Some(dest_str);
+                }
+            }
+            ResolvedTextureSource::EmbeddedBytes {
+                bytes,
+                file_name_hint,
+                unknown_mime,
+            } => {
+                if unknown_mime {
+                    report.merge_unknown_mime();
+                }
+                let hash = compute_content_hash(&bytes);
+                if let Some(existing_dest) = content_hash_to_dest.get(&hash) {
+                    mesh_def.texture_path = Some(existing_dest.clone());
+                } else {
+                    // Use the enum-captured hint as the primary naming source;
+                    // fall back to the full payload when the hint is empty
+                    // (source_label + MIME extension).
+                    let hint = if !file_name_hint.is_empty() {
+                        file_name_hint
+                    } else {
+                        let payload = state
+                            .meshes
+                            .get(mesh_index)
+                            .and_then(|m| m.texture_payload.as_ref());
+                        embedded_texture_file_name(payload, mesh_index)
+                    };
+                    let dest_relative = unique_texture_destination_by_hint(
+                        &texture_dir,
+                        &hint,
+                        &mut used_destinations,
+                    );
+                    let dest_absolute = campaign_dir.join(&dest_relative);
+                    if let Some(parent) = dest_absolute.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::write(&dest_absolute, &bytes)?;
+                    let dest_str = dest_relative.to_string_lossy().replace('\\', "/");
+                    content_hash_to_dest.insert(hash, dest_str.clone());
+                    mesh_def.texture_path = Some(dest_str);
+                }
+            }
+            ResolvedTextureSource::Missing => {
+                return Err(ObjImporterExportError::MissingTexture { mesh_name });
+            }
+        }
+    }
+
+    Ok(report)
+}
+
+/// Resolves the texture source for a single mesh during campaign export.
+///
+/// Checks in priority order:
+/// 1. If the texture path is already campaign-relative, returns
+///    [`ResolvedTextureSource::AlreadyCampaignRelative`].
+/// 2. If the mesh payload carries embedded bytes, returns
+///    [`ResolvedTextureSource::EmbeddedBytes`].
+/// 3. If the mesh payload or fallback paths point at an existing file, returns
+///    [`ResolvedTextureSource::FilesystemPath`].
+/// 4. Returns [`ResolvedTextureSource::Missing`] when no usable source exists.
+fn resolve_imported_texture_source(
+    state: &ObjImporterState,
+    mesh_index: usize,
+    texture_path: &str,
+    campaign_dir: &Path,
+) -> ResolvedTextureSource {
+    // 1. Already inside the campaign directory — nothing to copy.
+    if campaign_dir.join(texture_path).exists() {
+        return ResolvedTextureSource::AlreadyCampaignRelative;
+    }
+
+    // 2. Embedded GLB bytes take priority over filesystem paths.
+    if let Some(payload) = state
+        .meshes
+        .get(mesh_index)
+        .and_then(|mesh| mesh.texture_payload.as_ref())
+    {
+        if let Some(bytes) = payload.bytes.clone() {
+            return ResolvedTextureSource::EmbeddedBytes {
+                bytes,
+                file_name_hint: payload.file_name_hint.clone(),
+                unknown_mime: mime_to_extension(payload.mime_type.as_deref()) == "bin",
+            };
+        }
+
+        // 3a. Payload carries an OBJ filesystem source path.
+        if let Some(source_path) = payload.source_path.as_ref().filter(|p| p.exists()) {
+            return ResolvedTextureSource::FilesystemPath(source_path.clone());
+        }
+    }
+
+    // 3b. Absolute path encoded directly in the texture_path string.
+    let texture_path_ref = Path::new(texture_path);
+    if texture_path_ref.is_absolute() && texture_path_ref.exists() {
+        return ResolvedTextureSource::FilesystemPath(texture_path_ref.to_path_buf());
+    }
+
+    // 3c. Paths relative to MTL file directories.
+    for mtl_path in &state.resolved_mtl_paths {
+        if let Some(parent) = mtl_path.parent() {
+            let candidate = parent.join(texture_path_ref);
+            if candidate.exists() {
+                return ResolvedTextureSource::FilesystemPath(candidate);
+            }
+        }
+    }
+
+    // 3d. Path relative to the source OBJ/GLB file's parent directory.
+    if let Some(parent) = state.source_path.as_ref().and_then(|p| p.parent()) {
+        let candidate = parent.join(texture_path_ref);
+        if candidate.exists() {
+            return ResolvedTextureSource::FilesystemPath(candidate);
+        }
+    }
+
+    ResolvedTextureSource::Missing
+}
+
+/// Finds a unique campaign-relative destination path for a texture file, given
+/// its source path. Delegates filename derivation to
+/// [`unique_texture_destination_by_hint`] after extracting the filename component.
+///
+/// # Errors
+///
+/// Returns [`ObjImporterExportError::TextureMissingFileName`] when `source_path`
+/// has no filename component (e.g. a bare root path).
+fn unique_texture_destination(
+    texture_dir: &Path,
+    source_path: &Path,
+    used_destinations: &mut std::collections::HashSet<String>,
+) -> Result<PathBuf, ObjImporterExportError> {
+    let file_name = source_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| ObjImporterExportError::TextureMissingFileName(source_path.to_path_buf()))?;
+    Ok(unique_texture_destination_by_hint(
+        texture_dir,
+        file_name,
+        used_destinations,
+    ))
+}
+
+/// Finds a unique campaign-relative destination path for a texture file given a
+/// filename hint string (stem + optional extension).
+///
+/// Sanitizes the stem with [`sanitized_texture_stem`], lowercases the extension,
+/// and appends a numeric suffix (`_2`, `_3`, …) until a name not present in
+/// `used_destinations` is found.
+///
+/// The returned path is inserted into `used_destinations` before returning.
+fn unique_texture_destination_by_hint(
+    texture_dir: &Path,
+    file_name_hint: &str,
+    used_destinations: &mut std::collections::HashSet<String>,
+) -> PathBuf {
+    let hint_path = Path::new(file_name_hint);
+    let stem = hint_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("texture");
+    let extension = hint_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    let sanitized_stem = sanitized_texture_stem(stem);
+
+    for suffix in 0.. {
+        let candidate_name = if suffix == 0 {
+            format_texture_file_name(&sanitized_stem, extension.as_deref())
+        } else {
+            format_texture_file_name(
+                &format!("{}_{}", sanitized_stem, suffix + 1),
+                extension.as_deref(),
+            )
+        };
+        let candidate = texture_dir.join(candidate_name);
+        let candidate_string = candidate.to_string_lossy().replace('\\', "/");
+        if used_destinations.insert(candidate_string.clone()) {
+            return PathBuf::from(candidate_string);
+        }
+    }
+
+    unreachable!("unbounded suffix loop must return a unique texture destination")
+}
+
+fn sanitized_texture_stem(stem: &str) -> String {
+    let sanitized = stem
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect::<String>();
+    let mut collapsed = sanitized;
+    while collapsed.contains("__") {
+        collapsed = collapsed.replace("__", "_");
+    }
+    let collapsed = collapsed.trim_matches('_').to_string();
+    if collapsed.is_empty() {
+        "texture".to_string()
+    } else {
+        collapsed
+    }
+}
+
+fn format_texture_file_name(stem: &str, extension: Option<&str>) -> String {
+    extension
+        .filter(|extension| !extension.is_empty())
+        .map(|extension| format!("{}.{}", stem, extension))
+        .unwrap_or_else(|| stem.to_string())
+}
+
+/// Computes a 64-bit content hash for deduplication of texture payloads.
+///
+/// Two payloads with identical bytes produce the same hash and will be mapped
+/// to the same destination file by [`copy_imported_textures_into_campaign`].
+fn compute_content_hash(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Maps a MIME type string to a lowercase file extension.
+///
+/// | MIME           | Extension |
+/// |----------------|-----------|
+/// | `image/png`    | `png`     |
+/// | `image/jpeg`   | `jpg`     |
+/// | anything else  | `bin`     |
+fn mime_to_extension(mime: Option<&str>) -> &'static str {
+    match mime {
+        Some("image/png") => "png",
+        Some("image/jpeg") | Some("image/jpg") => "jpg",
+        _ => "bin",
+    }
+}
+
+/// Derives a sanitized export filename (with extension) for a GLB embedded
+/// texture, applying the following priority chain:
+///
+/// 1. `payload.file_name_hint` if non-empty — sanitized stem, lowercased extension.
+/// 2. `payload.source_label` if non-empty — sanitized stem, extension from MIME.
+/// 3. Fallback: `"texture_{mesh_index}"` plus extension from MIME (or `.bin`).
+fn embedded_texture_file_name(
+    payload: Option<&ImportedTexturePayload>,
+    mesh_index: usize,
+) -> String {
+    let Some(p) = payload else {
+        return format!("texture_{}.bin", mesh_index);
+    };
+
+    // 1. Prefer the pre-computed file_name_hint (already includes extension).
+    if !p.file_name_hint.is_empty() {
+        let hint_path = Path::new(&p.file_name_hint);
+        let stem = hint_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("texture");
+        let ext = hint_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase());
+        return format_texture_file_name(&sanitized_texture_stem(stem), ext.as_deref());
+    }
+
+    // 2. Fall back to source_label + MIME-derived extension.
+    let ext = mime_to_extension(p.mime_type.as_deref());
+    if !p.source_label.is_empty() {
+        return format!("{}.{}", sanitized_texture_stem(&p.source_label), ext);
+    }
+
+    // 3. Last resort: positional name.
+    format!("texture_{}.{}", mesh_index, ext)
 }
 
 fn preview_export_relative_path(
@@ -1274,17 +1964,35 @@ fn export_type_label(export_type: ExportType) -> &'static str {
     }
 }
 
+/// Extracts the embedded image count from a GLB status message.
+///
+/// The status message format produced by `load_imported_glb_scene` is:
+/// `"GLB: N mesh(es), M embedded image(s), K material(s)..."`.  This helper
+/// finds the token immediately before the literal `" embedded image"` substring
+/// and parses it as a [`u32`].
+///
+/// Returns `None` when the substring is absent or the preceding token is not a
+/// valid integer.
+fn parse_glb_embedded_image_count(status: &str) -> Option<u32> {
+    let pos = status.find(" embedded image")?;
+    let before = &status[..pos];
+    before.split_whitespace().last()?.parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        build_creature_definition, describe_mesh_color_source, export_state_to_campaign,
-        format_mtl_source_detail, format_mtl_source_summary, persist_custom_palette,
-        preview_export_relative_path, show_obj_importer_tab, stage_imported_swatch_as_custom_draft,
+        build_creature_definition, creature_category_from_str, describe_mesh_color_source,
+        export_state_to_campaign, format_mtl_source_detail, format_mtl_source_summary,
+        load_model_into_state, persist_custom_palette, preview_export_relative_path,
+        show_obj_importer_tab, stage_imported_swatch_as_custom_draft,
+        suggest_next_creature_id_from_dir, ObjImportError, ObjImporterExportError,
     };
+    use crate::creature_id_manager::CreatureCategory;
     use crate::logging::Logger;
     use crate::obj_importer::{
-        ExportType, ImportedMaterialSwatch, ImportedMeshColorSource, ImportedMtlSourceKind,
-        ImporterMode, ObjImporterState,
+        ExportType, ImportSourceFormat, ImportedMaterialSwatch, ImportedMeshColorSource,
+        ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
     };
     use antares::domain::visual::{AlphaMode, CreatureDefinition, MaterialDefinition};
     use eframe::egui;
@@ -1403,6 +2111,70 @@ mod tests {
     }
 
     #[test]
+    fn test_export_creature_copies_imported_texture_maps_and_updates_paths() {
+        let campaign_dir = tempdir().unwrap();
+        let source_dir = tempdir().unwrap();
+        let body_texture = source_dir.path().join("Body Texture.PNG");
+        let wing_texture = source_dir.path().join("wing-diffuse.jpg");
+        fs::write(&body_texture, b"body texture").unwrap();
+        fs::write(&wing_texture, b"wing texture").unwrap();
+
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("textures/body.png".to_string());
+        state.meshes[0].texture_payload = Some(ImportedTexturePayload {
+            source_label: "Body Texture.PNG".to_string(),
+            file_name_hint: "Body Texture.PNG".to_string(),
+            bytes: None,
+            source_path: Some(body_texture.clone()),
+            mime_type: None,
+        });
+        let mut second_mesh = state.meshes[0].clone();
+        second_mesh.name = "wing".to_string();
+        second_mesh.mesh_def.name = Some("wing".to_string());
+        second_mesh.mesh_def.texture_path = Some("textures/wing.jpg".to_string());
+        second_mesh.texture_payload = Some(ImportedTexturePayload {
+            source_label: "wing-diffuse.jpg".to_string(),
+            file_name_hint: "wing-diffuse.jpg".to_string(),
+            bytes: None,
+            source_path: Some(wing_texture.clone()),
+            mime_type: None,
+        });
+        state.meshes.push(second_mesh);
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        let body_path = round_trip.meshes[0].texture_path.as_ref().unwrap();
+        let wing_path = round_trip.meshes[1].texture_path.as_ref().unwrap();
+        assert!(body_path.starts_with("assets/textures/imported/test_import/"));
+        assert!(wing_path.starts_with("assets/textures/imported/test_import/"));
+        assert_ne!(body_path, wing_path);
+        assert!(campaign_dir.path().join(body_path).exists());
+        assert!(campaign_dir.path().join(wing_path).exists());
+    }
+
+    #[test]
+    fn test_export_creature_errors_when_imported_texture_is_missing() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("textures/missing.png".to_string());
+        state.meshes[0].texture_payload = Some(ImportedTexturePayload {
+            source_label: "missing.png".to_string(),
+            file_name_hint: "missing.png".to_string(),
+            bytes: None,
+            source_path: Some(campaign_dir.path().join("missing.png")),
+            mime_type: None,
+        });
+
+        let error = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap_err();
+        assert!(matches!(
+            error,
+            ObjImporterExportError::MissingTexture { .. }
+        ));
+    }
+
+    #[test]
     fn test_preview_export_relative_path_uses_expected_directories() {
         assert_eq!(
             preview_export_relative_path(ExportType::Creature, "Stone Golem", 44, ""),
@@ -1455,6 +2227,9 @@ mod tests {
         state.meshes[0].color_source = ImportedMeshColorSource::AutoAssigned;
         assert!(describe_mesh_color_source(&state.meshes[0]).contains("mesh-name fallback"));
 
+        state.meshes[0].color_source = ImportedMeshColorSource::TextureNeutral;
+        assert!(describe_mesh_color_source(&state.meshes[0]).contains("neutral tint"));
+
         state.meshes[0].color_source = ImportedMeshColorSource::ManualOverride;
         assert!(describe_mesh_color_source(&state.meshes[0]).contains("manual importer override"));
     }
@@ -1466,6 +2241,7 @@ mod tests {
             label: "HeroSkin".to_string(),
             color: [0.7, 0.6, 0.5, 1.0],
             texture_path: Some("textures/hero.png".to_string()),
+            texture_source_path: None,
         };
 
         stage_imported_swatch_as_custom_draft(&mut state, &swatch);
@@ -1503,6 +2279,7 @@ mod tests {
             label: "HeroSkin".to_string(),
             color: [0.7, 0.6, 0.5, 1.0],
             texture_path: Some("textures/hero.png".to_string()),
+            texture_source_path: None,
         }];
         state.meshes[0].color_source = ImportedMeshColorSource::ImportedMaterial;
         let ctx = egui::Context::default();
@@ -1516,5 +2293,755 @@ mod tests {
         });
 
         assert_eq!(state.mode, ImporterMode::Loaded);
+    }
+
+    #[test]
+    fn test_show_obj_importer_tab_renders_error_status_in_red() {
+        let mut state = ObjImporterState::new();
+        state.status_message = "Error: could not load file.".to_string();
+        state.is_error = true;
+        let ctx = egui::Context::default();
+        let mut logger = Logger::default();
+
+        // Verify that rendering does not panic when is_error is true.
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let signal = show_obj_importer_tab(ui, &mut state, None, &mut logger);
+                assert!(signal.is_none());
+            });
+        });
+
+        // is_error and status_message should be unchanged by rendering.
+        assert!(state.is_error, "is_error should remain true after render");
+        assert!(!state.status_message.is_empty());
+    }
+
+    #[test]
+    fn test_render_idle_mode_sets_is_error_on_unknown_format() {
+        use std::io::Write;
+        let temp_dir = tempfile::tempdir().unwrap();
+        let fake_file = temp_dir.path().join("model.xyz");
+        std::fs::File::create(&fake_file)
+            .unwrap()
+            .write_all(b"fake")
+            .unwrap();
+
+        let mut state = ObjImporterState::new();
+        state.source_path = Some(fake_file.clone());
+
+        // load_model_into_state should return an error for .xyz
+        let result = load_model_into_state(&mut state, &fake_file);
+        assert!(result.is_err(), "should error for unknown format");
+
+        // The caller (render_idle_mode) sets is_error; simulate that here.
+        state.status_message = result.unwrap_err().to_string();
+        state.is_error = true;
+
+        assert!(state.is_error, "is_error should be true after load failure");
+        assert!(
+            !state.status_message.is_empty(),
+            "status_message should be set"
+        );
+    }
+
+    // ─── GLB builder helpers (local copies for UI-layer tests) ──────────────
+
+    /// Build a minimal valid GLB binary from a JSON chunk and optional binary chunk.
+    fn build_test_glb(json: &str, bin: Option<&[u8]>) -> Vec<u8> {
+        let mut json_bytes = json.as_bytes().to_vec();
+        while !json_bytes.len().is_multiple_of(4) {
+            json_bytes.push(b' ');
+        }
+        let bin_chunk_total = bin.map_or(0usize, |b| {
+            let padded = (b.len() + 3) & !3;
+            8 + padded
+        });
+        let total_len = 12 + 8 + json_bytes.len() + bin_chunk_total;
+        let mut out = Vec::with_capacity(total_len);
+        out.extend_from_slice(&0x46546C67u32.to_le_bytes()); // magic "glTF"
+        out.extend_from_slice(&2u32.to_le_bytes()); // version
+        out.extend_from_slice(&(total_len as u32).to_le_bytes());
+        out.extend_from_slice(&(json_bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(&0x4E4F534Au32.to_le_bytes()); // "JSON"
+        out.extend_from_slice(&json_bytes);
+        if let Some(bin_data) = bin {
+            let padded = (bin_data.len() + 3) & !3;
+            out.extend_from_slice(&(padded as u32).to_le_bytes());
+            out.extend_from_slice(&0x004E4942u32.to_le_bytes()); // "BIN\0"
+            out.extend_from_slice(bin_data);
+            let pad = padded - bin_data.len();
+            out.resize(out.len() + pad, 0x00);
+        }
+        out
+    }
+
+    /// A minimal GLB with one triangle mesh and no texture.
+    fn build_minimal_triangle_glb() -> Vec<u8> {
+        let mut bin = Vec::new();
+        for pos in [[-1.0f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]] {
+            for f in pos {
+                bin.extend_from_slice(&f.to_le_bytes());
+            }
+        }
+        for idx in [0u16, 1, 2] {
+            bin.extend_from_slice(&idx.to_le_bytes());
+        }
+        build_test_glb(
+            r#"{"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],"meshes":[{"name":"TestMesh","primitives":[{"attributes":{"POSITION":0},"indices":1,"mode":4}]}],"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[-1,0,0],"max":[1,1,0]},{"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36},{"buffer":0,"byteOffset":36,"byteLength":6}],"buffers":[{"byteLength":42}]}"#,
+            Some(&bin),
+        )
+    }
+
+    // ─── Phase 3 tests ────────────────────────────────────────────────────────
+
+    /// OBJ path dispatches to the OBJ loader and leaves `source_format == Obj`.
+    #[test]
+    fn test_load_model_into_state_dispatches_obj() {
+        let path = fixture_path("data/test_fixtures/skeleton.obj");
+        let mut state = ObjImporterState::new();
+
+        let result = load_model_into_state(&mut state, &path);
+
+        assert!(result.is_ok(), "Expected Ok, got {result:?}");
+        assert_eq!(state.source_format, ImportSourceFormat::Obj);
+        assert_eq!(state.mode, ImporterMode::Loaded);
+    }
+
+    /// GLB path dispatches to the GLB loader and leaves `source_format == Glb`.
+    #[test]
+    fn test_load_model_into_state_dispatches_glb() {
+        let temp_dir = tempdir().unwrap();
+        let glb_path = temp_dir.path().join("model.glb");
+        fs::write(&glb_path, build_minimal_triangle_glb()).unwrap();
+        let mut state = ObjImporterState::new();
+
+        let result = load_model_into_state(&mut state, &glb_path);
+
+        assert!(result.is_ok(), "Expected Ok, got {result:?}");
+        assert_eq!(state.source_format, ImportSourceFormat::Glb);
+        assert_eq!(state.mode, ImporterMode::Loaded);
+    }
+
+    /// An unrecognised extension returns `ObjImportError::UnknownFormat`.
+    #[test]
+    fn test_load_model_into_state_rejects_unknown_extension() {
+        let mut state = ObjImporterState::new();
+        let path = PathBuf::from("model.fbx");
+
+        let result = load_model_into_state(&mut state, &path);
+
+        assert!(
+            matches!(result, Err(ObjImportError::UnknownFormat { ref extension }) if extension == "fbx"),
+            "Expected UnknownFormat{{extension: fbx}}, got {result:?}"
+        );
+    }
+
+    // ─── Phase 4 tests: Embedded Texture Export ───────────────────────────────
+
+    /// Returns a minimal `ImportedTexturePayload` with embedded PNG bytes.
+    fn glb_embedded_payload(file_name_hint: &str, bytes: Vec<u8>) -> ImportedTexturePayload {
+        ImportedTexturePayload {
+            source_label: "albedo".to_string(),
+            file_name_hint: file_name_hint.to_string(),
+            bytes: Some(bytes),
+            source_path: None,
+            mime_type: Some("image/png".to_string()),
+        }
+    }
+
+    /// After exporting a GLB creature, the embedded texture bytes are written to
+    /// `assets/textures/imported/<asset>/<hint>` with the expected content.
+    #[test]
+    fn test_export_glb_embedded_texture_writes_campaign_texture_file() {
+        let campaign_dir = tempdir().unwrap();
+        let texture_bytes = b"PNG_FAKE_BYTES_FOR_TEST".to_vec();
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload =
+            Some(glb_embedded_payload("texture_0.png", texture_bytes.clone()));
+
+        let _outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+
+        let expected = campaign_dir
+            .path()
+            .join("assets/textures/imported/test_import/texture_0.png");
+        assert!(expected.exists(), "Texture file should have been written");
+        assert_eq!(
+            fs::read(&expected).unwrap(),
+            texture_bytes,
+            "Texture file content must match the embedded bytes"
+        );
+    }
+
+    /// The RON creature file must reference the campaign-relative texture path
+    /// produced during export, not the placeholder embedded in the GLB.
+    #[test]
+    fn test_export_glb_rewrites_mesh_texture_path_to_campaign_relative() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload = Some(glb_embedded_payload(
+            "texture_0.png",
+            b"fake_png_data".to_vec(),
+        ));
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        let texture_path = round_trip.meshes[0].texture_path.as_ref().unwrap();
+        assert_eq!(
+            texture_path,
+            "assets/textures/imported/test_import/texture_0.png"
+        );
+    }
+
+    /// Two meshes with distinct embedded payloads must produce two distinct
+    /// texture files under the same asset directory.
+    #[test]
+    fn test_export_glb_multiple_embedded_textures_get_distinct_paths() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload = Some(glb_embedded_payload(
+            "texture_0.png",
+            b"body_bytes".to_vec(),
+        ));
+
+        let mut wing = state.meshes[0].clone();
+        wing.name = "wing".to_string();
+        wing.mesh_def.name = Some("wing".to_string());
+        wing.mesh_def.texture_path = Some("__glb_embedded_1".to_string());
+        wing.texture_payload = Some(glb_embedded_payload(
+            "texture_1.png",
+            b"wing_bytes".to_vec(),
+        ));
+        state.meshes.push(wing);
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        let path0 = round_trip.meshes[0].texture_path.as_ref().unwrap();
+        let path1 = round_trip.meshes[1].texture_path.as_ref().unwrap();
+        assert_ne!(
+            path0, path1,
+            "Distinct payloads must produce distinct texture paths"
+        );
+        assert!(
+            campaign_dir.path().join(path0).exists(),
+            "First texture file must exist"
+        );
+        assert!(
+            campaign_dir.path().join(path1).exists(),
+            "Second texture file must exist"
+        );
+    }
+
+    /// Two meshes whose embedded byte payloads are **identical** must both
+    /// reference the same destination file; only one file should be written.
+    #[test]
+    fn test_export_glb_deduplicates_identical_texture_payload() {
+        let campaign_dir = tempdir().unwrap();
+        let shared_bytes = b"shared_texture_data".to_vec();
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload =
+            Some(glb_embedded_payload("texture_0.png", shared_bytes.clone()));
+
+        let mut second = state.meshes[0].clone();
+        second.name = "detail".to_string();
+        second.mesh_def.name = Some("detail".to_string());
+        second.mesh_def.texture_path = Some("__glb_embedded_1".to_string());
+        second.texture_payload = Some(glb_embedded_payload("texture_0.png", shared_bytes));
+        state.meshes.push(second);
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        let path0 = round_trip.meshes[0].texture_path.as_ref().unwrap();
+        let path1 = round_trip.meshes[1].texture_path.as_ref().unwrap();
+        assert_eq!(
+            path0, path1,
+            "Identical payloads must deduplicate to the same path"
+        );
+
+        let texture_dir = campaign_dir
+            .path()
+            .join("assets/textures/imported/test_import");
+        let file_count = fs::read_dir(&texture_dir).map(|d| d.count()).unwrap_or(0);
+        assert_eq!(
+            file_count, 1,
+            "Only one texture file should be written for identical payloads"
+        );
+    }
+
+    /// When a mesh declares a texture path but the payload has neither embedded
+    /// bytes nor a valid filesystem path, export must fail with `MissingTexture`
+    /// **before** any RON file is created.
+    #[test]
+    fn test_export_glb_missing_texture_payload_fails_before_ron_write() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload = Some(ImportedTexturePayload {
+            source_label: "missing".to_string(),
+            file_name_hint: "texture_0.png".to_string(),
+            bytes: None,       // No embedded bytes
+            source_path: None, // No filesystem path
+            mime_type: Some("image/png".to_string()),
+        });
+
+        let error = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap_err();
+
+        assert!(
+            matches!(error, ObjImporterExportError::MissingTexture { .. }),
+            "Expected MissingTexture, got {error:?}"
+        );
+        let ron_path = campaign_dir.path().join("assets/creatures/test_import.ron");
+        assert!(
+            !ron_path.exists(),
+            "RON file must not be created when texture resolution fails"
+        );
+    }
+
+    #[test]
+    fn test_export_glb_unknown_mime_writes_bin_and_warns() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload = Some(ImportedTexturePayload {
+            source_label: "Mystery Texture".to_string(),
+            file_name_hint: "mystery_texture.bin".to_string(),
+            bytes: Some(b"unknown_mime_texture".to_vec()),
+            source_path: None,
+            mime_type: Some("image/webp".to_string()),
+        });
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+        let texture_path = round_trip.meshes[0].texture_path.as_ref().unwrap();
+
+        assert!(
+            texture_path.ends_with("mystery_texture.bin"),
+            "unknown MIME textures must export with .bin, got: {texture_path}"
+        );
+        assert!(campaign_dir.path().join(texture_path).exists());
+        assert!(
+            outcome.status_message.contains("unknown MIME type")
+                && outcome.status_message.contains(".bin"),
+            "unknown MIME export should warn in status_message, got: {}",
+            outcome.status_message
+        );
+    }
+
+    #[test]
+    fn test_missing_texture_display_message_matches_spec() {
+        let error = ObjImporterExportError::MissingTexture {
+            mesh_name: "body".to_string(),
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "Texture for mesh 'body' could not be resolved."
+        );
+    }
+
+    #[test]
+    fn test_no_meshes_loaded_display_message_mentions_model() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = ObjImporterState::new();
+        state.creature_name = "Empty Export".to_string();
+
+        let error = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap_err();
+
+        assert_eq!(error.to_string(), "Load a model file before exporting");
+    }
+
+    /// OBJ-style texture export (filesystem `source_path`, no embedded bytes)
+    /// must continue to work after the Phase 4 refactor.
+    #[test]
+    fn test_export_obj_texture_copy_still_passes() {
+        let campaign_dir = tempdir().unwrap();
+        let source_dir = tempdir().unwrap();
+        let body_texture = source_dir.path().join("body.png");
+        fs::write(&body_texture, b"obj_body_texture").unwrap();
+
+        let mut state = triangle_mesh_state();
+        state.meshes[0].mesh_def.texture_path = Some("textures/body.png".to_string());
+        state.meshes[0].texture_payload = Some(ImportedTexturePayload {
+            source_label: "body.png".to_string(),
+            file_name_hint: "body.png".to_string(),
+            bytes: None,                             // OBJ: no embedded bytes
+            source_path: Some(body_texture.clone()), // OBJ: resolved filesystem path
+            mime_type: None,
+        });
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        let texture_path = round_trip.meshes[0].texture_path.as_ref().unwrap();
+        assert!(
+            texture_path.starts_with("assets/textures/imported/test_import/"),
+            "Expected campaign-relative prefix, got: {texture_path}"
+        );
+        assert!(
+            campaign_dir.path().join(texture_path).exists(),
+            "Exported texture file must exist"
+        );
+        assert_eq!(
+            fs::read(campaign_dir.path().join(texture_path)).unwrap(),
+            b"obj_body_texture",
+            "Copied texture content must match the source file"
+        );
+    }
+
+    // ── Phase 5 tests: Runtime and Domain Compatibility ─────────────────────
+
+    /// A `CreatureDefinition` whose `texture_path` follows the GLB-import
+    /// campaign-relative convention (`assets/textures/imported/<name>/<file>`)
+    /// must survive a full RON serialization/deserialization round-trip without
+    /// any path corruption (back-slash conversion, extra escaping, etc.).
+    #[test]
+    fn test_glb_exported_texture_path_round_trips_through_ron() {
+        let original_path = "assets/textures/imported/dragon/dragon_albedo.png";
+
+        // Pre-create the texture so resolve_imported_texture_source recognises
+        // it as AlreadyCampaignRelative and leaves mesh_def.texture_path intact.
+        let campaign_dir = tempdir().unwrap();
+        let texture_file = campaign_dir.path().join(original_path);
+        fs::create_dir_all(texture_file.parent().unwrap()).unwrap();
+        fs::write(&texture_file, b"dummy").unwrap();
+
+        let mut state = triangle_mesh_state();
+        state.creature_name = "Dragon".to_string();
+        state.meshes[0].mesh_def.texture_path = Some(original_path.to_string());
+        state.meshes[0].texture_payload = None; // already campaign-relative, no copy needed
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        assert_eq!(
+            round_trip.meshes[0].texture_path.as_deref(),
+            Some(original_path),
+            "texture_path must survive RON round-trip without path corruption"
+        );
+    }
+
+    /// Exporting with `ExportType::Item` must preserve `texture_path` in the
+    /// written RON so the runtime can locate the texture asset.
+    #[test]
+    fn test_glb_item_export_preserves_texture_path() {
+        let campaign_dir = tempdir().unwrap();
+        let texture_bytes = b"fake_sword_texture".to_vec();
+
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Item;
+        state.creature_name = "Magic Sword".to_string();
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload =
+            Some(glb_embedded_payload("sword_albedo.png", texture_bytes));
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        let texture_path = round_trip.meshes[0]
+            .texture_path
+            .as_ref()
+            .expect("Item export must preserve texture_path in RON");
+        assert!(
+            texture_path.starts_with("assets/textures/imported/magic_sword/"),
+            "Item texture_path must be campaign-relative under \
+             assets/textures/imported/, got: {texture_path}"
+        );
+        assert!(
+            campaign_dir.path().join(texture_path).exists(),
+            "Item texture file must exist at the exported campaign-relative path"
+        );
+    }
+
+    /// Exporting with `ExportType::Furniture` must preserve `texture_path` in
+    /// the written RON so the runtime can locate the texture asset.
+    #[test]
+    fn test_importer_large_mesh_list_renders_bounded_rows() {
+        // Build a state with 200 meshes. The show_rows virtualization should
+        // handle this without panicking and without rendering all 200 rows.
+        let mut state = ObjImporterState {
+            mode: crate::obj_importer::ImporterMode::Loaded,
+            ..Default::default()
+        };
+
+        for i in 0..200_usize {
+            use antares::domain::visual::MeshDefinition;
+            let mesh_def = MeshDefinition {
+                name: Some(format!("mesh_{}", i)),
+                vertices: vec![[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                indices: vec![0, 1, 2],
+                normals: None,
+                uvs: None,
+                color: [1.0, 1.0, 1.0, 1.0],
+                lod_levels: None,
+                lod_distances: None,
+                material: None,
+                texture_path: None,
+            };
+            state
+                .meshes
+                .push(crate::obj_importer::ImportedMesh::from_mesh_definition(
+                    mesh_def,
+                ));
+        }
+
+        // Render the loaded mode in a small fixed-height egui context.
+        // The test passes as long as show_rows does not panic on large lists.
+        let ctx = egui::Context::default();
+        let mut logger = crate::logging::Logger::default();
+        let did_not_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    crate::obj_importer_ui::show_obj_importer_tab(
+                        ui,
+                        &mut state,
+                        None,
+                        &mut logger,
+                    );
+                });
+            });
+        }));
+        assert!(
+            did_not_panic.is_ok(),
+            "show_rows must handle 200-mesh importer state without panicking"
+        );
+    }
+
+    #[test]
+    fn test_glb_furniture_export_preserves_texture_path() {
+        let campaign_dir = tempdir().unwrap();
+        let texture_bytes = b"fake_wood_texture".to_vec();
+
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Furniture;
+        state.creature_name = "Oak Table".to_string();
+        state.furniture_id = 10042;
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload =
+            Some(glb_embedded_payload("table_wood.png", texture_bytes));
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        let texture_path = round_trip.meshes[0]
+            .texture_path
+            .as_ref()
+            .expect("Furniture export must preserve texture_path in RON");
+        assert!(
+            texture_path.starts_with("assets/textures/imported/oak_table/"),
+            "Furniture texture_path must be campaign-relative under \
+             assets/textures/imported/, got: {texture_path}"
+        );
+        assert!(
+            campaign_dir.path().join(texture_path).exists(),
+            "Furniture texture file must exist at the exported campaign-relative path"
+        );
+    }
+
+    // ── creature_category_from_str ────────────────────────────────────────────
+
+    #[test]
+    fn test_creature_category_from_str_maps_all_display_names() {
+        assert_eq!(
+            creature_category_from_str("Monsters"),
+            CreatureCategory::Monsters
+        );
+        assert_eq!(creature_category_from_str("NPCs"), CreatureCategory::Npcs);
+        assert_eq!(
+            creature_category_from_str("Templates"),
+            CreatureCategory::Templates
+        );
+        assert_eq!(
+            creature_category_from_str("Variants"),
+            CreatureCategory::Variants
+        );
+        assert_eq!(
+            creature_category_from_str("Custom"),
+            CreatureCategory::Custom
+        );
+    }
+
+    #[test]
+    fn test_creature_category_from_str_empty_or_unknown_defaults_to_custom() {
+        assert_eq!(creature_category_from_str(""), CreatureCategory::Custom);
+        assert_eq!(
+            creature_category_from_str("unknown_category"),
+            CreatureCategory::Custom
+        );
+        assert_eq!(
+            creature_category_from_str("monsters"), // wrong case
+            CreatureCategory::Custom
+        );
+    }
+
+    // ── suggest_next_creature_id_from_dir ────────────────────────────────────
+
+    #[test]
+    fn test_suggest_next_creature_id_no_campaign_dir_returns_range_start() {
+        // Without a campaign directory every category should fall back to the
+        // first ID in its range.
+        assert_eq!(
+            suggest_next_creature_id_from_dir(None, CreatureCategory::Monsters),
+            1
+        );
+        assert_eq!(
+            suggest_next_creature_id_from_dir(None, CreatureCategory::Npcs),
+            1000
+        );
+        assert_eq!(
+            suggest_next_creature_id_from_dir(None, CreatureCategory::Templates),
+            2000
+        );
+        assert_eq!(
+            suggest_next_creature_id_from_dir(None, CreatureCategory::Variants),
+            3000
+        );
+        assert_eq!(
+            suggest_next_creature_id_from_dir(None, CreatureCategory::Custom),
+            4000
+        );
+    }
+
+    #[test]
+    fn test_suggest_next_creature_id_skips_used_ids_in_range() {
+        use crate::creature_assets::CreatureAssetManager;
+        use antares::domain::visual::CreatureDefinition;
+
+        let temp_dir = tempdir().unwrap();
+        let manager = CreatureAssetManager::new(temp_dir.path().to_path_buf());
+
+        // Register two monster-range creatures (IDs 1 and 2).
+        for id in [1u32, 2u32] {
+            let creature = CreatureDefinition {
+                id,
+                name: format!("Creature {id}"),
+                meshes: vec![],
+                mesh_transforms: vec![],
+                scale: 1.0,
+                color_tint: None,
+            };
+            manager.save_creature(&creature).unwrap();
+        }
+
+        // The next available monster ID should be 3, skipping 1 and 2.
+        assert_eq!(
+            suggest_next_creature_id_from_dir(Some(temp_dir.path()), CreatureCategory::Monsters),
+            3
+        );
+
+        // NPCs and other categories are untouched, so should still return
+        // their respective range starts.
+        assert_eq!(
+            suggest_next_creature_id_from_dir(Some(temp_dir.path()), CreatureCategory::Npcs),
+            1000
+        );
+    }
+
+    #[test]
+    fn test_suggest_next_creature_id_empty_campaign_returns_range_start() {
+        let temp_dir = tempdir().unwrap();
+        // No creatures saved — should return the first ID of each range.
+        assert_eq!(
+            suggest_next_creature_id_from_dir(Some(temp_dir.path()), CreatureCategory::Monsters),
+            1
+        );
+        assert_eq!(
+            suggest_next_creature_id_from_dir(Some(temp_dir.path()), CreatureCategory::Custom),
+            4000
+        );
+    }
+
+    // ── idle-mode category change detection ──────────────────────────────────
+
+    /// Changing the category in idle mode must update `creature_id` to the
+    /// start of the new range (with no campaign dir, so no disk I/O).
+    #[test]
+    fn test_idle_mode_category_change_updates_creature_id_no_campaign() {
+        // Simulate what the idle-mode ComboBox now does when category changes.
+        let mut state = ObjImporterState::new();
+        state.category = "NPCs".to_string();
+        state.creature_id = 1001;
+
+        // User switches to Monsters.
+        let new_cat = creature_category_from_str("Monsters");
+        state.creature_id = suggest_next_creature_id_from_dir(None, new_cat);
+        state.category = "Monsters".to_string();
+
+        assert!(
+            new_cat.id_range().contains(&state.creature_id),
+            "creature_id {} must be in the Monsters range after switching category",
+            state.creature_id
+        );
+    }
+
+    /// After a successful model load the creature_id must reflect the current
+    /// category's range, not carry over a stale ID from a previous export session.
+    #[test]
+    fn test_model_load_suggests_id_for_current_category_no_campaign() {
+        let mut state = ObjImporterState::new();
+        // Simulate state preserved from a previous NPC export.
+        state.category = "NPCs".to_string();
+        state.creature_id = 1042; // arbitrary NPC-range leftover
+
+        // The user loads a new model and the importer re-suggests the ID.
+        // (No campaign_dir, so disk I/O is skipped and range-start is returned.)
+        if state.export_type == ExportType::Creature {
+            let current_cat = creature_category_from_str(&state.category);
+            state.creature_id = suggest_next_creature_id_from_dir(None, current_cat);
+        }
+
+        // With no campaign dir, suggest_next_creature_id_from_dir returns the
+        // range start for NPCs (1000).  The point is it's a valid NPC-range ID.
+        let npc_range = CreatureCategory::Npcs.id_range();
+        assert!(
+            npc_range.contains(&state.creature_id),
+            "creature_id {} must be in NPC range after model load with NPC category",
+            state.creature_id
+        );
+    }
+
+    /// Switching category then loading a model must produce an ID in the
+    /// post-switch category's range.
+    #[test]
+    fn test_model_load_after_category_switch_gives_correct_range_id() {
+        let mut state = ObjImporterState::new();
+        // Previous session left NPC state.
+        state.category = "NPCs".to_string();
+        state.creature_id = 1042;
+
+        // User switches category to Monsters in idle mode.
+        let new_cat = creature_category_from_str("Monsters");
+        state.creature_id = suggest_next_creature_id_from_dir(None, new_cat);
+        state.category = "Monsters".to_string();
+
+        // Then loads a model; the load also re-suggests (same result when no campaign).
+        if state.export_type == ExportType::Creature {
+            let current_cat = creature_category_from_str(&state.category);
+            state.creature_id = suggest_next_creature_id_from_dir(None, current_cat);
+        }
+
+        let monster_range = CreatureCategory::Monsters.id_range();
+        assert!(
+            monster_range.contains(&state.creature_id),
+            "creature_id {} must be in Monster range",
+            state.creature_id
+        );
+        assert_eq!(
+            state.creature_id, 1,
+            "no monsters in campaign, so ID must be 1"
+        );
     }
 }

@@ -164,6 +164,16 @@ pub struct CharactersEditorState {
     #[serde(skip)]
     pub last_campaign_dir: Option<PathBuf>,
 
+    /// Whether the creature autocomplete cache must be rebuilt on the next
+    /// [`show`] call, regardless of campaign directory change.
+    ///
+    /// Set by [`invalidate_creature_cache`] whenever `campaign_data.creatures`
+    /// changes without a corresponding `campaign_dir` change (e.g. after a
+    /// creature is exported from the Importer, or after the Creatures toolbar
+    /// Reload button fires).
+    #[serde(skip)]
+    pub creature_cache_dirty: bool,
+
     /// Last characters filename (cached from show() call)
     #[serde(skip)]
     pub last_characters_file: Option<String>,
@@ -309,6 +319,7 @@ impl Default for CharactersEditorState {
             portrait_textures: HashMap::new(),
             available_portraits: Vec::new(),
             last_campaign_dir: None,
+            creature_cache_dirty: false,
             last_characters_file: None,
             reset_autocomplete_buffers: false,
         }
@@ -319,6 +330,28 @@ impl CharactersEditorState {
     /// Creates a new characters editor state
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Marks the creature autocomplete cache as stale so it is rebuilt on
+    /// the next [`show`] call, regardless of whether the campaign directory
+    /// has changed.
+    ///
+    /// Call this after a creature is exported from the Importer or after the
+    /// creature registry is reloaded externally — any time
+    /// `campaign_data.creatures` changes without a `campaign_dir` change.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::characters_editor::CharactersEditorState;
+    ///
+    /// let mut state = CharactersEditorState::default();
+    /// assert!(!state.creature_cache_dirty);
+    /// state.invalidate_creature_cache();
+    /// assert!(state.creature_cache_dirty);
+    /// ```
+    pub fn invalidate_creature_cache(&mut self) {
+        self.creature_cache_dirty = true;
     }
 
     /// Starts creating a new character
@@ -1148,9 +1181,10 @@ impl CharactersEditorState {
             (None, None) => false,
         };
 
-        if campaign_dir_changed {
+        if campaign_dir_changed || self.creature_cache_dirty {
             self.available_portraits = extract_portrait_candidates(ctx.campaign_dir);
-            // Rebuild creature candidates from the manager whenever the campaign dir changes.
+            // Rebuild creature candidates from the manager whenever the campaign dir changes
+            // or when invalidate_creature_cache() has been called.
             self.available_creatures = creature_manager
                 .and_then(|m| m.load_all_creatures().ok())
                 .map(|creatures| {
@@ -1160,6 +1194,7 @@ impl CharactersEditorState {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
+            self.creature_cache_dirty = false;
             self.last_campaign_dir = ctx.campaign_dir.cloned();
         }
 
@@ -3307,6 +3342,20 @@ mod tests {
         state.last_campaign_dir = Some(dir2.clone());
         assert_eq!(state.last_campaign_dir, Some(dir2));
         assert_ne!(state.last_campaign_dir, Some(dir1));
+    }
+
+    #[test]
+    fn test_invalidate_creature_cache_sets_dirty_flag() {
+        let mut state = CharactersEditorState::default();
+        assert!(
+            !state.creature_cache_dirty,
+            "creature_cache_dirty must be false by default"
+        );
+        state.invalidate_creature_cache();
+        assert!(
+            state.creature_cache_dirty,
+            "invalidate_creature_cache() must set creature_cache_dirty to true"
+        );
     }
 
     #[test]

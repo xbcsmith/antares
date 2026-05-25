@@ -188,9 +188,17 @@ impl CampaignBuilderApp {
             self.obj_importer_state.custom_palette = color_palette::CustomPalette::default();
         }
 
-        match self
-            .next_available_creature_id_for_category(creature_id_manager::CreatureCategory::Custom)
-        {
+        // Derive the creature category from the importer's current category string
+        // so that the suggested ID falls in the correct range (e.g. Monsters 1-999,
+        // NPCs 1000-1999) rather than always defaulting to Custom (4000+).
+        let import_category = match self.obj_importer_state.category.as_str() {
+            "Monsters" => creature_id_manager::CreatureCategory::Monsters,
+            "NPCs" => creature_id_manager::CreatureCategory::Npcs,
+            "Templates" => creature_id_manager::CreatureCategory::Templates,
+            "Variants" => creature_id_manager::CreatureCategory::Variants,
+            _ => creature_id_manager::CreatureCategory::Custom,
+        };
+        match self.next_available_creature_id_for_category(import_category) {
             Ok(next_id) => self.obj_importer_state.set_next_creature_id(next_id),
             Err(error) => self.logger.warn(
                 category::APP,

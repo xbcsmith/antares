@@ -1448,7 +1448,7 @@ fn sync_party_to_combat(mut combat_res: ResMut<CombatResource>, global_state: Re
 ///
 /// Base values and stats are left untouched; `sync_combat_to_party_on_exit`
 /// handles the full authoritative copy when combat ends.
-fn sync_party_hp_during_combat(
+pub(crate) fn sync_party_hp_during_combat(
     mut global_state: ResMut<GlobalState>,
     combat_res: Res<CombatResource>,
 ) {
@@ -7499,6 +7499,55 @@ mod tests {
             matches!(gs_after.0.mode, GameMode::Combat(_)),
             "combat must still be active after sync; got {:?}",
             gs_after.0.mode
+        );
+    }
+
+    /// `sync_party_hp_during_combat` must also mirror current SP while combat is active.
+    ///
+    /// Sorcerer spells are primarily cast in combat, so the HUD's SP bar depends on
+    /// this live mirror to show spell-point costs as soon as they are paid.
+    #[test]
+    fn test_sync_party_hp_during_combat_updates_party_sp_for_sorcerer() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let mut mage = Character::new(
+            "LiveSpMage".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        mage.sp.base = 12;
+        mage.sp.current = 12;
+        gs.party.add_member(mage.clone()).unwrap();
+        gs.enter_combat();
+
+        let mut cr = CombatResource::new();
+        let mut combat_mage = mage.clone();
+        combat_mage.sp.current = 7; // simulates a 5-SP sorcerer spell already cast
+        cr.state.add_player(combat_mage);
+        cr.player_orig_indices = vec![Some(0)];
+        crate::domain::combat::engine::start_combat(&mut cr.state);
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        app.insert_resource(cr);
+
+        app.update();
+
+        let gs_after = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+        assert_eq!(
+            gs_after.0.party.members[0].sp.current, 7,
+            "sync_party_hp_during_combat must mirror combat SP into party.members \
+             so the HUD SP bar shows sorcerer spell-point spending immediately"
+        );
+        assert_eq!(
+            gs_after.0.party.members[0].sp.base, 12,
+            "SP sync must not mutate the caster's base spell points"
         );
     }
 

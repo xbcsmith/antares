@@ -315,6 +315,7 @@ pub struct ItemMeshDescriptorOverride {
 ///     icon_path: None,
 ///     tags: vec![],
 ///     mesh_descriptor_override: None,
+///     mesh_id: None,
 /// };
 ///
 /// let desc = ItemMeshDescriptor::from_item(&short_sword);
@@ -382,6 +383,7 @@ impl ItemMeshDescriptor {
     ///     item_type: ItemType::Consumable(ConsumableData {
     ///         effect: ConsumableEffect::HealHp(20),
     ///         is_combat_usable: true,
+    ///         duration_minutes: None,
     ///     }),
     ///     base_cost: 50,
     ///     sell_cost: 25,
@@ -394,6 +396,7 @@ impl ItemMeshDescriptor {
     ///     icon_path: None,
     ///     tags: vec![],
     ///     mesh_descriptor_override: None,
+    ///     mesh_id: None,
     /// };
     ///
     /// let desc = ItemMeshDescriptor::from_item(&potion);
@@ -517,6 +520,7 @@ impl ItemMeshDescriptor {
     ///     icon_path: None,
     ///     tags: vec![],
     ///     mesh_descriptor_override: None,
+    ///     mesh_id: None,
     /// };
     ///
     /// let desc = ItemMeshDescriptor::from_item(&sword);
@@ -888,6 +892,7 @@ impl ItemMeshDescriptor {
     ///     icon_path: None,
     ///     tags: vec![],
     ///     mesh_descriptor_override: None,
+    ///     mesh_id: None,
     /// };
     ///
     /// let desc = ItemMeshDescriptor::from_item(&sword);
@@ -936,6 +941,7 @@ impl ItemMeshDescriptor {
     ///     icon_path: None,
     ///     tags: vec![],
     ///     mesh_descriptor_override: None,
+    ///     mesh_id: None,
     /// };
     ///
     /// let desc = ItemMeshDescriptor::from_item(&sword);
@@ -994,6 +1000,7 @@ impl ItemMeshDescriptor {
     ///     icon_path: None,
     ///     tags: vec![],
     ///     mesh_descriptor_override: None,
+    ///     mesh_id: None,
     /// };
     ///
     /// let desc = ItemMeshDescriptor::from_item(&wand);

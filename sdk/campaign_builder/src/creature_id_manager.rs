@@ -172,6 +172,30 @@ impl CreatureCategory {
             CreatureCategory::Custom => [0.8, 0.6, 0.2],    // Orange
         }
     }
+
+    /// Returns a static slice of all categories in their defined display order.
+    ///
+    /// Useful for populating UI selection widgets such as ComboBoxes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::creature_id_manager::CreatureCategory;
+    ///
+    /// let cats = CreatureCategory::all_categories();
+    /// assert_eq!(cats.len(), 5);
+    /// assert_eq!(cats[0], CreatureCategory::Monsters);
+    /// assert_eq!(cats[4], CreatureCategory::Custom);
+    /// ```
+    pub fn all_categories() -> &'static [CreatureCategory] {
+        &[
+            CreatureCategory::Monsters,
+            CreatureCategory::Npcs,
+            CreatureCategory::Templates,
+            CreatureCategory::Variants,
+            CreatureCategory::Custom,
+        ]
+    }
 }
 
 /// Error type for ID management operations
@@ -910,5 +934,31 @@ mod tests {
     fn test_default_trait() {
         let manager = CreatureIdManager::default();
         assert_eq!(manager.used_id_count(), 0);
+    }
+
+    /// `all_categories()` must return exactly five entries.
+    #[test]
+    fn test_all_categories_has_five_entries() {
+        let cats = CreatureCategory::all_categories();
+        assert_eq!(cats.len(), 5);
+    }
+
+    /// Every category returned by `all_categories()` must have a strictly
+    /// ascending `id_range().start`, confirming display order matches ID order.
+    #[test]
+    fn test_all_categories_id_range_start_is_ascending() {
+        let cats = CreatureCategory::all_categories();
+        let mut prev_start = 0;
+        for cat in cats {
+            let range = cat.id_range();
+            assert!(
+                range.start > prev_start,
+                "Category {:?} range start {} should be > previous {}",
+                cat,
+                range.start,
+                prev_start,
+            );
+            prev_start = range.start;
+        }
     }
 }

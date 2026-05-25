@@ -632,6 +632,12 @@ dependencies = [
 
 [[package]]
 name = "base64"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
+
+[[package]]
+name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
@@ -1085,7 +1091,7 @@ version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3479fbaf897320a3ee30c1626b4a1bee0be874ca27699c3b2f3494891d103d9b"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bevy_animation",
  "bevy_app",
  "bevy_asset",
@@ -2139,6 +2145,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui_autocomplete",
+ "gltf",
  "image",
  "regex",
  "rfd",
@@ -3620,10 +3627,13 @@ version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3ce1918195723ce6ac74e80542c5a96a40c2b26162c1957a5cd70799b8cacf7"
 dependencies = [
+ "base64 0.13.1",
  "byteorder",
  "gltf-json",
+ "image",
  "lazy_static",
  "serde_json",
+ "urlencoding",
 ]
 
 [[package]]
@@ -5902,7 +5912,7 @@ version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "beceb6f7bf81c73e73aeef6dd1356d9a1b2b4909e1f0fc3e59b034f9572d7b7f"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bitflags 2.10.0",
  "serde",
  "serde_derive",

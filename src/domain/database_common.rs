@@ -32,7 +32,7 @@
 //!
 //! let map: HashMap<u32, Widget> = load_ron_entries(
 //!     ron,
-//!     |w| w.id,
+//!     |w: &Widget| w.id,
 //!     WidgetError::Duplicate,
 //!     WidgetError::Parse,
 //! )
@@ -92,7 +92,7 @@ use std::hash::Hash;
 ///     Dup(u32),
 /// }
 ///
-/// let items = load_ron_entries("[(id: 1), (id: 2)]", |i| i.id, DbError::Dup, DbError::Parse).unwrap();
+/// let items = load_ron_entries("[(id: 1), (id: 2)]", |i: &Item| i.id, DbError::Dup, DbError::Parse).unwrap();
 /// assert_eq!(items.len(), 2);
 /// ```
 ///
@@ -116,7 +116,7 @@ use std::hash::Hash;
 ///
 /// let entries = load_ron_entries(
 ///     r#"[(id: "a"), (id: "b")]"#,
-///     |e| e.id.clone(),
+///     |e: &Entry| e.id.clone(),
 ///     MyErr::Dup,
 ///     |e| MyErr::Parse(format!("RON parse error: {}", e)),
 /// )
@@ -185,7 +185,7 @@ where
 ///
 /// let monsters = load_ron_file(
 ///     "data/monsters.ron",
-///     |m| m.id,
+///     |m: &Monster| m.id,
 ///     MErr::Dup,
 ///     Into::into,  // io::Error → MErr via #[from]
 ///     Into::into,  // SpannedError → MErr via #[from]

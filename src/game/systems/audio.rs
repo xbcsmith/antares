@@ -37,6 +37,7 @@
 //! let mut app = App::new();
 //! app.add_plugins(AudioPlugin {
 //!     config: audio_config,
+//!     audio_dir: "assets/audio".to_string(),
 //! });
 //! # }
 //! ```
@@ -91,8 +92,13 @@ impl Default for AudioPaths {
 ///            "assets/audio/combat_theme.ogg");
 /// assert_eq!(resolve_audio_path("assets/audio", "fanfare.mp3"),
 ///            "assets/audio/fanfare.mp3");
+/// // Trailing slash in audio_dir is normalised — no double-slash in result:
+/// assert_eq!(resolve_audio_path("assets/audio/", "combat_theme"),
+///            "assets/audio/combat_theme.ogg");
 /// ```
 pub fn resolve_audio_path(audio_dir: &str, id: &str) -> String {
+    // Strip any trailing slash so format! never produces "dir//file".
+    let audio_dir = audio_dir.trim_end_matches('/');
     let has_ext = id.ends_with(".ogg")
         || id.ends_with(".mp3")
         || id.ends_with(".wav")
@@ -317,6 +323,7 @@ impl AudioSettings {
 /// let mut app = App::new();
 /// app.add_plugins(AudioPlugin {
 ///     config: audio_config,
+///     audio_dir: "assets/audio".to_string(),
 /// });
 /// # }
 /// ```
@@ -664,5 +671,52 @@ mod tests {
         let track = CurrentMusicTrack::default();
         assert!(track.entity.is_none());
         assert!(track.track_id.is_none());
+    }
+
+    /// `resolve_audio_path` must produce a clean path with no double-slash,
+    /// even when `audio_dir` has a trailing slash.
+    #[test]
+    fn test_resolve_audio_path_no_ext() {
+        assert_eq!(
+            resolve_audio_path("assets/audio", "combat_theme"),
+            "assets/audio/combat_theme.ogg"
+        );
+    }
+
+    #[test]
+    fn test_resolve_audio_path_with_ogg_ext() {
+        assert_eq!(
+            resolve_audio_path("assets/audio", "combat_theme.ogg"),
+            "assets/audio/combat_theme.ogg"
+        );
+    }
+
+    #[test]
+    fn test_resolve_audio_path_with_mp3_ext() {
+        assert_eq!(
+            resolve_audio_path("assets/audio", "fanfare.mp3"),
+            "assets/audio/fanfare.mp3"
+        );
+    }
+
+    #[test]
+    fn test_resolve_audio_path_trailing_slash_stripped() {
+        // A trailing slash in audio_dir must NOT produce a double-slash "//" in the result.
+        assert_eq!(
+            resolve_audio_path("assets/audio/", "combat_theme"),
+            "assets/audio/combat_theme.ogg",
+            "trailing slash in audio_dir must be stripped before joining"
+        );
+        assert_eq!(
+            resolve_audio_path("assets/audio/", "ambient.ogg"),
+            "assets/audio/ambient.ogg",
+            "trailing slash must not produce double-slash with an explicit ext"
+        );
+        // Multiple trailing slashes should also be normalised.
+        assert_eq!(
+            resolve_audio_path("assets/audio///", "fanfare.mp3"),
+            "assets/audio/fanfare.mp3",
+            "multiple trailing slashes must all be stripped"
+        );
     }
 }

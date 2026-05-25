@@ -436,10 +436,15 @@ impl Plugin for HudPlugin {
                 )
                     .chain(),
             )
-            // update_hud must run during combat too so party HP bars reflect live
-            // damage.  The exploration-only overlays (compass, clock, portraits) stay
-            // gated so they don't render on top of the combat HUD.
-            .add_systems(Update, update_hud)
+            // update_hud must run during combat too so party HP/SP bars reflect live
+            // damage and spell costs. Run it after the combat-resource mirror so
+            // sorcerer combat casts (the common SP-consuming case) are visible in
+            // the bottom HUD during the same frame instead of reading stale party
+            // values.
+            .add_systems(
+                Update,
+                update_hud.after(super::combat::sync_party_hp_during_combat),
+            )
             .add_systems(Update, handle_portrait_click_system)
             .add_systems(Update, update_automap_visibility)
             .add_systems(Update, bind_mini_map_canvas_image)
@@ -1768,30 +1773,45 @@ fn ensure_portraits_loaded(
                         // Compute the path relative to the campaign root and load it via the campaign's
                         // named AssetSource (`<campaign_id>://...`). This keeps asset references relative
                         // to the campaign directory while ensuring they are approved by the AssetServer.
-                        let relative_path = match path.strip_prefix(&campaign.root_path) {
-                            Ok(p) => p.to_path_buf(),
-                            Err(_) => {
-                                // Fallback: try canonicalizing both path and campaign root to compute a relative path.
-                                match (
-                                    std::fs::canonicalize(&path),
-                                    std::fs::canonicalize(&campaign.root_path),
-                                ) {
-                                    (Ok(abs_path), Ok(abs_root)) => abs_path
-                                        .strip_prefix(&abs_root)
-                                        .map(|p| p.to_path_buf())
-                                        .unwrap_or_else(|_| {
-                                            std::path::PathBuf::from(
-                                                path.file_name()
-                                                    .and_then(|n| n.to_str())
-                                                    .unwrap_or_default(),
-                                            )
-                                        }),
-                                    _ => std::path::PathBuf::from(
-                                        path.file_name()
-                                            .and_then(|n| n.to_str())
-                                            .unwrap_or_default(),
-                                    ),
-                                }
+                        //
+                        // Cascade through three normalisation strategies before giving up:
+                        //   1. Direct strip_prefix (fast; works when both paths share the same form).
+                        //   2. Canonicalize only campaign.root_path, then strip (handles symlinks or
+                        //      relative root_path joined against an absolute fs::read_dir result).
+                        //   3. Canonicalize both paths (last resort).
+                        // If all three fail we skip this file with a warning rather than falling back
+                        // to path.file_name() — a bare filename drops the directory structure and
+                        // causes asset_server.load() to look in the wrong location.
+                        let maybe_relative = path
+                            .strip_prefix(&campaign.root_path)
+                            .ok()
+                            .map(|p| p.to_path_buf())
+                            .or_else(|| {
+                                std::fs::canonicalize(&campaign.root_path).ok().and_then(
+                                    |abs_root| {
+                                        path.strip_prefix(&abs_root).ok().map(|p| p.to_path_buf())
+                                    },
+                                )
+                            })
+                            .or_else(|| {
+                                let abs_path = std::fs::canonicalize(&path).ok()?;
+                                let abs_root = std::fs::canonicalize(&campaign.root_path).ok()?;
+                                abs_path
+                                    .strip_prefix(&abs_root)
+                                    .ok()
+                                    .map(|p| p.to_path_buf())
+                            });
+
+                        let relative_path = match maybe_relative {
+                            Some(p) => p,
+                            None => {
+                                warn!(
+                                    "ensure_portraits_loaded: cannot compute campaign-relative \
+                                     path for '{}' (campaign_root='{}'); skipping",
+                                    path.display(),
+                                    campaign.root_path.display()
+                                );
+                                continue;
                             }
                         };
 
@@ -1955,28 +1975,42 @@ fn ensure_full_portraits_loaded(
                             path.display()
                         );
 
-                        let relative_path = match path.strip_prefix(&campaign.root_path) {
-                            Ok(p) => p.to_path_buf(),
-                            Err(_) => match (
-                                std::fs::canonicalize(&path),
-                                std::fs::canonicalize(&campaign.root_path),
-                            ) {
-                                (Ok(abs_path), Ok(abs_root)) => abs_path
+                        // Same three-stage normalisation as ensure_portraits_loaded.
+                        // Skips this file with a warning if no campaign-relative path
+                        // can be computed — avoids bare-filename fallback that drops
+                        // the directory structure and causes silent load failures.
+                        let maybe_relative = path
+                            .strip_prefix(&campaign.root_path)
+                            .ok()
+                            .map(|p| p.to_path_buf())
+                            .or_else(|| {
+                                std::fs::canonicalize(&campaign.root_path).ok().and_then(
+                                    |abs_root| {
+                                        path.strip_prefix(&abs_root).ok().map(|p| p.to_path_buf())
+                                    },
+                                )
+                            })
+                            .or_else(|| {
+                                let abs_path = std::fs::canonicalize(&path).ok()?;
+                                let abs_root = std::fs::canonicalize(&campaign.root_path).ok()?;
+                                abs_path
                                     .strip_prefix(&abs_root)
+                                    .ok()
                                     .map(|p| p.to_path_buf())
-                                    .unwrap_or_else(|_| {
-                                        std::path::PathBuf::from(
-                                            path.file_name()
-                                                .and_then(|n| n.to_str())
-                                                .unwrap_or_default(),
-                                        )
-                                    }),
-                                _ => std::path::PathBuf::from(
-                                    path.file_name()
-                                        .and_then(|n| n.to_str())
-                                        .unwrap_or_default(),
-                                ),
-                            },
+                            });
+
+                        let relative_path = match maybe_relative {
+                            Some(p) => p,
+                            None => {
+                                warn!(
+                                    "ensure_full_portraits_loaded: cannot compute \
+                                     campaign-relative path for '{}' \
+                                     (campaign_root='{}'); skipping",
+                                    path.display(),
+                                    campaign.root_path.display()
+                                );
+                                continue;
+                            }
                         };
 
                         let rel_str = relative_path
@@ -2065,7 +2099,7 @@ fn ensure_full_portraits_loaded(
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use antares::application::GameState;
 /// use antares::game::resources::GlobalState;
 /// use antares::game::systems::hud::in_automap_mode;

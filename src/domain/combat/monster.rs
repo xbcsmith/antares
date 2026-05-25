@@ -270,6 +270,8 @@ pub enum AiBehavior {
 ///     loot: LootTable::new(5, 15, 0, 1, 25),
 ///     flee_threshold: 25,
 ///     special_attack_threshold: 0,
+///     spells: vec![],
+///     spell_cooldown: 0,
 ///     resistances: MonsterResistances::new(),
 ///     can_regenerate: false,
 ///     can_advance: false,

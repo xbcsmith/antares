@@ -155,6 +155,7 @@ impl ItemDatabase {
     ///     icon_path: None,
     ///     tags: vec![],
     ///     mesh_descriptor_override: None,
+    ///     mesh_id: None,
     /// };
     /// db.add_item(club).unwrap();
     ///
@@ -254,6 +255,7 @@ impl ItemDatabase {
     ///     icon_path: None,
     ///     tags: vec![],
     ///     mesh_descriptor_override: None,
+    ///     mesh_id: None,
     /// };
     /// db.add_item(club.clone()).unwrap();
     ///
@@ -305,6 +307,7 @@ impl ItemDatabase {
     ///     icon_path: None,
     ///     tags: vec![],
     ///     mesh_descriptor_override: None,
+    ///     mesh_id: None,
     /// };
     /// db.add_item(sword).unwrap();
     /// assert!(db.validate_mesh_descriptors().is_ok());

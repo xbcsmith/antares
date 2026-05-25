@@ -391,7 +391,10 @@ pub fn create_material_with_texture(
 /// # Arguments
 ///
 /// * `asset_server` - Bevy asset server resource
-/// * `texture_path` - Relative path to texture file
+/// * `texture_path` - Path to the texture file, relative to the campaign root.
+///   **Must** start with `"assets/"` (e.g. `"assets/textures/dragon_scales.png"`).
+///   Paths without the `assets/` prefix will resolve against the wrong directory
+///   when `BEVY_ASSET_ROOT` is set to the campaign root.
 ///
 /// # Returns
 ///
@@ -404,10 +407,18 @@ pub fn create_material_with_texture(
 /// use bevy::prelude::*;
 ///
 /// fn load_dragon_texture(asset_server: &AssetServer) -> Handle<Image> {
-///     load_texture(asset_server, "textures/dragon_scales.png")
+///     // Path must include the `assets/` prefix so the AssetServer finds the file
+///     // at `<campaign_root>/assets/textures/dragon_scales.png`.
+///     load_texture(asset_server, "assets/textures/dragon_scales.png")
 /// }
 /// ```
 pub fn load_texture(asset_server: &AssetServer, texture_path: &str) -> Handle<Image> {
+    debug_assert!(
+        texture_path.starts_with("assets/"),
+        "load_texture: texture_path must start with 'assets/' \
+         so the AssetServer resolves it under the campaign root \
+         (got '{texture_path}')"
+    );
     asset_server.load(texture_path.to_string())
 }
 

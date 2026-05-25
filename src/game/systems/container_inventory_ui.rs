@@ -33,7 +33,7 @@
 //! | `1`–`6`          | Switch active character (number key maps to party index 0–5)   |
 //! | `←` `→` `↑` `↓` | Navigate the slot grid / item list inside the focused panel    |
 //! | `Enter`          | Enter **Action Navigation** for the highlighted slot           |
-//! | `Esc`            | Close container inventory; return to previous mode             |
+//! | `Esc`         | Close container inventory (handled by global toggle)              |
 //!
 //! ### Action Navigation
 //!
@@ -476,28 +476,6 @@ fn container_inventory_input_system(
     }
 
     // ── Slot Navigation phase ──────────────────────────────────────────────
-
-    // Esc → close container screen
-    if keyboard.just_pressed(KeyCode::Escape) {
-        // Write the updated item list back to the map event BEFORE restoring mode
-        // so that partial takes persist within the session.
-        let event_id = container_state.container_event_id.clone();
-        let updated_items = container_state.items.clone();
-        let remaining_gold = container_state.gold;
-        let remaining_gems = container_state.gems;
-        write_container_items_back(
-            &mut global_state.0,
-            &event_id,
-            updated_items,
-            remaining_gold,
-            remaining_gems,
-        );
-
-        let resume = container_state.get_resume_mode();
-        global_state.0.mode = resume;
-        nav_state.reset();
-        return;
-    }
 
     // Tab → toggle panel focus (character ↔ container)
     if keyboard.just_pressed(KeyCode::Tab) {
@@ -2127,6 +2105,57 @@ mod tests {
             assert_eq!(items[0].item_id, 2);
         } else {
             panic!("Expected Container event");
+        }
+    }
+
+    #[test]
+    fn test_close_modal_writes_container_items_back() {
+        // Verify that close_modal() persists modified container items to the map
+        // event — this is the write-back path used when ESC is handled by the
+        // global toggle system instead of container_inventory_input_system.
+        let pos = Position::new(7, 7);
+        let mut state = make_game_state_with_container(
+            "esc_chest",
+            vec![make_slot(1), make_slot(2), make_slot(3)],
+            pos,
+        );
+
+        // Simulate the player having taken items 1 and 3; only item 2 remains.
+        state.enter_container_inventory(
+            "esc_chest".to_string(),
+            "ESC Chest".to_string(),
+            vec![make_slot(2)],
+            10,
+            5,
+        );
+
+        let closed = state.close_modal();
+        assert!(
+            closed,
+            "close_modal must return true for ContainerInventory"
+        );
+        assert!(
+            matches!(state.mode, crate::application::GameMode::Exploration),
+            "close_modal must restore Exploration"
+        );
+
+        // The map event must now reflect the modified contents.
+        let event = state
+            .world
+            .get_current_map()
+            .unwrap()
+            .get_event(pos)
+            .unwrap();
+        if let MapEvent::Container {
+            items, gold, gems, ..
+        } = event
+        {
+            assert_eq!(items.len(), 1, "only item 2 should remain");
+            assert_eq!(items[0].item_id, 2, "remaining item must be id=2");
+            assert_eq!(*gold, 10, "gold must match");
+            assert_eq!(*gems, 5, "gems must match");
+        } else {
+            panic!("expected Container event at pos");
         }
     }
 

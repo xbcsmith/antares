@@ -580,37 +580,37 @@ pub struct ControlsConfig {
     #[serde(default = "default_character_sheet_keys")]
     pub character_sheet: Vec<String>,
 
-    /// Keys for selecting party slot 1 (index 0) and opening the character sheet.
+    /// Keys for selecting party slot 1 (index 0) while the character sheet is open.
     ///
     /// Default: `["1"]`
     #[serde(default = "default_character_select_1_keys")]
     pub character_select_1: Vec<String>,
 
-    /// Keys for selecting party slot 2 (index 1) and opening the character sheet.
+    /// Keys for selecting party slot 2 (index 1) while the character sheet is open.
     ///
     /// Default: `["2"]`
     #[serde(default = "default_character_select_2_keys")]
     pub character_select_2: Vec<String>,
 
-    /// Keys for selecting party slot 3 (index 2) and opening the character sheet.
+    /// Keys for selecting party slot 3 (index 2) while the character sheet is open.
     ///
     /// Default: `["3"]`
     #[serde(default = "default_character_select_3_keys")]
     pub character_select_3: Vec<String>,
 
-    /// Keys for selecting party slot 4 (index 3) and opening the character sheet.
+    /// Keys for selecting party slot 4 (index 3) while the character sheet is open.
     ///
     /// Default: `["4"]`
     #[serde(default = "default_character_select_4_keys")]
     pub character_select_4: Vec<String>,
 
-    /// Keys for selecting party slot 5 (index 4) and opening the character sheet.
+    /// Keys for selecting party slot 5 (index 4) while the character sheet is open.
     ///
     /// Default: `["5"]`
     #[serde(default = "default_character_select_5_keys")]
     pub character_select_5: Vec<String>,
 
-    /// Keys for selecting party slot 6 (index 5) and opening the character sheet.
+    /// Keys for selecting party slot 6 (index 5) while the character sheet is open.
     ///
     /// Default: `["6"]`
     #[serde(default = "default_character_select_6_keys")]

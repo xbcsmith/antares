@@ -148,6 +148,8 @@ impl CreatureBound for MonsterDefinition {
 ///     loot: LootTable::default(),
 ///     flee_threshold: 0,
 ///     special_attack_threshold: 0,
+///     spells: vec![],
+///     spell_cooldown: 0,
 ///     resistances: MonsterResistances::undead(),
 ///     can_regenerate: false,
 ///     can_advance: false,
@@ -176,23 +178,9 @@ impl CreatureBound for Monster {
 /// use antares::domain::world::creature_binding::CreatureBound;
 /// use antares::domain::world::npc::NpcDefinition;
 ///
-/// let def = NpcDefinition {
-///     id: "village_elder".to_string(),
-///     name: "Elder Theron".to_string(),
-///     description: "The wise village elder".to_string(),
-///     portrait_id: "elder.png".to_string(),
-///     dialogue_id: None,
-///     creature_id: Some(1000),
-///     sprite: None,
-///     quest_ids: vec![],
-///     faction: None,
-///     is_merchant: false,
-///     is_innkeeper: false,
-///     is_priest: false,
-///     stock_template: None,
-///     service_catalog: None,
-///     economy: None,
-/// };
+/// let mut def = NpcDefinition::new("village_elder", "Elder Theron", "elder.png");
+/// def.description = "The wise village elder".to_string();
+/// def.creature_id = Some(1000);
 ///
 /// assert_eq!(def.creature_id(), Some(1000));
 /// ```

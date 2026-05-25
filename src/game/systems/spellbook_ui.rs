@@ -141,12 +141,6 @@ pub fn spellbook_input_system(
         return;
     };
 
-    // ── Esc: close and restore previous mode ────────────────────────────────
-    if kb.just_pressed(KeyCode::Escape) {
-        global_state.0.exit_spellbook();
-        return;
-    }
-
     // ── C: open casting flow for the current character ───────────────────────
     if kb.just_pressed(KeyCode::KeyC) {
         let char_index = if let GameMode::SpellBook(ref sb) = global_state.0.mode {

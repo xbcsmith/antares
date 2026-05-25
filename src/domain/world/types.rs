@@ -2179,6 +2179,14 @@ pub enum MapEvent {
         /// thanks to `#[serde(default)]`.
         #[serde(default)]
         facing: Option<Direction>,
+        /// Whether dialogue start should rotate the recruitable visual toward the party.
+        ///
+        /// Defaults to `false` so authored recruitable-facing directions remain stable
+        /// during conversations. This is useful for imported 3D models whose local
+        /// forward axis is opposite the engine's convention and must be compensated
+        /// with an explicit `facing` value in the SDK.
+        #[serde(default)]
+        face_on_dialogue: bool,
     },
     /// Enter an inn for party management
     EnterInn {
@@ -2502,23 +2510,10 @@ impl ResolvedNpc {
     /// use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
     /// use antares::domain::types::Position;
     ///
-    /// let definition = NpcDefinition {
-    ///     id: "guard".to_string(),
-    ///     name: "City Guard".to_string(),
-    ///     description: "A vigilant guard".to_string(),
-    ///     portrait_id: "guard.png".to_string(),
-    ///     sprite: None,
-    ///     dialogue_id: Some(10),
-    ///     creature_id: None,
-    ///     quest_ids: vec![],
-    ///     faction: Some("City Watch".to_string()),
-    ///     is_merchant: false,
-    ///     is_innkeeper: false,
-    ///     is_priest: false,
-    ///     stock_template: None,
-    ///     service_catalog: None,
-    ///     economy: None,
-    /// };
+    /// let mut definition = NpcDefinition::new("guard", "City Guard", "guard.png");
+    /// definition.description = "A vigilant guard".to_string();
+    /// definition.dialogue_id = Some(10);
+    /// definition.faction = Some("City Watch".to_string());
     ///
     /// let placement = NpcPlacement::new("guard", Position::new(5, 5));
     ///
@@ -3119,6 +3114,69 @@ impl Map {
             }
         }
     }
+
+    /// Resize this map to the given dimensions.
+    ///
+    /// * Tiles within the new bounds are preserved from the original map.
+    /// * Any positions that are new (when growing) are initialised as
+    ///   `TerrainType::Ground` with `WallType::None`.
+    /// * Events and NPC placements whose tile position falls outside the new
+    ///   bounds are permanently removed.
+    /// * A `new_width` or `new_height` of `0` is a no-op (the map is
+    ///   unchanged).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::Map;
+    ///
+    /// let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+    /// map.resize(15, 8);
+    /// assert_eq!(map.width, 15);
+    /// assert_eq!(map.height, 8);
+    /// assert_eq!(map.tiles.len(), 15 * 8);
+    /// ```
+    pub fn resize(&mut self, new_width: u32, new_height: u32) {
+        if new_width == 0 || new_height == 0 {
+            return;
+        }
+
+        // Build a new tile grid, copying existing tiles that fall within the
+        // new bounds and adding fresh Ground tiles for any new positions.
+        let mut new_tiles = Vec::with_capacity((new_width * new_height) as usize);
+        for y in 0..new_height {
+            for x in 0..new_width {
+                let pos = Position::new(x as i32, y as i32);
+                if let Some(tile) = self.get_tile(pos) {
+                    new_tiles.push(tile.clone());
+                } else {
+                    new_tiles.push(Tile::new(
+                        x as i32,
+                        y as i32,
+                        TerrainType::Ground,
+                        WallType::None,
+                    ));
+                }
+            }
+        }
+
+        self.tiles = new_tiles;
+        self.width = new_width;
+        self.height = new_height;
+
+        // Remove events outside the new bounds.
+        self.events.retain(|pos, _| {
+            pos.x >= 0 && pos.y >= 0 && pos.x < new_width as i32 && pos.y < new_height as i32
+        });
+
+        // Remove NPC placements outside the new bounds.
+        self.npc_placements.retain(|p| {
+            p.position.x >= 0
+                && p.position.y >= 0
+                && p.position.x < new_width as i32
+                && p.position.y < new_height as i32
+        });
+    }
 }
 
 #[cfg(test)]
@@ -3464,6 +3522,267 @@ mod map_npc_resolution_tests {
 
         // Assert
         assert_eq!(resolved.len(), 0);
+    }
+}
+
+#[cfg(test)]
+mod map_resize_tests {
+    use super::*;
+    use crate::domain::world::npc::NpcPlacement;
+
+    // ── grow ───────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_resize_grow_expands_tiles() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 5, 5);
+
+        map.resize(10, 8);
+
+        assert_eq!(map.width, 10);
+        assert_eq!(map.height, 8);
+        assert_eq!(map.tiles.len(), 80, "10 × 8 = 80 tiles expected");
+        let origin = map
+            .get_tile(Position::new(0, 0))
+            .expect("tile at (0,0) must exist after grow");
+        assert_eq!(
+            origin.terrain,
+            TerrainType::Ground,
+            "existing tile terrain must be preserved"
+        );
+        let new_tile = map
+            .get_tile(Position::new(7, 6))
+            .expect("tile at (7,6) must exist after grow");
+        assert_eq!(
+            new_tile.terrain,
+            TerrainType::Ground,
+            "newly added tiles must default to Ground terrain"
+        );
+    }
+
+    #[test]
+    fn test_resize_shrink_removes_out_of_bounds_tiles() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.get_tile_mut(Position::new(9, 9)).unwrap().terrain = TerrainType::Mountain;
+
+        map.resize(5, 5);
+
+        assert_eq!(map.width, 5);
+        assert_eq!(map.height, 5);
+        assert_eq!(
+            map.tiles.len(),
+            25,
+            "5 × 5 = 25 tiles expected after shrink"
+        );
+        assert!(
+            map.get_tile(Position::new(4, 4)).is_some(),
+            "corner tile (4,4) must still exist in the new 5×5 map"
+        );
+        assert!(
+            !map.is_valid_position(Position::new(9, 9)),
+            "position (9,9) must be invalid after shrinking to 5×5"
+        );
+    }
+
+    // ── event pruning ────────────────────────────────────────────────
+
+    #[test]
+    fn test_resize_shrink_removes_out_of_bounds_events() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let sign_keep = MapEvent::Sign {
+            name: "keep".to_string(),
+            description: "in-bounds sign".to_string(),
+            text: "hello".to_string(),
+            time_condition: None,
+            facing: None,
+        };
+        let sign_remove = MapEvent::Sign {
+            name: "remove".to_string(),
+            description: "out-of-bounds sign".to_string(),
+            text: "bye".to_string(),
+            time_condition: None,
+            facing: None,
+        };
+        map.events.insert(Position::new(3, 3), sign_keep);
+        map.events.insert(Position::new(7, 7), sign_remove);
+
+        map.resize(5, 5);
+
+        assert_eq!(
+            map.events.len(),
+            1,
+            "only the in-bounds event should remain after shrink"
+        );
+        assert!(
+            map.events.contains_key(&Position::new(3, 3)),
+            "event at (3,3) must be preserved — it is within the new 5×5 bounds"
+        );
+        assert!(
+            !map.events.contains_key(&Position::new(7, 7)),
+            "event at (7,7) must be removed — it is outside the new 5×5 bounds"
+        );
+    }
+
+    #[test]
+    fn test_resize_grow_preserves_existing_events() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 5, 5);
+        let event = MapEvent::Sign {
+            name: "sign".to_string(),
+            description: "test".to_string(),
+            text: "hello".to_string(),
+            time_condition: None,
+            facing: None,
+        };
+        map.events.insert(Position::new(2, 2), event);
+
+        map.resize(10, 10);
+
+        assert!(
+            map.events.contains_key(&Position::new(2, 2)),
+            "event at (2,2) must be preserved after growing the map to 10×10"
+        );
+    }
+
+    // ── NPC placement pruning ─────────────────────────────────────────
+
+    #[test]
+    fn test_resize_shrink_removes_out_of_bounds_npc_placements() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.npc_placements
+            .push(NpcPlacement::new("npc_keep", Position::new(2, 2)));
+        map.npc_placements
+            .push(NpcPlacement::new("npc_remove", Position::new(8, 8)));
+
+        map.resize(5, 5);
+
+        assert_eq!(
+            map.npc_placements.len(),
+            1,
+            "only the in-bounds NPC placement should remain after shrink"
+        );
+        assert_eq!(
+            map.npc_placements[0].npc_id, "npc_keep",
+            "the remaining placement must be npc_keep"
+        );
+        assert_eq!(
+            map.npc_placements[0].position,
+            Position::new(2, 2),
+            "the remaining placement must be at (2,2)"
+        );
+    }
+
+    // ── idempotent / no-op cases ────────────────────────────────────────────
+
+    #[test]
+    fn test_resize_same_size_is_idempotent() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let event = MapEvent::Sign {
+            name: "sign".to_string(),
+            description: "test".to_string(),
+            text: "hello".to_string(),
+            time_condition: None,
+            facing: None,
+        };
+        map.events.insert(Position::new(5, 5), event);
+        map.npc_placements
+            .push(NpcPlacement::new("npc_one", Position::new(3, 3)));
+
+        map.resize(10, 10);
+
+        assert_eq!(
+            map.width, 10,
+            "width must be unchanged after same-size resize"
+        );
+        assert_eq!(
+            map.height, 10,
+            "height must be unchanged after same-size resize"
+        );
+        assert_eq!(
+            map.tiles.len(),
+            100,
+            "tile count must be unchanged after same-size resize"
+        );
+        assert!(
+            map.events.contains_key(&Position::new(5, 5)),
+            "event must be preserved after same-size resize"
+        );
+        assert_eq!(
+            map.npc_placements.len(),
+            1,
+            "NPC placement must be preserved after same-size resize"
+        );
+    }
+
+    #[test]
+    fn test_resize_zero_width_is_noop() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+
+        map.resize(0, 5);
+
+        assert_eq!(map.width, 10, "width must not change when new_width is 0");
+        assert_eq!(map.height, 10, "height must not change when new_width is 0");
+        assert_eq!(
+            map.tiles.len(),
+            100,
+            "tile count must not change when new_width is 0"
+        );
+    }
+
+    #[test]
+    fn test_resize_zero_height_is_noop() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+
+        map.resize(10, 0);
+
+        assert_eq!(map.width, 10, "width must not change when new_height is 0");
+        assert_eq!(
+            map.height, 10,
+            "height must not change when new_height is 0"
+        );
+        assert_eq!(
+            map.tiles.len(),
+            100,
+            "tile count must not change when new_height is 0"
+        );
+    }
+
+    // ── terrain preservation ────────────────────────────────────────────
+
+    #[test]
+    fn test_resize_preserves_tile_terrain_in_bounds() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.get_tile_mut(Position::new(2, 3)).unwrap().terrain = TerrainType::Mountain;
+
+        map.resize(5, 5);
+
+        let tile = map
+            .get_tile(Position::new(2, 3))
+            .expect("tile at (2,3) must still exist after shrinking to 5×5");
+        assert_eq!(
+            tile.terrain,
+            TerrainType::Mountain,
+            "Mountain terrain at (2,3) must be preserved across shrink"
+        );
+    }
+
+    #[test]
+    fn test_resize_new_tiles_are_ground() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 5, 5);
+
+        map.resize(8, 8);
+
+        let tile = map
+            .get_tile(Position::new(6, 6))
+            .expect("tile at (6,6) must exist after growing to 8×8");
+        assert_eq!(
+            tile.terrain,
+            TerrainType::Ground,
+            "newly added tiles must have Ground terrain"
+        );
+        assert_eq!(
+            tile.wall_type,
+            WallType::None,
+            "newly added tiles must have WallType::None"
+        );
     }
 }
 
@@ -3915,6 +4234,7 @@ mod time_condition_tests {
             dialogue_id: None,
             time_condition: Some(TimeCondition::AfterDay(3)),
             facing: None,
+            face_on_dialogue: false,
         };
         match event {
             MapEvent::RecruitableCharacter {

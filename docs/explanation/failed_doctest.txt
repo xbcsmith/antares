@@ -1,0 +1,711 @@
+failures:
+
+---- src/application/mod.rs - application::GameState::rest_party (line 2507) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+    --> src/application/mod.rs:2518:14
+     |
+2518 | let ration = Item {
+     |              ^^^^ missing `mesh_id`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/character_definition.rs - domain::character_definition::CharacterDefinition (line 338) stdout ----
+error[E0063]: missing field `starting_spells` in initializer of `antares::domain::CharacterDefinition`
+   --> src/domain/character_definition.rs:343:14
+    |
+343 | let knight = CharacterDefinition {
+    |              ^^^^^^^^^^^^^^^^^^^ missing `starting_spells`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/character_definition.rs - domain::character_definition::CharacterDefinition::instantiate (line 769) stdout ----
+error[E0425]: cannot find value `spell_db` in this scope
+   --> src/domain/character_definition.rs:790:67
+    |
+790 | ... &classes, &items, &spell_db).unwrap();
+    |                        ^^^^^^^^ not found in this scope
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0425`.
+Couldn't compile the test.
+---- src/domain/combat/monster.rs - domain::combat::monster::Monster (line 256) stdout ----
+error[E0063]: missing fields `spell_cooldown` and `spells` in initializer of `antares::domain::combat::Monster`
+   --> src/domain/combat/monster.rs:264:14
+    |
+264 | let goblin = Monster {
+    |              ^^^^^^^ missing `spell_cooldown` and `spells`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/combat/monster_spells.rs - domain::combat::monster_spells::execute_monster_spell_cast (line 160) stdout ----
+error[E0308]: mismatched types
+   --> src/domain/combat/monster_spells.rs:186:20
+    |
+186 | mage.spells = vec![spell_id];
+    |                    ^^^^^^^^ expected `u16`, found `u32`
+    |
+help: you can convert a `u32` to a `u16` and panic if the converted value doesn't fit
+    |
+186 | mage.spells = vec![spell_id.try_into().unwrap()];
+    |                            ++++++++++++++++++++
+
+error[E0308]: mismatched types
+   --> src/domain/combat/monster_spells.rs:190:5
+    |
+189 | let spell = Spell::new(
+    |             ---------- arguments to this function are incorrect
+190 |     spell_id, "Energy Blast", SpellSchool::Sorcerer, 3, 4, 0,
+    |     ^^^^^^^^ expected `u16`, found `u32`
+    |
+note: associated function defined here
+   --> src/domain/magic/types.rs:499:12
+    |
+499 |     pub fn new(
+    |            ^^^
+help: you can convert a `u32` to a `u16` and panic if the converted value doesn't fit
+    |
+190 |     spell_id.try_into().unwrap(), "Energy Blast", SpellSchool::Sorcerer, 3, 4, 0,
+    |             ++++++++++++++++++++
+
+error: aborting due to 2 previous errors
+
+For more information about this error, try `rustc --explain E0308`.
+Couldn't compile the test.
+---- src/domain/database_common.rs - domain::database_common (line 17) stdout ----
+error[E0282]: type annotations needed for `&_`
+  --> src/domain/database_common.rs:36:6
+   |
+36 |     |w| w.id,
+   |      ^  ---- type must be known at this point
+   |
+help: consider giving this closure parameter an explicit type, where the type for type parameter `T` is specified
+   |
+36 |     |w: &T| w.id,
+   |       ++++
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0282`.
+Couldn't compile the test.
+---- src/domain/database_common.rs - domain::database_common::load_ron_entries (line 101) stdout ----
+error[E0282]: type annotations needed for `&_`
+   --> src/domain/database_common.rs:120:6
+    |
+120 |     |e| e.id.clone(),
+    |      ^  ---- type must be known at this point
+    |
+help: consider giving this closure parameter an explicit type, where the type for type parameter `T` is specified
+    |
+120 |     |e: &T| e.id.clone(),
+    |       ++++
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0282`.
+Couldn't compile the test.
+---- src/domain/database_common.rs - domain::database_common::load_ron_entries (line 79) stdout ----
+error[E0282]: type annotations needed for `&_`
+  --> src/domain/database_common.rs:96:53
+   |
+96 | ...1), (id: 2)]", |i| i.id, DbError::Dup, DbError::Parse).unwrap();
+   |                    ^  ---- type must be known at this point
+   |
+help: consider giving this closure parameter an explicit type, where the type for type parameter `T` is specified
+   |
+96 | let items = load_ron_entries("[(id: 1), (id: 2)]", |i: &T| i.id, DbError::Dup, DbError::Parse).unwrap();
+   |                                                      ++++
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0282`.
+Couldn't compile the test.
+---- src/domain/database_common.rs - domain::database_common::load_ron_file (line 168) stdout ----
+error[E0282]: type annotations needed for `&_`
+   --> src/domain/database_common.rs:189:6
+    |
+189 |     |m| m.id,
+    |      ^  ---- type must be known at this point
+    |
+help: consider giving this closure parameter an explicit type, where the type for type parameter `T` is specified
+    |
+189 |     |m: &T| m.id,
+    |       ++++
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0282`.
+Couldn't compile the test.
+---- src/domain/items/database.rs - domain::items::database::ItemDatabase::get_item (line 133) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/items/database.rs:139:12
+    |
+139 | let club = Item {
+    |            ^^^^ missing `mesh_id`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/items/database.rs - domain::items::database::ItemDatabase::has_item (line 232) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/items/database.rs:238:12
+    |
+238 | let club = Item {
+    |            ^^^^ missing `mesh_id`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/items/database.rs - domain::items::database::ItemDatabase::validate_mesh_descriptors (line 283) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/items/database.rs:289:13
+    |
+289 | let sword = Item {
+    |             ^^^^ missing `mesh_id`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/items/types.rs - domain::items::types::Item (line 674) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/items/types.rs:679:12
+    |
+679 | let club = Item {
+    |            ^^^^ missing `mesh_id`
+
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/items/types.rs:702:18
+    |
+702 | let holy_sword = Item {
+    |                  ^^^^ missing `mesh_id`
+
+error: aborting due to 2 previous errors
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/items/types.rs - domain::items::types::Item::can_use_alignment (line 941) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/items/types.rs:947:18
+    |
+947 | let holy_sword = Item {
+    |                  ^^^^ missing `mesh_id`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/progression.rs - domain::progression::level_up_and_grant_spells (line 486) stdout ----
+error[E0308]: mismatched types
+   --> src/domain/progression.rs:506:81
+    |
+506 | ...s) = level_up_and_grant_spells(&mut cleric, &class_db, &spell_db, &mut r...
+    |         -------------------------                         ^^^^^^^^^ expected `antares::sdk::database::SpellDatabase`, found `antares::domain::magic::SpellDatabase`
+    |         |
+    |         arguments to this function are incorrect
+    |
+    = note: expected reference `&antares::sdk::database::SpellDatabase`
+               found reference `&antares::domain::magic::SpellDatabase`
+note: function defined here
+   --> src/domain/progression.rs:512:8
+    |
+512 | pub fn level_up_and_grant_spells(
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0308`.
+Couldn't compile the test.
+---- src/domain/progression.rs - domain::progression::level_up_and_grant_spells_with_level_db (line 546) stdout ----
+error[E0308]: mismatched types
+   --> src/domain/progression.rs:569:69
+    |
+569 |     level_up_and_grant_spells_with_level_db(&mut cleric, &class_db, &spell_db, N...
+    |     ---------------------------------------                         ^^^^^^^^^ expected `antares::sdk::database::SpellDatabase`, found `antares::domain::magic::SpellDatabase`
+    |     |
+    |     arguments to this function are incorrect
+    |
+    = note: expected reference `&antares::sdk::database::SpellDatabase`
+               found reference `&antares::domain::magic::SpellDatabase`
+note: function defined here
+   --> src/domain/progression.rs:575:8
+    |
+575 | pub fn level_up_and_grant_spells_with_level_db(
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0308`.
+Couldn't compile the test.
+---- src/domain/races.rs - domain::races::RaceDefinition (line 245) stdout ----
+error[E0063]: missing field `skill_grants` in initializer of `RaceDefinition`
+   --> src/domain/races.rs:249:16
+    |
+249 | let halfling = RaceDefinition {
+    |                ^^^^^^^^^^^^^^ missing `skill_grants`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/resources.rs - domain::resources::consume_food (line 281) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/resources.rs:290:17
+    |
+290 | let food_item = Item {
+    |                 ^^^^ missing `mesh_id`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/resources.rs - domain::resources::rest_party (line 825) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/resources.rs:834:17
+    |
+834 | let food_item = Item {
+    |                 ^^^^ missing `mesh_id`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/resources.rs - domain::resources::rest_party_hour (line 687) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/resources.rs:698:17
+    |
+698 | let food_item = Item {
+    |                 ^^^^ missing `mesh_id`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/transactions.rs - domain::transactions::buy_item (line 179) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/transactions.rs:191:12
+    |
+191 | let club = Item {
+    |            ^^^^ missing `mesh_id`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/transactions.rs - domain::transactions::sell_item (line 352) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/transactions.rs:362:13
+    |
+362 | let sword = Item {
+    |             ^^^^ missing `mesh_id`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/types.rs - domain::types::GameTime::advance_days (line 761) stdout ----
+Test executable failed (exit status: 101).
+
+stderr:
+
+thread 'main' (169129409) panicked at src/domain/types.rs:11:1:
+assertion `left == right` failed
+  left: 2
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+---- src/domain/visual/item_mesh.rs - domain::visual::item_mesh::ItemMeshDescriptor (line 293) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/visual/item_mesh.rs:299:19
+    |
+299 | let short_sword = Item {
+    |                   ^^^^ missing `mesh_id`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/visual/item_mesh.rs - domain::visual::item_mesh::ItemMeshDescriptor::accent_color_from_item (line 494) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/visual/item_mesh.rs:501:17
+    |
+501 | let mut sword = Item {
+    |                 ^^^^ missing `mesh_id`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/visual/item_mesh.rs - domain::visual::item_mesh::ItemMeshDescriptor::from_item (line 375) stdout ----
+error[E0063]: missing field `duration_minutes` in initializer of `ConsumableData`
+   --> src/domain/visual/item_mesh.rs:383:37
+    |
+383 |     item_type: ItemType::Consumable(ConsumableData {
+    |                                     ^^^^^^^^^^^^^^ missing `duration_minutes`
+
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/visual/item_mesh.rs:380:14
+    |
+380 | let potion = Item {
+    |              ^^^^ missing `mesh_id`
+
+error: aborting due to 2 previous errors
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/visual/item_mesh.rs - domain::visual::item_mesh::ItemMeshDescriptor::to_creature_definition (line 866) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/visual/item_mesh.rs:872:13
+    |
+872 | let sword = Item {
+    |             ^^^^ missing `mesh_id`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/visual/item_mesh.rs - domain::visual::item_mesh::ItemMeshDescriptor::to_creature_definition (line 914) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/visual/item_mesh.rs:920:13
+    |
+920 | let sword = Item {
+    |             ^^^^ missing `mesh_id`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/visual/item_mesh.rs - domain::visual::item_mesh::ItemMeshDescriptor::to_creature_definition_with_charges (line 972) stdout ----
+error[E0063]: missing field `mesh_id` in initializer of `antares::domain::items::Item`
+   --> src/domain/visual/item_mesh.rs:978:12
+    |
+978 | let wand = Item {
+    |            ^^^^ missing `mesh_id`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/world/creature_binding.rs - domain::world::creature_binding::Monster (line 136) stdout ----
+error[E0063]: missing fields `spell_cooldown` and `spells` in initializer of `antares::domain::combat::Monster`
+   --> src/domain/world/creature_binding.rs:142:15
+    |
+142 | let monster = Monster {
+    |               ^^^^^^^ missing `spell_cooldown` and `spells`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/world/creature_binding.rs - domain::world::creature_binding::NpcDefinition (line 175) stdout ----
+error[E0063]: missing fields `is_skill_trainer`, `is_trainer`, `skill_training_fee_base` and 5 other fields in initializer of `NpcDefinition`
+   --> src/domain/world/creature_binding.rs:180:11
+    |
+180 | let def = NpcDefinition {
+    |           ^^^^^^^^^^^^^ missing `is_skill_trainer`, `is_trainer`, `skill_training_fee_base` and 5 other fields
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/domain/world/events.rs - domain::world::events::UnlockMethod (line 160) stdout ----
+error[E0603]: module `events` is private
+   --> src/domain/world/events.rs:162:29
+    |
+162 | use antares::domain::world::events::UnlockMethod;
+    |                             ^^^^^^ private module
+    |
+note: the module `events` is defined here
+   --> src/domain/world/mod.rs:26:1
+    |
+ 26 | mod events;
+    | ^^^^^^^^^^
+help: consider importing this enum instead
+    |
+162 - use antares::domain::world::events::UnlockMethod;
+162 + use antares::domain::world::UnlockMethod;
+    |
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0603`.
+Couldn't compile the test.
+---- src/domain/world/types.rs - domain::world::types::ResolvedNpc::from_placement_and_definition (line 2500) stdout ----
+error[E0063]: missing fields `is_skill_trainer`, `is_trainer`, `skill_training_fee_base` and 5 other fields in initializer of `NpcDefinition`
+    --> src/domain/world/types.rs:2506:18
+     |
+2506 | let definition = NpcDefinition {
+     |                  ^^^^^^^^^^^^^ missing `is_skill_trainer`, `is_trainer`, `skill_training_fee_base` and 5 other fields
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/game/systems/audio.rs - game::systems::audio (line 23) stdout ----
+error[E0063]: missing field `audio_dir` in initializer of `antares::game::systems::audio::AudioPlugin`
+  --> src/game/systems/audio.rs:39:17
+   |
+39 | app.add_plugins(AudioPlugin {
+   |                 ^^^^^^^^^^^ missing `audio_dir`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/game/systems/audio.rs - game::systems::audio::PlayMusic (line 309) stdout ----
+error[E0063]: missing field `audio_dir` in initializer of `antares::game::systems::audio::AudioPlugin`
+   --> src/game/systems/audio.rs:319:17
+    |
+319 | app.add_plugins(AudioPlugin {
+    |                 ^^^^^^^^^^^ missing `audio_dir`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+---- src/game/systems/hud.rs - game::systems::hud::in_automap_mode (line 2068) stdout ----
+error[E0603]: function `in_automap_mode` is private
+    --> src/game/systems/hud.rs:2072:34
+     |
+2072 | use antares::game::systems::hud::in_automap_mode;
+     |                                  ^^^^^^^^^^^^^^^ private function
+     |
+note: the function `in_automap_mode` is defined here
+    --> src/game/systems/hud.rs:2078:1
+     |
+2078 | fn in_automap_mode(global_state: Res<GlobalState>) -> bool {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0603`.
+Couldn't compile the test.
+---- src/game/systems/input/frame_input.rs - game::systems::input::frame_input::FrameInputIntent (line 25) stdout ----
+error[E0603]: module `frame_input` is private
+  --> src/game/systems/input/frame_input.rs:27:36
+   |
+27 | use antares::game::systems::input::frame_input::FrameInputIntent;
+   |                                    ^^^^^^^^^^^ private module
+   |
+note: the module `frame_input` is defined here
+  --> src/game/systems/input.rs:51:1
+   |
+51 | mod frame_input;
+   | ^^^^^^^^^^^^^^^
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0603`.
+Couldn't compile the test.
+---- src/game/systems/input/frame_input.rs - game::systems::input::frame_input::FrameInputIntent::is_interact_attempt (line 102) stdout ----
+error[E0603]: module `frame_input` is private
+   --> src/game/systems/input/frame_input.rs:104:36
+    |
+104 | use antares::game::systems::input::frame_input::FrameInputIntent;
+    |                                    ^^^^^^^^^^^ private module
+    |
+note: the module `frame_input` is defined here
+   --> src/game/systems/input.rs:51:1
+    |
+ 51 | mod frame_input;
+    | ^^^^^^^^^^^^^^^
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0603`.
+Couldn't compile the test.
+---- src/game/systems/input/frame_input.rs - game::systems::input::frame_input::FrameInputIntent::is_movement_attempt (line 81) stdout ----
+error[E0603]: module `frame_input` is private
+  --> src/game/systems/input/frame_input.rs:83:36
+   |
+83 | use antares::game::systems::input::frame_input::FrameInputIntent;
+   |                                    ^^^^^^^^^^^ private module
+   |
+note: the module `frame_input` is defined here
+  --> src/game/systems/input.rs:51:1
+   |
+51 | mod frame_input;
+   | ^^^^^^^^^^^^^^^
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0603`.
+Couldn't compile the test.
+---- src/game/systems/input/frame_input.rs - game::systems::input::frame_input::decode_frame_input (line 151) stdout ----
+error[E0603]: module `frame_input` is private
+   --> src/game/systems/input/frame_input.rs:154:36
+    |
+154 | use antares::game::systems::input::frame_input::decode_frame_input;
+    |                                    ^^^^^^^^^^^ private module
+    |
+note: the module `frame_input` is defined here
+   --> src/game/systems/input.rs:51:1
+    |
+ 51 | mod frame_input;
+    | ^^^^^^^^^^^^^^^
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0603`.
+Couldn't compile the test.
+---- src/game/systems/input/world_click.rs - game::systems::input::world_click::is_cursor_in_center_third (line 83) stdout ----
+error[E0603]: module `world_click` is private
+  --> src/game/systems/input/world_click.rs:85:36
+   |
+85 | use antares::game::systems::input::world_click::is_cursor_in_center_third;
+   |                                    ^^^^^^^^^^^ private module
+   |
+note: the module `world_click` is defined here
+  --> src/game/systems/input.rs:57:1
+   |
+57 | mod world_click;
+   | ^^^^^^^^^^^^^^^
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0603`.
+Couldn't compile the test.
+---- src/game/systems/input/world_click.rs - game::systems::input::world_click::mouse_center_interact_pressed (line 41) stdout ----
+error[E0603]: module `world_click` is private
+  --> src/game/systems/input/world_click.rs:43:36
+   |
+43 | use antares::game::systems::input::world_click::mouse_center_interact_pressed;
+   |                                    ^^^^^^^^^^^ private module
+   |
+note: the module `world_click` is defined here
+  --> src/game/systems/input.rs:57:1
+   |
+57 | mod world_click;
+   | ^^^^^^^^^^^^^^^
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0603`.
+Couldn't compile the test.
+---- src/game/systems/lock_ui.rs - game::systems::lock_ui::apply_trap_effects (line 716) stdout ----
+error[E0603]: function `apply_trap_effects` is private
+   --> src/game/systems/lock_ui.rs:718:38
+    |
+718 | use antares::game::systems::lock_ui::apply_trap_effects;
+    |                                      ^^^^^^^^^^^^^^^^^^ private function
+    |
+note: the function `apply_trap_effects` is defined here
+   --> src/game/systems/lock_ui.rs:726:1
+    |
+726 | / pub(crate) fn apply_trap_effects(
+727 | |     effect: Option<&str>,
+728 | |     game_state: &mut crate::application::GameState,
+729 | | ) -> Vec<String> {
+    | |________________^
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0603`.
+Couldn't compile the test.
+---- src/game/systems/lock_ui.rs - game::systems::lock_ui::handle_lock_action (line 591) stdout ----
+error[E0603]: function `handle_lock_action` is private
+   --> src/game/systems/lock_ui.rs:593:39
+    |
+593 | use antares::game::systems::lock_ui::{handle_lock_action, LockAction};
+    |                                       ^^^^^^^^^^^^^^^^^^ private function
+    |
+note: the function `handle_lock_action` is defined here
+   --> src/game/systems/lock_ui.rs:617:1
+    |
+617 | / pub(crate) fn handle_lock_action<R: rand::Rng>(
+618 | |     action: LockAction,
+619 | |     lock_state: &mut LockState,
+620 | |     character: &Character,
+...   |
+623 | |     rng: &mut R,
+624 | | ) -> UnlockOutcome {
+    | |__________________^
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0603`.
+Couldn't compile the test.
+---- src/game/systems/terrain_materials.rs - game::systems::terrain_materials::texture_path_for (line 51) stdout ----
+Test executable failed (exit status: 101).
+
+stderr:
+
+thread 'main' (169193377) panicked at src/game/systems/terrain_materials.rs:8:1:
+assertion `left == right` failed
+  left: "assets/textures/terrain/grass.png"
+ right: "textures/terrain/grass.png"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+---- src/sdk/validation.rs - sdk::validation::Validator<'a>::validate_campaign_config (line 943) stdout ----
+error[E0063]: missing fields `base_xp`, `level_up_mode` and `xp_multiplier` in initializer of `antares::sdk::CampaignConfig`
+   --> src/sdk/validation.rs:953:14
+    |
+953 | let config = CampaignConfig {
+    |              ^^^^^^^^^^^^^^ missing `base_xp`, `level_up_mode` and `xp_multiplier`
+
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0063`.
+Couldn't compile the test.
+
+failures:
+    src/application/mod.rs - application::GameState::rest_party (line 2507)
+    src/domain/character_definition.rs - domain::character_definition::CharacterDefinition (line 338)
+    src/domain/character_definition.rs - domain::character_definition::CharacterDefinition::instantiate (line 769)
+    src/domain/combat/monster.rs - domain::combat::monster::Monster (line 256)
+    src/domain/combat/monster_spells.rs - domain::combat::monster_spells::execute_monster_spell_cast (line 160)
+    src/domain/database_common.rs - domain::database_common (line 17)
+    src/domain/database_common.rs - domain::database_common::load_ron_entries (line 101)
+    src/domain/database_common.rs - domain::database_common::load_ron_entries (line 79)
+    src/domain/database_common.rs - domain::database_common::load_ron_file (line 168)
+    src/domain/items/database.rs - domain::items::database::ItemDatabase::get_item (line 133)
+    src/domain/items/database.rs - domain::items::database::ItemDatabase::has_item (line 232)
+    src/domain/items/database.rs - domain::items::database::ItemDatabase::validate_mesh_descriptors (line 283)
+    src/domain/items/types.rs - domain::items::types::Item (line 674)
+    src/domain/items/types.rs - domain::items::types::Item::can_use_alignment (line 941)
+    src/domain/progression.rs - domain::progression::level_up_and_grant_spells (line 486)
+    src/domain/progression.rs - domain::progression::level_up_and_grant_spells_with_level_db (line 546)
+    src/domain/races.rs - domain::races::RaceDefinition (line 245)
+    src/domain/resources.rs - domain::resources::consume_food (line 281)
+    src/domain/resources.rs - domain::resources::rest_party (line 825)
+    src/domain/resources.rs - domain::resources::rest_party_hour (line 687)
+    src/domain/transactions.rs - domain::transactions::buy_item (line 179)
+    src/domain/transactions.rs - domain::transactions::sell_item (line 352)
+    src/domain/types.rs - domain::types::GameTime::advance_days (line 761)
+    src/domain/visual/item_mesh.rs - domain::visual::item_mesh::ItemMeshDescriptor (line 293)
+    src/domain/visual/item_mesh.rs - domain::visual::item_mesh::ItemMeshDescriptor::accent_color_from_item (line 494)
+    src/domain/visual/item_mesh.rs - domain::visual::item_mesh::ItemMeshDescriptor::from_item (line 375)
+    src/domain/visual/item_mesh.rs - domain::visual::item_mesh::ItemMeshDescriptor::to_creature_definition (line 866)
+    src/domain/visual/item_mesh.rs - domain::visual::item_mesh::ItemMeshDescriptor::to_creature_definition (line 914)
+    src/domain/visual/item_mesh.rs - domain::visual::item_mesh::ItemMeshDescriptor::to_creature_definition_with_charges (line 972)
+    src/domain/world/creature_binding.rs - domain::world::creature_binding::Monster (line 136)
+    src/domain/world/creature_binding.rs - domain::world::creature_binding::NpcDefinition (line 175)
+    src/domain/world/events.rs - domain::world::events::UnlockMethod (line 160)
+    src/domain/world/types.rs - domain::world::types::ResolvedNpc::from_placement_and_definition (line 2500)
+    src/game/systems/audio.rs - game::systems::audio (line 23)
+    src/game/systems/audio.rs - game::systems::audio::PlayMusic (line 309)
+    src/game/systems/hud.rs - game::systems::hud::in_automap_mode (line 2068)
+    src/game/systems/input/frame_input.rs - game::systems::input::frame_input::FrameInputIntent (line 25)
+    src/game/systems/input/frame_input.rs - game::systems::input::frame_input::FrameInputIntent::is_interact_attempt (line 102)
+    src/game/systems/input/frame_input.rs - game::systems::input::frame_input::FrameInputIntent::is_movement_attempt (line 81)
+    src/game/systems/input/frame_input.rs - game::systems::input::frame_input::decode_frame_input (line 151)
+    src/game/systems/input/world_click.rs - game::systems::input::world_click::is_cursor_in_center_third (line 83)
+    src/game/systems/input/world_click.rs - game::systems::input::world_click::mouse_center_interact_pressed (line 41)
+    src/game/systems/lock_ui.rs - game::systems::lock_ui::apply_trap_effects (line 716)
+    src/game/systems/lock_ui.rs - game::systems::lock_ui::handle_lock_action (line 591)
+    src/game/systems/terrain_materials.rs - game::systems::terrain_materials::texture_path_for (line 51)
+    src/sdk/validation.rs - sdk::validation::Validator<'a>::validate_campaign_config (line 943)
+
+test result: FAILED. 1300 passed; 46 failed; 9 ignored; 0 measured; 0 filtered out; finished in 1526.48s
+
+error: doctest failed, to rerun pass `--doc`

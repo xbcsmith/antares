@@ -168,7 +168,7 @@ pub fn choose_monster_action<R: Rng>(monster: &Monster, rng: &mut R) -> MonsterA
 /// use antares::application::ActiveSpells;
 /// use antares::sdk::database::ContentDatabase;
 ///
-/// let spell_id: u32 = 0xE001;
+/// let spell_id: u16 = 0xE001;
 ///
 /// let mut state = CombatState::new(Handicap::Even);
 ///

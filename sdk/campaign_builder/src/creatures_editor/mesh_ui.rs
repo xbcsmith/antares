@@ -59,6 +59,7 @@ impl CreaturesEditorState {
                             }
                             *unsaved_changes = true;
                             self.preview_dirty = true;
+                            self.validation_dirty = true;
                         }
                         ui.end_row();
 
@@ -100,6 +101,7 @@ impl CreaturesEditorState {
                                         self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                         *unsaved_changes = true;
                                         self.preview_dirty = true;
+                                        self.validation_dirty = true;
                                     }
                                 });
                                 ui.horizontal(|ui| {
@@ -115,6 +117,7 @@ impl CreaturesEditorState {
                                         self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                         *unsaved_changes = true;
                                         self.preview_dirty = true;
+                                        self.validation_dirty = true;
                                     }
                                 });
                                 ui.horizontal(|ui| {
@@ -130,6 +133,7 @@ impl CreaturesEditorState {
                                         self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                         *unsaved_changes = true;
                                         self.preview_dirty = true;
+                                        self.validation_dirty = true;
                                     }
                                 });
                             });
@@ -155,6 +159,7 @@ impl CreaturesEditorState {
                                         self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                         *unsaved_changes = true;
                                         self.preview_dirty = true;
+                                        self.validation_dirty = true;
                                     }
                                 });
                                 ui.horizontal(|ui| {
@@ -171,6 +176,7 @@ impl CreaturesEditorState {
                                         self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                         *unsaved_changes = true;
                                         self.preview_dirty = true;
+                                        self.validation_dirty = true;
                                     }
                                 });
                                 ui.horizontal(|ui| {
@@ -187,6 +193,7 @@ impl CreaturesEditorState {
                                         self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                         *unsaved_changes = true;
                                         self.preview_dirty = true;
+                                        self.validation_dirty = true;
                                     }
                                 });
                             });
@@ -212,6 +219,7 @@ impl CreaturesEditorState {
                                             self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                             *unsaved_changes = true;
                                             self.preview_dirty = true;
+                                            self.validation_dirty = true;
                                         }
                                     });
                                 } else {
@@ -228,6 +236,7 @@ impl CreaturesEditorState {
                                             self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                             *unsaved_changes = true;
                                             self.preview_dirty = true;
+                                            self.validation_dirty = true;
                                         }
                                     });
                                     ui.horizontal(|ui| {
@@ -243,6 +252,7 @@ impl CreaturesEditorState {
                                             self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                             *unsaved_changes = true;
                                             self.preview_dirty = true;
+                                            self.validation_dirty = true;
                                         }
                                     });
                                     ui.horizontal(|ui| {
@@ -258,6 +268,7 @@ impl CreaturesEditorState {
                                             self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
                                             *unsaved_changes = true;
                                             self.preview_dirty = true;
+                                            self.validation_dirty = true;
                                         }
                                     });
                                 }
@@ -304,6 +315,7 @@ impl CreaturesEditorState {
                     self.mesh_transform_buffer = Some(MeshTransform::identity());
                     *unsaved_changes = true;
                     self.preview_dirty = true;
+                    self.validation_dirty = true;
                 }
             });
         } else {

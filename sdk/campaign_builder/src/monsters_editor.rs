@@ -4,9 +4,10 @@
 use crate::creature_assets::CreatureAssetManager;
 use crate::editor_context::EditorContext;
 use crate::ui_helpers::{
-    dispatch_list_action, handle_reload, show_standard_list_item, AttributePair16Input,
-    AttributePairInput, DispatchActionState, EditorToolbar, ItemAction, MetadataBadge,
-    StandardListItemConfig, ToolbarAction, TwoColumnLayout,
+    autocomplete_creature_selector, dispatch_list_action, handle_reload,
+    remove_autocomplete_buffer, show_standard_list_item, AttributePair16Input, AttributePairInput,
+    DispatchActionState, EditorToolbar, ItemAction, MetadataBadge, StandardListItemConfig,
+    ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::character::{AttributePair, AttributePair16, Stats};
 use antares::domain::combat::database::MonsterDefinition;
@@ -40,10 +41,28 @@ pub struct MonstersEditorState {
     pub show_loot_editor: bool,
 
     // Autocomplete input buffers
+    /// Text buffer for the monster-name autocomplete widget.
     pub monster_name_input_buffer: String,
+    /// Text buffer for the creature-ID autocomplete widget (stores the raw numeric ID string).
+    pub creature_id_buffer: String,
 
-    // Creature asset picker
-    pub creature_picker_open: bool,
+    // Creature autocomplete cache
+    /// Cached `(id, name)` pairs rebuilt once per campaign-dir change — never per frame.
+    pub available_creatures: Vec<(u32, String)>,
+    /// Campaign directory recorded at the last cache rebuild.
+    pub last_campaign_dir: Option<PathBuf>,
+
+    /// `false` at startup and after every Back / Save / Cancel; set to `true` after the
+    /// first frame of a new edit session.  Drives the one-shot buffer reset that evicts
+    /// stale egui-memory display text so the autocomplete widgets show the correct values
+    /// for the monster currently being edited.
+    pub edit_session_initialized: bool,
+
+    /// When `true` the creature autocomplete cache is rebuilt on the next [`show`] call,
+    /// regardless of campaign-directory change.  Set by [`invalidate_creature_cache`]
+    /// whenever `campaign_data.creatures` changes without a campaign-dir change (e.g.
+    /// after a creature is exported from the Importer tab).
+    pub creature_cache_dirty: bool,
 }
 
 impl Default for MonstersEditorState {
@@ -60,7 +79,11 @@ impl Default for MonstersEditorState {
             show_attacks_editor: false,
             show_loot_editor: false,
             monster_name_input_buffer: String::new(),
-            creature_picker_open: false,
+            creature_id_buffer: String::new(),
+            available_creatures: Vec::new(),
+            last_campaign_dir: None,
+            edit_session_initialized: false,
+            creature_cache_dirty: false,
         }
     }
 }
@@ -70,10 +93,30 @@ impl MonstersEditorState {
         Self::default()
     }
 
-    /// Sets the creature ID on the edit buffer and closes the picker.
+    /// Sets the creature ID on the edit buffer and syncs the autocomplete buffer string.
     pub fn apply_selected_creature_id(&mut self, id: Option<CreatureId>) {
         self.edit_buffer.creature_id = id;
-        self.creature_picker_open = false;
+        self.creature_id_buffer = id.map(|i| i.to_string()).unwrap_or_default();
+    }
+
+    /// Marks the creature autocomplete cache as stale so it is rebuilt on the next
+    /// [`show`] call.
+    ///
+    /// Call this whenever the creature registry changes without a campaign-directory
+    /// change — for example, after a creature is exported from the Importer tab.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::monsters_editor::MonstersEditorState;
+    ///
+    /// let mut state = MonstersEditorState::default();
+    /// assert!(!state.creature_cache_dirty);
+    /// state.invalidate_creature_cache();
+    /// assert!(state.creature_cache_dirty);
+    /// ```
+    pub fn invalidate_creature_cache(&mut self) {
+        self.creature_cache_dirty = true;
     }
 
     pub fn default_monster() -> MonsterDefinition {
@@ -231,12 +274,48 @@ impl MonstersEditorState {
             self.show_import_dialog(ui.ctx(), monsters, ctx);
         }
 
+        // Rebuild the creature autocomplete cache once per campaign-dir change OR when
+        // invalidate_creature_cache() has been called (e.g. after the Importer exports a
+        // new creature into the campaign).  This prevents per-frame disk I/O that caused
+        // the old Browse modal to hang.
+        let campaign_dir_now = ctx.campaign_dir.cloned();
+        if campaign_dir_now != self.last_campaign_dir || self.creature_cache_dirty {
+            self.available_creatures = creature_manager
+                .and_then(|m| m.load_all_creatures().ok())
+                .map(|cs| cs.into_iter().map(|c| (c.id, c.name)).collect::<Vec<_>>())
+                .unwrap_or_default();
+            self.last_campaign_dir = campaign_dir_now;
+            self.creature_cache_dirty = false;
+        }
+
         match self.mode {
             MonstersEditorMode::List => self.show_list(ui, monsters, ctx),
             MonstersEditorMode::Add | MonstersEditorMode::Edit => {
-                // Initialize autocomplete buffer with current monster name when entering edit mode
-                if self.monster_name_input_buffer.is_empty() && !self.edit_buffer.name.is_empty() {
+                if !self.edit_session_initialized {
+                    // ── New edit session ──────────────────────────────────────────
+                    // Unconditionally reset both autocomplete string buffers from the
+                    // edit_buffer so they reflect the monster being edited, not a
+                    // previous one.  Also evict the creature autocomplete widget's
+                    // egui-memory display-text entry: load_autocomplete_buffer returns
+                    // the memory value when present, bypassing our initializer entirely,
+                    // so stale text from the last session would persist otherwise.
                     self.monster_name_input_buffer = self.edit_buffer.name.clone();
+                    self.creature_id_buffer = self
+                        .edit_buffer
+                        .creature_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_default();
+
+                    remove_autocomplete_buffer(
+                        ui.ctx(),
+                        egui::Id::new("autocomplete:creature:monster_creature"),
+                    );
+                    remove_autocomplete_buffer(
+                        ui.ctx(),
+                        egui::Id::new("autocomplete:monster:monster_name_autocomplete"),
+                    );
+
+                    self.edit_session_initialized = true;
                 }
 
                 self.show_form(ui, monsters, creature_manager, ctx)
@@ -694,7 +773,7 @@ impl MonstersEditorState {
         &mut self,
         ui: &mut egui::Ui,
         monsters: &mut Vec<MonsterDefinition>,
-        creature_manager: Option<&CreatureAssetManager>,
+        _creature_manager: Option<&CreatureAssetManager>,
         ctx: &mut EditorContext<'_>,
     ) {
         let is_add = self.mode == MonstersEditorMode::Add;
@@ -755,91 +834,34 @@ impl MonstersEditorState {
                 ui.group(|ui| {
                     ui.heading("Visual Asset");
 
-                    let creature_id_label = match self.edit_buffer.creature_id {
-                        Some(id) => id.to_string(),
-                        None => "None".to_string(),
-                    };
-
-                    ui.horizontal(|ui| {
-                        ui.label("Creature ID:");
-                        ui.label(&creature_id_label);
-                        if ui
-                            .button("Browse…")
-                            .on_hover_text("Select a creature asset")
-                            .clicked()
-                        {
-                            self.creature_picker_open = true;
-                        }
-                        if ui.button("Clear").clicked() && self.edit_buffer.creature_id.is_some() {
-                            self.apply_selected_creature_id(None);
-                            *ctx.unsaved_changes = true;
-                        }
-                        ui.label("ℹ").on_hover_text(
-                            "Links this monster to a procedural mesh creature definition. When set, \
-                             the monster spawns as a 3-D creature mesh on the map instead of a \
-                             sprite placeholder.",
-                        );
-                    });
-
-                    // Show resolved creature name when manager is available
-                    if let (Some(id), Some(manager)) =
-                        (self.edit_buffer.creature_id, creature_manager)
-                    {
-                        if let Ok(creature) = manager.load_creature(id) {
-                            ui.label(
-                                egui::RichText::new(format!("Asset: \"{}\"", creature.name))
-                                    .color(egui::Color32::GRAY),
-                            );
-                        }
+                    // Autocomplete text box — same pattern as Character and NPC editors.
+                    // Reads from the pre-built `available_creatures` cache (rebuilt once
+                    // per campaign-dir change in `show()`), never from disk per frame.
+                    if autocomplete_creature_selector(
+                        ui,
+                        "monster_creature",
+                        "Creature Asset:",
+                        &mut self.creature_id_buffer,
+                        &self.available_creatures,
+                    ) {
+                        self.edit_buffer.creature_id = if self.creature_id_buffer.is_empty() {
+                            None
+                        } else {
+                            self.creature_id_buffer.trim().parse::<CreatureId>().ok()
+                        };
+                        *ctx.unsaved_changes = true;
                     }
+
+                    ui.label(
+                        egui::RichText::new(
+                            "Links this monster to a procedural mesh creature definition. \
+                             When set, the monster spawns as a 3-D creature mesh instead of \
+                             a sprite placeholder.",
+                        )
+                        .weak()
+                        .small(),
+                    );
                 });
-
-                // Creature picker modal
-                if self.creature_picker_open {
-                    if let Some(manager) = creature_manager {
-                        let creatures = manager.load_all_creatures().unwrap_or_default();
-                        let mut picked_id: Option<CreatureId> = None;
-                        let mut should_close = false;
-                        egui::Window::new("Select Creature")
-                            .id(egui::Id::new("monster_creature_picker"))
-                            .resizable(true)
-                            .show(ui.ctx(), |ui| {
-                                egui::ScrollArea::vertical()
-                                    .id_salt("monster_creature_picker_scroll")
-                                    .max_height(300.0)
-                                    .show(ui, |ui| {
-                                        for creature in &creatures {
-                                            ui.push_id(creature.id, |ui| {
-                                                if ui
-                                                    .selectable_label(
-                                                        self.edit_buffer.creature_id
-                                                            == Some(creature.id),
-                                                        format!(
-                                                            "{} — {}",
-                                                            creature.id, creature.name
-                                                        ),
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    picked_id = Some(creature.id);
-                                                }
-                                            });
-                                        }
-                                    });
-                                if ui.button("Close").clicked() {
-                                    should_close = true;
-                                }
-                            });
-                        if let Some(id) = picked_id {
-                            self.apply_selected_creature_id(Some(id));
-                        } else if should_close {
-                            self.creature_picker_open = false;
-                        }
-                    } else {
-                        // No manager available; close picker
-                        self.creature_picker_open = false;
-                    }
-                }
 
                 ui.add_space(10.0);
 
@@ -977,8 +999,11 @@ impl MonstersEditorState {
                 ui.separator();
 
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button("⬅ Back to List").clicked() {
+                    if ui.button("\u{2b05} Back to List").clicked() {
                         self.mode = MonstersEditorMode::List;
+                        self.monster_name_input_buffer.clear();
+                        self.creature_id_buffer.clear();
+                        self.edit_session_initialized = false;
                         ui.ctx().request_repaint();
                     }
 
@@ -999,12 +1024,16 @@ impl MonstersEditorState {
                         );
                         self.mode = MonstersEditorMode::List;
                         self.monster_name_input_buffer.clear();
+                        self.creature_id_buffer.clear();
+                        self.edit_session_initialized = false;
                         *ctx.status_message = "Monster saved".to_string();
                     }
 
-                    if ui.button("❌ Cancel").clicked() {
+                    if ui.button("\u{274c} Cancel").clicked() {
                         self.mode = MonstersEditorMode::List;
                         self.monster_name_input_buffer.clear();
+                        self.creature_id_buffer.clear();
+                        self.edit_session_initialized = false;
                         ui.ctx().request_repaint();
                     }
                 });
@@ -1273,6 +1302,7 @@ mod tests {
         let mut state = MonstersEditorState::default();
         state.apply_selected_creature_id(Some(42));
         assert_eq!(state.edit_buffer.creature_id, Some(42));
+        assert_eq!(state.creature_id_buffer, "42");
     }
 
     #[test]
@@ -1280,6 +1310,138 @@ mod tests {
         let mut state = MonstersEditorState::default();
         state.edit_buffer.creature_id = Some(42);
         state.apply_selected_creature_id(None);
+        assert_eq!(state.edit_buffer.creature_id, None);
+        assert!(state.creature_id_buffer.is_empty());
+    }
+
+    /// The session flag must be `false` before an edit session begins.
+    #[test]
+    fn test_edit_session_initialized_starts_false() {
+        let state = MonstersEditorState::new();
+        assert!(!state.edit_session_initialized);
+    }
+
+    /// Simulating Back / Save / Cancel must reset the session flag so the NEXT
+    /// edit session triggers a fresh egui-memory eviction.
+    #[test]
+    fn test_edit_session_initialized_cleared_on_exit() {
+        let mut state = MonstersEditorState::new();
+        state.edit_session_initialized = true; // pretend we entered edit mode
+
+        // Simulate Back
+        state.edit_session_initialized = false;
+        state.monster_name_input_buffer.clear();
+        state.creature_id_buffer.clear();
+
+        assert!(!state.edit_session_initialized);
+        assert!(state.monster_name_input_buffer.is_empty());
+        assert!(state.creature_id_buffer.is_empty());
+    }
+
+    /// On the first frame of a new edit session the string buffers must match
+    /// the edit_buffer values, regardless of what the previous session held.
+    #[test]
+    fn test_edit_session_buffers_reset_unconditionally() {
+        let mut state = MonstersEditorState::new();
+
+        // Simulate previous session leftovers.
+        state.monster_name_input_buffer = "Old Monster".to_string();
+        state.creature_id_buffer = "99".to_string();
+        state.edit_session_initialized = false; // back from previous session
+
+        // Load a new monster into edit_buffer.
+        state.edit_buffer.name = "Dragon".to_string();
+        state.edit_buffer.creature_id = Some(7);
+
+        // Simulate the !edit_session_initialized branch in show().
+        if !state.edit_session_initialized {
+            state.monster_name_input_buffer = state.edit_buffer.name.clone();
+            state.creature_id_buffer = state
+                .edit_buffer
+                .creature_id
+                .map(|id| id.to_string())
+                .unwrap_or_default();
+            state.edit_session_initialized = true;
+        }
+
+        assert_eq!(state.monster_name_input_buffer, "Dragon");
+        assert_eq!(state.creature_id_buffer, "7");
+        assert!(state.edit_session_initialized);
+    }
+
+    /// When the monster has NO creature_id, the buffer must be empty (not stale
+    /// from the previous session).
+    #[test]
+    fn test_edit_session_buffer_empty_when_no_creature_id() {
+        let mut state = MonstersEditorState::new();
+
+        // Leftovers from a previous session that DID have a creature.
+        state.creature_id_buffer = "42".to_string();
+        state.edit_session_initialized = false;
+
+        // New monster with no creature_id.
+        state.edit_buffer.creature_id = None;
+
+        // Simulate the session-init branch.
+        if !state.edit_session_initialized {
+            state.creature_id_buffer = state
+                .edit_buffer
+                .creature_id
+                .map(|id| id.to_string())
+                .unwrap_or_default();
+            state.edit_session_initialized = true;
+        }
+
+        assert!(
+            state.creature_id_buffer.is_empty(),
+            "creature_id_buffer must be empty when monster has no creature_id"
+        );
+    }
+
+    /// `available_creatures` starts empty; no disk I/O until the campaign dir
+    /// is set for the first time inside `show()`.
+    #[test]
+    fn test_available_creatures_starts_empty() {
+        let state = MonstersEditorState::new();
+        assert!(
+            state.available_creatures.is_empty(),
+            "available_creatures must start empty — populated lazily from campaign dir"
+        );
+        assert!(
+            state.last_campaign_dir.is_none(),
+            "last_campaign_dir must be None before any show() call"
+        );
+    }
+
+    /// `creature_id_buffer` starts empty and is cleared when leaving edit mode.
+    #[test]
+    fn test_creature_id_buffer_starts_empty_and_clears() {
+        let mut state = MonstersEditorState::new();
+        assert!(state.creature_id_buffer.is_empty());
+
+        // Simulate entering edit mode and picking a creature.
+        state.creature_id_buffer = "7".to_string();
+        state.edit_buffer.creature_id = Some(7);
+
+        // Simulate pressing Back / Save / Cancel.
+        state.creature_id_buffer.clear();
+        assert!(state.creature_id_buffer.is_empty());
+    }
+
+    /// Changing creature_id_buffer to a valid numeric string and parsing it
+    /// correctly updates `edit_buffer.creature_id`.
+    #[test]
+    fn test_creature_id_buffer_parsed_to_option() {
+        let mut state = MonstersEditorState::new();
+
+        // Simulate the autocomplete returning a valid selection.
+        state.creature_id_buffer = "100".to_string();
+        state.edit_buffer.creature_id = state.creature_id_buffer.trim().parse::<CreatureId>().ok();
+        assert_eq!(state.edit_buffer.creature_id, Some(100));
+
+        // Simulate clearing.
+        state.creature_id_buffer.clear();
+        state.edit_buffer.creature_id = None;
         assert_eq!(state.edit_buffer.creature_id, None);
     }
 
@@ -1302,6 +1464,10 @@ mod tests {
         assert!(!state.show_import_dialog);
         assert!(state.import_export_buffer.is_empty());
         assert!(!state.show_preview);
+        assert!(
+            !state.edit_session_initialized,
+            "edit_session_initialized must start false"
+        );
     }
 
     #[test]
@@ -1552,5 +1718,40 @@ mod tests {
 
         assert_eq!(state.edit_buffer.name, "Ancient Dragon");
         assert_eq!(state.monster_name_input_buffer, "Ancient Dragon");
+    }
+
+    // =========================================================================
+    // Creature Cache Invalidation Tests
+    // =========================================================================
+
+    /// `creature_cache_dirty` must be `false` by default.
+    #[test]
+    fn test_creature_cache_dirty_starts_false() {
+        let state = MonstersEditorState::default();
+        assert!(
+            !state.creature_cache_dirty,
+            "creature_cache_dirty must be false by default"
+        );
+    }
+
+    /// `invalidate_creature_cache` must flip the dirty flag to `true`.
+    #[test]
+    fn test_invalidate_creature_cache_sets_dirty_flag() {
+        let mut state = MonstersEditorState::default();
+        assert!(!state.creature_cache_dirty);
+        state.invalidate_creature_cache();
+        assert!(
+            state.creature_cache_dirty,
+            "invalidate_creature_cache() must set creature_cache_dirty to true"
+        );
+    }
+
+    /// Calling `invalidate_creature_cache` multiple times must be idempotent.
+    #[test]
+    fn test_invalidate_creature_cache_idempotent() {
+        let mut state = MonstersEditorState::default();
+        state.invalidate_creature_cache();
+        state.invalidate_creature_cache();
+        assert!(state.creature_cache_dirty);
     }
 }

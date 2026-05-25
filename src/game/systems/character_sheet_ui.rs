@@ -77,6 +77,10 @@ const HINT_COLOR: egui::Color32 = egui::Color32::from_rgb(140, 140, 166);
 const SKILL_CATEGORY_COLOR: egui::Color32 = egui::Color32::from_rgb(180, 220, 180);
 /// Color for the trainable marker on skills.
 const SKILL_TRAINABLE_COLOR: egui::Color32 = egui::Color32::from_rgb(100, 200, 255);
+/// Maximum number of character summary cards per overview row.
+const PARTY_OVERVIEW_MAX_COLS: usize = 3;
+/// Minimum height for a character summary card in the party overview grid.
+const PARTY_OVERVIEW_CARD_MIN_H: f32 = 150.0;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
@@ -136,17 +140,6 @@ pub fn character_sheet_input_system(
     let Some(ref kb) = keyboard else {
         return;
     };
-
-    // ── Esc: close and restore previous mode ────────────────────────────────
-    if kb.just_pressed(KeyCode::Escape) {
-        let resume = if let GameMode::CharacterSheet(ref cs) = global_state.0.mode {
-            cs.get_resume_mode()
-        } else {
-            GameMode::Exploration
-        };
-        global_state.0.mode = resume;
-        return;
-    }
 
     // ── O: toggle view ───────────────────────────────────────────────────────
     if kb.just_pressed(KeyCode::KeyO) {
@@ -358,40 +351,34 @@ fn render_single_view(
             .strong(),
         );
 
-        let available = ui.available_size();
-        let button_width = if available.x <= 80.0 {
-            available.x.max(0.0)
-        } else {
-            (available.x * 0.45).clamp(0.0, available.x - 80.0)
-        };
-        let spacer_width = (available.x - button_width).max(0.0);
-        ui.add_space(spacer_width);
-        ui.allocate_ui(egui::vec2(button_width, available.y), |ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("Party Overview").clicked() {
-                    if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
-                        cs.toggle_view();
-                    }
+        // Keep these buttons directly in the header row. A previous nested,
+        // fixed-width `allocate_ui` clipped their egui hit regions on narrower
+        // windows, so the labels were visible but mouse clicks never reached
+        // the `< Prev`, `Next >`, and `Party Overview` responses.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.small_button("Party Overview").clicked() {
+                if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                    cs.toggle_view();
                 }
-                if ui.small_button("Next >").clicked() {
-                    if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
-                        cs.focus_next(party_len);
-                    }
+            }
+            if ui.small_button("Next >").clicked() {
+                if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                    cs.focus_next(party_len);
                 }
-                if ui.small_button("< Prev").clicked() {
-                    if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
-                        cs.focus_prev(party_len);
-                    }
+            }
+            if ui.small_button("< Prev").clicked() {
+                if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                    cs.focus_prev(party_len);
                 }
-                ui.separator();
-                ui.colored_label(HINT_COLOR, "[O] Overview");
-                ui.separator();
-                ui.colored_label(HINT_COLOR, "[1-6] Select");
-                ui.separator();
-                ui.colored_label(HINT_COLOR, "[Shift+Tab/←] Prev");
-                ui.separator();
-                ui.colored_label(HINT_COLOR, "[Tab/→] Next");
-            });
+            }
+            ui.separator();
+            ui.colored_label(HINT_COLOR, "[O] Overview");
+            ui.separator();
+            ui.colored_label(HINT_COLOR, "[1-6] Select");
+            ui.separator();
+            ui.colored_label(HINT_COLOR, "[Shift+Tab/←] Prev");
+            ui.separator();
+            ui.colored_label(HINT_COLOR, "[Tab/→] Next");
         });
     });
 
@@ -916,12 +903,65 @@ fn render_skill_section(
     }
 }
 
-/// Renders the compact party overview (horizontal scroll of cards).
-fn render_party_overview(
+/// Returns the overview grid dimensions needed to include every party member.
+fn party_overview_grid_dimensions(party_len: usize) -> (usize, usize) {
+    if party_len == 0 {
+        return (0, 0);
+    }
+
+    let cols = party_len.min(PARTY_OVERVIEW_MAX_COLS);
+    let rows = party_len.div_ceil(cols);
+    (cols, rows)
+}
+
+/// Renders one compact party-overview character card.
+fn render_party_overview_card(
     ui: &mut egui::Ui,
-    global_state: &mut ResMut<GlobalState>,
-    party_len: usize,
-) {
+    character: &crate::domain::character::Character,
+) -> bool {
+    let mut view_clicked = false;
+
+    egui::Frame::default()
+        .inner_margin(egui::Margin::same(8))
+        .stroke(egui::Stroke::new(1.0, egui::Color32::DARK_GRAY))
+        .show(ui, |ui| {
+            ui.set_min_size(ui.available_size());
+            ui.vertical(|ui| {
+                ui.colored_label(TITLE_COLOR, egui::RichText::new(&character.name).strong());
+                ui.label(format!("{} Lv {}", character.class_id, character.level));
+                ui.label(character.race_id.to_string());
+                ui.separator();
+
+                let hp_frac = if character.hp.base > 0 {
+                    character.hp.current as f32 / character.hp.base as f32
+                } else {
+                    0.0
+                };
+                let hp_color = if hp_frac < 0.25 {
+                    egui::Color32::from_rgb(220, 60, 60)
+                } else if hp_frac < 0.5 {
+                    egui::Color32::from_rgb(220, 160, 40)
+                } else {
+                    egui::Color32::from_rgb(60, 200, 60)
+                };
+                ui.horizontal(|ui| {
+                    ui.label("HP:");
+                    ui.colored_label(
+                        hp_color,
+                        format!("{} / {}", character.hp.current, character.hp.base),
+                    );
+                });
+
+                ui.add_space(4.0);
+                view_clicked = ui.small_button("View").clicked();
+            });
+        });
+
+    view_clicked
+}
+
+/// Renders the compact party overview as an all-member card grid.
+fn render_party_overview(ui: &mut egui::Ui, global_state: &mut GlobalState, party_len: usize) {
     if party_len == 0 {
         ui.colored_label(STAT_EMPTY_COLOR, "No party members.");
         return;
@@ -942,73 +982,59 @@ fn render_party_overview(
     });
     ui.separator();
 
-    // Clone characters to avoid borrow conflict inside closure
+    // Clone the whole active party, not just the focused member. The overview
+    // must stay independent of the character that opened the sheet/inventory.
     let members: Vec<_> = global_state.0.party.members.clone();
+    let (cols, rows) = party_overview_grid_dimensions(members.len());
+    if cols == 0 || rows == 0 {
+        ui.colored_label(STAT_EMPTY_COLOR, "No party members.");
+        return;
+    }
 
-    egui::ScrollArea::horizontal()
-        .id_salt("char_sheet_party_overview_scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                for (idx, character) in members.iter().enumerate() {
-                    ui.push_id(idx, |ui| {
-                        egui::Frame::default()
-                            .inner_margin(egui::Margin::same(8))
-                            .stroke(egui::Stroke::new(1.0, egui::Color32::DARK_GRAY))
-                            .show(ui, |ui| {
-                                ui.set_min_size(egui::vec2(220.0, 0.0));
-                                ui.vertical(|ui| {
-                                    ui.colored_label(
-                                        TITLE_COLOR,
-                                        egui::RichText::new(&character.name).strong(),
-                                    );
-                                    ui.label(format!(
-                                        "{} Lv {}",
-                                        character.class_id, character.level
-                                    ));
-                                    ui.label(character.race_id.to_string());
-                                    ui.separator();
+    // Pre-compute grid geometry before entering any horizontal layout. This
+    // keeps all overview cards mouse-interactive and avoids a horizontal
+    // ScrollArea showing only the first/focused character card.
+    let available = ui.available_size();
+    let col_h = available.y;
+    let spacing = ui.spacing().item_spacing;
+    let total_gap_w = spacing.x * (cols.saturating_sub(1) as f32);
+    let total_gap_h = spacing.y * (rows.saturating_sub(1) as f32);
+    let card_w = ((available.x - total_gap_w) / cols as f32).max(180.0);
+    let card_h = ((col_h - total_gap_h) / rows as f32).max(PARTY_OVERVIEW_CARD_MIN_H);
+    let mut pending_focus: Option<usize> = None;
 
-                                    // HP bar
-                                    let hp_frac = if character.hp.base > 0 {
-                                        character.hp.current as f32 / character.hp.base as f32
-                                    } else {
-                                        0.0
-                                    };
-                                    let hp_color = if hp_frac < 0.25 {
-                                        egui::Color32::from_rgb(220, 60, 60)
-                                    } else if hp_frac < 0.5 {
-                                        egui::Color32::from_rgb(220, 160, 40)
-                                    } else {
-                                        egui::Color32::from_rgb(60, 200, 60)
-                                    };
-                                    ui.horizontal(|ui| {
-                                        ui.label("HP:");
-                                        ui.colored_label(
-                                            hp_color,
-                                            format!(
-                                                "{} / {}",
-                                                character.hp.current, character.hp.base
-                                            ),
-                                        );
-                                    });
-
-                                    ui.add_space(4.0);
-                                    if ui.small_button("View").clicked() {
-                                        if let GameMode::CharacterSheet(ref mut cs) =
-                                            global_state.0.mode
-                                        {
-                                            cs.focused_index = idx;
-                                            cs.view = CharacterSheetView::Single;
+    ui.allocate_ui(egui::vec2(available.x, col_h), |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt("char_sheet_party_overview_scroll")
+            .auto_shrink([true, false])
+            .show(ui, |ui| {
+                for row in 0..rows {
+                    ui.horizontal(|ui| {
+                        for col in 0..cols {
+                            let idx = row * cols + col;
+                            if let Some(character) = members.get(idx) {
+                                ui.push_id(idx, |ui| {
+                                    ui.allocate_ui(egui::vec2(card_w, card_h), |ui| {
+                                        if render_party_overview_card(ui, character) {
+                                            pending_focus = Some(idx);
                                         }
-                                    }
+                                    });
                                 });
-                            });
+                            } else {
+                                ui.allocate_ui(egui::vec2(card_w, card_h), |_| {});
+                            }
+                        }
                     });
-                    ui.add_space(8.0);
                 }
             });
-        });
+    });
+
+    if let Some(idx) = pending_focus {
+        if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+            cs.focused_index = idx;
+            cs.view = CharacterSheetView::Single;
+        }
+    }
 }
 
 // ── Cleanup system ────────────────────────────────────────────────────────────
@@ -1118,6 +1144,64 @@ mod tests {
         assert_eq!(cs.view, CharacterSheetView::PartyOverview);
         cs.toggle_view();
         assert_eq!(cs.view, CharacterSheetView::Single);
+    }
+
+    #[test]
+    fn test_party_overview_grid_dimensions_include_whole_party() {
+        for party_len in 1..=6 {
+            let (cols, rows) = party_overview_grid_dimensions(party_len);
+            assert!(cols > 0, "non-empty parties must have at least one column");
+            assert!(rows > 0, "non-empty parties must have at least one row");
+            assert!(
+                cols <= PARTY_OVERVIEW_MAX_COLS,
+                "overview must cap columns so the full party wraps into rows"
+            );
+            assert!(
+                cols * rows >= party_len,
+                "overview grid capacity must include every active party member"
+            );
+        }
+    }
+
+    #[test]
+    fn test_party_overview_grid_dimensions_empty_party() {
+        assert_eq!(party_overview_grid_dimensions(0), (0, 0));
+    }
+
+    #[test]
+    fn test_render_party_overview_renders_whole_party_without_panic() {
+        use crate::application::character_sheet_state::CharacterSheetView;
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut state = GameState::new();
+        for name in ["Aldric", "Mira", "Borin", "Selene"] {
+            let hero = Character::new(
+                name.to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            state.party.add_member(hero).unwrap();
+        }
+        state.enter_character_sheet_at(2);
+        if let GameMode::CharacterSheet(ref mut cs) = state.mode {
+            cs.view = CharacterSheetView::PartyOverview;
+        }
+
+        let mut gs = crate::game::resources::GlobalState(state);
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_party_overview(ui, &mut gs, 4);
+            });
+        });
+
+        assert_eq!(
+            gs.0.party.members.len(),
+            4,
+            "rendering overview must preserve the whole active party"
+        );
     }
 
     #[test]
