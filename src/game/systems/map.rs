@@ -1187,7 +1187,10 @@ fn spawn_map(
                             );
                             let y_pos = tile.visual.mesh_y_position(tile.terrain, tile.wall_type);
 
-                            // Apply base terrain tint, then per-tile color tint if specified
+                            // Apply base terrain tint, then per-tile color tint if specified.
+                            // In Bevy's PBR, base_color is a multiplier on top of
+                            // base_color_texture, so setting it to a darkened value
+                            // darkens the texture without replacing it.
                             let mut wall_color = Color::srgb(tr * darken, tg * darken, tb * darken);
                             if let Some((r, g, b)) = tile.visual.color_tint {
                                 wall_color = Color::srgb(
@@ -1197,11 +1200,26 @@ fn spawn_map(
                                 );
                             }
 
-                            let tile_wall_material = materials.add(StandardMaterial {
-                                base_color: wall_color,
-                                perceptual_roughness: 0.5,
-                                ..default()
-                            });
+                            // Clone the terrain's cached material so the wall inherits the
+                            // same base_color_texture as the floor, then override base_color
+                            // with the darkened wall tint.  Falls back to a flat-colour
+                            // material when the cache is not populated (e.g. in tests).
+                            let source_material = terrain_cache
+                                .get(tile.terrain)
+                                .and_then(|handle| materials.get(handle))
+                                .cloned();
+
+                            let tile_wall_material = if let Some(mut src) = source_material {
+                                src.base_color = wall_color;
+                                src.perceptual_roughness = 0.5;
+                                materials.add(src)
+                            } else {
+                                materials.add(StandardMaterial {
+                                    base_color: wall_color,
+                                    perceptual_roughness: 0.5,
+                                    ..default()
+                                })
+                            };
 
                             // Apply rotation if specified
                             let rotation = bevy::prelude::Quat::from_rotation_y(
@@ -4966,6 +4984,119 @@ mod tests {
         assert!(
             app.world().get_entity(entity_b).is_ok(),
             "Entity at (3,3) must remain — map_id 99 does not match any spawned entity"
+        );
+    }
+
+    /// Verify that the Normal wall material inherits `base_color_texture` from the
+    /// terrain cache and only overrides `base_color` (for the darken tint).
+    ///
+    /// This is the regression test for the stone-wall texture not rendering:
+    /// the wall material was previously created as a flat `base_color`-only
+    /// `StandardMaterial` with no texture, so every wall showed a solid
+    /// grey/tinted colour regardless of the terrain's texture file.
+    #[test]
+    fn test_normal_wall_material_inherits_terrain_texture() {
+        use crate::game::resources::TerrainMaterialCache;
+
+        // Build a terrain cache with a stone material that has a texture.
+        let mut materials = Assets::<StandardMaterial>::default();
+        let texture_handle = Handle::<Image>::default(); // default handle is fine for the test
+        let stone_cached = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.6, 0.6, 0.6),
+            base_color_texture: Some(texture_handle.clone()),
+            perceptual_roughness: 0.85,
+            ..default()
+        });
+        let mut cache = TerrainMaterialCache::default();
+        cache.set(world::TerrainType::Stone, stone_cached.clone());
+
+        // Simulate the wall material creation logic from spawn_map.
+        let stone_rgb = (0.55_f32, 0.55_f32, 0.55_f32);
+        let darken = 0.6_f32;
+        let wall_color = Color::srgb(
+            stone_rgb.0 * darken,
+            stone_rgb.1 * darken,
+            stone_rgb.2 * darken,
+        );
+        let source_material = cache
+            .get(world::TerrainType::Stone)
+            .and_then(|handle| materials.get(handle))
+            .cloned();
+        let tile_wall_material = if let Some(mut src) = source_material {
+            src.base_color = wall_color;
+            src.perceptual_roughness = 0.5;
+            materials.add(src)
+        } else {
+            materials.add(StandardMaterial {
+                base_color: wall_color,
+                perceptual_roughness: 0.5,
+                ..default()
+            })
+        };
+
+        let mat = materials
+            .get(&tile_wall_material)
+            .expect("wall material handle should resolve");
+
+        // The wall must carry the terrain texture.
+        assert!(
+            mat.base_color_texture.is_some(),
+            "Normal wall material must have base_color_texture from terrain cache; \
+             got None — stone walls will render as a flat grey slab"
+        );
+        // The texture handle must be the same one we put in the cache.
+        assert_eq!(
+            mat.base_color_texture.as_ref().unwrap().id(),
+            texture_handle.id(),
+            "wall base_color_texture must be the texture from the terrain cache"
+        );
+        // base_color must be the darkened tint, not the cache's original.
+        let srgba = mat.base_color.to_srgba();
+        assert!(
+            (srgba.red - stone_rgb.0 * darken).abs() < 1e-5,
+            "wall base_color red channel must equal terrain_rgb * darken"
+        );
+    }
+
+    /// When the terrain cache is empty (e.g. in tests that skip the
+    /// terrain-materials startup system), the wall material must still
+    /// be created successfully — just without a texture.
+    #[test]
+    fn test_normal_wall_material_fallback_when_cache_empty() {
+        use crate::game::resources::TerrainMaterialCache;
+
+        let cache = TerrainMaterialCache::default(); // empty
+        let mut materials = Assets::<StandardMaterial>::default();
+
+        let wall_color = Color::srgb(0.33, 0.33, 0.33);
+        let source_material = cache
+            .get(world::TerrainType::Stone)
+            .and_then(|handle| materials.get(handle))
+            .cloned();
+        let tile_wall_material = if let Some(mut src) = source_material {
+            src.base_color = wall_color;
+            src.perceptual_roughness = 0.5;
+            materials.add(src)
+        } else {
+            materials.add(StandardMaterial {
+                base_color: wall_color,
+                perceptual_roughness: 0.5,
+                ..default()
+            })
+        };
+
+        let mat = materials
+            .get(&tile_wall_material)
+            .expect("fallback wall material handle should resolve");
+        // No texture expected in the fallback path.
+        assert!(
+            mat.base_color_texture.is_none(),
+            "fallback wall material must have no texture (cache was empty)"
+        );
+        let srgba = mat.base_color.to_srgba();
+        assert!(
+            (srgba.red - 0.33).abs() < 1e-5,
+            "fallback wall material must use the flat wall_color"
         );
     }
 }

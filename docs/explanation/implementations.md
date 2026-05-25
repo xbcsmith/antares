@@ -2,7 +2,256 @@
 
 ---
 
-## Asset Path Audit — Non-Relative Path Fixes
+## Character Sheet Header Mouse Buttons Use Full Hit Regions (2026)
+
+**Problem**: The Character Sheet header buttons **< Prev**, **Next >**, and
+**Party Overview** were visible but did not reliably respond to mouse clicks,
+especially when opened from inventory/portrait flows on narrower windows.
+
+**Root Cause**: The header actions were rendered inside a nested, fixed-width
+`allocate_ui` region after manual spacer math. On constrained widths, the button
+labels could still paint, but their egui interaction rectangles were clipped or
+outside the expected header hit area.
+
+**Fix**:
+
+- Removed the manual spacer and nested fixed-width allocation from the single
+  character header.
+- Rendered the header buttons directly in the existing right-to-left header row,
+  preserving their full egui response rectangles.
+- Kept the same keyboard hints and button actions.
+
+---
+
+## Character Sheet Party Overview Shows Full Party (2026)
+
+**Problem**: Opening the Character Sheet from a specific party member and then
+clicking **Party Overview** could present the overview as if it only contained
+that focused character. The old overview used a horizontal scroll strip, which
+made the screen behave like a one-card-at-a-time view on constrained window
+sizes.
+
+**Fix**:
+
+- Replaced the horizontal scroll strip in `character_sheet_ui.rs` with a wrapped
+  all-party card grid.
+- The overview now clones and renders the full active `party.members` list,
+  independent of which character opened the sheet.
+- Grid dimensions cap at three cards per row and wrap remaining members onto
+  additional rows, so parties of up to six members render as a 3×2 overview.
+- Each card is allocated an explicit rectangle before rendering, keeping mouse
+  interaction reliable for the per-character **View** buttons.
+
+**Tests Added**:
+
+- `test_party_overview_grid_dimensions_include_whole_party`
+- `test_party_overview_grid_dimensions_empty_party`
+- `test_render_party_overview_renders_whole_party_without_panic`
+
+---
+
+## ESC Key Bug Fix: Inventory Screens No Longer Open Game Menu (2025)
+
+**Problem**: Pressing ESC in any inventory screen (player inventory, merchant
+inventory, container inventory, character sheet, spell book) caused the game
+menu to open immediately after the screen closed. This was a system-ordering
+race condition in Bevy's Update schedule.
+
+**Root Cause**: Two systems handled the same `KeyCode::Escape` press in the same
+frame:
+
+1. Each screen's dedicated input system (e.g. `inventory_input_system`) handled
+   ESC by directly changing `GameState.mode` to the resume mode (Exploration).
+2. `handle_global_input_toggles` (from `InputPlugin`) also saw ESC → decoded it
+   as `menu_toggle = true` → called `close_modal()`. When the screen's input
+   system had already changed the mode to Exploration, `close_modal()` returned
+   `false`, and the handler fell into the `Exploration | Menu` match arm →
+   opened the game menu.
+
+**Fix**:
+
+- Removed the direct `KeyCode::Escape` mode-change handlers from:
+  - `inventory_input_system` (slot navigation phase only; action-nav ESC kept)
+  - `merchant_inventory_input_system` (slot navigation phase only)
+  - `container_inventory_input_system` (slot navigation phase only)
+  - `character_sheet_input_system`
+  - `spellbook_input_system`
+- Added container item write-back to `close_modal()` in `application/mod.rs`
+  for the `ContainerInventory` arm, so items are always persisted correctly
+  regardless of which code path triggers the close.
+- The single source of truth for ESC-closes-modal is now
+  `handle_global_mode_toggles` → `close_modal()`.
+
+**Tests Added**:
+
+- `test_close_modal_container_inventory_writes_items_back` in
+  `application/mod.rs` or `container_inventory_ui.rs`
+- `test_escape_in_inventory_mode_closes_inventory_not_menu` in `input.rs`
+- `test_escape_in_spellbook_mode_closes_spellbook_not_menu` in `input.rs`
+- `test_escape_in_character_sheet_mode_closes_sheet_not_menu` in `input.rs`
+
+---
+
+## Map Editor — Resize Map Feature
+
+### Problem
+
+The Campaign Builder's Map Editor had no way to change the size of an existing
+map after it was created. The only route was to delete the map and create a new
+one, losing all tile data, events, and NPC placements.
+
+### Implementation
+
+#### `src/domain/world/types.rs` — `Map::resize`
+
+A new public method `Map::resize(new_width: u32, new_height: u32)` was added to
+the `Map` domain struct:
+
+- **Grow**: new positions outside the old bounds are initialised as
+  `TerrainType::Ground` / `WallType::None`.
+- **Shrink**: tiles within the new bounds are preserved; tiles outside are
+  discarded. Events and NPC placements whose position falls outside the new
+  bounds are removed via `retain`.
+- **No-op guard**: `new_width == 0 || new_height == 0` is silently ignored so
+  callers don't need to guard against it.
+
+#### `sdk/campaign_builder/src/map_editor.rs` — UI
+
+Four new fields on `MapEditorState`:
+
+| Field                         | Purpose                                           |
+| ----------------------------- | ------------------------------------------------- |
+| `show_resize_dialog: bool`    | toggles the inline resize panel                   |
+| `resize_new_width: u32`       | target width (initialised to current map width)   |
+| `resize_new_height: u32`      | target height (initialised to current map height) |
+| `resize_confirm_shrink: bool` | user has acknowledged the shrink warning          |
+
+**`show_resize_dialog_ui`** — new private static method rendered inline inside
+the inspector panel when `show_resize_dialog` is true:
+
+- Two `DragValue` fields (1–512 tiles) for width and height.
+- A **live preview** row: `W × H = N tiles`.
+- When either dimension would shrink the map, a `⚠️` warning section appears
+  showing the exact count of tiles, events, and NPC placements that would be
+  removed (highlighted in orange/red when non-zero).
+- A confirmation checkbox `"I understand — remove tiles/events/NPCs outside new
+bounds"` must be ticked before the **✅ Apply Resize** button becomes enabled.
+- On Apply: calls `editor.map.resize(...)`, sets `has_changes = true`, closes
+  the dialog, clears `selected_position` and entries in `selected_tiles` that
+  are now outside the new bounds, and calls `request_repaint()`.
+- **❌ Cancel** closes the dialog without modifying the map.
+- The confirmation checkbox auto-resets when the user edits dimensions back to a
+  non-shrinking state.
+
+**`show_inspector_panel`** now shows a **📐 Resize Map** button below the Map
+info group. Clicking it toggles the inline resize panel and re-initialises the
+dimension fields to the current map size.
+
+### Tests Added
+
+**`mod map_resize_tests`** in `src/domain/world/types.rs` (10 tests):
+`test_resize_grow_expands_tiles`, `test_resize_shrink_removes_out_of_bounds_tiles`,
+`test_resize_shrink_removes_out_of_bounds_events`,
+`test_resize_grow_preserves_existing_events`,
+`test_resize_shrink_removes_out_of_bounds_npc_placements`,
+`test_resize_same_size_is_idempotent`, `test_resize_zero_width_is_noop`,
+`test_resize_zero_height_is_noop`, `test_resize_preserves_tile_terrain_in_bounds`,
+`test_resize_new_tiles_are_ground`.
+
+**`mod tests`** in `sdk/campaign_builder/src/map_editor.rs` (5 tests appended):
+`test_resize_dialog_fields_default_false`, `test_resize_dialog_initial_dims_match_map`,
+`test_map_resize_grow_sets_has_changes`,
+`test_map_resize_shrink_clears_selected_position_when_out_of_bounds`,
+`test_map_resize_shrink_selected_position_in_bounds_preserved`,
+`test_map_resize_shrink_removes_selected_tiles_outside_bounds`.
+
+### Quality gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 5083 passed, 8 skipped, 0 failed
+```
+
+---
+
+### Problem
+
+Stone textures appeared on the floor tiles but not on wall meshes. Mountain
+textures worked because mountains are rendered as floor-height meshes via the
+`world::TerrainType::Mountain` branch, which already used
+`terrain_material_with_optional_tint` to pull a textured material from the
+cache. Normal walls (`WallType::Normal`) had never been wired up to the terrain
+texture cache at all.
+
+### Root Cause
+
+`spawn_map` in `src/game/systems/map.rs` handled `WallType::Normal` by
+constructing a brand-new `StandardMaterial` with only a flat `base_color` (a
+darkened terrain-colour RGB) and no `base_color_texture`:
+
+```text
+let tile_wall_material = materials.add(StandardMaterial {
+    base_color: wall_color,   // flat grey / greenish / etc.
+    perceptual_roughness: 0.5,
+    ..default()               // base_color_texture = None  ← the bug
+});
+```
+
+Every wall surface was therefore a solid slab of colour regardless of which
+texture file existed on disk.
+
+### Fix (`src/game/systems/map.rs`)
+
+Before creating the wall material, clone the source material from
+`TerrainMaterialCache` for the wall's terrain type (e.g.
+`TerrainType::Stone` → `stone.png`). Override only `base_color` with the
+darkened tint — in Bevy's PBR pipeline, `base_color` is a multiplier over
+`base_color_texture`, so the texture is shown while still being visually
+darkened relative to the floor:
+
+```text
+let source_material = terrain_cache
+    .get(tile.terrain)
+    .and_then(|handle| materials.get(handle))
+    .cloned();
+
+let tile_wall_material = if let Some(mut src) = source_material {
+    src.base_color = wall_color;     // darken tint (0.6 × terrain RGB)
+    src.perceptual_roughness = 0.5;
+    materials.add(src)               // texture preserved
+} else {
+    materials.add(StandardMaterial { // test fallback (no texture)
+        base_color: wall_color,
+        perceptual_roughness: 0.5,
+        ..default()
+    })
+};
+```
+
+The existing tint/darken logic (`darken = 0.6`, per-tile `color_tint`) is
+unchanged — walls still look darker than floors and honour per-tile overrides.
+
+### Tests Added
+
+- `test_normal_wall_material_inherits_terrain_texture` — asserts that when the
+  terrain cache has a stone material with a texture handle, the produced wall
+  material carries the same texture handle and has the darkened `base_color`.
+- `test_normal_wall_material_fallback_when_cache_empty` — asserts that when the
+  cache is empty (e.g. unit tests that skip the startup system) the wall
+  material is still created successfully with a flat colour and no texture.
+
+### Quality gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 5073 passed, 8 skipped, 0 failed
+```
+
+---
 
 ### Problem
 

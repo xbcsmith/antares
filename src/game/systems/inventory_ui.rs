@@ -841,7 +841,7 @@ fn handle_grid_navigation(
 ///
 /// | Phase             | Key              | Effect                                              |
 /// |-------------------|------------------|-----------------------------------------------------|
-/// | Either            | `Esc` (slot)     | Close inventory                                     |
+/// | Either            | `Esc` (slot)     | Close inventory (delegated to global toggle)        |
 /// | Either            | `Esc` (action)   | Cancel action mode, return to selected slot         |
 /// | Either            | `Tab`            | Advance character panel focus (clears slot)         |
 /// | Either            | `Shift+Tab`      | Retreat character panel focus (clears slot)         |
@@ -919,17 +919,6 @@ fn inventory_input_system(
     // NOT handled here. The split input systems owned by `InputPlugin` handle the
     // open/close toggle for that key before inventory UI input runs. Duplicating
     // it here would cause the inventory to open and close in the same frame.
-
-    // Esc in slot mode — close inventory
-    if keyboard.just_pressed(KeyCode::Escape) {
-        let resume_mode = match &global_state.0.mode {
-            GameMode::Inventory(s) => s.get_resume_mode(),
-            _ => return,
-        };
-        global_state.0.mode = resume_mode;
-        nav_state.reset();
-        return;
-    }
 
     // ── Tab / Shift-Tab — cycle the yellow-border panel focus ─────────────
     //

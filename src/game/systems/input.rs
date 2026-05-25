@@ -1223,6 +1223,130 @@ mod integration_tests {
             "Party must not move while lock prompt is active"
         );
     }
+
+    /// Regression test: pressing ESC while in Inventory mode must close the
+    /// inventory and restore Exploration — it must NOT open the game menu.
+    ///
+    /// Previously, the inventory_input_system handled Escape directly (closing
+    /// inventory). The global toggle system then saw Escape still pressed and,
+    /// finding mode = Exploration, opened the menu. This test verifies that
+    /// handle_global_input_toggles alone correctly closes inventory via
+    /// close_modal() without opening the menu.
+    #[test]
+    fn test_escape_in_inventory_mode_closes_inventory_not_menu() {
+        let mut app = build_input_app();
+        // inventory_input_system no longer handles ESC — only
+        // handle_global_input_toggles (already in build_input_app) is needed.
+
+        // Set mode to Inventory.
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.enter_inventory();
+        }
+        assert!(
+            matches!(
+                app.world().resource::<GlobalState>().0.mode,
+                crate::application::GameMode::Inventory(_)
+            ),
+            "precondition: mode must be Inventory"
+        );
+
+        // Frame: press ESC.
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::Escape);
+        }
+        app.update();
+
+        let mode = &app.world().resource::<GlobalState>().0.mode;
+        assert!(
+            matches!(mode, crate::application::GameMode::Exploration),
+            "ESC in Inventory must restore Exploration, got {:?}",
+            mode
+        );
+        assert!(
+            !matches!(mode, crate::application::GameMode::Menu(_)),
+            "ESC in Inventory must NOT open the game menu"
+        );
+    }
+
+    /// Regression test: pressing ESC while in SpellBook mode must close the
+    /// spell book and restore Exploration — it must NOT open the game menu.
+    #[test]
+    fn test_escape_in_spellbook_mode_closes_spellbook_not_menu() {
+        let mut app = build_input_app();
+
+        // Set mode to SpellBook.
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.enter_spellbook_with_caster_select();
+        }
+        assert!(
+            matches!(
+                app.world().resource::<GlobalState>().0.mode,
+                crate::application::GameMode::SpellBook(_)
+            ),
+            "precondition: mode must be SpellBook"
+        );
+
+        // Frame: press ESC.
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::Escape);
+        }
+        app.update();
+
+        let mode = &app.world().resource::<GlobalState>().0.mode;
+        assert!(
+            matches!(mode, crate::application::GameMode::Exploration),
+            "ESC in SpellBook must restore Exploration, got {:?}",
+            mode
+        );
+        assert!(
+            !matches!(mode, crate::application::GameMode::Menu(_)),
+            "ESC in SpellBook must NOT open the game menu"
+        );
+    }
+
+    /// Regression test: pressing ESC while in CharacterSheet mode must close the
+    /// character sheet and restore Exploration — it must NOT open the game menu.
+    #[test]
+    fn test_escape_in_character_sheet_mode_closes_sheet_not_menu() {
+        let mut app = build_input_app();
+        // character_sheet_input_system no longer handles ESC — only
+        // handle_global_input_toggles (already in build_input_app) is needed.
+
+        // Set mode to CharacterSheet.
+        {
+            let mut gs = app.world_mut().resource_mut::<GlobalState>();
+            gs.0.enter_character_sheet();
+        }
+        assert!(
+            matches!(
+                app.world().resource::<GlobalState>().0.mode,
+                crate::application::GameMode::CharacterSheet(_)
+            ),
+            "precondition: mode must be CharacterSheet"
+        );
+
+        // Frame: press ESC.
+        {
+            let mut btn = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            btn.press(KeyCode::Escape);
+        }
+        app.update();
+
+        let mode = &app.world().resource::<GlobalState>().0.mode;
+        assert!(
+            matches!(mode, crate::application::GameMode::Exploration),
+            "ESC in CharacterSheet must restore Exploration, got {:?}",
+            mode
+        );
+        assert!(
+            !matches!(mode, crate::application::GameMode::Menu(_)),
+            "ESC in CharacterSheet must NOT open the game menu"
+        );
+    }
 }
 
 #[cfg(test)]

@@ -570,7 +570,7 @@
             ],
             experience: 50,
         ),
-        creature_id: None,
+        creature_id: Some(17),
         conditions: Normal,
         active_conditions: [],
         has_acted: false,
@@ -1430,7 +1430,7 @@
     ),
     (
         id: 134,
-        name: "Ogre",
+        name: "Ogre Magi",
         stats: (
             might: (
                 base: 21,

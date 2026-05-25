@@ -180,3 +180,33 @@ The `baked_basecolor.png` texture file in `whisper_new.ron` was likely exported 
 ## Creature Mesh Selector
 
 Campaing Builder --> Monster --> Edit --> Visual Asset hangs constantly when trying to change the creature mesh. It hangs when trying to scroll the window and it constantly hangs trying to select the mesh. It should work like the Character or NPC mesh selection wich is a text box with autocomplete.
+
+
+
+## Game Engine Sky
+
+The Sky is Grey in the game. We have no concept of weather or if we are in a building. We should be able to mark an area inside or outside on the map ron. The SDK Map Editor should be able to mark an area inside or outside. When outside the sky should be whatever color that worlds sky is with as many suns as that world has. It should be part of the map ron to control the sky color and number of suns. We should also have a concept of night and day based on the clock time of day. Day has suns and night has stars. We should also be able to set star density based on map ron data. The SDK Map Editor should be updated to support setting the day sky color, number of suns, night sky color, and number of stars visible. We should have cloud coverage and color and density settings.
+
+Write a plan with a phased approach to add this support to the game engine and SDK. THINK HARD and follow the rules in @PLAN.md
+
+[Sky System Implementation Plan](./sky_system_implementation_plan.md)
+
+## BUGS
+
+### Game Bugs
+
+When leaving player inventory with ESC button the game menu pops up immediately. ESC in any inventory screen should just close the inventory.
+
+Party Inventory screen Mouse does not work on the Next Back or Party Overview buttons in the inventory screen.
+
+Party Overview only shows the character that opened the inventory. It should show the whole party.
+
+Characters turn there back on the party when talking to them. There is no way to turn off auto rotate towards party in the SDK. For some reason the models seem to be oriented backwards causing the user to set which direction they face in the SDK. This causes the model to turn the other direction when facing the party and dialogue is engaged.
+
+Sorcerer Spell point bar does not go down as spell points are used.
+
+Can not select a Rest option of (1) (2) or (3) because it opens the 1,2, or 3 character inventory.
+
+### SDK Bugs
+
+Campaign Builder --> Monster Editor --> Edit save button at the bottom of the editor does not Save the monster when it returns to the list
