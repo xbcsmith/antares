@@ -353,6 +353,7 @@ impl StartingEquipment {
 ///     starting_gems: 0,
 ///     starting_food: 10,
 ///     starting_items: vec![],
+///     starting_spells: vec![],
 ///     starting_equipment: StartingEquipment::default(),
 ///     description: "A noble knight seeking glory.".to_string(),
 ///     is_premade: true,
@@ -772,6 +773,7 @@ impl CharacterDefinition {
     /// use antares::domain::races::RaceDatabase;
     /// use antares::domain::classes::ClassDatabase;
     /// use antares::domain::items::ItemDatabase;
+    /// use antares::sdk::database::SpellDatabase;
     ///
     /// let definition = CharacterDefinition::new(
     ///     "test_knight".to_string(),
@@ -785,6 +787,7 @@ impl CharacterDefinition {
     /// let races = RaceDatabase::load_from_file("data/races.ron").unwrap();
     /// let classes = ClassDatabase::load_from_file("data/classes.ron").unwrap();
     /// let items = ItemDatabase::load_from_file("data/items.ron").unwrap();
+    /// let spell_db = SpellDatabase::default();
     ///
     /// let character = definition.instantiate(&races, &classes, &items, &spell_db).unwrap();
     /// assert_eq!(character.name, "Sir Test");

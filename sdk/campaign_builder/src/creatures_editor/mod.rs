@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::context_menu::ContextMenuManager;
+use crate::creature_assets::CreatureAssetManager;
 use crate::creature_id_manager::{CreatureCategory, CreatureIdManager};
 use crate::creature_undo_redo::CreatureUndoRedoManager;
 use crate::creatures_workflow::CreatureWorkflowState;
@@ -144,6 +145,17 @@ pub struct CreaturesEditorState {
 
     // Preview state
     pub preview_dirty: bool,
+    /// Dirty flag for validation state. Set `true` whenever meshes, transforms,
+    /// or creature-level properties change. Cleared to `false` by
+    /// `show_edit_mode` after `refresh_validation_state` runs.
+    pub validation_dirty: bool,
+    /// Counts validation refreshes in tests so dirty-guard behaviour is asserted.
+    #[cfg(test)]
+    pub validation_refresh_count: usize,
+    /// When `true` (the default), preview syncs automatically on every dirty
+    /// event. When `false`, preview syncs only when the Refresh button is
+    /// clicked. Auto-disabled for dense models (> 50,000 triangles).
+    pub live_preview_enabled: bool,
 
     // Registry Management UI
     pub category_filter: Option<CreatureCategory>,
@@ -307,6 +319,10 @@ impl Default for CreaturesEditorState {
             mesh_edit_buffer: None,
             mesh_transform_buffer: None,
             preview_dirty: false,
+            validation_dirty: true,
+            #[cfg(test)]
+            validation_refresh_count: 0,
+            live_preview_enabled: true,
             category_filter: None,
             show_registry_stats: true,
             id_manager: CreatureIdManager::new(),
@@ -795,7 +811,14 @@ impl CreaturesEditorState {
             Some(RegistryPreviewAction::Delete) => {
                 if let Some(idx) = self.selected_registry_entry {
                     if idx < creatures.len() {
+                        let creature_id = creatures[idx].id;
                         let name = creatures[idx].name.clone();
+                        // Clean up the .ron file and any exclusive textures from disk.
+                        // Ignore errors — the creature may not have been saved to disk yet.
+                        if let Some(ref dir) = *campaign_dir {
+                            let asset_manager = CreatureAssetManager::new(dir.clone());
+                            let _ = asset_manager.delete_creature(creature_id);
+                        }
                         creatures.remove(idx);
                         self.selected_registry_entry = None;
                         self.registry_delete_confirm_pending = false;
@@ -1583,7 +1606,7 @@ impl CreaturesEditorState {
     ) -> Option<String> {
         let mut result_message: Option<String> = None;
 
-        self.refresh_validation_state();
+        self.refresh_validation_state_if_dirty();
 
         // Action buttons
         let action = ActionButtons::new().show(ui);
@@ -1595,7 +1618,14 @@ impl CreaturesEditorState {
             ItemAction::Delete => {
                 if let Some(idx) = self.selected_creature {
                     if idx < creatures.len() {
+                        let creature_id = creatures[idx].id;
                         let name = creatures[idx].name.clone();
+                        // Clean up the .ron file and any exclusive textures from disk.
+                        // Ignore errors — the creature may not have been saved to disk yet.
+                        if let Some(ref dir) = *campaign_dir {
+                            let asset_manager = CreatureAssetManager::new(dir.clone());
+                            let _ = asset_manager.delete_creature(creature_id);
+                        }
                         creatures.remove(idx);
                         self.selected_creature = None;
                         self.mode = CreaturesEditorMode::List;
@@ -1792,6 +1822,7 @@ impl CreaturesEditorState {
                     self.mesh_visibility.push(true);
                     *unsaved_changes = true;
                     self.preview_dirty = true;
+                    self.validation_dirty = true;
                 }
 
                 if ui.button("🗑 Delete").clicked() && mesh_idx < self.edit_buffer.meshes.len() {
@@ -1805,6 +1836,7 @@ impl CreaturesEditorState {
                     self.mesh_transform_buffer = None;
                     *unsaved_changes = true;
                     self.preview_dirty = true;
+                    self.validation_dirty = true;
                 }
             }
         });
@@ -1835,6 +1867,7 @@ impl CreaturesEditorState {
                                         self.mesh_visibility[idx] = visible;
                                     }
                                     self.preview_dirty = true;
+                                    self.validation_dirty = true;
                                     ui.ctx().request_repaint();
                                 }
 
@@ -1860,6 +1893,7 @@ impl CreaturesEditorState {
                                     self.mesh_transform_buffer =
                                         Some(self.edit_buffer.mesh_transforms[idx]);
                                     self.preview_dirty = true;
+                                    self.validation_dirty = true;
                                     ui.ctx().request_repaint();
                                 }
                             });
@@ -1878,18 +1912,87 @@ impl CreaturesEditorState {
         unsaved_changes: &mut bool,
     ) -> Option<String> {
         let mut result_message = None;
+
+        // In Edit mode, capture the creature's original ID so the duplicate
+        // check below does not flag the creature's own ID as a conflict.
+        let original_id: Option<CreatureId> = match self.mode {
+            CreaturesEditorMode::Edit => self
+                .selected_creature
+                .and_then(|idx| creatures.get(idx))
+                .map(|c| c.id),
+            _ => None,
+        };
+
         ui.heading("Creature Properties");
 
         egui::Grid::new("creature_properties_grid")
             .num_columns(2)
             .spacing([10.0, 8.0])
             .show(ui, |ui| {
+                // ── Category ─────────────────────────────────────────────────────
+                // Derived from the current ID.  Selecting a different category
+                // auto-suggests the next available ID in that range.
+                ui.label("Category:");
+                let current_category = CreatureCategory::from_id(self.edit_buffer.id);
+                let mut selected_category = current_category;
+                egui::ComboBox::from_id_salt("creature_edit_category_combo")
+                    .selected_text(current_category.display_name())
+                    .show_ui(ui, |ui| {
+                        for &cat in CreatureCategory::all_categories() {
+                            ui.selectable_value(&mut selected_category, cat, cat.display_name());
+                        }
+                    });
+                // Apply the category change after the ComboBox closure returns.
+                if selected_category != current_category {
+                    let new_range = selected_category.id_range();
+                    if !new_range.contains(&self.edit_buffer.id) {
+                        // Current ID is outside the new range — suggest the first
+                        // available ID in the chosen category.
+                        self.edit_buffer.id = self.id_manager.suggest_next_id(selected_category);
+                    }
+                    *unsaved_changes = true;
+                }
+                ui.end_row();
+
+                // ── ID ───────────────────────────────────────────────────────────
+                // Editable DragValue; inline hints show the valid range and flag
+                // conflicts with IDs already registered to other creatures.
+                let id_category = CreatureCategory::from_id(self.edit_buffer.id);
+                let id_range = id_category.id_range();
+                // Flag a duplicate only when the ID belongs to a *different*
+                // creature — the creature's own original ID is not a conflict.
+                let is_duplicate = self.id_manager.is_id_used(self.edit_buffer.id)
+                    && Some(self.edit_buffer.id) != original_id;
                 ui.label("ID:");
-                let category = CreatureCategory::from_id(self.edit_buffer.id);
-                let category_label = format!("{:?}", category);
-                ui.horizontal(|ui| {
-                    ui.add_enabled(false, egui::DragValue::new(&mut self.edit_buffer.id));
-                    ui.label(format!("({})", category_label));
+                ui.vertical(|ui| {
+                    let id_response = ui.add(
+                        egui::DragValue::new(&mut self.edit_buffer.id).range(1_u32..=u32::MAX),
+                    );
+                    if id_response.changed() {
+                        *unsaved_changes = true;
+                    }
+                    // Show the valid range for the current category as a hint.
+                    let range_hint = if id_range.end == u32::MAX {
+                        format!("{}+ ({})", id_range.start, id_category.display_name())
+                    } else {
+                        format!(
+                            "{}\u{2013}{} ({})",
+                            id_range.start,
+                            id_range.end - 1,
+                            id_category.display_name()
+                        )
+                    };
+                    ui.label(
+                        egui::RichText::new(format!("Range: {range_hint}"))
+                            .weak()
+                            .small(),
+                    );
+                    if is_duplicate {
+                        ui.colored_label(
+                            egui::Color32::RED,
+                            "\u{26a0} ID already in use by another creature",
+                        );
+                    }
                 });
                 ui.end_row();
 
@@ -1900,6 +2003,7 @@ impl CreaturesEditorState {
                 {
                     *unsaved_changes = true;
                     self.preview_dirty = true;
+                    self.validation_dirty = true;
                 }
                 ui.end_row();
 
@@ -1919,6 +2023,7 @@ impl CreaturesEditorState {
                 {
                     *unsaved_changes = true;
                     self.preview_dirty = true;
+                    self.validation_dirty = true;
                 }
                 ui.end_row();
 
@@ -1935,12 +2040,14 @@ impl CreaturesEditorState {
                         }
                         *unsaved_changes = true;
                         self.preview_dirty = true;
+                        self.validation_dirty = true;
                     }
 
                     if let Some(tint) = &mut self.edit_buffer.color_tint {
                         if ui.color_edit_button_rgba_unmultiplied(tint).changed() {
                             *unsaved_changes = true;
                             self.preview_dirty = true;
+                            self.validation_dirty = true;
                         }
                     }
                 });
@@ -2023,11 +2130,21 @@ impl CreaturesEditorState {
             }
         });
 
-        let _ = unsaved_changes;
         result_message
     }
 
+    fn refresh_validation_state_if_dirty(&mut self) {
+        if self.validation_dirty {
+            self.refresh_validation_state();
+            self.validation_dirty = false;
+        }
+    }
+
     fn refresh_validation_state(&mut self) {
+        #[cfg(test)]
+        {
+            self.validation_refresh_count += 1;
+        }
         self.validation_errors.clear();
         self.validation_warnings.clear();
         self.validation_info.clear();
@@ -2126,6 +2243,7 @@ impl CreaturesEditorState {
                         self.mesh_edit_buffer = None;
                         self.mesh_transform_buffer = None;
                         self.preview_dirty = true;
+                        self.validation_dirty = true;
                         self.show_validation_panel = false;
                         self.refresh_validation_state();
                         self.workflow.mark_clean();
@@ -2140,6 +2258,7 @@ impl CreaturesEditorState {
                 self.mesh_edit_buffer = None;
                 self.mesh_transform_buffer = None;
                 self.preview_dirty = true;
+                self.validation_dirty = true;
                 self.show_validation_panel = false;
                 self.refresh_validation_state();
                 self.workflow.mark_clean();
@@ -2215,6 +2334,7 @@ impl CreaturesEditorState {
         self.mesh_transform_buffer = None;
         self.selected_mesh_index = None;
         self.preview_dirty = true;
+        self.validation_dirty = true;
         self.workflow
             .enter_asset_editor(&normalized, &new_creature.name);
         self.workflow.mark_dirty();
@@ -2547,6 +2667,7 @@ impl CreaturesEditorState {
 
         *unsaved_changes = true;
         self.preview_dirty = true;
+        self.validation_dirty = true;
     }
 
     fn _legacy_show_mesh_list_and_editor(&mut self, ui: &mut egui::Ui) {
@@ -2836,6 +2957,16 @@ impl CreaturesEditorState {
             self.selected_creature = Some(index);
             self.edit_buffer = creature.clone();
             self.preview_dirty = true;
+            self.validation_dirty = true;
+            // Live Preview defaults on for small creatures and auto-disables
+            // for dense imports. Mid-sized creatures preserve the user's current
+            // preference so manual pause/resume choices are not overwritten.
+            let total_tris: usize = creature.meshes.iter().map(|m| m.indices.len() / 3).sum();
+            if total_tris <= 5_000 {
+                self.live_preview_enabled = true;
+            } else if total_tris > 50_000 {
+                self.live_preview_enabled = false;
+            }
             self.preview_error = None;
             self.workflow.enter_asset_editor(file_name, &creature.name);
         }
@@ -4143,6 +4274,202 @@ mod tests {
         assert!(
             state.id_manager.is_id_used(1),
             "show_registry_mode should refresh id manager from runtime registry"
+        );
+    }
+
+    #[test]
+    fn test_validation_dirty_flag_prevents_recompute_without_change() {
+        let mut state = CreaturesEditorState::new();
+
+        assert!(state.validation_dirty);
+        assert_eq!(state.validation_refresh_count, 0);
+
+        state.refresh_validation_state_if_dirty();
+
+        assert!(!state.validation_dirty);
+        assert_eq!(
+            state.validation_refresh_count, 1,
+            "dirty validation should recompute once"
+        );
+
+        state.refresh_validation_state_if_dirty();
+
+        assert!(!state.validation_dirty);
+        assert_eq!(
+            state.validation_refresh_count, 1,
+            "clean validation state must skip validate_mesh recomputation"
+        );
+    }
+
+    #[test]
+    fn test_validation_dirty_set_when_mesh_edited() {
+        let mut state = CreaturesEditorState::new();
+        state.edit_buffer.meshes = vec![make_mesh("body")];
+        state.edit_buffer.mesh_transforms = vec![MeshTransform::identity()];
+        state.validation_dirty = false;
+        state.preview_dirty = false;
+
+        state.edit_buffer.meshes[0].color = [0.25, 0.5, 0.75, 1.0];
+        state.preview_dirty = true;
+        state.validation_dirty = true;
+
+        assert!(
+            state.validation_dirty,
+            "mutating edit_buffer.meshes[0] must set validation_dirty"
+        );
+        assert!(
+            state.preview_dirty,
+            "mutating edit_buffer.meshes[0] must set preview_dirty"
+        );
+    }
+
+    #[test]
+    fn test_open_for_editing_small_creature_reenables_live_preview() {
+        let mut state = CreaturesEditorState::new();
+        state.live_preview_enabled = false;
+        let mut creature = make_creature(1, "Small Preview");
+        creature.meshes = vec![make_mesh("body")];
+        creature.mesh_transforms = vec![MeshTransform::identity()];
+
+        state.open_for_editing(&[creature], 0, "assets/creatures/small_preview.ron");
+
+        assert!(
+            state.live_preview_enabled,
+            "small creatures should restore the default live preview setting"
+        );
+    }
+
+    #[test]
+    fn test_open_for_editing_dense_creature_disables_live_preview() {
+        let mut state = CreaturesEditorState::new();
+        let mut creature = make_creature(1, "Dense Preview");
+        let mut mesh = make_mesh("dense_body");
+        mesh.vertices = (0..150_003).map(|i| [i as f32, 0.0, 0.0]).collect();
+        mesh.indices = (0..150_003_u32).collect();
+        creature.meshes = vec![mesh];
+        creature.mesh_transforms = vec![MeshTransform::identity()];
+
+        state.open_for_editing(&[creature], 0, "assets/creatures/dense_preview.ron");
+
+        assert!(
+            !state.live_preview_enabled,
+            "creatures above 50,000 triangles should auto-disable live preview"
+        );
+    }
+
+    // ── Editable ID / Category tests ─────────────────────────────────────────
+
+    /// The edit buffer ID is mutable; changing it does not affect the backing
+    /// `creatures` slice until Save is applied.
+    #[test]
+    fn test_edit_buffer_id_change_is_independent_of_creatures_vec() {
+        let mut state = CreaturesEditorState::new();
+        let creatures = vec![make_creature(5, "Goblin")];
+        state.open_for_editing(&creatures, 0, "assets/creatures/goblin.ron");
+
+        // Simulate user typing a new ID.
+        state.edit_buffer.id = 42;
+
+        // edit_buffer holds the new ID.
+        assert_eq!(state.edit_buffer.id, 42);
+        // The backing slice is still untouched.
+        assert_eq!(creatures[0].id, 5);
+    }
+
+    /// The duplicate-ID check must NOT flag a creature's own original ID as a
+    /// conflict when in Edit mode.
+    #[test]
+    fn test_duplicate_check_excludes_original_id_in_edit_mode() {
+        let mut state = CreaturesEditorState::new();
+        let creatures = vec![make_creature(1, "Goblin"), make_creature(2, "Orc")];
+
+        // Populate the id_manager so it knows about both IDs.
+        let refs: Vec<CreatureReference> = creatures
+            .iter()
+            .map(|c| CreatureReference {
+                id: c.id,
+                name: c.name.clone(),
+                filepath: format!("creatures/{}.ron", c.name.to_lowercase()),
+            })
+            .collect();
+        state.id_manager.update_from_registry(&refs);
+
+        state.open_for_editing(&creatures, 0, "assets/creatures/goblin.ron");
+        // edit_buffer.id == 1 after open_for_editing.
+
+        let original_id = state
+            .selected_creature
+            .and_then(|idx| creatures.get(idx))
+            .map(|c| c.id);
+        assert_eq!(original_id, Some(1));
+
+        // id_manager says 1 is used, but it is the creature's OWN id.
+        assert!(state.id_manager.is_id_used(1));
+        let is_duplicate_own = state.id_manager.is_id_used(state.edit_buffer.id)
+            && Some(state.edit_buffer.id) != original_id;
+        assert!(
+            !is_duplicate_own,
+            "a creature's own original ID must not be flagged as a duplicate"
+        );
+
+        // Changing to ID 2 (used by Orc) SHOULD be flagged.
+        state.edit_buffer.id = 2;
+        let is_duplicate_other = state.id_manager.is_id_used(state.edit_buffer.id)
+            && Some(state.edit_buffer.id) != original_id;
+        assert!(
+            is_duplicate_other,
+            "ID 2 is used by another creature and must be flagged"
+        );
+    }
+
+    /// Selecting a category whose range does NOT contain the current ID must
+    /// cause `id_manager.suggest_next_id` to be used for the new ID.
+    #[test]
+    fn test_category_change_to_different_range_triggers_id_suggestion() {
+        let mut state = CreaturesEditorState::new();
+        // Creature starts in the Monsters range.
+        state.edit_buffer.id = 5;
+        assert_eq!(
+            CreatureCategory::from_id(state.edit_buffer.id),
+            CreatureCategory::Monsters
+        );
+
+        // The id_manager is empty — first available NPC id is 1000.
+        let new_category = CreatureCategory::Npcs;
+        let new_range = new_category.id_range();
+
+        // Simulate the ComboBox guard: only suggest if current ID is outside range.
+        let should_suggest = !new_range.contains(&state.edit_buffer.id);
+        assert!(should_suggest, "ID 5 is outside the NPCs range");
+
+        if should_suggest {
+            state.edit_buffer.id = state.id_manager.suggest_next_id(new_category);
+        }
+        assert_eq!(
+            state.edit_buffer.id, 1000,
+            "first available NPCs id in an empty registry should be 1000"
+        );
+        assert_eq!(
+            CreatureCategory::from_id(state.edit_buffer.id),
+            CreatureCategory::Npcs
+        );
+    }
+
+    /// Selecting the same category as the current ID must NOT change the ID.
+    #[test]
+    fn test_category_change_to_same_range_leaves_id_unchanged() {
+        let current_id: CreatureId = 5;
+        let current_category = CreatureCategory::from_id(current_id);
+        assert_eq!(current_category, CreatureCategory::Monsters);
+
+        // Simulate re-selecting Monsters when already Monsters.
+        let selected_category = CreatureCategory::Monsters;
+        let new_range = selected_category.id_range();
+        let should_suggest = !new_range.contains(&current_id);
+
+        assert!(
+            !should_suggest,
+            "ID 5 is in the Monsters range; no suggestion should occur"
         );
     }
 }

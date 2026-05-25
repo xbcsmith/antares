@@ -204,12 +204,24 @@ fn update_camera(
             }
         }
 
-        // Update light to follow camera
+        // Update light to follow camera, offset forward along the party's
+        // facing direction.  Without this offset the light sits directly above
+        // the camera position, which places it *behind* any creature the player
+        // is looking at — causing their facing side (and chin area) to fall into
+        // the shadow hemisphere.  Pushing the light 2 units forward means
+        // encountered creatures are front-lit by the torch rather than back-lit.
         if let Ok(mut light_transform) = light_query.single_mut() {
+            let forward_offset = 2.0_f32;
+            let (fwd_x, fwd_z) = match party_facing {
+                Direction::North => (0.0_f32, -forward_offset),
+                Direction::South => (0.0_f32, forward_offset),
+                Direction::East => (forward_offset, 0.0_f32),
+                Direction::West => (-forward_offset, 0.0_f32),
+            };
             light_transform.translation = Vec3::new(
-                camera_transform.translation.x,
+                camera_transform.translation.x + fwd_x,
                 camera_config.light_height,
-                camera_transform.translation.z,
+                camera_transform.translation.z + fwd_z,
             );
         }
     }

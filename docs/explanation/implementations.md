@@ -2,6 +2,2013 @@
 
 ---
 
+## Rest Menu Digit Choices No Longer Open Character Sheets (2026)
+
+**Problem**: Pressing **1**, **2**, or **3** in the Rest menu opened the
+corresponding character sheet instead of selecting the rest duration.
+
+**Root Cause**: The global input-toggle handler treated configured
+`SelectCharacter(0..5)` keys as top-level character-sheet shortcuts in every
+non-blocked mode. That global handling ran before the Rest menu input system, so
+RestMenu never received its local digit choices.
+
+**Fix**:
+
+- Removed global number-key character-sheet opening from
+  `handle_global_mode_toggles`.
+- Digit keys are now left for local screens such as RestMenu to handle.
+- The Character Sheet screen can still use configured `SelectCharacter` keys
+  locally after it is already open.
+- Updated control comments so `character_select_1..6` are described as
+  in-character-sheet selection keys, not global open shortcuts.
+
+**Tests Added/Updated**:
+
+- `test_handle_global_mode_toggles_character_select_does_not_open_sheet`
+- `test_handle_global_mode_toggles_character_select_does_not_steal_rest_menu_options`
+
+---
+
+## Recruitable Dialogue Auto-Facing Can Be Disabled (2026)
+
+**Problem**: Recruitable 3D character models could turn their backs on the
+party when dialogue started. Some imported models use a local forward axis that
+is opposite the engine convention, so authors compensate with an explicit facing
+direction in the SDK. Dialogue startup then forced the entity to rotate toward
+the party, undoing that authored correction.
+
+**Fix**:
+
+- Added `face_on_dialogue: bool` to `MapEvent::RecruitableCharacter`.
+- Recruitable events default this value to `false`, preserving the SDK-authored
+  facing direction during conversations unless the author explicitly opts in.
+- Added `face_speaker_to_party` to `StartDialogue`, so callers decide whether a
+  speaker should rotate on dialogue start.
+- Kept normal NPC, merchant, and innkeeper dialogue auto-facing enabled.
+- Added a Campaign Builder checkbox for recruitable events:
+  **Turn to face party when dialogue starts**.
+- The Campaign Builder inspector now shows when a recruitable event has this
+  behavior enabled.
+
+**Tests Added**:
+
+- `test_dialogue_start_respects_face_speaker_to_party_false`
+- `test_event_editor_state_recruitable_face_on_dialogue_roundtrip`
+- RON default coverage now asserts missing `face_on_dialogue` deserializes to
+  `false`.
+
+---
+
+## Sorcerer Combat SP Bar Updates After Spell Casts (2026)
+
+**Problem**: Sorcerers could spend spell points in combat, but the bottom HUD SP
+bar did not visibly decrease as the spell points were consumed. Cleric SP bars
+appeared correct because their common spell use path was exploration/healing,
+where `party.members` was mutated directly before the HUD read it.
+
+**Root Cause**: Combat spell casting deducts SP inside `CombatResource` first.
+The HUD reads `GameState.party.members`, which is updated by the combat-to-party
+mirror system. The HUD update system had no explicit ordering after that mirror,
+so it could read stale party SP values during the same frame as a sorcerer
+combat cast.
+
+**Fix**:
+
+- Made `sync_party_hp_during_combat` visible within the crate for system-ordering
+  dependencies.
+- Ordered `update_hud` after `sync_party_hp_during_combat`, so live combat HP/SP
+  is mirrored into `party.members` before the HUD calculates bar widths.
+- Added a sorcerer-specific regression test proving combat SP current values are
+  mirrored into `party.members` without mutating SP base values.
+
+**Tests Added**:
+
+- `test_sync_party_hp_during_combat_updates_party_sp_for_sorcerer`
+
+---
+
+## Character Sheet Header Mouse Buttons Use Full Hit Regions (2026)
+
+**Problem**: The Character Sheet header buttons **< Prev**, **Next >**, and
+**Party Overview** were visible but did not reliably respond to mouse clicks,
+especially when opened from inventory/portrait flows on narrower windows.
+
+**Root Cause**: The header actions were rendered inside a nested, fixed-width
+`allocate_ui` region after manual spacer math. On constrained widths, the button
+labels could still paint, but their egui interaction rectangles were clipped or
+outside the expected header hit area.
+
+**Fix**:
+
+- Removed the manual spacer and nested fixed-width allocation from the single
+  character header.
+- Rendered the header buttons directly in the existing right-to-left header row,
+  preserving their full egui response rectangles.
+- Kept the same keyboard hints and button actions.
+
+---
+
+## Character Sheet Party Overview Shows Full Party (2026)
+
+**Problem**: Opening the Character Sheet from a specific party member and then
+clicking **Party Overview** could present the overview as if it only contained
+that focused character. The old overview used a horizontal scroll strip, which
+made the screen behave like a one-card-at-a-time view on constrained window
+sizes.
+
+**Fix**:
+
+- Replaced the horizontal scroll strip in `character_sheet_ui.rs` with a wrapped
+  all-party card grid.
+- The overview now clones and renders the full active `party.members` list,
+  independent of which character opened the sheet.
+- Grid dimensions cap at three cards per row and wrap remaining members onto
+  additional rows, so parties of up to six members render as a 3×2 overview.
+- Each card is allocated an explicit rectangle before rendering, keeping mouse
+  interaction reliable for the per-character **View** buttons.
+
+**Tests Added**:
+
+- `test_party_overview_grid_dimensions_include_whole_party`
+- `test_party_overview_grid_dimensions_empty_party`
+- `test_render_party_overview_renders_whole_party_without_panic`
+
+---
+
+## ESC Key Bug Fix: Inventory Screens No Longer Open Game Menu (2025)
+
+**Problem**: Pressing ESC in any inventory screen (player inventory, merchant
+inventory, container inventory, character sheet, spell book) caused the game
+menu to open immediately after the screen closed. This was a system-ordering
+race condition in Bevy's Update schedule.
+
+**Root Cause**: Two systems handled the same `KeyCode::Escape` press in the same
+frame:
+
+1. Each screen's dedicated input system (e.g. `inventory_input_system`) handled
+   ESC by directly changing `GameState.mode` to the resume mode (Exploration).
+2. `handle_global_input_toggles` (from `InputPlugin`) also saw ESC → decoded it
+   as `menu_toggle = true` → called `close_modal()`. When the screen's input
+   system had already changed the mode to Exploration, `close_modal()` returned
+   `false`, and the handler fell into the `Exploration | Menu` match arm →
+   opened the game menu.
+
+**Fix**:
+
+- Removed the direct `KeyCode::Escape` mode-change handlers from:
+  - `inventory_input_system` (slot navigation phase only; action-nav ESC kept)
+  - `merchant_inventory_input_system` (slot navigation phase only)
+  - `container_inventory_input_system` (slot navigation phase only)
+  - `character_sheet_input_system`
+  - `spellbook_input_system`
+- Added container item write-back to `close_modal()` in `application/mod.rs`
+  for the `ContainerInventory` arm, so items are always persisted correctly
+  regardless of which code path triggers the close.
+- The single source of truth for ESC-closes-modal is now
+  `handle_global_mode_toggles` → `close_modal()`.
+
+**Tests Added**:
+
+- `test_close_modal_container_inventory_writes_items_back` in
+  `application/mod.rs` or `container_inventory_ui.rs`
+- `test_escape_in_inventory_mode_closes_inventory_not_menu` in `input.rs`
+- `test_escape_in_spellbook_mode_closes_spellbook_not_menu` in `input.rs`
+- `test_escape_in_character_sheet_mode_closes_sheet_not_menu` in `input.rs`
+
+---
+
+## Map Editor — Resize Map Feature
+
+### Problem
+
+The Campaign Builder's Map Editor had no way to change the size of an existing
+map after it was created. The only route was to delete the map and create a new
+one, losing all tile data, events, and NPC placements.
+
+### Implementation
+
+#### `src/domain/world/types.rs` — `Map::resize`
+
+A new public method `Map::resize(new_width: u32, new_height: u32)` was added to
+the `Map` domain struct:
+
+- **Grow**: new positions outside the old bounds are initialised as
+  `TerrainType::Ground` / `WallType::None`.
+- **Shrink**: tiles within the new bounds are preserved; tiles outside are
+  discarded. Events and NPC placements whose position falls outside the new
+  bounds are removed via `retain`.
+- **No-op guard**: `new_width == 0 || new_height == 0` is silently ignored so
+  callers don't need to guard against it.
+
+#### `sdk/campaign_builder/src/map_editor.rs` — UI
+
+Four new fields on `MapEditorState`:
+
+| Field                         | Purpose                                           |
+| ----------------------------- | ------------------------------------------------- |
+| `show_resize_dialog: bool`    | toggles the inline resize panel                   |
+| `resize_new_width: u32`       | target width (initialised to current map width)   |
+| `resize_new_height: u32`      | target height (initialised to current map height) |
+| `resize_confirm_shrink: bool` | user has acknowledged the shrink warning          |
+
+**`show_resize_dialog_ui`** — new private static method rendered inline inside
+the inspector panel when `show_resize_dialog` is true:
+
+- Two `DragValue` fields (1–512 tiles) for width and height.
+- A **live preview** row: `W × H = N tiles`.
+- When either dimension would shrink the map, a `⚠️` warning section appears
+  showing the exact count of tiles, events, and NPC placements that would be
+  removed (highlighted in orange/red when non-zero).
+- A confirmation checkbox `"I understand — remove tiles/events/NPCs outside new
+bounds"` must be ticked before the **✅ Apply Resize** button becomes enabled.
+- On Apply: calls `editor.map.resize(...)`, sets `has_changes = true`, closes
+  the dialog, clears `selected_position` and entries in `selected_tiles` that
+  are now outside the new bounds, and calls `request_repaint()`.
+- **❌ Cancel** closes the dialog without modifying the map.
+- The confirmation checkbox auto-resets when the user edits dimensions back to a
+  non-shrinking state.
+
+**`show_inspector_panel`** now shows a **📐 Resize Map** button below the Map
+info group. Clicking it toggles the inline resize panel and re-initialises the
+dimension fields to the current map size.
+
+### Tests Added
+
+**`mod map_resize_tests`** in `src/domain/world/types.rs` (10 tests):
+`test_resize_grow_expands_tiles`, `test_resize_shrink_removes_out_of_bounds_tiles`,
+`test_resize_shrink_removes_out_of_bounds_events`,
+`test_resize_grow_preserves_existing_events`,
+`test_resize_shrink_removes_out_of_bounds_npc_placements`,
+`test_resize_same_size_is_idempotent`, `test_resize_zero_width_is_noop`,
+`test_resize_zero_height_is_noop`, `test_resize_preserves_tile_terrain_in_bounds`,
+`test_resize_new_tiles_are_ground`.
+
+**`mod tests`** in `sdk/campaign_builder/src/map_editor.rs` (5 tests appended):
+`test_resize_dialog_fields_default_false`, `test_resize_dialog_initial_dims_match_map`,
+`test_map_resize_grow_sets_has_changes`,
+`test_map_resize_shrink_clears_selected_position_when_out_of_bounds`,
+`test_map_resize_shrink_selected_position_in_bounds_preserved`,
+`test_map_resize_shrink_removes_selected_tiles_outside_bounds`.
+
+### Quality gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 5083 passed, 8 skipped, 0 failed
+```
+
+---
+
+### Problem
+
+Stone textures appeared on the floor tiles but not on wall meshes. Mountain
+textures worked because mountains are rendered as floor-height meshes via the
+`world::TerrainType::Mountain` branch, which already used
+`terrain_material_with_optional_tint` to pull a textured material from the
+cache. Normal walls (`WallType::Normal`) had never been wired up to the terrain
+texture cache at all.
+
+### Root Cause
+
+`spawn_map` in `src/game/systems/map.rs` handled `WallType::Normal` by
+constructing a brand-new `StandardMaterial` with only a flat `base_color` (a
+darkened terrain-colour RGB) and no `base_color_texture`:
+
+```text
+let tile_wall_material = materials.add(StandardMaterial {
+    base_color: wall_color,   // flat grey / greenish / etc.
+    perceptual_roughness: 0.5,
+    ..default()               // base_color_texture = None  ← the bug
+});
+```
+
+Every wall surface was therefore a solid slab of colour regardless of which
+texture file existed on disk.
+
+### Fix (`src/game/systems/map.rs`)
+
+Before creating the wall material, clone the source material from
+`TerrainMaterialCache` for the wall's terrain type (e.g.
+`TerrainType::Stone` → `stone.png`). Override only `base_color` with the
+darkened tint — in Bevy's PBR pipeline, `base_color` is a multiplier over
+`base_color_texture`, so the texture is shown while still being visually
+darkened relative to the floor:
+
+```text
+let source_material = terrain_cache
+    .get(tile.terrain)
+    .and_then(|handle| materials.get(handle))
+    .cloned();
+
+let tile_wall_material = if let Some(mut src) = source_material {
+    src.base_color = wall_color;     // darken tint (0.6 × terrain RGB)
+    src.perceptual_roughness = 0.5;
+    materials.add(src)               // texture preserved
+} else {
+    materials.add(StandardMaterial { // test fallback (no texture)
+        base_color: wall_color,
+        perceptual_roughness: 0.5,
+        ..default()
+    })
+};
+```
+
+The existing tint/darken logic (`darken = 0.6`, per-tile `color_tint`) is
+unchanged — walls still look darker than floors and honour per-tile overrides.
+
+### Tests Added
+
+- `test_normal_wall_material_inherits_terrain_texture` — asserts that when the
+  terrain cache has a stone material with a texture handle, the produced wall
+  material carries the same texture handle and has the darkened `base_color`.
+- `test_normal_wall_material_fallback_when_cache_empty` — asserts that when the
+  cache is empty (e.g. unit tests that skip the startup system) the wall
+  material is still created successfully with a flat colour and no texture.
+
+### Quality gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 5073 passed, 8 skipped, 0 failed
+```
+
+---
+
+### Problem
+
+A codebase audit found five places where the game engine constructed asset paths
+that were not cleanly relative, causing silent load failures or non-deterministic
+behaviour depending on the process working directory or filesystem layout.
+
+### Fixes
+
+#### `src/bin/antares.rs` — `BEVY_ASSET_ROOT` fallback always absolute
+
+`canonicalize()` can fail when the campaign directory doesn't exist yet (e.g. a
+campaign being created, or a CI checkout). The previous `unwrap_or_else` fell
+back to `campaign.root_path.clone()`, which may be a relative path like
+`"campaigns/tutorial"`. Bevy then resolved all asset loads against the process
+working directory, which varies by launch context.
+
+Fix: when `canonicalize()` fails, produce an absolute path via
+`std::env::current_dir().join(&campaign.root_path)` if the path is relative, or
+use it as-is if already absolute. Also removed the unnecessary `.clone()` on the
+string passed to `std::env::set_var`.
+
+#### `src/game/systems/hud.rs` — Portrait path fallback drops directory structure
+
+Both `ensure_portraits_loaded` and `ensure_full_portraits_loaded` had a
+`path.file_name()` fallback that fired when `canonicalize()` + `strip_prefix`
+failed (e.g. portrait on a different mount point or cross-symlink). That fallback
+produced a bare filename like `"hero.png"`, causing `asset_server.load("hero.png")`
+to look at `<campaign_root>/hero.png` instead of the correct
+`assets/portraits/hero.png`.
+
+Fix: replaced the single-level fallback with a three-stage cascading
+`Option<PathBuf>` chain:
+
+1. Direct `strip_prefix(&campaign.root_path)`.
+2. Canonicalize only `campaign.root_path`, then strip.
+3. Canonicalize both paths (last resort).
+
+If all three strategies fail, the file is skipped with a `warn!` log rather than
+passing a structurally broken path to the asset server.
+
+#### `src/game/systems/audio.rs` — Double-slash from trailing `/` in `audio_dir`
+
+`resolve_audio_path` used `format!("{}/{}", audio_dir, id)` with no normalisation.
+A campaign config with `audio_dir: "assets/audio/"` (trailing slash) produced
+`"assets/audio//combat.ogg"`, which Bevy's asset path parser may not normalise,
+causing lookup misses.
+
+Fix: added `let audio_dir = audio_dir.trim_end_matches('/');` at the top of the
+function. Updated the doc example and added four unit tests covering the trailing-
+slash case (single slash, explicit extension, multiple slashes).
+
+#### `src/domain/visual/mod.rs` + `src/game/systems/creature_meshes.rs` — Wrong `texture_path` doc example
+
+The `MeshDefinition::texture_path` field doc comment showed
+`"textures/dragon_scales.png"` as an example path. With `BEVY_ASSET_ROOT` pointing
+at the campaign root and `file_path: String::new()`, Bevy resolves that as
+`<campaign_root>/textures/...` — missing the required `assets/` layer.
+Creature `.ron` files authored following this example would have silently broken
+textures at runtime.
+
+Fix: updated the doc comment in `visual/mod.rs` to show
+`"assets/textures/dragon_scales.png"` and explain the `assets/` requirement.
+Updated the `load_texture` doc example in `creature_meshes.rs` to match.
+Added a `debug_assert!` in `load_texture` that fires in debug builds when a path
+is passed without the `assets/` prefix.
+
+#### `sdk/campaign_builder/tests/map_data_validation.rs` — `canonicalize()` before `is_dir()` hard-fails on missing directory
+
+`canonicalize()` returns an error on non-existent paths; the `?` propagated it
+before the `is_dir()` guard could skip. On a clean checkout without `data/maps`
+populated, the test always failed with a confusing canonicalize error.
+
+Fix: moved the `is_dir()` check **before** `canonicalize()` so a missing
+directory simply `continue`s rather than hard-failing.
+
+### Quality gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 5071 passed, 8 skipped, 0 failed
+```
+
+---
+
+## Importer Category ComboBox — ID Not Updating When Switching Categories
+
+### Problem
+
+Two related bugs in the OBJ/GLB Model Importer (`obj_importer_ui.rs`):
+
+1. **Grid ordering**: In `render_loaded_mode`, the **ID** row (with its range
+   hint `(1–999)`) was rendered **before** the **Category** row. When the user
+   changed the Category ComboBox, the ID suggestion fired correctly — but the
+   range hint on the ID row had already been drawn with the stale category in
+   that same frame. The updated range didn’t appear until the next egui repaint
+   cycle. On slower hosts this looked like the ID never changed at all.
+
+2. **No ID suggestion in idle mode**: `render_idle_mode` had a Category
+   ComboBox but no `campaign_dir` parameter and no change-detection logic.
+   If the user changed the category while the model was still being picked
+   (idle mode), `creature_id` was not re-suggested. When they then loaded a
+   model, the ID field showed whatever value was left from the previous export
+   session (e.g., an NPC-range ID of 1042 while Category showed “Monsters”).
+   There was also no re-suggestion when the model actually loaded.
+
+### Fix
+
+#### `obj_importer_ui.rs` — grid row reorder
+
+Moved the **Category** row **above** the **ID** row in the
+`render_loaded_mode` grid. The Category ComboBox now fires its change-detection
+(`if state.category != category_before`) and calls
+`suggest_next_creature_id_from_dir` **before** the ID row renders. The ID
+DragValue and range hint therefore read the already-updated `state.creature_id`
+and `state.category` in the same frame — no one-frame lag.
+
+New grid order:
+
+```
+Format
+MTL Source (conditional)
+Embedded textures (conditional)
+Export Type
+Category   ← now first, fires ID suggestion before ID row renders
+ID         ← reads updated creature_id and shows correct range hint
+Name
+Import Scale
+Export Path
+```
+
+#### `obj_importer_ui.rs` — idle mode category change detection
+
+Added `campaign_dir: Option<&PathBuf>` parameter to `render_idle_mode` and
+passed it through from `show_obj_importer_tab`.
+
+Added the same `category_before` / `if state.category != category_before`
+change-detection pattern to the idle-mode Category ComboBox. When the user
+changes category before loading a model, `state.creature_id` is immediately
+set to the next available ID in the new range.
+
+#### `obj_importer_ui.rs` — ID suggestion on model load
+
+After a successful `load_model_into_state` call (both in the idle **Load
+Model** button and the loaded **Load Another Model** button), the code now
+calls `suggest_next_creature_id_from_dir(campaign_dir, current_cat)` to
+fresh-suggest the creature ID for the current category. This ensures the ID
+field is always correct when entering Loaded mode, even when `state.category`
+was preserved from a previous export session.
+
+#### `monsters_editor.rs` — suppress unused-param warning
+
+Prefixed the no-longer-used `creature_manager` parameter in `show_form` with
+`_` (`_creature_manager`) since the form now reads entirely from
+`self.available_creatures`.
+
+### New Tests
+
+| File                 | Test name                                                        | What it verifies                                                               |
+| -------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `obj_importer_ui.rs` | `test_idle_mode_category_change_updates_creature_id_no_campaign` | Category change in idle mode moves `creature_id` into the new category’s range |
+| `obj_importer_ui.rs` | `test_model_load_suggests_id_for_current_category_no_campaign`   | Model load re-suggests ID; stale NPC-range ID is replaced by valid range-start |
+| `obj_importer_ui.rs` | `test_model_load_after_category_switch_gives_correct_range_id`   | Category switch then model load produces a Monster-range ID                    |
+
+All 2481 campaign-builder tests pass.
+
+---
+
+## Monster Editor — Visual Asset Autocomplete (fixes hang)
+
+### Problem
+
+In **Monsters → Edit**, the **Visual Asset** section had a **Browse…** button
+that opened a floating `egui::Window` picker. While the window was visible,
+`creature_manager.load_all_creatures()` was called on **every render frame**,
+reading all creature `.ron` files from disk each tick. This caused the editor
+to hard-hang whenever the picker was open — scrolling, clicking, or any other
+interaction stalled until the window was closed.
+
+### Root cause
+
+The modal pattern put the disk-I/O call inside the render closure:
+
+```antares/sdk/campaign_builder/src/monsters_editor.rs#L782-815
+// OLD (removed) — every frame while picker was open:
+if self.creature_picker_open {
+    if let Some(manager) = creature_manager {
+        let creatures = manager.load_all_creatures().unwrap_or_default(); // <— disk I/O every frame
+        ...
+    }
+}
+```
+
+The Character and NPC editors already had the correct pattern — a cached
+`available_creatures: Vec<(u32, String)>` rebuilt once on campaign-dir change,
+passed to `autocomplete_creature_selector` which is pure-UI (no I/O).
+
+### Fix
+
+#### `monsters_editor.rs`
+
+- **Removed** `creature_picker_open: bool` field and the entire modal-picker
+  block (`egui::Window`, `ScrollArea`, `selectable_label` loop, Close button).
+
+- **Added three fields to `MonstersEditorState`:**
+
+  - `pub creature_id_buffer: String` — the numeric ID string the autocomplete
+    widget reads/writes (e.g. `"42"` or `""`). Initialised from
+    `edit_buffer.creature_id` once per edit session; cleared on Back / Save /
+    Cancel.
+  - `pub available_creatures: Vec<(u32, String)>` — cached `(id, name)` pairs,
+    never populated per frame.
+  - `pub last_campaign_dir: Option<PathBuf>` — change sentinel.
+
+- **`apply_selected_creature_id`** now syncs `creature_id_buffer` instead of
+  closing the removed picker.
+
+- **`show()`** rebuilds the cache exactly once each time `ctx.campaign_dir`
+  changes:
+
+  ```antares/sdk/campaign_builder/src/monsters_editor.rs#L239-249
+  let campaign_dir_now = ctx.campaign_dir.cloned();
+  if campaign_dir_now != self.last_campaign_dir {
+      self.available_creatures = creature_manager
+          .and_then(|m| m.load_all_creatures().ok())
+          .map(|cs| cs.into_iter().map(|c| (c.id, c.name)).collect::<Vec<_>>())
+          .unwrap_or_default();
+      self.last_campaign_dir = campaign_dir_now;
+  }
+  ```
+
+- **`show_form()` Visual Asset group** now calls `autocomplete_creature_selector`
+  (the same widget used by Characters and NPCs — type by name or ID, built-in
+  Clear button). When the selection changes, the string is parsed back to
+  `Option<CreatureId>` and `edit_buffer.creature_id` is updated.
+
+- **`show_form()` Back / Save / Cancel** each call `self.creature_id_buffer.clear()`
+  alongside `self.monster_name_input_buffer.clear()` so the buffer resets
+  cleanly for the next edit session.
+
+- **Imports** — added `autocomplete_creature_selector` to the `ui_helpers` use
+  block.
+
+- **Updated two existing tests** (`test_monsters_editor_creature_id_roundtrips_through_form`,
+  `test_monsters_editor_clear_creature_id`) to also assert on `creature_id_buffer`.
+
+- **Added four new tests:**
+  - `test_available_creatures_starts_empty` — no I/O until campaign dir set.
+  - `test_creature_id_buffer_starts_empty_and_clears` — lifecycle check.
+  - `test_creature_id_buffer_parsed_to_option` — string→`Option<CreatureId>` parse.
+  - `test_monsters_editor_creature_id_roundtrips_through_form` / `test_monsters_editor_clear_creature_id` — updated to cover buffer sync.
+
+### Quality gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 5067 passed, 0 failed
+```
+
+### Follow-up: stale display text fix
+
+**Additional problem reported after the initial fix**: the autocomplete text box
+was displaying the creature name/ID from the _previous_ edit session instead of
+the value belonging to the monster currently being edited (or blank when no
+creature was set).
+
+**Root cause**: `load_autocomplete_buffer` reads from egui's persistent memory
+(`ctx.memory`) first and only invokes the initializer closure when no entry
+exists. Clearing `creature_id_buffer` (our Rust state) does not evict the
+display-text entry from egui's memory, so the stale `"5 — Dragon"` string
+reappeared on the next edit session.
+
+**Additional fix** (`monsters_editor.rs`):
+
+- Added `pub edit_session_initialized: bool` to `MonstersEditorState`
+  (default `false`).
+- The `Add | Edit` arm of `show()` now runs a one-shot block whenever
+  `!self.edit_session_initialized`:
+  - Unconditionally overwrites `monster_name_input_buffer` and
+    `creature_id_buffer` from the current `edit_buffer` values.
+  - Calls `remove_autocomplete_buffer(ctx, egui::Id::new("autocomplete:creature:monster_creature"))`
+    to evict the stale egui-memory entry — forcing the widget's initializer to
+    run on the next render and display the correct value.
+  - Sets `edit_session_initialized = true` so the block does not repeat while
+    the user is actively editing.
+- Back / Save / Cancel each set `edit_session_initialized = false` alongside the
+  existing `.clear()` calls, resetting the flag for the next edit session.
+- Added four new tests covering the session-lifecycle:
+  `test_edit_session_initialized_starts_false`,
+  `test_edit_session_initialized_cleared_on_exit`,
+  `test_edit_session_buffers_reset_unconditionally`,
+  `test_edit_session_buffer_empty_when_no_creature_id`.
+
+---
+
+## Creature Edit — Editable ID and Category
+
+### Problem
+
+In **Creatures → Edit** mode the ID field was rendered with
+`add_enabled(false, ...)` (greyed-out / read-only) and the category was shown
+as a static derived label. Once a creature was created there was no way to
+change its ID or move it to a different category range without deleting and
+re-creating it.
+
+### Fix
+
+#### `creature_id_manager.rs`
+
+- Added `pub fn all_categories() -> &'static [CreatureCategory]` to
+  `impl CreatureCategory`.
+  Returns all five categories in ascending ID-range order (`Monsters → NPCs
+→ Templates → Variants → Custom`). Used by both the creatures editor and
+  the importer UI to populate ComboBoxes without duplicating the list.
+- Added two tests: `test_all_categories_has_five_entries` and
+  `test_all_categories_id_range_start_is_ascending`.
+
+#### `creatures_editor/mod.rs` — `show_creature_level_properties`
+
+- **New `original_id` guard.** Before rendering the grid, the function now
+  captures `Option<CreatureId>` from `creatures[selected_creature]` when in
+  `Edit` mode. Used exclusively by the duplicate-ID check so the creature's
+  own existing ID is never flagged as a conflict with itself.
+
+- **Category row (new, replaces static label).**
+  An `egui::ComboBox` (id salt `creature_edit_category_combo`) lists all five
+  categories. When the user picks a category different from the one implied
+  by the current ID:
+
+  - If the current ID is **already inside** the new category's range → ID is
+    left unchanged (avoids spurious ID churn when re-selecting the same
+    category).
+  - If the current ID is **outside** the new range → `id_manager.suggest_next_id(new_category)`
+    picks the first unused ID in the target range and assigns it to
+    `edit_buffer.id`.
+  - `*unsaved_changes` is set to `true` in either case.
+
+- **ID row (was disabled `DragValue`, now editable).**
+  The `add_enabled(false, ...)` call is replaced with a normal `DragValue`
+  constrained to `1..=u32::MAX`. Below the input:
+
+  - A dim small-text hint shows the valid range for the current category
+    (e.g. `Range: 1–999 (Monsters)`, or `Range: 4000+ (Custom)` for the
+    unbounded Custom category).
+  - A red `⚠ ID already in use by another creature` label appears when the
+    proposed ID is registered to a _different_ creature (the `original_id`
+    exclusion prevents false positives for the creature's own ID).
+
+- Removed the dead `let _ = unsaved_changes;` line that was suppressing a
+  now-resolved lint.
+
+- Added four tests:
+  - `test_edit_buffer_id_change_is_independent_of_creatures_vec` — buffer
+    changes do not touch the backing slice before Save.
+  - `test_duplicate_check_excludes_original_id_in_edit_mode` — a creature's
+    own ID is never flagged; another creature's ID is.
+  - `test_category_change_to_different_range_triggers_id_suggestion` — moving
+    to a non-overlapping category sets the first available ID in that range.
+  - `test_category_change_to_same_range_leaves_id_unchanged` — re-selecting
+    the same category does not trigger a suggestion.
+
+### Quality gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 5067 passed, 0 failed
+```
+
+---
+
+## Importer — Category ComboBox and ID Range Consistency
+
+### Problems
+
+Three related bugs in the Campaign Builder **Importer** tab:
+
+1. **Category was a plain text field.** For `ExportType::Creature`, the
+   category controls which ID range to assign (Monsters 1–999, NPCs
+   1000–1999, Templates 2000–2999, Variants 3000–3999, Custom 4000+).
+   A free-text box provided no guidance and accepted arbitrary strings that
+   never matched any recognised category.
+
+2. **ID always defaulted to the Custom range (4000+).** `sync_obj_importer_campaign_state`
+   in `campaign_io.rs` hardcoded `CreatureCategory::Custom`, so no matter what
+   category the user typed, the suggested ID was always 4000+.
+
+3. **Changing the category did not update the ID.** There was no link between the
+   category selection and the ID field, so the two could silently disagree.
+
+### Fix
+
+#### `obj_importer_ui.rs`
+
+- Added `use crate::creature_id_manager::CreatureCategory;`.
+- Added `ALL_CREATURE_CATEGORIES` constant (all five variants in display order).
+- Added `creature_category_from_str(s: &str) -> CreatureCategory` — maps the
+  canonical display names to their enum variant; falls back to `Custom` for
+  any unrecognised input including the empty string.
+- Added `suggest_next_creature_id_from_dir(campaign_dir, category) -> u32` —
+  loads the campaign registry via `CreatureAssetManager::load_all_creatures()`
+  and returns the first unused ID in the requested category's range.
+- In **both** `render_idle_mode` and `render_loaded_mode`, the plain text
+  `Category` field is replaced with an `egui::ComboBox` (id salts
+  `obj_importer_idle_creature_category` / `obj_importer_loaded_creature_category`)
+  when `ExportType::Creature` is active. Item and Furniture exports retain the
+  original free-text field because their category is used as a path subfolder.
+- In `render_loaded_mode`: when the ComboBox selection changes, `state.creature_id`
+  is immediately updated via `suggest_next_creature_id_from_dir` so the ID
+  field always reflects the chosen range.
+- The ID row now shows the expected range as a dim label (e.g. `(1–999)`) and
+  a yellow `⚠` warning when the current ID is outside the selected category's
+  range, without constraining the `DragValue` (the user can still override).
+
+#### `campaign_io.rs` — `sync_obj_importer_campaign_state`
+
+The hardcoded `CreatureCategory::Custom` was replaced with a `match` on
+`self.obj_importer_state.category` using the same display-name mapping as
+`creature_category_from_str`. This means that when a campaign is opened (or
+after an export), the suggested ID is derived from the importer's current
+category selection rather than always landing in the 4000+ range.
+
+#### `obj_importer.rs`
+
+The `category` field's default value remains `""` (empty string). Item and
+Furniture exports use category as a path subfolder component, so defaulting
+to `"Custom"` would pollute those paths with an unwanted `/custom/`
+subdirectory. The Creature ComboBox already maps `""` to `Custom` via
+`creature_category_from_str`, so the UI is consistent: a brand-new importer
+shows `Custom` selected and `creature_id` starts at 4000.
+
+### New Tests
+
+| File                 | Test name                                                             | What it verifies                                       |
+| -------------------- | --------------------------------------------------------------------- | ------------------------------------------------------ |
+| `obj_importer.rs`    | `test_default_category_is_empty_and_maps_to_custom_range`             | Default `category` is `""` and `creature_id` is 4000   |
+| `obj_importer_ui.rs` | `test_creature_category_from_str_maps_all_display_names`              | All five display names map to the correct enum variant |
+| `obj_importer_ui.rs` | `test_creature_category_from_str_empty_or_unknown_defaults_to_custom` | Unknown / empty input maps to `Custom`                 |
+| `obj_importer_ui.rs` | `test_suggest_next_creature_id_no_campaign_dir_returns_range_start`   | Falls back to range start with no campaign dir         |
+| `obj_importer_ui.rs` | `test_suggest_next_creature_id_skips_used_ids_in_range`               | Skips already-used IDs within the category             |
+| `obj_importer_ui.rs` | `test_suggest_next_creature_id_empty_campaign_returns_range_start`    | Empty campaign returns range start                     |
+
+All 2462 tests pass.
+
+---
+
+## Importer Creature Export — Immediate Autocomplete Update in Character, NPC, and Monster Editors
+
+### Problem
+
+When a creature was exported from the OBJ/GLB Importer, the Campaign Builder
+called `load_creatures()` to refresh `campaign_data.creatures`, but the
+autocomplete caches inside `CharactersEditorState`, `NpcEditorState`, and
+`MonstersEditorState` (`available_creatures: Vec<(u32, String)>`) were only
+ever rebuilt when the `campaign_dir` changed. Because an export does not
+change the campaign directory, the new creature would not appear in the
+character or NPC creature assignment dropdowns, or in the Monster Editor
+**Visual Asset** autocomplete, until the user saved the campaign and reopened it.
+
+The same staleness applied when the user clicked **Reload** in the Creatures
+toolbar (`RELOAD_CREATURES_SENTINEL`): the registry was refreshed on disk but
+the editor caches stayed stale.
+
+**Follow-up bug:** The original fix for Characters and NPCs was not applied to
+`MonstersEditorState`. Its cache was only guarded by
+`campaign_dir_now != self.last_campaign_dir`, so importing an orc (or any new
+mesh) via the Importer tab would never update the Visual Asset autocomplete in
+the Monster Editor's Edit form until the campaign was reopened.
+
+### Fix
+
+#### `characters_editor.rs` and `npc_editor/mod.rs`
+
+A new `pub creature_cache_dirty: bool` field (`#[serde(skip)]`, default `false`)
+was added to both `CharactersEditorState` and `NpcEditorState`.
+
+The cache-rebuild guard in each editor's `show()` method was widened:
+
+- **Before:** `if campaign_dir_changed { … }`
+- **After:** `if campaign_dir_changed || self.creature_cache_dirty { … }`
+
+The flag is cleared (`creature_cache_dirty = false`) inside the same block so
+it only triggers a single extra rebuild.
+
+A `pub fn invalidate_creature_cache(&mut self)` method was added to both
+editors to set the flag from outside.
+
+#### `monsters_editor.rs`
+
+The same `pub creature_cache_dirty: bool` field and
+`pub fn invalidate_creature_cache(&mut self)` method were added to
+`MonstersEditorState`. The cache-rebuild guard in `show()` was widened to also
+check the dirty flag:
+
+- **Before:** `if campaign_dir_now != self.last_campaign_dir { … }`
+- **After:** `if campaign_dir_now != self.last_campaign_dir || self.creature_cache_dirty { … }`
+
+The flag is cleared after the rebuild.
+
+#### `lib.rs` — call-sites
+
+`invalidate_creature_cache()` is now called on **all three** editor states after
+every `load_creatures()` invocation in the main `update()` function:
+
+1. **`RELOAD_CREATURES_SENTINEL` handler** — Creatures toolbar Reload button.
+2. **`ObjImporterUiSignal::Creature` handler** — successful creature export
+   from the Importer.
+
+### New Tests
+
+| File                   | Test name                                        | What it verifies                                                  |
+| ---------------------- | ------------------------------------------------ | ----------------------------------------------------------------- |
+| `characters_editor.rs` | `test_invalidate_creature_cache_sets_dirty_flag` | Flag starts `false`; `invalidate_creature_cache()` sets it `true` |
+| `npc_editor/mod.rs`    | `test_invalidate_creature_cache_sets_dirty_flag` | Same contract for `NpcEditorState`                                |
+| `monsters_editor.rs`   | `test_creature_cache_dirty_starts_false`         | Default value is `false`                                          |
+| `monsters_editor.rs`   | `test_invalidate_creature_cache_sets_dirty_flag` | `invalidate_creature_cache()` sets the flag to `true`             |
+| `monsters_editor.rs`   | `test_invalidate_creature_cache_idempotent`      | Calling the method multiple times leaves the flag `true`          |
+
+All 5067 tests pass.
+
+---
+
+## `delete_creature` Texture Cleanup and Alias-Safe Deletion
+
+### Problem
+
+`CreatureAssetManager::delete_creature` had two gaps:
+
+1. **Orphaned texture files.** When the importer embeds a texture path in a
+   `MeshDefinition`, deleting the creature left that texture file on disk
+   indefinitely. Over time this caused the `assets/textures/imported/` tree to
+   accumulate stale files with no campaign reference.
+
+2. **Alias-unsafe `.ron` deletion.** The registry allows multiple
+   `CreatureReference` entries to share one `.ron` filepath (the aliasing
+   pattern used by variant creatures such as `DireWolf` / `DireWolfLeader`
+   both pointing at `wolf.ron`). The old code deleted the `.ron` file
+   unconditionally, corrupting any remaining alias.
+
+### Fix — `sdk/campaign_builder/src/creature_assets.rs`
+
+The method was rewritten as a three-phase cleanup:
+
+1. **Collect textures first.** Before modifying the registry or touching the
+   filesystem, all `texture_path` values from the creature's `MeshDefinition`
+   list are read into a `HashSet<String>`. This snapshot is taken while the
+   `.ron` file still exists.
+
+2. **Alias-safe `.ron` deletion.** After writing the updated registry (without
+   the deleted entry), the `.ron` file is only removed when no remaining
+   registry entry still references the same `filepath`. If two or more aliases
+   shared the file, the file survives.
+
+3. **Exclusive-texture deletion.** The set of texture paths retained by all
+   surviving creatures is computed by loading each remaining `.ron` file. Any
+   texture path in the deleted set that is absent from the retained set is
+   deleted from disk on a best-effort basis (individual errors are non-fatal).
+
+`use std::collections::HashSet;` was added to the crate-level imports to
+support both the implementation and tests.
+
+### New Tests (all in `mod tests`)
+
+| Test name                                                             | What it verifies                                                 |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `test_delete_creature_also_removes_exclusive_texture_file`            | Texture owned exclusively by the deleted creature is removed     |
+| `test_delete_creature_preserves_texture_shared_with_another_creature` | Texture shared with a surviving creature is kept                 |
+| `test_delete_creature_preserves_aliased_ron_file`                     | `.ron` file shared by two aliases survives deletion of one alias |
+
+### Fix — `sdk/campaign_builder/src/creatures_editor/mod.rs`
+
+Both UI-level delete handlers now call `CreatureAssetManager::delete_creature`
+before removing the entry from the in-memory `Vec<CreatureDefinition>`:
+
+- **`show_registry_mode`** — `RegistryPreviewAction::Delete` (triggered from
+  the right-panel delete button and the list context-menu delete action).
+- **`show_edit_mode`** — `ItemAction::Delete` (triggered from the action
+  buttons bar in the asset editor).
+
+When `campaign_dir` is `None` (no campaign open) the cleanup step is skipped
+and only the in-memory entry is removed — identical to the previous behaviour.
+Errors from `delete_creature` are silently ignored so that creatures created
+in-session but not yet flushed to disk (and therefore absent from the
+registry file) can still be deleted without surfacing a spurious error.
+
+`use crate::creature_assets::CreatureAssetManager;` was added to the import
+block.
+
+All 2454 existing tests continue to pass.
+
+---
+
+## Shadow Rendering Fix: Ambient Lux Scale and Point-Light Forward Offset
+
+### Problem
+
+Models with complex geometry (notably `whisper_new`) had visually unacceptable
+pitch-black shadows — most noticeably under the chin and in the neck area. Two
+root causes were identified:
+
+1. **Ambient light was ~600× too dim.** `AMBIENT_DAY_BRIGHTNESS` was set to
+   `1.0` when `AmbientLight.brightness` in Bevy is measured in **lux**. Bevy's
+   own built-in default is `80.0 lux`. With a 2 000 000-lumen point light
+   providing ≈ 17 000 lux at 3 metres, a `1.0 lux` fill produced a
+   17 000:1 key-to-fill ratio — any polygon not in the direct cone of the
+   torch appeared as literal black.
+
+2. **The point light was behind the creatures being viewed.** In first-person
+   mode the `MainLight` was updated to `(camera_x, light_height, camera_z)` —
+   directly above the party's position. Creatures in front of the camera are at
+   a lower Z (for North-facing view), so the light was behind them. Their
+   front-facing surfaces (including the face and chin) fell into the shadow
+   hemisphere.
+
+### Fix 1 — `src/game/systems/time.rs`: Proper lux values
+
+All five ambient brightness constants were scaled up to physically meaningful
+lux values that maintain the same dark-to-light ordering while preventing
+pit-black shadows:
+
+| Period            | Old value | New value (lux) |
+| ----------------- | --------- | --------------- |
+| Night             | 0.25      | 80.0            |
+| Evening           | 0.50      | 200.0           |
+| Dawn/Dusk         | 0.70      | 400.0           |
+| Morning/Afternoon | 1.00      | 600.0           |
+
+With the scene's 2 000 000-lumen point light this gives a ≈ 28:1 key-to-fill
+ratio at daytime — moody and clearly lit-by-torch, but with visible detail in
+shadow areas. At night the 80 lux ambient (Bevy's default) ensures the world
+still feels dark without being impenetrable.
+
+The two tests that wrongly asserted brightness is in `[0.0, 1.0]` were
+updated to check for a positive finite value and to compare against
+`AMBIENT_DAY_BRIGHTNESS` rather than the hard-coded `1.0`.
+
+### Fix 2 — `src/game/systems/camera.rs`: Forward-offset the point light
+
+The `update_camera` light-position update now offsets the `MainLight` by
+`2.0` world units in the party's current facing direction:
+
+- North: light at `(camera_x, height, camera_z − 2)`
+- South: light at `(camera_x, height, camera_z + 2)`
+- East: light at `(camera_x + 2, height, camera_z)`
+- West: light at `(camera_x − 2, height, camera_z)`
+
+This places the "torch" ahead of the player, so encountered creatures are
+front-lit rather than back-lit. The chin / jaw / neck area now receives
+direct illumination from the key light.
+
+### Root Cause 3 (informational) — baked AO in `baked_basecolor.png`
+
+The `whisper_new` creature uses a texture named `baked_basecolor.png`.
+Such textures exported from Blender/Maya typically have ambient occlusion
+baked into the albedo channel, which pre-darkens crevices like the
+under-chin concavity. This compounds with dynamic shadows but cannot be
+resolved in code — it requires either re-baking the texture without AO
+or using a separate `occlusion_texture` slot so the AO is not baked into
+the base colour. The two code fixes above are sufficient to make the dark
+area visible again even with the baked AO present.
+
+---
+
+## Campaign Builder GLB Texture Material Neutralization
+
+Textured GLB imports now preserve the baked base-color texture as the source of
+truth instead of letting scalar material fields wash out the model. When a GLB
+primitive has a base-color texture, `mesh_glb_io` now exports neutral runtime
+material defaults: white opaque mesh color, white material base color,
+non-metallic surfaces, roughness `0.8`, and no emissive glow. Untextured GLB and
+OBJ imports continue to preserve or assign colors through the existing importer
+color workflow.
+
+The Campaign Builder importer state now records texture-backed GLB meshes with a
+neutral texture color source. Bulk auto-assignment skips those meshes, and the UI
+labels their color controls as optional texture tinting rather than normal import
+coloring. Existing palette and color picker controls remain available for
+explicit user tint overrides.
+
+The affected tutorial `whisper_new` creature asset was also patched to use
+neutral material values so the already-exported texture is no longer rendered
+with white emissive/metallic washout.
+
+Regression coverage was added for texture-backed GLB material defaults, neutral
+GLB importer color sources, and auto-assignment skipping textured GLB meshes.
+
+---
+
+## Recruitable Character Map Event Persistence Fix
+
+Recruitable character map events now remain in the map when the party merely
+walks onto their tile or otherwise triggers the event without completing
+recruitment. Previously, `trigger_event` removed `RecruitableCharacter` events as
+soon as they were triggered, which caused cleanup systems to despawn the visible
+mesh even though no recruitment dialogue had completed.
+
+The domain event handler now returns `EventResult::RecruitableCharacter` without
+removing the backing `MapEvent::RecruitableCharacter`. The dialogue recruitment
+flow remains responsible for removing that event and despawning the visual only
+after the character is added to the party or sent to an inn.
+
+Regression coverage was added for both the domain event handler and
+`GameState::move_party_and_handle_events` so recruitable meshes stay visible
+until successful recruitment.
+
+---
+
+## GLB File Support in Campaign Builder Importer — Full Feature Summary (Complete)
+
+All seven phases of GLB file support in the Campaign Builder Importer are
+complete. Campaign Builder users can import `.glb` files, adjust per-mesh
+colors, and export self-contained Creature, Item, or Furniture RON assets with
+embedded textures written to `assets/textures/imported/`.
+
+### Feature Components
+
+| Phase | Scope                                     | Key Files                                                                        |
+| ----- | ----------------------------------------- | -------------------------------------------------------------------------------- |
+| 1     | GLB parser foundation                     | `mesh_glb_io.rs`                                                                 |
+| 2     | Format-neutral importer state             | `obj_importer.rs`                                                                |
+| 3     | UI dispatch for GLB selection             | `obj_importer_ui.rs`                                                             |
+| 4     | Embedded texture export                   | `obj_importer_ui.rs`                                                             |
+| 5     | Runtime and domain compatibility          | `mesh_glb_io.rs`, `obj_importer.rs`, `obj_importer_ui.rs`                        |
+| 6     | Importer and creature preview performance | `creatures_editor/mod.rs`, `preview_renderer.rs`, `obj_importer_ui.rs`, `lib.rs` |
+| 7     | Documentation, validation, and QA         | `mesh_glb_io.rs`, `obj_importer.rs`, `obj_importer_ui.rs`                        |
+
+### Success Criteria (All Met)
+
+- Campaign Builder users can import a `.glb`, export as Creature/Item/Furniture
+  RON, and get self-contained embedded texture files in `assets/textures/imported/`
+  without manually managing sidecar files.
+- Textured GLB assets produce exported RON plus campaign texture files that are
+  self-contained inside the campaign directory.
+- OBJ import remains fully functional with zero regressions.
+- Unsupported GLB features fail or warn clearly rather than producing silently
+  untextured models.
+- Campaign Builder remains responsive when loading and exporting large GLB models.
+
+### Error Message Specification
+
+| GLB Problem                 | User-Facing Behavior                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------------ |
+| No mesh primitives          | Load error: `"No mesh primitives found in GLB file."`                                |
+| Missing POSITION attribute  | Load error: `"Mesh '<name>' primitive <N> has no position data."`                    |
+| Unsupported primitive mode  | Load error: `"Unsupported primitive mode '<mode>' in mesh '<name>'."`                |
+| External URI texture        | Load error: `"Embedded textures required; external URI textures are not supported."` |
+| Unknown MIME type           | Export warning in `status_message`; file saved with `.bin` extension                 |
+| Texture missing at export   | Export error: `"Texture for mesh '<name>' could not be resolved."`                   |
+| Multiple scenes             | Info in `status_message`: `"GLB contains N scene(s); importing default scene."`      |
+| Skinning/animations present | Info in `status_message`: `"Skinning/animations present but not imported."`          |
+
+### Quality Gates (Final)
+
+All four quality gates pass on the complete workspace:
+
+```antares/docs/explanation/implementations.md#L1-1
+cargo fmt --all              → no output (all files formatted)
+cargo check --all-targets    → Finished, 0 errors
+cargo clippy -D warnings     → Finished, 0 warnings
+cargo nextest run            → 2441 passed, 0 failed
+```
+
+---
+
+## GLB Importer — Phase 7: `is_error` Status Flag and Improved Status Message Format (Complete)
+
+### Overview
+
+Phase 7 adds a boolean `is_error` field to `ObjImporterState` so the UI can
+distinguish error messages (rendered in red) from informational status messages
+(rendered in italics). It also rewrites the GLB metadata summary in
+`load_imported_glb_scene` to use a `Vec<String>` parts-joining approach,
+adding explicit sentences for multi-scene GLB files and for skinning/animations.
+
+| Change | File                 | Description                                                                                                                                 |
+| ------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1      | `obj_importer.rs`    | `is_error: bool` field added to `ObjImporterState`; `Default` impl initializes to `false`                                                   |
+| 2      | `obj_importer.rs`    | `load_imported_glb_scene` rewrites status to `status_parts.join(" ")` with multi-scene and skinning sentences; sets `self.is_error = false` |
+| 3      | `obj_importer.rs`    | Four new tests: defaults, clear reset, multi-scene message, skinning message                                                                |
+| 4      | `obj_importer_ui.rs` | `show_obj_importer_tab` renders `status_message` red when `is_error`, italic otherwise                                                      |
+| 5      | `obj_importer_ui.rs` | `render_idle_mode`: Browse sets `is_error=false`; load Ok sets `is_error=false`; load Err sets `is_error=true`                              |
+| 6      | `obj_importer_ui.rs` | `render_loaded_mode`: export Err sets `is_error=true`; `[skinning ignored]` check updated to `"Skinning/animations present"`                |
+| 7      | `obj_importer_ui.rs` | `reload_obj_after_mtl_change`: Err arm sets `is_error=true`                                                                                 |
+| 8      | `obj_importer_ui.rs` | Two new tests: red error render, unknown-format sets `is_error`                                                                             |
+| 9      | `lib.rs`             | Pre-existing `clone_on_copy` lint fixed (`EditorTab` is `Copy`)                                                                             |
+| 10     | `obj_importer.rs`    | Pre-existing `field_reassign_with_default` lint fixed in `test_open_after_export_preserved_across_clear`                                    |
+| 11     | `obj_importer_ui.rs` | Pre-existing `field_reassign_with_default` lint fixed in `test_importer_large_mesh_list_renders_bounded_rows`                               |
+
+**2441/2441 tests green. Zero `cargo clippy` warnings.**
+
+### Deliverables
+
+#### `sdk/campaign_builder/src/obj_importer.rs`
+
+- **`ObjImporterState::is_error`** — new `pub is_error: bool` field; `Default`
+  and `new()` initialize it `false`; `clear()` resets it to `false` via
+  `..Self::default()`.
+- **`load_imported_glb_scene`** — status message now built from a
+  `Vec<String>` joined with `" "`. Base sentence always present. Extra
+  sentences appended for `scene_count > 1` ("GLB contains N scene(s);
+  importing default scene.") and `has_skinning || has_animations`
+  ("Skinning/animations present but not imported.") and
+  `has_unsupported_pbr_channels`. Sets `self.is_error = false` before writing
+  the message.
+- **New tests**: `test_obj_importer_state_is_error_defaults_to_false`,
+  `test_obj_importer_state_is_error_resets_on_clear`,
+  `test_obj_importer_state_load_glb_multi_scene_status`,
+  `test_obj_importer_state_load_glb_skinning_status`.
+
+#### `sdk/campaign_builder/src/obj_importer_ui.rs`
+
+- **`show_obj_importer_tab`** — `status_message` rendered via
+  `ui.colored_label(Color32::RED, ...)` when `state.is_error`, italic
+  `RichText` otherwise.
+- **`render_idle_mode`** — Browse button sets `is_error = false`; load
+  `Ok` arm sets `is_error = false`; load `Err` arm sets `is_error = true`.
+- **`render_loaded_mode`** — export `Err` arm sets `is_error = true`;
+  skinning badge check updated from `"[skinning ignored]"` to
+  `"Skinning/animations present"` to match new message format.
+- **`reload_obj_after_mtl_change`** — `Err` arm sets `is_error = true`.
+- **New tests**: `test_show_obj_importer_tab_renders_error_status_in_red`,
+  `test_render_idle_mode_sets_is_error_on_unknown_format`.
+
+---
+
+## GLB File Support — Phase 7: Error Message Specification Compliance (Complete)
+
+### Overview
+
+All 8 changes of the Phase 7 error message specification compliance update are
+implemented in `sdk/campaign_builder/src/mesh_glb_io.rs`.
+
+| Change | Description                                                                     |
+| ------ | ------------------------------------------------------------------------------- |
+| 1      | `UnsupportedPrimitive` gains a `mesh: String` field; display updated            |
+| 2      | `MissingPositions` display message updated to spec format                       |
+| 3      | New `NoMeshPrimitives` variant added after `InvalidIndex`                       |
+| 4      | External URI image error in step 2b pre-validation updated to spec wording      |
+| 5      | `NoMeshPrimitives` guard added before `Ok(ImportedGlbScene { ... })`            |
+| 6      | `glb_primitive_to_mesh_definition` passes `mesh_name` to `UnsupportedPrimitive` |
+| 7      | Defensive URI error in `extract_base_color_texture_payload` updated             |
+| 8      | `build_scene_without_meshes_glb` helper + 2 new tests added to `mod tests`      |
+
+**2435/2435 tests green. Zero `cargo clippy` warnings in `mesh_glb_io.rs`.**
+
+### Deliverables
+
+#### `sdk/campaign_builder/src/mesh_glb_io.rs`
+
+- **`GlbImportError::UnsupportedPrimitive`** — new `mesh: String` field added;
+  display string changed to `"Unsupported primitive mode '{mode}' in mesh
+'{mesh}'."`. Existing pattern-match test updated with `..` wildcard.
+- **`GlbImportError::MissingPositions`** — display string changed from
+  `"Missing POSITION attribute in mesh '{mesh}', primitive {primitive}"` to
+  `"Mesh '{mesh}' primitive {primitive} has no position data."`.
+- **`GlbImportError::NoMeshPrimitives`** — new unit variant with display
+  `"No mesh primitives found in GLB file."`, placed after `InvalidIndex`.
+- **Step 2b pre-validation** — external URI texture error detail changed from
+  `"external URI textures are not supported; embed textures in the GLB file
+(found URI: {uri})"` to `"Embedded textures required; external URI textures
+are not supported (found URI: {uri})"`.
+- **`import_glb_scene_from_bytes`** — `NoMeshPrimitives` guard inserted
+  immediately after the node-traversal loop and before `Ok(ImportedGlbScene
+{ ... })`, so a scene containing only non-mesh nodes (cameras, lights, etc.)
+  returns an error rather than an empty mesh list.
+- **`glb_primitive_to_mesh_definition`** — passes `mesh: mesh_name.to_string()`
+  when constructing `GlbImportError::UnsupportedPrimitive`.
+- **`extract_base_color_texture_payload`** — defensive URI branch error detail
+  updated to match the step 2b wording.
+- **New test helpers and tests**:
+  - `build_scene_without_meshes_glb()` — GLB with a single no-mesh node
+    (`CameraOnly`), producing zero primitives.
+  - `test_import_glb_no_mesh_primitives_returns_error` — asserts
+    `NoMeshPrimitives` is returned for a mesh-free scene.
+  - `test_import_glb_error_messages_match_spec` — verifies exact display
+    strings for `MissingPositions`, `UnsupportedPrimitive`, and
+    `NoMeshPrimitives`.
+
+---
+
+## GLB File Support — Phase 6: Importer and Creature Preview Responsiveness (Complete)
+
+### Overview
+
+All four findings of Phase 6 are now fully implemented. Each finding is an
+independent performance fix for a confirmed per-frame CPU hot-path in the
+Campaign Builder that becomes more visible with large OBJ or GLB files.
+
+| Finding | Description                                                                                        | Primary Files                                                              |
+| ------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| A       | `validation_dirty` guard — `refresh_validation_state` was called every frame unconditionally       | `creatures_editor/mod.rs`, `creatures_editor/mesh_ui.rs`, `app_dialogs.rs` |
+| B       | Render-signature skip — `render_preview` was called every frame even with no camera or mesh change | `preview_renderer.rs`, `creatures_editor/preview_panel.rs`                 |
+| C       | `show_rows` virtualization — importer mesh list painted all N rows every frame                     | `obj_importer_ui.rs`                                                       |
+| D       | Conditional tab switch — creature export always navigated away from Importer tab                   | `obj_importer.rs`, `obj_importer_ui.rs`, `lib.rs`                          |
+
+**All 6 required tests pass. Zero `cargo clippy` warnings. 2433/2433 tests green.**
+
+---
+
+## GLB File Support — Phase 6 Findings C & D: Virtualized Mesh List + `open_after_export` Toggle (Complete)
+
+### Overview
+
+Implemented Findings C and D of the Phase 6 GLB file support plan for the
+Campaign Builder.
+
+**Finding D** adds an `open_after_export: bool` field to `ObjImporterState`
+that controls whether the active tab switches to the Creatures editor after a
+creature export. It defaults to `false`, keeping the user in the Importer tab
+so they can make further edits or load a new model immediately.
+
+**Finding C** virtualizes the mesh-list `ScrollArea` in `render_loaded_mode`
+using egui's `show_rows` API, eliminating the O(N) widget instantiation cost
+for scenes with many meshes. Row height is computed analytically (body text
+height x 2 + spacing x 2 + group padding) so only the rows visible in the
+scroll viewport are allocated each frame.
+
+### Deliverables
+
+#### `sdk/campaign_builder/src/obj_importer.rs`
+
+- **`open_after_export: bool` field** — added to `ObjImporterState` after
+  `new_custom_color`. Initialises to `false` in `Default::default()`.
+- **`clear()` preservation** — `open_after_export` is now extracted before the
+  struct reset and written back into the new default, alongside the existing
+  preserved fields (`scale`, `custom_palette`, `creature_id`, etc.).
+- **Doc comment update** — the `clear()` doc comment now explicitly lists
+  `open_after_export` as a field that survives a clear.
+- **Two new tests**:
+  - `test_importer_creature_export_stays_in_importer_by_default` — asserts
+    `open_after_export` defaults to `false`.
+  - `test_open_after_export_preserved_across_clear` — asserts the flag
+    survives `clear()`.
+
+#### `sdk/campaign_builder/src/obj_importer_ui.rs`
+
+- **`show_rows` virtualization** — replaced the `ScrollArea::vertical().show()`
+  loop in `render_loaded_mode` with `show_rows(left_ui, row_height, num_rows,
+|ui, row_range| { ... })`. The `id_salt` was updated to
+  `"importer_mesh_list_scroll"`. Row height is pre-computed from
+  `text_style_height(Body)` and `item_spacing.y` before entering the layout.
+- **`open_after_export` checkbox** — added in the `horizontal_wrapped` export
+  controls block, between the "Back / Clear" button and the "Export RON"
+  button. Calls `request_repaint()` on change.
+- **One new test**:
+  - `test_importer_large_mesh_list_renders_bounded_rows` — builds a state with
+    200 meshes, renders via `show_obj_importer_tab`, and asserts no panic
+    occurs.
+
+#### `sdk/campaign_builder/src/lib.rs`
+
+- **Conditional tab switch** — the `ObjImporterUiSignal::Creature` match arm
+  now wraps `self.ui_state.active_tab = EditorTab::Creatures` in
+  `if self.obj_importer_state.open_after_export { ... }`, so the tab only
+  switches when the user has explicitly opted in.
+- **One new test**:
+  - `test_importer_creature_export_switches_tab_when_enabled` — verifies the
+    tab does NOT switch when `open_after_export` is `false` (default) and DOES
+    switch when it is `true`.
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors)
+✅ cargo clippy      → Finished (0 warnings)
+✅ cargo nextest run → 2433 tests run: 2433 passed, 0 failed
+```
+
+---
+
+## GLB File Support — Phase 6 Finding A: `validation_dirty` Guard in `creatures_editor` (Complete)
+
+### Overview
+
+Implemented Finding A of the Phase 6 GLB file support plan for the Campaign
+Builder. This change adds a `validation_dirty` guard to
+`CreaturesEditorState` so that `refresh_validation_state` is only called
+when something has actually changed, eliminating the unconditional per-frame
+validation recompute in `show_edit_mode`.
+
+Also adds `live_preview_enabled: bool` (the scaffold for Finding B) and
+auto-disables live preview for dense creatures (> 50,000 triangles) when
+`open_for_editing` is called.
+
+### Deliverables
+
+#### `sdk/campaign_builder/src/creatures_editor/mod.rs`
+
+- **`validation_dirty: bool` field** — added to `CreaturesEditorState` after
+  `preview_dirty`. Initialises to `true` in `Default::default()` so the first
+  frame always runs a validation pass.
+- **`live_preview_enabled: bool` field** — added after `validation_dirty`.
+  Initialises to `true`. Auto-set to `false` in `open_for_editing` when the
+  total triangle count of the loaded creature exceeds 50,000.
+- **`show_edit_mode` guard** — replaced the unconditional
+  `self.refresh_validation_state()` call with:
+  ```rust
+  if self.validation_dirty {
+      self.refresh_validation_state();
+      self.validation_dirty = false;
+  }
+  ```
+- **`validation_dirty = true` co-set** — added `self.validation_dirty = true;`
+  alongside every existing `self.preview_dirty = true;` assignment in all
+  non-legacy, non-test code paths:
+  - `show_mesh_list_panel`: duplicate, delete, visibility toggle, mesh
+    selection (4 sites)
+  - `show_creature_level_properties`: name, scale, color-tint toggle,
+    color-tint value (4 sites)
+  - `revert_edit_buffer_from_registry`: Edit branch, Add branch (2 sites)
+  - `perform_save_as_with_path` (1 site)
+  - `apply_primitive_replacement` (1 site)
+  - `open_for_editing` (1 site)
+- **Two new tests** added to `mod tests`:
+  - `test_validation_dirty_flag_prevents_recompute_without_change`
+  - `test_validation_dirty_set_when_mesh_edited`
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors)
+✅ cargo clippy      → Finished (0 warnings)
+✅ cargo nextest run → 2433 tests run: 2433 passed, 0 failed
+```
+
+---
+
+## GLB File Support — Phase 6 Finding B: Render-Signature Skip Optimization (Complete)
+
+### Overview
+
+Implemented Finding B of the Phase 6 GLB file support plan for the Campaign
+Builder. This optimization adds a render-signature mechanism to
+`PreviewRenderer` that prevents the expensive `render_preview` drawing pass
+from executing on every egui frame when neither the camera nor the creature
+data has changed.
+
+### Problem
+
+`render_preview` was called unconditionally on every call to `show`, including
+frames where nothing had changed. This wasted CPU time re-projecting and
+re-drawing identical wireframes every frame.
+
+### Solution
+
+A lightweight `u64` hash (built with `DefaultHasher`) captures the full camera
+state — `distance`, `azimuth`, `elevation`, `fov`, and `target[3]`. The hash
+is stored in `last_rendered_signature` after each actual render. On subsequent
+frames, if the hash matches and `needs_update` is `false`, the draw pass is
+skipped entirely.
+
+### Deliverables
+
+#### `sdk/campaign_builder/src/preview_renderer.rs`
+
+- **`last_rendered_signature: Option<u64>`** — new private field on
+  `PreviewRenderer`. Initialized to `None`. Stores the camera-state hash
+  produced by the most recent `render_preview` call.
+
+- **`compute_render_signature(&self) -> u64`** — new private method. Hashes
+  the five camera fields (`distance`, `azimuth`, `elevation`, `fov`,
+  `target[3]`) using `DefaultHasher` and the existing `hash_f32` helper.
+  `needs_update` is intentionally **not** included in the hash; that flag is
+  already handled by the explicit `||` branch in `should_render`.
+
+- **`show` method updated** — the unconditional `self.render_preview(...)` call
+  is replaced with:
+
+  ```rust
+  let render_sig = self.compute_render_signature();
+  let should_render = self.needs_update || self.last_rendered_signature != Some(render_sig);
+  if should_render {
+      self.render_preview(&painter, response.rect);
+      self.last_rendered_signature = Some(render_sig);
+      self.needs_update = false;
+  }
+  ```
+
+  This also clears `needs_update` after each render, preventing repeated
+  re-renders on subsequent frames when no input has arrived.
+
+- **1 new test** (`test_preview_renderer_skips_render_when_signature_unchanged`):
+  - Verifies `last_rendered_signature` is `None` before any render.
+  - Verifies `last_rendered_signature` is set and `needs_update` is `false`
+    after the first `show` call.
+  - Verifies `last_rendered_signature` is **unchanged** after a second `show`
+    call with identical camera state (i.e., the render was skipped).
+
+### Design Note: Why `needs_update` is excluded from the hash
+
+Including `needs_update` in the hash would cause a signature mismatch on every
+frame following the first render: the stored signature would encode `true`
+(the value at render time) while the next frame's computed signature would
+encode `false` (the cleared value), creating an infinite re-render loop.
+The `should_render` guard handles the `needs_update` case directly via the
+explicit `||` condition.
+
+### Quality Gates
+
+```
+cargo fmt         ✔ no output
+cargo check       ✔ 0 errors, 0 warnings
+cargo clippy      ✔ 0 warnings (-D warnings)
+cargo nextest run ✔ 17/17 preview_renderer tests passed; 1860/1860 lib tests passed
+                    (1 new test added)
+```
+
+---
+
+## GLB File Support — Phase 6 Finding B (continued): Live Preview Toggle + Remaining `validation_dirty` Co-sets (Complete)
+
+### Overview
+
+Completed the Finding A and B deliverables not yet covered by the preceding
+sections — specifically the **Live Preview toggle UI** in the creature editor
+preview panel and the **`validation_dirty = true` co-assignments** in
+`creatures_editor/mesh_ui.rs` and `app_dialogs.rs`.
+
+### Deliverables
+
+#### `sdk/campaign_builder/src/creatures_editor/preview_panel.rs`
+
+- **Live Preview toggle row** — inserted between `ui.heading("Preview")` and
+  the existing camera-controls `horizontal`. Contains:
+  - **`Live Preview` checkbox** — bound to `self.live_preview_enabled`. When
+    re-checked, sets both `preview_dirty = true` and `validation_dirty = true`
+    so the preview syncs immediately on re-enable.
+  - **`🔄 Refresh` button** — calls `sync_preview_renderer_from_edit_buffer()`
+    unconditionally (regardless of `live_preview_enabled`), letting the user
+    trigger a manual update while Live Preview is off.
+  - **`Preview paused` label** — shown in yellow while `live_preview_enabled`
+    is `false` so the user knows updates are suppressed.
+- **Gated auto-sync** — the `if self.preview_dirty { … }` block now reads
+  `if self.live_preview_enabled && self.preview_dirty { … }`, preventing
+  automatic syncs when the toggle is off.
+
+#### `sdk/campaign_builder/src/creatures_editor/mesh_ui.rs`
+
+- **12 `validation_dirty = true` co-assignments** — added `self.validation_dirty
+= true;` immediately after every `self.preview_dirty = true;` in
+  `show_mesh_properties_panel` (color, translation X/Y/Z, pitch/yaw/roll,
+  uniform scale, scale X/Y/Z, Reset Transform).
+
+#### `sdk/campaign_builder/src/app_dialogs.rs`
+
+- **1 `validation_dirty = true` co-assignment** — added after the existing
+  `preview_dirty = true;` in the creature-template-apply branch.
+
+### Quality Gates
+
+```text
+✅ cargo fmt         → no output
+✅ cargo check       → Finished (0 errors)
+✅ cargo clippy      → Finished (0 warnings)
+✅ cargo nextest run → 2433 tests run: 2433 passed, 0 failed
+```
+
+---
+
+## GLB Runtime and Domain Compatibility — Phase 5 (Complete)
+
+### Overview
+
+Implemented Phase 5 of the GLB file support plan for the Campaign Builder
+importer. This phase verifies that GLB-exported Creature, Item, and Furniture
+RON files are compatible with the game runtime, adds an
+`has_unsupported_pbr_channels` flag to surface silent channel skips in the
+importer UI status message, and documents the GLB texture export convention in
+the campaign content format reference. No geometry-parsing or export-pipeline
+changes were required — runtime compatibility was confirmed without code
+modification.
+
+### Deliverables
+
+#### `sdk/campaign_builder/src/mesh_glb_io.rs`
+
+- **`ImportedGlbScene::has_unsupported_pbr_channels: bool`** — new public
+  field. Set to `true` when any material in the glTF document has
+  `normalTexture`, `occlusionTexture`, or
+  `pbrMetallicRoughness.metallicRoughnessTexture`. Detection uses a single
+  `.any()` pass over `gltf.document.materials()` after document-level metadata
+  collection; this avoids touching the per-primitive traversal loop. The flag
+  is `Copy` (`bool`), so the partial-move pattern already established by other
+  `usize`/`bool` fields continues to work unmodified.
+
+- **Unsupported PBR channel detection** — three glTF channels are now actively
+  detected and flagged rather than silently ignored:
+
+  | Channel                | gltf crate API                               |
+  | ---------------------- | -------------------------------------------- |
+  | Normal map             | `material.normal_texture().is_some()`        |
+  | Ambient occlusion      | `material.occlusion_texture().is_some()`     |
+  | Metallic-roughness map | `pbr.metallic_roughness_texture().is_some()` |
+
+- **3 new test-helper functions** — `build_triangle_full_material_glb`,
+  `build_normal_texture_glb`, `build_occlusion_texture_glb` — added to the
+  in-module test section alongside the existing factory helpers.
+
+- **5 new tests** (all pass):
+  - `test_glb_material_base_color_maps_to_domain_material` — `[0.8, 0.2, 0.1,
+1.0]` maps to `mesh_def.color` and `material.base_color`.
+  - `test_glb_material_metallic_roughness_maps_to_domain` — `metallicFactor:
+0.3` and `roughnessFactor: 0.7` map to `MaterialDefinition` fields.
+  - `test_glb_normal_texture_sets_unsupported_pbr_channels_flag` — scene flag
+    is `true` when `normalTexture` present; geometry imports normally.
+  - `test_glb_occlusion_texture_sets_unsupported_pbr_channels_flag` — same for
+    `occlusionTexture`.
+  - `test_glb_standard_pbr_leaves_unsupported_channels_flag_false` — scalar-only
+    PBR material leaves flag `false`.
+
+#### `sdk/campaign_builder/src/obj_importer.rs`
+
+- **`load_imported_glb_scene` metadata summary updated** — a sixth token is
+  appended to the `format!` string when `scene.has_unsupported_pbr_channels`
+  is `true`:
+
+  ```text
+  [unsupported PBR: normal/occlusion/metallic-roughness textures ignored]
+  ```
+
+  This follows the same pattern as the existing `[skinning ignored]` and
+  `[animations ignored]` tokens.
+
+#### `sdk/campaign_builder/src/obj_importer_ui.rs`
+
+- **3 new tests** (all pass):
+  - `test_glb_exported_texture_path_round_trips_through_ron` — verifies that
+    a campaign-relative `texture_path` (the `assets/textures/imported/<name>/…`
+    convention) survives a full RON serialization/deserialization cycle without
+    path corruption.
+  - `test_glb_item_export_preserves_texture_path` — `ExportType::Item` export
+    with an embedded GLB texture writes a campaign-relative `texture_path` to
+    the RON output and creates the texture file on disk.
+  - `test_glb_furniture_export_preserves_texture_path` — same for
+    `ExportType::Furniture`.
+
+#### `docs/reference/campaign_content_format.md`
+
+- **New section: "GLB Texture Export Convention"** — documents:
+  - Texture destination path format
+    (`assets/textures/imported/<asset_name>/<image_file>`).
+  - File name derivation rules (glTF image name → sanitized stem; MIME →
+    extension; fallback `image_<index>.<ext>`).
+  - `texture_path` RON field format (campaign-relative string).
+  - Content-hash deduplication behaviour.
+  - Unsupported PBR channel table (normal, occlusion, metallic-roughness)
+    and the UI warning format.
+  - Runtime compatibility note (no GLB file needed after export; Bevy asset
+    server loads the copied texture files identically for OBJ and GLB imports).
+
+### Runtime Compatibility Confirmation
+
+`src/game/systems/creature_meshes.rs::texture_loading_system` reads
+`MeshDefinition.texture_path` as a campaign-relative `&str` and passes it
+directly to `asset_server.load(texture_path)`. GLB creature exports produce
+paths with the same `assets/textures/imported/…` prefix as OBJ exports, so
+creature runtime texture loading requires no GLB-specific code.
+
+Item and Furniture exports preserve `MeshDefinition.texture_path` in their RON
+files and copy embedded texture assets into the campaign tree, but runtime
+rendering does **not** currently apply those texture paths uniformly:
+
+- Dropped item meshes are spawned from `CreatureDefinition` data through
+  `spawn_creature`, whose initial material creation uses `MaterialDefinition` or
+  flat color and does not load `mesh_def.texture_path` during spawn.
+- Furniture rendering currently builds `StandardMaterial` from furniture material
+  metadata/color tint and does not read `mesh_def.texture_path`.
+
+### Known Limitations
+
+| Area                       | Status                                                                        |
+| -------------------------- | ----------------------------------------------------------------------------- |
+| Creature GLB textures      | Runtime-compatible through `texture_loading_system`                           |
+| Item GLB textures          | Exported RON and copied files preserve paths; runtime application is deferred |
+| Furniture GLB textures     | Exported RON and copied files preserve paths; runtime application is deferred |
+| Unknown embedded MIME      | Export proceeds with `.bin`; importer status includes a warning               |
+| `normalTexture`            | Ignored; flag set, warning shown in UI status                                 |
+| `occlusionTexture`         | Ignored; flag set, warning shown in UI status                                 |
+| `metallicRoughnessTexture` | Ignored; flag set, warning shown in UI status                                 |
+| Skinning / animations      | Ignored since Phase 2; status message unchanged                               |
+
+### Quality Gates
+
+```
+cargo fmt         ✔ no output
+cargo check       ✔ 0 errors, 0 warnings
+cargo clippy      ✔ 0 warnings (-D warnings)
+cargo nextest run ✔ 5065 tests run: 5065 passed, 0 failed
+                    (8 new Phase 5 tests: 5 required + 3 bonus)
+```
+
+---
+
+## GLB Embedded Texture Export — Phase 4 (Complete)
+
+### Overview
+
+Implemented Phase 4 of the GLB file support plan for the Campaign Builder
+importer. This phase extends `obj_importer_ui.rs` to write embedded GLB image
+bytes to campaign texture asset files during export, while fully preserving all
+existing OBJ texture copy behaviour. No changes were made to `mesh_glb_io.rs`
+or `obj_importer.rs`.
+
+### Deliverables
+
+- **`ResolvedTextureSource` enum** — new private enum added in
+  `obj_importer_ui.rs`:
+
+  - `AlreadyCampaignRelative` — texture already lives in campaign dir; skip.
+  - `FilesystemPath(PathBuf)` — copy from this filesystem path.
+  - `EmbeddedBytes { bytes: Vec<u8>, file_name_hint: String }` — write these
+    bytes to a new campaign texture file.
+  - `Missing` — no usable source; export fails with `MissingTexture`.
+
+- **`resolve_imported_texture_source` refactored** — return type changed from
+  `Option<PathBuf>` to `ResolvedTextureSource`. Priority order:
+
+  1. Campaign-relative check → `AlreadyCampaignRelative`.
+  2. `payload.bytes.is_some()` → `EmbeddedBytes`.
+  3. `payload.source_path` exists on disk → `FilesystemPath`.
+  4. Absolute `texture_path` exists → `FilesystemPath`.
+  5. MTL-relative fallback paths → `FilesystemPath`.
+  6. Source file parent directory → `FilesystemPath`.
+  7. None of the above → `Missing`.
+
+- **`copy_imported_textures_into_campaign` rewritten** — uses `match` on
+  `ResolvedTextureSource`. Deduplication switched from
+  `HashMap<PathBuf, String>` (by canonicalized source path) to
+  `HashMap<u64, String>` (by 64-bit content hash via
+  `std::collections::hash_map::DefaultHasher`). Both `FilesystemPath` and
+  `EmbeddedBytes` branches read or carry the full byte content, hash it, and
+  write via `fs::write`. The `MissingTexture` error fires before any
+  downstream RON write — the `export_state_to_campaign` call order is
+  unchanged: `build_creature_definition` → `copy_imported_textures_into_campaign`
+  → RON serialisation and `fs::write`.
+
+- **`unique_texture_destination` refactored** — now a thin wrapper that
+  extracts the filename from a `&Path` and delegates to the new
+  `unique_texture_destination_by_hint`.
+
+- **`unique_texture_destination_by_hint` added** — takes a `file_name_hint:
+&str`, applies `sanitized_texture_stem` to the stem, lowercases the
+  extension, and finds a unique destination with numeric suffix (`_2`, `_3`,
+  …). Infallible (always returns `Ok`); inserted into `used_destinations`
+  before returning.
+
+- **`compute_content_hash(bytes: &[u8]) -> u64`** — private helper using
+  `DefaultHasher` for payload deduplication.
+
+- **`mime_to_extension(mime: Option<&str>) -> &'static str`** — maps
+  `"image/png"` → `"png"`, `"image/jpeg"` → `"jpg"`, anything else → `"bin"`.
+
+- **`embedded_texture_file_name(payload, mesh_index) -> String`** — derives a
+  sanitized export filename from the payload using the priority chain:
+
+  1. `payload.file_name_hint` if non-empty (sanitize stem, lowercase ext).
+  2. `payload.source_label` if non-empty + MIME extension.
+  3. Fallback `"texture_{mesh_index}.{ext_from_mime}"`.
+
+- **`ImportedTexturePayload`** added to the top-level `use` block in
+  `obj_importer_ui.rs` (was already imported only in `mod tests`).
+
+- **6 new tests** in `obj_importer_ui::tests` (all pass):
+  - `test_export_glb_embedded_texture_writes_campaign_texture_file` — bytes
+    written to `assets/textures/imported/<asset>/texture_0.png` with correct
+    content.
+  - `test_export_glb_rewrites_mesh_texture_path_to_campaign_relative` — RON
+    `texture_path` equals
+    `"assets/textures/imported/test_import/texture_0.png"`.
+  - `test_export_glb_multiple_embedded_textures_get_distinct_paths` — two
+    meshes with different payloads produce two distinct files, both existing.
+  - `test_export_glb_deduplicates_identical_texture_payload` — two meshes with
+    identical byte payloads produce exactly one file; both RON entries reference
+    the same path.
+  - `test_export_glb_missing_texture_payload_fails_before_ron_write` — no
+    bytes and no source path → `MissingTexture` error; RON file is never
+    written.
+  - `test_export_obj_texture_copy_still_passes` — OBJ-style payload
+    (`source_path` set, `bytes: None`) copies correctly; content verified.
+
+### Key Design Decisions
+
+- **Content hash over path canonicalisation** — two meshes that import different
+  filenames but carry identical bytes now correctly deduplicate to a single
+  campaign texture file. The old path-based approach couldn't handle this case
+  (embedded GLB textures have no filesystem path).
+- **`fs::write` instead of `fs::copy` for `FilesystemPath`** — reading the
+  file into memory for hashing is unavoidable; using the same bytes for writing
+  eliminates a second system call. For the textures involved in a game
+  campaign (typically KBs to low MBs), the memory overhead is acceptable.
+- **`EmbeddedBytes.file_name_hint` read directly in match arm** — avoids a
+  `dead_code` lint by using the destructured field as the primary naming
+  source, falling back to `embedded_texture_file_name(full_payload)` only
+  when the hint is empty.
+- **Export call order preserved** — `MissingTexture` is returned from
+  `copy_imported_textures_into_campaign`, which is called before any
+  `fs::write` of the RON creature file. This invariant is confirmed by
+  `test_export_glb_missing_texture_payload_fails_before_ron_write`.
+
+### Quality Gates
+
+```
+cargo fmt         ✔ no output
+cargo check       ✔ 0 errors, 0 warnings
+cargo clippy      ✔ 0 warnings (-D warnings)
+cargo nextest run ✔ 2418 tests run: 2418 passed, 0 failed
+                    (6 new Phase 4 tests + 2412 existing)
+```
+
+---
+
+## GLB Importer UI for GLB Selection — Phase 3 (Complete)
+
+### Overview
+
+Implemented Phase 3 of the GLB file support plan for the Campaign Builder
+importer. This phase updates `obj_importer_ui.rs` to present a multi-format
+importer that handles both Wavefront OBJ and binary glTF (GLB) files through a
+unified UI. The file is **not** renamed — `obj_importer_ui.rs` remains the
+canonical module name as required by the plan.
+
+### Deliverables
+
+- **`show_obj_importer_tab` heading** updated from `"OBJ Importer"` to
+  `"Model Importer"`.
+- **Help label** updated to mention both OBJ and GLB formats.
+- **`pick_obj_file` renamed to `pick_model_file`** with a second
+  `.add_filter("Binary glTF", &["glb"])` entry added after the existing OBJ
+  filter.
+- **`load_obj_into_state` replaced by `load_model_into_state`** — dispatches on
+  lowercased file extension: `.obj` → `state.load_obj_file`, `.glb` →
+  `state.load_glb_file`, any other extension → `ObjImportError::UnknownFormat`.
+  OBJ path writes a "Loaded N mesh(es)" status message; GLB path preserves the
+  richer metadata summary written by `load_imported_glb_scene`.
+- **`ObjImportError::UnknownFormat { extension: String }`** added with Display
+  message: `"Unsupported file format '.{extension}'; supported formats are .obj
+and .glb"`.
+- **`render_idle_mode`** updated: `"Source OBJ:"` → `"Source File:"`,
+  `"No OBJ selected"` → `"No model selected"`, `"Load OBJ"` → `"Load Model"`;
+  MTL Source row **removed** (it is now only shown in loaded mode for OBJ
+  format); `pick_model_file` and `load_model_into_state` used throughout.
+- **`render_loaded_mode` metadata grid** gained:
+  - `"Format:"` row (first in grid) showing `"OBJ"` or `"GLB (binary glTF)"`
+    based on `state.source_format`.
+  - MTL Source row is now **conditionally rendered** only when
+    `source_format == ImportSourceFormat::Obj`.
+  - `"Embedded textures: N"` row (GLB only), parsed from `status_message` via
+    `parse_glb_embedded_image_count`.
+  - Orange warning label `"⚠ Skinning/animations present but not imported"`
+    shown outside the grid when `status_message` contains
+    `"[skinning ignored]"`.
+- **`"Load Another OBJ"` button** renamed to `"Load Another Model"`; uses
+  `pick_model_file` and `load_model_into_state`.
+- **`reload_obj_after_mtl_change`** migrated from `load_obj_into_state` to
+  `load_model_into_state` (only ever called for OBJ state; OBJ extension still
+  dispatches correctly).
+- **`parse_glb_embedded_image_count(status: &str) -> Option<u32>`** — private
+  helper that extracts the image count from the GLB status message format
+  `"GLB: N mesh(es), M embedded image(s), K material(s)..."`.
+- **Module-level `//!` doc comment** updated to `"OBJ and GLB importer tab UI."`.
+- **3 new tests** in `obj_importer_ui::tests` (all pass):
+  - `test_load_model_into_state_dispatches_obj` — OBJ path → `Obj` format,
+    `Loaded` mode.
+  - `test_load_model_into_state_dispatches_glb` — GLB path → `Glb` format,
+    `Loaded` mode.
+  - `test_load_model_into_state_rejects_unknown_extension` — `.fbx` path →
+    `ObjImportError::UnknownFormat { extension: "fbx" }`.
+- **Local GLB builder helpers** (`build_test_glb`, `build_minimal_triangle_glb`)
+  copied into the test module (not public; no shared module created).
+- **egui ID audit** passed: no new `ScrollArea` without `id_salt`, every loop
+  uses `push_id`, all state mutations that affect layout call
+  `request_repaint()`.
+
+### Key Design Decisions
+
+- `load_model_into_state` does **not** overwrite `status_message` after a
+  successful GLB load because `load_imported_glb_scene` already writes a rich
+  metadata summary (`"GLB: N mesh(es), M embedded image(s), ..."`) that the UI
+  parses for display.
+- The `"MTL Source:"` row was removed from `render_idle_mode` (not just
+  guarded) because the plan states `render_mtl_source_controls` is
+  `"only called from render_loaded_mode for OBJ format"`.
+- `parse_glb_embedded_image_count` uses `str::find` on the literal
+  `" embedded image"` suffix rather than a regex to keep the dependency
+  footprint minimal.
+
+### Quality Gates
+
+```
+cargo fmt         ✔ no output
+cargo check       ✔ 0 errors, 0 warnings
+cargo clippy      ✔ 0 warnings (-D warnings)
+cargo nextest run ✔ 5065 passed, 0 failed (3 new Phase 3 tests + 5062 existing)
+```
+
+---
+
+## GLB Format-Neutral Importer State — Phase 2 (Complete)
+
+### Overview
+
+Implemented Phase 2 of the GLB (binary glTF) file support plan for the Campaign
+Builder importer. This phase extends `obj_importer.rs` with a format-neutral
+importer state so OBJ and GLB sources both converge into the same
+`ObjImporterState` and export code paths. No UI changes in this phase; existing
+OBJ workflow is entirely unchanged.
+
+### Deliverables
+
+- **`ImportSourceFormat` enum** — `Obj | Glb`; added to `obj_importer.rs` after
+  `ImportedMtlSourceKind`; `Default` is `Obj`.
+- **`ImportedTexturePayload` struct** — generalized texture source covering both
+  OBJ filesystem paths (`source_path: Option<PathBuf>`) and GLB embedded image
+  bytes (`bytes: Option<Vec<u8>>`); added after `ImportedMaterialSwatch`.
+- **`ImportedMesh.texture_payload`** — replaces the OBJ-only
+  `texture_source_path: Option<PathBuf>` field. All OBJ call sites updated to
+  construct an `ImportedTexturePayload` with `source_path` populated and
+  `bytes = None`. UI code updated to use
+  `texture_payload.as_ref().and_then(|p| p.source_path.as_ref())`.
+- **`ObjImporterState.source_format`** — new `ImportSourceFormat` field;
+  initialized to `Obj` in `Default`; reset to `Obj` by `clear()`; set to `Glb`
+  by `load_imported_glb_scene`.
+- **`ObjImporterError::Glb`** — new `#[from] GlbImportError` variant.
+- **`ObjImporterState::load_glb_file`** — public method parallel to
+  `load_obj_file`; reads a `.glb` file using `import_glb_scene_from_file`,
+  delegates to `load_imported_glb_scene`.
+- **`ObjImporterState::load_imported_glb_scene`** — private helper; converts
+  `ImportedGlbScene` meshes into `ImportedMesh` rows, builds metadata summary
+  into `status_message`.
+- **`ImportedMesh::from_imported_glb_mesh`** — private constructor; maps GLB
+  PBR color to `color_source` (non-white → `ImportedMaterial`, white →
+  `AutoAssigned`); defaults `selected: false`.
+- **5 new tests** in `obj_importer::tests` (all pass):
+  - `test_obj_importer_state_load_glb_file_sets_loaded_mode`
+  - `test_obj_importer_state_load_glb_preserves_texture_payload`
+  - `test_obj_importer_state_load_glb_metadata_summary_in_status`
+  - `test_obj_importer_clear_resets_source_format_to_obj`
+  - `test_obj_importer_load_obj_still_works_after_glb_fields_added`
+- **`obj_importer_ui.rs`** — `resolve_imported_texture_source` updated to use
+  `mesh.texture_payload.as_ref().and_then(|p| p.source_path.as_ref())`. Two
+  existing texture-copy tests updated to construct `ImportedTexturePayload`
+  instead of setting `texture_source_path` directly.
+
+### Key Design Decisions
+
+- `ImportedTexturePayload.bytes` is `Option<Vec<u8>>` (not `Vec<u8>`) so OBJ
+  payloads can be constructed without stub byte data (`bytes: None`).
+- `from_imported_glb_mesh` does **not** call `auto_assigned_color`; GLB meshes
+  carry their PBR base-color factor directly. Users may invoke
+  `auto_assign_colors()` post-load.
+- `clear()` resets `source_format` to `Obj` via `..Self::default()` — no
+  explicit assignment needed in the clear body.
+- `status_message` is overwritten **after** `load_imported_mesh_rows` because
+  `load_imported_mesh_rows` sets a generic "Loaded N meshes" message that the
+  richer GLB metadata summary must replace.
+
+### Quality Gates
+
+```
+cargo fmt         ✔ no output
+cargo check       ✔ 0 errors, 0 warnings
+cargo clippy      ✔ 0 warnings (-D warnings)
+cargo nextest run ✔ 2409 passed, 0 failed (5 new Phase 2 tests + 2404 existing)
+```
+
+---
+
+## GLB Parser Foundation — Phase 1 (Complete)
+
+### Overview
+
+Implemented Phase 1 of the GLB (binary glTF) file support plan for the Campaign
+Builder importer. This phase creates the pure parser backend `mesh_glb_io.rs`
+with no UI dependencies, following the same structure as `mesh_obj_io.rs`.
+
+### Deliverables
+
+- **`sdk/campaign_builder/src/mesh_glb_io.rs`** — new module containing:
+  - Public types: `GlbImportOptions`, `GlbImportError`, `ImportedGlbScene`,
+    `ImportedGlbMesh`, `ImportedGlbTexturePayload`.
+  - Public entry point: `import_glb_scene_from_file` (file I/O wrapper).
+  - Crate-internal entry point: `import_glb_scene_from_bytes` (testable, no I/O).
+  - Private helpers: `glb_primitive_to_mesh_definition`,
+    `extract_base_color_texture_payload`, `convert_gltf_material`,
+    `sanitize_glb_file_name`.
+  - 11 unit tests, all passing, all using in-memory fixtures.
+- **`sdk/campaign_builder/Cargo.toml`** — `gltf = { version = "1",
+features = ["import"] }` dependency added.
+- **`sdk/campaign_builder/src/lib.rs`** — `pub mod mesh_glb_io;` registered in
+  alphabetical order.
+
+### Key Design Decisions
+
+- **`Gltf::from_slice` + raw blob access** instead of `import_slice` avoids
+  automatic image decoding (which would fail on non-valid test PNG bytes). Raw
+  buffer-view bytes are stored in `ImportedGlbTexturePayload.bytes`—original
+  encoded PNG/JPEG ready for direct disk write in Phase 4.
+- **Pre-validation** of external URI buffers and images before any mesh
+  processing; returns `GlbImportError::MissingBuffer` immediately so the error
+  message is actionable.
+- **Explicit `'doc` lifetime** on `glb_primitive_to_mesh_definition` and
+  `extract_base_color_texture_payload` ties the blob slice and primitive
+  lifetimes together so the gltf `reader` closure satisfies its `Fn(Buffer<'a>)
+-> Option<&'a [u8]>` constraint without unsafe code.
+- **Empty-blob guard** in the reader closure (`!blob.is_empty()`) returns
+  `None` for buffer 0 when the GLB has no binary chunk, causing
+  `read_positions()` to return `None` and triggering `MissingPositions`
+  (the gltf crate's strict validator rejects truly attribute-free primitives
+  before we can check).
+- **Texture placeholder** `"__glb_texture_{mesh_doc_index}_{prim_index}"`
+  written to `MeshDefinition.texture_path` during parsing; rewritten to a
+  campaign-relative path in Phase 4.
+- **Node transforms preserved** as `node_transform: Option<[[f32; 4]; 4]>` on
+  `ImportedGlbMesh`; not flattened into vertex positions (the export pipeline
+  uses `CreatureDefinition.mesh_transforms` for that).
+- `TRIANGLE_STRIP` and `TRIANGLE_FAN` return `UnsupportedPrimitive` rather than
+  being triangulated silently. Callers should pre-process meshes.
+
+### Quality Gates
+
+```
+cargo fmt         ✔ no output
+cargo check       ✔ 0 errors, 0 warnings
+cargo clippy      ✔ 0 warnings (-D warnings)
+cargo nextest run ✔ 2404 passed, 0 failed (11 new GLB tests)
+```
+
+---
+
+## Campaign Builder OBJ Texture Map Import (Complete)
+
+### Overview
+
+Updated the Campaign Builder OBJ importer so MTL diffuse texture maps are
+preserved, copied into the active campaign, and applied to exported custom model
+meshes instead of leaving imported models white.
+
+### Key Updates
+
+- Parsed `map_Kd` texture directives with common MTL options such as `-s` and
+  `-clamp` instead of treating the whole option string as the filename.
+- Preserved resolved source texture paths from MTL files in importer metadata.
+- Supported models with multiple material sections by preserving one diffuse
+  texture per imported mesh/material segment.
+- Copied imported texture files to `assets/textures/imported/<asset_name>/` on
+  export and rewrote exported mesh `texture_path` values to campaign-relative
+  paths.
+- Added export errors for missing texture source files so failed texture imports
+  do not silently produce white models.
+- Registered the runtime creature texture-loading system so exported
+  `texture_path` values are applied to spawned creature mesh materials.
+- Added regression tests for MTL option parsing, source texture preservation,
+  multiple material texture maps, export-time texture copying, and missing
+  texture errors.
+
+### Notes
+
+This implementation supports the common OBJ/MTL workflow where different model
+parts use different `usemtl` material sections, each with its own `map_Kd`
+diffuse texture. Additional PBR texture channels such as normal, metallic, or
+roughness maps remain future enhancements because the current domain material
+schema exposes a single applied mesh texture path.
+
+---
+
 ## Phase 10: Audit Closure — Remaining Deliverables (Complete)
 
 ### Overview

@@ -944,6 +944,7 @@ impl<'a> Validator<'a> {
     /// use antares::sdk::database::ContentDatabase;
     /// use antares::sdk::validation::Validator;
     /// use antares::sdk::campaign_loader::{CampaignConfig, Difficulty};
+    /// use antares::domain::campaign::LevelUpMode;
     /// use antares::domain::types::{Position, Direction};
     /// use antares::sdk::validation::ValidationError;
     ///
@@ -963,6 +964,9 @@ impl<'a> Validator<'a> {
     ///     allow_multiclassing: false,
     ///     starting_level: 1,
     ///     max_level: 20,
+    ///     level_up_mode: LevelUpMode::Auto,
+    ///     base_xp: 1000,
+    ///     xp_multiplier: 1.5,
     ///     starting_time: antares::domain::types::GameTime::new(1, 8, 0),
     /// };
     ///

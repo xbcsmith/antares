@@ -14,6 +14,39 @@ impl CreaturesEditorState {
     pub(super) fn show_preview_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Preview");
 
+        // Live Preview toggle
+        ui.horizontal(|ui| {
+            if ui
+                .checkbox(&mut self.live_preview_enabled, "Live Preview")
+                .on_hover_text(
+                    "When checked, the preview updates automatically on every change.\nUncheck for large models to prevent continuous repaints.",
+                )
+                .changed()
+            {
+                if self.live_preview_enabled {
+                    // Re-enable: trigger immediate sync
+                    self.preview_dirty = true;
+                    self.validation_dirty = true;
+                }
+                ui.ctx().request_repaint();
+            }
+
+            if ui.button("\u{1F504} Refresh").clicked() {
+                if let Err(error) = self.sync_preview_renderer_from_edit_buffer() {
+                    self.preview_error = Some(error.to_string());
+                }
+                ui.ctx().request_repaint();
+            }
+
+            if !self.live_preview_enabled {
+                ui.label(
+                    egui::RichText::new("Preview paused")
+                        .color(egui::Color32::YELLOW)
+                        .small(),
+                );
+            }
+        });
+
         // Preview controls overlay
         ui.horizontal(|ui| {
             if ui.checkbox(&mut self.show_grid, "Grid").changed() {
@@ -93,7 +126,7 @@ impl CreaturesEditorState {
 
         ui.separator();
 
-        if self.preview_dirty {
+        if self.live_preview_enabled && self.preview_dirty {
             if let Err(error) = self.sync_preview_renderer_from_edit_buffer() {
                 self.preview_error = Some(error.to_string());
             }

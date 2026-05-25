@@ -2033,6 +2033,32 @@ impl GameState {
                 true
             }
             GameMode::ContainerInventory(container_state) => {
+                // Persist any items taken or stashed during the session before
+                // restoring the previous mode. This ensures write-back always
+                // happens regardless of which system triggers close_modal.
+                if let Some(map) = self.world.get_current_map_mut() {
+                    let pos = map.events.iter().find_map(|(p, event)| {
+                        if let crate::domain::world::MapEvent::Container { id, .. } = event {
+                            if id == &container_state.container_event_id {
+                                return Some(*p);
+                            }
+                        }
+                        None
+                    });
+                    if let Some(pos) = pos {
+                        if let Some(crate::domain::world::MapEvent::Container {
+                            items: ref mut stored,
+                            gold: ref mut stored_gold,
+                            gems: ref mut stored_gems,
+                            ..
+                        }) = map.events.get_mut(&pos)
+                        {
+                            *stored = container_state.items.clone();
+                            *stored_gold = container_state.gold;
+                            *stored_gems = container_state.gems;
+                        }
+                    }
+                }
                 self.mode = container_state.get_resume_mode();
                 true
             }
@@ -2533,6 +2559,7 @@ impl GameState {
     ///     icon_path: None,
     ///     tags: vec![],
     ///     mesh_descriptor_override: None,
+    ///     mesh_id: None,
     /// };
     /// item_db.add_item(ration).unwrap();
     ///
@@ -2951,6 +2978,87 @@ mod tests {
 
         assert!(state.close_modal());
         assert!(matches!(state.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_close_modal_container_inventory_writes_items_back() {
+        use crate::domain::character::InventorySlot;
+        use crate::domain::world::{Map, MapEvent};
+
+        // Build a map with a container event that has two items.
+        let pos = crate::domain::types::Position::new(3, 3);
+        let item_a = InventorySlot {
+            item_id: 10,
+            charges: 0,
+        };
+        let item_b = InventorySlot {
+            item_id: 20,
+            charges: 0,
+        };
+        let mut map = Map::new(1, "Test Map".to_string(), "".to_string(), 10, 10);
+        map.add_event(
+            pos,
+            MapEvent::Container {
+                id: "chest_wb".to_string(),
+                name: "Chest".to_string(),
+                description: "".to_string(),
+                items: vec![item_a, item_b],
+                gold: 5,
+                gems: 2,
+            },
+        );
+        let mut state = GameState::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        // Enter container inventory with only item_b remaining (simulating item_a was taken).
+        state.enter_container_inventory(
+            "chest_wb".to_string(),
+            "Chest".to_string(),
+            vec![InventorySlot {
+                item_id: 20,
+                charges: 0,
+            }],
+            3, // gold remaining
+            1, // gems remaining
+        );
+
+        // close_modal() must write the updated items back to the map event.
+        let closed = state.close_modal();
+        assert!(
+            closed,
+            "close_modal must return true for ContainerInventory"
+        );
+        assert!(
+            matches!(state.mode, GameMode::Exploration),
+            "close_modal must restore Exploration after ContainerInventory"
+        );
+
+        // Verify the map event now reflects the modified container contents.
+        let event = state
+            .world
+            .get_current_map()
+            .unwrap()
+            .get_event(pos)
+            .unwrap();
+        if let MapEvent::Container {
+            items, gold, gems, ..
+        } = event
+        {
+            assert_eq!(
+                items.len(),
+                1,
+                "container must have 1 item after write-back"
+            );
+            assert_eq!(
+                items[0].item_id, 20,
+                "remaining item must be item_b (id=20)"
+            );
+            assert_eq!(*gold, 3, "gold must be written back");
+            assert_eq!(*gems, 1, "gems must be written back");
+        } else {
+            panic!("expected Container event at pos");
+        }
     }
 
     #[test]
@@ -5874,6 +5982,62 @@ mod tests {
             .unwrap()
             .get_event(treasure_pos)
             .is_none());
+    }
+
+    #[test]
+    fn test_moving_onto_recruitable_character_keeps_event_until_recruited() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent, World};
+
+        let mut state = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero).unwrap();
+
+        let recruit_pos = Position::new(1, 0);
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 20, 20);
+        map.add_event(
+            recruit_pos,
+            MapEvent::RecruitableCharacter {
+                name: "Wandering Knight".to_string(),
+                description: "A recruitable knight".to_string(),
+                character_id: "wandering_knight".to_string(),
+                dialogue_id: Some(42),
+                time_condition: None,
+                facing: None,
+                face_on_dialogue: false,
+            },
+        );
+        state.world = World::new();
+        state.world.add_map(map);
+        state.world.set_current_map(1);
+
+        let content = crate::sdk::database::ContentDatabase::new();
+        let result =
+            state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+
+        assert!(result.is_ok());
+        assert!(
+            matches!(
+                state
+                    .world
+                    .get_current_map()
+                    .and_then(|map| map.get_event(recruit_pos)),
+                Some(MapEvent::RecruitableCharacter { character_id, .. })
+                    if character_id == "wandering_knight"
+            ),
+            "Walking onto a recruitable must not remove the map event or hide the mesh"
+        );
+        assert!(
+            !state.encountered_characters.contains("wandering_knight"),
+            "Encounter tracking should update only after successful recruitment"
+        );
     }
 
     #[test]

@@ -1499,6 +1499,15 @@ pub struct MapEditorState {
     /// changes in `terrain_editor_state`. Terrain state is only refreshed from
     /// the tile when the selected position actually changes to a different tile.
     pub last_loaded_terrain_position: Option<Position>,
+
+    /// Whether the resize-map dialog is currently visible in the inspector.
+    pub show_resize_dialog: bool,
+    /// Target width entered in the resize dialog (tiles).
+    pub resize_new_width: u32,
+    /// Target height entered in the resize dialog (tiles).
+    pub resize_new_height: u32,
+    /// User has acknowledged the shrink-warning and confirmed data loss.
+    pub resize_confirm_shrink: bool,
 }
 
 impl MapEditorState {
@@ -1528,6 +1537,9 @@ impl MapEditorState {
             ..Default::default()
         };
 
+        let initial_width = map.width;
+        let initial_height = map.height;
+
         Self {
             map,
             metadata,
@@ -1553,6 +1565,10 @@ impl MapEditorState {
             multi_select_mode: false,
             last_loaded_visual_position: None,
             last_loaded_terrain_position: None,
+            show_resize_dialog: false,
+            resize_new_width: initial_width,
+            resize_new_height: initial_height,
+            resize_confirm_shrink: false,
         }
     }
 
@@ -2267,6 +2283,9 @@ pub struct EventEditorState {
     /// Rotation speed in degrees per second for smooth proximity-facing transitions.
     /// `None` means snap (instant). Applies to Encounter and NpcDialogue only.
     pub event_rotation_speed: Option<f32>,
+    /// Whether a recruitable character should turn toward the party when dialogue starts.
+    /// Applies to RecruitableCharacter only.
+    pub event_face_on_dialogue: bool,
 
     // Container event fields
     /// Items in the container's initial inventory (item IDs)
@@ -2329,6 +2348,7 @@ impl Default for EventEditorState {
             event_facing: None,
             event_proximity_facing: false,
             event_rotation_speed: None,
+            event_face_on_dialogue: false,
             container_items: Vec::new(),
             container_item_input: String::new(),
             container_locked: false,
@@ -2571,6 +2591,7 @@ impl EventEditorState {
                     dialogue_id,
                     time_condition: None,
                     facing,
+                    face_on_dialogue: self.event_face_on_dialogue,
                 })
             }
             EventType::EnterInn => {
@@ -2775,6 +2796,7 @@ impl EventEditorState {
                 character_id,
                 dialogue_id,
                 facing,
+                face_on_dialogue,
                 ..
             } => {
                 s.event_type = EventType::RecruitableCharacter;
@@ -2785,6 +2807,7 @@ impl EventEditorState {
                 s.recruitable_dialogue_id =
                     dialogue_id.map(|id| id.to_string()).unwrap_or_default();
                 s.event_facing = facing.map(|d| format!("{:?}", d));
+                s.event_face_on_dialogue = *face_on_dialogue;
             }
             MapEvent::EnterInn {
                 name,
@@ -4463,6 +4486,28 @@ impl MapsEditorState {
             ui.label(format!("Name: {}", editor.metadata.name));
         });
 
+        // ── Resize map ───────────────────────────────────────────────────────
+        if ui
+            .button("📐 Resize Map")
+            .on_hover_text("Change the width and/or height of this map")
+            .clicked()
+        {
+            editor.show_resize_dialog = !editor.show_resize_dialog;
+            if editor.show_resize_dialog {
+                // Re-initialise to current dims each time the panel is opened.
+                editor.resize_new_width = editor.map.width;
+                editor.resize_new_height = editor.map.height;
+                editor.resize_confirm_shrink = false;
+            }
+            ui.ctx().request_repaint();
+        }
+
+        if editor.show_resize_dialog {
+            ui.separator();
+            Self::show_resize_dialog_ui(ui, editor);
+            ui.separator();
+        }
+
         ui.separator();
 
         // Selected tile info
@@ -4724,11 +4769,15 @@ impl MapsEditorState {
                             character_id,
                             name,
                             facing,
+                            face_on_dialogue,
                             ..
                         } => {
                             ui.label(format!("Recruitable: {} ({})", character_id, name));
                             if let Some(dir) = facing {
                                 ui.label(format!("Facing: {:?}", dir));
+                            }
+                            if *face_on_dialogue {
+                                ui.label("🔄 Turns toward party when dialogue starts");
                             }
                         }
                         MapEvent::EnterInn {
@@ -5091,7 +5140,181 @@ impl MapsEditorState {
         }
     }
 
-    /// Show metadata editor panel
+    /// Renders the inline resize-map panel shown inside the inspector when
+    /// `editor.show_resize_dialog` is `true`.
+    ///
+    /// The panel lets the user enter new width and height values. If either
+    /// dimension would be smaller than the current map the panel shows a
+    /// warning listing how many events and NPC placements would be lost, and
+    /// requires an explicit confirmation checkbox before the Apply button is
+    /// enabled.
+    fn show_resize_dialog_ui(ui: &mut egui::Ui, editor: &mut MapEditorState) {
+        let current_w = editor.map.width;
+        let current_h = editor.map.height;
+
+        let is_shrinking =
+            editor.resize_new_width < current_w || editor.resize_new_height < current_h;
+
+        // Count data that would be removed so the warning is specific.
+        let (lost_events, lost_npcs) = if is_shrinking {
+            let nw = editor.resize_new_width as i32;
+            let nh = editor.resize_new_height as i32;
+            let ev = editor
+                .map
+                .events
+                .keys()
+                .filter(|p| p.x >= nw || p.y >= nh)
+                .count();
+            let np = editor
+                .map
+                .npc_placements
+                .iter()
+                .filter(|p| p.position.x >= nw || p.position.y >= nh)
+                .count();
+            (ev, np)
+        } else {
+            (0, 0)
+        };
+
+        // Reset confirmation if the user edits dimensions back to non-shrinking.
+        if !is_shrinking {
+            editor.resize_confirm_shrink = false;
+        }
+
+        ui.group(|ui| {
+            ui.label(
+                egui::RichText::new("📐 Resize Map")
+                    .strong()
+                    .color(egui::Color32::LIGHT_BLUE),
+            );
+            ui.separator();
+
+            egui::Grid::new("map_resize_dims_grid")
+                .num_columns(2)
+                .spacing([8.0, 4.0])
+                .show(ui, |ui| {
+                    ui.label("Width (tiles):");
+                    ui.add(
+                        egui::DragValue::new(&mut editor.resize_new_width)
+                            .range(1..=512u32)
+                            .suffix(" tiles"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Height (tiles):");
+                    ui.add(
+                        egui::DragValue::new(&mut editor.resize_new_height)
+                            .range(1..=512u32)
+                            .suffix(" tiles"),
+                    );
+                    ui.end_row();
+
+                    ui.label("New size:");
+                    ui.label(format!(
+                        "{} × {} = {} tiles",
+                        editor.resize_new_width,
+                        editor.resize_new_height,
+                        editor.resize_new_width as u64 * editor.resize_new_height as u64
+                    ));
+                    ui.end_row();
+                });
+
+            if is_shrinking {
+                ui.add_space(4.0);
+                ui.separator();
+
+                ui.label(
+                    egui::RichText::new("⚠️ Shrinking the map will permanently remove data:")
+                        .color(egui::Color32::YELLOW)
+                        .strong(),
+                );
+
+                egui::Grid::new("map_resize_loss_grid")
+                    .num_columns(2)
+                    .spacing([8.0, 4.0])
+                    .show(ui, |ui| {
+                        let removed_tiles = (current_w as i64 * current_h as i64)
+                            - (editor.resize_new_width as i64 * editor.resize_new_height as i64);
+                        let removed_tiles = removed_tiles.max(0) as u64;
+
+                        ui.label("Tiles removed:");
+                        ui.label(
+                            egui::RichText::new(removed_tiles.to_string())
+                                .color(egui::Color32::from_rgb(255, 160, 50)),
+                        );
+                        ui.end_row();
+
+                        ui.label("Events removed:");
+                        ui.label(egui::RichText::new(lost_events.to_string()).color(
+                            if lost_events > 0 {
+                                egui::Color32::from_rgb(255, 100, 80)
+                            } else {
+                                egui::Color32::GRAY
+                            },
+                        ));
+                        ui.end_row();
+
+                        ui.label("NPCs removed:");
+                        ui.label(egui::RichText::new(lost_npcs.to_string()).color(
+                            if lost_npcs > 0 {
+                                egui::Color32::from_rgb(255, 100, 80)
+                            } else {
+                                egui::Color32::GRAY
+                            },
+                        ));
+                        ui.end_row();
+                    });
+
+                ui.add_space(4.0);
+                ui.checkbox(
+                    &mut editor.resize_confirm_shrink,
+                    "I understand — remove tiles/events/NPCs outside new bounds",
+                );
+            }
+
+            ui.add_space(4.0);
+
+            let can_apply = !is_shrinking || editor.resize_confirm_shrink;
+
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add_enabled(can_apply, egui::Button::new("✅ Apply Resize"))
+                    .on_hover_text(if can_apply {
+                        "Apply the new dimensions to this map"
+                    } else {
+                        "Confirm the warning above before applying"
+                    })
+                    .clicked()
+                {
+                    editor
+                        .map
+                        .resize(editor.resize_new_width, editor.resize_new_height);
+                    editor.has_changes = true;
+                    editor.show_resize_dialog = false;
+                    editor.resize_confirm_shrink = false;
+
+                    // Clear selected position / tiles that are now out of bounds.
+                    if let Some(pos) = editor.selected_position {
+                        if !editor.map.is_valid_position(pos) {
+                            editor.selected_position = None;
+                        }
+                    }
+                    editor
+                        .selected_tiles
+                        .retain(|p| editor.map.is_valid_position(*p));
+
+                    ui.ctx().request_repaint();
+                }
+
+                if ui.button("❌ Cancel").clicked() {
+                    editor.show_resize_dialog = false;
+                    editor.resize_confirm_shrink = false;
+                    ui.ctx().request_repaint();
+                }
+            });
+        });
+    }
+
     fn show_metadata_editor(ui: &mut egui::Ui, editor: &mut MapEditorState) {
         ui.group(|ui| {
             ui.heading("Map Metadata");
@@ -5788,6 +6011,22 @@ impl MapsEditorState {
                         }
                     });
                     if event_editor.event_facing.is_some() {
+                        editor.has_changes = true;
+                    }
+
+                    ui.separator();
+                    ui.label("🔄 Behaviour:");
+                    if ui
+                        .checkbox(
+                            &mut event_editor.event_face_on_dialogue,
+                            "Turn to face party when dialogue starts",
+                        )
+                        .on_hover_text(
+                            "Disable this for imported 3D recruitable models whose local forward \
+                             axis is backwards and whose facing is already corrected in the SDK.",
+                        )
+                        .changed()
+                    {
                         editor.has_changes = true;
                     }
                 }
@@ -7690,12 +7929,14 @@ mod tests {
                 description,
                 character_id,
                 dialogue_id,
+                face_on_dialogue,
                 ..
             } => {
                 assert_eq!(name, "Old Gareth".to_string());
                 assert_eq!(description, "A grizzled dwarf".to_string());
                 assert_eq!(character_id, "old_gareth".to_string());
                 assert_eq!(dialogue_id, None);
+                assert!(!face_on_dialogue);
             }
             _ => panic!("Expected RecruitableCharacter event"),
         }
@@ -7710,6 +7951,7 @@ mod tests {
             dialogue_id: None,
             time_condition: None,
             facing: None,
+            face_on_dialogue: false,
         };
 
         let state = EventEditorState::from_map_event(Position::new(0, 0), &event);
@@ -7720,6 +7962,30 @@ mod tests {
             "whisper".to_string()
         );
         assert_eq!(state.recruitable_dialogue_id, "");
+        assert!(!state.event_face_on_dialogue);
+    }
+
+    #[test]
+    fn test_event_editor_state_recruitable_face_on_dialogue_roundtrip() {
+        let editor = EventEditorState {
+            event_type: EventType::RecruitableCharacter,
+            name: "Mira".to_string(),
+            description: "A recruitable sorcerer".to_string(),
+            recruit_character_id_input_buffer: "mira".to_string(),
+            event_face_on_dialogue: true,
+            ..Default::default()
+        };
+
+        let event = editor.to_map_event().unwrap();
+        match &event {
+            MapEvent::RecruitableCharacter {
+                face_on_dialogue, ..
+            } => assert!(*face_on_dialogue),
+            _ => panic!("Expected RecruitableCharacter event"),
+        }
+
+        let restored = EventEditorState::from_map_event(Position::new(0, 0), &event);
+        assert!(restored.event_face_on_dialogue);
     }
 
     #[test]
@@ -11655,6 +11921,126 @@ mod tests {
             restored.encounter_monsters,
             vec![3u8, 3u8, 3u8, 3u8, 5u8],
             "duplicate monster IDs must survive a to_map_event/from_map_event round-trip"
+        );
+    }
+
+    // ── MapEditorState resize dialog fields ────────────────────────────────────
+
+    #[test]
+    fn test_resize_dialog_fields_default_false() {
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let state = MapEditorState::new(map);
+
+        assert!(
+            !state.show_resize_dialog,
+            "show_resize_dialog must be false when the editor is first created"
+        );
+        assert!(
+            !state.resize_confirm_shrink,
+            "resize_confirm_shrink must be false when the editor is first created"
+        );
+    }
+
+    #[test]
+    fn test_resize_dialog_initial_dims_match_map() {
+        let map = Map::new(2, "Named".to_string(), "Desc".to_string(), 15, 12);
+        let state = MapEditorState::new(map);
+
+        assert_eq!(
+            state.resize_new_width, 15,
+            "resize_new_width must be initialised to the map's current width"
+        );
+        assert_eq!(
+            state.resize_new_height, 12,
+            "resize_new_height must be initialised to the map's current height"
+        );
+    }
+
+    #[test]
+    fn test_map_resize_grow_sets_has_changes() {
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 5, 5);
+        let mut editor = MapEditorState::new(map);
+        editor.resize_new_width = 10;
+        editor.resize_new_height = 10;
+
+        // Simulate what the Apply button does.
+        editor.map.resize(10, 10);
+        editor.has_changes = true;
+
+        assert!(
+            editor.has_changes,
+            "has_changes must be true after a resize operation"
+        );
+        assert_eq!(editor.map.width, 10, "map width must be 10 after grow");
+        assert_eq!(editor.map.height, 10, "map height must be 10 after grow");
+        assert_eq!(
+            editor.map.tiles.len(),
+            100,
+            "tile count must be 10×10=100 after grow"
+        );
+    }
+
+    #[test]
+    fn test_map_resize_shrink_clears_selected_position_when_out_of_bounds() {
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+        editor.selected_position = Some(Position::new(8, 8));
+
+        editor.map.resize(5, 5);
+
+        // Mirror the guard the Apply button runs.
+        if let Some(pos) = editor.selected_position {
+            if !editor.map.is_valid_position(pos) {
+                editor.selected_position = None;
+            }
+        }
+
+        assert!(
+            editor.selected_position.is_none(),
+            "selected_position (8,8) must be cleared after the map shrinks to 5×5"
+        );
+    }
+
+    #[test]
+    fn test_map_resize_shrink_selected_position_in_bounds_preserved() {
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+        editor.selected_position = Some(Position::new(2, 2));
+
+        editor.map.resize(5, 5);
+
+        assert!(
+            editor.map.is_valid_position(Position::new(2, 2)),
+            "position (2,2) must remain valid after shrinking to 5×5"
+        );
+        assert_eq!(
+            editor.selected_position,
+            Some(Position::new(2, 2)),
+            "selected_position (2,2) must not be cleared — it is still within new bounds"
+        );
+    }
+
+    #[test]
+    fn test_map_resize_shrink_removes_selected_tiles_outside_bounds() {
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let mut editor = MapEditorState::new(map);
+        // Select tiles: one inside new bounds and one outside.
+        editor.selected_tiles = vec![Position::new(2, 2), Position::new(7, 7)];
+
+        editor.map.resize(5, 5);
+        // Mirror the Apply button's retain.
+        let valid_tiles: Vec<Position> = editor
+            .selected_tiles
+            .iter()
+            .copied()
+            .filter(|p| editor.map.is_valid_position(*p))
+            .collect();
+        editor.selected_tiles = valid_tiles;
+
+        assert_eq!(
+            editor.selected_tiles,
+            vec![Position::new(2, 2)],
+            "only in-bounds selected tiles must survive a shrink"
         );
     }
 }

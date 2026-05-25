@@ -49,6 +49,8 @@ pub struct StartDialogue {
     pub speaker_entity: Option<Entity>,
     /// Fallback map position for visual placement if speaker_entity is missing
     pub fallback_position: Option<crate::domain::types::Position>,
+    /// Whether the speaker visual should rotate toward the party when dialogue starts.
+    pub face_speaker_to_party: bool,
 }
 
 /// Message to select a dialogue choice by index for the active dialogue.
@@ -223,27 +225,31 @@ fn handle_start_dialogue(
 
                 global_state.0.mode = GameMode::Dialogue(new_state);
 
-                // If the speaker entity has a TileCoord, determine the
+                // If requested and the speaker entity has a TileCoord, determine the
                 // 4-direction from the speaker toward the party and emit SetFacing
                 // so the NPC turns to face the player at the start of dialogue.
-                if let Some(ref mut writer) = facing_writer {
-                    if let Some(speaker_entity) = ev.speaker_entity {
-                        if let Ok(tile_coord) = tile_coord_query.get(speaker_entity) {
-                            let speaker_pos = tile_coord.0;
-                            let party_pos = global_state.0.world.party_position;
-                            let direction = crate::game::systems::facing::cardinal_toward(
-                                speaker_pos,
-                                party_pos,
-                            );
-                            writer.write(crate::game::systems::facing::SetFacing {
-                                entity: speaker_entity,
-                                direction,
-                                instant: true,
-                            });
-                            info!(
-                                "Dialogue start: NPC {:?} at {:?} facing {:?} toward party at {:?}",
-                                speaker_entity, speaker_pos, direction, party_pos
-                            );
+                // Recruitable character events may disable this when their imported
+                // 3D model's local forward axis needs an authored facing correction.
+                if ev.face_speaker_to_party {
+                    if let Some(ref mut writer) = facing_writer {
+                        if let Some(speaker_entity) = ev.speaker_entity {
+                            if let Ok(tile_coord) = tile_coord_query.get(speaker_entity) {
+                                let speaker_pos = tile_coord.0;
+                                let party_pos = global_state.0.world.party_position;
+                                let direction = crate::game::systems::facing::cardinal_toward(
+                                    speaker_pos,
+                                    party_pos,
+                                );
+                                writer.write(crate::game::systems::facing::SetFacing {
+                                    entity: speaker_entity,
+                                    direction,
+                                    instant: true,
+                                });
+                                info!(
+                                    "Dialogue start: NPC {:?} at {:?} facing {:?} toward party at {:?}",
+                                    speaker_entity, speaker_pos, direction, party_pos
+                                );
+                            }
                         }
                     }
                 }
@@ -2962,6 +2968,7 @@ mod tests {
                 dialogue_id: 999,
                 speaker_entity: Some(npc_entity),
                 fallback_position: None,
+                face_speaker_to_party: true,
             });
         }
 
@@ -3830,6 +3837,7 @@ mod tests {
                 dialogue_id: 500,
                 speaker_entity: Some(speaker),
                 fallback_position: None,
+                face_speaker_to_party: true,
             });
 
         // First frame: handle_start_dialogue processes StartDialogue and emits SetFacing.
@@ -3844,6 +3852,67 @@ mod tests {
             facing.direction,
             Direction::East,
             "NPC speaker at (3,3) must face East toward party at (5,3) after dialogue start"
+        );
+    }
+
+    /// `test_dialogue_start_respects_face_speaker_to_party_false` – recruitable
+    /// dialogue can opt out of start-of-dialogue auto-facing so authored model
+    /// orientation remains stable.
+    #[test]
+    fn test_dialogue_start_respects_face_speaker_to_party_false() {
+        use crate::application::GameState;
+        use crate::domain::types::{Direction, Position};
+        use crate::game::components::creature::FacingComponent;
+        use crate::game::resources::GlobalState;
+        use crate::game::systems::facing::FacingPlugin;
+        use crate::game::systems::map::TileCoord;
+
+        let mut tree = DialogueTree::new(503, "No Auto Face", 1);
+        let node = DialogueNode::new(1, "I keep my authored orientation.");
+        tree.add_node(node);
+
+        let mut db = ContentDatabase::new();
+        db.dialogues.add_dialogue(tree);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(FacingPlugin);
+        app.add_plugins(DialoguePlugin);
+
+        let mut game_state = GameState::new();
+        game_state.world.set_party_position(Position::new(5, 3));
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(db));
+        app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(bevy::input::ButtonInput::<bevy::prelude::KeyCode>::default());
+
+        let speaker = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                GlobalTransform::default(),
+                FacingComponent::new(Direction::North),
+                TileCoord(Position::new(3, 3)),
+            ))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<StartDialogue>>()
+            .write(StartDialogue {
+                dialogue_id: 503,
+                speaker_entity: Some(speaker),
+                fallback_position: None,
+                face_speaker_to_party: false,
+            });
+
+        app.update();
+        app.update();
+
+        let facing = app.world().get::<FacingComponent>(speaker).unwrap();
+        assert_eq!(
+            facing.direction,
+            Direction::North,
+            "speaker facing must remain unchanged when face_speaker_to_party is false"
         );
     }
 
@@ -3882,6 +3951,7 @@ mod tests {
                 dialogue_id: 501,
                 speaker_entity: None,
                 fallback_position: Some(Position::new(3, 3)),
+                face_speaker_to_party: true,
             });
 
         // Must not panic
@@ -3934,6 +4004,7 @@ mod tests {
                 dialogue_id: 502,
                 speaker_entity: Some(speaker),
                 fallback_position: None,
+                face_speaker_to_party: true,
             });
 
         app.update();
@@ -4014,6 +4085,7 @@ mod tests {
                 dialogue_id: None,
                 time_condition: None,
                 facing: None,
+                face_on_dialogue: false,
             },
         );
 

@@ -33,7 +33,7 @@
 //! | `1`–`6`          | Switch active character (number key maps to party index 0–5) |
 //! | `←` `→` `↑` `↓` | Navigate the slot grid inside the focused panel              |
 //! | `Enter`          | Enter **Action Navigation** for the highlighted slot         |
-//! | `Esc`            | Close merchant inventory; return to previous mode            |
+//! | `Esc`            | Close merchant inventory (handled by global toggle)          |
 //!
 //! ### Action Navigation
 //!
@@ -379,14 +379,6 @@ fn merchant_inventory_input_system(
     }
 
     // ── Slot Navigation phase ──────────────────────────────────────────────
-
-    // Esc → close merchant inventory screen
-    if keyboard.just_pressed(KeyCode::Escape) {
-        let resume = merchant_state.get_resume_mode();
-        global_state.0.mode = resume;
-        nav_state.reset();
-        return;
-    }
 
     // Tab → toggle panel focus (character ↔ merchant)
     if keyboard.just_pressed(KeyCode::Tab) {

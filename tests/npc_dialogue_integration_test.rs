@@ -87,6 +87,7 @@ fn test_start_dialogue_event_includes_speaker() {
         dialogue_id: 1,
         speaker_entity: Some(Entity::PLACEHOLDER),
         fallback_position: None,
+        face_speaker_to_party: true,
     };
     assert_eq!(event.dialogue_id, 1);
     assert_eq!(event.speaker_entity, Some(Entity::PLACEHOLDER));

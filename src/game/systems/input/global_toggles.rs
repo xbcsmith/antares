@@ -244,29 +244,11 @@ pub fn handle_global_mode_toggles(
         return true;
     }
 
-    if let Some(index) = frame_input.character_select {
-        let is_blocked = matches!(
-            game_state.mode,
-            GameMode::Combat(_)
-                | GameMode::Dialogue(_)
-                | GameMode::Training(_)
-                | GameMode::SkillTraining(_)
-                | GameMode::MerchantInventory(_)
-        );
-
-        if is_blocked {
-            bevy::prelude::info!(
-                "Character select {} pressed but mode is {:?} -- ignoring",
-                index,
-                game_state.mode
-            );
-        } else {
-            game_state.enter_character_sheet_at(index);
-            bevy::prelude::info!("Character select {}: mode = {:?}", index, game_state.mode);
-        }
-        return true;
-    }
-
+    // Number keys are intentionally not handled as global character-sheet
+    // shortcuts. Screens such as the Rest menu use 1/2/3 as local choices, so
+    // treating digits as global modal openers steals input from those screens.
+    // CharacterSheet itself may still interpret configured SelectCharacter keys
+    // locally after the sheet is already open.
     false
 }
 
@@ -974,7 +956,6 @@ mod tests {
             ("character sheet", character_sheet_toggle_intent(true)),
             ("spellbook", spell_book_toggle_intent()),
             ("automap", automap_toggle_intent()),
-            ("character select", character_select_intent(0)),
         ];
 
         for (name, intent) in cases {
@@ -1040,9 +1021,8 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_global_mode_toggles_character_select_opens_sheet_at_index() {
+    fn test_handle_global_mode_toggles_character_select_does_not_open_sheet() {
         let mut state = GameState::new();
-        // Add two party members so index 1 is in range.
         for name in ["Hero Alpha", "Hero Beta"] {
             let hero = Character::new(
                 name.to_string(),
@@ -1057,70 +1037,25 @@ mod tests {
 
         let consumed = handle_global_mode_toggles(&mut state, character_select_intent(1), None);
 
-        assert!(consumed);
-        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
-        if let GameMode::CharacterSheet(ref cs) = state.mode {
-            assert_eq!(cs.focused_index, 1);
-        }
+        assert!(
+            !consumed,
+            "number keys must not be consumed globally because local menus use them"
+        );
+        assert!(matches!(state.mode, GameMode::Exploration));
     }
 
     #[test]
-    fn test_handle_global_mode_toggles_character_select_ignored_in_combat() {
-        let mut state = make_combat_state();
-        assert!(matches!(state.mode, GameMode::Combat(_)));
+    fn test_handle_global_mode_toggles_character_select_does_not_steal_rest_menu_options() {
+        let mut state = GameState::new();
+        state.enter_rest_menu();
+        assert!(matches!(state.mode, GameMode::RestMenu));
 
         let consumed = handle_global_mode_toggles(&mut state, character_select_intent(0), None);
 
-        assert!(consumed);
-        assert!(matches!(state.mode, GameMode::Combat(_)));
-    }
-
-    #[test]
-    fn test_handle_global_mode_toggles_character_select_switches_index_when_in_sheet() {
-        let mut state = GameState::new();
-        // Two members so index 1 is valid.
-        for name in ["Alpha", "Beta"] {
-            let hero = Character::new(
-                name.to_string(),
-                "human".to_string(),
-                "knight".to_string(),
-                Sex::Male,
-                Alignment::Good,
-            );
-            state.party.add_member(hero).unwrap();
-        }
-        state.enter_character_sheet();
-        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
-
-        let consumed = handle_global_mode_toggles(&mut state, character_select_intent(1), None);
-
-        assert!(consumed);
-        // Mode must remain CharacterSheet (no transition)
-        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
-        if let GameMode::CharacterSheet(ref cs) = state.mode {
-            assert_eq!(cs.focused_index, 1);
-        }
-    }
-
-    #[test]
-    fn test_handle_global_mode_toggles_character_select_clamps_to_party_size() {
-        let mut state = GameState::new();
-        // Only one member -- index 5 must clamp to 0.
-        let hero = Character::new(
-            "Lone Hero".to_string(),
-            "human".to_string(),
-            "knight".to_string(),
-            Sex::Male,
-            Alignment::Good,
+        assert!(
+            !consumed,
+            "RestMenu must receive digit keys 1/2/3 instead of global character select"
         );
-        state.party.add_member(hero).unwrap();
-
-        let consumed = handle_global_mode_toggles(&mut state, character_select_intent(5), None);
-
-        assert!(consumed);
-        assert!(matches!(state.mode, GameMode::CharacterSheet(_)));
-        if let GameMode::CharacterSheet(ref cs) = state.mode {
-            assert_eq!(cs.focused_index, 0);
-        }
+        assert!(matches!(state.mode, GameMode::RestMenu));
     }
 }

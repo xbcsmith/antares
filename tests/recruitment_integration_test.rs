@@ -64,6 +64,7 @@ fn create_test_map_with_recruitment_event(
         dialogue_id,
         time_condition: None,
         facing: None,
+        face_on_dialogue: false,
     };
 
     map.events.insert(Position { x: 5, y: 5 }, event);
@@ -323,6 +324,7 @@ fn test_multiple_recruitable_events_on_map() {
             dialogue_id: Some(1001),
             time_condition: None,
             facing: None,
+            face_on_dialogue: false,
         },
     );
 
@@ -335,6 +337,7 @@ fn test_multiple_recruitable_events_on_map() {
             dialogue_id: Some(1002),
             time_condition: None,
             facing: None,
+            face_on_dialogue: false,
         },
     );
 
@@ -508,6 +511,7 @@ fn test_recruitment_map_event_properties() {
         dialogue_id,
         time_condition: None,
         facing: None,
+        face_on_dialogue: false,
     };
 
     // Assert: Verify all event properties

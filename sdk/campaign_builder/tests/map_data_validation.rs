@@ -25,6 +25,14 @@ fn test_maps_have_event_and_npc_names_and_descriptions() -> Result<(), Box<dyn s
     let map_dirs = [project_root.join("data").join("maps")];
 
     for dir in &map_dirs {
+        // Guard before canonicalize(): canonicalize() returns an error on
+        // non-existent paths, so we must check is_dir() first.  A missing
+        // directory is not a test failure — the fixture may simply be absent
+        // on a clean checkout.
+        if !dir.is_dir() {
+            continue;
+        }
+
         let dir = dir.canonicalize().map_err(|e| {
             format!(
                 "Failed to canonicalize map directory {}: {}",
@@ -32,11 +40,6 @@ fn test_maps_have_event_and_npc_names_and_descriptions() -> Result<(), Box<dyn s
                 e
             )
         })?;
-
-        if !dir.is_dir() {
-            // Skip non-existent dirs (defensive)
-            continue;
-        }
 
         for entry in fs::read_dir(&dir)? {
             let entry = entry?;

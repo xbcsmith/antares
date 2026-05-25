@@ -62,6 +62,7 @@
         description: "A young warrior eager to prove herself. Kira\'s straightforward fighting style makes her an excellent choice for players learning the basics of combat.",
         is_premade: true,
         starts_in_party: true,
+        creature_id: Some(1013),
     ),
     (
         id: "tutorial_elf_sorcerer",
@@ -194,6 +195,7 @@
         description: "A kind-hearted healer from the local temple. Mira\'s divine magic can mend wounds and cure ailments, teaching players the value of support characters.",
         is_premade: true,
         starts_in_party: true,
+        creature_id: Some(1014),
         starting_spells: [
             261,
             258,
@@ -260,7 +262,7 @@
         description: "A grizzled dwarf veteran who runs the town\'s smithy. Though his adventuring days are behind him, Old Gareth can be convinced to join a worthy cause one last time.",
         is_premade: true,
         starts_in_party: false,
-        creature_id: Some(1007),
+        creature_id: Some(1012),
     ),
     (
         id: "whisper",
@@ -325,7 +327,7 @@
         description: "A nimble elf with quick fingers and quicker feet. Whisper claims to be a \'locksmith\' but her skills with traps suggest a more colorful past.",
         is_premade: true,
         starts_in_party: false,
-        creature_id: Some(1012),
+        creature_id: Some(1011),
     ),
     (
         id: "apprentice_zara",
@@ -391,7 +393,7 @@
         description: "An enthusiastic gnome apprentice from the Mage\'s Guild. Zara was separated from her mentor and seeks adventurers to help her complete her studies.",
         is_premade: true,
         starts_in_party: false,
-        creature_id: Some(1008),
+        creature_id: Some(1010),
         starting_spells: [
             1027,
             257,
@@ -632,5 +634,6 @@
         description: "Zhaya left her people after years of training to search the world for the one true Astrologer",
         is_premade: true,
         starts_in_party: false,
+        creature_id: Some(1015),
     ),
 ]

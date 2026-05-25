@@ -28,6 +28,8 @@ rfd = "0.15"
 arboard = "3.4"
 # For image loading (portrait thumbnails)
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# For GLB (binary glTF) mesh import
+gltf = { version = "1", features = ["import"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tray-icon = { version = "0.19", features = [] }

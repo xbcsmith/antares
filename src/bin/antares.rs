@@ -92,21 +92,36 @@ fn main() {
         ..default()
     };
 
-    // Set BEVY_ASSET_ROOT to the campaign directory so the AssetServer resolves relative asset paths against it.
-    let campaign_root_abs = campaign
-        .root_path
-        .canonicalize()
-        .unwrap_or_else(|_| campaign.root_path.clone());
+    // Set BEVY_ASSET_ROOT to the campaign directory so the AssetServer resolves
+    // relative asset paths against it.  file_path is set to "" (empty) so Bevy
+    // joins BEVY_ASSET_ROOT directly with the asset path — no spurious "./"
+    // segment in the constructed absolute path.
+    //
+    // canonicalize() can fail when the path doesn't exist yet (e.g. a campaign
+    // being created, or a CI checkout that hasn't populated the directory).
+    // The fallback MUST still produce an absolute path — a relative BEVY_ASSET_ROOT
+    // makes Bevy resolve assets against the process working directory, which
+    // varies by launch context and causes non-deterministic asset failures.
+    let campaign_root_abs = campaign.root_path.canonicalize().unwrap_or_else(|_| {
+        if campaign.root_path.is_absolute() {
+            campaign.root_path.clone()
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .join(&campaign.root_path)
+        }
+    });
     let campaign_root_str = campaign_root_abs.to_string_lossy().to_string();
-    std::env::set_var("BEVY_ASSET_ROOT", campaign_root_str.clone());
+    std::env::set_var("BEVY_ASSET_ROOT", &campaign_root_str);
 
-    // Build the app and configure the AssetPlugin to use '.' as its file path so the effective asset root is the campaign root
+    // Build the app and configure the AssetPlugin to use an empty file_path
+    // so the effective asset root is BEVY_ASSET_ROOT with no subdirectory.
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
             .set(window_plugin)
             .set(bevy::asset::AssetPlugin {
-                file_path: ".".to_string(),
+                file_path: String::new(),
                 ..Default::default()
             })
             .set(RenderPlugin {
@@ -292,6 +307,12 @@ impl Plugin for AntaresPlugin {
 
         // Item world spawn / despawn systems
         app.add_plugins(antares::game::systems::item_world_events::ItemWorldPlugin);
+
+        // Apply imported creature mesh textures after mesh entities spawn.
+        app.add_systems(
+            Update,
+            antares::game::systems::creature_meshes::texture_loading_system,
+        );
 
         // Lock prompt UI and lock action handler
         app.add_plugins(antares::game::systems::lock_ui::LockUiPlugin);

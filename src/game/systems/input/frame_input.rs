@@ -23,7 +23,7 @@ use bevy::window::Window;
 /// # Examples
 ///
 /// ```
-/// use antares::game::systems::input::frame_input::FrameInputIntent;
+/// use antares::game::systems::input::FrameInputIntent;
 ///
 /// let intent = FrameInputIntent {
 ///     menu_toggle: true,
@@ -79,7 +79,7 @@ impl FrameInputIntent {
     /// # Examples
     ///
     /// ```
-    /// use antares::game::systems::input::frame_input::FrameInputIntent;
+    /// use antares::game::systems::input::FrameInputIntent;
     ///
     /// let intent = FrameInputIntent {
     ///     turn_left: true,
@@ -100,7 +100,7 @@ impl FrameInputIntent {
     /// # Examples
     ///
     /// ```
-    /// use antares::game::systems::input::frame_input::FrameInputIntent;
+    /// use antares::game::systems::input::FrameInputIntent;
     ///
     /// let intent = FrameInputIntent {
     ///     mouse_center_interact: true,
@@ -150,7 +150,7 @@ impl FrameInputIntent {
 ///
 /// ```
 /// use antares::game::systems::input::{FrameInputIntent, KeyMap};
-/// use antares::game::systems::input::frame_input::decode_frame_input;
+/// use antares::game::systems::input::decode_frame_input;
 /// use antares::sdk::game_config::ControlsConfig;
 /// use bevy::prelude::{ButtonInput, KeyCode, MouseButton};
 ///

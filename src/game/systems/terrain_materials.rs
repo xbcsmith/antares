@@ -52,8 +52,8 @@ pub const TEXTURE_FOREST_FLOOR: &str = "assets/textures/terrain/forest_floor.png
 /// use antares::domain::world::TerrainType;
 /// use antares::game::systems::terrain_materials::texture_path_for;
 ///
-/// assert_eq!(texture_path_for(TerrainType::Grass), "textures/terrain/grass.png");
-/// assert_eq!(texture_path_for(TerrainType::Water), "textures/terrain/water.png");
+/// assert_eq!(texture_path_for(TerrainType::Grass), "assets/textures/terrain/grass.png");
+/// assert_eq!(texture_path_for(TerrainType::Water), "assets/textures/terrain/water.png");
 /// ```
 pub fn texture_path_for(terrain: TerrainType) -> &'static str {
     match terrain {

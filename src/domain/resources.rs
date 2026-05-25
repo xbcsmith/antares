@@ -305,6 +305,7 @@ pub fn count_food_in_party(party: &Party, item_db: &ItemDatabase) -> u32 {
 ///     icon_path: None,
 ///     tags: vec![],
 ///     mesh_descriptor_override: None,
+///     mesh_id: None,
 /// };
 /// item_db.add_item(food_item).unwrap();
 ///
@@ -713,6 +714,7 @@ pub fn revive_from_dead(character: &mut crate::domain::character::Character, hp:
 ///     icon_path: None,
 ///     tags: vec![],
 ///     mesh_descriptor_override: None,
+///     mesh_id: None,
 /// };
 /// item_db.add_item(food_item).unwrap();
 ///
@@ -849,6 +851,7 @@ pub fn rest_party_hour(
 ///     icon_path: None,
 ///     tags: vec![],
 ///     mesh_descriptor_override: None,
+///     mesh_id: None,
 /// };
 /// item_db.add_item(food_item).unwrap();
 ///

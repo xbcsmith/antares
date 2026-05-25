@@ -1005,6 +1005,7 @@ mod tests {
                 dialogue_id: None,
                 time_condition: None,
                 facing: None,
+                face_on_dialogue: false,
             },
         );
         events.insert(

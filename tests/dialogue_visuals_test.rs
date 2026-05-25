@@ -201,6 +201,7 @@ fn test_dialogue_state_message_types() {
         dialogue_id: 1,
         speaker_entity: Some(Entity::PLACEHOLDER),
         fallback_position: None,
+        face_speaker_to_party: true,
     };
     assert_eq!(start_msg.dialogue_id, 1);
 

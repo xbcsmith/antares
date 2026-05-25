@@ -214,6 +214,7 @@ struct ResolvedImportedMaterial {
     mesh_color: [f32; 4],
     material: MaterialDefinition,
     texture_path: Option<String>,
+    texture_source_path: Option<PathBuf>,
     color_source: ImportedObjMeshColorSource,
 }
 
@@ -236,6 +237,7 @@ pub(crate) struct ImportedObjMaterialSwatch {
     pub label: String,
     pub color: [f32; 4],
     pub texture_path: Option<String>,
+    pub texture_source_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -249,6 +251,7 @@ pub(crate) struct ImportedObjMetadata {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ImportedObjMesh {
     pub mesh_def: MeshDefinition,
+    pub texture_source_path: Option<PathBuf>,
     pub color_source: ImportedObjMeshColorSource,
 }
 
@@ -261,6 +264,7 @@ pub(crate) struct ImportedObjScene {
 #[derive(Debug, Clone, PartialEq)]
 struct BuiltObjMesh {
     mesh_def: MeshDefinition,
+    texture_source_path: Option<PathBuf>,
     color_source: ImportedObjMeshColorSource,
 }
 
@@ -601,6 +605,7 @@ pub(crate) fn import_obj_scene_for_importer_with_options(
         )?;
         meshes.push(ImportedObjMesh {
             mesh_def: mesh.mesh_def,
+            texture_source_path: mesh.texture_source_path,
             color_source: mesh.color_source,
         });
     }
@@ -950,7 +955,7 @@ fn parse_mtl_materials(
             }
             "map_Kd" => {
                 if let Some(material) = current_material.as_mut() {
-                    if let Some(texture_path) = parse_obj_label(parts.as_slice()) {
+                    if let Some(texture_path) = parse_mtl_texture_reference(parts.as_slice()) {
                         material.diffuse_texture_reference = Some(texture_path.clone());
                         material.diffuse_texture_path =
                             resolve_texture_path(source_path, &texture_path);
@@ -988,6 +993,44 @@ where
 {
     (parts.len() >= 2).then_some(())?;
     parts[1].parse().ok()
+}
+
+fn parse_mtl_texture_reference(parts: &[&str]) -> Option<String> {
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let mut index = 1;
+    let mut path_tokens = Vec::new();
+    while index < parts.len() {
+        let token = parts[index];
+        if token.starts_with('-') {
+            index += 1;
+            let option_arg_count = match token {
+                "-blendu" | "-blendv" | "-boost" | "-bm" | "-cc" | "-clamp" | "-imfchan"
+                | "-texres" | "-type" => 1,
+                "-mm" => 2,
+                "-o" | "-s" | "-t" => count_numeric_option_args(&parts[index..]).min(3),
+                _ => count_numeric_option_args(&parts[index..]),
+            };
+            index = (index + option_arg_count).min(parts.len());
+        } else {
+            path_tokens.extend_from_slice(&parts[index..]);
+            break;
+        }
+    }
+
+    (!path_tokens.is_empty())
+        .then(|| path_tokens.join(" "))
+        .map(|path| path.trim_matches('"').to_string())
+        .filter(|path| !path.is_empty())
+}
+
+fn count_numeric_option_args(tokens: &[&str]) -> usize {
+    tokens
+        .iter()
+        .take_while(|token| token.parse::<f32>().is_ok())
+        .count()
 }
 
 fn resolve_texture_path(source_path: Option<&Path>, texture_path: &str) -> Option<PathBuf> {
@@ -1075,17 +1118,19 @@ where
         triangulate_face_indices(&face_indices, &mut indices);
     }
 
-    let (color, material, texture_path, color_source) =
+    let (color, material, texture_path, texture_source_path, color_source) =
         if let Some(resolved_material) = resolved_material {
             (
                 resolved_material.mesh_color,
                 Some(resolved_material.material),
                 resolved_material.texture_path,
+                resolved_material.texture_source_path,
                 resolved_material.color_source,
             )
         } else {
             (
                 options.default_color,
+                None,
                 None,
                 None,
                 ImportedObjMeshColorSource::HeuristicFallback,
@@ -1105,6 +1150,7 @@ where
             material,
             texture_path,
         },
+        texture_source_path,
         color_source,
     })
 }
@@ -1121,10 +1167,12 @@ fn resolve_imported_material(material: &ParsedMtlMaterial) -> Option<ResolvedImp
     } else {
         AlphaMode::Opaque
     };
+    let texture_source_path = material.diffuse_texture_path.clone();
     let texture_path = material
         .diffuse_texture_reference
         .as_deref()
-        .and_then(preserve_relative_texture_path);
+        .and_then(preserve_relative_texture_path)
+        .or_else(|| portable_texture_file_name(texture_source_path.as_deref()));
 
     let has_meaningful_data = material.diffuse_color.is_some()
         || material.dissolve.is_some()
@@ -1144,6 +1192,7 @@ fn resolve_imported_material(material: &ParsedMtlMaterial) -> Option<ResolvedImp
             alpha_mode,
         },
         texture_path,
+        texture_source_path,
         color_source: if material.diffuse_color.is_some() {
             ImportedObjMeshColorSource::ImportedMaterial
         } else {
@@ -1192,6 +1241,7 @@ fn build_imported_material_swatches(parsed: &ParsedObjData) -> Vec<ImportedObjMa
                     label: material_name.clone(),
                     color: resolved.mesh_color,
                     texture_path: resolved.texture_path,
+                    texture_source_path: resolved.texture_source_path,
                 },
             )
         })
@@ -1251,6 +1301,14 @@ fn preserve_relative_texture_path(texture_reference: &str) -> Option<String> {
     let normalized = normalized.to_string_lossy().replace('\\', "/");
 
     (!normalized.is_empty()).then_some(normalized)
+}
+
+fn portable_texture_file_name(texture_path: Option<&Path>) -> Option<String> {
+    texture_path
+        .and_then(Path::file_name)
+        .and_then(|file_name| file_name.to_str())
+        .map(|file_name| file_name.replace('\\', "/"))
+        .filter(|file_name| !file_name.is_empty())
 }
 
 fn resolve_segment_names(segments: &[ParsedObjSegment]) -> Vec<String> {
@@ -2024,6 +2082,132 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_mtl_texture_reference_ignores_common_options() {
+        let parts = [
+            "map_Kd",
+            "-s",
+            "1",
+            "1",
+            "1",
+            "-clamp",
+            "on",
+            "textures/hero.png",
+        ];
+        assert_eq!(
+            parse_mtl_texture_reference(&parts),
+            Some("textures/hero.png".to_string())
+        );
+    }
+
+    #[test]
+    fn test_import_obj_scene_preserves_resolved_texture_source_paths() {
+        let temp_dir = tempdir().unwrap();
+        let obj_path = temp_dir.path().join("models/hero.obj");
+        let mtl_path = temp_dir.path().join("models/hero.mtl");
+        let texture_path = temp_dir.path().join("models/textures/hero.png");
+        fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
+        fs::write(&texture_path, b"texture").unwrap();
+        fs::write(
+            &mtl_path,
+            concat!("newmtl HeroSkin\n", "map_Kd textures/hero.png\n"),
+        )
+        .unwrap();
+        fs::write(
+            &obj_path,
+            concat!(
+                "mtllib hero.mtl\n",
+                "usemtl HeroSkin\n",
+                "v 0.0 0.0 0.0\n",
+                "v 1.0 0.0 0.0\n",
+                "v 0.0 1.0 0.0\n",
+                "vt 0.0 0.0\n",
+                "vt 1.0 0.0\n",
+                "vt 0.0 1.0\n",
+                "f 1/1 2/2 3/3\n"
+            ),
+        )
+        .unwrap();
+
+        let scene = import_obj_scene_for_importer_from_obj_file_with_options(
+            &obj_path.to_string_lossy(),
+            &ObjImportOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            scene.meshes[0].mesh_def.texture_path.as_deref(),
+            Some("textures/hero.png")
+        );
+        assert_eq!(
+            scene.meshes[0].texture_source_path.as_ref(),
+            Some(&texture_path)
+        );
+    }
+
+    #[test]
+    fn test_import_obj_scene_preserves_multiple_material_texture_maps() {
+        let temp_dir = tempdir().unwrap();
+        let obj_path = temp_dir.path().join("models/multi.obj");
+        let mtl_path = temp_dir.path().join("models/multi.mtl");
+        let body_texture = temp_dir.path().join("models/textures/body.png");
+        let wing_texture = temp_dir.path().join("models/textures/wing.png");
+        fs::create_dir_all(body_texture.parent().unwrap()).unwrap();
+        fs::write(&body_texture, b"body").unwrap();
+        fs::write(&wing_texture, b"wing").unwrap();
+        fs::write(
+            &mtl_path,
+            concat!(
+                "newmtl Body\n",
+                "map_Kd textures/body.png\n",
+                "newmtl Wing\n",
+                "map_Kd textures/wing.png\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            &obj_path,
+            concat!(
+                "mtllib multi.mtl\n",
+                "v 0.0 0.0 0.0\n",
+                "v 1.0 0.0 0.0\n",
+                "v 0.0 1.0 0.0\n",
+                "v 0.0 0.0 1.0\n",
+                "vt 0.0 0.0\n",
+                "vt 1.0 0.0\n",
+                "vt 0.0 1.0\n",
+                "vt 1.0 1.0\n",
+                "usemtl Body\n",
+                "f 1/1 2/2 3/3\n",
+                "usemtl Wing\n",
+                "f 1/1 3/3 4/4\n"
+            ),
+        )
+        .unwrap();
+
+        let scene = import_obj_scene_for_importer_from_obj_file_with_options(
+            &obj_path.to_string_lossy(),
+            &ObjImportOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(scene.meshes.len(), 2);
+        let texture_paths = scene
+            .meshes
+            .iter()
+            .map(|mesh| mesh.mesh_def.texture_path.as_deref())
+            .collect::<Vec<_>>();
+        assert!(texture_paths.contains(&Some("textures/body.png")));
+        assert!(texture_paths.contains(&Some("textures/wing.png")));
+        let source_paths = scene
+            .meshes
+            .iter()
+            .filter_map(|mesh| mesh.texture_source_path.as_ref())
+            .collect::<Vec<_>>();
+        assert!(source_paths.contains(&&body_texture));
+        assert!(source_paths.contains(&&wing_texture));
+    }
+
+    #[test]
     fn test_import_meshes_maps_mtl_material_into_domain_types() {
         let temp_dir = tempdir().unwrap();
         let obj_path = temp_dir.path().join("models/hero.obj");
@@ -2146,7 +2330,8 @@ mod tests {
         };
 
         let meshes = import_meshes_from_obj_with_options(obj, &options).unwrap();
-        assert_eq!(meshes[0].texture_path, None);
+        assert_eq!(meshes[0].texture_path.as_deref(), Some("hero.png"));
+        assert!(!Path::new(meshes[0].texture_path.as_deref().unwrap()).is_absolute());
     }
 
     #[test]

@@ -13,6 +13,7 @@
 
 use antares::domain::types::CreatureId;
 use antares::domain::visual::{CreatureDefinition, CreatureReference};
+use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -323,7 +324,33 @@ impl CreatureAssetManager {
         Ok(references.into_iter().map(|r| r.name).collect())
     }
 
-    /// Deletes a creature and removes its registry entry.
+    /// Deletes a creature and removes its registry entry, asset file, and exclusive textures.
+    ///
+    /// This method performs a complete cleanup of all files associated with the
+    /// creature, respecting shared resources:
+    ///
+    /// - The creature's `.ron` asset file is deleted only when no other registry
+    ///   entry references the same filepath (alias-safe deletion).
+    /// - Texture files referenced by the creature's meshes are deleted only when no
+    ///   remaining creature in the registry references those same texture paths.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CreatureAssetError::CreatureNotFound`] when `creature_id` has no
+    /// registry entry. Other errors are returned for I/O or serialization failures.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use campaign_builder::creature_assets::CreatureAssetManager;
+    /// use std::path::PathBuf;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let manager = CreatureAssetManager::new(PathBuf::from("campaigns/tutorial"));
+    /// manager.delete_creature(42)?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn delete_creature(&self, creature_id: CreatureId) -> Result<(), CreatureAssetError> {
         let mut references = self.load_registry_references()?;
 
@@ -333,11 +360,64 @@ impl CreatureAssetManager {
             .ok_or_else(|| CreatureAssetError::CreatureNotFound(creature_id.to_string()))?;
 
         let removed = references.remove(idx);
+
+        // Collect texture paths from the creature being deleted BEFORE updating the
+        // registry or removing the asset file so we still have access to the file.
+        let deleted_texture_paths: HashSet<String> = {
+            let asset_path = self.creature_asset_path(&removed.filepath);
+            if asset_path.exists() {
+                match fs::read_to_string(&asset_path)
+                    .ok()
+                    .and_then(|c| ron::from_str::<CreatureDefinition>(&c).ok())
+                {
+                    Some(creature) => creature
+                        .meshes
+                        .iter()
+                        .filter_map(|m| m.texture_path.clone())
+                        .collect(),
+                    None => HashSet::new(),
+                }
+            } else {
+                HashSet::new()
+            }
+        };
+
+        // Persist the updated registry (without the deleted entry).
         self.write_registry_references(&references)?;
 
-        let asset_path = self.creature_asset_path(&removed.filepath);
-        if asset_path.exists() {
-            fs::remove_file(asset_path)?;
+        // Delete the .ron asset file only when no remaining registry entry references
+        // the same filepath.  This handles the aliasing case where multiple creatures
+        // share one .ron file (see test_load_all_creatures_supports_shared_asset_filepath_aliasing).
+        if !references.iter().any(|r| r.filepath == removed.filepath) {
+            let asset_path = self.creature_asset_path(&removed.filepath);
+            if asset_path.exists() {
+                fs::remove_file(asset_path)?;
+            }
+        }
+
+        // Delete texture files exclusively owned by the deleted creature.
+        // Build the set of texture paths still referenced by all remaining creatures.
+        if !deleted_texture_paths.is_empty() {
+            let retained_texture_paths: HashSet<String> = references
+                .iter()
+                .filter_map(|r| {
+                    let path = self.creature_asset_path(&r.filepath);
+                    fs::read_to_string(&path)
+                        .ok()
+                        .and_then(|c| ron::from_str::<CreatureDefinition>(&c).ok())
+                })
+                .flat_map(|c| c.meshes.into_iter().filter_map(|m| m.texture_path))
+                .collect();
+
+            for texture_path in &deleted_texture_paths {
+                if !retained_texture_paths.contains(texture_path) {
+                    let full_path = self.campaign_dir.join(texture_path);
+                    if full_path.exists() {
+                        // Best-effort: individual texture deletion errors are not fatal.
+                        let _ = fs::remove_file(&full_path);
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -405,6 +485,36 @@ mod tests {
             name: name.to_string(),
             meshes: vec![],
             mesh_transforms: vec![],
+            scale: 1.0,
+            color_tint: None,
+        }
+    }
+
+    fn create_test_creature_with_texture(
+        id: CreatureId,
+        name: &str,
+        texture_relative_path: &str,
+    ) -> CreatureDefinition {
+        use antares::domain::visual::{MeshDefinition, MeshTransform};
+
+        let mesh = MeshDefinition {
+            name: Some("body".to_string()),
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: Some(texture_relative_path.to_string()),
+        };
+
+        CreatureDefinition {
+            id,
+            name: name.to_string(),
+            meshes: vec![mesh],
+            mesh_transforms: vec![MeshTransform::identity()],
             scale: 1.0,
             color_tint: None,
         }
@@ -629,5 +739,104 @@ mod tests {
             .iter()
             .any(|c| c.id == 5 && c.name == "DireWolfLeader"));
         assert!(creatures.iter().any(|c| c.id == 12 && c.name == "Wolf"));
+    }
+
+    #[test]
+    fn test_delete_creature_also_removes_exclusive_texture_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = CreatureAssetManager::new(temp_dir.path().to_path_buf());
+
+        // Simulate a texture file placed by the importer.
+        let texture_relative = "assets/textures/imported/goblin/body.png";
+        let texture_abs = temp_dir.path().join(texture_relative);
+        fs::create_dir_all(texture_abs.parent().unwrap()).unwrap();
+        fs::write(&texture_abs, b"fake png data").unwrap();
+        assert!(texture_abs.exists());
+
+        let creature = create_test_creature_with_texture(1, "Goblin", texture_relative);
+        manager.save_creature(&creature).unwrap();
+
+        manager.delete_creature(1).unwrap();
+
+        let registry = read_registry(temp_dir.path());
+        assert!(registry.is_empty(), "registry must be empty after deletion");
+        assert!(
+            !texture_abs.exists(),
+            "exclusive texture must be removed when the creature is deleted"
+        );
+    }
+
+    #[test]
+    fn test_delete_creature_preserves_texture_shared_with_another_creature() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = CreatureAssetManager::new(temp_dir.path().to_path_buf());
+
+        // Both creatures reference the same texture path.
+        let shared_texture = "assets/textures/imported/shared/skin.png";
+        let texture_abs = temp_dir.path().join(shared_texture);
+        fs::create_dir_all(texture_abs.parent().unwrap()).unwrap();
+        fs::write(&texture_abs, b"shared texture data").unwrap();
+
+        let goblin = create_test_creature_with_texture(1, "Goblin", shared_texture);
+        let orc = create_test_creature_with_texture(2, "Orc", shared_texture);
+        manager.save_creature(&goblin).unwrap();
+        manager.save_creature(&orc).unwrap();
+
+        // Delete Goblin only — Orc still references the same texture.
+        manager.delete_creature(1).unwrap();
+
+        let registry = read_registry(temp_dir.path());
+        assert_eq!(registry.len(), 1, "Orc must remain in registry");
+        assert_eq!(registry[0].id, 2);
+        assert!(
+            texture_abs.exists(),
+            "shared texture must not be removed while Orc still references it"
+        );
+    }
+
+    #[test]
+    fn test_delete_creature_preserves_aliased_ron_file() {
+        // When two registry entries share the same .ron filepath, deleting one
+        // must NOT delete the .ron file because the other entry still needs it.
+        let temp_dir = TempDir::new().unwrap();
+        let campaign_dir = temp_dir.path();
+        let manager = CreatureAssetManager::new(campaign_dir.to_path_buf());
+
+        fs::create_dir_all(campaign_dir.join("data")).unwrap();
+        fs::create_dir_all(campaign_dir.join("assets/creatures")).unwrap();
+
+        let shared_creature = create_test_creature(12, "Wolf");
+        let shared_content =
+            ron::ser::to_string_pretty(&shared_creature, ron::ser::PrettyConfig::new()).unwrap();
+        let shared_filepath = "assets/creatures/wolf.ron";
+        fs::write(campaign_dir.join(shared_filepath), shared_content).unwrap();
+
+        let references = vec![
+            CreatureReference {
+                id: 4,
+                name: "DireWolf".to_string(),
+                filepath: shared_filepath.to_string(),
+            },
+            CreatureReference {
+                id: 5,
+                name: "DireWolfLeader".to_string(),
+                filepath: shared_filepath.to_string(),
+            },
+        ];
+        let registry_content =
+            ron::ser::to_string_pretty(&references, ron::ser::PrettyConfig::new()).unwrap();
+        fs::write(campaign_dir.join("data/creatures.ron"), registry_content).unwrap();
+
+        // Delete creature 4 (DireWolf). Creature 5 (DireWolfLeader) still
+        // references the same .ron file so it must not be deleted.
+        manager.delete_creature(4).unwrap();
+
+        let registry_after = read_registry(campaign_dir);
+        assert_eq!(registry_after.len(), 1, "only DireWolfLeader should remain");
+        assert_eq!(registry_after[0].id, 5);
+        assert!(
+            campaign_dir.join(shared_filepath).exists(),
+            "shared .ron file must not be deleted while DireWolfLeader still references it"
+        );
     }
 }
