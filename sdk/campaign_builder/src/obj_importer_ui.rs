@@ -28,6 +28,7 @@
 
 use crate::color_palette::{palette_entries, PaletteEntry};
 use crate::creature_assets::{CreatureAssetError, CreatureAssetManager};
+use crate::creature_id_manager::CreatureCategory;
 use crate::logging::{category, Logger};
 use crate::obj_importer::{
     ExportType, ImportSourceFormat, ImportedMaterialSwatch, ImportedMesh, ImportedMeshColorSource,
@@ -159,7 +160,7 @@ pub(crate) fn show_obj_importer_tab(
 
     match state.mode {
         ImporterMode::Idle => {
-            render_idle_mode(ui, state, logger);
+            render_idle_mode(ui, state, campaign_dir, logger);
             None
         }
         ImporterMode::Loaded => render_loaded_mode(ui, state, campaign_dir, logger),
@@ -171,7 +172,69 @@ pub(crate) fn show_obj_importer_tab(
     }
 }
 
-fn render_idle_mode(ui: &mut egui::Ui, state: &mut ObjImporterState, logger: &mut Logger) {
+/// All selectable creature categories in display order.
+const ALL_CREATURE_CATEGORIES: &[CreatureCategory] = &[
+    CreatureCategory::Monsters,
+    CreatureCategory::Npcs,
+    CreatureCategory::Templates,
+    CreatureCategory::Variants,
+    CreatureCategory::Custom,
+];
+
+/// Maps a category display-name string back to a [`CreatureCategory`].
+///
+/// Accepts the canonical display names produced by
+/// [`CreatureCategory::display_name`]: `"Monsters"`, `"NPCs"`,
+/// `"Templates"`, `"Variants"`, `"Custom"`. Any other input
+/// (including the empty string) returns [`CreatureCategory::Custom`].
+fn creature_category_from_str(s: &str) -> CreatureCategory {
+    match s {
+        "Monsters" => CreatureCategory::Monsters,
+        "NPCs" => CreatureCategory::Npcs,
+        "Templates" => CreatureCategory::Templates,
+        "Variants" => CreatureCategory::Variants,
+        _ => CreatureCategory::Custom,
+    }
+}
+
+/// Returns the next available creature ID in `category`'s range.
+///
+/// Loads the campaign's creature registry from disk (if `campaign_dir` is
+/// `Some`) to skip IDs that are already in use. Falls back to the first ID in
+/// the range when:
+/// - `campaign_dir` is `None`.
+/// - The registry cannot be read or parsed.
+/// - Every ID in the range is already taken.
+fn suggest_next_creature_id_from_dir(
+    campaign_dir: Option<&Path>,
+    category: CreatureCategory,
+) -> u32 {
+    let range = category.id_range();
+    let used_ids: std::collections::HashSet<u32> = campaign_dir
+        .map(|dir| {
+            CreatureAssetManager::new(dir.to_path_buf())
+                .load_all_creatures()
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+        .iter()
+        .filter(|c| range.contains(&c.id))
+        .map(|c| c.id)
+        .collect();
+    for id in range.clone() {
+        if !used_ids.contains(&id) {
+            return id;
+        }
+    }
+    range.start
+}
+
+fn render_idle_mode(
+    ui: &mut egui::Ui,
+    state: &mut ObjImporterState,
+    campaign_dir: Option<&PathBuf>,
+    logger: &mut Logger,
+) {
     let selected_path = state
         .source_path
         .as_ref()
@@ -223,7 +286,31 @@ fn render_idle_mode(ui: &mut egui::Ui, state: &mut ObjImporterState, logger: &mu
             ui.end_row();
 
             ui.label("Category:");
-            if ui.text_edit_singleline(&mut state.category).changed() {
+            if state.export_type == ExportType::Creature {
+                let category_before = state.category.clone();
+                egui::ComboBox::from_id_salt("obj_importer_idle_creature_category")
+                    .selected_text(creature_category_from_str(&state.category).display_name())
+                    .show_ui(ui, |ui| {
+                        for cat in ALL_CREATURE_CATEGORIES {
+                            ui.selectable_value(
+                                &mut state.category,
+                                cat.display_name().to_string(),
+                                cat.display_name(),
+                            );
+                        }
+                    });
+                // When category changes in idle mode, immediately suggest the next
+                // available ID in the new range so it is pre-populated when the model
+                // loads and the user reaches the Loaded form.
+                if state.category != category_before {
+                    let new_cat = creature_category_from_str(&state.category);
+                    state.creature_id = suggest_next_creature_id_from_dir(
+                        campaign_dir.map(|p| p.as_path()),
+                        new_cat,
+                    );
+                    ui.ctx().request_repaint();
+                }
+            } else if ui.text_edit_singleline(&mut state.category).changed() {
                 ui.ctx().request_repaint();
             }
             ui.end_row();
@@ -264,6 +351,17 @@ fn render_idle_mode(ui: &mut egui::Ui, state: &mut ObjImporterState, logger: &mu
 
         match load_model_into_state(state, &path) {
             Ok(()) => {
+                // Re-suggest the creature ID for the current category so the ID
+                // field in the Loaded form is immediately correct for the selected
+                // category, even if the user hasn't touched the Category ComboBox
+                // since the previous export session.
+                if state.export_type == ExportType::Creature {
+                    let current_cat = creature_category_from_str(&state.category);
+                    state.creature_id = suggest_next_creature_id_from_dir(
+                        campaign_dir.map(|p| p.as_path()),
+                        current_cat,
+                    );
+                }
                 state.is_error = false;
                 logger.info(
                     category::EDITOR,
@@ -357,31 +455,79 @@ fn render_loaded_mode(
             });
             ui.end_row();
 
-            ui.label("ID:");
-            match state.export_type {
-                ExportType::Furniture => {
-                    if ui
-                        .add(egui::DragValue::new(&mut state.furniture_id).range(0..=u32::MAX))
-                        .changed()
-                    {
-                        ui.ctx().request_repaint();
-                    }
+            ui.label("Category:");
+            if state.export_type == ExportType::Creature {
+                let category_before = state.category.clone();
+                egui::ComboBox::from_id_salt("obj_importer_loaded_creature_category")
+                    .selected_text(creature_category_from_str(&state.category).display_name())
+                    .show_ui(ui, |ui| {
+                        for cat in ALL_CREATURE_CATEGORIES {
+                            ui.selectable_value(
+                                &mut state.category,
+                                cat.display_name().to_string(),
+                                cat.display_name(),
+                            );
+                        }
+                    });
+                // Category is now rendered BEFORE the ID row.  When category changes,
+                // the ID suggestion fires here, and the ID row below reads the already-
+                // updated creature_id and state.category in the same frame — no lag.
+                if state.category != category_before {
+                    let new_cat = creature_category_from_str(&state.category);
+                    state.creature_id = suggest_next_creature_id_from_dir(
+                        campaign_dir.map(|p| p.as_path()),
+                        new_cat,
+                    );
+                    ui.ctx().request_repaint();
                 }
-                ExportType::Creature | ExportType::Item => {
-                    if ui
-                        .add(egui::DragValue::new(&mut state.creature_id).range(0..=u32::MAX))
-                        .changed()
-                    {
-                        ui.ctx().request_repaint();
-                    }
-                }
+            } else if ui.text_edit_singleline(&mut state.category).changed() {
+                ui.ctx().request_repaint();
             }
             ui.end_row();
 
-            ui.label("Category:");
-            if ui.text_edit_singleline(&mut state.category).changed() {
-                ui.ctx().request_repaint();
-            }
+            ui.label("ID:");
+            ui.horizontal(|ui| {
+                match state.export_type {
+                    ExportType::Furniture => {
+                        if ui
+                            .add(egui::DragValue::new(&mut state.furniture_id).range(0..=u32::MAX))
+                            .changed()
+                        {
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                    ExportType::Creature | ExportType::Item => {
+                        if ui
+                            .add(egui::DragValue::new(&mut state.creature_id).range(0..=u32::MAX))
+                            .changed()
+                        {
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                }
+                // For creature exports: show the expected ID range and warn when
+                // the current value falls outside it.
+                if state.export_type == ExportType::Creature {
+                    let cat = creature_category_from_str(&state.category);
+                    let r = cat.id_range();
+                    let range_str = if r.end == u32::MAX {
+                        format!("{}+", r.start)
+                    } else {
+                        format!("{}\u{2013}{}", r.start, r.end - 1)
+                    };
+                    ui.label(egui::RichText::new(format!("({})", range_str)).weak());
+                    if !r.contains(&state.creature_id) {
+                        ui.colored_label(
+                            egui::Color32::YELLOW,
+                            format!(
+                                "\u{26a0} {} is outside {} range",
+                                state.creature_id,
+                                cat.display_name()
+                            ),
+                        );
+                    }
+                }
+            });
             ui.end_row();
 
             ui.label("Name:");
@@ -457,6 +603,15 @@ fn render_loaded_mode(
             if let Some(path) = pick_model_file(state.source_path.as_deref()) {
                 match load_model_into_state(state, &path) {
                     Ok(()) => {
+                        // Re-suggest the creature ID for the current category after
+                        // loading a replacement model.
+                        if state.export_type == ExportType::Creature {
+                            let current_cat = creature_category_from_str(&state.category);
+                            state.creature_id = suggest_next_creature_id_from_dir(
+                                campaign_dir.map(|p| p.as_path()),
+                                current_cat,
+                            );
+                        }
                         state.is_error = false;
                         logger.info(
                             category::EDITOR,
@@ -1827,11 +1982,13 @@ fn parse_glb_embedded_image_count(status: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_creature_definition, describe_mesh_color_source, export_state_to_campaign,
-        format_mtl_source_detail, format_mtl_source_summary, load_model_into_state,
-        persist_custom_palette, preview_export_relative_path, show_obj_importer_tab,
-        stage_imported_swatch_as_custom_draft, ObjImportError, ObjImporterExportError,
+        build_creature_definition, creature_category_from_str, describe_mesh_color_source,
+        export_state_to_campaign, format_mtl_source_detail, format_mtl_source_summary,
+        load_model_into_state, persist_custom_palette, preview_export_relative_path,
+        show_obj_importer_tab, stage_imported_swatch_as_custom_draft,
+        suggest_next_creature_id_from_dir, ObjImportError, ObjImporterExportError,
     };
+    use crate::creature_id_manager::CreatureCategory;
     use crate::logging::Logger;
     use crate::obj_importer::{
         ExportType, ImportSourceFormat, ImportedMaterialSwatch, ImportedMeshColorSource,
@@ -2691,6 +2848,200 @@ mod tests {
         assert!(
             campaign_dir.path().join(texture_path).exists(),
             "Furniture texture file must exist at the exported campaign-relative path"
+        );
+    }
+
+    // ── creature_category_from_str ────────────────────────────────────────────
+
+    #[test]
+    fn test_creature_category_from_str_maps_all_display_names() {
+        assert_eq!(
+            creature_category_from_str("Monsters"),
+            CreatureCategory::Monsters
+        );
+        assert_eq!(creature_category_from_str("NPCs"), CreatureCategory::Npcs);
+        assert_eq!(
+            creature_category_from_str("Templates"),
+            CreatureCategory::Templates
+        );
+        assert_eq!(
+            creature_category_from_str("Variants"),
+            CreatureCategory::Variants
+        );
+        assert_eq!(
+            creature_category_from_str("Custom"),
+            CreatureCategory::Custom
+        );
+    }
+
+    #[test]
+    fn test_creature_category_from_str_empty_or_unknown_defaults_to_custom() {
+        assert_eq!(creature_category_from_str(""), CreatureCategory::Custom);
+        assert_eq!(
+            creature_category_from_str("unknown_category"),
+            CreatureCategory::Custom
+        );
+        assert_eq!(
+            creature_category_from_str("monsters"), // wrong case
+            CreatureCategory::Custom
+        );
+    }
+
+    // ── suggest_next_creature_id_from_dir ────────────────────────────────────
+
+    #[test]
+    fn test_suggest_next_creature_id_no_campaign_dir_returns_range_start() {
+        // Without a campaign directory every category should fall back to the
+        // first ID in its range.
+        assert_eq!(
+            suggest_next_creature_id_from_dir(None, CreatureCategory::Monsters),
+            1
+        );
+        assert_eq!(
+            suggest_next_creature_id_from_dir(None, CreatureCategory::Npcs),
+            1000
+        );
+        assert_eq!(
+            suggest_next_creature_id_from_dir(None, CreatureCategory::Templates),
+            2000
+        );
+        assert_eq!(
+            suggest_next_creature_id_from_dir(None, CreatureCategory::Variants),
+            3000
+        );
+        assert_eq!(
+            suggest_next_creature_id_from_dir(None, CreatureCategory::Custom),
+            4000
+        );
+    }
+
+    #[test]
+    fn test_suggest_next_creature_id_skips_used_ids_in_range() {
+        use crate::creature_assets::CreatureAssetManager;
+        use antares::domain::visual::CreatureDefinition;
+
+        let temp_dir = tempdir().unwrap();
+        let manager = CreatureAssetManager::new(temp_dir.path().to_path_buf());
+
+        // Register two monster-range creatures (IDs 1 and 2).
+        for id in [1u32, 2u32] {
+            let creature = CreatureDefinition {
+                id,
+                name: format!("Creature {id}"),
+                meshes: vec![],
+                mesh_transforms: vec![],
+                scale: 1.0,
+                color_tint: None,
+            };
+            manager.save_creature(&creature).unwrap();
+        }
+
+        // The next available monster ID should be 3, skipping 1 and 2.
+        assert_eq!(
+            suggest_next_creature_id_from_dir(Some(temp_dir.path()), CreatureCategory::Monsters),
+            3
+        );
+
+        // NPCs and other categories are untouched, so should still return
+        // their respective range starts.
+        assert_eq!(
+            suggest_next_creature_id_from_dir(Some(temp_dir.path()), CreatureCategory::Npcs),
+            1000
+        );
+    }
+
+    #[test]
+    fn test_suggest_next_creature_id_empty_campaign_returns_range_start() {
+        let temp_dir = tempdir().unwrap();
+        // No creatures saved — should return the first ID of each range.
+        assert_eq!(
+            suggest_next_creature_id_from_dir(Some(temp_dir.path()), CreatureCategory::Monsters),
+            1
+        );
+        assert_eq!(
+            suggest_next_creature_id_from_dir(Some(temp_dir.path()), CreatureCategory::Custom),
+            4000
+        );
+    }
+
+    // ── idle-mode category change detection ──────────────────────────────────
+
+    /// Changing the category in idle mode must update `creature_id` to the
+    /// start of the new range (with no campaign dir, so no disk I/O).
+    #[test]
+    fn test_idle_mode_category_change_updates_creature_id_no_campaign() {
+        // Simulate what the idle-mode ComboBox now does when category changes.
+        let mut state = ObjImporterState::new();
+        state.category = "NPCs".to_string();
+        state.creature_id = 1001;
+
+        // User switches to Monsters.
+        let new_cat = creature_category_from_str("Monsters");
+        state.creature_id = suggest_next_creature_id_from_dir(None, new_cat);
+        state.category = "Monsters".to_string();
+
+        assert!(
+            new_cat.id_range().contains(&state.creature_id),
+            "creature_id {} must be in the Monsters range after switching category",
+            state.creature_id
+        );
+    }
+
+    /// After a successful model load the creature_id must reflect the current
+    /// category's range, not carry over a stale ID from a previous export session.
+    #[test]
+    fn test_model_load_suggests_id_for_current_category_no_campaign() {
+        let mut state = ObjImporterState::new();
+        // Simulate state preserved from a previous NPC export.
+        state.category = "NPCs".to_string();
+        state.creature_id = 1042; // arbitrary NPC-range leftover
+
+        // The user loads a new model and the importer re-suggests the ID.
+        // (No campaign_dir, so disk I/O is skipped and range-start is returned.)
+        if state.export_type == ExportType::Creature {
+            let current_cat = creature_category_from_str(&state.category);
+            state.creature_id = suggest_next_creature_id_from_dir(None, current_cat);
+        }
+
+        // With no campaign dir, suggest_next_creature_id_from_dir returns the
+        // range start for NPCs (1000).  The point is it's a valid NPC-range ID.
+        let npc_range = CreatureCategory::Npcs.id_range();
+        assert!(
+            npc_range.contains(&state.creature_id),
+            "creature_id {} must be in NPC range after model load with NPC category",
+            state.creature_id
+        );
+    }
+
+    /// Switching category then loading a model must produce an ID in the
+    /// post-switch category's range.
+    #[test]
+    fn test_model_load_after_category_switch_gives_correct_range_id() {
+        let mut state = ObjImporterState::new();
+        // Previous session left NPC state.
+        state.category = "NPCs".to_string();
+        state.creature_id = 1042;
+
+        // User switches category to Monsters in idle mode.
+        let new_cat = creature_category_from_str("Monsters");
+        state.creature_id = suggest_next_creature_id_from_dir(None, new_cat);
+        state.category = "Monsters".to_string();
+
+        // Then loads a model; the load also re-suggests (same result when no campaign).
+        if state.export_type == ExportType::Creature {
+            let current_cat = creature_category_from_str(&state.category);
+            state.creature_id = suggest_next_creature_id_from_dir(None, current_cat);
+        }
+
+        let monster_range = CreatureCategory::Monsters.id_range();
+        assert!(
+            monster_range.contains(&state.creature_id),
+            "creature_id {} must be in Monster range",
+            state.creature_id
+        );
+        assert_eq!(
+            state.creature_id, 1,
+            "no monsters in campaign, so ID must be 1"
         );
     }
 }

@@ -274,6 +274,16 @@ pub struct NpcEditorState {
     #[serde(skip)]
     pub last_campaign_dir: Option<PathBuf>,
 
+    /// Whether the creature autocomplete cache must be rebuilt on the next
+    /// [`show`] call, regardless of campaign directory change.
+    ///
+    /// Set by [`invalidate_creature_cache`] whenever `campaign_data.creatures`
+    /// changes without a corresponding `campaign_dir` change (e.g. after a
+    /// creature is exported from the Importer, or after the Creatures toolbar
+    /// Reload button fires).
+    #[serde(skip)]
+    pub creature_cache_dirty: bool,
+
     /// Last NPCs filename (cached from show() call)
     #[serde(skip)]
     pub last_npcs_file: Option<String>,
@@ -402,6 +412,7 @@ impl Default for NpcEditorState {
             available_creatures: Vec::new(),
             portrait_textures: HashMap::new(),
             last_campaign_dir: None,
+            creature_cache_dirty: false,
             last_npcs_file: None,
             reset_autocomplete_buffers: false,
             available_stock_templates: Vec::new(),
@@ -419,6 +430,28 @@ impl NpcEditorState {
     /// Creates a new NPC editor state
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Marks the creature autocomplete cache as stale so it is rebuilt on
+    /// the next [`show`] call, regardless of whether the campaign directory
+    /// has changed.
+    ///
+    /// Call this after a creature is exported from the Importer or after the
+    /// creature registry is reloaded externally — any time
+    /// `campaign_data.creatures` changes without a `campaign_dir` change.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::npc_editor::NpcEditorState;
+    ///
+    /// let mut state = NpcEditorState::default();
+    /// assert!(!state.creature_cache_dirty);
+    /// state.invalidate_creature_cache();
+    /// assert!(state.creature_cache_dirty);
+    /// ```
+    pub fn invalidate_creature_cache(&mut self) {
+        self.creature_cache_dirty = true;
     }
 
     /// Sets the creature ID buffer and closes the creature picker.
@@ -453,11 +486,12 @@ impl NpcEditorState {
         npc_ctx: &NpcEditorContext<'_>,
     ) -> bool {
         // Update portrait and sprite sheet candidates if campaign directory changed
-        if self.last_campaign_dir != npc_ctx.campaign_dir.cloned() {
+        if self.last_campaign_dir != npc_ctx.campaign_dir.cloned() || self.creature_cache_dirty {
             self.available_portraits = extract_portrait_candidates(npc_ctx.campaign_dir);
             self.available_sprite_sheets =
                 crate::ui_helpers::extract_sprite_sheet_candidates(npc_ctx.campaign_dir);
-            // Rebuild creature candidates for autocomplete whenever the campaign dir changes.
+            // Rebuild creature candidates for autocomplete whenever the campaign dir changes
+            // or when invalidate_creature_cache() has been called.
             self.available_creatures = npc_ctx
                 .creature_manager
                 .and_then(|m| m.load_all_creatures().ok())
@@ -468,6 +502,7 @@ impl NpcEditorState {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
+            self.creature_cache_dirty = false;
             self.last_campaign_dir = npc_ctx.campaign_dir.cloned();
         }
 
@@ -4960,6 +4995,20 @@ mod tests {
         // This would trigger portrait rescan in the show() method
         state.last_campaign_dir = Some(dir2);
         assert!(state.last_campaign_dir.is_some());
+    }
+
+    #[test]
+    fn test_invalidate_creature_cache_sets_dirty_flag() {
+        let mut state = NpcEditorState::default();
+        assert!(
+            !state.creature_cache_dirty,
+            "creature_cache_dirty must be false by default"
+        );
+        state.invalidate_creature_cache();
+        assert!(
+            state.creature_cache_dirty,
+            "invalidate_creature_cache() must set creature_cache_dirty to true"
+        );
     }
 
     #[test]

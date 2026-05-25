@@ -134,11 +134,13 @@ That causes the visible washed-out result.
 ## Recommended fix order
 
 1. Patch existing bad exported assets:
+
    - set `color` to white/opaque
    - set `metallic` to `0.0`
    - set `emissive` to `None`
 
 2. Update `sdk/campaign_builder/src/mesh_glb_io.rs`:
+
    - textured GLB meshes export neutral color/base color
    - no emissive by default
    - metallic defaults to `0.0` for texture-backed importer output
@@ -148,7 +150,33 @@ That causes the visible washed-out result.
    - make it optional tinting for GLB
    - prevent `Auto-Assign All` from silently tinting textured GLB meshes
 
-✅ COMPLETED - So: **yes, keep the color stuff for OBJ/untextured imports, but don’t let it drive fully textured GLB imports unless the user explicitly asks for tinting.
-
+✅ COMPLETED - So: \*\*yes, keep the color stuff for OBJ/untextured imports, but don’t let it drive fully textured GLB imports unless the user explicitly asks for tinting.
 
 ✅ COMPLETED - Walking over a Recruitable Character mesh makes them disappear from the screen without triggering a recruiting dialogue. The Recruitable Character should remain on the map until recruited. Once recruited then the mesh should disapear.
+
+Why are the shadows on the models so bad? The new whisper model has a shadow under her chin that is so black you can not see anything. Very unrealistic
+
+Here is what you already know
+
+Inspecting creature spawning\*\*
+
+I need to check the timing of creature spawning and the materials involved. I'm also considering whether there's a new whisper. My potential answer could be, "The current lighting likely uses just a single high contrast directional sun without any ambient or fill lights, and the model has baked Ambient Occlusion (AO)." So I need to inspect these elements to confirm and clarify. Let's explore this further!
+
+Inspecting texture and lighting\*\*
+
+I need to get a specific answer regarding the texture loading. I think I should check if the texture has been applied without an ambient occlusion map. The black area under the chin could be due to self-shadowing from dynamic shadows. To clarify, I need to know the actual light's position. The camera sets the point light at (0, 5, 0) during startup, but I'm wondering if the update moves the light. I should read the update lines to confirm.
+
+I need to come up with potential fixes and ensure I mention that shadow quality isn’t being used anywhere in the configuration. This suggests the shadow quality setting isn't impacting rendering. I could explain that the graphics are currently set to a single camera-following point light and lack fill, HDR, and contact shadow tuning. If the user wants to fix it, I could point out specifics in the configuration files and provide relevant line numbers.**Analyzing light and texture issues**
+
+If the Whisper model is close to the viewer, the point light positioned above or behind can cause chin and lip occlusion of the neck, without fill light or bounce. This results in hard self-shadows. The new model includes facial geometry under the chin, which catches occlusion. I should check the RON texture named baked_basecolor in case it contains baked shadows. It might be a large PNG file, so I'll find the path and inspect it closely.
+
+## Art Notes
+
+Art note (actionable, but not a code fix)
+
+The `baked_basecolor.png` texture file in `whisper_new.ron` was likely exported from Blender with Ambient Occlusion pre-multiplied into the base colour channel. That pre-baked darkness in the concave chin/neck area was compounding with the dynamic shadow. The two code fixes above are enough to make those areas visible. If you want the model to look its best long-term, re-export the texture with AO in a separate channel (`occlusion_texture`) rather than baked into albedo — but that's an artist task, not a code task.
+
+
+## Creature Mesh Selector
+
+Campaing Builder --> Monster --> Edit --> Visual Asset hangs constantly when trying to change the creature mesh. It hangs when trying to scroll the window and it constantly hangs trying to select the mesh. It should work like the Character or NPC mesh selection wich is a text box with autocomplete.

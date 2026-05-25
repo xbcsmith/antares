@@ -2,6 +2,675 @@
 
 ---
 
+## Asset Path Audit — Non-Relative Path Fixes
+
+### Problem
+
+A codebase audit found five places where the game engine constructed asset paths
+that were not cleanly relative, causing silent load failures or non-deterministic
+behaviour depending on the process working directory or filesystem layout.
+
+### Fixes
+
+#### `src/bin/antares.rs` — `BEVY_ASSET_ROOT` fallback always absolute
+
+`canonicalize()` can fail when the campaign directory doesn't exist yet (e.g. a
+campaign being created, or a CI checkout). The previous `unwrap_or_else` fell
+back to `campaign.root_path.clone()`, which may be a relative path like
+`"campaigns/tutorial"`. Bevy then resolved all asset loads against the process
+working directory, which varies by launch context.
+
+Fix: when `canonicalize()` fails, produce an absolute path via
+`std::env::current_dir().join(&campaign.root_path)` if the path is relative, or
+use it as-is if already absolute. Also removed the unnecessary `.clone()` on the
+string passed to `std::env::set_var`.
+
+#### `src/game/systems/hud.rs` — Portrait path fallback drops directory structure
+
+Both `ensure_portraits_loaded` and `ensure_full_portraits_loaded` had a
+`path.file_name()` fallback that fired when `canonicalize()` + `strip_prefix`
+failed (e.g. portrait on a different mount point or cross-symlink). That fallback
+produced a bare filename like `"hero.png"`, causing `asset_server.load("hero.png")`
+to look at `<campaign_root>/hero.png` instead of the correct
+`assets/portraits/hero.png`.
+
+Fix: replaced the single-level fallback with a three-stage cascading
+`Option<PathBuf>` chain:
+
+1. Direct `strip_prefix(&campaign.root_path)`.
+2. Canonicalize only `campaign.root_path`, then strip.
+3. Canonicalize both paths (last resort).
+
+If all three strategies fail, the file is skipped with a `warn!` log rather than
+passing a structurally broken path to the asset server.
+
+#### `src/game/systems/audio.rs` — Double-slash from trailing `/` in `audio_dir`
+
+`resolve_audio_path` used `format!("{}/{}", audio_dir, id)` with no normalisation.
+A campaign config with `audio_dir: "assets/audio/"` (trailing slash) produced
+`"assets/audio//combat.ogg"`, which Bevy's asset path parser may not normalise,
+causing lookup misses.
+
+Fix: added `let audio_dir = audio_dir.trim_end_matches('/');` at the top of the
+function. Updated the doc example and added four unit tests covering the trailing-
+slash case (single slash, explicit extension, multiple slashes).
+
+#### `src/domain/visual/mod.rs` + `src/game/systems/creature_meshes.rs` — Wrong `texture_path` doc example
+
+The `MeshDefinition::texture_path` field doc comment showed
+`"textures/dragon_scales.png"` as an example path. With `BEVY_ASSET_ROOT` pointing
+at the campaign root and `file_path: String::new()`, Bevy resolves that as
+`<campaign_root>/textures/...` — missing the required `assets/` layer.
+Creature `.ron` files authored following this example would have silently broken
+textures at runtime.
+
+Fix: updated the doc comment in `visual/mod.rs` to show
+`"assets/textures/dragon_scales.png"` and explain the `assets/` requirement.
+Updated the `load_texture` doc example in `creature_meshes.rs` to match.
+Added a `debug_assert!` in `load_texture` that fires in debug builds when a path
+is passed without the `assets/` prefix.
+
+#### `sdk/campaign_builder/tests/map_data_validation.rs` — `canonicalize()` before `is_dir()` hard-fails on missing directory
+
+`canonicalize()` returns an error on non-existent paths; the `?` propagated it
+before the `is_dir()` guard could skip. On a clean checkout without `data/maps`
+populated, the test always failed with a confusing canonicalize error.
+
+Fix: moved the `is_dir()` check **before** `canonicalize()` so a missing
+directory simply `continue`s rather than hard-failing.
+
+### Quality gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 5071 passed, 8 skipped, 0 failed
+```
+
+---
+
+## Importer Category ComboBox — ID Not Updating When Switching Categories
+
+### Problem
+
+Two related bugs in the OBJ/GLB Model Importer (`obj_importer_ui.rs`):
+
+1. **Grid ordering**: In `render_loaded_mode`, the **ID** row (with its range
+   hint `(1–999)`) was rendered **before** the **Category** row. When the user
+   changed the Category ComboBox, the ID suggestion fired correctly — but the
+   range hint on the ID row had already been drawn with the stale category in
+   that same frame. The updated range didn’t appear until the next egui repaint
+   cycle. On slower hosts this looked like the ID never changed at all.
+
+2. **No ID suggestion in idle mode**: `render_idle_mode` had a Category
+   ComboBox but no `campaign_dir` parameter and no change-detection logic.
+   If the user changed the category while the model was still being picked
+   (idle mode), `creature_id` was not re-suggested. When they then loaded a
+   model, the ID field showed whatever value was left from the previous export
+   session (e.g., an NPC-range ID of 1042 while Category showed “Monsters”).
+   There was also no re-suggestion when the model actually loaded.
+
+### Fix
+
+#### `obj_importer_ui.rs` — grid row reorder
+
+Moved the **Category** row **above** the **ID** row in the
+`render_loaded_mode` grid. The Category ComboBox now fires its change-detection
+(`if state.category != category_before`) and calls
+`suggest_next_creature_id_from_dir` **before** the ID row renders. The ID
+DragValue and range hint therefore read the already-updated `state.creature_id`
+and `state.category` in the same frame — no one-frame lag.
+
+New grid order:
+
+```
+Format
+MTL Source (conditional)
+Embedded textures (conditional)
+Export Type
+Category   ← now first, fires ID suggestion before ID row renders
+ID         ← reads updated creature_id and shows correct range hint
+Name
+Import Scale
+Export Path
+```
+
+#### `obj_importer_ui.rs` — idle mode category change detection
+
+Added `campaign_dir: Option<&PathBuf>` parameter to `render_idle_mode` and
+passed it through from `show_obj_importer_tab`.
+
+Added the same `category_before` / `if state.category != category_before`
+change-detection pattern to the idle-mode Category ComboBox. When the user
+changes category before loading a model, `state.creature_id` is immediately
+set to the next available ID in the new range.
+
+#### `obj_importer_ui.rs` — ID suggestion on model load
+
+After a successful `load_model_into_state` call (both in the idle **Load
+Model** button and the loaded **Load Another Model** button), the code now
+calls `suggest_next_creature_id_from_dir(campaign_dir, current_cat)` to
+fresh-suggest the creature ID for the current category. This ensures the ID
+field is always correct when entering Loaded mode, even when `state.category`
+was preserved from a previous export session.
+
+#### `monsters_editor.rs` — suppress unused-param warning
+
+Prefixed the no-longer-used `creature_manager` parameter in `show_form` with
+`_` (`_creature_manager`) since the form now reads entirely from
+`self.available_creatures`.
+
+### New Tests
+
+| File                 | Test name                                                        | What it verifies                                                               |
+| -------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `obj_importer_ui.rs` | `test_idle_mode_category_change_updates_creature_id_no_campaign` | Category change in idle mode moves `creature_id` into the new category’s range |
+| `obj_importer_ui.rs` | `test_model_load_suggests_id_for_current_category_no_campaign`   | Model load re-suggests ID; stale NPC-range ID is replaced by valid range-start |
+| `obj_importer_ui.rs` | `test_model_load_after_category_switch_gives_correct_range_id`   | Category switch then model load produces a Monster-range ID                    |
+
+All 2481 campaign-builder tests pass.
+
+---
+
+## Monster Editor — Visual Asset Autocomplete (fixes hang)
+
+### Problem
+
+In **Monsters → Edit**, the **Visual Asset** section had a **Browse…** button
+that opened a floating `egui::Window` picker. While the window was visible,
+`creature_manager.load_all_creatures()` was called on **every render frame**,
+reading all creature `.ron` files from disk each tick. This caused the editor
+to hard-hang whenever the picker was open — scrolling, clicking, or any other
+interaction stalled until the window was closed.
+
+### Root cause
+
+The modal pattern put the disk-I/O call inside the render closure:
+
+```antares/sdk/campaign_builder/src/monsters_editor.rs#L782-815
+// OLD (removed) — every frame while picker was open:
+if self.creature_picker_open {
+    if let Some(manager) = creature_manager {
+        let creatures = manager.load_all_creatures().unwrap_or_default(); // <— disk I/O every frame
+        ...
+    }
+}
+```
+
+The Character and NPC editors already had the correct pattern — a cached
+`available_creatures: Vec<(u32, String)>` rebuilt once on campaign-dir change,
+passed to `autocomplete_creature_selector` which is pure-UI (no I/O).
+
+### Fix
+
+#### `monsters_editor.rs`
+
+- **Removed** `creature_picker_open: bool` field and the entire modal-picker
+  block (`egui::Window`, `ScrollArea`, `selectable_label` loop, Close button).
+
+- **Added three fields to `MonstersEditorState`:**
+
+  - `pub creature_id_buffer: String` — the numeric ID string the autocomplete
+    widget reads/writes (e.g. `"42"` or `""`). Initialised from
+    `edit_buffer.creature_id` once per edit session; cleared on Back / Save /
+    Cancel.
+  - `pub available_creatures: Vec<(u32, String)>` — cached `(id, name)` pairs,
+    never populated per frame.
+  - `pub last_campaign_dir: Option<PathBuf>` — change sentinel.
+
+- **`apply_selected_creature_id`** now syncs `creature_id_buffer` instead of
+  closing the removed picker.
+
+- **`show()`** rebuilds the cache exactly once each time `ctx.campaign_dir`
+  changes:
+
+  ```antares/sdk/campaign_builder/src/monsters_editor.rs#L239-249
+  let campaign_dir_now = ctx.campaign_dir.cloned();
+  if campaign_dir_now != self.last_campaign_dir {
+      self.available_creatures = creature_manager
+          .and_then(|m| m.load_all_creatures().ok())
+          .map(|cs| cs.into_iter().map(|c| (c.id, c.name)).collect::<Vec<_>>())
+          .unwrap_or_default();
+      self.last_campaign_dir = campaign_dir_now;
+  }
+  ```
+
+- **`show_form()` Visual Asset group** now calls `autocomplete_creature_selector`
+  (the same widget used by Characters and NPCs — type by name or ID, built-in
+  Clear button). When the selection changes, the string is parsed back to
+  `Option<CreatureId>` and `edit_buffer.creature_id` is updated.
+
+- **`show_form()` Back / Save / Cancel** each call `self.creature_id_buffer.clear()`
+  alongside `self.monster_name_input_buffer.clear()` so the buffer resets
+  cleanly for the next edit session.
+
+- **Imports** — added `autocomplete_creature_selector` to the `ui_helpers` use
+  block.
+
+- **Updated two existing tests** (`test_monsters_editor_creature_id_roundtrips_through_form`,
+  `test_monsters_editor_clear_creature_id`) to also assert on `creature_id_buffer`.
+
+- **Added four new tests:**
+  - `test_available_creatures_starts_empty` — no I/O until campaign dir set.
+  - `test_creature_id_buffer_starts_empty_and_clears` — lifecycle check.
+  - `test_creature_id_buffer_parsed_to_option` — string→`Option<CreatureId>` parse.
+  - `test_monsters_editor_creature_id_roundtrips_through_form` / `test_monsters_editor_clear_creature_id` — updated to cover buffer sync.
+
+### Quality gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 5067 passed, 0 failed
+```
+
+### Follow-up: stale display text fix
+
+**Additional problem reported after the initial fix**: the autocomplete text box
+was displaying the creature name/ID from the _previous_ edit session instead of
+the value belonging to the monster currently being edited (or blank when no
+creature was set).
+
+**Root cause**: `load_autocomplete_buffer` reads from egui's persistent memory
+(`ctx.memory`) first and only invokes the initializer closure when no entry
+exists. Clearing `creature_id_buffer` (our Rust state) does not evict the
+display-text entry from egui's memory, so the stale `"5 — Dragon"` string
+reappeared on the next edit session.
+
+**Additional fix** (`monsters_editor.rs`):
+
+- Added `pub edit_session_initialized: bool` to `MonstersEditorState`
+  (default `false`).
+- The `Add | Edit` arm of `show()` now runs a one-shot block whenever
+  `!self.edit_session_initialized`:
+  - Unconditionally overwrites `monster_name_input_buffer` and
+    `creature_id_buffer` from the current `edit_buffer` values.
+  - Calls `remove_autocomplete_buffer(ctx, egui::Id::new("autocomplete:creature:monster_creature"))`
+    to evict the stale egui-memory entry — forcing the widget's initializer to
+    run on the next render and display the correct value.
+  - Sets `edit_session_initialized = true` so the block does not repeat while
+    the user is actively editing.
+- Back / Save / Cancel each set `edit_session_initialized = false` alongside the
+  existing `.clear()` calls, resetting the flag for the next edit session.
+- Added four new tests covering the session-lifecycle:
+  `test_edit_session_initialized_starts_false`,
+  `test_edit_session_initialized_cleared_on_exit`,
+  `test_edit_session_buffers_reset_unconditionally`,
+  `test_edit_session_buffer_empty_when_no_creature_id`.
+
+---
+
+## Creature Edit — Editable ID and Category
+
+### Problem
+
+In **Creatures → Edit** mode the ID field was rendered with
+`add_enabled(false, ...)` (greyed-out / read-only) and the category was shown
+as a static derived label. Once a creature was created there was no way to
+change its ID or move it to a different category range without deleting and
+re-creating it.
+
+### Fix
+
+#### `creature_id_manager.rs`
+
+- Added `pub fn all_categories() -> &'static [CreatureCategory]` to
+  `impl CreatureCategory`.
+  Returns all five categories in ascending ID-range order (`Monsters → NPCs
+→ Templates → Variants → Custom`). Used by both the creatures editor and
+  the importer UI to populate ComboBoxes without duplicating the list.
+- Added two tests: `test_all_categories_has_five_entries` and
+  `test_all_categories_id_range_start_is_ascending`.
+
+#### `creatures_editor/mod.rs` — `show_creature_level_properties`
+
+- **New `original_id` guard.** Before rendering the grid, the function now
+  captures `Option<CreatureId>` from `creatures[selected_creature]` when in
+  `Edit` mode. Used exclusively by the duplicate-ID check so the creature's
+  own existing ID is never flagged as a conflict with itself.
+
+- **Category row (new, replaces static label).**
+  An `egui::ComboBox` (id salt `creature_edit_category_combo`) lists all five
+  categories. When the user picks a category different from the one implied
+  by the current ID:
+
+  - If the current ID is **already inside** the new category's range → ID is
+    left unchanged (avoids spurious ID churn when re-selecting the same
+    category).
+  - If the current ID is **outside** the new range → `id_manager.suggest_next_id(new_category)`
+    picks the first unused ID in the target range and assigns it to
+    `edit_buffer.id`.
+  - `*unsaved_changes` is set to `true` in either case.
+
+- **ID row (was disabled `DragValue`, now editable).**
+  The `add_enabled(false, ...)` call is replaced with a normal `DragValue`
+  constrained to `1..=u32::MAX`. Below the input:
+
+  - A dim small-text hint shows the valid range for the current category
+    (e.g. `Range: 1–999 (Monsters)`, or `Range: 4000+ (Custom)` for the
+    unbounded Custom category).
+  - A red `⚠ ID already in use by another creature` label appears when the
+    proposed ID is registered to a _different_ creature (the `original_id`
+    exclusion prevents false positives for the creature's own ID).
+
+- Removed the dead `let _ = unsaved_changes;` line that was suppressing a
+  now-resolved lint.
+
+- Added four tests:
+  - `test_edit_buffer_id_change_is_independent_of_creatures_vec` — buffer
+    changes do not touch the backing slice before Save.
+  - `test_duplicate_check_excludes_original_id_in_edit_mode` — a creature's
+    own ID is never flagged; another creature's ID is.
+  - `test_category_change_to_different_range_triggers_id_suggestion` — moving
+    to a non-overlapping category sets the first available ID in that range.
+  - `test_category_change_to_same_range_leaves_id_unchanged` — re-selecting
+    the same category does not trigger a suggestion.
+
+### Quality gates
+
+```text
+cargo fmt         → clean
+cargo check       → 0 errors
+cargo clippy      → 0 warnings
+cargo nextest run → 5067 passed, 0 failed
+```
+
+---
+
+## Importer — Category ComboBox and ID Range Consistency
+
+### Problems
+
+Three related bugs in the Campaign Builder **Importer** tab:
+
+1. **Category was a plain text field.** For `ExportType::Creature`, the
+   category controls which ID range to assign (Monsters 1–999, NPCs
+   1000–1999, Templates 2000–2999, Variants 3000–3999, Custom 4000+).
+   A free-text box provided no guidance and accepted arbitrary strings that
+   never matched any recognised category.
+
+2. **ID always defaulted to the Custom range (4000+).** `sync_obj_importer_campaign_state`
+   in `campaign_io.rs` hardcoded `CreatureCategory::Custom`, so no matter what
+   category the user typed, the suggested ID was always 4000+.
+
+3. **Changing the category did not update the ID.** There was no link between the
+   category selection and the ID field, so the two could silently disagree.
+
+### Fix
+
+#### `obj_importer_ui.rs`
+
+- Added `use crate::creature_id_manager::CreatureCategory;`.
+- Added `ALL_CREATURE_CATEGORIES` constant (all five variants in display order).
+- Added `creature_category_from_str(s: &str) -> CreatureCategory` — maps the
+  canonical display names to their enum variant; falls back to `Custom` for
+  any unrecognised input including the empty string.
+- Added `suggest_next_creature_id_from_dir(campaign_dir, category) -> u32` —
+  loads the campaign registry via `CreatureAssetManager::load_all_creatures()`
+  and returns the first unused ID in the requested category's range.
+- In **both** `render_idle_mode` and `render_loaded_mode`, the plain text
+  `Category` field is replaced with an `egui::ComboBox` (id salts
+  `obj_importer_idle_creature_category` / `obj_importer_loaded_creature_category`)
+  when `ExportType::Creature` is active. Item and Furniture exports retain the
+  original free-text field because their category is used as a path subfolder.
+- In `render_loaded_mode`: when the ComboBox selection changes, `state.creature_id`
+  is immediately updated via `suggest_next_creature_id_from_dir` so the ID
+  field always reflects the chosen range.
+- The ID row now shows the expected range as a dim label (e.g. `(1–999)`) and
+  a yellow `⚠` warning when the current ID is outside the selected category's
+  range, without constraining the `DragValue` (the user can still override).
+
+#### `campaign_io.rs` — `sync_obj_importer_campaign_state`
+
+The hardcoded `CreatureCategory::Custom` was replaced with a `match` on
+`self.obj_importer_state.category` using the same display-name mapping as
+`creature_category_from_str`. This means that when a campaign is opened (or
+after an export), the suggested ID is derived from the importer's current
+category selection rather than always landing in the 4000+ range.
+
+#### `obj_importer.rs`
+
+The `category` field's default value remains `""` (empty string). Item and
+Furniture exports use category as a path subfolder component, so defaulting
+to `"Custom"` would pollute those paths with an unwanted `/custom/`
+subdirectory. The Creature ComboBox already maps `""` to `Custom` via
+`creature_category_from_str`, so the UI is consistent: a brand-new importer
+shows `Custom` selected and `creature_id` starts at 4000.
+
+### New Tests
+
+| File                 | Test name                                                             | What it verifies                                       |
+| -------------------- | --------------------------------------------------------------------- | ------------------------------------------------------ |
+| `obj_importer.rs`    | `test_default_category_is_empty_and_maps_to_custom_range`             | Default `category` is `""` and `creature_id` is 4000   |
+| `obj_importer_ui.rs` | `test_creature_category_from_str_maps_all_display_names`              | All five display names map to the correct enum variant |
+| `obj_importer_ui.rs` | `test_creature_category_from_str_empty_or_unknown_defaults_to_custom` | Unknown / empty input maps to `Custom`                 |
+| `obj_importer_ui.rs` | `test_suggest_next_creature_id_no_campaign_dir_returns_range_start`   | Falls back to range start with no campaign dir         |
+| `obj_importer_ui.rs` | `test_suggest_next_creature_id_skips_used_ids_in_range`               | Skips already-used IDs within the category             |
+| `obj_importer_ui.rs` | `test_suggest_next_creature_id_empty_campaign_returns_range_start`    | Empty campaign returns range start                     |
+
+All 2462 tests pass.
+
+---
+
+## Importer Creature Export — Immediate Autocomplete Update in Character, NPC, and Monster Editors
+
+### Problem
+
+When a creature was exported from the OBJ/GLB Importer, the Campaign Builder
+called `load_creatures()` to refresh `campaign_data.creatures`, but the
+autocomplete caches inside `CharactersEditorState`, `NpcEditorState`, and
+`MonstersEditorState` (`available_creatures: Vec<(u32, String)>`) were only
+ever rebuilt when the `campaign_dir` changed. Because an export does not
+change the campaign directory, the new creature would not appear in the
+character or NPC creature assignment dropdowns, or in the Monster Editor
+**Visual Asset** autocomplete, until the user saved the campaign and reopened it.
+
+The same staleness applied when the user clicked **Reload** in the Creatures
+toolbar (`RELOAD_CREATURES_SENTINEL`): the registry was refreshed on disk but
+the editor caches stayed stale.
+
+**Follow-up bug:** The original fix for Characters and NPCs was not applied to
+`MonstersEditorState`. Its cache was only guarded by
+`campaign_dir_now != self.last_campaign_dir`, so importing an orc (or any new
+mesh) via the Importer tab would never update the Visual Asset autocomplete in
+the Monster Editor's Edit form until the campaign was reopened.
+
+### Fix
+
+#### `characters_editor.rs` and `npc_editor/mod.rs`
+
+A new `pub creature_cache_dirty: bool` field (`#[serde(skip)]`, default `false`)
+was added to both `CharactersEditorState` and `NpcEditorState`.
+
+The cache-rebuild guard in each editor's `show()` method was widened:
+
+- **Before:** `if campaign_dir_changed { … }`
+- **After:** `if campaign_dir_changed || self.creature_cache_dirty { … }`
+
+The flag is cleared (`creature_cache_dirty = false`) inside the same block so
+it only triggers a single extra rebuild.
+
+A `pub fn invalidate_creature_cache(&mut self)` method was added to both
+editors to set the flag from outside.
+
+#### `monsters_editor.rs`
+
+The same `pub creature_cache_dirty: bool` field and
+`pub fn invalidate_creature_cache(&mut self)` method were added to
+`MonstersEditorState`. The cache-rebuild guard in `show()` was widened to also
+check the dirty flag:
+
+- **Before:** `if campaign_dir_now != self.last_campaign_dir { … }`
+- **After:** `if campaign_dir_now != self.last_campaign_dir || self.creature_cache_dirty { … }`
+
+The flag is cleared after the rebuild.
+
+#### `lib.rs` — call-sites
+
+`invalidate_creature_cache()` is now called on **all three** editor states after
+every `load_creatures()` invocation in the main `update()` function:
+
+1. **`RELOAD_CREATURES_SENTINEL` handler** — Creatures toolbar Reload button.
+2. **`ObjImporterUiSignal::Creature` handler** — successful creature export
+   from the Importer.
+
+### New Tests
+
+| File                   | Test name                                        | What it verifies                                                  |
+| ---------------------- | ------------------------------------------------ | ----------------------------------------------------------------- |
+| `characters_editor.rs` | `test_invalidate_creature_cache_sets_dirty_flag` | Flag starts `false`; `invalidate_creature_cache()` sets it `true` |
+| `npc_editor/mod.rs`    | `test_invalidate_creature_cache_sets_dirty_flag` | Same contract for `NpcEditorState`                                |
+| `monsters_editor.rs`   | `test_creature_cache_dirty_starts_false`         | Default value is `false`                                          |
+| `monsters_editor.rs`   | `test_invalidate_creature_cache_sets_dirty_flag` | `invalidate_creature_cache()` sets the flag to `true`             |
+| `monsters_editor.rs`   | `test_invalidate_creature_cache_idempotent`      | Calling the method multiple times leaves the flag `true`          |
+
+All 5067 tests pass.
+
+---
+
+## `delete_creature` Texture Cleanup and Alias-Safe Deletion
+
+### Problem
+
+`CreatureAssetManager::delete_creature` had two gaps:
+
+1. **Orphaned texture files.** When the importer embeds a texture path in a
+   `MeshDefinition`, deleting the creature left that texture file on disk
+   indefinitely. Over time this caused the `assets/textures/imported/` tree to
+   accumulate stale files with no campaign reference.
+
+2. **Alias-unsafe `.ron` deletion.** The registry allows multiple
+   `CreatureReference` entries to share one `.ron` filepath (the aliasing
+   pattern used by variant creatures such as `DireWolf` / `DireWolfLeader`
+   both pointing at `wolf.ron`). The old code deleted the `.ron` file
+   unconditionally, corrupting any remaining alias.
+
+### Fix — `sdk/campaign_builder/src/creature_assets.rs`
+
+The method was rewritten as a three-phase cleanup:
+
+1. **Collect textures first.** Before modifying the registry or touching the
+   filesystem, all `texture_path` values from the creature's `MeshDefinition`
+   list are read into a `HashSet<String>`. This snapshot is taken while the
+   `.ron` file still exists.
+
+2. **Alias-safe `.ron` deletion.** After writing the updated registry (without
+   the deleted entry), the `.ron` file is only removed when no remaining
+   registry entry still references the same `filepath`. If two or more aliases
+   shared the file, the file survives.
+
+3. **Exclusive-texture deletion.** The set of texture paths retained by all
+   surviving creatures is computed by loading each remaining `.ron` file. Any
+   texture path in the deleted set that is absent from the retained set is
+   deleted from disk on a best-effort basis (individual errors are non-fatal).
+
+`use std::collections::HashSet;` was added to the crate-level imports to
+support both the implementation and tests.
+
+### New Tests (all in `mod tests`)
+
+| Test name                                                             | What it verifies                                                 |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `test_delete_creature_also_removes_exclusive_texture_file`            | Texture owned exclusively by the deleted creature is removed     |
+| `test_delete_creature_preserves_texture_shared_with_another_creature` | Texture shared with a surviving creature is kept                 |
+| `test_delete_creature_preserves_aliased_ron_file`                     | `.ron` file shared by two aliases survives deletion of one alias |
+
+### Fix — `sdk/campaign_builder/src/creatures_editor/mod.rs`
+
+Both UI-level delete handlers now call `CreatureAssetManager::delete_creature`
+before removing the entry from the in-memory `Vec<CreatureDefinition>`:
+
+- **`show_registry_mode`** — `RegistryPreviewAction::Delete` (triggered from
+  the right-panel delete button and the list context-menu delete action).
+- **`show_edit_mode`** — `ItemAction::Delete` (triggered from the action
+  buttons bar in the asset editor).
+
+When `campaign_dir` is `None` (no campaign open) the cleanup step is skipped
+and only the in-memory entry is removed — identical to the previous behaviour.
+Errors from `delete_creature` are silently ignored so that creatures created
+in-session but not yet flushed to disk (and therefore absent from the
+registry file) can still be deleted without surfacing a spurious error.
+
+`use crate::creature_assets::CreatureAssetManager;` was added to the import
+block.
+
+All 2454 existing tests continue to pass.
+
+---
+
+## Shadow Rendering Fix: Ambient Lux Scale and Point-Light Forward Offset
+
+### Problem
+
+Models with complex geometry (notably `whisper_new`) had visually unacceptable
+pitch-black shadows — most noticeably under the chin and in the neck area. Two
+root causes were identified:
+
+1. **Ambient light was ~600× too dim.** `AMBIENT_DAY_BRIGHTNESS` was set to
+   `1.0` when `AmbientLight.brightness` in Bevy is measured in **lux**. Bevy's
+   own built-in default is `80.0 lux`. With a 2 000 000-lumen point light
+   providing ≈ 17 000 lux at 3 metres, a `1.0 lux` fill produced a
+   17 000:1 key-to-fill ratio — any polygon not in the direct cone of the
+   torch appeared as literal black.
+
+2. **The point light was behind the creatures being viewed.** In first-person
+   mode the `MainLight` was updated to `(camera_x, light_height, camera_z)` —
+   directly above the party's position. Creatures in front of the camera are at
+   a lower Z (for North-facing view), so the light was behind them. Their
+   front-facing surfaces (including the face and chin) fell into the shadow
+   hemisphere.
+
+### Fix 1 — `src/game/systems/time.rs`: Proper lux values
+
+All five ambient brightness constants were scaled up to physically meaningful
+lux values that maintain the same dark-to-light ordering while preventing
+pit-black shadows:
+
+| Period            | Old value | New value (lux) |
+| ----------------- | --------- | --------------- |
+| Night             | 0.25      | 80.0            |
+| Evening           | 0.50      | 200.0           |
+| Dawn/Dusk         | 0.70      | 400.0           |
+| Morning/Afternoon | 1.00      | 600.0           |
+
+With the scene's 2 000 000-lumen point light this gives a ≈ 28:1 key-to-fill
+ratio at daytime — moody and clearly lit-by-torch, but with visible detail in
+shadow areas. At night the 80 lux ambient (Bevy's default) ensures the world
+still feels dark without being impenetrable.
+
+The two tests that wrongly asserted brightness is in `[0.0, 1.0]` were
+updated to check for a positive finite value and to compare against
+`AMBIENT_DAY_BRIGHTNESS` rather than the hard-coded `1.0`.
+
+### Fix 2 — `src/game/systems/camera.rs`: Forward-offset the point light
+
+The `update_camera` light-position update now offsets the `MainLight` by
+`2.0` world units in the party's current facing direction:
+
+- North: light at `(camera_x, height, camera_z − 2)`
+- South: light at `(camera_x, height, camera_z + 2)`
+- East: light at `(camera_x + 2, height, camera_z)`
+- West: light at `(camera_x − 2, height, camera_z)`
+
+This places the "torch" ahead of the player, so encountered creatures are
+front-lit rather than back-lit. The chin / jaw / neck area now receives
+direct illumination from the key light.
+
+### Root Cause 3 (informational) — baked AO in `baked_basecolor.png`
+
+The `whisper_new` creature uses a texture named `baked_basecolor.png`.
+Such textures exported from Blender/Maya typically have ambient occlusion
+baked into the albedo channel, which pre-darkens crevices like the
+under-chin concavity. This compounds with dynamic shadows but cannot be
+resolved in code — it requires either re-baking the texture without AO
+or using a separate `occlusion_texture` slot so the AO is not baked into
+the base colour. The two code fixes above are sufficient to make the dark
+area visible again even with the baked AO present.
+
+---
+
 ## Campaign Builder GLB Texture Material Neutralization
 
 Textured GLB imports now preserve the baked base-color texture as the source of

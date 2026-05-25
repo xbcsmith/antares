@@ -71,25 +71,31 @@ pub struct TimeAdvanceEvent {
 
 // ===== Constants =====
 
-/// Ambient brightness during Night (22:00–04:59).
-/// At this level the world is very dark; a light source is required indoors.
-pub const AMBIENT_NIGHT_BRIGHTNESS: f32 = 0.25;
+/// Ambient brightness (in lux) during Night (22:00–04:59).
+///
+/// Bevy's `AmbientLight.brightness` is measured in lux.  80 lux is Bevy's
+/// built-in default and is intentionally kept here so that torches / the
+/// player's point-light still provide visible fill without the scene going
+/// pitch-black in shadowed areas at night.
+pub const AMBIENT_NIGHT_BRIGHTNESS: f32 = 80.0;
 
-/// Ambient brightness during Evening (19:00–21:59).
+/// Ambient brightness (in lux) during Evening (19:00–21:59).
 /// Noticeably darker than daytime but not pitch-black.
-pub const AMBIENT_EVENING_BRIGHTNESS: f32 = 0.50;
+pub const AMBIENT_EVENING_BRIGHTNESS: f32 = 200.0;
 
-/// Ambient brightness during Dawn (05:00–07:59).
+/// Ambient brightness (in lux) during Dawn (05:00–07:59).
 /// Slightly dimmer than full day — pale early-morning light.
-pub const AMBIENT_DAWN_BRIGHTNESS: f32 = 0.70;
+pub const AMBIENT_DAWN_BRIGHTNESS: f32 = 400.0;
 
-/// Ambient brightness during Dusk (16:00–18:59).
+/// Ambient brightness (in lux) during Dusk (16:00–18:59).
 /// Golden hour — slightly reduced from peak noon.
-pub const AMBIENT_DUSK_BRIGHTNESS: f32 = 0.70;
+pub const AMBIENT_DUSK_BRIGHTNESS: f32 = 400.0;
 
-/// Ambient brightness during Morning and Afternoon (08:00–15:59).
-/// Full daytime illumination.
-pub const AMBIENT_DAY_BRIGHTNESS: f32 = 1.00;
+/// Ambient brightness (in lux) during Morning and Afternoon (08:00–15:59).
+/// Full daytime illumination.  With the scene's 2 000 000-lumen point light
+/// this gives an approximately 28:1 key-to-fill ratio, which is moody but
+/// leaves visible detail in shadow areas (no more solid-black under-chin).
+pub const AMBIENT_DAY_BRIGHTNESS: f32 = 600.0;
 
 // ===== Plugin =====
 
@@ -299,12 +305,13 @@ mod tests {
 
     #[test]
     fn test_all_hours_produce_valid_brightness() {
+        // Brightness is in lux — must be positive and finite.
         for hour in 0u8..24 {
             let time = GameTime::new(1, hour, 0);
             let brightness = time_of_day_brightness(time.time_of_day());
             assert!(
-                (0.0..=1.0).contains(&brightness),
-                "hour {} produced out-of-range brightness: {}",
+                brightness > 0.0 && brightness.is_finite(),
+                "hour {} produced invalid brightness: {}",
                 hour,
                 brightness
             );
@@ -313,11 +320,25 @@ mod tests {
 
     #[test]
     fn test_dark_periods_below_threshold() {
-        // Evening and Night must be strictly below 1.0 (noticeably dark)
+        // Evening and Night must be strictly below the full daytime level
+        // (they are noticeably darker, but not zero — shadows must not be
+        // pitch-black).
         let evening = time_of_day_brightness(TimeOfDay::Evening);
         let night = time_of_day_brightness(TimeOfDay::Night);
-        assert!(evening < 1.0, "Evening brightness must be below 1.0");
-        assert!(night < 1.0, "Night brightness must be below 1.0");
+        assert!(
+            evening < AMBIENT_DAY_BRIGHTNESS,
+            "Evening brightness ({}) must be below day brightness ({})",
+            evening,
+            AMBIENT_DAY_BRIGHTNESS
+        );
+        assert!(
+            night < AMBIENT_DAY_BRIGHTNESS,
+            "Night brightness ({}) must be below day brightness ({})",
+            night,
+            AMBIENT_DAY_BRIGHTNESS
+        );
+        // Night must also be above zero so shadows retain visible detail.
+        assert!(night > 0.0, "Night brightness must be positive");
     }
 
     // ── TimeAdvanceEvent tests ────────────────────────────────────────────────

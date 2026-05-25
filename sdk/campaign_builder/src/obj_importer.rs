@@ -1527,4 +1527,22 @@ mod tests {
             "is_error should be false for successful load"
         );
     }
+
+    #[test]
+    fn test_default_category_is_empty_and_maps_to_custom_range() {
+        // The raw category defaults to empty string so that Item and Furniture
+        // exports (which use category as a path subfolder) are not polluted
+        // by a "Custom" subdirectory.  The Creature ComboBox maps "" to
+        // CreatureCategory::Custom via creature_category_from_str, keeping
+        // the UI consistent with the default creature_id of 4000.
+        let state = ObjImporterState::default();
+        assert_eq!(
+            state.category, "",
+            "default category must be empty string; the ComboBox resolves it to Custom"
+        );
+        assert_eq!(
+            state.creature_id, 4000,
+            "default creature_id must be 4000 (first Custom-range ID)"
+        );
+    }
 }

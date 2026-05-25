@@ -1308,6 +1308,14 @@ impl eframe::App for CampaignBuilderApp {
                         // cannot perform the two-step registry → per-file load itself,
                         // so it returns a sentinel and we call load_creatures() here.
                         self.load_creatures();
+                        // Invalidate the creature autocomplete caches in both editors
+                        // so the updated registry is visible without a campaign reload.
+                        self.editor_registry
+                            .characters_editor_state
+                            .invalidate_creature_cache();
+                        self.editor_registry
+                            .npc_editor_state
+                            .invalidate_creature_cache();
                     } else {
                         self.ui_state.status_message = msg;
                     }
@@ -1356,6 +1364,20 @@ impl eframe::App for CampaignBuilderApp {
                         obj_importer_ui::ObjImporterUiSignal::Creature => {
                             self.load_creatures();
                             self.sync_obj_importer_campaign_state();
+                            // Invalidate the creature autocomplete caches in both editors
+                            // so the newly-exported creature is available for assignment
+                            // to characters and NPCs without a save-and-reopen cycle.
+                            self.editor_registry
+                                .characters_editor_state
+                                .invalidate_creature_cache();
+                            self.editor_registry
+                                .npc_editor_state
+                                .invalidate_creature_cache();
+                            // Also invalidate the monster editor cache so the Visual Asset
+                            // autocomplete reflects newly-imported meshes immediately.
+                            self.editor_registry
+                                .monsters_editor_state
+                                .invalidate_creature_cache();
                             if self.obj_importer_state.open_after_export {
                                 self.ui_state.active_tab = EditorTab::Creatures;
                             }
