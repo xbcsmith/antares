@@ -19,6 +19,7 @@ pub mod furniture;
 pub mod inventory;
 pub mod menu;
 pub mod performance;
+pub mod sky;
 pub mod sprite;
 
 // Re-export commonly used types
@@ -41,4 +42,5 @@ pub use performance::{
     DistanceCulling, InstanceData, InstancedCreature, LodState, MeshStreaming, PerformanceCategory,
     PerformanceMarker,
 };
+pub use sky::{StarFieldMarker, SunMarker};
 pub use sprite::{ActorSprite, ActorType, AnimatedSprite, TileSprite};

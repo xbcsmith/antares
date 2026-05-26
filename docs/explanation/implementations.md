@@ -2,6 +2,86 @@
 
 ---
 
+## Sky System — Phase 4: Celestial Bodies — Suns and Stars (2026)
+
+**Goal:** Spawn sun disc entities and a single star-field mesh entity per
+outdoor map, driven by each map's `SkyConfig`. Toggle visibility frame-by-frame
+based on the current `TimeOfDay` so suns show during the day, stars at night,
+and both during transitional periods.
+
+### Files Changed
+
+| Path                             | Action                           |
+| -------------------------------- | -------------------------------- |
+| `src/game/systems/sky_bodies.rs` | **New** — Phase 4 implementation |
+| `src/game/systems/mod.rs`        | Added `pub mod sky_bodies;`      |
+
+### What Was Built
+
+#### `src/game/systems/sky_bodies.rs` (new file)
+
+**Constants**
+
+| Constant                      | Value                | Purpose                                            |
+| ----------------------------- | -------------------- | -------------------------------------------------- |
+| `SUN_DISTANCE`                | `500.0`              | World-units distance at which sun discs are placed |
+| `SUN_ELEVATION_ANGLE_RADIANS` | `π/4` (45°)          | Elevation above horizon for all suns               |
+| `SUN_BASE_RADIUS`             | `SUN_DISTANCE * 0.1` | Disc radius at `sun_size = 1.0`                    |
+| `STAR_FIELD_RADIUS`           | `480.0`              | Hemisphere radius for star positions               |
+| `STAR_POINT_SIZE`             | `0.8`                | Half-size of each star triangle (world units)      |
+
+**`SkyBodyState` resource**
+
+Tracks `sun_entities: Vec<Entity>` and `star_entity: Option<Entity>` so every
+entity spawned by the system can be found and despawned when the map changes.
+
+**`SkyBodyPlugin`**
+
+Registers `SkyBodyState` and two `Update` systems:
+
+- `manage_sky_bodies_on_map_change` — detects map change via `Local<Option<MapId>>`,
+  despawns old entities, spawns new ones.
+- `update_sky_body_visibility` — runs `.after(manage_sky_bodies_on_map_change)`,
+  sets `Visibility::Visible` / `Visibility::Hidden` on all `SunMarker` and
+  `StarFieldMarker` entities.
+
+**Pure helper functions**
+
+| Function                                     | Description                                                                                                         |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `sun_azimuths(n)`                            | Returns azimuth angles in radians for `n` suns: 0→empty, 1→[-30°], 2→[±60°], n>2→evenly distributed over 120° arc   |
+| `sun_world_positions(n, size)`               | Converts azimuths to 3D world-space `(Vec3, radius)` pairs at `SUN_DISTANCE` / `SUN_ELEVATION_ANGLE_RADIANS`        |
+| `generate_star_positions(count, seed)`       | Scatters `count` points on the upper hemisphere using a seeded `StdRng`; seed derived from `map.id` for determinism |
+| `sky_body_visibility_flags(is_outdoor, tod)` | Returns `(suns_visible, stars_visible)` — pure, no Bevy dependency                                                  |
+| `build_star_mesh(positions, density)`        | Builds a `Mesh` of tiny equilateral triangles, one per star; alpha from `density.clamp(0.2, 1.0)`                   |
+
+**Visibility rules implemented**
+
+| `is_outdoor` | `TimeOfDay`         | Suns    | Stars   |
+| ------------ | ------------------- | ------- | ------- |
+| `false`      | (any)               | Hidden  | Hidden  |
+| `true`       | Morning / Afternoon | Visible | Hidden  |
+| `true`       | Evening / Night     | Hidden  | Visible |
+| `true`       | Dawn / Dusk         | Visible | Visible |
+
+**Spawn / despawn helpers**
+
+`spawn_sky_bodies` and `despawn_sky_bodies` are free functions (not systems)
+so they can be called from tests or other contexts without a Bevy world.
+
+### Tests Added (6 unit tests, all in `sky_bodies::tests`)
+
+| Test                                            | What it verifies                                                                            |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `test_sun_positions_one_sun`                    | `sun_azimuths(1)` returns exactly one element at -30°                                       |
+| `test_sun_positions_two_suns`                   | `sun_azimuths(2)` returns symmetric ±60° pair                                               |
+| `test_sun_count_zero_spawns_nothing`            | Both `sun_azimuths(0)` and `sun_world_positions(0, …)` return empty vecs                    |
+| `test_star_count_zero_spawns_empty_field`       | `generate_star_positions(0, …)` is empty; `build_star_mesh` over empty input has 0 vertices |
+| `test_sky_body_visibility_night_shows_stars`    | Night/Evening outdoor → stars only; indoor night → both hidden                              |
+| `test_sky_body_visibility_afternoon_shows_suns` | Morning/Afternoon → suns only; Dawn/Dusk → both visible                                     |
+
+---
+
 ## Sky System — Phase 3: SDK Map Editor Integration (2026)
 
 **Goal:** Expose `is_outdoor` and `SkyConfig` in the SDK Map Editor's

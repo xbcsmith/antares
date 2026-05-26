@@ -299,6 +299,9 @@ impl Plugin for AntaresPlugin {
         // Sky background colour rendering (must come after TimeOfDayPlugin)
         app.add_plugins(antares::game::systems::sky::SkyPlugin);
 
+        // Celestial body rendering (suns/stars, must come after SkyPlugin)
+        app.add_plugins(antares::game::systems::sky_bodies::SkyBodyPlugin);
+
         // Rest orchestration system
         app.add_plugins(antares::game::systems::rest::RestPlugin);
 
