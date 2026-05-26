@@ -2,6 +2,37 @@
 
 ---
 
+## Campaign Builder Monster Editor — Reliable Edit Save (2026)
+
+**Goal:** Ensure the bottom **Save** button in the Monster Editor always commits
+the current edit buffer to the intended monster before returning to the list.
+
+### Files Changed
+
+| Path                                          | Action                                                       |
+| --------------------------------------------- | ------------------------------------------------------------ |
+| `sdk/campaign_builder/src/monsters_editor.rs` | Hardened edit-buffer commit logic and added regression tests |
+| `docs/explanation/implementations.md`         | Recorded this Monster Editor bug fix                         |
+
+### What Changed
+
+- Added a dedicated `commit_edit_buffer_to_monsters` helper.
+- Edit saves now prefer the selected row only when it still points at the same
+  monster ID.
+- If selection is missing or stale due to filtering, sorting, or context-menu
+  interactions, saves fall back to locating the monster by `edit_buffer.id`.
+- Add-mode saves select the newly inserted monster after committing.
+- The bottom Save button now requests repaint after returning to list mode and
+  only overwrites the save status when disk save succeeds.
+
+### Tests Added
+
+- `test_commit_edit_buffer_updates_by_id_when_selection_is_missing`
+- `test_commit_edit_buffer_updates_by_id_when_selection_points_elsewhere`
+- `test_commit_edit_buffer_add_selects_new_monster`
+
+---
+
 ## Campaign Builder Importer — Item/Furniture Category and Furniture RON Fix (2026)
 
 **Goal:** Make the Importer tab consistent across creature, item, and furniture

@@ -258,5 +258,5 @@
         ],
         mesh_id: None,
         description: Some("A heavy iron-bound chest secured with a sturdy lock."),
-    ),
+    )
 ]

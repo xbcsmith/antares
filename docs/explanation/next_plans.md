@@ -193,7 +193,9 @@ Write a plan with a phased approach to add this support to the game engine and S
 
 ## Landscape Category
 
-Need to add a `landscape` category to the importer and SDK so we can import meshes of Trees, Shrubs, Rocks, etc... Add support to the Map editor to place landscape meshes on maps.
+Need to add a `landscape` category to the importer and SDK so we can import meshes of Trees, Shrubs, Rocks, etc... Add support to the Map editor to place landscape meshes on maps. Write a plan with a phased approach to add landscape category and SDK support for placing landscape on the maps. 
+
+[landscape implementation plan](./landscape_implementation_plan)
 
 ## BUGS
 
