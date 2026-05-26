@@ -1866,16 +1866,46 @@ impl MapEditorState {
         }
     }
 
-    /// Apply the metadata fields back into the map struct
+    /// Update whether this map is outdoors, clearing sky metadata when disabled.
+    fn set_metadata_is_outdoor(&mut self, is_outdoor: bool) {
+        let was_outdoor = self.metadata.is_outdoor;
+        let had_sky_config = self.metadata.sky_config.is_some();
+
+        self.metadata.is_outdoor = is_outdoor;
+        if !is_outdoor {
+            self.metadata.sky_config = None;
+        }
+
+        if was_outdoor != is_outdoor || (had_sky_config && !is_outdoor) {
+            self.has_changes = true;
+        }
+    }
+
+    /// Apply the metadata fields back into the map struct.
     ///
     /// Ensures metadata set via the editor (e.g., `metadata.name`,
     /// `metadata.is_outdoor`) are copied into the underlying map before
-    /// saving/export.
+    /// saving/export. Indoor maps always clear `map.sky`, even if editor
+    /// metadata still contains a stale sky configuration.
     pub fn apply_metadata(&mut self) {
-        self.map.name = self.metadata.name.clone();
-        self.map.description = self.metadata.description.clone();
-        self.map.is_outdoor = self.metadata.is_outdoor;
-        self.map.sky = self.metadata.sky_config.clone();
+        Self::apply_metadata_to_map(&mut self.map, &self.metadata);
+    }
+
+    fn apply_metadata_to_map(map: &mut Map, metadata: &MapMetadata) {
+        map.name = metadata.name.clone();
+        map.description = metadata.description.clone();
+        map.is_outdoor = metadata.is_outdoor;
+        map.sky = if metadata.is_outdoor {
+            metadata.sky_config.clone()
+        } else {
+            None
+        };
+    }
+
+    fn map_with_applied_metadata(&self) -> Map {
+        let mut map = self.map.clone();
+        Self::apply_metadata_to_map(&mut map, &self.metadata);
+        map
     }
 
     /// Load visual metadata into the editor from the currently selected position,
@@ -2155,9 +2185,10 @@ impl MapEditorState {
         }
     }
 
-    /// Saves the map to RON format
+    /// Saves the metadata-synchronised map to RON format.
     pub fn save_to_ron(&self) -> Result<String, String> {
-        ron::ser::to_string_pretty(&self.map, ron::ser::PrettyConfig::default())
+        let map = self.map_with_applied_metadata();
+        ron::ser::to_string_pretty(&map, ron::ser::PrettyConfig::default())
             .map_err(|e| format!("Failed to serialize map: {}", e))
     }
 
@@ -3704,6 +3735,16 @@ impl MapsEditorState {
                 *ctx.unsaved_changes = true;
             }
             ToolbarAction::Save => {
+                if let Some(editor) = self.active_editor.as_mut() {
+                    let map = Self::synchronized_editor_map(editor);
+                    if let Some(idx) = self.selected_map_idx {
+                        if idx < maps.len() {
+                            maps[idx] = map.clone();
+                        }
+                    }
+                    editor.map = map;
+                }
+
                 self.save_all_maps(
                     maps,
                     ctx.campaign_dir,
@@ -4325,10 +4366,7 @@ impl MapsEditorState {
                 // Scoped mutable borrow to collect a map to save if any changes exist.
                 let map_opt: Option<Map> = self.active_editor.as_mut().and_then(|editor| {
                     if editor.has_changes {
-                        // Ensure metadata is reflected in the map before saving
-                        editor.commit_pending_event_to_map();
-                        editor.apply_metadata();
-                        Some(editor.map.clone())
+                        Some(Self::synchronized_editor_map(editor))
                     } else {
                         None
                     }
@@ -4362,12 +4400,10 @@ impl MapsEditorState {
         // Handle save action
         if save_clicked {
             // Acquire a clone of the map to save while avoiding overlapping borrows
-            let map_opt: Option<Map> = self.active_editor.as_mut().map(|editor| {
-                // Flush any pending PlaceEvent edit before saving, then sync metadata
-                editor.commit_pending_event_to_map();
-                editor.apply_metadata();
-                editor.map.clone()
-            });
+            let map_opt: Option<Map> = self
+                .active_editor
+                .as_mut()
+                .map(Self::synchronized_editor_map);
 
             if let Some(map) = map_opt {
                 if let Some(idx) = self.selected_map_idx {
@@ -5389,11 +5425,10 @@ impl MapsEditorState {
                 }
             });
 
-            if ui
-                .checkbox(&mut editor.metadata.is_outdoor, "Outdoor Map")
-                .changed()
-            {
-                editor.has_changes = true;
+            let mut is_outdoor = editor.metadata.is_outdoor;
+            if ui.checkbox(&mut is_outdoor, "Outdoor Map").changed() {
+                editor.set_metadata_is_outdoor(is_outdoor);
+                ui.ctx().request_repaint();
             }
 
             // ===== Sky Settings (outdoor maps only) =====
@@ -7693,6 +7728,11 @@ impl MapsEditorState {
         }
     }
 
+    fn synchronized_editor_map(editor: &mut MapEditorState) -> Map {
+        editor.commit_pending_event_to_map();
+        editor.map_with_applied_metadata()
+    }
+
     /// Save a single map to file
     fn save_map(
         &self,
@@ -7860,6 +7900,38 @@ fn classify_map_environment(map: &Map) -> (&'static str, Color32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn custom_sky_config() -> SkyConfig {
+        SkyConfig {
+            day_sky_color: [0.11, 0.22, 0.33, 1.0],
+            dusk_dawn_sky_color: [0.44, 0.31, 0.12, 1.0],
+            night_sky_color: [0.01, 0.02, 0.09, 1.0],
+            sun_count: 2,
+            sun_color: [1.0, 0.88, 0.66, 1.0],
+            sun_size: 1.75,
+            star_count: 1000,
+            star_density: 0.72,
+            cloud_coverage: 0.43,
+            cloud_color: [0.77, 0.78, 0.81, 0.86],
+            cloud_density: 0.64,
+            cloud_speed: 1.35,
+        }
+    }
+
+    fn assert_sky_config_eq(actual: &SkyConfig, expected: &SkyConfig) {
+        assert_eq!(actual.day_sky_color, expected.day_sky_color);
+        assert_eq!(actual.dusk_dawn_sky_color, expected.dusk_dawn_sky_color);
+        assert_eq!(actual.night_sky_color, expected.night_sky_color);
+        assert_eq!(actual.sun_count, expected.sun_count);
+        assert_eq!(actual.sun_color, expected.sun_color);
+        assert_eq!(actual.sun_size, expected.sun_size);
+        assert_eq!(actual.star_count, expected.star_count);
+        assert_eq!(actual.star_density, expected.star_density);
+        assert_eq!(actual.cloud_coverage, expected.cloud_coverage);
+        assert_eq!(actual.cloud_color, expected.cloud_color);
+        assert_eq!(actual.cloud_density, expected.cloud_density);
+        assert_eq!(actual.cloud_speed, expected.cloud_speed);
+    }
 
     #[test]
     fn test_map_editor_state_creation() {
@@ -12253,25 +12325,22 @@ mod tests {
         let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 5, 5);
         let mut state = MapEditorState::new(map);
 
-        let sky = SkyConfig {
-            sun_count: 2,
-            star_count: 1000,
-            ..SkyConfig::default()
-        };
+        let sky = custom_sky_config();
         state.metadata.is_outdoor = true;
-        state.metadata.sky_config = Some(sky);
+        state.metadata.sky_config = Some(sky.clone());
         state.apply_metadata();
 
-        assert!(
-            state.map.sky.is_some(),
-            "map.sky must be Some after apply_metadata"
-        );
+        let map_sky = state
+            .map
+            .sky
+            .as_ref()
+            .expect("map.sky must be Some after apply_metadata");
+        assert_sky_config_eq(map_sky, &sky);
 
         let ron_str = state.save_to_ron().unwrap();
         let loaded: Map = ron::from_str(&ron_str).expect("RON must round-trip");
         let loaded_sky = loaded.sky.expect("sky must survive RON serialisation");
-        assert_eq!(loaded_sky.sun_count, 2);
-        assert_eq!(loaded_sky.star_count, 1000);
+        assert_sky_config_eq(&loaded_sky, &sky);
     }
 
     #[test]
@@ -12289,6 +12358,69 @@ mod tests {
             !ron_str.contains("sky:"),
             "sky key must not appear in RON when sky_config is None; got: {ron_str}"
         );
+    }
+
+    #[test]
+    fn test_map_editor_save_to_ron_applies_metadata_without_manual_apply() {
+        let map = Map::new(1, "Original".to_string(), "Old desc".to_string(), 5, 5);
+        let mut state = MapEditorState::new(map);
+        let sky = custom_sky_config();
+
+        state.metadata.name = "Synced Name".to_string();
+        state.metadata.description = "Synced description".to_string();
+        state.metadata.is_outdoor = true;
+        state.metadata.sky_config = Some(sky.clone());
+
+        let ron_str = state.save_to_ron().unwrap();
+        let loaded: Map = ron::from_str(&ron_str).expect("RON must round-trip");
+
+        assert_eq!(loaded.name, "Synced Name");
+        assert_eq!(loaded.description, "Synced description");
+        assert!(loaded.is_outdoor);
+        let loaded_sky = loaded
+            .sky
+            .expect("save_to_ron must apply metadata.sky_config");
+        assert_sky_config_eq(&loaded_sky, &sky);
+    }
+
+    #[test]
+    fn test_map_editor_turning_off_outdoor_clears_sky_config() {
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 5, 5);
+        let mut state = MapEditorState::new(map);
+
+        state.metadata.is_outdoor = true;
+        state.metadata.sky_config = Some(custom_sky_config());
+        state.has_changes = false;
+
+        state.set_metadata_is_outdoor(false);
+
+        assert!(!state.metadata.is_outdoor);
+        assert!(
+            state.metadata.sky_config.is_none(),
+            "turning off Outdoor Map must clear stale sky metadata immediately"
+        );
+        assert!(state.has_changes);
+    }
+
+    #[test]
+    fn test_map_editor_indoor_map_omits_sky_key_after_stale_config() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 5, 5);
+        map.is_outdoor = false;
+        map.sky = Some(SkyConfig::default());
+        let mut state = MapEditorState::new(map);
+
+        state.metadata.is_outdoor = false;
+        state.metadata.sky_config = Some(custom_sky_config());
+
+        let ron_str = state.save_to_ron().unwrap();
+        assert!(
+            !ron_str.contains("sky:"),
+            "indoor map RON must omit stale sky key; got: {ron_str}"
+        );
+
+        let loaded: Map = ron::from_str(&ron_str).expect("RON must round-trip");
+        assert!(!loaded.is_outdoor);
+        assert!(loaded.sky.is_none());
     }
 
     #[test]
@@ -12317,20 +12449,20 @@ mod tests {
     }
 
     #[test]
-    fn test_metadata_sky_section_only_shown_when_outdoor() {
-        // A map with is_outdoor=false and no sky config: metadata should reflect that.
-        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 5, 5);
-        assert!(!map.is_outdoor);
-        assert!(map.sky.is_none());
+    fn test_metadata_sky_section_off_path_clears_stale_sky_on_apply() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 5, 5);
+        map.is_outdoor = true;
+        map.sky = Some(SkyConfig::default());
+        let mut state = MapEditorState::new(map);
 
-        let state = MapEditorState::new(map);
+        state.metadata.is_outdoor = false;
+        state.metadata.sky_config = Some(custom_sky_config());
+        state.apply_metadata();
+
+        assert!(!state.map.is_outdoor);
         assert!(
-            !state.metadata.is_outdoor,
-            "metadata.is_outdoor must mirror map.is_outdoor on load"
-        );
-        assert!(
-            state.metadata.sky_config.is_none(),
-            "metadata.sky_config must be None for indoor maps"
+            state.map.sky.is_none(),
+            "apply_metadata must clear map.sky for indoor maps even when metadata is stale"
         );
     }
 }

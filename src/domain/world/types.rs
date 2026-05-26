@@ -6460,7 +6460,21 @@ mod tests {
     }
 
     #[test]
-    fn test_map_with_sky_config_ron_roundtrip() {
+    fn test_domain_map_sky_roundtrip_preserves_all_fields() {
+        let expected = SkyConfig {
+            day_sky_color: [0.11, 0.22, 0.33, 1.0],
+            dusk_dawn_sky_color: [0.44, 0.55, 0.66, 1.0],
+            night_sky_color: [0.01, 0.02, 0.03, 1.0],
+            sun_count: 2,
+            sun_color: [0.90, 0.80, 0.70, 1.0],
+            sun_size: 1.75,
+            star_count: 1234,
+            star_density: 0.87,
+            cloud_coverage: 0.42,
+            cloud_color: [0.60, 0.65, 0.70, 0.75],
+            cloud_density: 0.58,
+            cloud_speed: 2.25,
+        };
         let mut map = Map::new(
             1,
             "Outdoor Test".to_string(),
@@ -6469,18 +6483,25 @@ mod tests {
             5,
         );
         map.is_outdoor = true;
-        map.sky = Some(SkyConfig {
-            sun_count: 2,
-            ..SkyConfig::default()
-        });
+        map.sky = Some(expected.clone());
 
         let ron_str = ron::to_string(&map).expect("serialization must succeed");
         let deserialized: Map = ron::from_str(&ron_str).expect("deserialization must succeed");
 
         assert!(deserialized.is_outdoor);
         let sky = deserialized.sky.expect("sky must be Some after roundtrip");
-        assert_eq!(sky.sun_count, 2);
-        assert_eq!(sky.day_sky_color, [0.53, 0.81, 0.98, 1.0]);
+        assert_eq!(sky.day_sky_color, expected.day_sky_color);
+        assert_eq!(sky.dusk_dawn_sky_color, expected.dusk_dawn_sky_color);
+        assert_eq!(sky.night_sky_color, expected.night_sky_color);
+        assert_eq!(sky.sun_count, expected.sun_count);
+        assert_eq!(sky.sun_color, expected.sun_color);
+        assert_eq!(sky.sun_size, expected.sun_size);
+        assert_eq!(sky.star_count, expected.star_count);
+        assert_eq!(sky.star_density, expected.star_density);
+        assert_eq!(sky.cloud_coverage, expected.cloud_coverage);
+        assert_eq!(sky.cloud_color, expected.cloud_color);
+        assert_eq!(sky.cloud_density, expected.cloud_density);
+        assert_eq!(sky.cloud_speed, expected.cloud_speed);
     }
 
     #[test]

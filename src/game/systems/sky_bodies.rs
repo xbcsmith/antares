@@ -10,8 +10,10 @@
 //! # Design
 //!
 //! Core logic is split into pure helper functions ([`sun_azimuths`],
-//! [`generate_star_positions`], [`sky_body_visibility_flags`],
-//! [`should_spawn_cloud_layer`], [`cloud_alpha`], [`cloud_base_color`],
+//! [`generate_star_positions`], [`SkyBodyRenderState::for_time`],
+//! [`sky_body_visibility_flags`], [`should_spawn_cloud_layer`],
+//! [`cloud_alpha`], [`cloud_base_color`], [`build_sun_disc_mesh`],
+//! [`build_cloud_noise_image`], [`build_cloud_material`],
 //! [`wrap_cloud_position`]) that are unit-testable without a Bevy world.
 //! Bevy systems ([`manage_sky_bodies_on_map_change`],
 //! [`update_sky_body_visibility`], [`animate_clouds`]) wrap them.
@@ -58,8 +60,10 @@ use crate::domain::world::{Map, SkyConfig};
 use crate::game::components::sky::{CloudLayerMarker, StarFieldMarker, SunMarker};
 use crate::game::resources::GlobalState;
 use bevy::color::LinearRgba;
+use bevy::ecs::system::SystemParam;
 use bevy::mesh::Indices;
 use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
@@ -75,6 +79,9 @@ pub const SUN_ELEVATION_ANGLE_RADIANS: f32 = std::f32::consts::FRAC_PI_4;
 
 /// Base radius of a sun disc at `sun_size = 1.0` (world units).
 pub const SUN_BASE_RADIUS: f32 = SUN_DISTANCE * 0.1;
+
+/// Number of radial segments used by [`build_sun_disc_mesh`].
+pub const SUN_DISC_SEGMENTS: u32 = 48;
 
 /// Radius of the hemisphere used for the star field (world units).
 pub const STAR_FIELD_RADIUS: f32 = 480.0;
@@ -105,6 +112,9 @@ pub const MAX_CLOUD_QUADS: u32 = 50;
 /// Values below this threshold are treated as "no clouds".
 pub const MIN_CLOUD_COVERAGE: f32 = 0.05;
 
+/// Width and height of the reusable procedural cloud noise texture in pixels.
+pub const CLOUD_NOISE_TEXTURE_SIZE: u32 = 64;
+
 // ===== Resource =====
 
 /// Bevy resource tracking spawned sky body entity IDs for safe despawn.
@@ -127,6 +137,26 @@ pub struct SkyBodyState {
     pub star_entity: Option<Entity>,
     /// Entity ID for the cloud layer mesh entity, if spawned.
     pub cloud_entity: Option<Entity>,
+}
+
+/// Bevy resource that caches the procedurally generated cloud noise texture.
+///
+/// The first cloud layer spawn creates an [`Image`] and stores its handle here;
+/// later cloud layers reuse the same handle so map changes do not allocate a
+/// duplicate noise texture.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::sky_bodies::CloudNoiseTexture;
+///
+/// let texture = CloudNoiseTexture::default();
+/// assert!(texture.handle.is_none());
+/// ```
+#[derive(Resource, Debug, Default, Clone)]
+pub struct CloudNoiseTexture {
+    /// Cached handle for the generated cloud noise texture, when available.
+    pub handle: Option<Handle<Image>>,
 }
 
 // ===== Plugin =====
@@ -153,6 +183,8 @@ pub struct SkyBodyPlugin;
 impl Plugin for SkyBodyPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SkyBodyState>();
+        app.init_resource::<CloudNoiseTexture>();
+        app.init_asset::<Image>();
         app.add_systems(
             Update,
             (
@@ -279,10 +311,124 @@ pub fn generate_star_positions(star_count: u32, seed: u64) -> Vec<Vec3> {
         .collect()
 }
 
+/// Pure render contract for sun and star visibility plus opacity.
+///
+/// `Visibility` alone is not expressive enough for Dawn and Dusk because both
+/// sun and star entities must remain visible while their materials cross-fade.
+/// This helper carries the visibility flags and material alpha values together.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::types::TimeOfDay;
+/// use antares::game::systems::sky_bodies::SkyBodyRenderState;
+///
+/// let dawn = SkyBodyRenderState::for_time(true, TimeOfDay::Dawn);
+/// assert!(dawn.suns_visible);
+/// assert!(dawn.stars_visible);
+/// assert!((dawn.sun_alpha - 0.6).abs() < 1e-5);
+/// assert!((dawn.star_alpha - 0.4).abs() < 1e-5);
+///
+/// let indoor = SkyBodyRenderState::for_time(false, TimeOfDay::Afternoon);
+/// assert!(!indoor.suns_visible);
+/// assert_eq!(indoor.sun_alpha, 0.0);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SkyBodyRenderState {
+    /// Whether sun entities should be [`Visibility::Visible`].
+    pub suns_visible: bool,
+    /// Whether star-field entities should be [`Visibility::Visible`].
+    pub stars_visible: bool,
+    /// Material alpha applied to sun materials.
+    pub sun_alpha: f32,
+    /// Material alpha applied to star-field materials.
+    pub star_alpha: f32,
+}
+
+impl SkyBodyRenderState {
+    /// Returns the render state for an outdoor flag and [`TimeOfDay`].
+    ///
+    /// Indoor maps always return no visible bodies and zero alpha. Outdoor maps
+    /// render suns during Morning/Afternoon, stars during Evening/Night, and a
+    /// cross-fade during Dawn/Dusk.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::TimeOfDay;
+    /// use antares::game::systems::sky_bodies::SkyBodyRenderState;
+    ///
+    /// let dusk = SkyBodyRenderState::for_time(true, TimeOfDay::Dusk);
+    /// assert_eq!(dusk.sun_alpha, 0.4);
+    /// assert_eq!(dusk.star_alpha, 0.6);
+    /// ```
+    pub fn for_time(is_outdoor: bool, tod: TimeOfDay) -> Self {
+        if !is_outdoor {
+            return Self {
+                suns_visible: false,
+                stars_visible: false,
+                sun_alpha: 0.0,
+                star_alpha: 0.0,
+            };
+        }
+
+        match tod {
+            TimeOfDay::Morning | TimeOfDay::Afternoon => Self {
+                suns_visible: true,
+                stars_visible: false,
+                sun_alpha: 1.0,
+                star_alpha: 0.0,
+            },
+            TimeOfDay::Evening | TimeOfDay::Night => Self {
+                suns_visible: false,
+                stars_visible: true,
+                sun_alpha: 0.0,
+                star_alpha: 1.0,
+            },
+            TimeOfDay::Dawn => Self {
+                suns_visible: true,
+                stars_visible: true,
+                sun_alpha: 0.6,
+                star_alpha: 0.4,
+            },
+            TimeOfDay::Dusk => Self {
+                suns_visible: true,
+                stars_visible: true,
+                sun_alpha: 0.4,
+                star_alpha: 0.6,
+            },
+        }
+    }
+}
+
+/// Returns the full sun/star render state for the given outdoor flag and time.
+///
+/// This free function mirrors the Phase 6 contract and delegates to
+/// [`SkyBodyRenderState::for_time`] so callers do not need to know whether the
+/// render contract is implemented as an associated function or a standalone
+/// helper.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::types::TimeOfDay;
+/// use antares::game::systems::sky_bodies::sky_body_render_state;
+///
+/// let state = sky_body_render_state(true, TimeOfDay::Dawn);
+/// assert!(state.suns_visible);
+/// assert!(state.stars_visible);
+/// assert_eq!(state.sun_alpha, 0.6);
+/// assert_eq!(state.star_alpha, 0.4);
+/// ```
+pub fn sky_body_render_state(is_outdoor: bool, tod: TimeOfDay) -> SkyBodyRenderState {
+    SkyBodyRenderState::for_time(is_outdoor, tod)
+}
+
 /// Returns `(suns_visible, stars_visible)` for the given outdoor flag and
 /// time of day.
 ///
-/// Pure function — testable without a Bevy world.
+/// Pure function — testable without a Bevy world. Prefer
+/// [`sky_body_render_state`] when material opacity is also needed.
 ///
 /// # Examples
 ///
@@ -296,14 +442,8 @@ pub fn generate_star_positions(star_count: u32, seed: u64) -> Vec<Vec3> {
 /// assert_eq!(sky_body_visibility_flags(true, TimeOfDay::Dawn),       (true, true));
 /// ```
 pub fn sky_body_visibility_flags(is_outdoor: bool, tod: TimeOfDay) -> (bool, bool) {
-    if !is_outdoor {
-        return (false, false);
-    }
-    match tod {
-        TimeOfDay::Night | TimeOfDay::Evening => (false, true),
-        TimeOfDay::Morning | TimeOfDay::Afternoon => (true, false),
-        TimeOfDay::Dawn | TimeOfDay::Dusk => (true, true),
-    }
+    let render_state = sky_body_render_state(is_outdoor, tod);
+    (render_state.suns_visible, render_state.stars_visible)
 }
 
 /// Returns `true` when a cloud layer should be spawned for the given coverage.
@@ -360,6 +500,119 @@ pub fn cloud_base_color(cloud_color: [f32; 4], density: f32, coverage: f32) -> [
     [cloud_color[0], cloud_color[1], cloud_color[2], alpha]
 }
 
+fn cloud_noise_byte(x: u32, y: u32) -> u8 {
+    let mut value = x
+        .wrapping_mul(374_761_393)
+        .wrapping_add(y.wrapping_mul(668_265_263))
+        .wrapping_add(0x9E37_79B9);
+    value = (value ^ (value >> 13)).wrapping_mul(1_274_126_177);
+    let hashed = ((value ^ (value >> 16)) & 0xFF) as u8;
+    let soft_floor = 64_u16;
+    let range = 191_u16;
+    (soft_floor + (u16::from(hashed) * range / 255)) as u8
+}
+
+/// Builds the reusable procedural cloud noise [`Image`].
+///
+/// The texture is a deterministic `CLOUD_NOISE_TEXTURE_SIZE ×
+/// CLOUD_NOISE_TEXTURE_SIZE` RGBA image. RGB channels are white so the material
+/// `base_color` can provide the configured cloud tint; alpha varies per pixel
+/// to provide procedural breakup.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::sky_bodies::{build_cloud_noise_image, CLOUD_NOISE_TEXTURE_SIZE};
+///
+/// let image = build_cloud_noise_image();
+/// assert_eq!(image.texture_descriptor.size.width, CLOUD_NOISE_TEXTURE_SIZE);
+/// assert_eq!(image.texture_descriptor.size.height, CLOUD_NOISE_TEXTURE_SIZE);
+/// ```
+pub fn build_cloud_noise_image() -> Image {
+    let mut data =
+        Vec::with_capacity((CLOUD_NOISE_TEXTURE_SIZE * CLOUD_NOISE_TEXTURE_SIZE * 4) as usize);
+    for y in 0..CLOUD_NOISE_TEXTURE_SIZE {
+        for x in 0..CLOUD_NOISE_TEXTURE_SIZE {
+            let alpha = cloud_noise_byte(x, y);
+            data.extend_from_slice(&[255, 255, 255, alpha]);
+        }
+    }
+
+    let mut image = Image::new_fill(
+        Extent3d {
+            width: CLOUD_NOISE_TEXTURE_SIZE,
+            height: CLOUD_NOISE_TEXTURE_SIZE,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[255, 255, 255, 255],
+        TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::all(),
+    );
+    image.data = Some(data);
+    image
+}
+
+/// Returns the cached cloud noise texture handle, generating it once if needed.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::sky_bodies::{get_or_create_cloud_noise_texture, CloudNoiseTexture};
+/// use bevy::prelude::*;
+///
+/// let mut images = Assets::<Image>::default();
+/// let mut cache = CloudNoiseTexture::default();
+/// let first = get_or_create_cloud_noise_texture(&mut images, &mut cache);
+/// let second = get_or_create_cloud_noise_texture(&mut images, &mut cache);
+/// assert_eq!(first, second);
+/// ```
+pub fn get_or_create_cloud_noise_texture(
+    images: &mut Assets<Image>,
+    cache: &mut CloudNoiseTexture,
+) -> Handle<Image> {
+    if let Some(handle) = cache.handle.as_ref() {
+        return handle.clone();
+    }
+
+    let handle = images.add(build_cloud_noise_image());
+    cache.handle = Some(handle.clone());
+    handle
+}
+
+/// Builds the cloud layer material from [`SkyConfig`] and a noise texture.
+///
+/// The material uses the texture as `base_color_texture` while preserving the
+/// configured tint RGB and computed tint alpha (`cloud_density *
+/// cloud_coverage`, clamped to `[0.0, 1.0]`).
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::SkyConfig;
+/// use antares::game::systems::sky_bodies::{build_cloud_material, cloud_alpha};
+/// use bevy::prelude::*;
+///
+/// let sky = SkyConfig::default();
+/// let texture = Handle::<Image>::default();
+/// let material = build_cloud_material(&sky, texture.clone());
+/// assert_eq!(material.base_color_texture, Some(texture));
+/// assert!((material.base_color.to_srgba().alpha - cloud_alpha(sky.cloud_density, sky.cloud_coverage)).abs() < 1e-5);
+/// ```
+pub fn build_cloud_material(sky: &SkyConfig, texture_handle: Handle<Image>) -> StandardMaterial {
+    let [r, g, b, _] = sky.cloud_color;
+    let alpha = cloud_alpha(sky.cloud_density, sky.cloud_coverage);
+    StandardMaterial {
+        base_color: Color::srgba(r, g, b, alpha),
+        base_color_texture: Some(texture_handle),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        double_sided: true,
+        cull_mode: None,
+        ..Default::default()
+    }
+}
+
 /// Wraps the cloud layer X translation when it exceeds `±half_width`.
 ///
 /// When `x > half_width`, subtracts `2 * half_width` (wraps to negative side).
@@ -387,6 +640,56 @@ pub fn wrap_cloud_position(x: f32, half_width: f32) -> f32 {
 }
 
 // ===== Mesh building =====
+
+/// Builds a flat sun disc mesh in the local XY plane.
+///
+/// The mesh is a triangle fan with the center vertex at the origin and all
+/// perimeter vertices at `z = 0.0`, making it suitable for billboard-style sun
+/// rendering. The spawning system orients the entity toward the world origin.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::sky_bodies::{build_sun_disc_mesh, SUN_DISC_SEGMENTS};
+/// use bevy::prelude::*;
+///
+/// let mesh = build_sun_disc_mesh(10.0);
+/// assert_eq!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len(), (SUN_DISC_SEGMENTS + 2) as usize);
+/// ```
+pub fn build_sun_disc_mesh(radius: f32) -> Mesh {
+    let safe_radius = radius.max(0.0);
+    let vertex_count = (SUN_DISC_SEGMENTS + 2) as usize;
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(vertex_count);
+    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(vertex_count);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(vertex_count);
+    let mut indices: Vec<u32> = Vec::with_capacity(SUN_DISC_SEGMENTS as usize * 3);
+
+    positions.push([0.0, 0.0, 0.0]);
+    normals.push([0.0, 0.0, 1.0]);
+    uvs.push([0.5, 0.5]);
+
+    for segment in 0..=SUN_DISC_SEGMENTS {
+        let angle = std::f32::consts::TAU * segment as f32 / SUN_DISC_SEGMENTS as f32;
+        let (sin, cos) = angle.sin_cos();
+        positions.push([cos * safe_radius, sin * safe_radius, 0.0]);
+        normals.push([0.0, 0.0, 1.0]);
+        uvs.push([0.5 + cos * 0.5, 0.5 + sin * 0.5]);
+    }
+
+    for segment in 1..=SUN_DISC_SEGMENTS {
+        indices.extend_from_slice(&[0, segment, segment + 1]);
+    }
+
+    let mut mesh = Mesh::new(
+        bevy::mesh::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::all(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
 
 /// Builds a [`Mesh`] representing the star field.
 ///
@@ -505,33 +808,46 @@ pub fn build_cloud_mesh(coverage: f32, seed: u64) -> Mesh {
 /// Spawns sun disc, star-field, and cloud-layer entities for `map` and
 /// records their entity IDs in `state`.
 ///
+/// Indoor maps (`Map::is_outdoor == false`) spawn no sky body entities. Outdoor
+/// maps use flat sun disc meshes, a deterministic star field, and an optional
+/// textured cloud layer.
+///
 /// Called by [`manage_sky_bodies_on_map_change`] whenever the current map
-/// changes.  Free function (not a system) to simplify testing.
+/// changes. Free function (not a system) to simplify testing.
 pub fn spawn_sky_bodies(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
+    cloud_noise: &mut CloudNoiseTexture,
     state: &mut SkyBodyState,
     map: &Map,
 ) {
+    if !map.is_outdoor {
+        return;
+    }
+
     let default_sky = SkyConfig::default();
     let sky = map.sky.as_ref().unwrap_or(&default_sky);
 
     // ── Sun discs ──────────────────────────────────────────────────────────
     for (pos, radius) in sun_world_positions(sky.sun_count, sky.sun_size) {
-        let mesh_handle = meshes.add(Sphere::new(radius));
+        let mesh_handle = meshes.add(build_sun_disc_mesh(radius));
         let [r, g, b, a] = sky.sun_color;
         let mat = materials.add(StandardMaterial {
             base_color: Color::srgba(r, g, b, a),
-            emissive: LinearRgba::new(r * 2.0, g * 2.0, b * 2.0, 1.0),
+            emissive: LinearRgba::new(r * 2.0, g * 2.0, b * 2.0, a),
             unlit: true,
+            alpha_mode: AlphaMode::Blend,
+            double_sided: true,
+            cull_mode: None,
             ..Default::default()
         });
         let entity = commands
             .spawn((
                 Mesh3d(mesh_handle),
                 MeshMaterial3d(mat),
-                Transform::from_translation(pos),
+                Transform::from_translation(pos).looking_at(Vec3::ZERO, Vec3::Y),
                 GlobalTransform::default(),
                 Visibility::default(),
                 SunMarker,
@@ -566,7 +882,7 @@ pub fn spawn_sky_bodies(
     }
 
     // ── Cloud layer ────────────────────────────────────────────────────────
-    spawn_cloud_layer(commands, meshes, materials, state, map);
+    spawn_cloud_layer(commands, meshes, materials, images, cloud_noise, state, map);
 }
 
 /// Despawns all sky body entities tracked in `state` and clears the lists.
@@ -585,6 +901,10 @@ pub fn despawn_sky_bodies(commands: &mut Commands, state: &mut SkyBodyState) {
 
 /// Spawns the cloud layer entity for `map` and records its entity ID in `state`.
 ///
+/// The cloud material reuses the procedural noise texture cached in
+/// [`CloudNoiseTexture`] and applies the map's cloud tint through material base
+/// colour.
+///
 /// No entity is spawned when:
 /// - `map.is_outdoor == false`, or
 /// - [`should_spawn_cloud_layer`] returns `false` for `cloud_coverage`.
@@ -592,6 +912,8 @@ pub fn spawn_cloud_layer(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
+    cloud_noise: &mut CloudNoiseTexture,
     state: &mut SkyBodyState,
     map: &Map,
 ) {
@@ -610,16 +932,8 @@ pub fn spawn_cloud_layer(
     let cloud_mesh = build_cloud_mesh(sky.cloud_coverage, seed);
     let mesh_handle = meshes.add(cloud_mesh);
 
-    let [r, g, b, _] = sky.cloud_color;
-    let alpha = cloud_alpha(sky.cloud_density, sky.cloud_coverage);
-    let mat = materials.add(StandardMaterial {
-        base_color: Color::srgba(r, g, b, alpha),
-        unlit: true,
-        alpha_mode: AlphaMode::Blend,
-        double_sided: true,
-        cull_mode: None,
-        ..Default::default()
-    });
+    let texture_handle = get_or_create_cloud_noise_texture(images, cloud_noise);
+    let mat = materials.add(build_cloud_material(sky, texture_handle));
 
     let entity = commands
         .spawn((
@@ -644,7 +958,38 @@ pub fn despawn_cloud_layer(commands: &mut Commands, state: &mut SkyBodyState) {
     }
 }
 
+fn apply_material_alpha(material: &mut StandardMaterial, alpha: f32) {
+    let clamped = alpha.clamp(0.0, 1.0);
+    let base = material.base_color.to_srgba();
+    material.base_color = Color::srgba(base.red, base.green, base.blue, clamped);
+    material.emissive.alpha = clamped;
+    material.alpha_mode = AlphaMode::Blend;
+}
+
 // ===== Bevy systems =====
+
+/// Bundled mutable asset resources used by sky-body spawn systems.
+///
+/// Grouping these resources keeps Bevy system signatures small enough for
+/// Clippy while preserving explicit ownership over meshes, materials, images,
+/// and the cached cloud noise texture.
+#[derive(SystemParam)]
+pub struct SkyBodyAssetResources<'w> {
+    /// Mesh asset storage used for sun, star, and cloud meshes.
+    pub meshes: ResMut<'w, Assets<Mesh>>,
+    /// Material asset storage used for sun, star, and cloud materials.
+    pub materials: ResMut<'w, Assets<StandardMaterial>>,
+    /// Image asset storage used for the procedural cloud noise texture.
+    pub images: ResMut<'w, Assets<Image>>,
+    /// Cached procedural cloud noise texture handle.
+    pub cloud_noise: ResMut<'w, CloudNoiseTexture>,
+}
+
+/// Query item used for sky-body visibility and material-opacity updates.
+pub type SkyBodyMaterialQueryItem<'a> = (&'a mut Visibility, &'a MeshMaterial3d<StandardMaterial>);
+
+/// Query filter that selects star fields while excluding sun entities.
+pub type StarFieldVisibilityFilter = (With<StarFieldMarker>, Without<SunMarker>);
 
 /// System: detects map changes and re-spawns sky bodies when the current map
 /// changes.
@@ -653,8 +998,7 @@ pub fn despawn_cloud_layer(commands: &mut Commands, state: &mut SkyBodyState) {
 /// first frame (when `None`) sky bodies are spawned for the starting map.
 pub fn manage_sky_bodies_on_map_change(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut assets: SkyBodyAssetResources,
     mut state: ResMut<SkyBodyState>,
     global_state: Res<GlobalState>,
     mut last_map_id: Local<Option<MapId>>,
@@ -667,8 +1011,10 @@ pub fn manage_sky_bodies_on_map_change(
     if let Some(map) = global_state.0.world.get_current_map() {
         spawn_sky_bodies(
             &mut commands,
-            meshes.as_mut(),
-            materials.as_mut(),
+            assets.meshes.as_mut(),
+            assets.materials.as_mut(),
+            assets.images.as_mut(),
+            assets.cloud_noise.as_mut(),
             state.as_mut(),
             map,
         );
@@ -676,12 +1022,16 @@ pub fn manage_sky_bodies_on_map_change(
     *last_map_id = Some(current_map_id);
 }
 
-/// System: updates [`Visibility`] on all [`SunMarker`] and [`StarFieldMarker`]
-/// entities based on the current map's outdoor flag and time of day.
+/// System: updates visibility and material opacity on sky body entities.
+///
+/// [`SkyBodyRenderState`] drives both [`Visibility`] and material alpha so Dawn
+/// and Dusk can cross-fade suns and stars instead of relying on visibility
+/// toggles alone.
 pub fn update_sky_body_visibility(
     global_state: Res<GlobalState>,
-    mut sun_query: Query<&mut Visibility, With<SunMarker>>,
-    mut star_query: Query<&mut Visibility, (With<StarFieldMarker>, Without<SunMarker>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut sun_query: Query<SkyBodyMaterialQueryItem<'_>, With<SunMarker>>,
+    mut star_query: Query<SkyBodyMaterialQueryItem<'_>, StarFieldVisibilityFilter>,
 ) {
     let game_state = &global_state.0;
     let tod = game_state.time_of_day();
@@ -691,24 +1041,30 @@ pub fn update_sky_body_visibility(
         .map(|m| m.is_outdoor)
         .unwrap_or(false);
 
-    let (suns_visible, stars_visible) = sky_body_visibility_flags(is_outdoor, tod);
+    let render_state = sky_body_render_state(is_outdoor, tod);
 
-    let sun_vis = if suns_visible {
+    let sun_vis = if render_state.suns_visible {
         Visibility::Visible
     } else {
         Visibility::Hidden
     };
-    let star_vis = if stars_visible {
+    let star_vis = if render_state.stars_visible {
         Visibility::Visible
     } else {
         Visibility::Hidden
     };
 
-    for mut vis in sun_query.iter_mut() {
+    for (mut vis, material_handle) in sun_query.iter_mut() {
         *vis = sun_vis;
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            apply_material_alpha(material, render_state.sun_alpha);
+        }
     }
-    for mut vis in star_query.iter_mut() {
+    for (mut vis, material_handle) in star_query.iter_mut() {
         *vis = star_vis;
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            apply_material_alpha(material, render_state.star_alpha);
+        }
     }
 }
 
@@ -787,6 +1143,54 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_sun_mesh_is_flat_disc_or_billboard() {
+        let radius = 12.5;
+        let mesh = build_sun_disc_mesh(radius);
+        let positions = match mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .expect("sun disc mesh must have positions")
+        {
+            bevy::mesh::VertexAttributeValues::Float32x3(values) => values,
+            other => panic!("sun disc positions must be Float32x3, got {other:?}"),
+        };
+
+        assert_eq!(
+            positions.len(),
+            (SUN_DISC_SEGMENTS + 2) as usize,
+            "triangle fan must contain center plus closed perimeter"
+        );
+        assert!(
+            positions.iter().all(|pos| pos[2].abs() < 1e-6),
+            "all sun disc vertices must lie on one local z=0 plane"
+        );
+        assert!(
+            positions
+                .iter()
+                .all(|pos| (pos[0] * pos[0] + pos[1] * pos[1]).sqrt() <= radius + 1e-5),
+            "all sun disc vertices must stay within the requested radius"
+        );
+        assert!(
+            positions
+                .iter()
+                .any(|pos| ((pos[0] * pos[0] + pos[1] * pos[1]).sqrt() - radius).abs() < 1e-5),
+            "sun disc perimeter must reach the requested radius"
+        );
+
+        let index_count = mesh
+            .indices()
+            .map(|indices| match indices {
+                bevy::mesh::Indices::U32(values) => values.len(),
+                bevy::mesh::Indices::U16(values) => values.len(),
+            })
+            .unwrap_or(0);
+        assert_eq!(
+            index_count,
+            SUN_DISC_SEGMENTS as usize * 3,
+            "sun disc must be rendered as a triangle fan"
+        );
+    }
+
     // ── Star field tests ──────────────────────────────────────────────────
 
     #[test]
@@ -850,6 +1254,158 @@ mod tests {
         assert!(stars, "Dusk outdoor: stars must be visible");
     }
 
+    #[test]
+    fn test_sky_body_render_state_dawn_reduces_both_opacities() {
+        let state = sky_body_render_state(true, TimeOfDay::Dawn);
+        assert!(state.suns_visible);
+        assert!(state.stars_visible);
+        assert!((state.sun_alpha - 0.6).abs() < 1e-5);
+        assert!((state.star_alpha - 0.4).abs() < 1e-5);
+        assert!(state.sun_alpha < 1.0);
+        assert!(state.star_alpha < 1.0);
+    }
+
+    #[test]
+    fn test_sky_body_render_state_dusk_reduces_both_opacities() {
+        let state = sky_body_render_state(true, TimeOfDay::Dusk);
+        assert!(state.suns_visible);
+        assert!(state.stars_visible);
+        assert!((state.sun_alpha - 0.4).abs() < 1e-5);
+        assert!((state.star_alpha - 0.6).abs() < 1e-5);
+        assert!(state.sun_alpha < 1.0);
+        assert!(state.star_alpha < 1.0);
+    }
+
+    #[test]
+    fn test_sky_body_render_state_contract() {
+        let cases = [
+            (
+                false,
+                TimeOfDay::Morning,
+                SkyBodyRenderState {
+                    suns_visible: false,
+                    stars_visible: false,
+                    sun_alpha: 0.0,
+                    star_alpha: 0.0,
+                },
+            ),
+            (
+                true,
+                TimeOfDay::Morning,
+                SkyBodyRenderState {
+                    suns_visible: true,
+                    stars_visible: false,
+                    sun_alpha: 1.0,
+                    star_alpha: 0.0,
+                },
+            ),
+            (
+                true,
+                TimeOfDay::Afternoon,
+                SkyBodyRenderState {
+                    suns_visible: true,
+                    stars_visible: false,
+                    sun_alpha: 1.0,
+                    star_alpha: 0.0,
+                },
+            ),
+            (
+                true,
+                TimeOfDay::Evening,
+                SkyBodyRenderState {
+                    suns_visible: false,
+                    stars_visible: true,
+                    sun_alpha: 0.0,
+                    star_alpha: 1.0,
+                },
+            ),
+            (
+                true,
+                TimeOfDay::Night,
+                SkyBodyRenderState {
+                    suns_visible: false,
+                    stars_visible: true,
+                    sun_alpha: 0.0,
+                    star_alpha: 1.0,
+                },
+            ),
+            (
+                true,
+                TimeOfDay::Dawn,
+                SkyBodyRenderState {
+                    suns_visible: true,
+                    stars_visible: true,
+                    sun_alpha: 0.6,
+                    star_alpha: 0.4,
+                },
+            ),
+            (
+                true,
+                TimeOfDay::Dusk,
+                SkyBodyRenderState {
+                    suns_visible: true,
+                    stars_visible: true,
+                    sun_alpha: 0.4,
+                    star_alpha: 0.6,
+                },
+            ),
+        ];
+
+        for (is_outdoor, tod, expected) in cases {
+            assert_eq!(sky_body_render_state(is_outdoor, tod), expected);
+        }
+    }
+
+    #[test]
+    fn test_spawn_sky_bodies_indoor_spawns_no_suns_or_stars() {
+        fn spawn_indoor_map_for_test(
+            mut commands: Commands,
+            mut meshes: ResMut<Assets<Mesh>>,
+            mut materials: ResMut<Assets<StandardMaterial>>,
+            mut images: ResMut<Assets<Image>>,
+            mut cloud_noise: ResMut<CloudNoiseTexture>,
+            mut state: ResMut<SkyBodyState>,
+        ) {
+            let mut map = Map::new(1, "Indoor".to_string(), "Test".to_string(), 2, 2);
+            map.is_outdoor = false;
+            map.sky = Some(SkyConfig {
+                sun_count: 2,
+                star_count: 32,
+                cloud_coverage: 1.0,
+                ..Default::default()
+            });
+
+            spawn_sky_bodies(
+                &mut commands,
+                meshes.as_mut(),
+                materials.as_mut(),
+                images.as_mut(),
+                cloud_noise.as_mut(),
+                state.as_mut(),
+                &map,
+            );
+        }
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(Assets::<Mesh>::default())
+            .insert_resource(Assets::<StandardMaterial>::default())
+            .insert_resource(Assets::<Image>::default())
+            .init_resource::<CloudNoiseTexture>()
+            .init_resource::<SkyBodyState>()
+            .add_systems(Update, spawn_indoor_map_for_test);
+        app.update();
+
+        let world = app.world_mut();
+        let mut sun_query = world.query::<&SunMarker>();
+        assert_eq!(sun_query.iter(&*world).count(), 0);
+        let mut star_query = world.query::<&StarFieldMarker>();
+        assert_eq!(star_query.iter(&*world).count(), 0);
+        let state = world.resource::<SkyBodyState>();
+        assert!(state.sun_entities.is_empty());
+        assert!(state.star_entity.is_none());
+    }
+
     // ── Cloud layer tests ─────────────────────────────────────────────────
 
     #[test]
@@ -895,6 +1451,42 @@ mod tests {
             1.0,
             "product > 1.0 must be clamped to 1.0"
         );
+    }
+
+    #[test]
+    fn test_cloud_noise_texture_generated_once_and_reused() {
+        let mut images = Assets::<Image>::default();
+        let mut cache = CloudNoiseTexture::default();
+
+        let first = get_or_create_cloud_noise_texture(&mut images, &mut cache);
+        let image_count_after_first = images.iter().count();
+        let second = get_or_create_cloud_noise_texture(&mut images, &mut cache);
+        let image_count_after_second = images.iter().count();
+
+        assert_eq!(first, second, "cloud noise texture handle must be reused");
+        assert_eq!(image_count_after_first, 1);
+        assert_eq!(image_count_after_second, 1);
+        assert!(images.get(&first).is_some());
+    }
+
+    #[test]
+    fn test_cloud_material_uses_noise_texture_and_config_tint() {
+        let sky = SkyConfig {
+            cloud_color: [0.2, 0.4, 0.6, 0.9],
+            cloud_density: 0.5,
+            cloud_coverage: 0.8,
+            ..Default::default()
+        };
+        let texture = Handle::<Image>::default();
+
+        let material = build_cloud_material(&sky, texture.clone());
+        assert_eq!(material.base_color_texture, Some(texture));
+        let base = material.base_color.to_srgba();
+        assert!((base.red - 0.2).abs() < 1e-5);
+        assert!((base.green - 0.4).abs() < 1e-5);
+        assert!((base.blue - 0.6).abs() < 1e-5);
+        assert!((base.alpha - cloud_alpha(0.5, 0.8)).abs() < 1e-5);
+        assert!(matches!(material.alpha_mode, AlphaMode::Blend));
     }
 
     #[test]

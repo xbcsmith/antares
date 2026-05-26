@@ -243,23 +243,44 @@ pub enum GameMode {
 
 ```rust
 pub struct World {
-    pub maps: HashMap<MapId, Map>,
+    pub maps: BTreeMap<MapId, Map>,
     pub current_map: MapId,
     pub party_position: Position,
     pub party_facing: Direction,
 }
 
+pub struct SkyConfig {
+    pub day_sky_color: [f32; 4],       // default: [0.53, 0.81, 0.98, 1.0]
+    pub dusk_dawn_sky_color: [f32; 4], // default: [0.98, 0.60, 0.20, 1.0]
+    pub night_sky_color: [f32; 4],     // default: [0.02, 0.02, 0.08, 1.0]
+    pub sun_count: u8,                 // default: 1
+    pub sun_color: [f32; 4],           // default: [1.0, 0.95, 0.80, 1.0]
+    pub sun_size: f32,                 // default: 1.0
+    pub star_count: u32,               // default: 2000
+    pub star_density: f32,             // default: 0.5
+    pub cloud_coverage: f32,           // default: 0.3
+    pub cloud_color: [f32; 4],         // default: [0.9, 0.9, 0.9, 0.8]
+    pub cloud_density: f32,            // default: 0.5
+    pub cloud_speed: f32,              // default: 1.0
+}
+
 pub struct Map {
     pub id: MapId,
-    pub name: String,
-    pub description: String,
     pub width: u32,
     pub height: u32,
+    pub name: String,
+    pub description: String,
     pub tiles: Vec<Tile>,
-    pub events: HashMap<Position, MapEvent>,
+    pub events: BTreeMap<Position, MapEvent>,
     pub encounter_table: Option<EncounterTable>,
     pub allow_random_encounters: bool,
     pub npc_placements: Vec<NpcPlacement>,
+    pub dropped_items: Vec<DroppedItem>,
+    pub lock_states: HashMap<String, LockState>,
+    /// Enables sky rendering and outdoor light behavior when true.
+    pub is_outdoor: bool,
+    /// Only consulted when `is_outdoor` is true; indoor maps ignore sky config.
+    pub sky: Option<SkyConfig>,
 }
 
 pub struct Tile {

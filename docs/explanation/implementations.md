@@ -2,6 +2,104 @@
 
 ---
 
+## Sky System — Phase 6 Completion and Compliance Hardening (2026)
+
+**Goal:** Finish the remaining Phase 6 work from the sky system plan: harden SDK
+map saving, complete sun/star transition rendering, prevent indoor sky-body
+spawns, add reusable procedural cloud noise texturing, and document the final
+implementation state.
+
+### Files Changed
+
+| Path                                     | Action                                                                                      |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/map_editor.rs` | Hardened metadata save synchronisation and stale indoor sky cleanup                         |
+| `src/game/systems/sky_bodies.rs`         | Completed flat sun discs, indoor no-spawn, Dawn/Dusk opacity, and cloud noise texture reuse |
+| `docs/explanation/implementations.md`    | Recorded this Phase 6 completion work                                                       |
+
+### What Changed
+
+- Added SDK metadata synchronisation helpers so `save_to_ron` serializes a map
+  with current metadata even when callers do not manually call
+  `apply_metadata` first.
+- Clearing **Outdoor Map** now clears stale `sky_config`, and indoor maps always
+  serialize with `sky: None`.
+- Replaced sun sphere meshes with flat triangle-fan disc meshes.
+- Added `SkyBodyRenderState` and `sky_body_render_state` so Dawn and Dusk keep
+  both suns and stars visible while reducing material alpha.
+- Prevented indoor maps from spawning sun or star entities at all.
+- Added `CloudNoiseTexture`, deterministic cloud `Image` generation, and
+  cloud materials that reuse the generated texture while preserving
+  `cloud_density * cloud_coverage` alpha.
+- Added/strengthened tests for metadata synchronization, stale indoor sky
+  cleanup, flat sun meshes, indoor no-spawn behaviour, Dawn/Dusk opacity, and
+  cloud texture reuse/material tinting.
+
+---
+
+## Sky System — Phase 6 Domain and Architecture Hardening (2026)
+
+**Goal:** Align the architecture reference with the implemented domain sky model
+and strengthen the domain RON round-trip test so every `SkyConfig` field is
+covered explicitly.
+
+### Files Changed
+
+| Path                                  | Action                                                                                                                                         |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/reference/architecture.md`      | Updated Section 4.2 to document the real `World`, `Map`, and `SkyConfig` field shapes, including sky defaults and `is_outdoor`/`sky` semantics |
+| `src/domain/world/types.rs`           | Renamed and strengthened the map sky RON round-trip test to assert every `SkyConfig` field survives serialization and deserialization          |
+| `docs/explanation/implementations.md` | Recorded this Phase 6 domain/architecture update                                                                                               |
+
+### What Changed
+
+- Documented `SkyConfig` in `docs/reference/architecture.md` Section 4.2 with
+  all twelve fields and their default values.
+- Updated the documented `Map` fields to include `is_outdoor: bool` and
+  `sky: Option<SkyConfig>` alongside the other implemented map fields.
+- Clarified that `sky` is only consulted when `is_outdoor` is `true`; indoor
+  maps ignore sky configuration.
+- Replaced the narrower sky round-trip test with
+  `test_domain_map_sky_roundtrip_preserves_all_fields`, which uses non-default
+  values for every `SkyConfig` field and verifies each one after RON round-trip.
+
+---
+
+## Sky System Implementation Plan — Phase 6 Hardening Added (2026)
+
+**Goal:** Extend `docs/explanation/sky_system_implementation_plan.md` with a
+final completion phase that captures the remaining implementation gaps found
+after auditing Phases 1–5.
+
+### Files Changed
+
+| Path                                                 | Action                                             |
+| ---------------------------------------------------- | -------------------------------------------------- |
+| `docs/explanation/sky_system_implementation_plan.md` | Added Phase 6: Completion and Compliance Hardening |
+| `docs/explanation/implementations.md`                | Recorded this planning/documentation update        |
+
+### What Was Added
+
+The new Phase 6 defines the remaining work needed to finish the sky system:
+
+- synchronise `docs/reference/architecture.md` with the implemented `SkyConfig`
+  and `Map` fields,
+- harden SDK map saving so indoor maps cannot retain or serialize stale sky
+  configuration,
+- strengthen domain and SDK round-trip tests to assert every `SkyConfig` field,
+- prevent indoor maps from spawning sun/star entities,
+- replace sphere suns with flat disc/billboard rendering,
+- add Dawn/Dusk opacity transitions for suns and stars,
+- complete the procedural cloud noise texture requirement,
+- add explicit tests and success criteria for all remaining gaps.
+
+### Validation
+
+This was a documentation-only planning update. No Rust code or game data was
+changed.
+
+---
+
 ## Sky System — Phase 4: Celestial Bodies — Suns and Stars (2026)
 
 **Goal:** Spawn sun disc entities and a single star-field mesh entity per

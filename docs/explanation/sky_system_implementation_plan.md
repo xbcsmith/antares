@@ -577,6 +577,196 @@ Add to `src/game/components/sky.rs` alongside `SunMarker` and
 
 ---
 
+### Phase 6: Completion and Compliance Hardening
+
+**Goal:** Close the remaining implementation gaps discovered after Phases 1–5:
+make SDK saves impossible to misuse, align tests with the full contract, finish
+transitional celestial-body rendering, add the planned procedural cloud texture,
+and bring the architecture reference back into sync with the implemented domain
+model.
+
+This phase is intentionally a hardening phase, not a new feature phase. It
+should not introduce new author-facing sky settings unless they are required to
+complete the behaviours already specified above.
+
+#### 6.1 Architecture Reference Synchronisation
+
+Update `docs/reference/architecture.md` Section 4.2 so the canonical `Map`
+structure includes the implemented sky fields and the `SkyConfig` structure.
+The architecture reference must match the real domain model exactly.
+
+Required updates:
+
+- Add `SkyConfig` to the World section with every field from
+  `src/domain/world/types.rs` and the documented default values.
+- Add `is_outdoor: bool` and `sky: Option<SkyConfig>` to the `Map` definition.
+- Explain that `sky` is only consulted when `is_outdoor == true`.
+- Preserve the existing architecture style and do not introduce divergent type
+  names or field names.
+
+#### 6.2 SDK Save Semantics and Indoor Sky Cleanup
+
+Harden `sdk/campaign_builder/src/map_editor.rs` so metadata cannot become
+stale or be accidentally omitted by direct save callers.
+
+Required behaviour:
+
+- When the **Outdoor Map** checkbox changes from checked to unchecked,
+  immediately set `editor.metadata.sky_config = None` and mark
+  `editor.has_changes = true`.
+- `MapEditorState::apply_metadata` must enforce the invariant:
+  - `metadata.is_outdoor == true` → copy `metadata.sky_config` into `map.sky`.
+  - `metadata.is_outdoor == false` → set `map.sky = None` regardless of stale
+    metadata state.
+- `MapEditorState::save_to_ron` must serialize a metadata-synchronised map, not
+  a stale `self.map`. If the method remains `&self`, clone `self.map`, apply
+  the metadata clone into that temporary map, then serialize it.
+- Every `MapsEditorState::save_map` caller must pass a map whose `is_outdoor`
+  and `sky` values already reflect the editor metadata. Add a small helper if
+  needed so this is not duplicated.
+- Existing maps with `is_outdoor = false` must save with no `sky:` key.
+
+#### 6.3 Test Coverage Hardening
+
+Strengthen existing tests instead of only adding shallow new tests.
+
+Required changes:
+
+- In `src/domain/world/types.rs`, update
+  `test_map_with_sky_config_ron_roundtrip` so it asserts every `SkyConfig`
+  field survives the RON round-trip.
+- In `sdk/campaign_builder/src/map_editor.rs`, update
+  `test_map_metadata_sky_config_round_trip` so it asserts every `SkyConfig`
+  field survives save/reload.
+- Replace or strengthen `test_metadata_sky_section_only_shown_when_outdoor` so
+  it covers the stale-state case:
+  1. start with `metadata.is_outdoor = true` and `sky_config = Some(...)`,
+  2. simulate turning `is_outdoor` off through the same helper used by the UI,
+  3. save to RON,
+  4. assert `map.is_outdoor == false`, `map.sky == None`, and the RON omits
+     `sky:`.
+- Add a regression test proving `save_to_ron` synchronises metadata even when
+  the caller did not manually call `apply_metadata` first.
+
+#### 6.4 Celestial Body Rendering Completion
+
+Finish the rendering details originally specified by Phase 4.
+
+Required behaviour:
+
+- `spawn_sky_bodies` must not spawn `SunMarker` or `StarFieldMarker` entities
+  for indoor maps. Indoor maps should have no sky-body entities to hide.
+- Replace sphere-based sun meshes with flat billboard or disc meshes so suns
+  read visually as sky discs rather than 3D balls.
+- Preserve deterministic sun placement rules from Phase 4:
+  - `sun_count = 0` → no suns,
+  - `sun_count = 1` → center-left azimuth,
+  - `sun_count = 2` → symmetric left/right azimuths,
+  - `sun_count > 2` → evenly distributed over a 120° arc.
+- Star rendering must match the Phase 4 intent: a deterministic field across
+  the upper hemisphere whose density/alpha is driven by `star_density`. If the
+  Bevy version makes `PointList` impractical, keep the triangle implementation
+  but document the reason in code comments and preserve the public helper tests.
+- `star_count = 0` must create no visible stars and must keep `SkyBodyState`
+  internally consistent.
+
+#### 6.5 Dawn and Dusk Opacity Transitions
+
+Implement reduced-opacity celestial-body transitions for Dawn and Dusk instead
+of boolean-only visibility.
+
+Introduce a pure helper such as:
+
+```antares/src/game/systems/sky_bodies.rs#L1-20
+pub struct SkyBodyRenderState {
+    pub suns_visible: bool,
+    pub stars_visible: bool,
+    pub sun_alpha: f32,
+    pub star_alpha: f32,
+}
+
+pub fn sky_body_render_state(is_outdoor: bool, tod: TimeOfDay) -> SkyBodyRenderState {
+    // exact values defined by tests
+}
+```
+
+Expected contract:
+
+| `is_outdoor` | `TimeOfDay`       | Suns visible | Stars visible | Sun alpha | Star alpha |
+| ------------ | ----------------- | ------------ | ------------- | --------- | ---------- |
+| `false`      | any               | false        | false         | 0.0       | 0.0        |
+| `true`       | Morning/Afternoon | true         | false         | 1.0       | 0.0        |
+| `true`       | Evening/Night     | false        | true          | 0.0       | 1.0        |
+| `true`       | Dawn              | true         | true          | 0.6       | 0.4        |
+| `true`       | Dusk              | true         | true          | 0.4       | 0.6        |
+
+Use material alpha/emissive intensity (or another Bevy-supported opacity path)
+to apply the transition. Do not rely on `Visibility` alone for Dawn/Dusk.
+
+#### 6.6 Procedural Cloud Texture Completion
+
+Finish the Phase 5 cloud material plan by adding a procedural noise texture.
+
+Required behaviour:
+
+- Generate a reusable white-noise cloud texture at startup or on first cloud
+  spawn using Bevy's `Image` API.
+- Store the texture handle in a Bevy resource so maps reuse the texture instead
+  of regenerating it every frame or every map change.
+- Apply the texture as the cloud material's base color / alpha texture while
+  still tinting by `SkyConfig::cloud_color`.
+- Preserve `cloud_density * cloud_coverage` as the alpha contract.
+- Keep cloud placement deterministic from `MapId`.
+- Keep `cloud_coverage < MIN_CLOUD_COVERAGE` as the no-cloud threshold.
+
+#### 6.7 Testing Requirements
+
+Add or strengthen tests for the remaining gaps:
+
+- `test_domain_map_sky_roundtrip_preserves_all_fields`
+- `test_map_editor_save_to_ron_applies_metadata_without_manual_apply`
+- `test_map_editor_turning_off_outdoor_clears_sky_config`
+- `test_map_editor_indoor_map_omits_sky_key_after_stale_config`
+- `test_spawn_sky_bodies_indoor_spawns_no_suns_or_stars`
+- `test_sun_mesh_is_flat_disc_or_billboard`
+- `test_sky_body_render_state_dawn_reduces_both_opacities`
+- `test_sky_body_render_state_dusk_reduces_both_opacities`
+- `test_cloud_noise_texture_generated_once_and_reused`
+- `test_cloud_material_uses_noise_texture_and_config_tint`
+
+All SDK tests must remain under `sdk/campaign_builder/src/map_editor.rs` or the
+campaign builder test suite. All game/domain tests must use `data/test_campaign`
+when they need fixture data. No new test may reference `campaigns/tutorial`.
+
+#### 6.8 Deliverables
+
+- [ ] `docs/reference/architecture.md` updated with `SkyConfig`,
+      `Map::is_outdoor`, and `Map::sky`.
+- [ ] SDK outdoor toggle clears stale sky config when turned off.
+- [ ] `apply_metadata` and `save_to_ron` enforce indoor maps having `sky: None`.
+- [ ] Phase 1 and Phase 3 round-trip tests assert every `SkyConfig` field.
+- [ ] Indoor maps spawn no sun/star entities.
+- [ ] Sun rendering uses flat discs/billboards instead of spheres.
+- [ ] Dawn/Dusk opacity transitions are implemented and tested.
+- [ ] Cloud layer uses a reusable procedural noise texture.
+- [ ] All new/updated public items have `///` doc comments and doctests where
+      practical.
+- [ ] `docs/explanation/implementations.md` documents the hardening work.
+
+#### 6.9 Success Criteria
+
+- Saving an indoor map from the SDK never writes a `sky:` key, even if stale
+  metadata previously contained a custom sky.
+- Direct calls to `MapEditorState::save_to_ron` cannot accidentally serialize
+  stale metadata.
+- Dawn and Dusk show both suns and stars with visibly reduced/faded opacity.
+- Outdoor suns render as sky discs/billboards, not 3D spheres.
+- Cloud quads use a generated noise texture tinted by `cloud_color`.
+- Architecture Section 4.2 matches the real `Map` and `SkyConfig` definitions.
+- All four quality gates pass with zero warnings and zero test failures.
+
+---
+
 ## Cross-Cutting Concerns
 
 ### Backward Compatibility
@@ -612,20 +802,24 @@ reference `campaigns/tutorial`. At least one map in the test campaign gets a
 | `src/domain/world/types.rs`              | Add `SkyConfig` struct; add `is_outdoor` and `sky` to `Map`                                                     |
 | `src/domain/world/mod.rs`                | Export `SkyConfig`                                                                                              |
 | `src/game/systems/sky.rs`                | New: `SkyPlugin`, `update_sky_background`, `sky_color_for_time`, `update_sky_body_visibility`, `animate_clouds` |
-| `src/game/systems/mod.rs`                | Add `pub mod sky`                                                                                               |
+| `src/game/systems/sky_bodies.rs`         | Add/finish `SkyBodyPlugin`, sun/star spawning, Dawn/Dusk opacity transitions, and cloud noise texture support   |
+| `src/game/systems/mod.rs`                | Add `pub mod sky` and `pub mod sky_bodies`                                                                      |
 | `src/game/components/sky.rs`             | New: `SunMarker`, `StarFieldMarker`, `CloudLayerMarker`                                                         |
 | `src/game/components/mod.rs`             | Add `pub mod sky`                                                                                               |
 | `src/bin/antares.rs`                     | Register `SkyPlugin` and `SkyBodyPlugin`                                                                        |
-| `sdk/campaign_builder/src/map_editor.rs` | Add `sky_config` to `MapMetadata`; wire load/save; add sky UI; fix `classify_map_environment`                   |
+| `sdk/campaign_builder/src/map_editor.rs` | Add `sky_config` to `MapMetadata`; wire hardened load/save; add sky UI; fix `classify_map_environment`          |
+| `docs/reference/architecture.md`         | Synchronise `Map` and `SkyConfig` architecture definitions with implementation                                  |
 | `data/test_campaign/data/maps/map_*.ron` | Add `is_outdoor` and `sky` to at least one map                                                                  |
 
 ---
 
 ## Implementation Order
 
-Implement phases 1 through 5 in numerical order. Each phase depends on the
+Implement phases 1 through 6 in numerical order. Each phase depends on the
 previous one: the data model (Phase 1) must exist before anything else;
 the background sky color (Phase 2) must be live before SDK controls
 (Phase 3) are worth testing end-to-end; celestial bodies (Phase 4) require
-both the background and the authoring data to be in place; and clouds
-(Phase 5) are the highest-complexity rendering work and come last.
+both the background and the authoring data to be in place; clouds (Phase 5)
+add the highest-complexity rendering layer; and completion hardening (Phase 6)
+closes the known gaps, synchronises architecture documentation, and verifies
+that all prior phase contracts are fully satisfied.

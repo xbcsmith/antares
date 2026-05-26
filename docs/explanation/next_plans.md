@@ -191,6 +191,10 @@ Write a plan with a phased approach to add this support to the game engine and S
 
 [Sky System Implementation Plan](./sky_system_implementation_plan.md)
 
+## Landscape Category
+
+Need to add a `landscape` category to the importer and SDK so we can import meshes of Trees, Shrubs, Rocks, etc... Add support to the Map editor to place landscape meshes on maps. 
+
 ## BUGS
 
 ### Game Bugs
@@ -210,3 +214,5 @@ Can not select a Rest option of (1) (2) or (3) because it opens the 1,2, or 3 ch
 ### SDK Bugs
 
 Campaign Builder --> Monster Editor --> Edit save button at the bottom of the editor does not always Save the monster when it returns to the list
+
+Campaign Builder --> Importer --> Items and Furniture do not have category drop down like Creatures. Importing Furnture does not update the furniture.ron
