@@ -2,6 +2,28 @@
 
 ---
 
+## Landscape Category and Map Placement Implementation Plan (2026)
+
+**Goal:** Define a phased plan for adding a first-class `landscape` importer/SDK category, map-editor landscape placement support, and default tree/brush visual fixes using the existing tree mesh and texture assets.
+
+### Files Changed
+
+| Path                                                | Action                                                           |
+| --------------------------------------------------- | ---------------------------------------------------------------- |
+| `docs/explanation/landscape_implementation_plan.md` | Added phased landscape implementation and tree/brush repair plan |
+| `docs/explanation/next_plans.md`                    | Updated the landscape plan link to point at the Markdown file    |
+| `docs/explanation/implementations.md`               | Recorded this planning/documentation update                      |
+
+### What Was Added
+
+- Proposed a domain model for `LandscapeDefinition`, `LandscapePlacement`, `LandscapeCategory`, `LandscapeDatabase`, and `LandscapeMeshDatabase`.
+- Planned the architecture update needed before adding `Map.landscape_placements`.
+- Defined phases for tree/brush asset repair, domain loading and validation, runtime rendering, importer export support, SDK landscape editing, map placement, fixtures, tests, and documentation cleanup.
+- Captured SDK egui ID and multi-column layout requirements for the planned importer and map-editor work.
+- Reiterated that tests and fixtures must use `data/test_campaign` rather than `campaigns/tutorial`.
+
+---
+
 ## Campaign Builder Monster Editor — Reliable Edit Save (2026)
 
 **Goal:** Ensure the bottom **Save** button in the Monster Editor always commits
