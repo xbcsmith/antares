@@ -2,6 +2,83 @@
 
 ---
 
+## Sky System — Phase 3: SDK Map Editor Integration (2026)
+
+**Goal:** Expose `is_outdoor` and `SkyConfig` in the SDK Map Editor's
+Metadata panel so campaign authors can configure sky settings visually and
+have them persisted to map RON files.
+
+### What Was Built
+
+All changes are in `sdk/campaign_builder/src/map_editor.rs`.
+
+#### `MapMetadata` struct
+
+Added `pub sky_config: Option<SkyConfig>` field (default `None`). The
+field gates the entire sky-settings UI section.
+
+#### `MapEditorState::new` (load path)
+
+Now copies both `map.is_outdoor` and `map.sky` into `metadata.is_outdoor`
+and `metadata.sky_config` on construction, so existing maps open with their
+correct sky state in the editor.
+
+#### `apply_metadata` (save path)
+
+Now writes `map.is_outdoor = metadata.is_outdoor` and
+`map.sky = metadata.sky_config.clone()` back to the `Map` struct before
+serialisation. Previously `is_outdoor` was never persisted to the RON file;
+that gap is now closed.
+
+#### `show_metadata_editor` UI
+
+Immediately after the "Outdoor Map" checkbox, a `CollapsingHeader`
+`"\u2601 Sky Settings"` (hidden when `is_outdoor = false`) exposes:
+
+- **Enable Custom Sky** checkbox — toggles `sky_config` between `None` and
+  `Some(SkyConfig::default())`.
+- When enabled, colour pickers (`color_edit_button_rgba_unmultiplied`) for
+  Day Sky, Dusk/Dawn Sky, Night Sky, Sun Color, and Cloud Color.
+- `DragValue` widgets for Sun Count (0–8) and Star Count (0–10 000).
+- `Slider` widgets for Sun Size (0.1–5.0), Star Density, Cloud Coverage,
+  Cloud Density, and Cloud Speed (all 0.0–1.0 or 0.0–5.0).
+- Every widget sets `editor.has_changes = true` on change.
+
+#### `classify_map_environment` update
+
+The `is_outdoor` flag is now checked first (authoritative). If `true`,
+returns `("Outdoor", green)` immediately. The existing wall-density
+heuristic only runs for maps where `is_outdoor == false`; its old
+fallthrough path `("Outdoor", …)` is replaced with `("Indoor", …)` so
+the heuristic never produces an "Outdoor" label for a map the author
+intended as indoor.
+
+#### `SkyConfig` import
+
+Added to the `antares::domain::world::{\u2026}` import block.
+
+### Tests Added (5 new, all in `map_editor::tests`)
+
+| Test                                                 | What it verifies                                                        |
+| ---------------------------------------------------- | ----------------------------------------------------------------------- |
+| `test_map_metadata_is_outdoor_writes_to_map_ron`     | `apply_metadata` propagates `is_outdoor` and it survives RON round-trip |
+| `test_map_metadata_sky_config_round_trip`            | `SkyConfig` fields survive `apply_metadata` + RON round-trip            |
+| `test_map_metadata_sky_config_none_not_written`      | `sky:` key absent from RON when `sky_config` is `None`                  |
+| `test_classify_map_environment_uses_is_outdoor_flag` | `is_outdoor=true` overrides wall-density heuristic → `"Outdoor"`        |
+| `test_metadata_sky_section_only_shown_when_outdoor`  | `MapEditorState::new` mirrors `is_outdoor=false` / `sky=None` from map  |
+
+### Quality Gates
+
+```text
+cargo fmt     → clean
+cargo check   → 0 errors
+cargo clippy  → 0 warnings
+cargo nextest (antares)          → 5101 passed, 8 skipped, 0 failed
+cargo nextest (campaign_builder) → 2493 passed, 0 skipped, 0 failed
+```
+
+---
+
 ## Sky System — Phase 2: Sky Background Rendering Engine (2026)
 
 **Goal:** Replace the static grey Bevy `ClearColor` with a live, per-map sky

@@ -49,8 +49,8 @@ use antares::domain::types::{Direction, EventId, ItemId, MapId, MonsterId, Posit
 use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
 use antares::domain::world::{
     FurnitureMaterial, FurnitureType, GrassBladeConfig, GrassDensity, LayeredSprite, Map, MapEvent,
-    RockVariant, SpriteLayer, SpriteReference, TerrainType, Tile, TileVisualMetadata, TreeType,
-    WallType, WaterFlowDirection,
+    RockVariant, SkyConfig, SpriteLayer, SpriteReference, TerrainType, Tile, TileVisualMetadata,
+    TreeType, WallType, WaterFlowDirection,
 };
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
@@ -286,6 +286,9 @@ pub struct MapMetadata {
     pub difficulty: u8,
     /// Is this an outdoor map?
     pub is_outdoor: bool,
+    /// Per-map sky configuration.  Only relevant when `is_outdoor` is `true`.
+    /// `None` means the game engine uses default sky colours.
+    pub sky_config: Option<SkyConfig>,
     /// Connected map IDs and transition positions
     pub connections: Vec<MapConnection>,
     /// Light level (0-100, where 0 is pitch black)
@@ -305,6 +308,7 @@ impl Default for MapMetadata {
             description: String::new(),
             difficulty: 1,
             is_outdoor: false,
+            sky_config: None,
             connections: Vec::new(),
             light_level: 100,
             music_track: String::new(),
@@ -1529,6 +1533,8 @@ impl MapEditorState {
         let metadata = MapMetadata {
             name: map.name.clone(),
             description: map.description.clone(),
+            is_outdoor: map.is_outdoor,
+            sky_config: map.sky.clone(),
             tile_visual_metadata: if visual_overrides.is_empty() {
                 None
             } else {
@@ -1862,11 +1868,14 @@ impl MapEditorState {
 
     /// Apply the metadata fields back into the map struct
     ///
-    /// Ensures metadata set via the editor (e.g., `metadata.name`) are copied into the
-    /// underlying map before saving/export.
+    /// Ensures metadata set via the editor (e.g., `metadata.name`,
+    /// `metadata.is_outdoor`) are copied into the underlying map before
+    /// saving/export.
     pub fn apply_metadata(&mut self) {
         self.map.name = self.metadata.name.clone();
         self.map.description = self.metadata.description.clone();
+        self.map.is_outdoor = self.metadata.is_outdoor;
+        self.map.sky = self.metadata.sky_config.clone();
     }
 
     /// Load visual metadata into the editor from the currently selected position,
@@ -5387,6 +5396,167 @@ impl MapsEditorState {
                 editor.has_changes = true;
             }
 
+            // ===== Sky Settings (outdoor maps only) =====
+            if editor.metadata.is_outdoor {
+                ui.add_space(4.0);
+                egui::CollapsingHeader::new("☁ Sky Settings")
+                    .id_salt("sky_settings_header")
+                    .show(ui, |ui| {
+                        let sky_enabled = editor.metadata.sky_config.is_some();
+                        let mut enabled = sky_enabled;
+                        if ui.checkbox(&mut enabled, "Enable Custom Sky").changed() {
+                            if enabled {
+                                editor.metadata.sky_config = Some(SkyConfig::default());
+                            } else {
+                                editor.metadata.sky_config = None;
+                            }
+                            editor.has_changes = true;
+                        }
+
+                        if let Some(ref mut cfg) = editor.metadata.sky_config {
+                            ui.add_space(4.0);
+                            ui.label(egui::RichText::new("Sky Colours").strong());
+
+                            ui.horizontal(|ui| {
+                                ui.label("Day Sky:");
+                                if ui
+                                    .color_edit_button_rgba_unmultiplied(&mut cfg.day_sky_color)
+                                    .changed()
+                                {
+                                    editor.has_changes = true;
+                                }
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Dusk/Dawn Sky:");
+                                if ui
+                                    .color_edit_button_rgba_unmultiplied(
+                                        &mut cfg.dusk_dawn_sky_color,
+                                    )
+                                    .changed()
+                                {
+                                    editor.has_changes = true;
+                                }
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Night Sky:");
+                                if ui
+                                    .color_edit_button_rgba_unmultiplied(&mut cfg.night_sky_color)
+                                    .changed()
+                                {
+                                    editor.has_changes = true;
+                                }
+                            });
+
+                            ui.add_space(4.0);
+                            ui.label(egui::RichText::new("Sun").strong());
+
+                            ui.horizontal(|ui| {
+                                ui.label("Sun Count:");
+                                if ui
+                                    .add(egui::DragValue::new(&mut cfg.sun_count).range(0..=8u8))
+                                    .changed()
+                                {
+                                    editor.has_changes = true;
+                                }
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Sun Color:");
+                                if ui
+                                    .color_edit_button_rgba_unmultiplied(&mut cfg.sun_color)
+                                    .changed()
+                                {
+                                    editor.has_changes = true;
+                                }
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Sun Size:");
+                                if ui
+                                    .add(egui::Slider::new(&mut cfg.sun_size, 0.1f32..=5.0f32))
+                                    .changed()
+                                {
+                                    editor.has_changes = true;
+                                }
+                            });
+
+                            ui.add_space(4.0);
+                            ui.label(egui::RichText::new("Stars").strong());
+
+                            ui.horizontal(|ui| {
+                                ui.label("Star Count:");
+                                if ui
+                                    .add(
+                                        egui::DragValue::new(&mut cfg.star_count)
+                                            .range(0..=10000u32),
+                                    )
+                                    .changed()
+                                {
+                                    editor.has_changes = true;
+                                }
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Star Density:");
+                                if ui
+                                    .add(egui::Slider::new(&mut cfg.star_density, 0.0f32..=1.0f32))
+                                    .changed()
+                                {
+                                    editor.has_changes = true;
+                                }
+                            });
+
+                            ui.add_space(4.0);
+                            ui.label(egui::RichText::new("Clouds").strong());
+
+                            ui.horizontal(|ui| {
+                                ui.label("Cloud Coverage:");
+                                if ui
+                                    .add(egui::Slider::new(
+                                        &mut cfg.cloud_coverage,
+                                        0.0f32..=1.0f32,
+                                    ))
+                                    .changed()
+                                {
+                                    editor.has_changes = true;
+                                }
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Cloud Color:");
+                                if ui
+                                    .color_edit_button_rgba_unmultiplied(&mut cfg.cloud_color)
+                                    .changed()
+                                {
+                                    editor.has_changes = true;
+                                }
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Cloud Density:");
+                                if ui
+                                    .add(egui::Slider::new(&mut cfg.cloud_density, 0.0f32..=1.0f32))
+                                    .changed()
+                                {
+                                    editor.has_changes = true;
+                                }
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.label("Cloud Speed:");
+                                if ui
+                                    .add(egui::Slider::new(&mut cfg.cloud_speed, 0.0f32..=5.0f32))
+                                    .changed()
+                                {
+                                    editor.has_changes = true;
+                                }
+                            });
+                        }
+                    });
+            }
+
             // ===== Random Encounter Table Editor =====
             ui.separator();
             ui.heading("⚔️ Random Encounter Table");
@@ -7652,9 +7822,24 @@ impl MapsEditorState {
     }
 }
 
+/// Classifies a map's environment for display in the map list.
+///
+/// When [`Map::is_outdoor`] is explicitly set, that flag is authoritative.
+/// Otherwise, falls back to a wall-density heuristic to distinguish indoor
+/// from dungeon maps.
 fn classify_map_environment(map: &Map) -> (&'static str, Color32) {
+    // Authoritative flag: if the author marked the map outdoor, trust it.
+    if map.is_outdoor {
+        return ("Outdoor", Color32::from_rgb(50, 200, 50));
+    }
+
+    // Not outdoor — use heuristics to distinguish town (indoor) from dungeon.
     let total_tiles = map.tiles.len();
     if total_tiles == 0 {
+        return ("Indoor", Color32::from_rgb(139, 69, 19));
+    }
+
+    if !map.allow_random_encounters {
         return ("Indoor", Color32::from_rgb(139, 69, 19));
     }
 
@@ -7665,15 +7850,11 @@ fn classify_map_environment(map: &Map) -> (&'static str, Color32) {
         .count();
     let wall_ratio = wall_tiles as f32 / total_tiles as f32;
 
-    if !map.allow_random_encounters {
-        return ("Indoor", Color32::from_rgb(139, 69, 19));
-    }
-
     if wall_ratio > 0.20 {
         return ("Dungeon", Color32::from_rgb(100, 100, 100));
     }
 
-    ("Outdoor", Color32::from_rgb(50, 200, 50))
+    ("Indoor", Color32::from_rgb(139, 69, 19))
 }
 
 #[cfg(test)]
@@ -12041,6 +12222,115 @@ mod tests {
             editor.selected_tiles,
             vec![Position::new(2, 2)],
             "only in-bounds selected tiles must survive a shrink"
+        );
+    }
+
+    #[test]
+    fn test_map_metadata_is_outdoor_writes_to_map_ron() {
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 5, 5);
+        let mut state = MapEditorState::new(map);
+
+        // Set is_outdoor in metadata and propagate to the map.
+        state.metadata.is_outdoor = true;
+        state.apply_metadata();
+
+        assert!(
+            state.map.is_outdoor,
+            "map.is_outdoor must be true after apply_metadata"
+        );
+
+        // Round-trip through RON.
+        let ron_str = state.save_to_ron().unwrap();
+        let loaded: Map = ron::from_str(&ron_str).expect("RON must round-trip");
+        assert!(
+            loaded.is_outdoor,
+            "is_outdoor must survive RON serialisation"
+        );
+    }
+
+    #[test]
+    fn test_map_metadata_sky_config_round_trip() {
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 5, 5);
+        let mut state = MapEditorState::new(map);
+
+        let sky = SkyConfig {
+            sun_count: 2,
+            star_count: 1000,
+            ..SkyConfig::default()
+        };
+        state.metadata.is_outdoor = true;
+        state.metadata.sky_config = Some(sky);
+        state.apply_metadata();
+
+        assert!(
+            state.map.sky.is_some(),
+            "map.sky must be Some after apply_metadata"
+        );
+
+        let ron_str = state.save_to_ron().unwrap();
+        let loaded: Map = ron::from_str(&ron_str).expect("RON must round-trip");
+        let loaded_sky = loaded.sky.expect("sky must survive RON serialisation");
+        assert_eq!(loaded_sky.sun_count, 2);
+        assert_eq!(loaded_sky.star_count, 1000);
+    }
+
+    #[test]
+    fn test_map_metadata_sky_config_none_not_written() {
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 5, 5);
+        let mut state = MapEditorState::new(map);
+
+        // Ensure sky_config is None (default).
+        state.metadata.sky_config = None;
+        state.apply_metadata();
+
+        let ron_str = state.save_to_ron().unwrap();
+        // The serde skip_serializing_if annotation means the key is absent.
+        assert!(
+            !ron_str.contains("sky:"),
+            "sky key must not appear in RON when sky_config is None; got: {ron_str}"
+        );
+    }
+
+    #[test]
+    fn test_classify_map_environment_uses_is_outdoor_flag() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 5, 5);
+        // Fill every tile with a wall — normally classified as "Dungeon".
+        for tile in map.tiles.iter_mut() {
+            tile.wall_type = WallType::Normal;
+        }
+        map.allow_random_encounters = true;
+
+        // Without the flag the heuristic would return "Dungeon".
+        let (label, _) = classify_map_environment(&map);
+        assert_eq!(
+            label, "Dungeon",
+            "sanity: wall-heavy map without flag is Dungeon"
+        );
+
+        // Setting is_outdoor overrides the heuristic.
+        map.is_outdoor = true;
+        let (label, _) = classify_map_environment(&map);
+        assert_eq!(
+            label, "Outdoor",
+            "is_outdoor=true must produce 'Outdoor' regardless of wall ratio"
+        );
+    }
+
+    #[test]
+    fn test_metadata_sky_section_only_shown_when_outdoor() {
+        // A map with is_outdoor=false and no sky config: metadata should reflect that.
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 5, 5);
+        assert!(!map.is_outdoor);
+        assert!(map.sky.is_none());
+
+        let state = MapEditorState::new(map);
+        assert!(
+            !state.metadata.is_outdoor,
+            "metadata.is_outdoor must mirror map.is_outdoor on load"
+        );
+        assert!(
+            state.metadata.sky_config.is_none(),
+            "metadata.sky_config must be None for indoor maps"
         );
     }
 }
