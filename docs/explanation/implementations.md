@@ -2,6 +2,42 @@
 
 ---
 
+## Campaign Builder Importer — Item/Furniture Category and Furniture RON Fix (2026)
+
+**Goal:** Make the Importer tab consistent across creature, item, and furniture
+exports, and ensure furniture imports update campaign furniture definitions.
+
+### Files Changed
+
+| Path                                          | Action                                                              |
+| --------------------------------------------- | ------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/obj_importer_ui.rs` | Added item/furniture category dropdowns and export metadata upserts |
+| `sdk/campaign_builder/src/lib.rs`             | Reloaded item mesh/furniture state after importer export signals    |
+| `docs/explanation/implementations.md`         | Recorded this importer bug fix                                      |
+
+### What Changed
+
+- Replaced free-text category entry for item and furniture importer exports
+  with `ComboBox::from_id_salt` dropdowns.
+- Item exports now upsert `data/item_mesh_registry.ron` so newly imported item
+  mesh assets are registered for runtime/editor loading.
+- Furniture exports now upsert both `data/furniture_mesh_registry.ron` and
+  `data/furniture.ron`, creating or updating a `FurnitureDefinition` that
+  references the imported mesh ID.
+- After item exports, the Item Mesh editor registry is reloaded from the open
+  campaign so the new asset appears immediately.
+- After furniture exports, furniture definitions are reloaded and the UI returns
+  to the Furniture tab with the imported definition available.
+
+### Tests Added
+
+- `test_export_item_updates_item_mesh_registry`
+- `test_export_furniture_updates_registry_and_furniture_file`
+- `test_export_furniture_upserts_existing_definition_by_mesh_id`
+- `test_item_and_furniture_category_helpers_map_dropdown_values`
+
+---
+
 ## Sky System — Phase 6 Completion and Compliance Hardening (2026)
 
 **Goal:** Finish the remaining Phase 6 work from the sky system plan: harden SDK

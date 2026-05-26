@@ -1384,10 +1384,17 @@ impl eframe::App for CampaignBuilderApp {
                             ui.ctx().request_repaint();
                         }
                         obj_importer_ui::ObjImporterUiSignal::Item => {
+                            let importer_status = self.obj_importer_state.status_message.clone();
+                            if let Some(ref dir) = self.campaign_dir.clone() {
+                                self.item_mesh_editor_state.load_from_campaign(dir);
+                            }
+                            self.ui_state.status_message = importer_status;
                             ui.ctx().request_repaint();
                         }
                         obj_importer_ui::ObjImporterUiSignal::Furniture => {
-                            self.ui_state.status_message = self.obj_importer_state.status_message.clone();
+                            let importer_status = self.obj_importer_state.status_message.clone();
+                            self.load_furniture();
+                            self.ui_state.status_message = importer_status;
                             self.ui_state.active_tab = EditorTab::Furniture;
                             ui.ctx().request_repaint();
                         }
