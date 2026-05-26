@@ -2,6 +2,30 @@
 
 ---
 
+## Landscape Phase 1 Tree and Brush Asset Baseline (2026)
+
+**Goal:** Fix the default tree/brush asset baseline so tutorial and test campaign landscape assets use valid campaign-relative texture paths, real mesh payloads, reliable diagnostics, and imported defaults where practical while preserving procedural vegetation fallback.
+
+### Files Changed
+
+| Area                | Action                                                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Mesh/data assets    | Repaired foliage mesh alpha modes, copied full tree/brush mesh RON files into `data/test_campaign`, and completed tree textures |
+| Runtime rendering   | Preferred imported default landscape definitions for Oak, Pine, Dead, Palm, and Shrub terrain vegetation when meshes exist      |
+| Procedural fallback | Documented the explicit texture-free foliage fallback decision and retained bark texture loading                                |
+| Validation/tests    | Added texture-path diagnostic coverage and fixture-integrity tests for the Phase 1 landscape mesh registry                      |
+| Documentation       | Recorded the Phase 1 asset-baseline update                                                                                      |
+
+### What Changed
+
+- The five Phase 1 mesh RON assets now use campaign-relative `assets/textures/trees/...` texture paths with foliage materials using alpha masking.
+- `data/test_campaign` now contains full matching copies of the five tree/brush mesh RON assets plus the complete tree texture set, including Birch and Willow foliage textures used by procedural diagnostics.
+- Terrain-tied `TreeType::Oak`, `Pine`, `Dead`, `Palm`, and `Shrub` visuals try matching imported landscape definitions first and fall back to procedural trees/brush if definitions or meshes are missing. Birch and Willow intentionally remain procedural because Phase 1 has no imported defaults for them.
+- Runtime landscape material creation warns when a mesh texture path does not start with `assets/`, and campaign validation reports the landscape mesh name, ID, mesh part, texture path, and campaign root for texture failures.
+- Procedural fallback tree docs now match behavior: bark uses `bark.png`; foliage uses generated geometry and opaque species colours instead of the old round alpha-mask textures.
+
+---
+
 ## Landscape Phase 0 Architecture Alignment (2026)
 
 **Goal:** Complete the landscape Phase 0 architecture and scope alignment so later work has approved names, module placement, identifier allocation rules, database responsibilities, and a clear mesh-reuse decision.

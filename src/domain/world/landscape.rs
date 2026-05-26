@@ -638,12 +638,13 @@ impl LandscapeMeshDatabase {
         for creature in self.inner.all_creatures() {
             for mesh in &creature.meshes {
                 if let Some(texture_path) = &mesh.texture_path {
+                    let mesh_name = mesh.name.as_deref().unwrap_or("<unnamed>");
                     if !texture_path.starts_with("assets/") {
                         return Err(CreatureDatabaseError::ValidationError(
                             creature.id,
                             format!(
-                                "Landscape mesh texture path '{}' must start with 'assets/'",
-                                texture_path
+                                "Landscape mesh '{}' (ID {}, part '{}') texture path '{}' must start with 'assets/'",
+                                creature.name, creature.id, mesh_name, texture_path
                             ),
                         ));
                     }
@@ -654,7 +655,10 @@ impl LandscapeMeshDatabase {
                             return Err(CreatureDatabaseError::ValidationError(
                                 creature.id,
                                 format!(
-                                    "Landscape mesh texture '{}' does not exist under campaign root '{}'",
+                                    "Landscape mesh '{}' (ID {}, part '{}') texture '{}' does not exist under campaign root '{}'",
+                                    creature.name,
+                                    creature.id,
+                                    mesh_name,
                                     texture_path,
                                     root.display()
                                 ),
@@ -672,6 +676,12 @@ impl LandscapeMeshDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::visual::{
+        AlphaMode, CreatureDefinition, CreatureReference, MaterialDefinition, MeshDefinition,
+        MeshTransform,
+    };
+    use std::fs;
+    use tempfile::TempDir;
 
     fn make_definition(id: LandscapeId, name: &str) -> LandscapeDefinition {
         LandscapeDefinition {
@@ -686,6 +696,62 @@ mod tests {
             mesh_id: None,
             description: None,
         }
+    }
+
+    fn write_mesh_registry_fixture(
+        root: &std::path::Path,
+        texture_path: &str,
+    ) -> std::path::PathBuf {
+        let mesh_dir = root.join("assets/meshes/landscape");
+        fs::create_dir_all(&mesh_dir).unwrap();
+        let data_dir = root.join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        let mesh = MeshDefinition {
+            name: Some("leaf_card".to_string()),
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: Some(vec![[0.0, 0.0, 1.0]; 3]),
+            uvs: Some(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]),
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: Some(MaterialDefinition {
+                base_color: [1.0, 1.0, 1.0, 1.0],
+                metallic: 0.0,
+                roughness: 0.8,
+                emissive: None,
+                alpha_mode: AlphaMode::Mask,
+            }),
+            texture_path: Some(texture_path.to_string()),
+        };
+        let creature = CreatureDefinition {
+            id: 11042,
+            name: "Fixture Landscape Mesh".to_string(),
+            meshes: vec![mesh],
+            mesh_transforms: vec![MeshTransform::identity()],
+            scale: 1.0,
+            color_tint: None,
+        };
+        let mesh_path = mesh_dir.join("fixture.ron");
+        fs::write(
+            &mesh_path,
+            ron::ser::to_string_pretty(&creature, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        let registry = vec![CreatureReference {
+            id: 11042,
+            name: "Fixture Landscape Mesh".to_string(),
+            filepath: "assets/meshes/landscape/fixture.ron".to_string(),
+        }];
+        let registry_path = data_dir.join("landscape_mesh_registry.ron");
+        fs::write(
+            &registry_path,
+            ron::ser::to_string_pretty(&registry, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+        registry_path
     }
 
     #[test]
@@ -829,5 +895,102 @@ mod tests {
             db.validate_placements(&placements, 10, 10),
             Err(LandscapeDatabaseError::PlacementOutOfBounds { .. })
         ));
+    }
+
+    #[test]
+    fn test_validate_texture_paths_rejects_non_assets_prefix_with_context() {
+        let temp = TempDir::new().unwrap();
+        let registry_path = write_mesh_registry_fixture(temp.path(), "textures/trees/leaf.png");
+        let db = LandscapeMeshDatabase::load_from_registry(&registry_path, temp.path()).unwrap();
+
+        let error = db.validate_texture_paths(None).unwrap_err().to_string();
+
+        assert!(error.contains("Fixture Landscape Mesh"));
+        assert!(error.contains("leaf_card"));
+        assert!(error.contains("textures/trees/leaf.png"));
+        assert!(error.contains("assets/"));
+    }
+
+    #[test]
+    fn test_validate_texture_paths_reports_missing_texture_with_context() {
+        let temp = TempDir::new().unwrap();
+        let registry_path =
+            write_mesh_registry_fixture(temp.path(), "assets/textures/trees/missing.png");
+        let db = LandscapeMeshDatabase::load_from_registry(&registry_path, temp.path()).unwrap();
+
+        let error = db
+            .validate_texture_paths(Some(temp.path()))
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("Fixture Landscape Mesh"));
+        assert!(error.contains("leaf_card"));
+        assert!(error.contains("assets/textures/trees/missing.png"));
+        assert!(error.contains(&temp.path().display().to_string()));
+    }
+
+    #[test]
+    fn test_validate_texture_paths_accepts_valid_assets_texture() {
+        let temp = TempDir::new().unwrap();
+        let texture_path = temp.path().join("assets/textures/trees/leaf.png");
+        fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
+        fs::write(&texture_path, b"fake png bytes").unwrap();
+        let registry_path =
+            write_mesh_registry_fixture(temp.path(), "assets/textures/trees/leaf.png");
+        let db = LandscapeMeshDatabase::load_from_registry(&registry_path, temp.path()).unwrap();
+
+        db.validate_texture_paths(Some(temp.path())).unwrap();
+    }
+
+    #[test]
+    fn test_test_campaign_phase1_landscape_mesh_fixture_integrity() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data/test_campaign");
+        let registry_path = root.join("data/landscape_mesh_registry.ron");
+        let db = LandscapeMeshDatabase::load_from_registry(&registry_path, &root).unwrap();
+
+        assert_eq!(db.count(), 5);
+        db.validate_texture_paths(Some(&root)).unwrap();
+
+        let mut mesh_count = 0;
+        for creature in db.as_creature_database().all_creatures() {
+            assert!(
+                !creature.meshes.is_empty(),
+                "{} has no meshes",
+                creature.name
+            );
+            for mesh in &creature.meshes {
+                mesh_count += 1;
+                assert!(
+                    !mesh.vertices.is_empty(),
+                    "{} has no vertices",
+                    creature.name
+                );
+                assert!(!mesh.indices.is_empty(), "{} has no indices", creature.name);
+                if let Some(normals) = &mesh.normals {
+                    assert_eq!(normals.len(), mesh.vertices.len());
+                }
+                if let Some(uvs) = &mesh.uvs {
+                    assert_eq!(uvs.len(), mesh.vertices.len());
+                }
+                assert!(mesh.material.is_some(), "{} has no material", creature.name);
+                let texture_path = mesh
+                    .texture_path
+                    .as_deref()
+                    .expect("landscape fixture texture");
+                assert!(texture_path.starts_with("assets/"));
+                assert!(
+                    root.join(texture_path).exists(),
+                    "missing texture {texture_path}"
+                );
+                if texture_path.contains("foliage_") {
+                    assert_eq!(
+                        mesh.material.as_ref().unwrap().alpha_mode,
+                        AlphaMode::Mask,
+                        "foliage texture {texture_path} should use alpha masking"
+                    );
+                }
+            }
+        }
+        assert!(mesh_count >= 5);
     }
 }

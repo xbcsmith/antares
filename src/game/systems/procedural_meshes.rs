@@ -4,7 +4,10 @@
 //! Procedural mesh generation for environmental objects and static event markers
 //!
 //! This module provides pure Rust functions to spawn composite 3D meshes using
-//! Bevy primitives (Cylinder, Sphere, Cuboid). No external assets required.
+//! Bevy primitives (Cylinder, Sphere, Cuboid). Tree trunk fallback materials use
+//! the campaign bark texture when available, while procedural foliage fallback
+//! uses generated silhouettes with species-specific material colours instead of
+//! the legacy round alpha-mask foliage textures.
 //!
 //! Character rendering (NPCs, Monsters, Recruitables) uses the sprite system.
 
@@ -303,9 +306,11 @@ impl ProceduralMeshCache {
 
     /// Gets or creates the bark `StandardMaterial` handle.
     ///
-    /// The bark material uses the bark texture loaded via the asset server and
-    /// is tinted with [`TREE_TRUNK_COLOR`].  The handle is cached so that all
-    /// tree trunks on a map share the same material asset.
+    /// The bark material uses `assets/textures/trees/bark.png` loaded via the
+    /// asset server. Its base colour remains white so the texture stays the
+    /// primary colour source; species and tile tints are applied only by
+    /// texture-free variant material paths. The handle is cached so all tree
+    /// trunks on a map share the same material asset.
     ///
     /// # Arguments
     ///
@@ -349,14 +354,17 @@ impl ProceduralMeshCache {
 
     /// Gets or creates the foliage `StandardMaterial` handle for `tree_type`.
     ///
-    /// Each `TreeType` variant gets its own alpha-masked foliage material that
-    /// references the appropriate foliage texture.  `double_sided` and
-    /// `cull_mode: None` ensure the quad is visible from both sides.
+    /// Each `TreeType` variant gets its own texture-free foliage material.
+    /// Generated foliage geometry supplies the silhouette, so the fallback path
+    /// intentionally avoids the old circular alpha-mask textures and uses
+    /// species-specific opaque colours instead. `double_sided` and
+    /// `cull_mode: None` ensure generated leaves and fronds are visible from
+    /// both sides.
     ///
     /// # Arguments
     ///
-    /// * `tree_type` - Determines which foliage texture to load
-    /// * `asset_server` - Asset server used to load the foliage texture
+    /// * `tree_type` - Determines the species colour and diagnostic texture path
+    /// * `asset_server` - Retained for API compatibility with texture-backed paths
     /// * `materials` - Mutable reference to the material asset storage
     ///
     /// # Returns
@@ -935,17 +943,17 @@ const TREE_TRUNK_COLOR: Color = Color::srgb(0.4, 0.25, 0.15); // Brown
 // Tree texture asset paths
 /// Asset path for the bark texture applied to all non-Dead tree trunks.
 const TREE_BARK_TEXTURE: &str = "assets/textures/trees/bark.png";
-/// Asset path for the Oak foliage alpha-mask texture.
+/// Legacy/diagnostic asset path for the Oak foliage texture.
 const TREE_FOLIAGE_TEXTURE_OAK: &str = "assets/textures/trees/foliage_oak.png";
-/// Asset path for the Pine foliage alpha-mask texture.
+/// Legacy/diagnostic asset path for the Pine foliage texture.
 const TREE_FOLIAGE_TEXTURE_PINE: &str = "assets/textures/trees/foliage_pine.png";
-/// Asset path for the Birch foliage alpha-mask texture.
+/// Legacy/diagnostic asset path for the Birch foliage texture.
 const TREE_FOLIAGE_TEXTURE_BIRCH: &str = "assets/textures/trees/foliage_birch.png";
-/// Asset path for the Willow foliage alpha-mask texture.
+/// Legacy/diagnostic asset path for the Willow foliage texture.
 const TREE_FOLIAGE_TEXTURE_WILLOW: &str = "assets/textures/trees/foliage_willow.png";
-/// Asset path for the Palm foliage alpha-mask texture.
+/// Legacy/diagnostic asset path for the Palm foliage texture.
 const TREE_FOLIAGE_TEXTURE_PALM: &str = "assets/textures/trees/foliage_palm.png";
-/// Asset path for the Shrub foliage alpha-mask texture.
+/// Legacy/diagnostic asset path for the Shrub foliage texture.
 const TREE_FOLIAGE_TEXTURE_SHRUB: &str = "assets/textures/trees/foliage_shrub.png";
 /// Alpha cutoff previously used for texture alpha masks.
 #[cfg(test)]
@@ -1076,11 +1084,13 @@ fn brighten_tree_color_for_dim_scene(color: Color, minimum_channel: f32) -> Colo
     )
 }
 
-/// Returns the asset path for the foliage texture of the given tree type.
+/// Returns the legacy/diagnostic foliage texture path for the given tree type.
 ///
-/// Used by [`ProceduralMeshCache::get_or_create_foliage_material`] to select
-/// the correct texture.  `Dead` trees have zero foliage density so their path
-/// is never loaded in practice, but we fall back to Oak for safety.
+/// Procedural fallback foliage currently uses generated geometry plus opaque
+/// species material colours, not these alpha-mask textures. The paths remain in
+/// code so diagnostics, fixture completeness checks, and future texture-backed
+/// rendering can refer to the same canonical asset names. `Dead` trees have
+/// zero foliage density, so their path is diagnostic only and falls back to Oak.
 fn foliage_texture_path(tree_type: TreeType) -> &'static str {
     match tree_type {
         TreeType::Oak => TREE_FOLIAGE_TEXTURE_OAK,

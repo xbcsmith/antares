@@ -45439,7 +45439,7 @@
                 emissive: None,
                 alpha_mode: Opaque,
             )),
-            texture_path: Some("assets/textures/trees/bark.png")),
+            texture_path: Some("assets/textures/trees/bark.png"),
         ),
     ],
     mesh_transforms: [

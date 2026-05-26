@@ -56177,9 +56177,9 @@
                 metallic: 0.0,
                 roughness: 0.8,
                 emissive: None,
-                alpha_mode: Opaque,
+                alpha_mode: Mask,
             )),
-            texture_path: Some("assets/textures/trees/foliage_palm.png")),
+            texture_path: Some("assets/textures/trees/foliage_palm.png"),
         ),
     ],
     mesh_transforms: [

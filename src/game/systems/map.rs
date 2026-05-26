@@ -19,7 +19,7 @@ use crate::game::systems::creature_meshes::{
 use crate::game::systems::creature_spawning::spawn_creature;
 use crate::game::systems::furniture_rendering::resolve_furniture_fields;
 use crate::game::systems::ui::{GameLogEvent, LogCategory};
-use crate::game::systems::{procedural_meshes, vegetation_placement};
+use crate::game::systems::{advanced_trees, procedural_meshes, vegetation_placement};
 
 const DEFAULT_NPC_SPRITE_PATH: &str = "sprites/placeholders/npc_placeholder.png";
 use bevy::prelude::*;
@@ -66,6 +66,80 @@ fn vegetation_anchor_tile_offset(
     anchor.center - vegetation_placement::tile_center(position)
 }
 
+fn rendered_tree_type_from_domain(tree_type: world::TreeType) -> advanced_trees::TreeType {
+    match tree_type {
+        world::TreeType::Oak => advanced_trees::TreeType::Oak,
+        world::TreeType::Pine => advanced_trees::TreeType::Pine,
+        world::TreeType::Birch => advanced_trees::TreeType::Birch,
+        world::TreeType::Willow => advanced_trees::TreeType::Willow,
+        world::TreeType::Dead => advanced_trees::TreeType::Dead,
+        world::TreeType::Shrub => advanced_trees::TreeType::Shrub,
+        world::TreeType::Palm => advanced_trees::TreeType::Palm,
+    }
+}
+
+fn default_landscape_definition_for_tree_type(
+    tree_type: world::TreeType,
+    landscape: &world::LandscapeDatabase,
+) -> Option<&world::LandscapeDefinition> {
+    let keywords: &[&str] = match tree_type {
+        world::TreeType::Oak => &["oak"],
+        world::TreeType::Pine => &["pine"],
+        world::TreeType::Dead => &["dead"],
+        world::TreeType::Palm => &["palm"],
+        world::TreeType::Shrub => &["brush", "shrub"],
+        world::TreeType::Birch | world::TreeType::Willow => return None,
+    };
+
+    let mut candidates: Vec<_> = landscape
+        .all_definitions()
+        .into_iter()
+        .filter(|definition| definition.mesh_id.is_some())
+        .filter(|definition| match tree_type {
+            world::TreeType::Shrub => matches!(
+                definition.category,
+                world::LandscapeCategory::Shrub | world::LandscapeCategory::Brush
+            ),
+            _ => definition.category == world::LandscapeCategory::Tree,
+        })
+        .filter(|definition| landscape_definition_matches_any_keyword(definition, keywords))
+        .collect();
+
+    candidates.sort_by_key(|definition| definition.id);
+    candidates.first().copied()
+}
+
+fn landscape_definition_matches_any_keyword(
+    definition: &world::LandscapeDefinition,
+    keywords: &[&str],
+) -> bool {
+    let name = definition.name.to_lowercase();
+    keywords.iter().any(|keyword| name.contains(keyword))
+        || definition.tags.iter().any(|tag| {
+            let tag = tag.to_lowercase();
+            keywords.iter().any(|keyword| tag.contains(keyword))
+        })
+}
+
+fn landscape_placement_from_vegetation_anchor(
+    landscape_id: types::LandscapeId,
+    position: types::Position,
+    anchor: vegetation_placement::VegetationAnchor,
+    metadata: &world::TileVisualMetadata,
+) -> world::LandscapePlacement {
+    let offset = vegetation_anchor_tile_offset(anchor, position);
+    world::LandscapePlacement {
+        landscape_id,
+        position,
+        offset: Some([offset.x, offset.y]),
+        y_offset: Some(anchor.y_offset),
+        rotation_y: Some(anchor.rotation_y_radians.to_degrees()),
+        scale: metadata.scale,
+        color_tint: metadata.color_tint.map(|(r, g, b)| [r, g, b]),
+        blocking: None,
+    }
+}
+
 /// Plugin that renders the current map using Bevy meshes/materials.
 ///
 /// Note: The visual rendering plugin remains focused on rendering. The map
@@ -90,8 +164,9 @@ pub struct LandscapeEntity {
     pub landscape_id: types::LandscapeId,
     /// Optional imported landscape mesh ID used for this entity.
     pub mesh_id: Option<types::LandscapeMeshId>,
-    /// Index of the placement in `Map.landscape_placements`.
-    pub placement_index: usize,
+    /// Index of the placement in `Map.landscape_placements`, or `None` for
+    /// terrain-derived default landscape meshes.
+    pub placement_index: Option<usize>,
 }
 
 /// Component tagging an entity as an NPC visual marker
@@ -866,7 +941,7 @@ fn spawn_landscape_placements(
                     materials,
                     asset_server,
                     map.id,
-                    placement_index,
+                    Some(placement_index),
                     placement,
                     definition,
                     mesh_id,
@@ -886,7 +961,7 @@ fn spawn_landscape_placements(
             meshes,
             materials,
             map.id,
-            placement_index,
+            Some(placement_index),
             placement,
             definition,
         );
@@ -900,7 +975,7 @@ fn spawn_imported_landscape_mesh(
     materials: &mut Assets<StandardMaterial>,
     asset_server: &AssetServer,
     map_id: types::MapId,
-    placement_index: usize,
+    placement_index: Option<usize>,
     placement: &world::LandscapePlacement,
     definition: &world::LandscapeDefinition,
     mesh_id: types::LandscapeMeshId,
@@ -968,7 +1043,7 @@ fn spawn_fallback_landscape_marker(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     map_id: types::MapId,
-    placement_index: usize,
+    placement_index: Option<usize>,
     placement: &world::LandscapePlacement,
     definition: &world::LandscapeDefinition,
 ) -> Entity {
@@ -1035,20 +1110,78 @@ fn landscape_root_transform(
     .with_scale(Vec3::splat(scale))
 }
 
+#[allow(clippy::too_many_arguments)]
+fn try_spawn_imported_default_tree_landscape(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    asset_server: &AssetServer,
+    map_id: types::MapId,
+    position: types::Position,
+    metadata: &world::TileVisualMetadata,
+    anchor: vegetation_placement::VegetationAnchor,
+    tree_type: world::TreeType,
+    landscape: &world::LandscapeDatabase,
+    landscape_meshes: &world::LandscapeMeshDatabase,
+) -> bool {
+    let Some(definition) = default_landscape_definition_for_tree_type(tree_type, landscape) else {
+        return false;
+    };
+
+    let Some(mesh_id) = definition.mesh_id else {
+        return false;
+    };
+
+    let Some(mesh_def) = landscape_meshes.get_mesh(mesh_id) else {
+        debug!(
+            landscape_id = definition.id,
+            mesh_id,
+            tree_type = ?tree_type,
+            "Default landscape definition references a missing mesh; falling back to procedural vegetation"
+        );
+        return false;
+    };
+
+    let placement =
+        landscape_placement_from_vegetation_anchor(definition.id, position, anchor, metadata);
+    spawn_imported_landscape_mesh(
+        commands,
+        meshes,
+        materials,
+        asset_server,
+        map_id,
+        None,
+        &placement,
+        definition,
+        mesh_id,
+        mesh_def,
+    );
+    true
+}
+
 fn landscape_material(
     mesh_def: &crate::domain::visual::MeshDefinition,
     tint: Option<[f32; 3]>,
     asset_server: &AssetServer,
 ) -> StandardMaterial {
-    let mut material = if let Some(texture_path) = mesh_def
-        .texture_path
-        .as_deref()
-        .filter(|path| path.starts_with("assets/"))
-    {
-        create_material_with_texture(
-            crate::game::systems::creature_meshes::load_texture(asset_server, texture_path),
-            mesh_def.material.as_ref(),
-        )
+    let mut material = if let Some(texture_path) = mesh_def.texture_path.as_deref() {
+        if texture_path.starts_with("assets/") {
+            create_material_with_texture(
+                crate::game::systems::creature_meshes::load_texture(asset_server, texture_path),
+                mesh_def.material.as_ref(),
+            )
+        } else {
+            warn!(
+                mesh_name = mesh_def.name.as_deref().unwrap_or("<unnamed>"),
+                texture_path,
+                "Landscape mesh texture path must start with 'assets/'; using material/color fallback"
+            );
+            if let Some(material_def) = &mesh_def.material {
+                material_definition_to_bevy(material_def)
+            } else {
+                create_material_from_color(mesh_def.color)
+            }
+        }
     } else if let Some(material_def) = &mesh_def.material {
         material_definition_to_bevy(material_def)
     } else {
@@ -1253,38 +1386,61 @@ fn spawn_map(
                             // Spawn tree/shrub if specified in metadata, or default for Forest.
                             // The vegetation plan supplies deterministic offsets and exclusion
                             // footprints so trunks, shrubs, and grass do not all stack at tile center.
+                            // Imported Phase 1 landscape defaults are preferred when the active
+                            // campaign defines matching landscape meshes; procedural trees remain
+                            // the fallback for missing definitions, missing meshes, Birch, and Willow.
                             let tree_type = tile.visual.tree_type;
                             if should_spawn_procedural_vegetation {
                                 if let Some(t) = tree_type {
-                                    // Explicitly map domain TreeType to rendered TreeType to resolve ambiguity
-                                    let rendered_t = match t {
-                                        crate::domain::world::TreeType::Oak => {
-                                            crate::game::systems::advanced_trees::TreeType::Oak
-                                        }
-                                        crate::domain::world::TreeType::Pine => {
-                                            crate::game::systems::advanced_trees::TreeType::Pine
-                                        }
-                                        crate::domain::world::TreeType::Birch => {
-                                            crate::game::systems::advanced_trees::TreeType::Birch
-                                        }
-                                        crate::domain::world::TreeType::Willow => {
-                                            crate::game::systems::advanced_trees::TreeType::Willow
-                                        }
-                                        crate::domain::world::TreeType::Dead => {
-                                            crate::game::systems::advanced_trees::TreeType::Dead
-                                        }
-                                        crate::domain::world::TreeType::Shrub => {
-                                            crate::game::systems::advanced_trees::TreeType::Shrub
-                                        }
-                                        crate::domain::world::TreeType::Palm => {
-                                            crate::game::systems::advanced_trees::TreeType::Palm
-                                        }
-                                    };
+                                    let rendered_t = rendered_tree_type_from_domain(t);
 
-                                    if rendered_t
-                                        == crate::game::systems::advanced_trees::TreeType::Shrub
-                                    {
+                                    if rendered_t == advanced_trees::TreeType::Shrub {
                                         for shrub_anchor in &vegetation_plan.shrub_anchors {
+                                            if !try_spawn_imported_default_tree_landscape(
+                                                &mut commands,
+                                                meshes.as_mut(),
+                                                materials.as_mut(),
+                                                &asset_server,
+                                                map.id,
+                                                pos,
+                                                &tile.visual,
+                                                *shrub_anchor,
+                                                t,
+                                                &content.0.landscape,
+                                                &content.0.landscape_meshes,
+                                            ) {
+                                                let mut ctx = procedural_meshes::MeshSpawnContext {
+                                                    commands: &mut commands,
+                                                    materials: &mut materials,
+                                                    meshes: &mut meshes,
+                                                    cache: procedural_cache,
+                                                };
+                                                procedural_meshes::spawn_tree_with_offset_with_quality(
+                                                    &mut ctx,
+                                                    &asset_server,
+                                                    pos,
+                                                    map.id,
+                                                    Some(&tile.visual),
+                                                    Some(advanced_trees::TreeType::Shrub),
+                                                    vegetation_anchor_tile_offset(*shrub_anchor, pos),
+                                                    &vegetation_quality,
+                                                );
+                                            }
+                                        }
+                                    } else if let Some(tree_anchor) = vegetation_plan.tree_anchor {
+                                        if !try_spawn_imported_default_tree_landscape(
+                                            &mut commands,
+                                            meshes.as_mut(),
+                                            materials.as_mut(),
+                                            &asset_server,
+                                            map.id,
+                                            pos,
+                                            &tile.visual,
+                                            tree_anchor,
+                                            t,
+                                            &content.0.landscape,
+                                            &content.0.landscape_meshes,
+                                        ) {
                                             let mut ctx = procedural_meshes::MeshSpawnContext {
                                                 commands: &mut commands,
                                                 materials: &mut materials,
@@ -1297,48 +1453,45 @@ fn spawn_map(
                                                 pos,
                                                 map.id,
                                                 Some(&tile.visual),
-                                                Some(crate::game::systems::advanced_trees::TreeType::Shrub),
-                                                vegetation_anchor_tile_offset(*shrub_anchor, pos),
+                                                Some(rendered_t),
+                                                vegetation_anchor_tile_offset(tree_anchor, pos),
                                                 &vegetation_quality,
                                             );
                                         }
-                                    } else if let Some(tree_anchor) = vegetation_plan.tree_anchor {
-                                        let mut ctx = procedural_meshes::MeshSpawnContext {
-                                            commands: &mut commands,
-                                            materials: &mut materials,
-                                            meshes: &mut meshes,
-                                            cache: procedural_cache,
-                                        };
-                                        procedural_meshes::spawn_tree_with_offset_with_quality(
-                                            &mut ctx,
-                                            &asset_server,
-                                            pos,
-                                            map.id,
-                                            Some(&tile.visual),
-                                            Some(rendered_t),
-                                            vegetation_anchor_tile_offset(tree_anchor, pos),
-                                            &vegetation_quality,
-                                        );
                                     }
                                 } else if is_forest {
                                     // Default tree for Forest terrain with no explicit tree type.
                                     if let Some(tree_anchor) = vegetation_plan.tree_anchor {
-                                        let mut ctx = procedural_meshes::MeshSpawnContext {
-                                            commands: &mut commands,
-                                            materials: &mut materials,
-                                            meshes: &mut meshes,
-                                            cache: procedural_cache,
-                                        };
-                                        procedural_meshes::spawn_tree_with_offset_with_quality(
-                                            &mut ctx,
+                                        if !try_spawn_imported_default_tree_landscape(
+                                            &mut commands,
+                                            meshes.as_mut(),
+                                            materials.as_mut(),
                                             &asset_server,
-                                            pos,
                                             map.id,
-                                            Some(&tile.visual),
-                                            None, // Use default tree type
-                                            vegetation_anchor_tile_offset(tree_anchor, pos),
-                                            &vegetation_quality,
-                                        );
+                                            pos,
+                                            &tile.visual,
+                                            tree_anchor,
+                                            world::TreeType::Oak,
+                                            &content.0.landscape,
+                                            &content.0.landscape_meshes,
+                                        ) {
+                                            let mut ctx = procedural_meshes::MeshSpawnContext {
+                                                commands: &mut commands,
+                                                materials: &mut materials,
+                                                meshes: &mut meshes,
+                                                cache: procedural_cache,
+                                            };
+                                            procedural_meshes::spawn_tree_with_offset_with_quality(
+                                                &mut ctx,
+                                                &asset_server,
+                                                pos,
+                                                map.id,
+                                                Some(&tile.visual),
+                                                None, // Use default tree type
+                                                vegetation_anchor_tile_offset(tree_anchor, pos),
+                                                &vegetation_quality,
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -1351,22 +1504,36 @@ fn spawn_map(
                                 && tree_type != Some(world::TreeType::Shrub)
                             {
                                 for shrub_anchor in &vegetation_plan.shrub_anchors {
-                                    let mut ctx = procedural_meshes::MeshSpawnContext {
-                                        commands: &mut commands,
-                                        materials: &mut materials,
-                                        meshes: &mut meshes,
-                                        cache: procedural_cache,
-                                    };
-                                    procedural_meshes::spawn_tree_with_offset_with_quality(
-                                        &mut ctx,
+                                    if !try_spawn_imported_default_tree_landscape(
+                                        &mut commands,
+                                        meshes.as_mut(),
+                                        materials.as_mut(),
                                         &asset_server,
-                                        pos,
                                         map.id,
-                                        Some(&tile.visual),
-                                        Some(crate::game::systems::advanced_trees::TreeType::Shrub),
-                                        vegetation_anchor_tile_offset(*shrub_anchor, pos),
-                                        &vegetation_quality,
-                                    );
+                                        pos,
+                                        &tile.visual,
+                                        *shrub_anchor,
+                                        world::TreeType::Shrub,
+                                        &content.0.landscape,
+                                        &content.0.landscape_meshes,
+                                    ) {
+                                        let mut ctx = procedural_meshes::MeshSpawnContext {
+                                            commands: &mut commands,
+                                            materials: &mut materials,
+                                            meshes: &mut meshes,
+                                            cache: procedural_cache,
+                                        };
+                                        procedural_meshes::spawn_tree_with_offset_with_quality(
+                                            &mut ctx,
+                                            &asset_server,
+                                            pos,
+                                            map.id,
+                                            Some(&tile.visual),
+                                            Some(advanced_trees::TreeType::Shrub),
+                                            vegetation_anchor_tile_offset(*shrub_anchor, pos),
+                                            &vegetation_quality,
+                                        );
+                                    }
                                 }
                             }
 
@@ -2395,6 +2562,186 @@ mod tests {
                 "terrain {terrain:?} should not spawn procedural grass cover"
             );
         }
+    }
+
+    fn make_landscape_definition(
+        id: types::LandscapeId,
+        name: &str,
+        category: world::LandscapeCategory,
+        mesh_id: Option<types::LandscapeMeshId>,
+        tags: &[&str],
+    ) -> world::LandscapeDefinition {
+        world::LandscapeDefinition {
+            id,
+            name: name.to_string(),
+            category,
+            default_scale: 1.0,
+            color_tint: None,
+            flags: world::LandscapeFlags::default(),
+            icon: None,
+            tags: tags.iter().map(|tag| (*tag).to_string()).collect(),
+            mesh_id,
+            description: None,
+        }
+    }
+
+    #[test]
+    fn test_default_landscape_definition_for_tree_type_maps_phase1_defaults() {
+        let mut db = world::LandscapeDatabase::new();
+        db.add(make_landscape_definition(
+            1,
+            "Oak Tree Short",
+            world::LandscapeCategory::Tree,
+            Some(11001),
+            &["oak", "tree"],
+        ))
+        .unwrap();
+        db.add(make_landscape_definition(
+            2,
+            "Pine Tree",
+            world::LandscapeCategory::Tree,
+            Some(11002),
+            &["pine", "tree"],
+        ))
+        .unwrap();
+        db.add(make_landscape_definition(
+            3,
+            "Dead Tree",
+            world::LandscapeCategory::Tree,
+            Some(11003),
+            &["dead", "tree"],
+        ))
+        .unwrap();
+        db.add(make_landscape_definition(
+            4,
+            "Palm Tree",
+            world::LandscapeCategory::Tree,
+            Some(11004),
+            &["palm", "tree"],
+        ))
+        .unwrap();
+        db.add(make_landscape_definition(
+            5,
+            "Brush Shrub",
+            world::LandscapeCategory::Brush,
+            Some(11005),
+            &["brush", "shrub"],
+        ))
+        .unwrap();
+
+        assert_eq!(
+            default_landscape_definition_for_tree_type(world::TreeType::Oak, &db)
+                .map(|definition| definition.id),
+            Some(1)
+        );
+        assert_eq!(
+            default_landscape_definition_for_tree_type(world::TreeType::Pine, &db)
+                .map(|definition| definition.id),
+            Some(2)
+        );
+        assert_eq!(
+            default_landscape_definition_for_tree_type(world::TreeType::Dead, &db)
+                .map(|definition| definition.id),
+            Some(3)
+        );
+        assert_eq!(
+            default_landscape_definition_for_tree_type(world::TreeType::Palm, &db)
+                .map(|definition| definition.id),
+            Some(4)
+        );
+        assert_eq!(
+            default_landscape_definition_for_tree_type(world::TreeType::Shrub, &db)
+                .map(|definition| definition.id),
+            Some(5)
+        );
+    }
+
+    #[test]
+    fn test_default_landscape_definition_leaves_birch_and_willow_procedural() {
+        let mut db = world::LandscapeDatabase::new();
+        db.add(make_landscape_definition(
+            1,
+            "Oak Tree Short",
+            world::LandscapeCategory::Tree,
+            Some(11001),
+            &["oak"],
+        ))
+        .unwrap();
+
+        assert!(default_landscape_definition_for_tree_type(world::TreeType::Birch, &db).is_none());
+        assert!(default_landscape_definition_for_tree_type(world::TreeType::Willow, &db).is_none());
+    }
+
+    #[test]
+    fn test_default_landscape_definition_requires_mesh_id() {
+        let mut db = world::LandscapeDatabase::new();
+        db.add(make_landscape_definition(
+            1,
+            "Oak Tree Short",
+            world::LandscapeCategory::Tree,
+            None,
+            &["oak"],
+        ))
+        .unwrap();
+
+        assert!(default_landscape_definition_for_tree_type(world::TreeType::Oak, &db).is_none());
+    }
+
+    #[test]
+    fn test_default_landscape_definition_chooses_lowest_id() {
+        let mut db = world::LandscapeDatabase::new();
+        db.add(make_landscape_definition(
+            10,
+            "Oak Tree Variant B",
+            world::LandscapeCategory::Tree,
+            Some(11010),
+            &["oak"],
+        ))
+        .unwrap();
+        db.add(make_landscape_definition(
+            2,
+            "Oak Tree Variant A",
+            world::LandscapeCategory::Tree,
+            Some(11002),
+            &["oak"],
+        ))
+        .unwrap();
+
+        assert_eq!(
+            default_landscape_definition_for_tree_type(world::TreeType::Oak, &db)
+                .map(|definition| definition.id),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn test_landscape_placement_from_vegetation_anchor_preserves_transform_metadata() {
+        let position = Position::new(2, 3);
+        let metadata = world::TileVisualMetadata {
+            scale: Some(1.25),
+            color_tint: Some((0.8, 0.9, 1.0)),
+            ..Default::default()
+        };
+        let anchor = vegetation_placement::VegetationAnchor::new(
+            vegetation_placement::VegetationKind::Tree,
+            vegetation_placement::tile_center(position) + Vec2::new(0.2, -0.3),
+            0.25,
+            0.25,
+            0.15,
+            std::f32::consts::FRAC_PI_2,
+        );
+
+        let placement = landscape_placement_from_vegetation_anchor(1, position, anchor, &metadata);
+
+        assert_eq!(placement.landscape_id, 1);
+        assert_eq!(placement.position, position);
+        let [offset_x, offset_z] = placement.offset.unwrap();
+        assert!((offset_x - 0.2).abs() < 0.001);
+        assert!((offset_z + 0.3).abs() < 0.001);
+        assert_eq!(placement.y_offset, Some(0.15));
+        assert_eq!(placement.scale, Some(1.25));
+        assert_eq!(placement.color_tint, Some([0.8, 0.9, 1.0]));
+        assert!((placement.rotation_y.unwrap() - 90.0).abs() < 0.001);
     }
 
     #[test]
