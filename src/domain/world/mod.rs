@@ -18,6 +18,7 @@
 //! - `sprite_selection`: Procedural sprite selection
 //! - `dropped_items`: Domain record for items lying on the ground ([`DroppedItem`])
 //! - `furniture`: Data-driven furniture definitions ([`FurnitureDefinition`], [`FurnitureDatabase`])
+//! - `landscape`: Data-driven landscape definitions and map placements
 //! - `lock`: Lock state domain types and unlock functions ([`LockState`], [`try_unlock`], etc.)
 
 pub mod blueprint;
@@ -25,6 +26,7 @@ pub mod creature_binding;
 pub mod dropped_items;
 mod events;
 pub mod furniture;
+pub mod landscape;
 pub mod lock;
 mod movement;
 pub mod npc;
@@ -38,6 +40,10 @@ pub use dropped_items::DroppedItem;
 pub use events::{random_encounter, trigger_event, EventError, EventResult, UnlockMethod};
 pub use furniture::{
     FurnitureDatabase, FurnitureDatabaseError, FurnitureDefinition, FurnitureMeshDatabase,
+};
+pub use landscape::{
+    LandscapeCategory, LandscapeDatabase, LandscapeDatabaseError, LandscapeDefinition,
+    LandscapeFlags, LandscapeMeshDatabase, LandscapePlacement,
 };
 pub use lock::{
     try_bash, try_lockpick, try_unlock, LockState, UnlockOutcome, BASH_TRAP_INCREMENT,

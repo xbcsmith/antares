@@ -134,6 +134,7 @@ pub struct CampaignMetadataEditBuffer {
     pub creatures_file: String,
     pub stock_templates_file: String,
     pub furniture_file: String,
+    pub landscape_file: String,
     pub levels_file: String,
 }
 
@@ -184,6 +185,7 @@ impl CampaignMetadataEditBuffer {
             creatures_file: m.creatures_file.clone(),
             stock_templates_file: m.stock_templates_file.clone(),
             furniture_file: m.furniture_file.clone(),
+            landscape_file: m.landscape_file.clone(),
             levels_file: m.levels_file.clone(),
         }
     }
@@ -235,6 +237,7 @@ impl CampaignMetadataEditBuffer {
         dest.creatures_file = self.creatures_file.clone();
         dest.stock_templates_file = self.stock_templates_file.clone();
         dest.furniture_file = self.furniture_file.clone();
+        dest.landscape_file = self.landscape_file.clone();
         dest.levels_file = self.levels_file.clone();
     }
 }
@@ -1080,6 +1083,30 @@ impl CampaignMetadataEditorState {
                                                 .pick_file()
                                             {
                                                 self.buffer.furniture_file =
+                                                    p.display().to_string();
+                                                self.has_unsaved_changes = true;
+                                                *ctx.unsaved_changes = true;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    // Landscape File
+                                    ui.label("Landscape File:");
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .text_edit_singleline(&mut self.buffer.landscape_file)
+                                            .changed()
+                                        {
+                                            self.has_unsaved_changes = true;
+                                            *ctx.unsaved_changes = true;
+                                        }
+                                        if ui.button("📁").on_hover_text("Browse").clicked() {
+                                            if let Some(p) = rfd::FileDialog::new()
+                                                .add_filter("RON", &["ron"])
+                                                .pick_file()
+                                            {
+                                                self.buffer.landscape_file =
                                                     p.display().to_string();
                                                 self.has_unsaved_changes = true;
                                                 *ctx.unsaved_changes = true;

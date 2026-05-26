@@ -2732,6 +2732,14 @@ pub struct Map {
     #[serde(default)]
     pub npc_placements: Vec<crate::domain::world::npc::NpcPlacement>,
 
+    /// Authored static landscape decorations on this map.
+    ///
+    /// Landscape placements are separate from terrain visual metadata so that
+    /// multiple trees, shrubs, rocks, and other decorative props may share one
+    /// tile without overloading terrain or event data.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub landscape_placements: Vec<crate::domain::world::landscape::LandscapePlacement>,
+
     /// Items lying on the ground on this map.
     ///
     /// Each entry represents an item that has been dropped at runtime by a
@@ -2824,6 +2832,7 @@ impl Map {
             encounter_table: None,
             allow_random_encounters: default_allow_random_encounters(),
             npc_placements: Vec::new(),
+            landscape_placements: Vec::new(),
             dropped_items: Vec::new(),
             lock_states: HashMap::new(),
             is_outdoor: false,
@@ -3333,6 +3342,85 @@ impl Map {
                 && p.position.x < new_width as i32
                 && p.position.y < new_height as i32
         });
+
+        // Remove landscape placements outside the new bounds.
+        self.landscape_placements.retain(|p| {
+            p.position.x >= 0
+                && p.position.y >= 0
+                && p.position.x < new_width as i32
+                && p.position.y < new_height as i32
+        });
+    }
+}
+
+#[cfg(test)]
+mod map_landscape_placement_tests {
+    use super::*;
+    use crate::domain::world::landscape::LandscapePlacement;
+
+    #[test]
+    fn test_map_new_has_no_landscape_placements() {
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 2, 2);
+        assert!(map.landscape_placements.is_empty());
+    }
+
+    #[test]
+    fn test_map_deserializes_without_landscape_placements() {
+        let ron = r#"(
+            id: 1,
+            width: 1,
+            height: 1,
+            name: "Old Map",
+            description: "No landscape field",
+            tiles: [
+                (
+                    terrain: Ground,
+                    wall_type: None,
+                    blocked: false,
+                    is_special: false,
+                    is_dark: false,
+                    visited: false,
+                    x: 0,
+                    y: 0,
+                ),
+            ],
+        )"#;
+
+        let map: Map = ron::from_str(ron).unwrap();
+        assert!(map.landscape_placements.is_empty());
+    }
+
+    #[test]
+    fn test_map_landscape_placements_roundtrip() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 3, 3);
+        map.landscape_placements.push(LandscapePlacement {
+            landscape_id: 1,
+            position: Position::new(1, 2),
+            offset: Some([0.1, -0.2]),
+            y_offset: Some(0.05),
+            rotation_y: Some(90.0),
+            scale: Some(1.25),
+            color_tint: Some([0.8, 1.0, 0.9]),
+            blocking: Some(false),
+        });
+
+        let ron = ron::ser::to_string_pretty(&map, ron::ser::PrettyConfig::default()).unwrap();
+        let roundtrip: Map = ron::from_str(&ron).unwrap();
+        assert_eq!(roundtrip.landscape_placements, map.landscape_placements);
+    }
+
+    #[test]
+    fn test_resize_shrink_removes_out_of_bounds_landscape_placements() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.landscape_placements
+            .push(LandscapePlacement::new(1, Position::new(2, 2)));
+        map.landscape_placements
+            .push(LandscapePlacement::new(2, Position::new(8, 8)));
+
+        map.resize(5, 5);
+
+        assert_eq!(map.landscape_placements.len(), 1);
+        assert_eq!(map.landscape_placements[0].landscape_id, 1);
     }
 }
 

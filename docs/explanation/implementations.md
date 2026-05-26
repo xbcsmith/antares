@@ -2,6 +2,53 @@
 
 ---
 
+## Landscape Phase 0 Architecture Alignment (2026)
+
+**Goal:** Complete the landscape Phase 0 architecture and scope alignment so later work has approved names, module placement, identifier allocation rules, database responsibilities, and a clear mesh-reuse decision.
+
+### Files Changed
+
+| Path                                  | Action                                                                                                       |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `docs/reference/architecture.md`      | Documented landscape identifiers, database types, mesh registry design, placement semantics, and scope split |
+| `src/domain/types.rs`                 | Added explicit landscape ID allocation constants and clarified alias ranges                                  |
+| `docs/explanation/implementations.md` | Recorded this Phase 0 alignment update                                                                       |
+
+### What Changed
+
+- `LandscapeId` is documented as a campaign-local `u32` allocated from `1..=u32::MAX`, with `0` reserved.
+- `LandscapeMeshId` is documented as an imported mesh registry `u32` allocated by SDK/importer workflows from `11000..=u32::MAX`.
+- Architecture Section 4.2 now documents `LandscapeDatabase`, `LandscapeMeshDatabase`, `Map.landscape_placements`, placement transform semantics, and migration-safe empty placement behavior.
+- The mesh decision is explicit: landscape meshes reuse the existing `CreatureDefinition` / `MeshDefinition` RON format through a `LandscapeMeshDatabase` wrapper rather than introducing a separate `LandscapeMeshDefinition` in this phase.
+- The furniture-vs-landscape boundary is documented so interactable gameplay objects remain furniture while static ambient scenery is landscape.
+
+---
+
+## Landscape Category, Importer, Runtime, and Map Placement (2026)
+
+**Goal:** Implement the landscape plan end-to-end: first-class landscape domain data, campaign loading, imported tree/brush asset repair, runtime map spawning, importer export support, SDK landscape browsing, and map-editor placement.
+
+### Files Changed
+
+| Area                | Action                                                                                                                                                         |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Architecture/domain | Added `LandscapeId`, `LandscapeMeshId`, `LandscapeCategory`, `LandscapeDefinition`, `LandscapePlacement`, landscape databases, and `Map.landscape_placements`  |
+| Runtime             | Added `LandscapeEntity` and map-spawn support for imported landscape mesh placements with texture-aware materials and fallback markers                         |
+| Data/fixtures       | Added tutorial and `data/test_campaign` landscape definitions, mesh registries, fixture mesh assets, and copied tree textures into the test fixture            |
+| Importer/SDK        | Added `ExportType::Landscape`, landscape registry/definition upserts, landscape texture export paths, a Landscape tab, and map-editor `PlaceLandscape` support |
+| Tests/docs          | Added domain, loader, importer, and map-editor tests and updated implementation documentation                                                                  |
+
+### What Changed
+
+- Landscape definitions and imported landscape mesh registries now load from `data/landscape.ron` and `data/landscape_mesh_registry.ron`.
+- Maps serialize a migration-safe `landscape_placements` vector that allows multiple static props per tile.
+- Runtime map spawning renders placed imported landscape meshes using the same mesh format as creature/furniture assets, including `assets/` texture paths.
+- The OBJ/GLB importer can export Landscape assets, upsert both landscape RON files, and copy textures under `assets/textures/landscape/`.
+- The Campaign Builder has a Landscape tab and the Map editor can select a landscape definition, place it on tiles, and rotate/duplicate/delete placements with undo/redo.
+- Default tree and brush RON texture paths were repaired and tutorial/test campaign landscape data was seeded.
+
+---
+
 ## Landscape Category and Map Placement Implementation Plan (2026)
 
 **Goal:** Define a phased plan for adding a first-class `landscape` importer/SDK category, map-editor landscape placement support, and default tree/brush visual fixes using the existing tree mesh and texture assets.

@@ -241,6 +241,40 @@ pub enum GameMode {
 
 #### 4.2 World
 
+Landscape data is a first-class world concept for static environmental decoration.
+`LandscapeDefinition` entries are reusable campaign assets for trees, shrubs,
+brush, rocks, ground cover, ruins, and similar non-interactable props.
+`LandscapePlacement` entries live directly on a `Map` so multiple decorative
+props can share one tile without overloading `TileVisualMetadata` or
+`MapEvent`.
+
+Furniture remains the domain for interactable or structure-like content:
+chests, doors, chairs, tables, torches, containers, and authored objects that
+participate in gameplay, inspection, or object interaction. Landscape remains
+static environmental decoration, usually outdoor, usually non-interactable, and
+often placed many times per map: trees, shrubs, brush, rocks, grass clumps,
+ground cover, and decorative ruin fragments. If an object is a door, container,
+seat, inspectable structure, or gameplay object, model it as furniture; if it is
+ambient scenery, model it as landscape.
+
+Landscape definitions and placements live in `src/domain/world/landscape.rs`
+and are re-exported from `src/domain/world/mod.rs`. `LandscapeId` identifies
+campaign-local reusable definitions loaded from `data/landscape.ron`; authored
+IDs are allocated from `1..=u32::MAX`, with `0` reserved as an unassigned or
+invalid sentinel. `LandscapeMeshId` identifies imported landscape mesh registry
+entries loaded from `data/landscape_mesh_registry.ron`; SDK/importer-created
+mesh IDs are allocated from `11000..=u32::MAX` so they remain distinct from
+creature and furniture visual IDs.
+
+Landscape mesh assets intentionally reuse the existing creature-style
+`CreatureDefinition` / `MeshDefinition` RON shape through a small
+`LandscapeMeshDatabase` domain wrapper. This phase does not introduce a
+separate `LandscapeMeshDefinition` type; the wrapper keeps landscape file paths,
+ID aliases, and validation separate while preserving the shared mesh conversion
+pipeline. If `mesh_id` is absent, runtime systems may use category markers or
+terrain-tied procedural fallback behavior. A persisted species-specific fallback
+field is intentionally not part of the current architecture.
+
 ```rust
 pub struct World {
     pub maps: BTreeMap<MapId, Map>,
@@ -264,6 +298,66 @@ pub struct SkyConfig {
     pub cloud_speed: f32,              // default: 1.0
 }
 
+pub enum LandscapeCategory {
+    Tree,
+    Shrub,
+    Brush,
+    Rock,
+    Grass,
+    GroundCover,
+    Ruin,
+    Custom,
+}
+
+pub struct LandscapeFlags {
+    pub blocking: bool,
+}
+
+pub struct LandscapeDefinition {
+    pub id: LandscapeId,
+    pub name: String,
+    pub category: LandscapeCategory,
+    pub default_scale: f32,
+    pub color_tint: Option<[f32; 3]>,
+    pub flags: LandscapeFlags,
+    pub icon: Option<String>,
+    pub tags: Vec<String>,
+    pub mesh_id: Option<LandscapeMeshId>,
+    pub description: Option<String>,
+}
+
+pub struct LandscapePlacement {
+    pub landscape_id: LandscapeId,
+    pub position: Position,
+    /// Optional X/Z sub-tile offset from tile center in world units.
+    pub offset: Option<[f32; 2]>,
+    /// Optional vertical offset from the ground plane.
+    pub y_offset: Option<f32>,
+    /// Optional Y-axis rotation in degrees.
+    pub rotation_y: Option<f32>,
+    /// Optional scale override; absent uses `LandscapeDefinition::default_scale`.
+    pub scale: Option<f32>,
+    /// Optional RGB tint override applied multiplicatively.
+    pub color_tint: Option<[f32; 3]>,
+    /// Optional blocking override; absent uses `LandscapeDefinition::flags`.
+    pub blocking: Option<bool>,
+}
+
+pub struct LandscapeDatabase {
+    /// Definitions loaded from `data/landscape.ron`, indexed by `LandscapeId`.
+    /// Validates duplicate IDs, definition-to-mesh references, and placement
+    /// references/bounds when campaign or map validation supplies map context.
+    items: HashMap<LandscapeId, LandscapeDefinition>,
+}
+
+pub struct LandscapeMeshDatabase {
+    /// Registry loaded from `data/landscape_mesh_registry.ron` using the shared
+    /// `CreatureDefinition` / `MeshDefinition` visual asset format.
+    /// Validates mesh data plus `assets/` texture paths relative to the active
+    /// campaign root when a campaign directory is available.
+    inner: CreatureDatabase,
+}
+
 pub struct Map {
     pub id: MapId,
     pub width: u32,
@@ -275,6 +369,9 @@ pub struct Map {
     pub encounter_table: Option<EncounterTable>,
     pub allow_random_encounters: bool,
     pub npc_placements: Vec<NpcPlacement>,
+    /// Authored static decoration placements. Missing map RON defaults to an
+    /// empty vector, and empty vectors are skipped during serialization.
+    pub landscape_placements: Vec<LandscapePlacement>,
     pub dropped_items: Vec<DroppedItem>,
     pub lock_states: HashMap<String, LockState>,
     /// Enables sky rendering and outdoor light behavior when true.
@@ -1100,6 +1197,8 @@ pub type SpellId = u16;      // High byte = school, low byte = spell number
 pub type MonsterId = u8;
 pub type MapId = u16;
 pub type CharacterId = usize;
+pub type LandscapeId = u32;      // Campaign-local reusable landscape definition ID; allocate 1..=u32::MAX, reserve 0
+pub type LandscapeMeshId = u32;  // Imported landscape mesh registry ID; SDK/importer allocation range 11000..=u32::MAX
 /// Innkeeper NPC identifier (references `NpcId` for NPCs that are marked as innkeepers)
 ///
 /// Semantics:

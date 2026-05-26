@@ -43,6 +43,7 @@ use crate::domain::races::{RaceDatabase, RaceError};
 use crate::domain::skills::SkillDatabase;
 use crate::domain::types::{MapId, MonsterId, SpellId};
 use crate::domain::world::furniture::FurnitureDatabase;
+use crate::domain::world::landscape::{LandscapeDatabase, LandscapeMeshDatabase};
 use crate::domain::world::{Map, MapBlueprint};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -92,6 +93,12 @@ pub enum DatabaseError {
 
     #[error("Failed to load furniture: {0}")]
     FurnitureLoadError(String),
+
+    #[error("Failed to load landscape: {0}")]
+    LandscapeLoadError(String),
+
+    #[error("Failed to load landscape meshes: {0}")]
+    LandscapeMeshLoadError(String),
 
     #[error("Failed to load skills: {0}")]
     SkillLoadError(String),
@@ -1086,6 +1093,18 @@ pub struct ContentDatabase {
     /// Missing file is not an error — furniture support is opt-in per campaign.
     pub furniture: FurnitureDatabase,
 
+    /// Landscape definition database — named, reusable static environment templates.
+    ///
+    /// Loaded from `data/landscape.ron` in the campaign directory.
+    /// Missing file is not an error — landscape support is opt-in per campaign.
+    pub landscape: LandscapeDatabase,
+
+    /// Landscape mesh database — imported landscape mesh registry.
+    ///
+    /// Loaded from `data/landscape_mesh_registry.ron` in the campaign directory.
+    /// Missing file is not an error.
+    pub landscape_meshes: LandscapeMeshDatabase,
+
     /// Skill definitions database.
     ///
     /// Loaded from `data/skills.ron` in the campaign directory.
@@ -1121,6 +1140,8 @@ impl ContentDatabase {
             npc_stock_templates:
                 crate::domain::world::npc_runtime::MerchantStockTemplateDatabase::new(),
             furniture: FurnitureDatabase::new(),
+            landscape: LandscapeDatabase::new(),
+            landscape_meshes: LandscapeMeshDatabase::new(),
             skills: SkillDatabase::new(),
         }
     }
@@ -1304,6 +1325,32 @@ impl ContentDatabase {
             FurnitureDatabase::new()
         };
 
+        // Load landscape definitions (opt-in per campaign; missing file is not an error)
+        let landscape = if data_dir.join("landscape.ron").exists() {
+            LandscapeDatabase::load_from_file(data_dir.join("landscape.ron"))
+                .map_err(|e| DatabaseError::LandscapeLoadError(e.to_string()))?
+        } else {
+            LandscapeDatabase::new()
+        };
+
+        // Load landscape mesh registry (opt-in per campaign; missing file is not an error)
+        let landscape_meshes = if data_dir.join("landscape_mesh_registry.ron").exists() {
+            let db = LandscapeMeshDatabase::load_from_registry(
+                &data_dir.join("landscape_mesh_registry.ron"),
+                campaign_path,
+            )
+            .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?;
+            db.validate_texture_paths(Some(campaign_path))
+                .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?;
+            db
+        } else {
+            LandscapeMeshDatabase::new()
+        };
+
+        landscape
+            .validate_mesh_references(&landscape_meshes)
+            .map_err(|e| DatabaseError::LandscapeLoadError(e.to_string()))?;
+
         // Load skill definitions (opt-in per campaign; missing file is not an error)
         let configured_skills_path = Path::new(skills_file);
         let skills_path = if configured_skills_path.is_absolute() {
@@ -1333,6 +1380,8 @@ impl ContentDatabase {
             npc_stock_templates,
             creatures,
             furniture,
+            landscape,
+            landscape_meshes,
             skills,
         })
     }
@@ -1470,6 +1519,31 @@ impl ContentDatabase {
             FurnitureDatabase::new()
         };
 
+        let landscape = if data_path.join("landscape.ron").exists() {
+            LandscapeDatabase::load_from_file(data_path.join("landscape.ron"))
+                .map_err(|e| DatabaseError::LandscapeLoadError(e.to_string()))?
+        } else {
+            LandscapeDatabase::new()
+        };
+
+        let landscape_meshes = if data_path.join("landscape_mesh_registry.ron").exists() {
+            let root_path = data_path.parent().unwrap_or(data_path);
+            let db = LandscapeMeshDatabase::load_from_registry(
+                &data_path.join("landscape_mesh_registry.ron"),
+                root_path,
+            )
+            .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?;
+            db.validate_texture_paths(Some(root_path))
+                .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?;
+            db
+        } else {
+            LandscapeMeshDatabase::new()
+        };
+
+        landscape
+            .validate_mesh_references(&landscape_meshes)
+            .map_err(|e| DatabaseError::LandscapeLoadError(e.to_string()))?;
+
         // Load skill definitions (opt-in; missing file is not an error)
         let skills = if data_path.join("skills.ron").exists() {
             SkillDatabase::load_from_file(data_path.join("skills.ron"))
@@ -1493,6 +1567,8 @@ impl ContentDatabase {
             npc_stock_templates,
             creatures,
             furniture,
+            landscape,
+            landscape_meshes,
             skills,
         })
     }

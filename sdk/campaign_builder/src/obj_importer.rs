@@ -37,7 +37,7 @@ use crate::mesh_obj_io::{
     ImportedObjMesh, ImportedObjMeshColorSource, ImportedObjMtlSourceKind, ImportedObjScene,
     ObjError, ObjImportOptions,
 };
-use antares::domain::types::{CreatureId, FurnitureMeshId};
+use antares::domain::types::{CreatureId, FurnitureMeshId, LandscapeMeshId};
 use antares::domain::visual::{AlphaMode, MeshDefinition};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -64,6 +64,8 @@ pub enum ExportType {
     Item,
     /// Export as a furniture mesh asset.
     Furniture,
+    /// Export as a static landscape mesh asset.
+    Landscape,
 }
 
 /// Records how the importer's current mesh color was chosen.
@@ -192,6 +194,8 @@ pub struct ObjImporterState {
     pub creature_id: CreatureId,
     /// Suggested next furniture mesh ID for export.
     pub furniture_id: FurnitureMeshId,
+    /// Suggested next landscape mesh ID for export.
+    pub landscape_mesh_id: LandscapeMeshId,
     /// Name entered by the user for the export.
     pub creature_name: String,
     /// Optional category subfolder used when exporting item or furniture meshes.
@@ -437,6 +441,7 @@ impl Default for ObjImporterState {
             export_type: ExportType::Creature,
             creature_id: 4000,
             furniture_id: 10001,
+            landscape_mesh_id: 11001,
             creature_name: String::new(),
             category: String::new(),
             scale: 0.01,
@@ -461,13 +466,14 @@ impl ObjImporterState {
     ///
     /// The following fields survive a clear and are restored into the new
     /// default state: `scale`, `custom_palette`, `creature_id`,
-    /// `furniture_id`, `export_type`, `category`, `new_custom_color`,
-    /// `manual_mtl_path`, and `open_after_export`.
+    /// `furniture_id`, `landscape_mesh_id`, `export_type`, `category`,
+    /// `new_custom_color`, `manual_mtl_path`, and `open_after_export`.
     pub fn clear(&mut self) {
         let scale = self.scale;
         let custom_palette = self.custom_palette.clone();
         let creature_id = self.creature_id;
         let furniture_id = self.furniture_id;
+        let landscape_mesh_id = self.landscape_mesh_id;
         let export_type = self.export_type;
         let category = self.category.clone();
         let new_custom_color = self.new_custom_color;
@@ -479,6 +485,7 @@ impl ObjImporterState {
             custom_palette,
             creature_id,
             furniture_id,
+            landscape_mesh_id,
             export_type,
             category,
             new_custom_color,
@@ -695,6 +702,11 @@ impl ObjImporterState {
     /// Updates the suggested furniture mesh ID shown by the importer.
     pub fn set_next_furniture_id(&mut self, furniture_id: FurnitureMeshId) {
         self.furniture_id = furniture_id;
+    }
+
+    /// Updates the suggested landscape mesh ID shown by the importer.
+    pub fn set_next_landscape_mesh_id(&mut self, landscape_mesh_id: LandscapeMeshId) {
+        self.landscape_mesh_id = landscape_mesh_id;
     }
 
     /// Sets the mesh currently targeted by the color editor.

@@ -40,6 +40,9 @@ pub struct CampaignData {
     /// Furniture definitions loaded from `data/furniture.ron`.
     pub furniture_definitions: Vec<antares::domain::FurnitureDefinition>,
 
+    /// Landscape definitions loaded from `data/landscape.ron`.
+    pub landscape_definitions: Vec<antares::domain::LandscapeDefinition>,
+
     /// Maps loaded from `data/maps/`.
     pub maps: Vec<Map>,
 
@@ -103,6 +106,9 @@ pub struct EditorRegistry {
     /// Furniture editor state.
     pub furniture_editor_state: furniture_editor::FurnitureEditorState,
 
+    /// Landscape editor state.
+    pub landscape_editor_state: LandscapeEditorState,
+
     /// Maps editor state.
     pub maps_editor_state: MapsEditorState,
 
@@ -159,6 +165,7 @@ impl Default for EditorRegistry {
             creatures_editor_state: creatures_editor::CreaturesEditorState::new(),
             conditions_editor_state: ConditionsEditorState::new(),
             furniture_editor_state: furniture_editor::FurnitureEditorState::new(),
+            landscape_editor_state: LandscapeEditorState::new(),
             maps_editor_state: MapsEditorState::new(),
             quest_editor_state: QuestEditorState::default(),
             dialogue_editor_state: DialogueEditorState::default(),

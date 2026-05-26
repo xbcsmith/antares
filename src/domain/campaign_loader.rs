@@ -28,6 +28,7 @@ use crate::domain::items::database::ItemMeshDatabase;
 use crate::domain::levels::LevelDatabase;
 use crate::domain::visual::creature_database::CreatureDatabase;
 use crate::domain::world::furniture::{FurnitureDatabase, FurnitureMeshDatabase};
+use crate::domain::world::landscape::{LandscapeDatabase, LandscapeMeshDatabase};
 
 /// Campaign validation errors
 #[derive(Debug, Error)]
@@ -77,12 +78,15 @@ pub enum CampaignError {
 /// use antares::domain::visual::creature_database::CreatureDatabase;
 /// use antares::domain::items::database::ItemMeshDatabase;
 /// use antares::domain::world::furniture::{FurnitureDatabase, FurnitureMeshDatabase};
+/// use antares::domain::world::landscape::{LandscapeDatabase, LandscapeMeshDatabase};
 ///
 /// let game_data = GameData {
 ///     creatures: CreatureDatabase::new(),
 ///     item_meshes: ItemMeshDatabase::new(),
 ///     furniture: FurnitureDatabase::new(),
 ///     furniture_meshes: FurnitureMeshDatabase::new(),
+///     landscape: LandscapeDatabase::new(),
+///     landscape_meshes: LandscapeMeshDatabase::new(),
 ///     levels: None,
 /// };
 ///
@@ -90,6 +94,8 @@ pub enum CampaignError {
 /// assert!(game_data.item_meshes.is_empty());
 /// assert!(game_data.furniture.is_empty());
 /// assert!(game_data.furniture_meshes.is_empty());
+/// assert!(game_data.landscape.is_empty());
+/// assert!(game_data.landscape_meshes.is_empty());
 /// assert!(game_data.levels.is_none());
 /// ```
 #[derive(Debug, Clone, Default)]
@@ -102,6 +108,10 @@ pub struct GameData {
     pub furniture: FurnitureDatabase,
     /// Furniture mesh database — custom OBJ-imported mesh definitions
     pub furniture_meshes: FurnitureMeshDatabase,
+    /// Landscape definition database — named, reusable static environment templates
+    pub landscape: LandscapeDatabase,
+    /// Landscape mesh database — custom OBJ/GLB-imported landscape mesh definitions
+    pub landscape_meshes: LandscapeMeshDatabase,
     /// Optional per-class XP threshold tables loaded from `data/levels.ron`.
     ///
     /// `None` means the file was absent; all XP calculations fall back to
@@ -127,6 +137,8 @@ impl GameData {
             item_meshes: ItemMeshDatabase::new(),
             furniture: FurnitureDatabase::new(),
             furniture_meshes: FurnitureMeshDatabase::new(),
+            landscape: LandscapeDatabase::new(),
+            landscape_meshes: LandscapeMeshDatabase::new(),
             levels: None,
         }
     }
@@ -154,6 +166,14 @@ impl GameData {
         self.furniture_meshes.validate().map_err(|e| {
             CampaignError::ValidationFailed(format!("Furniture mesh validation: {}", e))
         })?;
+
+        // Validate landscape mesh database and definition references.
+        self.landscape_meshes.validate().map_err(|e| {
+            CampaignError::ValidationFailed(format!("Landscape mesh validation: {}", e))
+        })?;
+        self.landscape
+            .validate_mesh_references(&self.landscape_meshes)
+            .map_err(|e| CampaignError::ValidationFailed(format!("Landscape validation: {}", e)))?;
 
         Ok(())
     }
@@ -238,6 +258,12 @@ impl CampaignLoader {
 
         // Load furniture mesh registry (opt-in per campaign; missing file is OK)
         game_data.furniture_meshes = self.load_furniture_meshes()?;
+
+        // Load landscape definitions (opt-in per campaign; missing file is OK)
+        game_data.landscape = self.load_landscape()?;
+
+        // Load landscape mesh registry (opt-in per campaign; missing file is OK)
+        game_data.landscape_meshes = self.load_landscape_meshes()?;
 
         // Load per-class XP tables (opt-in per campaign; missing file is OK —
         // absent levels.ron means "use formula for all classes")
@@ -415,6 +441,65 @@ impl CampaignLoader {
         )
     }
 
+    /// Loads landscape definitions from the campaign.
+    ///
+    /// Looks for `data/landscape.ron` inside the campaign directory. If the
+    /// file does not exist, returns an empty [`LandscapeDatabase`] without error.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CampaignError::ReadError` if the file exists but cannot be read
+    /// or parsed.
+    fn load_landscape(&self) -> Result<LandscapeDatabase, CampaignError> {
+        let landscape_path = self.campaign_path.join("data/landscape.ron");
+
+        if !landscape_path.exists() {
+            return Ok(LandscapeDatabase::new());
+        }
+
+        LandscapeDatabase::load_from_file(&landscape_path).map_err(|e| {
+            CampaignError::ReadError(format!(
+                "landscape.ron '{}': {}",
+                landscape_path.display(),
+                e
+            ))
+        })
+    }
+
+    /// Loads landscape mesh database from campaign.
+    ///
+    /// Looks for `data/landscape_mesh_registry.ron` inside the campaign
+    /// directory. If the file does not exist, returns an empty
+    /// [`LandscapeMeshDatabase`] without error.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CampaignError::ReadError` if the registry or any referenced mesh
+    /// asset cannot be read, parsed, or validated.
+    fn load_landscape_meshes(&self) -> Result<LandscapeMeshDatabase, CampaignError> {
+        let registry_path = self.campaign_path.join("data/landscape_mesh_registry.ron");
+
+        if !registry_path.exists() {
+            return Ok(LandscapeMeshDatabase::new());
+        }
+
+        let db = LandscapeMeshDatabase::load_from_registry(&registry_path, &self.campaign_path)
+            .map_err(|e| {
+                CampaignError::ReadError(format!(
+                    "Landscape mesh registry '{}': {}",
+                    registry_path.display(),
+                    e
+                ))
+            })?;
+
+        db.validate_texture_paths(Some(&self.campaign_path))
+            .map_err(|e| {
+                CampaignError::ValidationFailed(format!("Landscape texture validation: {}", e))
+            })?;
+
+        Ok(db)
+    }
+
     /// Gets the campaign path
     pub fn campaign_path(&self) -> &PathBuf {
         &self.campaign_path
@@ -436,6 +521,9 @@ mod tests {
         assert!(data.creatures.is_empty());
         assert!(data.item_meshes.is_empty());
         assert!(data.furniture.is_empty());
+        assert!(data.furniture_meshes.is_empty());
+        assert!(data.landscape.is_empty());
+        assert!(data.landscape_meshes.is_empty());
         assert!(data.levels.is_none());
     }
 
@@ -445,6 +533,9 @@ mod tests {
         assert!(data.creatures.is_empty());
         assert!(data.item_meshes.is_empty());
         assert!(data.furniture.is_empty());
+        assert!(data.furniture_meshes.is_empty());
+        assert!(data.landscape.is_empty());
+        assert!(data.landscape_meshes.is_empty());
         assert!(data.levels.is_none());
     }
 
@@ -551,6 +642,49 @@ mod tests {
             "Expected empty FurnitureDatabase when furniture.ron is absent"
         );
         assert!(result.unwrap().is_empty());
+    }
+
+    /// Landscape — loads `data/test_campaign` and asserts landscape fixtures are present.
+    #[test]
+    fn test_campaign_loader_loads_landscape() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let base = std::path::PathBuf::from(manifest_dir).join("data");
+        let campaign = base.join("test_campaign");
+
+        let mut loader = CampaignLoader::new(base, campaign);
+        let result = loader.load_game_data();
+        assert!(result.is_ok(), "load_game_data failed: {:?}", result.err());
+
+        let game_data = result.unwrap();
+        assert!(
+            game_data.landscape.len() >= 5,
+            "Expected ≥ 5 landscape definitions, got {}",
+            game_data.landscape.len()
+        );
+        assert!(
+            game_data.landscape_meshes.count() >= 5,
+            "Expected ≥ 5 landscape mesh entries, got {}",
+            game_data.landscape_meshes.count()
+        );
+        assert!(game_data.landscape.has_definition(1));
+        assert!(game_data.landscape_meshes.has_mesh(11001));
+    }
+
+    /// Landscape — missing landscape files load without error.
+    #[test]
+    fn test_landscape_missing_is_ok() {
+        let loader = CampaignLoader::new(
+            PathBuf::from("nonexistent_data"),
+            PathBuf::from("nonexistent_campaign"),
+        );
+
+        let landscape = loader.load_landscape();
+        assert!(landscape.is_ok());
+        assert!(landscape.unwrap().is_empty());
+
+        let meshes = loader.load_landscape_meshes();
+        assert!(meshes.is_ok());
+        assert!(meshes.unwrap().is_empty());
     }
 
     /// Phase 1 — a campaign without `levels.ron` loads without error and

@@ -1,0 +1,27 @@
+[
+    (
+        id: 11001,
+        name: "OakTreeShort",
+        filepath: "assets/meshes/landscape/oak_tree_short.ron",
+    ),
+    (
+        id: 11002,
+        name: "PineTree",
+        filepath: "assets/meshes/landscape/pine_tree.ron",
+    ),
+    (
+        id: 11003,
+        name: "DeadTree",
+        filepath: "assets/meshes/landscape/dead_tree.ron",
+    ),
+    (
+        id: 11004,
+        name: "PalmTree",
+        filepath: "assets/meshes/landscape/palm_tree.ron",
+    ),
+    (
+        id: 11005,
+        name: "BrushShrub",
+        filepath: "assets/meshes/landscape/brush.ron",
+    ),
+]

@@ -63,6 +63,26 @@ pub type FurnitureId = u32;
 /// Conventionally in the 10000+ range to avoid collisions with creature IDs.
 pub type FurnitureMeshId = u32;
 
+/// Landscape definition identifier.
+///
+/// Used to reference `LandscapeDefinition` entries in `LandscapeDatabase`.
+/// Authored campaign definitions are allocated from [`LANDSCAPE_ID_MIN`] through
+/// `u32::MAX`; `0` is reserved as an unassigned/invalid sentinel.
+pub type LandscapeId = u32;
+
+/// Minimum authored landscape definition ID.
+pub const LANDSCAPE_ID_MIN: LandscapeId = 1;
+
+/// Landscape mesh identifier for custom OBJ/GLB-imported landscape meshes.
+///
+/// References entries in `landscape_mesh_registry.ron`. SDK/importer-created
+/// landscape mesh entries are allocated from [`LANDSCAPE_MESH_ID_MIN`] through
+/// `u32::MAX` to avoid collisions with creature and furniture visual IDs.
+pub type LandscapeMeshId = u32;
+
+/// Minimum SDK/importer-created landscape mesh registry ID.
+pub const LANDSCAPE_MESH_ID_MIN: LandscapeMeshId = 11_000;
+
 // ===== Position =====
 
 /// 2D position on a map

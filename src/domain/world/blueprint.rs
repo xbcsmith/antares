@@ -240,6 +240,7 @@ impl From<MapBlueprint> for Map {
             encounter_table: None,
             allow_random_encounters: true,
             npc_placements,
+            landscape_placements: Vec::new(),
             dropped_items: Vec::new(),
             lock_states: std::collections::HashMap::new(),
             is_outdoor: false,

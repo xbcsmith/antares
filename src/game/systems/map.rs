@@ -12,6 +12,10 @@ use crate::game::resources::sprite_assets::SpriteAssets;
 use crate::game::resources::GlobalState;
 use crate::game::resources::TerrainMaterialCache;
 use crate::game::systems::actor::spawn_actor_sprite;
+use crate::game::systems::creature_meshes::{
+    create_material_from_color, create_material_with_texture, material_definition_to_bevy,
+    mesh_definition_to_bevy,
+};
 use crate::game::systems::creature_spawning::spawn_creature;
 use crate::game::systems::furniture_rendering::resolve_furniture_fields;
 use crate::game::systems::ui::{GameLogEvent, LogCategory};
@@ -76,6 +80,19 @@ pub struct MapEntity(pub types::MapId);
 /// Component that stores the position of a spawned tile/entity
 #[derive(bevy::prelude::Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TileCoord(pub types::Position);
+
+/// Component tagging an entity as a spawned landscape placement.
+#[derive(bevy::prelude::Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LandscapeEntity {
+    /// Map containing the landscape placement.
+    pub map_id: types::MapId,
+    /// Landscape definition ID referenced by the placement.
+    pub landscape_id: types::LandscapeId,
+    /// Optional imported landscape mesh ID used for this entity.
+    pub mesh_id: Option<types::LandscapeMeshId>,
+    /// Index of the placement in `Map.landscape_placements`.
+    pub placement_index: usize,
+}
 
 /// Component tagging an entity as an NPC visual marker
 #[derive(bevy::prelude::Component, Debug, Clone, PartialEq, Eq)]
@@ -811,6 +828,247 @@ fn terrain_material_with_optional_tint(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn spawn_landscape_placements(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    asset_server: &AssetServer,
+    map: &world::Map,
+    landscape: &world::LandscapeDatabase,
+    landscape_meshes: &world::LandscapeMeshDatabase,
+) {
+    for (placement_index, placement) in map.landscape_placements.iter().enumerate() {
+        if !map.is_valid_position(placement.position) {
+            warn!(
+                landscape_id = placement.landscape_id,
+                x = placement.position.x,
+                y = placement.position.y,
+                "Skipping out-of-bounds landscape placement"
+            );
+            continue;
+        }
+
+        let Some(definition) = landscape.get_by_id(placement.landscape_id) else {
+            warn!(
+                landscape_id = placement.landscape_id,
+                x = placement.position.x,
+                y = placement.position.y,
+                "Skipping landscape placement with missing definition"
+            );
+            continue;
+        };
+
+        if let Some(mesh_id) = definition.mesh_id {
+            if let Some(mesh_def) = landscape_meshes.get_mesh(mesh_id) {
+                spawn_imported_landscape_mesh(
+                    commands,
+                    meshes,
+                    materials,
+                    asset_server,
+                    map.id,
+                    placement_index,
+                    placement,
+                    definition,
+                    mesh_id,
+                    mesh_def,
+                );
+                continue;
+            }
+
+            warn!(
+                landscape_id = placement.landscape_id,
+                mesh_id, "Landscape definition references missing mesh; using fallback marker"
+            );
+        }
+
+        spawn_fallback_landscape_marker(
+            commands,
+            meshes,
+            materials,
+            map.id,
+            placement_index,
+            placement,
+            definition,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_imported_landscape_mesh(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    asset_server: &AssetServer,
+    map_id: types::MapId,
+    placement_index: usize,
+    placement: &world::LandscapePlacement,
+    definition: &world::LandscapeDefinition,
+    mesh_id: types::LandscapeMeshId,
+    creature_def: &crate::domain::visual::CreatureDefinition,
+) -> Entity {
+    let root_transform = landscape_root_transform(placement, definition, creature_def.scale);
+    let root = commands
+        .spawn((
+            LandscapeEntity {
+                map_id,
+                landscape_id: placement.landscape_id,
+                mesh_id: Some(mesh_id),
+                placement_index,
+            },
+            MapEntity(map_id),
+            TileCoord(placement.position),
+            Name::new(format!("Landscape: {}", definition.name)),
+            root_transform,
+            GlobalTransform::default(),
+            Visibility::default(),
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+        ))
+        .id();
+
+    let tint = placement.color_tint.or(definition.color_tint);
+    for (mesh_index, mesh_def) in creature_def.meshes.iter().enumerate() {
+        let mesh_handle = meshes.add(mesh_definition_to_bevy(mesh_def));
+        let material_handle = materials.add(landscape_material(mesh_def, tint, asset_server));
+        let transform = creature_def
+            .mesh_transforms
+            .get(mesh_index)
+            .map(|mesh_transform| {
+                Transform::from_translation(Vec3::from(mesh_transform.translation))
+                    .with_rotation(Quat::from_euler(
+                        EulerRot::XYZ,
+                        mesh_transform.rotation[0],
+                        mesh_transform.rotation[1],
+                        mesh_transform.rotation[2],
+                    ))
+                    .with_scale(Vec3::from(mesh_transform.scale))
+            })
+            .unwrap_or_default();
+
+        let child = commands
+            .spawn((
+                Mesh3d(mesh_handle),
+                MeshMaterial3d(material_handle),
+                transform,
+                GlobalTransform::default(),
+                Visibility::default(),
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
+                Name::new(format!("Landscape Mesh {}", mesh_index)),
+            ))
+            .id();
+        commands.entity(root).add_child(child);
+    }
+
+    root
+}
+
+fn spawn_fallback_landscape_marker(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    map_id: types::MapId,
+    placement_index: usize,
+    placement: &world::LandscapePlacement,
+    definition: &world::LandscapeDefinition,
+) -> Entity {
+    let color = match definition.category {
+        world::LandscapeCategory::Tree => Color::srgb(0.18, 0.55, 0.16),
+        world::LandscapeCategory::Shrub | world::LandscapeCategory::Brush => {
+            Color::srgb(0.12, 0.42, 0.12)
+        }
+        world::LandscapeCategory::Rock | world::LandscapeCategory::Ruin => {
+            Color::srgb(0.45, 0.45, 0.45)
+        }
+        world::LandscapeCategory::Grass | world::LandscapeCategory::GroundCover => {
+            Color::srgb(0.24, 0.65, 0.18)
+        }
+        world::LandscapeCategory::Custom => Color::srgb(0.5, 0.4, 0.7),
+    };
+
+    let mesh = meshes.add(Cuboid::new(0.35, 0.6, 0.35));
+    let material = materials.add(StandardMaterial {
+        base_color: color,
+        perceptual_roughness: 0.85,
+        ..default()
+    });
+    let transform = landscape_root_transform(placement, definition, 1.0);
+
+    commands
+        .spawn((
+            LandscapeEntity {
+                map_id,
+                landscape_id: placement.landscape_id,
+                mesh_id: None,
+                placement_index,
+            },
+            MapEntity(map_id),
+            TileCoord(placement.position),
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Name::new(format!("Landscape Fallback: {}", definition.name)),
+            transform,
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id()
+}
+
+fn landscape_root_transform(
+    placement: &world::LandscapePlacement,
+    definition: &world::LandscapeDefinition,
+    mesh_scale: f32,
+) -> Transform {
+    let offset = placement.offset.unwrap_or([0.0, 0.0]);
+    let scale = placement
+        .effective_scale(definition.default_scale)
+        .max(0.0001)
+        * mesh_scale;
+    Transform::from_xyz(
+        placement.position.x as f32 + TILE_CENTER_OFFSET + offset[0],
+        placement.y_offset.unwrap_or(0.0),
+        placement.position.y as f32 + TILE_CENTER_OFFSET + offset[1],
+    )
+    .with_rotation(Quat::from_rotation_y(
+        placement.rotation_y.unwrap_or(0.0).to_radians(),
+    ))
+    .with_scale(Vec3::splat(scale))
+}
+
+fn landscape_material(
+    mesh_def: &crate::domain::visual::MeshDefinition,
+    tint: Option<[f32; 3]>,
+    asset_server: &AssetServer,
+) -> StandardMaterial {
+    let mut material = if let Some(texture_path) = mesh_def
+        .texture_path
+        .as_deref()
+        .filter(|path| path.starts_with("assets/"))
+    {
+        create_material_with_texture(
+            crate::game::systems::creature_meshes::load_texture(asset_server, texture_path),
+            mesh_def.material.as_ref(),
+        )
+    } else if let Some(material_def) = &mesh_def.material {
+        material_definition_to_bevy(material_def)
+    } else {
+        create_material_from_color(mesh_def.color)
+    };
+
+    if let Some([r, g, b]) = tint {
+        let base = material.base_color.to_srgba();
+        material.base_color = Color::srgba(
+            (base.red * r).clamp(0.0, 1.0),
+            (base.green * g).clamp(0.0, 1.0),
+            (base.blue * b).clamp(0.0, 1.0),
+            base.alpha,
+        );
+    }
+
+    material
+}
+
+#[allow(clippy::too_many_arguments)]
 fn spawn_map(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -1298,6 +1556,16 @@ fn spawn_map(
                 }
             }
         }
+
+        spawn_landscape_placements(
+            &mut commands,
+            meshes.as_mut(),
+            materials.as_mut(),
+            &asset_server,
+            map,
+            &content.0.landscape,
+            &content.0.landscape_meshes,
+        );
 
         // Also spawn lightweight event trigger entities for any map events (so the
         // visual + logic are both represented at load time). We only spawn

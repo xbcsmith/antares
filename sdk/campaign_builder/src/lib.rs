@@ -41,6 +41,7 @@ pub mod item_mesh_undo_redo;
 pub mod item_mesh_workflow;
 pub mod items_editor;
 pub mod keyboard_shortcuts;
+pub mod landscape_editor;
 pub mod levels_editor;
 pub mod linear_history;
 pub mod lod_editor;
@@ -107,6 +108,7 @@ use dialogue_editor::DialogueEditorState;
 use editor_context::EditorContext;
 use eframe::egui;
 use items_editor::ItemsEditorState;
+use landscape_editor::LandscapeEditorState;
 use map_editor::MapsEditorState;
 use monsters_editor::MonstersEditorState;
 use quest_editor::QuestEditorState;
@@ -251,6 +253,7 @@ pub fn run() -> Result<(), eframe::Error> {
                                 app.load_maps();
                                 app.load_conditions();
                                 app.load_furniture();
+                                app.load_landscape();
 
                                 if let Err(e) = app.load_quests() {
                                     app.logger.warn(
@@ -462,6 +465,13 @@ pub struct CampaignMetadata {
     #[serde(default = "default_furniture_file")]
     pub furniture_file: String,
 
+    /// Relative path to the landscape definitions RON file.
+    ///
+    /// Landscape support is opt-in per campaign. Existing `campaign.ron` files
+    /// that omit this field default to `"data/landscape.ron"`.
+    #[serde(default = "default_landscape_file")]
+    pub landscape_file: String,
+
     /// Relative path to the XP threshold tables RON file.
     ///
     /// Defaults to `"data/levels.ron"` when absent from the RON file (via `serde(default)`).
@@ -530,6 +540,10 @@ fn default_furniture_file() -> String {
     "data/furniture.ron".to_string()
 }
 
+fn default_landscape_file() -> String {
+    "data/landscape.ron".to_string()
+}
+
 fn default_levels_file() -> String {
     "data/levels.ron".to_string()
 }
@@ -594,6 +608,7 @@ impl Default for CampaignMetadata {
             creatures_file: "data/creatures.ron".to_string(),
             stock_templates_file: "data/npc_stock_templates.ron".to_string(),
             furniture_file: "data/furniture.ron".to_string(),
+            landscape_file: "data/landscape.ron".to_string(),
             levels_file: "data/levels.ron".to_string(),
             starting_time: default_starting_time(),
         }
@@ -613,6 +628,7 @@ pub enum EditorTab {
     Monsters,
     Creatures,
     Furniture,
+    Landscape,
     Importer,
     Maps,
     Quests,
@@ -641,6 +657,7 @@ impl EditorTab {
             EditorTab::Monsters => "Monsters",
             EditorTab::Creatures => "Creatures",
             EditorTab::Furniture => "Furniture",
+            EditorTab::Landscape => "Landscape",
             EditorTab::Importer => "Importer",
             EditorTab::Maps => "Maps",
             EditorTab::Quests => "Quests",
@@ -1091,6 +1108,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Monsters,
                     EditorTab::Creatures,
                     EditorTab::Furniture,
+                    EditorTab::Landscape,
                     EditorTab::Importer,
                     EditorTab::Maps,
                     EditorTab::Quests,
@@ -1321,6 +1339,20 @@ impl eframe::App for CampaignBuilderApp {
                     }
                 }
             }
+            EditorTab::Landscape => {
+                self.editor_registry
+                    .landscape_editor_state
+                    .show(ui, &mut self.campaign_data.landscape_definitions);
+                if let Some(landscape_editor::LandscapeEditorSignal::OpenInObjImporter) =
+                    self.editor_registry.landscape_editor_state.requested_signal.take()
+                {
+                    self.ui_state.active_tab = EditorTab::Importer;
+                    self.obj_importer_state.export_type = obj_importer::ExportType::Landscape;
+                    self.ui_state.status_message =
+                        "Opening OBJ Importer for landscape mesh work".to_string();
+                    ui.ctx().request_repaint();
+                }
+            }
             EditorTab::Furniture => {
                 let available_mesh_ids: Vec<u32> = if self.obj_importer_state.furniture_id >= 10001
                 {
@@ -1398,6 +1430,13 @@ impl eframe::App for CampaignBuilderApp {
                             self.ui_state.active_tab = EditorTab::Furniture;
                             ui.ctx().request_repaint();
                         }
+                        obj_importer_ui::ObjImporterUiSignal::Landscape => {
+                            let importer_status = self.obj_importer_state.status_message.clone();
+                            self.load_landscape();
+                            self.ui_state.status_message = importer_status;
+                            self.ui_state.active_tab = EditorTab::Landscape;
+                            ui.ctx().request_repaint();
+                        }
                     }
                 } else {
                     self.ui_state.status_message = self.obj_importer_state.status_message.clone();
@@ -1410,6 +1449,7 @@ impl eframe::App for CampaignBuilderApp {
                     conditions: &self.campaign_data.conditions,
                     npcs: &self.editor_registry.npc_editor_state.npcs,
                     furniture_definitions: &self.campaign_data.furniture_definitions,
+                    landscape_definitions: &self.campaign_data.landscape_definitions,
                     characters: &self.editor_registry.characters_editor_state.characters,
                     display_config: &self.tool_config.display,
                 };

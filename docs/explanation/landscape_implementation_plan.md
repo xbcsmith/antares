@@ -53,7 +53,7 @@ Recommended campaign layout:
 
 The existing `assets/meshes/*.ron` files can be used as the seed assets, but the final campaign-facing registry should point at campaign-relative asset paths so runtime loading and packaging stay consistent.
 
-## Phase 0 — Architecture and Scope Alignment
+## Phase 0: Architecture and Scope Alignment
 
 ### Deliverables
 
@@ -69,7 +69,7 @@ The existing `assets/meshes/*.ron` files can be used as the seed assets, but the
 - Architecture names, field names, and module placement are approved before implementation.
 - No code changes to core data structures happen before this phase is complete.
 
-## Phase 1 — Fix Default Trees and Brush Asset Baseline
+## Phase 1: Fix Default Trees and Brush Asset Baseline
 
 ### Deliverables
 
@@ -100,7 +100,7 @@ The current procedural code has tree texture constants, but foliage material cre
 - Missing texture paths produce useful diagnostics rather than silent invisible/white assets.
 - Test fixtures do not reference `campaigns/tutorial`.
 
-## Phase 2 — Domain Loading, Validation, and Serialization
+## Phase 2: Domain Loading, Validation, and Serialization
 
 ### Deliverables
 
@@ -122,7 +122,7 @@ The current procedural code has tree texture constants, but foliage material cre
 - New maps can round-trip landscape placements through RON.
 - Loader tests use `CampaignLoader::new("data")` with `test_campaign` or `data/test_campaign` path-based fixtures.
 
-## Phase 3 — Runtime Rendering and Map Spawn Integration
+## Phase 3: Runtime Rendering and Map Spawn Integration
 
 ### Deliverables
 
@@ -141,7 +141,7 @@ The current procedural code has tree texture constants, but foliage material cre
 - Procedural tree/grass/rock rendering still works for terrain-only maps.
 - Unloading/reloading a map despawns old landscape entities cleanly.
 
-## Phase 4 — Importer Landscape Export Support
+## Phase 4: Importer Landscape Export Support
 
 ### Deliverables
 
@@ -168,7 +168,7 @@ The current procedural code has tree texture constants, but foliage material cre
 - The new landscape appears in the SDK without restarting the Campaign Builder.
 - Texture paths are portable and campaign-relative.
 
-## Phase 5 — SDK Landscape Editor and Map Placement
+## Phase 5: SDK Landscape Editor and Map Placement
 
 ### Deliverables
 
@@ -193,7 +193,7 @@ If the Landscape editor or placement panel uses multi-column layout, it must fol
 - Map RON contains stable `landscape_placements` data after save.
 - Reopening the campaign shows the same placements.
 
-## Phase 6 — Testing, Fixtures, and Quality Gates
+## Phase 6: Testing, Fixtures, and Quality Gates
 
 ### Required Tests
 
@@ -220,7 +220,7 @@ Run the project quality gates after implementation work:
 - `cargo clippy --all-targets --all-features -- -D warnings`
 - `cargo nextest run --all-features`
 
-## Phase 7 — Documentation and Cleanup
+## Phase 7: Documentation and Cleanup
 
 ### Deliverables
 
