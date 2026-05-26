@@ -45,6 +45,7 @@ pub mod quest;
 pub mod recruitment_dialog;
 pub mod rest;
 pub mod skill_training_ui;
+pub mod sky;
 pub mod spellbook_ui;
 pub mod sprite_uv_update;
 pub mod temple_ui;

@@ -296,6 +296,9 @@ impl Plugin for AntaresPlugin {
         // Time-of-Day ambient lighting
         app.add_plugins(antares::game::systems::time::TimeOfDayPlugin);
 
+        // Sky background colour rendering (must come after TimeOfDayPlugin)
+        app.add_plugins(antares::game::systems::sky::SkyPlugin);
+
         // Rest orchestration system
         app.add_plugins(antares::game::systems::rest::RestPlugin);
 

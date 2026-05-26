@@ -2,6 +2,88 @@
 
 ---
 
+## Sky System — Phase 2: Sky Background Rendering Engine (2026)
+
+**Goal:** Replace the static grey Bevy `ClearColor` with a live, per-map sky
+tint driven by `SkyConfig` and `TimeOfDay`. Indoor maps receive a near-black
+cave ceiling colour; outdoor maps blend through dawn, day, dusk, and night
+palettes.
+
+### What Was Built
+
+#### `src/game/systems/sky.rs` (new file)
+
+**Constants (4)**
+
+| Constant                              | Value                     | Purpose                           |
+| ------------------------------------- | ------------------------- | --------------------------------- |
+| `INDOOR_SKY_COLOR`                    | `[0.05, 0.04, 0.03, 1.0]` | Near-black warm grey for dungeons |
+| `DEFAULT_OUTDOOR_DAY_SKY_COLOR`       | `[0.53, 0.81, 0.98, 1.0]` | Sky blue for Morning/Afternoon    |
+| `DEFAULT_OUTDOOR_NIGHT_SKY_COLOR`     | `[0.02, 0.02, 0.08, 1.0]` | Deep navy for Evening/Night       |
+| `DEFAULT_OUTDOOR_DUSK_DAWN_SKY_COLOR` | `[0.98, 0.60, 0.20, 1.0]` | Warm amber for Dawn/Dusk          |
+
+**`sky_color_for_time(config: &SkyConfig, tod: TimeOfDay) -> [f32; 4]`**
+
+Pure function (no Bevy dependencies) that maps each `TimeOfDay` variant to an
+exact colour or a blended colour:
+
+| `TimeOfDay` | Result                                              |
+| ----------- | --------------------------------------------------- |
+| `Night`     | `night_sky_color`                                   |
+| `Evening`   | lerp(`night_sky_color`, `dusk_dawn_sky_color`, 0.3) |
+| `Dawn`      | `dusk_dawn_sky_color`                               |
+| `Morning`   | lerp(`dusk_dawn_sky_color`, `day_sky_color`, 0.7)   |
+| `Afternoon` | `day_sky_color`                                     |
+| `Dusk`      | `dusk_dawn_sky_color`                               |
+
+**`update_sky_background` Bevy system**
+
+Reads `GlobalState` (current map + time), computes the RGBA via
+`sky_color_for_time`, and writes `Color::srgba(…)` to `ResMut<ClearColor>`.
+Selection logic:
+
+1. No active map → `INDOOR_SKY_COLOR`
+2. `is_outdoor == false` → `INDOOR_SKY_COLOR`
+3. `is_outdoor == true`, `sky == None` → `SkyConfig::default()`
+4. `is_outdoor == true`, `sky == Some(cfg)` → per-map `cfg`
+
+**`SkyPlugin`**
+
+Registers `update_sky_background` in `Update`, ordered
+`.after(apply_time_advance).before(update_ambient_light)`, guaranteeing the
+sky colour is always computed from the up-to-date time value.
+
+#### `src/game/systems/mod.rs`
+
+`pub mod sky;` added (alphabetically between `rest` and `skill_training_ui`).
+
+#### `src/bin/antares.rs`
+
+`app.add_plugins(antares::game::systems::sky::SkyPlugin)` registered
+immediately after `TimeOfDayPlugin`.
+
+### Tests Added (6 new unit tests in `game::systems::sky::tests`)
+
+| Test                                            | What it verifies                                |
+| ----------------------------------------------- | ----------------------------------------------- |
+| `test_sky_color_for_time_night`                 | Night returns `night_sky_color` exactly         |
+| `test_sky_color_for_time_afternoon`             | Afternoon returns `day_sky_color` exactly       |
+| `test_sky_color_for_time_dusk`                  | Dusk returns `dusk_dawn_sky_color` exactly      |
+| `test_sky_color_for_time_evening_is_blend`      | Evening is strictly between Night and Dusk/Dawn |
+| `test_sky_color_for_time_morning_is_blend`      | Morning is strictly between Dusk/Dawn and Day   |
+| `test_sky_color_all_periods_produce_valid_rgba` | All 6 variants stay in `[0.0, 1.0]` per channel |
+
+### Quality Gates
+
+```text
+cargo fmt     → clean
+cargo check   → 0 errors
+cargo clippy  → 0 warnings
+cargo nextest → 5101 passed, 8 skipped, 0 failed
+```
+
+---
+
 ## Sky System — Phase 1: Domain Foundation (2026)
 
 **Goal:** Add `is_outdoor` and `SkyConfig` to the `Map` domain struct and RON
