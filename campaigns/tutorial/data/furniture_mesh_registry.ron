@@ -1,7 +1,7 @@
 [
     (
         id: 10001,
-        name: "CustomOakTable",
-        filepath: "assets/furniture/tables/oak_table.ron",
+        name: "brush",
+        filepath: "assets/furniture/utility/brush.ron",
     ),
 ]

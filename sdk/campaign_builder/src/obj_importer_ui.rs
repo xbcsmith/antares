@@ -35,7 +35,10 @@ use crate::obj_importer::{
     ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
 };
 use crate::ui_helpers::TwoColumnLayout;
-use antares::domain::visual::{CreatureDefinition, MeshTransform};
+use antares::domain::visual::item_mesh::ItemMeshCategory;
+use antares::domain::visual::{CreatureDefinition, CreatureReference, MeshTransform};
+use antares::domain::world::furniture::FurnitureDefinition;
+use antares::domain::world::{FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType};
 use eframe::egui;
 use std::collections::HashMap;
 use std::fs;
@@ -120,6 +123,9 @@ enum ObjImporterExportError {
     #[error("Failed to serialize RON asset: {0}")]
     Serialization(#[from] ron::Error),
 
+    #[error("Failed to parse RON registry data: {0}")]
+    RegistryParse(#[from] ron::error::SpannedError),
+
     #[error("Texture for mesh '{mesh_name}' could not be resolved.")]
     MissingTexture { mesh_name: String },
 
@@ -181,6 +187,27 @@ const ALL_CREATURE_CATEGORIES: &[CreatureCategory] = &[
     CreatureCategory::Custom,
 ];
 
+/// All selectable item mesh categories in importer display order.
+const ALL_ITEM_MESH_CATEGORIES: &[ItemMeshCategory] = &[
+    ItemMeshCategory::Sword,
+    ItemMeshCategory::Dagger,
+    ItemMeshCategory::Blunt,
+    ItemMeshCategory::Staff,
+    ItemMeshCategory::Bow,
+    ItemMeshCategory::BodyArmor,
+    ItemMeshCategory::Helmet,
+    ItemMeshCategory::Shield,
+    ItemMeshCategory::Boots,
+    ItemMeshCategory::Ring,
+    ItemMeshCategory::Amulet,
+    ItemMeshCategory::Belt,
+    ItemMeshCategory::Cloak,
+    ItemMeshCategory::Potion,
+    ItemMeshCategory::Scroll,
+    ItemMeshCategory::Ammo,
+    ItemMeshCategory::QuestItem,
+];
+
 /// Maps a category display-name string back to a [`CreatureCategory`].
 ///
 /// Accepts the canonical display names produced by
@@ -194,6 +221,142 @@ fn creature_category_from_str(s: &str) -> CreatureCategory {
         "Templates" => CreatureCategory::Templates,
         "Variants" => CreatureCategory::Variants,
         _ => CreatureCategory::Custom,
+    }
+}
+
+fn item_mesh_category_name(category: ItemMeshCategory) -> &'static str {
+    match category {
+        ItemMeshCategory::Sword => "Sword",
+        ItemMeshCategory::Dagger => "Dagger",
+        ItemMeshCategory::Blunt => "Blunt",
+        ItemMeshCategory::Staff => "Staff",
+        ItemMeshCategory::Bow => "Bow",
+        ItemMeshCategory::BodyArmor => "Body Armor",
+        ItemMeshCategory::Helmet => "Helmet",
+        ItemMeshCategory::Shield => "Shield",
+        ItemMeshCategory::Boots => "Boots",
+        ItemMeshCategory::Ring => "Ring",
+        ItemMeshCategory::Amulet => "Amulet",
+        ItemMeshCategory::Belt => "Belt",
+        ItemMeshCategory::Cloak => "Cloak",
+        ItemMeshCategory::Potion => "Potion",
+        ItemMeshCategory::Scroll => "Scroll",
+        ItemMeshCategory::Ammo => "Ammo",
+        ItemMeshCategory::QuestItem => "Quest Item",
+    }
+}
+
+fn item_mesh_category_from_str(s: &str) -> ItemMeshCategory {
+    match s {
+        "Sword" => ItemMeshCategory::Sword,
+        "Dagger" => ItemMeshCategory::Dagger,
+        "Blunt" => ItemMeshCategory::Blunt,
+        "Staff" => ItemMeshCategory::Staff,
+        "Bow" => ItemMeshCategory::Bow,
+        "Body Armor" => ItemMeshCategory::BodyArmor,
+        "Helmet" => ItemMeshCategory::Helmet,
+        "Shield" => ItemMeshCategory::Shield,
+        "Boots" => ItemMeshCategory::Boots,
+        "Ring" => ItemMeshCategory::Ring,
+        "Amulet" => ItemMeshCategory::Amulet,
+        "Belt" => ItemMeshCategory::Belt,
+        "Cloak" => ItemMeshCategory::Cloak,
+        "Potion" => ItemMeshCategory::Potion,
+        "Scroll" => ItemMeshCategory::Scroll,
+        "Ammo" => ItemMeshCategory::Ammo,
+        "Quest Item" => ItemMeshCategory::QuestItem,
+        _ => ItemMeshCategory::Sword,
+    }
+}
+
+fn furniture_category_from_str(s: &str) -> FurnitureCategory {
+    FurnitureCategory::all()
+        .iter()
+        .copied()
+        .find(|category| category.name() == s)
+        .unwrap_or(FurnitureCategory::Seating)
+}
+
+fn default_furniture_type_for_category(category: FurnitureCategory) -> FurnitureType {
+    match category {
+        FurnitureCategory::Seating => FurnitureType::Chair,
+        FurnitureCategory::Storage => FurnitureType::Chest,
+        FurnitureCategory::Decoration => FurnitureType::Table,
+        FurnitureCategory::Lighting => FurnitureType::Torch,
+        FurnitureCategory::Utility => FurnitureType::Table,
+        FurnitureCategory::Passage => FurnitureType::Door,
+    }
+}
+
+fn render_export_category_control(
+    ui: &mut egui::Ui,
+    state: &mut ObjImporterState,
+    campaign_dir: Option<&Path>,
+    id_salt: &'static str,
+) {
+    match state.export_type {
+        ExportType::Creature => {
+            let category_before = state.category.clone();
+            egui::ComboBox::from_id_salt(id_salt)
+                .selected_text(creature_category_from_str(&state.category).display_name())
+                .show_ui(ui, |ui| {
+                    for cat in ALL_CREATURE_CATEGORIES {
+                        ui.selectable_value(
+                            &mut state.category,
+                            cat.display_name().to_string(),
+                            cat.display_name(),
+                        );
+                    }
+                });
+            if state.category != category_before {
+                let new_cat = creature_category_from_str(&state.category);
+                state.creature_id = suggest_next_creature_id_from_dir(campaign_dir, new_cat);
+                ui.ctx().request_repaint();
+            }
+        }
+        ExportType::Item => {
+            let selected = item_mesh_category_from_str(&state.category);
+            let selected_name = item_mesh_category_name(selected);
+            if state.category != selected_name {
+                state.category = selected_name.to_string();
+            }
+            let category_before = state.category.clone();
+            egui::ComboBox::from_id_salt(id_salt)
+                .selected_text(selected_name)
+                .show_ui(ui, |ui| {
+                    for category in ALL_ITEM_MESH_CATEGORIES {
+                        ui.selectable_value(
+                            &mut state.category,
+                            item_mesh_category_name(*category).to_string(),
+                            item_mesh_category_name(*category),
+                        );
+                    }
+                });
+            if state.category != category_before {
+                ui.ctx().request_repaint();
+            }
+        }
+        ExportType::Furniture => {
+            let selected = furniture_category_from_str(&state.category);
+            if state.category != selected.name() {
+                state.category = selected.name().to_string();
+            }
+            let category_before = state.category.clone();
+            egui::ComboBox::from_id_salt(id_salt)
+                .selected_text(selected.name())
+                .show_ui(ui, |ui| {
+                    for category in FurnitureCategory::all() {
+                        ui.selectable_value(
+                            &mut state.category,
+                            category.name().to_string(),
+                            category.name(),
+                        );
+                    }
+                });
+            if state.category != category_before {
+                ui.ctx().request_repaint();
+            }
+        }
     }
 }
 
@@ -286,33 +449,12 @@ fn render_idle_mode(
             ui.end_row();
 
             ui.label("Category:");
-            if state.export_type == ExportType::Creature {
-                let category_before = state.category.clone();
-                egui::ComboBox::from_id_salt("obj_importer_idle_creature_category")
-                    .selected_text(creature_category_from_str(&state.category).display_name())
-                    .show_ui(ui, |ui| {
-                        for cat in ALL_CREATURE_CATEGORIES {
-                            ui.selectable_value(
-                                &mut state.category,
-                                cat.display_name().to_string(),
-                                cat.display_name(),
-                            );
-                        }
-                    });
-                // When category changes in idle mode, immediately suggest the next
-                // available ID in the new range so it is pre-populated when the model
-                // loads and the user reaches the Loaded form.
-                if state.category != category_before {
-                    let new_cat = creature_category_from_str(&state.category);
-                    state.creature_id = suggest_next_creature_id_from_dir(
-                        campaign_dir.map(|p| p.as_path()),
-                        new_cat,
-                    );
-                    ui.ctx().request_repaint();
-                }
-            } else if ui.text_edit_singleline(&mut state.category).changed() {
-                ui.ctx().request_repaint();
-            }
+            render_export_category_control(
+                ui,
+                state,
+                campaign_dir.map(|p| p.as_path()),
+                "obj_importer_idle_export_category",
+            );
             ui.end_row();
 
             ui.label("Scale:");
@@ -456,33 +598,12 @@ fn render_loaded_mode(
             ui.end_row();
 
             ui.label("Category:");
-            if state.export_type == ExportType::Creature {
-                let category_before = state.category.clone();
-                egui::ComboBox::from_id_salt("obj_importer_loaded_creature_category")
-                    .selected_text(creature_category_from_str(&state.category).display_name())
-                    .show_ui(ui, |ui| {
-                        for cat in ALL_CREATURE_CATEGORIES {
-                            ui.selectable_value(
-                                &mut state.category,
-                                cat.display_name().to_string(),
-                                cat.display_name(),
-                            );
-                        }
-                    });
-                // Category is now rendered BEFORE the ID row.  When category changes,
-                // the ID suggestion fires here, and the ID row below reads the already-
-                // updated creature_id and state.category in the same frame — no lag.
-                if state.category != category_before {
-                    let new_cat = creature_category_from_str(&state.category);
-                    state.creature_id = suggest_next_creature_id_from_dir(
-                        campaign_dir.map(|p| p.as_path()),
-                        new_cat,
-                    );
-                    ui.ctx().request_repaint();
-                }
-            } else if ui.text_edit_singleline(&mut state.category).changed() {
-                ui.ctx().request_repaint();
-            }
+            render_export_category_control(
+                ui,
+                state,
+                campaign_dir.map(|p| p.as_path()),
+                "obj_importer_loaded_export_category",
+            );
             ui.end_row();
 
             ui.label("ID:");
@@ -1497,6 +1618,13 @@ fn export_state_to_campaign(
             }
             let contents = ron::ser::to_string_pretty(&creature, ron::ser::PrettyConfig::new())?;
             fs::write(&absolute_path, contents)?;
+            upsert_mesh_registry_entry(
+                campaign_dir,
+                "data/item_mesh_registry.ron",
+                creature.id,
+                &creature.name,
+                &relative_path,
+            )?;
         }
         ExportType::Furniture => {
             if let Some(parent) = absolute_path.parent() {
@@ -1504,6 +1632,14 @@ fn export_state_to_campaign(
             }
             let contents = ron::ser::to_string_pretty(&creature, ron::ser::PrettyConfig::new())?;
             fs::write(&absolute_path, contents)?;
+            upsert_mesh_registry_entry(
+                campaign_dir,
+                "data/furniture_mesh_registry.ron",
+                creature.id,
+                &creature.name,
+                &relative_path,
+            )?;
+            upsert_furniture_definition(campaign_dir, state, &creature)?;
         }
     }
 
@@ -1518,6 +1654,98 @@ fn export_state_to_campaign(
             texture_report.warning_suffix()
         ),
     })
+}
+
+fn read_ron_vec_or_empty<T: serde::de::DeserializeOwned>(
+    path: &Path,
+) -> Result<Vec<T>, ObjImporterExportError> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let contents = fs::read_to_string(path)?;
+    ron::from_str::<Vec<T>>(&contents).map_err(ObjImporterExportError::RegistryParse)
+}
+
+fn write_ron_vec<T: serde::Serialize>(
+    path: &Path,
+    values: &[T],
+) -> Result<(), ObjImporterExportError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let contents = ron::ser::to_string_pretty(values, ron::ser::PrettyConfig::new())?;
+    fs::write(path, contents)?;
+    Ok(())
+}
+
+fn upsert_mesh_registry_entry(
+    campaign_dir: &Path,
+    registry_file: &str,
+    id: u32,
+    name: &str,
+    filepath: &str,
+) -> Result<(), ObjImporterExportError> {
+    let registry_path = campaign_dir.join(registry_file);
+    let mut refs = read_ron_vec_or_empty::<CreatureReference>(&registry_path)?;
+    if let Some(existing) = refs.iter_mut().find(|entry| entry.id == id) {
+        existing.name = name.to_string();
+        existing.filepath = filepath.to_string();
+    } else {
+        refs.push(CreatureReference {
+            id,
+            name: name.to_string(),
+            filepath: filepath.to_string(),
+        });
+    }
+    refs.sort_by_key(|entry| entry.id);
+    write_ron_vec(&registry_path, &refs)
+}
+
+fn next_furniture_definition_id(defs: &[FurnitureDefinition]) -> u32 {
+    defs.iter()
+        .map(|definition| definition.id)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1)
+}
+
+fn upsert_furniture_definition(
+    campaign_dir: &Path,
+    state: &ObjImporterState,
+    creature: &CreatureDefinition,
+) -> Result<(), ObjImporterExportError> {
+    let furniture_path = campaign_dir.join("data/furniture.ron");
+    let mut defs = read_ron_vec_or_empty::<FurnitureDefinition>(&furniture_path)?;
+    let category = furniture_category_from_str(&state.category);
+    let definition = FurnitureDefinition {
+        id: defs
+            .iter()
+            .find(|definition| definition.mesh_id == Some(creature.id))
+            .map(|definition| definition.id)
+            .unwrap_or_else(|| next_furniture_definition_id(&defs)),
+        name: creature.name.clone(),
+        category,
+        base_type: default_furniture_type_for_category(category),
+        material: FurnitureMaterial::Wood,
+        scale: state.scale,
+        color_tint: None,
+        flags: FurnitureFlags::default(),
+        icon: None,
+        tags: vec!["imported".to_string()],
+        mesh_id: Some(creature.id),
+        description: Some(format!("Imported furniture mesh '{}'", creature.name)),
+    };
+
+    if let Some(existing) = defs
+        .iter_mut()
+        .find(|existing| existing.mesh_id == Some(creature.id))
+    {
+        *existing = definition;
+    } else {
+        defs.push(definition);
+    }
+    defs.sort_by_key(|definition| definition.id);
+    write_ron_vec(&furniture_path, &defs)
 }
 
 /// Describes how a mesh texture will be obtained during campaign export.
@@ -1984,6 +2212,7 @@ mod tests {
     use super::{
         build_creature_definition, creature_category_from_str, describe_mesh_color_source,
         export_state_to_campaign, format_mtl_source_detail, format_mtl_source_summary,
+        furniture_category_from_str, item_mesh_category_from_str, item_mesh_category_name,
         load_model_into_state, persist_custom_palette, preview_export_relative_path,
         show_obj_importer_tab, stage_imported_swatch_as_custom_draft,
         suggest_next_creature_id_from_dir, ObjImportError, ObjImporterExportError,
@@ -1994,7 +2223,12 @@ mod tests {
         ExportType, ImportSourceFormat, ImportedMaterialSwatch, ImportedMeshColorSource,
         ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
     };
-    use antares::domain::visual::{AlphaMode, CreatureDefinition, MaterialDefinition};
+    use antares::domain::visual::item_mesh::ItemMeshCategory;
+    use antares::domain::visual::{
+        AlphaMode, CreatureDefinition, CreatureReference, MaterialDefinition,
+    };
+    use antares::domain::world::furniture::FurnitureDefinition;
+    use antares::domain::world::FurnitureCategory;
     use eframe::egui;
     use std::fs;
     use std::path::PathBuf;
@@ -2108,6 +2342,34 @@ mod tests {
             temp_dir.path().join("assets/items/bronze_dagger.ron")
         );
         assert!(outcome.absolute_path.exists());
+    }
+
+    #[test]
+    fn test_export_item_updates_item_mesh_registry() {
+        let temp_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Item;
+        state.creature_id = 9007;
+        state.creature_name = "Bronze Dagger".to_string();
+        state.category = "Dagger".to_string();
+
+        let outcome = export_state_to_campaign(&state, Some(temp_dir.path())).unwrap();
+        let registry_path = temp_dir.path().join("data/item_mesh_registry.ron");
+        let registry =
+            ron::from_str::<Vec<CreatureReference>>(&fs::read_to_string(registry_path).unwrap())
+                .unwrap();
+
+        assert_eq!(registry.len(), 1);
+        assert_eq!(registry[0].id, 9007);
+        assert_eq!(registry[0].name, "Bronze Dagger");
+        assert_eq!(
+            registry[0].filepath,
+            "assets/items/dagger/bronze_dagger.ron"
+        );
+        assert_eq!(
+            outcome.absolute_path,
+            temp_dir.path().join(&registry[0].filepath)
+        );
     }
 
     #[test]
@@ -2820,6 +3082,87 @@ mod tests {
     }
 
     #[test]
+    fn test_export_furniture_updates_registry_and_furniture_file() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Furniture;
+        state.creature_name = "Oak Table".to_string();
+        state.category = "Utility".to_string();
+        state.furniture_id = 10042;
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+
+        let mesh_registry = ron::from_str::<Vec<CreatureReference>>(
+            &fs::read_to_string(campaign_dir.path().join("data/furniture_mesh_registry.ron"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(mesh_registry.len(), 1);
+        assert_eq!(mesh_registry[0].id, 10042);
+        assert_eq!(
+            mesh_registry[0].filepath,
+            "assets/furniture/utility/oak_table.ron"
+        );
+        assert_eq!(
+            outcome.absolute_path,
+            campaign_dir.path().join(&mesh_registry[0].filepath)
+        );
+
+        let furniture_defs = ron::from_str::<Vec<FurnitureDefinition>>(
+            &fs::read_to_string(campaign_dir.path().join("data/furniture.ron")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(furniture_defs.len(), 1);
+        assert_eq!(furniture_defs[0].id, 1);
+        assert_eq!(furniture_defs[0].name, "Oak Table");
+        assert_eq!(furniture_defs[0].category, FurnitureCategory::Utility);
+        assert_eq!(furniture_defs[0].mesh_id, Some(10042));
+    }
+
+    #[test]
+    fn test_export_furniture_upserts_existing_definition_by_mesh_id() {
+        let campaign_dir = tempdir().unwrap();
+        fs::create_dir_all(campaign_dir.path().join("data")).unwrap();
+        let existing = FurnitureDefinition {
+            id: 12,
+            name: "Old Table".to_string(),
+            category: FurnitureCategory::Seating,
+            base_type: antares::domain::world::FurnitureType::Chair,
+            material: antares::domain::world::FurnitureMaterial::Wood,
+            scale: 1.0,
+            color_tint: None,
+            flags: antares::domain::world::FurnitureFlags::default(),
+            icon: None,
+            tags: vec![],
+            mesh_id: Some(10042),
+            description: None,
+        };
+        fs::write(
+            campaign_dir.path().join("data/furniture.ron"),
+            ron::ser::to_string_pretty(&vec![existing], ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Furniture;
+        state.creature_name = "Updated Table".to_string();
+        state.category = "Decoration".to_string();
+        state.furniture_id = 10042;
+
+        export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let furniture_defs = ron::from_str::<Vec<FurnitureDefinition>>(
+            &fs::read_to_string(campaign_dir.path().join("data/furniture.ron")).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(furniture_defs.len(), 1);
+        assert_eq!(furniture_defs[0].id, 12);
+        assert_eq!(furniture_defs[0].name, "Updated Table");
+        assert_eq!(furniture_defs[0].category, FurnitureCategory::Decoration);
+        assert_eq!(furniture_defs[0].mesh_id, Some(10042));
+    }
+
+    #[test]
     fn test_glb_furniture_export_preserves_texture_path() {
         let campaign_dir = tempdir().unwrap();
         let texture_bytes = b"fake_wood_texture".to_vec();
@@ -2852,6 +3195,34 @@ mod tests {
     }
 
     // ── creature_category_from_str ────────────────────────────────────────────
+
+    #[test]
+    fn test_item_and_furniture_category_helpers_map_dropdown_values() {
+        assert_eq!(
+            item_mesh_category_name(ItemMeshCategory::BodyArmor),
+            "Body Armor"
+        );
+        assert_eq!(
+            item_mesh_category_from_str("Body Armor"),
+            ItemMeshCategory::BodyArmor
+        );
+        assert_eq!(
+            item_mesh_category_from_str("Quest Item"),
+            ItemMeshCategory::QuestItem
+        );
+        assert_eq!(
+            item_mesh_category_from_str("unknown"),
+            ItemMeshCategory::Sword
+        );
+        assert_eq!(
+            furniture_category_from_str("Lighting"),
+            FurnitureCategory::Lighting
+        );
+        assert_eq!(
+            furniture_category_from_str("unknown"),
+            FurnitureCategory::Seating
+        );
+    }
 
     #[test]
     fn test_creature_category_from_str_maps_all_display_names() {

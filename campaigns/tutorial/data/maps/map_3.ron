@@ -5370,4 +5370,5 @@
     },
     allow_random_encounters: true,
     npc_placements: [],
+    is_outdoor: false,
 )

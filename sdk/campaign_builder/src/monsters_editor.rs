@@ -765,7 +765,52 @@ impl MonstersEditorState {
         self.show_import_dialog = open;
     }
 
-    /// Shows the monster creation/edit form
+    /// Commits the current edit buffer to the monster list and returns its index.
+    ///
+    /// Edit saves prefer the selected row when it still points at the same monster
+    /// ID, but fall back to ID lookup when selection became stale due to filtering,
+    /// sorting, or context-menu actions.
+    fn commit_edit_buffer_to_monsters(
+        &mut self,
+        monsters: &mut Vec<MonsterDefinition>,
+        is_add: bool,
+    ) -> usize {
+        let edited = self.edit_buffer.clone();
+
+        if is_add {
+            monsters.push(edited);
+            let idx = monsters.len() - 1;
+            self.selected_monster = Some(idx);
+            return idx;
+        }
+
+        if let Some(idx) = self
+            .selected_monster
+            .filter(|&idx| idx < monsters.len() && monsters[idx].id == edited.id)
+        {
+            monsters[idx] = edited;
+            return idx;
+        }
+
+        if let Some(idx) = monsters.iter().position(|monster| monster.id == edited.id) {
+            monsters[idx] = edited;
+            self.selected_monster = Some(idx);
+            return idx;
+        }
+
+        if let Some(idx) = self.selected_monster.filter(|&idx| idx < monsters.len()) {
+            monsters[idx] = edited;
+            self.selected_monster = Some(idx);
+            return idx;
+        }
+
+        monsters.push(edited);
+        let idx = monsters.len() - 1;
+        self.selected_monster = Some(idx);
+        idx
+    }
+
+    /// Shows the monster creation/edit form.
     ///
     /// Displays fields for editing monster properties including name (with autocomplete),
     /// stats, abilities, attacks, and loot tables.
@@ -1008,14 +1053,8 @@ impl MonstersEditorState {
                     }
 
                     if ui.button("💾 Save").clicked() {
-                        if is_add {
-                            monsters.push(self.edit_buffer.clone());
-                        } else if let Some(idx) = self.selected_monster {
-                            if idx < monsters.len() {
-                                monsters[idx] = self.edit_buffer.clone();
-                            }
-                        }
-                        self.save_monsters(
+                        self.commit_edit_buffer_to_monsters(monsters, is_add);
+                        let saved_to_disk = self.save_monsters(
                             monsters,
                             ctx.campaign_dir,
                             ctx.data_file,
@@ -1026,7 +1065,10 @@ impl MonstersEditorState {
                         self.monster_name_input_buffer.clear();
                         self.creature_id_buffer.clear();
                         self.edit_session_initialized = false;
-                        *ctx.status_message = "Monster saved".to_string();
+                        if saved_to_disk {
+                            *ctx.status_message = "Monster saved".to_string();
+                        }
+                        ui.ctx().request_repaint();
                     }
 
                     if ui.button("\u{274c} Cancel").clicked() {
@@ -1205,7 +1247,7 @@ impl MonstersEditorState {
         monsters_file: &str,
         unsaved_changes: &mut bool,
         status_message: &mut String,
-    ) {
+    ) -> bool {
         if let Some(dir) = campaign_dir {
             let monsters_path = dir.join(monsters_file);
 
@@ -1213,7 +1255,7 @@ impl MonstersEditorState {
             if let Some(parent) = monsters_path.parent() {
                 if let Err(e) = std::fs::create_dir_all(parent) {
                     *status_message = format!("Failed to create directory: {}", e);
-                    return;
+                    return false;
                 }
             }
 
@@ -1223,15 +1265,22 @@ impl MonstersEditorState {
                         *unsaved_changes = true;
                         *status_message =
                             format!("Auto-saved monsters to: {}", monsters_path.display());
+                        true
                     }
                     Err(e) => {
                         *status_message = format!("Failed to save monsters: {}", e);
+                        false
                     }
                 },
                 Err(e) => {
                     *status_message = format!("Failed to serialize monsters: {}", e);
+                    false
                 }
             }
+        } else {
+            *unsaved_changes = true;
+            *status_message = "Monster saved in editor; no campaign directory set".to_string();
+            false
         }
     }
 
@@ -1601,6 +1650,84 @@ mod tests {
             resistant_xp > base_xp,
             "Magic resistance should increase XP"
         );
+    }
+
+    #[test]
+    fn test_commit_edit_buffer_updates_by_id_when_selection_is_missing() {
+        let mut state = MonstersEditorState::new();
+        let mut monsters = vec![
+            MonsterDefinition {
+                id: 1,
+                name: "Goblin".to_string(),
+                ..MonstersEditorState::default_monster()
+            },
+            MonsterDefinition {
+                id: 2,
+                name: "Orc".to_string(),
+                ..MonstersEditorState::default_monster()
+            },
+        ];
+        state.selected_monster = None;
+        state.edit_buffer = monsters[1].clone();
+        state.edit_buffer.name = "Orc Veteran".to_string();
+        state.edit_buffer.hp = AttributePair16::new(44);
+
+        let saved_idx = state.commit_edit_buffer_to_monsters(&mut monsters, false);
+
+        assert_eq!(saved_idx, 1);
+        assert_eq!(state.selected_monster, Some(1));
+        assert_eq!(monsters[0].name, "Goblin");
+        assert_eq!(monsters[1].name, "Orc Veteran");
+        assert_eq!(monsters[1].hp.base, 44);
+    }
+
+    #[test]
+    fn test_commit_edit_buffer_updates_by_id_when_selection_points_elsewhere() {
+        let mut state = MonstersEditorState::new();
+        let mut monsters = vec![
+            MonsterDefinition {
+                id: 1,
+                name: "Goblin".to_string(),
+                ..MonstersEditorState::default_monster()
+            },
+            MonsterDefinition {
+                id: 2,
+                name: "Orc".to_string(),
+                ..MonstersEditorState::default_monster()
+            },
+        ];
+        state.selected_monster = Some(0);
+        state.edit_buffer = monsters[1].clone();
+        state.edit_buffer.name = "Orc Captain".to_string();
+
+        let saved_idx = state.commit_edit_buffer_to_monsters(&mut monsters, false);
+
+        assert_eq!(saved_idx, 1);
+        assert_eq!(state.selected_monster, Some(1));
+        assert_eq!(monsters[0].name, "Goblin");
+        assert_eq!(monsters[1].name, "Orc Captain");
+    }
+
+    #[test]
+    fn test_commit_edit_buffer_add_selects_new_monster() {
+        let mut state = MonstersEditorState::new();
+        let mut monsters = vec![MonsterDefinition {
+            id: 1,
+            name: "Goblin".to_string(),
+            ..MonstersEditorState::default_monster()
+        }];
+        state.edit_buffer = MonsterDefinition {
+            id: 2,
+            name: "New Slime".to_string(),
+            ..MonstersEditorState::default_monster()
+        };
+
+        let saved_idx = state.commit_edit_buffer_to_monsters(&mut monsters, true);
+
+        assert_eq!(saved_idx, 1);
+        assert_eq!(state.selected_monster, Some(1));
+        assert_eq!(monsters.len(), 2);
+        assert_eq!(monsters[1].name, "New Slime");
     }
 
     #[test]

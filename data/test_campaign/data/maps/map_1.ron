@@ -4,6 +4,21 @@
     height: 20,
     name: "Town Square",
     description: "The bustling town square where adventurers gather",
+    is_outdoor: true,
+    sky: Some((
+        day_sky_color: (0.53, 0.81, 0.98, 1.0),
+        dusk_dawn_sky_color: (0.98, 0.60, 0.20, 1.0),
+        night_sky_color: (0.02, 0.02, 0.08, 1.0),
+        sun_count: 1,
+        sun_color: (1.0, 0.95, 0.80, 1.0),
+        sun_size: 1.0,
+        star_count: 2000,
+        star_density: 0.5,
+        cloud_coverage: 0.3,
+        cloud_color: (0.9, 0.9, 0.9, 0.8),
+        cloud_density: 0.5,
+        cloud_speed: 1.0,
+    )),
     tiles: [
         (
             terrain: Stone,
