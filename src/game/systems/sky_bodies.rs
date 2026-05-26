@@ -1,19 +1,20 @@
 // SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! Celestial body spawning and visibility system.
+//! Celestial body and cloud layer spawning and visibility system.
 //!
-//! Manages sun disc entities and a star-field mesh entity whose visibility is
-//! toggled based on the current map's [`SkyConfig`] and the current
-//! [`TimeOfDay`].
+//! Manages sun disc entities, a star-field mesh entity, and a cloud layer mesh
+//! entity. Visibility is toggled based on the current map's [`SkyConfig`] and
+//! the current [`TimeOfDay`]. Cloud quads drift east-to-west each frame.
 //!
 //! # Design
 //!
 //! Core logic is split into pure helper functions ([`sun_azimuths`],
-//! [`generate_star_positions`], [`sky_body_visibility_flags`]) that are
-//! unit-testable without a Bevy world.  Bevy systems
-//! ([`manage_sky_bodies_on_map_change`], [`update_sky_body_visibility`]) wrap
-//! them.
+//! [`generate_star_positions`], [`sky_body_visibility_flags`],
+//! [`should_spawn_cloud_layer`], [`cloud_alpha`], [`cloud_base_color`],
+//! [`wrap_cloud_position`]) that are unit-testable without a Bevy world.
+//! Bevy systems ([`manage_sky_bodies_on_map_change`],
+//! [`update_sky_body_visibility`], [`animate_clouds`]) wrap them.
 //!
 //! ## Sun placement
 //!
@@ -26,6 +27,16 @@
 //! Stars are scattered over the upper hemisphere using a seeded RNG whose seed
 //! is derived from the map ID, guaranteeing deterministic placement.
 //!
+//! ## Cloud layer
+//!
+//! Cloud quads are distributed randomly across a horizontal plane at altitude
+//! [`MAP_CLOUD_HEIGHT`]. The number of quads scales with `cloud_coverage`.
+//! Cloud quads drift along the X axis each frame via [`animate_clouds`], which
+//! wraps the position using [`wrap_cloud_position`] when the translation
+//! exceeds half the plane width.
+//!
+//! When `cloud_coverage < MIN_CLOUD_COVERAGE` no cloud entity is spawned.
+//!
 //! ## Visibility rules
 //!
 //! | `is_outdoor` | `TimeOfDay`          | Suns  | Stars |
@@ -35,13 +46,16 @@
 //! | `true`      | Evening / Night      | false | true  |
 //! | `true`      | Dawn / Dusk          | true  | true  |
 //!
+//! Clouds are visible whenever `is_outdoor == true` (ambient light darkens
+//! them at night automatically).
+//!
 //! # Architecture Reference
 //!
-//! See `docs/explanation/sky_system_implementation_plan.md` Phase 4.
+//! See `docs/explanation/sky_system_implementation_plan.md` Phase 4 and Phase 5.
 
 use crate::domain::types::{MapId, TimeOfDay};
 use crate::domain::world::{Map, SkyConfig};
-use crate::game::components::sky::{StarFieldMarker, SunMarker};
+use crate::game::components::sky::{CloudLayerMarker, StarFieldMarker, SunMarker};
 use crate::game::resources::GlobalState;
 use bevy::color::LinearRgba;
 use bevy::mesh::Indices;
@@ -68,6 +82,29 @@ pub const STAR_FIELD_RADIUS: f32 = 480.0;
 /// Half-size of each star triangle on the hemisphere surface (world units).
 pub const STAR_POINT_SIZE: f32 = 0.8;
 
+/// Altitude (Y position) at which the cloud layer plane is placed (world units).
+///
+/// Chosen to be clearly above the tallest in-scene geometry (~20 units) while
+/// remaining within the camera frustum's far plane.
+pub const MAP_CLOUD_HEIGHT: f32 = 40.0;
+
+/// Total width and depth of the cloud plane mesh (world units).
+///
+/// The cloud layer entity's `translation.x` is wrapped within
+/// `±CLOUD_PLANE_WIDTH / 2` by [`wrap_cloud_position`].
+pub const CLOUD_PLANE_WIDTH: f32 = 200.0;
+
+/// World-unit side length of each individual cloud quad.
+pub const CLOUD_QUAD_SIZE: f32 = 20.0;
+
+/// Maximum number of cloud quads at `cloud_coverage = 1.0`.
+pub const MAX_CLOUD_QUADS: u32 = 50;
+
+/// Minimum `cloud_coverage` value that triggers cloud entity spawning.
+///
+/// Values below this threshold are treated as "no clouds".
+pub const MIN_CLOUD_COVERAGE: f32 = 0.05;
+
 // ===== Resource =====
 
 /// Bevy resource tracking spawned sky body entity IDs for safe despawn.
@@ -80,6 +117,7 @@ pub const STAR_POINT_SIZE: f32 = 0.8;
 /// let state = SkyBodyState::default();
 /// assert!(state.sun_entities.is_empty());
 /// assert!(state.star_entity.is_none());
+/// assert!(state.cloud_entity.is_none());
 /// ```
 #[derive(Resource, Debug, Default)]
 pub struct SkyBodyState {
@@ -87,12 +125,15 @@ pub struct SkyBodyState {
     pub sun_entities: Vec<Entity>,
     /// Entity ID for the star-field mesh entity, if spawned.
     pub star_entity: Option<Entity>,
+    /// Entity ID for the cloud layer mesh entity, if spawned.
+    pub cloud_entity: Option<Entity>,
 }
 
 // ===== Plugin =====
 
-/// Plugin that spawns sun and star-field entities and updates their visibility
-/// based on the current map's sky configuration and time of day.
+/// Plugin that spawns sun, star-field, and cloud-layer entities and updates
+/// their visibility based on the current map's sky configuration and time of
+/// day.
 ///
 /// Register this plugin **after**
 /// [`SkyPlugin`](crate::game::systems::sky::SkyPlugin) so that the sky
@@ -117,6 +158,7 @@ impl Plugin for SkyBodyPlugin {
             (
                 manage_sky_bodies_on_map_change,
                 update_sky_body_visibility.after(manage_sky_bodies_on_map_change),
+                animate_clouds,
             ),
         );
     }
@@ -264,6 +306,86 @@ pub fn sky_body_visibility_flags(is_outdoor: bool, tod: TimeOfDay) -> (bool, boo
     }
 }
 
+/// Returns `true` when a cloud layer should be spawned for the given coverage.
+///
+/// Coverage values below [`MIN_CLOUD_COVERAGE`] are treated as "no clouds".
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::sky_bodies::{should_spawn_cloud_layer, MIN_CLOUD_COVERAGE};
+///
+/// assert!(!should_spawn_cloud_layer(0.0));
+/// assert!(!should_spawn_cloud_layer(MIN_CLOUD_COVERAGE - 0.001));
+/// assert!(should_spawn_cloud_layer(MIN_CLOUD_COVERAGE));
+/// assert!(should_spawn_cloud_layer(1.0));
+/// ```
+pub fn should_spawn_cloud_layer(coverage: f32) -> bool {
+    coverage >= MIN_CLOUD_COVERAGE
+}
+
+/// Computes cloud layer opacity from `density` and `coverage`.
+///
+/// Result is clamped to `[0.0, 1.0]`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::sky_bodies::cloud_alpha;
+///
+/// assert_eq!(cloud_alpha(0.0, 0.8), 0.0);
+/// assert!((cloud_alpha(0.5, 0.8) - 0.4).abs() < 1e-5);
+/// assert_eq!(cloud_alpha(1.0, 1.0), 1.0);
+/// ```
+pub fn cloud_alpha(density: f32, coverage: f32) -> f32 {
+    (density * coverage).clamp(0.0, 1.0)
+}
+
+/// Returns the RGBA base colour for the cloud material.
+///
+/// RGB channels come from `cloud_color`; alpha is `density * coverage`
+/// (clamped to `[0.0, 1.0]`).
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::sky_bodies::{cloud_alpha, cloud_base_color};
+///
+/// let color = cloud_base_color([0.9, 0.9, 0.9, 0.8], 0.5, 0.8);
+/// assert!((color[0] - 0.9).abs() < 1e-5);
+/// assert!((color[3] - cloud_alpha(0.5, 0.8)).abs() < 1e-5);
+/// ```
+pub fn cloud_base_color(cloud_color: [f32; 4], density: f32, coverage: f32) -> [f32; 4] {
+    let alpha = cloud_alpha(density, coverage);
+    [cloud_color[0], cloud_color[1], cloud_color[2], alpha]
+}
+
+/// Wraps the cloud layer X translation when it exceeds `±half_width`.
+///
+/// When `x > half_width`, subtracts `2 * half_width` (wraps to negative side).
+/// When `x < -half_width`, adds `2 * half_width` (wraps to positive side).
+/// Otherwise returns `x` unchanged.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::sky_bodies::{wrap_cloud_position, CLOUD_PLANE_WIDTH};
+///
+/// let half = CLOUD_PLANE_WIDTH / 2.0;
+/// assert!((wrap_cloud_position(0.0, half) - 0.0).abs() < 1e-5);
+/// let wrapped = wrap_cloud_position(half + 5.0, half);
+/// assert!((wrapped - (-half + 5.0)).abs() < 1e-5);
+/// ```
+pub fn wrap_cloud_position(x: f32, half_width: f32) -> f32 {
+    if x > half_width {
+        x - 2.0 * half_width
+    } else if x < -half_width {
+        x + 2.0 * half_width
+    } else {
+        x
+    }
+}
+
 // ===== Mesh building =====
 
 /// Builds a [`Mesh`] representing the star field.
@@ -320,10 +442,68 @@ pub fn build_star_mesh(positions: &[Vec3], density: f32) -> Mesh {
     mesh
 }
 
+/// Builds a cloud layer [`Mesh`] as a set of flat quads distributed randomly
+/// across a horizontal plane.
+///
+/// Quads are distributed within a `CLOUD_PLANE_WIDTH × CLOUD_PLANE_WIDTH` area
+/// using a seeded RNG. The number of quads scales with
+/// `coverage * MAX_CLOUD_QUADS`.
+///
+/// Returns an empty mesh when [`should_spawn_cloud_layer`] returns `false`.
+pub fn build_cloud_mesh(coverage: f32, seed: u64) -> Mesh {
+    if !should_spawn_cloud_layer(coverage) {
+        return Mesh::new(
+            bevy::mesh::PrimitiveTopology::TriangleList,
+            bevy::asset::RenderAssetUsages::all(),
+        );
+    }
+    let num_quads = ((coverage * MAX_CLOUD_QUADS as f32) as u32).max(1);
+    let mut rng = StdRng::seed_from_u64(seed);
+    let half = CLOUD_PLANE_WIDTH / 2.0;
+    let q_half = CLOUD_QUAD_SIZE / 2.0;
+    let cap = num_quads as usize;
+
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(cap * 4);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(cap * 4);
+    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(cap * 4);
+    let mut indices: Vec<u32> = Vec::with_capacity(cap * 6);
+
+    for i in 0..num_quads {
+        let cx = rng.random_range(-half..half);
+        let cz = rng.random_range(-half..half);
+        let base = i * 4;
+
+        positions.extend_from_slice(&[
+            [cx - q_half, 0.0, cz - q_half],
+            [cx + q_half, 0.0, cz - q_half],
+            [cx + q_half, 0.0, cz + q_half],
+            [cx - q_half, 0.0, cz + q_half],
+        ]);
+        uvs.extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        normals.extend_from_slice(&[
+            [0.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ]);
+        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+
+    let mut mesh = Mesh::new(
+        bevy::mesh::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::all(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
 // ===== Spawn / despawn helpers =====
 
-/// Spawns sun disc and star-field entities for `map` and records their
-/// entity IDs in `state`.
+/// Spawns sun disc, star-field, and cloud-layer entities for `map` and
+/// records their entity IDs in `state`.
 ///
 /// Called by [`manage_sky_bodies_on_map_change`] whenever the current map
 /// changes.  Free function (not a system) to simplify testing.
@@ -384,6 +564,9 @@ pub fn spawn_sky_bodies(
             .id();
         state.star_entity = Some(entity);
     }
+
+    // ── Cloud layer ────────────────────────────────────────────────────────
+    spawn_cloud_layer(commands, meshes, materials, state, map);
 }
 
 /// Despawns all sky body entities tracked in `state` and clears the lists.
@@ -395,6 +578,68 @@ pub fn despawn_sky_bodies(commands: &mut Commands, state: &mut SkyBodyState) {
         commands.entity(entity).despawn();
     }
     if let Some(entity) = state.star_entity.take() {
+        commands.entity(entity).despawn();
+    }
+    despawn_cloud_layer(commands, state);
+}
+
+/// Spawns the cloud layer entity for `map` and records its entity ID in `state`.
+///
+/// No entity is spawned when:
+/// - `map.is_outdoor == false`, or
+/// - [`should_spawn_cloud_layer`] returns `false` for `cloud_coverage`.
+pub fn spawn_cloud_layer(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    state: &mut SkyBodyState,
+    map: &Map,
+) {
+    if !map.is_outdoor {
+        return;
+    }
+    let default_sky = SkyConfig::default();
+    let sky = map.sky.as_ref().unwrap_or(&default_sky);
+
+    if !should_spawn_cloud_layer(sky.cloud_coverage) {
+        return;
+    }
+
+    // Use a different seed offset from stars so cloud positions are independent.
+    let seed = u64::from(map.id).wrapping_add(0x9E37_79B9);
+    let cloud_mesh = build_cloud_mesh(sky.cloud_coverage, seed);
+    let mesh_handle = meshes.add(cloud_mesh);
+
+    let [r, g, b, _] = sky.cloud_color;
+    let alpha = cloud_alpha(sky.cloud_density, sky.cloud_coverage);
+    let mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(r, g, b, alpha),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        double_sided: true,
+        cull_mode: None,
+        ..Default::default()
+    });
+
+    let entity = commands
+        .spawn((
+            Mesh3d(mesh_handle),
+            MeshMaterial3d(mat),
+            Transform::from_xyz(0.0, MAP_CLOUD_HEIGHT, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+            CloudLayerMarker {
+                cloud_speed: sky.cloud_speed,
+                plane_half_width: CLOUD_PLANE_WIDTH / 2.0,
+            },
+        ))
+        .id();
+    state.cloud_entity = Some(entity);
+}
+
+/// Despawns the cloud layer entity tracked in `state`.
+pub fn despawn_cloud_layer(commands: &mut Commands, state: &mut SkyBodyState) {
+    if let Some(entity) = state.cloud_entity.take() {
         commands.entity(entity).despawn();
     }
 }
@@ -464,6 +709,19 @@ pub fn update_sky_body_visibility(
     }
     for mut vis in star_query.iter_mut() {
         *vis = star_vis;
+    }
+}
+
+/// System: animates the cloud layer by translating it along the X axis.
+///
+/// Each frame, `cloud_speed * delta_seconds` is added to the cloud entity's
+/// `transform.translation.x`. When the position exceeds the plane's half-width,
+/// it is wrapped to the opposite side via [`wrap_cloud_position`].
+pub fn animate_clouds(time: Res<Time>, mut query: Query<(&mut Transform, &CloudLayerMarker)>) {
+    for (mut transform, marker) in query.iter_mut() {
+        transform.translation.x += marker.cloud_speed * time.delta_secs();
+        transform.translation.x =
+            wrap_cloud_position(transform.translation.x, marker.plane_half_width);
     }
 }
 
@@ -590,5 +848,114 @@ mod tests {
         let (suns, stars) = sky_body_visibility_flags(true, TimeOfDay::Dusk);
         assert!(suns, "Dusk outdoor: suns must be visible");
         assert!(stars, "Dusk outdoor: stars must be visible");
+    }
+
+    // ── Cloud layer tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_cloud_coverage_zero_skips_spawn() {
+        assert!(
+            !should_spawn_cloud_layer(0.0),
+            "cloud_coverage = 0.0 must not spawn"
+        );
+        assert!(
+            !should_spawn_cloud_layer(MIN_CLOUD_COVERAGE - 0.001),
+            "cloud_coverage just below MIN_CLOUD_COVERAGE must not spawn"
+        );
+        assert!(
+            should_spawn_cloud_layer(MIN_CLOUD_COVERAGE),
+            "cloud_coverage = MIN_CLOUD_COVERAGE must spawn"
+        );
+        assert!(
+            should_spawn_cloud_layer(0.5),
+            "cloud_coverage = 0.5 must spawn"
+        );
+        assert!(
+            should_spawn_cloud_layer(1.0),
+            "cloud_coverage = 1.0 must spawn"
+        );
+    }
+
+    #[test]
+    fn test_cloud_density_affects_opacity() {
+        assert_eq!(cloud_alpha(0.0, 0.8), 0.0, "density = 0.0 → alpha = 0.0");
+        assert_eq!(cloud_alpha(0.5, 0.0), 0.0, "coverage = 0.0 → alpha = 0.0");
+        let alpha = cloud_alpha(0.5, 0.8);
+        assert!(
+            (alpha - 0.4).abs() < 1e-5,
+            "0.5 * 0.8 must equal 0.4, got {alpha}"
+        );
+        assert_eq!(
+            cloud_alpha(1.0, 1.0),
+            1.0,
+            "density = 1.0, coverage = 1.0 → alpha = 1.0"
+        );
+        assert_eq!(
+            cloud_alpha(2.0, 2.0),
+            1.0,
+            "product > 1.0 must be clamped to 1.0"
+        );
+    }
+
+    #[test]
+    fn test_animate_clouds_wraps_position() {
+        let half = CLOUD_PLANE_WIDTH / 2.0;
+
+        // Within range — no wrap.
+        assert!(
+            (wrap_cloud_position(0.0, half) - 0.0).abs() < 1e-5,
+            "x = 0 must remain 0"
+        );
+        assert!(
+            (wrap_cloud_position(half - 0.01, half) - (half - 0.01)).abs() < 1e-5,
+            "x just below half_width must not wrap"
+        );
+
+        // Exceeds positive half_width → wraps to negative side.
+        let result = wrap_cloud_position(half + 5.0, half);
+        let expected = -half + 5.0;
+        assert!(
+            (result - expected).abs() < 1e-5,
+            "x > half_width: got {result}, expected {expected}"
+        );
+
+        // Below negative half_width → wraps to positive side.
+        let result2 = wrap_cloud_position(-half - 5.0, half);
+        let expected2 = half - 5.0;
+        assert!(
+            (result2 - expected2).abs() < 1e-5,
+            "x < -half_width: got {result2}, expected {expected2}"
+        );
+    }
+
+    #[test]
+    fn test_cloud_color_applied_to_material() {
+        let sky_color = [0.9_f32, 0.9, 0.9, 0.8];
+
+        // RGB channels are preserved; alpha = density * coverage.
+        let color = cloud_base_color(sky_color, 0.5, 0.8);
+        assert!((color[0] - 0.9).abs() < 1e-5, "R must match cloud_color[0]");
+        assert!((color[1] - 0.9).abs() < 1e-5, "G must match cloud_color[1]");
+        assert!((color[2] - 0.9).abs() < 1e-5, "B must match cloud_color[2]");
+        let expected_alpha = cloud_alpha(0.5, 0.8);
+        assert!(
+            (color[3] - expected_alpha).abs() < 1e-5,
+            "alpha must equal density * coverage = {expected_alpha}"
+        );
+
+        // Default SkyConfig: cloud_coverage=0.3, cloud_density=0.5 → alpha=0.15.
+        let default_sky = SkyConfig::default();
+        let default_color = cloud_base_color(
+            default_sky.cloud_color,
+            default_sky.cloud_density,
+            default_sky.cloud_coverage,
+        );
+        let expected_default_alpha =
+            cloud_alpha(default_sky.cloud_density, default_sky.cloud_coverage);
+        assert!(
+            (default_color[3] - expected_default_alpha).abs() < 1e-5,
+            "default sky: alpha = 0.5 * 0.3 = 0.15, got {}",
+            default_color[3]
+        );
     }
 }

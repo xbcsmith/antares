@@ -42,5 +42,5 @@ pub use performance::{
     DistanceCulling, InstanceData, InstancedCreature, LodState, MeshStreaming, PerformanceCategory,
     PerformanceMarker,
 };
-pub use sky::{StarFieldMarker, SunMarker};
+pub use sky::{CloudLayerMarker, StarFieldMarker, SunMarker};
 pub use sprite::{ActorSprite, ActorType, AnimatedSprite, TileSprite};

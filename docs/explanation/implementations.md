@@ -82,6 +82,89 @@ so they can be called from tests or other contexts without a Bevy world.
 
 ---
 
+## Sky System — Phase 5: Cloud Layer (2026)
+
+**Goal:** Add a cloud layer mesh entity to the sky system. Cloud quads are
+distributed across a flat horizontal plane, drift east-to-west each frame via
+`animate_clouds`, and wrap seamlessly when they exceed the plane boundary.
+Cloud spawning is gated by `MIN_CLOUD_COVERAGE` and driven entirely by each
+map's `SkyConfig.cloud_coverage`, `.cloud_density`, `.cloud_color`, and
+`.cloud_speed` fields.
+
+### Files Changed
+
+| Path                             | Action                                              |
+| -------------------------------- | --------------------------------------------------- |
+| `src/game/systems/sky_bodies.rs` | **Rewritten** — Phase 5 additions on top of Phase 4 |
+
+### What Was Built
+
+**New constants**
+
+| Constant             | Value   | Purpose                                             |
+| -------------------- | ------- | --------------------------------------------------- |
+| `MAP_CLOUD_HEIGHT`   | `40.0`  | Y altitude of the cloud plane                       |
+| `CLOUD_PLANE_WIDTH`  | `200.0` | Total X/Z extent of the cloud plane (world units)   |
+| `CLOUD_QUAD_SIZE`    | `20.0`  | Side length of each individual cloud quad           |
+| `MAX_CLOUD_QUADS`    | `50`    | Maximum quads at `cloud_coverage = 1.0`             |
+| `MIN_CLOUD_COVERAGE` | `0.05`  | Coverage threshold below which no entity is spawned |
+
+**`SkyBodyState` — new field**
+
+Added `pub cloud_entity: Option<Entity>` so the cloud entity is tracked
+alongside sun and star entities and safely despawned on map change.
+
+**`SkyBodyPlugin` — new system**
+
+Registered `animate_clouds` in the `Update` schedule alongside the existing
+`manage_sky_bodies_on_map_change` and `update_sky_body_visibility` systems.
+
+**New pure helper functions**
+
+| Function                                           | Description                                                                                      |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `should_spawn_cloud_layer(coverage)`               | Returns `true` when `coverage >= MIN_CLOUD_COVERAGE`                                             |
+| `cloud_alpha(density, coverage)`                   | Returns `(density * coverage).clamp(0.0, 1.0)` — cloud opacity                                   |
+| `cloud_base_color(cloud_color, density, coverage)` | Preserves RGB from `cloud_color`; computes alpha via `cloud_alpha`                               |
+| `wrap_cloud_position(x, half_width)`               | Wraps X translation: subtracts `2*half_width` when `x > half_width`, adds when `x < -half_width` |
+
+**`build_cloud_mesh(coverage, seed)`**
+
+Builds a flat `Mesh` of `coverage * MAX_CLOUD_QUADS` quads randomly placed
+across a `CLOUD_PLANE_WIDTH × CLOUD_PLANE_WIDTH` plane using a seeded `StdRng`.
+Returns an empty mesh when `should_spawn_cloud_layer` returns `false`.
+
+**`spawn_cloud_layer` / `despawn_cloud_layer`**
+
+Free helper functions (not systems) that create / destroy the cloud entity and
+write / clear `state.cloud_entity`. `spawn_cloud_layer` no-ops when
+`map.is_outdoor == false` or coverage is below threshold.
+
+**`spawn_sky_bodies` update**
+
+Now calls `spawn_cloud_layer` after spawning suns and stars.
+
+**`despawn_sky_bodies` update**
+
+Now calls `despawn_cloud_layer` to clean up the cloud entity.
+
+**`animate_clouds` system**
+
+Each frame, adds `cloud_speed * delta_secs` to the cloud entity's
+`transform.translation.x` and wraps via `wrap_cloud_position`. Queries
+`(&mut Transform, &CloudLayerMarker)` — no `Res<GlobalState>` needed.
+
+### Tests Added (4 new unit tests; total 10 in `sky_bodies::tests`)
+
+| Test                                   | What it verifies                                                                                          |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `test_cloud_coverage_zero_skips_spawn` | `should_spawn_cloud_layer` returns `false` below threshold, `true` at and above it                        |
+| `test_cloud_density_affects_opacity`   | `cloud_alpha` returns `0.0` for zero density/coverage, `0.4` for 0.5×0.8, `1.0` for max, clamps above 1.0 |
+| `test_animate_clouds_wraps_position`   | `wrap_cloud_position` leaves in-range values unchanged, wraps correctly in both directions                |
+| `test_cloud_color_applied_to_material` | `cloud_base_color` preserves RGB and computes alpha; verified against `SkyConfig::default()` values       |
+
+---
+
 ## Sky System — Phase 3: SDK Map Editor Integration (2026)
 
 **Goal:** Expose `is_outdoor` and `SkyConfig` in the SDK Map Editor's

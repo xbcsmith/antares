@@ -4,11 +4,12 @@
 //! Sky-related ECS components for celestial body entities.
 //!
 //! Provides marker components used by [`crate::game::systems::sky_bodies`] to
-//! identify, query, and toggle visibility of sun disc and star-field entities.
+//! identify, query, toggle visibility of, and animate sun disc, star-field,
+//! and cloud layer entities.
 //!
 //! # Architecture Reference
 //!
-//! See `docs/explanation/sky_system_implementation_plan.md` Phase 4.
+//! See `docs/explanation/sky_system_implementation_plan.md` Phase 4 and Phase 5.
 
 use bevy::prelude::*;
 
@@ -47,6 +48,30 @@ pub struct SunMarker;
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StarFieldMarker;
 
+/// Marker and animation-parameter component for the cloud layer entity
+/// spawned by [`crate::game::systems::sky_bodies::SkyBodyPlugin`].
+///
+/// The [`crate::game::systems::sky_bodies::animate_clouds`] system reads
+/// `cloud_speed` and `plane_half_width` from this component to animate the
+/// cloud layer each frame via [`crate::game::systems::sky_bodies::wrap_cloud_position`].
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::components::sky::CloudLayerMarker;
+///
+/// let marker = CloudLayerMarker { cloud_speed: 1.0, plane_half_width: 100.0 };
+/// assert_eq!(marker.cloud_speed, 1.0);
+/// assert_eq!(marker.plane_half_width, 100.0);
+/// ```
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct CloudLayerMarker {
+    /// Horizontal scroll speed in world units per second.
+    pub cloud_speed: f32,
+    /// Half the total cloud plane width, used for X-position wrapping.
+    pub plane_half_width: f32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,5 +102,25 @@ mod tests {
     fn test_star_field_marker_debug() {
         let marker = StarFieldMarker;
         assert_eq!(format!("{:?}", marker), "StarFieldMarker");
+    }
+
+    #[test]
+    fn test_cloud_layer_marker_fields() {
+        let marker = CloudLayerMarker {
+            cloud_speed: 2.5,
+            plane_half_width: 100.0,
+        };
+        assert!((marker.cloud_speed - 2.5).abs() < 1e-5);
+        assert!((marker.plane_half_width - 100.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_cloud_layer_marker_is_copy() {
+        let marker = CloudLayerMarker {
+            cloud_speed: 1.0,
+            plane_half_width: 50.0,
+        };
+        let _copy = marker;
+        let _original = marker;
     }
 }
