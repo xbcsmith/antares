@@ -32162,6 +32162,7 @@
             dialogue_id: Some(1000),
             time_condition: None,
             facing: Some(South),
+            face_on_dialogue: false,
         ),
         (
             x: 38,
@@ -32178,4 +32179,5 @@
     },
     allow_random_encounters: true,
     npc_placements: [],
+    is_outdoor: false,
 )

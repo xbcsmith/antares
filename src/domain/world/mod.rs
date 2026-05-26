@@ -55,7 +55,7 @@ pub use types::{
     DoorFrameConfig, EncounterGroup, EncounterTable, FurnitureAppearancePreset, FurnitureCategory,
     FurnitureFlags, FurnitureMaterial, FurnitureType, GrassBladeConfig, GrassDensity, InstanceData,
     LayeredSprite, Map, MapEvent, PointOfInterest, RailingConfig, ResolvedNpc, RockVariant,
-    SpriteAnimation, SpriteLayer, SpriteMaterialProperties, SpriteReference, SpriteSelectionRule,
-    StructureType, TerrainType, Tile, TileVisualMetadata, TimeCondition, TreeType,
-    WallSegmentConfig, WallType, WaterFlowDirection, World,
+    SkyConfig, SpriteAnimation, SpriteLayer, SpriteMaterialProperties, SpriteReference,
+    SpriteSelectionRule, StructureType, TerrainType, Tile, TileVisualMetadata, TimeCondition,
+    TreeType, WallSegmentConfig, WallType, WaterFlowDirection, World,
 };

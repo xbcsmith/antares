@@ -6177,4 +6177,5 @@
             dialogue_override: None,
         ),
     ],
+    is_outdoor: false,
 )

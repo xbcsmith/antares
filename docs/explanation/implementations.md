@@ -2,6 +2,602 @@
 
 ---
 
+## Landscape Category and Map Placement Implementation Plan (2026)
+
+**Goal:** Define a phased plan for adding a first-class `landscape` importer/SDK category, map-editor landscape placement support, and default tree/brush visual fixes using the existing tree mesh and texture assets.
+
+### Files Changed
+
+| Path                                                | Action                                                           |
+| --------------------------------------------------- | ---------------------------------------------------------------- |
+| `docs/explanation/landscape_implementation_plan.md` | Added phased landscape implementation and tree/brush repair plan |
+| `docs/explanation/next_plans.md`                    | Updated the landscape plan link to point at the Markdown file    |
+| `docs/explanation/implementations.md`               | Recorded this planning/documentation update                      |
+
+### What Was Added
+
+- Proposed a domain model for `LandscapeDefinition`, `LandscapePlacement`, `LandscapeCategory`, `LandscapeDatabase`, and `LandscapeMeshDatabase`.
+- Planned the architecture update needed before adding `Map.landscape_placements`.
+- Defined phases for tree/brush asset repair, domain loading and validation, runtime rendering, importer export support, SDK landscape editing, map placement, fixtures, tests, and documentation cleanup.
+- Captured SDK egui ID and multi-column layout requirements for the planned importer and map-editor work.
+- Reiterated that tests and fixtures must use `data/test_campaign` rather than `campaigns/tutorial`.
+
+---
+
+## Campaign Builder Monster Editor — Reliable Edit Save (2026)
+
+**Goal:** Ensure the bottom **Save** button in the Monster Editor always commits
+the current edit buffer to the intended monster before returning to the list.
+
+### Files Changed
+
+| Path                                          | Action                                                       |
+| --------------------------------------------- | ------------------------------------------------------------ |
+| `sdk/campaign_builder/src/monsters_editor.rs` | Hardened edit-buffer commit logic and added regression tests |
+| `docs/explanation/implementations.md`         | Recorded this Monster Editor bug fix                         |
+
+### What Changed
+
+- Added a dedicated `commit_edit_buffer_to_monsters` helper.
+- Edit saves now prefer the selected row only when it still points at the same
+  monster ID.
+- If selection is missing or stale due to filtering, sorting, or context-menu
+  interactions, saves fall back to locating the monster by `edit_buffer.id`.
+- Add-mode saves select the newly inserted monster after committing.
+- The bottom Save button now requests repaint after returning to list mode and
+  only overwrites the save status when disk save succeeds.
+
+### Tests Added
+
+- `test_commit_edit_buffer_updates_by_id_when_selection_is_missing`
+- `test_commit_edit_buffer_updates_by_id_when_selection_points_elsewhere`
+- `test_commit_edit_buffer_add_selects_new_monster`
+
+---
+
+## Campaign Builder Importer — Item/Furniture Category and Furniture RON Fix (2026)
+
+**Goal:** Make the Importer tab consistent across creature, item, and furniture
+exports, and ensure furniture imports update campaign furniture definitions.
+
+### Files Changed
+
+| Path                                          | Action                                                              |
+| --------------------------------------------- | ------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/obj_importer_ui.rs` | Added item/furniture category dropdowns and export metadata upserts |
+| `sdk/campaign_builder/src/lib.rs`             | Reloaded item mesh/furniture state after importer export signals    |
+| `docs/explanation/implementations.md`         | Recorded this importer bug fix                                      |
+
+### What Changed
+
+- Replaced free-text category entry for item and furniture importer exports
+  with `ComboBox::from_id_salt` dropdowns.
+- Item exports now upsert `data/item_mesh_registry.ron` so newly imported item
+  mesh assets are registered for runtime/editor loading.
+- Furniture exports now upsert both `data/furniture_mesh_registry.ron` and
+  `data/furniture.ron`, creating or updating a `FurnitureDefinition` that
+  references the imported mesh ID.
+- After item exports, the Item Mesh editor registry is reloaded from the open
+  campaign so the new asset appears immediately.
+- After furniture exports, furniture definitions are reloaded and the UI returns
+  to the Furniture tab with the imported definition available.
+
+### Tests Added
+
+- `test_export_item_updates_item_mesh_registry`
+- `test_export_furniture_updates_registry_and_furniture_file`
+- `test_export_furniture_upserts_existing_definition_by_mesh_id`
+- `test_item_and_furniture_category_helpers_map_dropdown_values`
+
+---
+
+## Sky System — Phase 6 Completion and Compliance Hardening (2026)
+
+**Goal:** Finish the remaining Phase 6 work from the sky system plan: harden SDK
+map saving, complete sun/star transition rendering, prevent indoor sky-body
+spawns, add reusable procedural cloud noise texturing, and document the final
+implementation state.
+
+### Files Changed
+
+| Path                                     | Action                                                                                      |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/map_editor.rs` | Hardened metadata save synchronisation and stale indoor sky cleanup                         |
+| `src/game/systems/sky_bodies.rs`         | Completed flat sun discs, indoor no-spawn, Dawn/Dusk opacity, and cloud noise texture reuse |
+| `docs/explanation/implementations.md`    | Recorded this Phase 6 completion work                                                       |
+
+### What Changed
+
+- Added SDK metadata synchronisation helpers so `save_to_ron` serializes a map
+  with current metadata even when callers do not manually call
+  `apply_metadata` first.
+- Clearing **Outdoor Map** now clears stale `sky_config`, and indoor maps always
+  serialize with `sky: None`.
+- Replaced sun sphere meshes with flat triangle-fan disc meshes.
+- Added `SkyBodyRenderState` and `sky_body_render_state` so Dawn and Dusk keep
+  both suns and stars visible while reducing material alpha.
+- Prevented indoor maps from spawning sun or star entities at all.
+- Added `CloudNoiseTexture`, deterministic cloud `Image` generation, and
+  cloud materials that reuse the generated texture while preserving
+  `cloud_density * cloud_coverage` alpha.
+- Added/strengthened tests for metadata synchronization, stale indoor sky
+  cleanup, flat sun meshes, indoor no-spawn behaviour, Dawn/Dusk opacity, and
+  cloud texture reuse/material tinting.
+
+---
+
+## Sky System — Phase 6 Domain and Architecture Hardening (2026)
+
+**Goal:** Align the architecture reference with the implemented domain sky model
+and strengthen the domain RON round-trip test so every `SkyConfig` field is
+covered explicitly.
+
+### Files Changed
+
+| Path                                  | Action                                                                                                                                         |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/reference/architecture.md`      | Updated Section 4.2 to document the real `World`, `Map`, and `SkyConfig` field shapes, including sky defaults and `is_outdoor`/`sky` semantics |
+| `src/domain/world/types.rs`           | Renamed and strengthened the map sky RON round-trip test to assert every `SkyConfig` field survives serialization and deserialization          |
+| `docs/explanation/implementations.md` | Recorded this Phase 6 domain/architecture update                                                                                               |
+
+### What Changed
+
+- Documented `SkyConfig` in `docs/reference/architecture.md` Section 4.2 with
+  all twelve fields and their default values.
+- Updated the documented `Map` fields to include `is_outdoor: bool` and
+  `sky: Option<SkyConfig>` alongside the other implemented map fields.
+- Clarified that `sky` is only consulted when `is_outdoor` is `true`; indoor
+  maps ignore sky configuration.
+- Replaced the narrower sky round-trip test with
+  `test_domain_map_sky_roundtrip_preserves_all_fields`, which uses non-default
+  values for every `SkyConfig` field and verifies each one after RON round-trip.
+
+---
+
+## Sky System Implementation Plan — Phase 6 Hardening Added (2026)
+
+**Goal:** Extend `docs/explanation/sky_system_implementation_plan.md` with a
+final completion phase that captures the remaining implementation gaps found
+after auditing Phases 1–5.
+
+### Files Changed
+
+| Path                                                 | Action                                             |
+| ---------------------------------------------------- | -------------------------------------------------- |
+| `docs/explanation/sky_system_implementation_plan.md` | Added Phase 6: Completion and Compliance Hardening |
+| `docs/explanation/implementations.md`                | Recorded this planning/documentation update        |
+
+### What Was Added
+
+The new Phase 6 defines the remaining work needed to finish the sky system:
+
+- synchronise `docs/reference/architecture.md` with the implemented `SkyConfig`
+  and `Map` fields,
+- harden SDK map saving so indoor maps cannot retain or serialize stale sky
+  configuration,
+- strengthen domain and SDK round-trip tests to assert every `SkyConfig` field,
+- prevent indoor maps from spawning sun/star entities,
+- replace sphere suns with flat disc/billboard rendering,
+- add Dawn/Dusk opacity transitions for suns and stars,
+- complete the procedural cloud noise texture requirement,
+- add explicit tests and success criteria for all remaining gaps.
+
+### Validation
+
+This was a documentation-only planning update. No Rust code or game data was
+changed.
+
+---
+
+## Sky System — Phase 4: Celestial Bodies — Suns and Stars (2026)
+
+**Goal:** Spawn sun disc entities and a single star-field mesh entity per
+outdoor map, driven by each map's `SkyConfig`. Toggle visibility frame-by-frame
+based on the current `TimeOfDay` so suns show during the day, stars at night,
+and both during transitional periods.
+
+### Files Changed
+
+| Path                             | Action                           |
+| -------------------------------- | -------------------------------- |
+| `src/game/systems/sky_bodies.rs` | **New** — Phase 4 implementation |
+| `src/game/systems/mod.rs`        | Added `pub mod sky_bodies;`      |
+
+### What Was Built
+
+#### `src/game/systems/sky_bodies.rs` (new file)
+
+**Constants**
+
+| Constant                      | Value                | Purpose                                            |
+| ----------------------------- | -------------------- | -------------------------------------------------- |
+| `SUN_DISTANCE`                | `500.0`              | World-units distance at which sun discs are placed |
+| `SUN_ELEVATION_ANGLE_RADIANS` | `π/4` (45°)          | Elevation above horizon for all suns               |
+| `SUN_BASE_RADIUS`             | `SUN_DISTANCE * 0.1` | Disc radius at `sun_size = 1.0`                    |
+| `STAR_FIELD_RADIUS`           | `480.0`              | Hemisphere radius for star positions               |
+| `STAR_POINT_SIZE`             | `0.8`                | Half-size of each star triangle (world units)      |
+
+**`SkyBodyState` resource**
+
+Tracks `sun_entities: Vec<Entity>` and `star_entity: Option<Entity>` so every
+entity spawned by the system can be found and despawned when the map changes.
+
+**`SkyBodyPlugin`**
+
+Registers `SkyBodyState` and two `Update` systems:
+
+- `manage_sky_bodies_on_map_change` — detects map change via `Local<Option<MapId>>`,
+  despawns old entities, spawns new ones.
+- `update_sky_body_visibility` — runs `.after(manage_sky_bodies_on_map_change)`,
+  sets `Visibility::Visible` / `Visibility::Hidden` on all `SunMarker` and
+  `StarFieldMarker` entities.
+
+**Pure helper functions**
+
+| Function                                     | Description                                                                                                         |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `sun_azimuths(n)`                            | Returns azimuth angles in radians for `n` suns: 0→empty, 1→[-30°], 2→[±60°], n>2→evenly distributed over 120° arc   |
+| `sun_world_positions(n, size)`               | Converts azimuths to 3D world-space `(Vec3, radius)` pairs at `SUN_DISTANCE` / `SUN_ELEVATION_ANGLE_RADIANS`        |
+| `generate_star_positions(count, seed)`       | Scatters `count` points on the upper hemisphere using a seeded `StdRng`; seed derived from `map.id` for determinism |
+| `sky_body_visibility_flags(is_outdoor, tod)` | Returns `(suns_visible, stars_visible)` — pure, no Bevy dependency                                                  |
+| `build_star_mesh(positions, density)`        | Builds a `Mesh` of tiny equilateral triangles, one per star; alpha from `density.clamp(0.2, 1.0)`                   |
+
+**Visibility rules implemented**
+
+| `is_outdoor` | `TimeOfDay`         | Suns    | Stars   |
+| ------------ | ------------------- | ------- | ------- |
+| `false`      | (any)               | Hidden  | Hidden  |
+| `true`       | Morning / Afternoon | Visible | Hidden  |
+| `true`       | Evening / Night     | Hidden  | Visible |
+| `true`       | Dawn / Dusk         | Visible | Visible |
+
+**Spawn / despawn helpers**
+
+`spawn_sky_bodies` and `despawn_sky_bodies` are free functions (not systems)
+so they can be called from tests or other contexts without a Bevy world.
+
+### Tests Added (6 unit tests, all in `sky_bodies::tests`)
+
+| Test                                            | What it verifies                                                                            |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `test_sun_positions_one_sun`                    | `sun_azimuths(1)` returns exactly one element at -30°                                       |
+| `test_sun_positions_two_suns`                   | `sun_azimuths(2)` returns symmetric ±60° pair                                               |
+| `test_sun_count_zero_spawns_nothing`            | Both `sun_azimuths(0)` and `sun_world_positions(0, …)` return empty vecs                    |
+| `test_star_count_zero_spawns_empty_field`       | `generate_star_positions(0, …)` is empty; `build_star_mesh` over empty input has 0 vertices |
+| `test_sky_body_visibility_night_shows_stars`    | Night/Evening outdoor → stars only; indoor night → both hidden                              |
+| `test_sky_body_visibility_afternoon_shows_suns` | Morning/Afternoon → suns only; Dawn/Dusk → both visible                                     |
+
+---
+
+## Sky System — Phase 5: Cloud Layer (2026)
+
+**Goal:** Add a cloud layer mesh entity to the sky system. Cloud quads are
+distributed across a flat horizontal plane, drift east-to-west each frame via
+`animate_clouds`, and wrap seamlessly when they exceed the plane boundary.
+Cloud spawning is gated by `MIN_CLOUD_COVERAGE` and driven entirely by each
+map's `SkyConfig.cloud_coverage`, `.cloud_density`, `.cloud_color`, and
+`.cloud_speed` fields.
+
+### Files Changed
+
+| Path                             | Action                                              |
+| -------------------------------- | --------------------------------------------------- |
+| `src/game/systems/sky_bodies.rs` | **Rewritten** — Phase 5 additions on top of Phase 4 |
+
+### What Was Built
+
+**New constants**
+
+| Constant             | Value   | Purpose                                             |
+| -------------------- | ------- | --------------------------------------------------- |
+| `MAP_CLOUD_HEIGHT`   | `40.0`  | Y altitude of the cloud plane                       |
+| `CLOUD_PLANE_WIDTH`  | `200.0` | Total X/Z extent of the cloud plane (world units)   |
+| `CLOUD_QUAD_SIZE`    | `20.0`  | Side length of each individual cloud quad           |
+| `MAX_CLOUD_QUADS`    | `50`    | Maximum quads at `cloud_coverage = 1.0`             |
+| `MIN_CLOUD_COVERAGE` | `0.05`  | Coverage threshold below which no entity is spawned |
+
+**`SkyBodyState` — new field**
+
+Added `pub cloud_entity: Option<Entity>` so the cloud entity is tracked
+alongside sun and star entities and safely despawned on map change.
+
+**`SkyBodyPlugin` — new system**
+
+Registered `animate_clouds` in the `Update` schedule alongside the existing
+`manage_sky_bodies_on_map_change` and `update_sky_body_visibility` systems.
+
+**New pure helper functions**
+
+| Function                                           | Description                                                                                      |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `should_spawn_cloud_layer(coverage)`               | Returns `true` when `coverage >= MIN_CLOUD_COVERAGE`                                             |
+| `cloud_alpha(density, coverage)`                   | Returns `(density * coverage).clamp(0.0, 1.0)` — cloud opacity                                   |
+| `cloud_base_color(cloud_color, density, coverage)` | Preserves RGB from `cloud_color`; computes alpha via `cloud_alpha`                               |
+| `wrap_cloud_position(x, half_width)`               | Wraps X translation: subtracts `2*half_width` when `x > half_width`, adds when `x < -half_width` |
+
+**`build_cloud_mesh(coverage, seed)`**
+
+Builds a flat `Mesh` of `coverage * MAX_CLOUD_QUADS` quads randomly placed
+across a `CLOUD_PLANE_WIDTH × CLOUD_PLANE_WIDTH` plane using a seeded `StdRng`.
+Returns an empty mesh when `should_spawn_cloud_layer` returns `false`.
+
+**`spawn_cloud_layer` / `despawn_cloud_layer`**
+
+Free helper functions (not systems) that create / destroy the cloud entity and
+write / clear `state.cloud_entity`. `spawn_cloud_layer` no-ops when
+`map.is_outdoor == false` or coverage is below threshold.
+
+**`spawn_sky_bodies` update**
+
+Now calls `spawn_cloud_layer` after spawning suns and stars.
+
+**`despawn_sky_bodies` update**
+
+Now calls `despawn_cloud_layer` to clean up the cloud entity.
+
+**`animate_clouds` system**
+
+Each frame, adds `cloud_speed * delta_secs` to the cloud entity's
+`transform.translation.x` and wraps via `wrap_cloud_position`. Queries
+`(&mut Transform, &CloudLayerMarker)` — no `Res<GlobalState>` needed.
+
+### Tests Added (4 new unit tests; total 10 in `sky_bodies::tests`)
+
+| Test                                   | What it verifies                                                                                          |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `test_cloud_coverage_zero_skips_spawn` | `should_spawn_cloud_layer` returns `false` below threshold, `true` at and above it                        |
+| `test_cloud_density_affects_opacity`   | `cloud_alpha` returns `0.0` for zero density/coverage, `0.4` for 0.5×0.8, `1.0` for max, clamps above 1.0 |
+| `test_animate_clouds_wraps_position`   | `wrap_cloud_position` leaves in-range values unchanged, wraps correctly in both directions                |
+| `test_cloud_color_applied_to_material` | `cloud_base_color` preserves RGB and computes alpha; verified against `SkyConfig::default()` values       |
+
+---
+
+## Sky System — Phase 3: SDK Map Editor Integration (2026)
+
+**Goal:** Expose `is_outdoor` and `SkyConfig` in the SDK Map Editor's
+Metadata panel so campaign authors can configure sky settings visually and
+have them persisted to map RON files.
+
+### What Was Built
+
+All changes are in `sdk/campaign_builder/src/map_editor.rs`.
+
+#### `MapMetadata` struct
+
+Added `pub sky_config: Option<SkyConfig>` field (default `None`). The
+field gates the entire sky-settings UI section.
+
+#### `MapEditorState::new` (load path)
+
+Now copies both `map.is_outdoor` and `map.sky` into `metadata.is_outdoor`
+and `metadata.sky_config` on construction, so existing maps open with their
+correct sky state in the editor.
+
+#### `apply_metadata` (save path)
+
+Now writes `map.is_outdoor = metadata.is_outdoor` and
+`map.sky = metadata.sky_config.clone()` back to the `Map` struct before
+serialisation. Previously `is_outdoor` was never persisted to the RON file;
+that gap is now closed.
+
+#### `show_metadata_editor` UI
+
+Immediately after the "Outdoor Map" checkbox, a `CollapsingHeader`
+`"\u2601 Sky Settings"` (hidden when `is_outdoor = false`) exposes:
+
+- **Enable Custom Sky** checkbox — toggles `sky_config` between `None` and
+  `Some(SkyConfig::default())`.
+- When enabled, colour pickers (`color_edit_button_rgba_unmultiplied`) for
+  Day Sky, Dusk/Dawn Sky, Night Sky, Sun Color, and Cloud Color.
+- `DragValue` widgets for Sun Count (0–8) and Star Count (0–10 000).
+- `Slider` widgets for Sun Size (0.1–5.0), Star Density, Cloud Coverage,
+  Cloud Density, and Cloud Speed (all 0.0–1.0 or 0.0–5.0).
+- Every widget sets `editor.has_changes = true` on change.
+
+#### `classify_map_environment` update
+
+The `is_outdoor` flag is now checked first (authoritative). If `true`,
+returns `("Outdoor", green)` immediately. The existing wall-density
+heuristic only runs for maps where `is_outdoor == false`; its old
+fallthrough path `("Outdoor", …)` is replaced with `("Indoor", …)` so
+the heuristic never produces an "Outdoor" label for a map the author
+intended as indoor.
+
+#### `SkyConfig` import
+
+Added to the `antares::domain::world::{\u2026}` import block.
+
+### Tests Added (5 new, all in `map_editor::tests`)
+
+| Test                                                 | What it verifies                                                        |
+| ---------------------------------------------------- | ----------------------------------------------------------------------- |
+| `test_map_metadata_is_outdoor_writes_to_map_ron`     | `apply_metadata` propagates `is_outdoor` and it survives RON round-trip |
+| `test_map_metadata_sky_config_round_trip`            | `SkyConfig` fields survive `apply_metadata` + RON round-trip            |
+| `test_map_metadata_sky_config_none_not_written`      | `sky:` key absent from RON when `sky_config` is `None`                  |
+| `test_classify_map_environment_uses_is_outdoor_flag` | `is_outdoor=true` overrides wall-density heuristic → `"Outdoor"`        |
+| `test_metadata_sky_section_only_shown_when_outdoor`  | `MapEditorState::new` mirrors `is_outdoor=false` / `sky=None` from map  |
+
+### Quality Gates
+
+```text
+cargo fmt     → clean
+cargo check   → 0 errors
+cargo clippy  → 0 warnings
+cargo nextest (antares)          → 5101 passed, 8 skipped, 0 failed
+cargo nextest (campaign_builder) → 2493 passed, 0 skipped, 0 failed
+```
+
+---
+
+## Sky System — Phase 2: Sky Background Rendering Engine (2026)
+
+**Goal:** Replace the static grey Bevy `ClearColor` with a live, per-map sky
+tint driven by `SkyConfig` and `TimeOfDay`. Indoor maps receive a near-black
+cave ceiling colour; outdoor maps blend through dawn, day, dusk, and night
+palettes.
+
+### What Was Built
+
+#### `src/game/systems/sky.rs` (new file)
+
+**Constants (4)**
+
+| Constant                              | Value                     | Purpose                           |
+| ------------------------------------- | ------------------------- | --------------------------------- |
+| `INDOOR_SKY_COLOR`                    | `[0.05, 0.04, 0.03, 1.0]` | Near-black warm grey for dungeons |
+| `DEFAULT_OUTDOOR_DAY_SKY_COLOR`       | `[0.53, 0.81, 0.98, 1.0]` | Sky blue for Morning/Afternoon    |
+| `DEFAULT_OUTDOOR_NIGHT_SKY_COLOR`     | `[0.02, 0.02, 0.08, 1.0]` | Deep navy for Evening/Night       |
+| `DEFAULT_OUTDOOR_DUSK_DAWN_SKY_COLOR` | `[0.98, 0.60, 0.20, 1.0]` | Warm amber for Dawn/Dusk          |
+
+**`sky_color_for_time(config: &SkyConfig, tod: TimeOfDay) -> [f32; 4]`**
+
+Pure function (no Bevy dependencies) that maps each `TimeOfDay` variant to an
+exact colour or a blended colour:
+
+| `TimeOfDay` | Result                                              |
+| ----------- | --------------------------------------------------- |
+| `Night`     | `night_sky_color`                                   |
+| `Evening`   | lerp(`night_sky_color`, `dusk_dawn_sky_color`, 0.3) |
+| `Dawn`      | `dusk_dawn_sky_color`                               |
+| `Morning`   | lerp(`dusk_dawn_sky_color`, `day_sky_color`, 0.7)   |
+| `Afternoon` | `day_sky_color`                                     |
+| `Dusk`      | `dusk_dawn_sky_color`                               |
+
+**`update_sky_background` Bevy system**
+
+Reads `GlobalState` (current map + time), computes the RGBA via
+`sky_color_for_time`, and writes `Color::srgba(…)` to `ResMut<ClearColor>`.
+Selection logic:
+
+1. No active map → `INDOOR_SKY_COLOR`
+2. `is_outdoor == false` → `INDOOR_SKY_COLOR`
+3. `is_outdoor == true`, `sky == None` → `SkyConfig::default()`
+4. `is_outdoor == true`, `sky == Some(cfg)` → per-map `cfg`
+
+**`SkyPlugin`**
+
+Registers `update_sky_background` in `Update`, ordered
+`.after(apply_time_advance).before(update_ambient_light)`, guaranteeing the
+sky colour is always computed from the up-to-date time value.
+
+#### `src/game/systems/mod.rs`
+
+`pub mod sky;` added (alphabetically between `rest` and `skill_training_ui`).
+
+#### `src/bin/antares.rs`
+
+`app.add_plugins(antares::game::systems::sky::SkyPlugin)` registered
+immediately after `TimeOfDayPlugin`.
+
+### Tests Added (6 new unit tests in `game::systems::sky::tests`)
+
+| Test                                            | What it verifies                                |
+| ----------------------------------------------- | ----------------------------------------------- |
+| `test_sky_color_for_time_night`                 | Night returns `night_sky_color` exactly         |
+| `test_sky_color_for_time_afternoon`             | Afternoon returns `day_sky_color` exactly       |
+| `test_sky_color_for_time_dusk`                  | Dusk returns `dusk_dawn_sky_color` exactly      |
+| `test_sky_color_for_time_evening_is_blend`      | Evening is strictly between Night and Dusk/Dawn |
+| `test_sky_color_for_time_morning_is_blend`      | Morning is strictly between Dusk/Dawn and Day   |
+| `test_sky_color_all_periods_produce_valid_rgba` | All 6 variants stay in `[0.0, 1.0]` per channel |
+
+### Quality Gates
+
+```text
+cargo fmt     → clean
+cargo check   → 0 errors
+cargo clippy  → 0 warnings
+cargo nextest → 5101 passed, 8 skipped, 0 failed
+```
+
+---
+
+## Sky System — Phase 1: Domain Foundation (2026)
+
+**Goal:** Add `is_outdoor` and `SkyConfig` to the `Map` domain struct and RON
+format with full backward compatibility. No rendering changes — pure data
+foundation for Phases 2–5.
+
+### What Was Built
+
+#### `SkyConfig` struct (`src/domain/world/types.rs`)
+
+New public struct inserted before `pub struct Map`, carrying twelve fields that
+describe per-map sky rendering:
+
+| Field                 | Type       | Default                   | Purpose                            |
+| --------------------- | ---------- | ------------------------- | ---------------------------------- |
+| `day_sky_color`       | `[f32; 4]` | `[0.53, 0.81, 0.98, 1.0]` | RGBA sky during Morning/Afternoon  |
+| `dusk_dawn_sky_color` | `[f32; 4]` | `[0.98, 0.60, 0.20, 1.0]` | RGBA sky during Dawn/Dusk          |
+| `night_sky_color`     | `[f32; 4]` | `[0.02, 0.02, 0.08, 1.0]` | RGBA sky during Evening/Night      |
+| `sun_count`           | `u8`       | `1`                       | Number of sun discs (0 = overcast) |
+| `sun_color`           | `[f32; 4]` | `[1.0, 0.95, 0.80, 1.0]`  | Sun disc RGBA                      |
+| `sun_size`            | `f32`      | `1.0`                     | Sun disc scale multiplier          |
+| `star_count`          | `u32`      | `2000`                    | Total stars in night sky           |
+| `star_density`        | `f32`      | `0.5`                     | 0–1 density distribution           |
+| `cloud_coverage`      | `f32`      | `0.3`                     | 0–1 sky fraction covered           |
+| `cloud_color`         | `[f32; 4]` | `[0.9, 0.9, 0.9, 0.8]`    | Cloud layer RGBA                   |
+| `cloud_density`       | `f32`      | `0.5`                     | 0–1 cloud opacity/thickness        |
+| `cloud_speed`         | `f32`      | `1.0`                     | Cloud animation speed multiplier   |
+
+All fields carry `#[serde(default = "…")]` so existing RON files that omit the
+block continue to deserialize without error.
+
+#### `Map` struct additions (`src/domain/world/types.rs`)
+
+- `pub is_outdoor: bool` — `#[serde(default)]` → `false`; enables sky
+  rendering for outdoor maps.
+- `pub sky: Option<SkyConfig>` — `#[serde(default,
+skip_serializing_if = "Option::is_none")]`; per-map sky config, `None`
+  for indoor maps. `Map::new()` initialises both fields to their defaults.
+
+#### Export (`src/domain/world/mod.rs`)
+
+`SkyConfig` added to the `pub use types::{ … }` block, making it available
+as `antares::domain::world::SkyConfig`.
+
+#### Struct-literal fixes
+
+Four files that construct `Map` using struct-literal syntax were updated to
+include the two new fields:
+
+- `src/domain/world/blueprint.rs` — `is_outdoor: false, sky: None`
+- `src/sdk/templates.rs` — `town_map` / `forest_map` get `is_outdoor: true`;
+  `dungeon_map` gets `is_outdoor: false`
+- `src/sdk/cli/map_validator.rs` (two helpers) — `is_outdoor: false, sky: None`
+
+#### Test campaign fixture (`data/test_campaign/data/maps/map_1.ron`)
+
+Added `is_outdoor: true` and a full `sky: Some(( … ))` block to the Town
+Square map so integration tests exercise the new sky data path. All other
+fixture maps (`map_2.ron` – `map_7.ron`) remain untouched and continue to
+load correctly via serde defaults.
+
+### Tests Added (4 new unit tests in `mod tests`)
+
+| Test                                          | What it verifies                                                                |
+| --------------------------------------------- | ------------------------------------------------------------------------------- |
+| `test_sky_config_default_values`              | All 12 `SkyConfig::default()` fields match documented defaults                  |
+| `test_map_with_sky_config_ron_roundtrip`      | `Map` with `sky: Some(…)` survives `ron::to_string` → `ron::from_str` roundtrip |
+| `test_map_without_sky_config_backward_compat` | RON without `is_outdoor`/`sky` deserializes to `false`/`None`                   |
+| `test_sky_config_partial_fields_deserialize`  | Omitting `cloud_speed` from RON yields the `1.0` default                        |
+
+### RON Format Note
+
+The `ron` crate serialises Rust `[f32; 4]` fixed-size arrays as RON **tuple**
+syntax `(r, g, b, a)` — not list syntax `[r, g, b, a]`. All RON files and test
+strings use parentheses accordingly.
+
+### Quality Gates
+
+```text
+cargo fmt     → clean (no output)
+cargo check   → Finished 0 errors
+cargo clippy  → Finished 0 warnings
+cargo nextest → 5095 passed, 8 skipped, 0 failed
+```
+
+---
+
 ## Rest Menu Digit Choices No Longer Open Character Sheets (2026)
 
 **Problem**: Pressing **1**, **2**, or **3** in the Rest menu opened the

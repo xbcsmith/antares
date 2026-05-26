@@ -2546,6 +2546,145 @@ impl ResolvedNpc {
     }
 }
 
+// ===== Sky Configuration =====
+
+/// Per-map sky rendering configuration.
+///
+/// All fields carry `#[serde(default)]` so existing RON map files that omit
+/// the block continue to deserialize without error.  Only consulted by the
+/// game engine when the parent [`Map::is_outdoor`] flag is `true`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::SkyConfig;
+///
+/// let sky = SkyConfig::default();
+/// assert_eq!(sky.sun_count, 1);
+/// assert_eq!(sky.star_count, 2000);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkyConfig {
+    /// RGBA sky colour during day periods (Morning, Afternoon).
+    #[serde(default = "SkyConfig::default_day_sky_color")]
+    pub day_sky_color: [f32; 4],
+
+    /// RGBA sky colour during Dawn and Dusk transition periods.
+    #[serde(default = "SkyConfig::default_dusk_dawn_sky_color")]
+    pub dusk_dawn_sky_color: [f32; 4],
+
+    /// RGBA sky colour during Evening and Night.
+    #[serde(default = "SkyConfig::default_night_sky_color")]
+    pub night_sky_color: [f32; 4],
+
+    /// Number of suns rendered.  `0` means overcast — no sun disc or glow.
+    #[serde(default = "SkyConfig::default_sun_count")]
+    pub sun_count: u8,
+
+    /// RGBA colour of each sun disc.
+    #[serde(default = "SkyConfig::default_sun_color")]
+    pub sun_color: [f32; 4],
+
+    /// Relative size multiplier for sun discs.  `1.0` = normal size.
+    #[serde(default = "SkyConfig::default_sun_size")]
+    pub sun_size: f32,
+
+    /// Total number of stars rendered in the night sky.
+    #[serde(default = "SkyConfig::default_star_count")]
+    pub star_count: u32,
+
+    /// Star density distribution in the range `0.0`–`1.0`.
+    /// `0.0` = sparse field; `1.0` = dense Milky Way.
+    #[serde(default = "SkyConfig::default_star_density")]
+    pub star_density: f32,
+
+    /// Fraction of sky covered by clouds, in the range `0.0`–`1.0`.
+    #[serde(default = "SkyConfig::default_cloud_coverage")]
+    pub cloud_coverage: f32,
+
+    /// RGBA colour of the cloud layer.
+    #[serde(default = "SkyConfig::default_cloud_color")]
+    pub cloud_color: [f32; 4],
+
+    /// Cloud opacity / thickness in the range `0.0`–`1.0`.
+    #[serde(default = "SkyConfig::default_cloud_density")]
+    pub cloud_density: f32,
+
+    /// Relative speed multiplier for cloud animation.  `1.0` = normal speed.
+    #[serde(default = "SkyConfig::default_cloud_speed")]
+    pub cloud_speed: f32,
+}
+
+impl SkyConfig {
+    fn default_day_sky_color() -> [f32; 4] {
+        [0.53, 0.81, 0.98, 1.0]
+    }
+
+    fn default_dusk_dawn_sky_color() -> [f32; 4] {
+        [0.98, 0.60, 0.20, 1.0]
+    }
+
+    fn default_night_sky_color() -> [f32; 4] {
+        [0.02, 0.02, 0.08, 1.0]
+    }
+
+    fn default_sun_count() -> u8 {
+        1
+    }
+
+    fn default_sun_color() -> [f32; 4] {
+        [1.0, 0.95, 0.80, 1.0]
+    }
+
+    fn default_sun_size() -> f32 {
+        1.0
+    }
+
+    fn default_star_count() -> u32 {
+        2000
+    }
+
+    fn default_star_density() -> f32 {
+        0.5
+    }
+
+    fn default_cloud_coverage() -> f32 {
+        0.3
+    }
+
+    fn default_cloud_color() -> [f32; 4] {
+        [0.9, 0.9, 0.9, 0.8]
+    }
+
+    fn default_cloud_density() -> f32 {
+        0.5
+    }
+
+    fn default_cloud_speed() -> f32 {
+        1.0
+    }
+}
+
+impl Default for SkyConfig {
+    /// Returns a `SkyConfig` with all fields set to their documented defaults.
+    fn default() -> Self {
+        Self {
+            day_sky_color: Self::default_day_sky_color(),
+            dusk_dawn_sky_color: Self::default_dusk_dawn_sky_color(),
+            night_sky_color: Self::default_night_sky_color(),
+            sun_count: Self::default_sun_count(),
+            sun_color: Self::default_sun_color(),
+            sun_size: Self::default_sun_size(),
+            star_count: Self::default_star_count(),
+            star_density: Self::default_star_density(),
+            cloud_coverage: Self::default_cloud_coverage(),
+            cloud_color: Self::default_cloud_color(),
+            cloud_density: Self::default_cloud_density(),
+            cloud_speed: Self::default_cloud_speed(),
+        }
+    }
+}
+
 // ===== Map =====
 
 /// A map in the game world
@@ -2616,6 +2755,22 @@ pub struct Map {
     /// existing map files are unaffected by this addition.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub lock_states: HashMap<String, LockState>,
+
+    /// Whether the map is outdoors, which enables sky rendering and outdoor
+    /// light behaviour.
+    ///
+    /// Defaults to `false` so that indoor maps (dungeons, buildings) do not
+    /// receive sky effects.  Set to `true` in the map RON file for outdoor
+    /// maps.
+    #[serde(default)]
+    pub is_outdoor: bool,
+
+    /// Per-map sky configuration.  Only consulted when `is_outdoor` is `true`.
+    ///
+    /// Omitted from RON output when `None` so that existing map files are
+    /// unchanged by this addition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sky: Option<SkyConfig>,
 }
 
 fn default_map_name() -> String {
@@ -2671,6 +2826,8 @@ impl Map {
             npc_placements: Vec::new(),
             dropped_items: Vec::new(),
             lock_states: HashMap::new(),
+            is_outdoor: false,
+            sky: None,
         }
     }
 
@@ -6281,5 +6438,107 @@ mod tests {
             objective_pos,
             PointOfInterest::QuestObjective { quest_id: 42 }
         )));
+    }
+
+    // ===== SkyConfig Tests =====
+
+    #[test]
+    fn test_sky_config_default_values() {
+        let sky = SkyConfig::default();
+        assert_eq!(sky.day_sky_color, [0.53, 0.81, 0.98, 1.0]);
+        assert_eq!(sky.dusk_dawn_sky_color, [0.98, 0.60, 0.20, 1.0]);
+        assert_eq!(sky.night_sky_color, [0.02, 0.02, 0.08, 1.0]);
+        assert_eq!(sky.sun_count, 1);
+        assert_eq!(sky.sun_color, [1.0, 0.95, 0.80, 1.0]);
+        assert_eq!(sky.sun_size, 1.0);
+        assert_eq!(sky.star_count, 2000);
+        assert_eq!(sky.star_density, 0.5);
+        assert_eq!(sky.cloud_coverage, 0.3);
+        assert_eq!(sky.cloud_color, [0.9, 0.9, 0.9, 0.8]);
+        assert_eq!(sky.cloud_density, 0.5);
+        assert_eq!(sky.cloud_speed, 1.0);
+    }
+
+    #[test]
+    fn test_domain_map_sky_roundtrip_preserves_all_fields() {
+        let expected = SkyConfig {
+            day_sky_color: [0.11, 0.22, 0.33, 1.0],
+            dusk_dawn_sky_color: [0.44, 0.55, 0.66, 1.0],
+            night_sky_color: [0.01, 0.02, 0.03, 1.0],
+            sun_count: 2,
+            sun_color: [0.90, 0.80, 0.70, 1.0],
+            sun_size: 1.75,
+            star_count: 1234,
+            star_density: 0.87,
+            cloud_coverage: 0.42,
+            cloud_color: [0.60, 0.65, 0.70, 0.75],
+            cloud_density: 0.58,
+            cloud_speed: 2.25,
+        };
+        let mut map = Map::new(
+            1,
+            "Outdoor Test".to_string(),
+            "A sunny map".to_string(),
+            5,
+            5,
+        );
+        map.is_outdoor = true;
+        map.sky = Some(expected.clone());
+
+        let ron_str = ron::to_string(&map).expect("serialization must succeed");
+        let deserialized: Map = ron::from_str(&ron_str).expect("deserialization must succeed");
+
+        assert!(deserialized.is_outdoor);
+        let sky = deserialized.sky.expect("sky must be Some after roundtrip");
+        assert_eq!(sky.day_sky_color, expected.day_sky_color);
+        assert_eq!(sky.dusk_dawn_sky_color, expected.dusk_dawn_sky_color);
+        assert_eq!(sky.night_sky_color, expected.night_sky_color);
+        assert_eq!(sky.sun_count, expected.sun_count);
+        assert_eq!(sky.sun_color, expected.sun_color);
+        assert_eq!(sky.sun_size, expected.sun_size);
+        assert_eq!(sky.star_count, expected.star_count);
+        assert_eq!(sky.star_density, expected.star_density);
+        assert_eq!(sky.cloud_coverage, expected.cloud_coverage);
+        assert_eq!(sky.cloud_color, expected.cloud_color);
+        assert_eq!(sky.cloud_density, expected.cloud_density);
+        assert_eq!(sky.cloud_speed, expected.cloud_speed);
+    }
+
+    #[test]
+    fn test_map_without_sky_config_backward_compat() {
+        // A minimal map RON string without is_outdoor or sky fields — simulates
+        // an existing campaign map file that predates the sky system.
+        let ron_str = r#"(
+            id: 99,
+            width: 5,
+            height: 5,
+            tiles: [],
+        )"#;
+        let map: Map =
+            ron::from_str(ron_str).expect("backward-compat deserialization must succeed");
+        assert!(!map.is_outdoor, "is_outdoor should default to false");
+        assert!(map.sky.is_none(), "sky should default to None");
+    }
+
+    #[test]
+    fn test_sky_config_partial_fields_deserialize() {
+        // Omit cloud_speed; the field must take its default value of 1.0.
+        let ron_str = r#"(
+            day_sky_color: (0.1, 0.2, 0.3, 1.0),
+            dusk_dawn_sky_color: (0.98, 0.60, 0.20, 1.0),
+            night_sky_color: (0.02, 0.02, 0.08, 1.0),
+            sun_count: 1,
+            sun_color: (1.0, 0.95, 0.80, 1.0),
+            sun_size: 1.0,
+            star_count: 2000,
+            star_density: 0.5,
+            cloud_coverage: 0.3,
+            cloud_color: (0.9, 0.9, 0.9, 0.8),
+            cloud_density: 0.5,
+        )"#;
+        let sky: SkyConfig =
+            ron::from_str(ron_str).expect("partial field deserialization must succeed");
+        assert_eq!(sky.cloud_speed, 1.0, "cloud_speed should default to 1.0");
+        assert_eq!(sky.day_sky_color, [0.1, 0.2, 0.3, 1.0]);
     }
 }

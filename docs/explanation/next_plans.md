@@ -176,12 +176,9 @@ Art note (actionable, but not a code fix)
 
 The `baked_basecolor.png` texture file in `whisper_new.ron` was likely exported from Blender with Ambient Occlusion pre-multiplied into the base colour channel. That pre-baked darkness in the concave chin/neck area was compounding with the dynamic shadow. The two code fixes above are enough to make those areas visible. If you want the model to look its best long-term, re-export the texture with AO in a separate channel (`occlusion_texture`) rather than baked into albedo — but that's an artist task, not a code task.
 
-
 ## Creature Mesh Selector
 
 Campaing Builder --> Monster --> Edit --> Visual Asset hangs constantly when trying to change the creature mesh. It hangs when trying to scroll the window and it constantly hangs trying to select the mesh. It should work like the Character or NPC mesh selection wich is a text box with autocomplete.
-
-
 
 ## Game Engine Sky
 
@@ -190,6 +187,13 @@ The Sky is Grey in the game. We have no concept of weather or if we are in a bui
 Write a plan with a phased approach to add this support to the game engine and SDK. THINK HARD and follow the rules in @PLAN.md
 
 [Sky System Implementation Plan](./sky_system_implementation_plan.md)
+
+## Landscape Category
+
+Need to add a `landscape` category to the importer and SDK so we can import meshes of Trees, Shrubs, Rocks, etc... Add support to the Map editor to place landscape meshes on maps. Write a plan with a phased approach to add landscape category and SDK support for placing landscape on the maps.
+As part of this plan I want to fix the default tree procedural meshes. I have created tree ron files in [@meshes](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/assets/meshes/) and placed the textures in [@trees](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/campaigns/tutorial/assets/textures/trees/) Use these files to fix the trees and brush in the game engine.
+
+[landscape implementation plan](./landscape_implementation_plan.md)
 
 ## BUGS
 
@@ -210,3 +214,5 @@ Can not select a Rest option of (1) (2) or (3) because it opens the 1,2, or 3 ch
 ### SDK Bugs
 
 Campaign Builder --> Monster Editor --> Edit save button at the bottom of the editor does not always Save the monster when it returns to the list
+
+Campaign Builder --> Importer --> Items and Furniture do not have category drop down like Creatures. Importing Furnture does not update the furniture.ron

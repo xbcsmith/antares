@@ -779,6 +779,8 @@ pub fn town_map(id: MapId, name: &str, description: &str, width: u32, height: u3
         npc_placements: Vec::new(),
         dropped_items: Vec::new(),
         lock_states: std::collections::HashMap::new(),
+        is_outdoor: true,
+        sky: None,
     }
 }
 
@@ -828,6 +830,8 @@ pub fn dungeon_map(id: MapId, name: &str, description: &str, width: u32, height:
         npc_placements: Vec::new(),
         dropped_items: Vec::new(),
         lock_states: std::collections::HashMap::new(),
+        is_outdoor: false,
+        sky: None,
     }
 }
 
@@ -865,6 +869,8 @@ pub fn forest_map(id: MapId, name: &str, description: &str, width: u32, height: 
         npc_placements: Vec::new(),
         dropped_items: Vec::new(),
         lock_states: std::collections::HashMap::new(),
+        is_outdoor: true,
+        sky: None,
     }
 }
 

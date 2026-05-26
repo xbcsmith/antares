@@ -909,6 +909,8 @@ mod tests {
             npc_placements: Vec::new(),
             dropped_items: Vec::new(),
             lock_states: std::collections::HashMap::new(),
+            is_outdoor: false,
+            sky: None,
         }
     }
 
@@ -1082,6 +1084,8 @@ mod tests {
             npc_placements: Vec::new(),
             dropped_items: Vec::new(),
             lock_states: std::collections::HashMap::new(),
+            is_outdoor: false,
+            sky: None,
         }
     }
 }
