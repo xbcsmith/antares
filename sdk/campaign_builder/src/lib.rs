@@ -1342,9 +1342,11 @@ impl eframe::App for CampaignBuilderApp {
                 }
             }
             EditorTab::Landscape => {
-                self.editor_registry
-                    .landscape_editor_state
-                    .show(ui, &mut self.campaign_data.landscape_definitions);
+                self.editor_registry.landscape_editor_state.show(
+                    ui,
+                    &mut self.campaign_data.landscape_definitions,
+                    self.campaign_dir.as_deref(),
+                );
                 if let Some(landscape_editor::LandscapeEditorSignal::OpenInObjImporter) =
                     self.editor_registry.landscape_editor_state.requested_signal.take()
                 {

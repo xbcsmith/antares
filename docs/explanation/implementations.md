@@ -2,6 +2,33 @@
 
 ---
 
+## Landscape Phase 5 SDK Landscape Editor and Map Placement (2026)
+
+**Goal:** Complete SDK authoring support for landscape definitions and map placements so campaign authors can browse grouped landscape assets, inspect validation metadata, place decorations on maps, edit placement overrides, and save/reopen stable placement RON.
+
+### Files Changed
+
+| Area                    | Action                                                                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Landscape editor        | Grouped landscape definitions by category, added texture validation preview status, and kept the multi-column `allocate_ui` layout compliant     |
+| Map placement tool      | Expanded `PlaceLandscape` support with selected-placement editing, move-by-position edits, offset/y-offset/rotation/scale/tint/blocking controls |
+| Map overlay             | Improved landscape grid markers to show same-tile placement counts without replacing terrain/event/NPC colors                                    |
+| Authoring conveniences  | Added edit, rotate, duplicate, delete, and deterministic random-variation actions for landscape placements                                       |
+| Undo/save/load coverage | Reused add/remove/replace undo history and added tests proving transform overrides survive save, load, metadata application, and map round trips |
+| SDK egui audit          | Added stable `push_id` scopes for new and touched widget loops, wrapped growing toolbar rows, and requested repaint on layout-driving changes    |
+| Documentation           | Recorded this Phase 5 SDK implementation slice                                                                                                   |
+
+### What Changed
+
+- The Landscape tab now presents definitions in category sections while still supporting search and category filtering.
+- Landscape previews show icon, name, category, default scale, tags, mesh availability, blocking defaults, and texture validation status from the active campaign mesh registry.
+- The Map editor can place landscape definitions with `PlaceLandscape`, then edit existing placements through an inspector buffer that controls definition, tile position, sub-tile offset, vertical offset, rotation, scale, tint, and blocking override.
+- Landscape placement edits use existing `LandscapePlacementReplaced` undo/redo semantics, so movement and transform changes undo and redo consistently.
+- Same-tile landscape overlay markers now display a compact count badge, preserving support for multiple decorations on one tile.
+- Save/load regression tests prove `landscape_placements` and all optional transform/override fields survive map RON serialization, `MapsEditorState::load_maps`, `save_map`, and metadata synchronization.
+
+---
+
 ## Landscape Phase 4 Importer Landscape Export Support (2026)
 
 **Goal:** Complete Campaign Builder importer support for first-class Landscape exports so imported OBJ/GLB models create reusable landscape mesh registry entries and landscape definitions that reload immediately in the SDK.

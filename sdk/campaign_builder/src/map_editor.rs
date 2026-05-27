@@ -46,7 +46,7 @@ use antares::domain::combat::database::MonsterDefinition;
 use antares::domain::combat::types::CombatEventType;
 use antares::domain::items::types::Item;
 use antares::domain::types::{Direction, EventId, ItemId, LandscapeId, MapId, MonsterId, Position};
-use antares::domain::world::landscape::LandscapePlacement;
+use antares::domain::world::landscape::{LandscapeDefinition, LandscapePlacement};
 use antares::domain::world::npc::{NpcDefinition, NpcPlacement};
 use antares::domain::world::{
     FurnitureMaterial, FurnitureType, GrassBladeConfig, GrassDensity, LayeredSprite, Map, MapEvent,
@@ -55,7 +55,7 @@ use antares::domain::world::{
 };
 use antares::sdk::tool_config::DisplayConfig;
 use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
@@ -1501,6 +1501,8 @@ pub struct MapEditorState {
     pub event_editor: Option<EventEditorState>,
     /// NPC placement editor state
     pub npc_placement_editor: Option<NpcPlacementEditorState>,
+    /// Landscape placement editor state
+    pub landscape_placement_editor: Option<LandscapePlacementEditorState>,
     /// Show metadata editor panel
     pub show_metadata_editor: bool,
     /// Visual metadata editor state
@@ -1591,6 +1593,7 @@ impl MapEditorState {
             auto_fit_on_resize: true,
             event_editor: None,
             npc_placement_editor: None,
+            landscape_placement_editor: None,
             show_metadata_editor: false,
             visual_editor: VisualMetadataEditor::default(),
             terrain_editor_state: TerrainEditorState::default(),
@@ -3061,6 +3064,284 @@ pub struct NpcPlacementEditorState {
     pub editing_index: Option<usize>,
 }
 
+/// Blocking override mode for an authored landscape placement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LandscapeBlockingOverride {
+    /// Use the referenced landscape definition's default blocking flag.
+    #[default]
+    Inherit,
+    /// Force this placement to block movement.
+    Blocking,
+    /// Force this placement to not block movement.
+    NonBlocking,
+}
+
+impl LandscapeBlockingOverride {
+    /// Returns all blocking override choices in UI order.
+    pub const fn all() -> &'static [Self] {
+        &[Self::Inherit, Self::Blocking, Self::NonBlocking]
+    }
+
+    /// Returns the user-facing name for this blocking override.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Inherit => "Inherit",
+            Self::Blocking => "Blocking",
+            Self::NonBlocking => "Non-blocking",
+        }
+    }
+
+    /// Converts this UI choice into the persisted optional override value.
+    pub const fn to_option(self) -> Option<bool> {
+        match self {
+            Self::Inherit => None,
+            Self::Blocking => Some(true),
+            Self::NonBlocking => Some(false),
+        }
+    }
+
+    /// Converts a persisted optional override into a UI choice.
+    pub const fn from_option(value: Option<bool>) -> Self {
+        match value {
+            None => Self::Inherit,
+            Some(true) => Self::Blocking,
+            Some(false) => Self::NonBlocking,
+        }
+    }
+}
+
+/// Editor buffer for creating or updating a [`LandscapePlacement`].
+///
+/// The map editor stores optional placement overrides as text plus explicit
+/// enable flags so authors can distinguish “inherit definition/default value”
+/// from an override set to `0.0`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LandscapePlacementEditorState {
+    /// Selected reusable landscape definition.
+    pub selected_landscape_id: Option<LandscapeId>,
+    /// X tile coordinate.
+    pub position_x: String,
+    /// Y tile coordinate.
+    pub position_y: String,
+    /// Whether to persist an X/Z sub-tile offset override.
+    pub use_offset: bool,
+    /// Sub-tile X offset in world units.
+    pub offset_x: String,
+    /// Sub-tile Z offset in world units.
+    pub offset_z: String,
+    /// Whether to persist a vertical offset override.
+    pub use_y_offset: bool,
+    /// Vertical offset in world units.
+    pub y_offset: String,
+    /// Whether to persist an explicit Y-axis rotation override.
+    pub use_rotation: bool,
+    /// Y-axis rotation in degrees.
+    pub rotation_y: String,
+    /// Whether to persist a scale override.
+    pub use_scale: bool,
+    /// Scale multiplier.
+    pub scale: String,
+    /// Whether to persist an RGB tint override.
+    pub use_tint: bool,
+    /// Red tint multiplier.
+    pub tint_r: String,
+    /// Green tint multiplier.
+    pub tint_g: String,
+    /// Blue tint multiplier.
+    pub tint_b: String,
+    /// Optional blocking override mode.
+    pub blocking_override: LandscapeBlockingOverride,
+    /// Existing placement index when editing, or `None` when adding.
+    pub editing_index: Option<usize>,
+}
+
+impl Default for LandscapePlacementEditorState {
+    fn default() -> Self {
+        Self {
+            selected_landscape_id: None,
+            position_x: String::new(),
+            position_y: String::new(),
+            use_offset: false,
+            offset_x: "0.0".to_string(),
+            offset_z: "0.0".to_string(),
+            use_y_offset: false,
+            y_offset: "0.0".to_string(),
+            use_rotation: false,
+            rotation_y: "0.0".to_string(),
+            use_scale: false,
+            scale: "1.0".to_string(),
+            use_tint: false,
+            tint_r: "1.0".to_string(),
+            tint_g: "1.0".to_string(),
+            tint_b: "1.0".to_string(),
+            blocking_override: LandscapeBlockingOverride::Inherit,
+            editing_index: None,
+        }
+    }
+}
+
+impl LandscapePlacementEditorState {
+    /// Creates an editor buffer for adding a placement at `position`.
+    pub fn new_for_position(
+        position: Position,
+        selected_landscape_id: Option<LandscapeId>,
+    ) -> Self {
+        Self {
+            selected_landscape_id,
+            position_x: position.x.to_string(),
+            position_y: position.y.to_string(),
+            ..Self::default()
+        }
+    }
+
+    /// Creates an editor buffer from an existing placement.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::Position;
+    /// use antares::domain::world::landscape::LandscapePlacement;
+    /// use campaign_builder::map_editor::LandscapePlacementEditorState;
+    ///
+    /// let mut placement = LandscapePlacement::new(7, Position::new(2, 3));
+    /// placement.scale = Some(1.25);
+    /// let state = LandscapePlacementEditorState::from_placement(4, &placement);
+    /// assert_eq!(state.editing_index, Some(4));
+    /// assert_eq!(state.selected_landscape_id, Some(7));
+    /// assert!(state.use_scale);
+    /// ```
+    pub fn from_placement(index: usize, placement: &LandscapePlacement) -> Self {
+        let offset = placement.offset.unwrap_or([0.0, 0.0]);
+        let tint = placement.color_tint.unwrap_or([1.0, 1.0, 1.0]);
+        Self {
+            selected_landscape_id: Some(placement.landscape_id),
+            position_x: placement.position.x.to_string(),
+            position_y: placement.position.y.to_string(),
+            use_offset: placement.offset.is_some(),
+            offset_x: format_float(offset[0]),
+            offset_z: format_float(offset[1]),
+            use_y_offset: placement.y_offset.is_some(),
+            y_offset: format_float(placement.y_offset.unwrap_or(0.0)),
+            use_rotation: placement.rotation_y.is_some(),
+            rotation_y: format_float(placement.rotation_y.unwrap_or(0.0)),
+            use_scale: placement.scale.is_some(),
+            scale: format_float(placement.scale.unwrap_or(1.0)),
+            use_tint: placement.color_tint.is_some(),
+            tint_r: format_float(tint[0]),
+            tint_g: format_float(tint[1]),
+            tint_b: format_float(tint[2]),
+            blocking_override: LandscapeBlockingOverride::from_option(placement.blocking),
+            editing_index: Some(index),
+        }
+    }
+
+    /// Converts this editor buffer into a persisted landscape placement.
+    ///
+    /// # Errors
+    ///
+    /// Returns a human-readable validation error when a required ID, coordinate,
+    /// or enabled numeric override is invalid.
+    pub fn to_placement(&self) -> Result<LandscapePlacement, String> {
+        let landscape_id = self
+            .selected_landscape_id
+            .ok_or_else(|| "Select a landscape definition".to_string())?;
+        let x = self
+            .position_x
+            .trim()
+            .parse::<i32>()
+            .map_err(|_| "Invalid X coordinate".to_string())?;
+        let y = self
+            .position_y
+            .trim()
+            .parse::<i32>()
+            .map_err(|_| "Invalid Y coordinate".to_string())?;
+
+        let mut placement = LandscapePlacement::new(landscape_id, Position::new(x, y));
+        if self.use_offset {
+            placement.offset = Some([
+                parse_f32_field(&self.offset_x, "offset X")?,
+                parse_f32_field(&self.offset_z, "offset Z")?,
+            ]);
+        }
+        if self.use_y_offset {
+            placement.y_offset = Some(parse_f32_field(&self.y_offset, "Y offset")?);
+        }
+        if self.use_rotation {
+            placement.rotation_y = Some(normalize_degrees(parse_f32_field(
+                &self.rotation_y,
+                "rotation Y",
+            )?));
+        }
+        if self.use_scale {
+            let scale = parse_f32_field(&self.scale, "scale")?;
+            if scale <= 0.0 {
+                return Err("Scale must be greater than 0".to_string());
+            }
+            placement.scale = Some(scale);
+        }
+        if self.use_tint {
+            placement.color_tint = Some([
+                parse_f32_field(&self.tint_r, "tint red")?,
+                parse_f32_field(&self.tint_g, "tint green")?,
+                parse_f32_field(&self.tint_b, "tint blue")?,
+            ]);
+        }
+        placement.blocking = self.blocking_override.to_option();
+        Ok(placement)
+    }
+}
+
+fn format_float(value: f32) -> String {
+    if value.fract().abs() < f32::EPSILON {
+        format!("{value:.1}")
+    } else {
+        format!("{value:.3}")
+    }
+}
+
+fn parse_f32_field(value: &str, label: &str) -> Result<f32, String> {
+    value
+        .trim()
+        .parse::<f32>()
+        .map_err(|_| format!("Invalid {label}"))
+}
+
+fn normalize_degrees(value: f32) -> f32 {
+    value.rem_euclid(360.0)
+}
+
+fn deterministic_unit(seed: &mut u64) -> f32 {
+    *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+    ((*seed >> 32) as u32) as f32 / u32::MAX as f32
+}
+
+fn landscape_variation_seed(index: usize, placement: &LandscapePlacement) -> u64 {
+    let mut seed = (index as u64).wrapping_add(0x9e37_79b9_7f4a_7c15);
+    seed ^= (placement.landscape_id as u64) << 32;
+    seed ^= (placement.position.x as i64 as u64).rotate_left(13);
+    seed ^= (placement.position.y as i64 as u64).rotate_left(29);
+    seed
+}
+
+fn randomized_landscape_placement(placement: &LandscapePlacement, seed: u64) -> LandscapePlacement {
+    let mut seed = seed;
+    let mut updated = placement.clone();
+    updated.offset = Some([
+        deterministic_unit(&mut seed) * 0.5 - 0.25,
+        deterministic_unit(&mut seed) * 0.5 - 0.25,
+    ]);
+    updated.rotation_y = Some(deterministic_unit(&mut seed) * 360.0);
+    let base_scale = placement.scale.unwrap_or(1.0).max(0.0001);
+    updated.scale = Some(base_scale * (0.85 + deterministic_unit(&mut seed) * 0.3));
+    let base_tint = placement.color_tint.unwrap_or([1.0, 1.0, 1.0]);
+    updated.color_tint = Some([
+        (base_tint[0] * (0.9 + deterministic_unit(&mut seed) * 0.2)).clamp(0.0, 2.0),
+        (base_tint[1] * (0.9 + deterministic_unit(&mut seed) * 0.2)).clamp(0.0, 2.0),
+        (base_tint[2] * (0.9 + deterministic_unit(&mut seed) * 0.2)).clamp(0.0, 2.0),
+    ]);
+    updated
+}
+
 impl NpcPlacementEditorState {
     /// Converts the editor state to an NPC placement
     pub fn to_placement(&self) -> Result<NpcPlacement, String> {
@@ -3291,15 +3572,14 @@ impl<'a> Widget for MapGridWidget<'a> {
             } else {
                 HashSet::new()
             };
-            let landscape_positions: HashSet<Position> = if self.state.show_landscapes {
-                self.state
-                    .map
-                    .landscape_placements
-                    .iter()
-                    .map(|placement| placement.position)
-                    .collect()
+            let landscape_counts: HashMap<Position, usize> = if self.state.show_landscapes {
+                let mut counts = HashMap::new();
+                for placement in &self.state.map.landscape_placements {
+                    *counts.entry(placement.position).or_insert(0) += 1;
+                }
+                counts
             } else {
-                HashSet::new()
+                HashMap::new()
             };
 
             for y in min_y..max_y {
@@ -3371,13 +3651,24 @@ impl<'a> Widget for MapGridWidget<'a> {
                         }
 
                         // Draw landscape placement marker without obscuring event/NPC colors.
-                        if self.state.show_landscapes && landscape_positions.contains(&pos) {
-                            let indicator_pos = rect.min + Vec2::new(self.tile_size - 5.0, 5.0);
-                            painter.circle_filled(
-                                indicator_pos,
-                                3.0,
-                                Color32::from_rgb(30, 180, 70),
-                            );
+                        if self.state.show_landscapes {
+                            if let Some(count) = landscape_counts.get(&pos) {
+                                let indicator_pos = rect.min + Vec2::new(self.tile_size - 5.0, 5.0);
+                                painter.circle_filled(
+                                    indicator_pos,
+                                    3.0,
+                                    Color32::from_rgb(30, 180, 70),
+                                );
+                                if *count > 1 {
+                                    painter.text(
+                                        rect.min + Vec2::new(self.tile_size - 12.0, 10.0),
+                                        egui::Align2::CENTER_CENTER,
+                                        count.to_string(),
+                                        egui::FontId::monospace(9.0),
+                                        Color32::WHITE,
+                                    );
+                                }
+                            }
                         }
 
                         // Highlight event being edited (distinct from selection highlights)
@@ -3483,6 +3774,15 @@ impl<'a> Widget for MapGridWidget<'a> {
                                     landscape_id,
                                     pos,
                                 ));
+                                self.state.landscape_placement_editor =
+                                    Some(LandscapePlacementEditorState::from_placement(
+                                        self.state.map.landscape_placements.len() - 1,
+                                        self.state
+                                            .map
+                                            .landscape_placements
+                                            .last()
+                                            .expect("just-added landscape placement must exist"),
+                                    ));
                             }
                         }
                         EditorTool::Fill => {
@@ -3491,6 +3791,8 @@ impl<'a> Widget for MapGridWidget<'a> {
                             self.state.paint_tile(pos);
                         }
                     }
+
+                    ui.ctx().request_repaint();
                 }
             }
         }
@@ -4244,17 +4546,31 @@ impl MapsEditorState {
             let view_zoom_action = {
                 let mut a: Option<ZoomAction> = None;
 
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     // View options
                     ui.label("View: ");
-                    ui.checkbox(&mut editor.show_grid, "Grid");
-                    ui.checkbox(&mut editor.show_events, "Events");
-                    ui.checkbox(&mut editor.show_npcs, "NPCs");
-                    ui.checkbox(&mut editor.show_landscapes, "Landscape");
+                    if ui.checkbox(&mut editor.show_grid, "Grid").changed() {
+                        ui.ctx().request_repaint();
+                    }
+                    if ui.checkbox(&mut editor.show_events, "Events").changed() {
+                        ui.ctx().request_repaint();
+                    }
+                    if ui.checkbox(&mut editor.show_npcs, "NPCs").changed() {
+                        ui.ctx().request_repaint();
+                    }
+                    if ui.checkbox(&mut editor.show_landscapes, "Landscape").changed() {
+                        ui.ctx().request_repaint();
+                    }
 
-                    ui.checkbox(&mut editor.auto_fit_on_resize, "Auto Fit").on_hover_text(
-                        "When enabled, the map will automatically scale to fit the left column when the window is resized. Manual zoom persists until Fit is clicked.",
-                    );
+                    if ui
+                        .checkbox(&mut editor.auto_fit_on_resize, "Auto Fit")
+                        .on_hover_text(
+                            "When enabled, the map will automatically scale to fit the left column when the window is resized. Manual zoom persists until Fit is clicked.",
+                        )
+                        .changed()
+                    {
+                        ui.ctx().request_repaint();
+                    }
 
                     ui.separator();
 
@@ -4304,6 +4620,7 @@ impl MapsEditorState {
                         // Fit will be handled while drawing the grid where available size/context is known
                     }
                 }
+                ui.ctx().request_repaint();
             }
 
             let fit_requested = matches!(zoom_action, Some(ZoomAction::Fit));
@@ -4570,19 +4887,22 @@ impl MapsEditorState {
     ) -> Option<ZoomAction> {
         let action: Option<ZoomAction> = None;
 
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Tools:");
 
             for tool in EditorTool::all() {
-                if ui
-                    .selectable_label(
-                        editor.current_tool == *tool,
-                        format!("{} {}", tool.icon(), tool.name()),
-                    )
-                    .clicked()
-                {
-                    editor.current_tool = *tool;
-                }
+                ui.push_id(tool.name(), |ui| {
+                    if ui
+                        .selectable_label(
+                            editor.current_tool == *tool,
+                            format!("{} {}", tool.icon(), tool.name()),
+                        )
+                        .clicked()
+                    {
+                        editor.current_tool = *tool;
+                        ui.ctx().request_repaint();
+                    }
+                });
             }
 
             ui.separator();
@@ -4603,11 +4923,18 @@ impl MapsEditorState {
                         TerrainType::Lava,
                         TerrainType::Swamp,
                     ] {
-                        ui.selectable_value(
-                            &mut editor.selected_terrain,
-                            *terrain,
-                            format!("{:?}", terrain),
-                        );
+                        ui.push_id(format!("{terrain:?}"), |ui| {
+                            if ui
+                                .selectable_value(
+                                    &mut editor.selected_terrain,
+                                    *terrain,
+                                    format!("{:?}", terrain),
+                                )
+                                .changed()
+                            {
+                                ui.ctx().request_repaint();
+                            }
+                        });
                     }
                 });
 
@@ -4621,11 +4948,18 @@ impl MapsEditorState {
                         WallType::Door,
                         WallType::Torch,
                     ] {
-                        ui.selectable_value(
-                            &mut editor.selected_wall,
-                            *wall,
-                            format!("{:?}", wall),
-                        );
+                        ui.push_id(format!("{wall:?}"), |ui| {
+                            if ui
+                                .selectable_value(
+                                    &mut editor.selected_wall,
+                                    *wall,
+                                    format!("{:?}", wall),
+                                )
+                                .changed()
+                            {
+                                ui.ctx().request_repaint();
+                            }
+                        });
                     }
                 });
 
@@ -4652,6 +4986,7 @@ impl MapsEditorState {
         // Metadata editor toggle
         if ui.button("🗺️ Edit Map Metadata").clicked() {
             editor.show_metadata_editor = !editor.show_metadata_editor;
+            ui.ctx().request_repaint();
         }
 
         if editor.show_metadata_editor {
@@ -4697,15 +5032,20 @@ impl MapsEditorState {
                         .show_ui(ui, |ui| {
                             for definition in data.landscape_definitions {
                                 ui.push_id(definition.id, |ui| {
-                                    ui.selectable_value(
-                                        &mut editor.selected_landscape_id,
-                                        Some(definition.id),
-                                        format!(
-                                            "{} {}",
-                                            definition.display_icon(),
-                                            definition.name
-                                        ),
-                                    );
+                                    if ui
+                                        .selectable_value(
+                                            &mut editor.selected_landscape_id,
+                                            Some(definition.id),
+                                            format!(
+                                                "{} {}",
+                                                definition.display_icon(),
+                                                definition.name
+                                            ),
+                                        )
+                                        .changed()
+                                    {
+                                        ui.ctx().request_repaint();
+                                    }
                                 });
                             }
                         });
@@ -4778,6 +5118,8 @@ impl MapsEditorState {
                     let mut remove_landscape_idx: Option<usize> = None;
                     let mut duplicate_landscape: Option<LandscapePlacement> = None;
                     let mut rotate_landscape: Option<(usize, LandscapePlacement)> = None;
+                    let mut randomize_landscape: Option<(usize, LandscapePlacement)> = None;
+                    let mut edit_landscape: Option<(usize, LandscapePlacement)> = None;
                     for (idx, placement) in &landscape_rows {
                         ui.push_id((*idx, placement.landscape_id), |ui| {
                             let name = data
@@ -4788,6 +5130,10 @@ impl MapsEditorState {
                                 .unwrap_or("Unknown Landscape");
                             ui.horizontal_wrapped(|ui| {
                                 ui.label(format!("{} (#{}):", name, placement.landscape_id));
+                                if ui.button("✏️ Edit").clicked() {
+                                    edit_landscape = Some((*idx, placement.clone()));
+                                    ui.ctx().request_repaint();
+                                }
                                 if ui.button("⟳ Rotate 90°").clicked() {
                                     let mut updated = placement.clone();
                                     updated.rotation_y = Some(
@@ -4800,6 +5146,16 @@ impl MapsEditorState {
                                     duplicate_landscape = Some(placement.clone());
                                     ui.ctx().request_repaint();
                                 }
+                                if ui.button("🎲 Randomize").clicked() {
+                                    randomize_landscape = Some((
+                                        *idx,
+                                        randomized_landscape_placement(
+                                            placement,
+                                            landscape_variation_seed(*idx, placement),
+                                        ),
+                                    ));
+                                    ui.ctx().request_repaint();
+                                }
                                 if ui.button("🗑️ Delete").clicked() {
                                     remove_landscape_idx = Some(*idx);
                                     ui.ctx().request_repaint();
@@ -4807,7 +5163,15 @@ impl MapsEditorState {
                             });
                         });
                     }
+                    if let Some((idx, placement)) = edit_landscape {
+                        editor.landscape_placement_editor =
+                            Some(LandscapePlacementEditorState::from_placement(idx, &placement));
+                        editor.current_tool = EditorTool::PlaceLandscape;
+                    }
                     if let Some((idx, placement)) = rotate_landscape {
+                        editor.replace_landscape_placement(idx, placement);
+                    }
+                    if let Some((idx, placement)) = randomize_landscape {
                         editor.replace_landscape_placement(idx, placement);
                     }
                     if let Some(placement) = duplicate_landscape {
@@ -4815,6 +5179,14 @@ impl MapsEditorState {
                     }
                     if let Some(idx) = remove_landscape_idx {
                         editor.remove_landscape_placement(idx);
+                        if editor
+                            .landscape_placement_editor
+                            .as_ref()
+                            .and_then(|placement_editor| placement_editor.editing_index)
+                            == Some(idx)
+                        {
+                            editor.landscape_placement_editor = None;
+                        }
                     }
                 }
 
@@ -5301,6 +5673,25 @@ impl MapsEditorState {
         }
 
         ui.add_space(10.0);
+
+        // Landscape placement editor (when PlaceLandscape tool is active)
+        if matches!(editor.current_tool, EditorTool::PlaceLandscape) {
+            ui.group(|ui| {
+                let heading = if editor
+                    .landscape_placement_editor
+                    .as_ref()
+                    .and_then(|placement_editor| placement_editor.editing_index)
+                    .is_some()
+                {
+                    "Edit Landscape Placement"
+                } else {
+                    "Place Landscape"
+                };
+                ui.heading(heading);
+                Self::show_landscape_placement_editor(ui, editor, data.landscape_definitions);
+            });
+            ui.add_space(10.0);
+        }
 
         // NPC placement editor (when PlaceNpc tool is active)
         if matches!(editor.current_tool, EditorTool::PlaceNpc) {
@@ -7091,6 +7482,260 @@ impl MapsEditorState {
         }
     }
 
+    /// Show landscape placement editor with transform and override controls.
+    fn show_landscape_placement_editor(
+        ui: &mut egui::Ui,
+        editor: &mut MapEditorState,
+        landscape_definitions: &[LandscapeDefinition],
+    ) {
+        if editor.landscape_placement_editor.is_none() {
+            if let Some(position) = editor.selected_position {
+                editor.landscape_placement_editor =
+                    Some(LandscapePlacementEditorState::new_for_position(
+                        position,
+                        editor.selected_landscape_id,
+                    ));
+            }
+        }
+
+        let Some(placement_editor) = editor.landscape_placement_editor.as_mut() else {
+            ui.label("Select a map tile to place or edit landscape decorations.");
+            return;
+        };
+
+        if placement_editor.selected_landscape_id.is_none() {
+            placement_editor.selected_landscape_id = editor.selected_landscape_id.or_else(|| {
+                landscape_definitions
+                    .first()
+                    .map(|definition| definition.id)
+            });
+        }
+
+        ui.label("Edit the selected landscape instance. Position changes move the placement.");
+        ui.horizontal(|ui| {
+            ui.label("Definition:");
+            let selected_label = placement_editor
+                .selected_landscape_id
+                .and_then(|id| {
+                    landscape_definitions
+                        .iter()
+                        .find(|definition| definition.id == id)
+                })
+                .map(|definition| format!("{} {}", definition.display_icon(), definition.name))
+                .unwrap_or_else(|| "Select landscape".to_string());
+            egui::ComboBox::from_id_salt("landscape_placement_definition_selector")
+                .selected_text(selected_label)
+                .show_ui(ui, |ui| {
+                    for definition in landscape_definitions {
+                        ui.push_id(definition.id, |ui| {
+                            if ui
+                                .selectable_value(
+                                    &mut placement_editor.selected_landscape_id,
+                                    Some(definition.id),
+                                    format!("{} {}", definition.display_icon(), definition.name),
+                                )
+                                .changed()
+                            {
+                                editor.selected_landscape_id = Some(definition.id);
+                                ui.ctx().request_repaint();
+                            }
+                        });
+                    }
+                });
+        });
+
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Position:");
+            ui.label("X");
+            ui.add(
+                egui::TextEdit::singleline(&mut placement_editor.position_x).desired_width(48.0),
+            );
+            ui.label("Y");
+            ui.add(
+                egui::TextEdit::singleline(&mut placement_editor.position_y).desired_width(48.0),
+            );
+        });
+
+        if ui
+            .checkbox(&mut placement_editor.use_offset, "Sub-tile offset")
+            .changed()
+        {
+            ui.ctx().request_repaint();
+        }
+        if placement_editor.use_offset {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Offset X");
+                ui.add(
+                    egui::TextEdit::singleline(&mut placement_editor.offset_x).desired_width(64.0),
+                );
+                ui.label("Offset Z");
+                ui.add(
+                    egui::TextEdit::singleline(&mut placement_editor.offset_z).desired_width(64.0),
+                );
+            });
+        }
+
+        if ui
+            .checkbox(&mut placement_editor.use_y_offset, "Vertical offset")
+            .changed()
+        {
+            ui.ctx().request_repaint();
+        }
+        if placement_editor.use_y_offset {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Y Offset");
+                ui.add(
+                    egui::TextEdit::singleline(&mut placement_editor.y_offset).desired_width(64.0),
+                );
+            });
+        }
+
+        if ui
+            .checkbox(&mut placement_editor.use_rotation, "Rotation override")
+            .changed()
+        {
+            ui.ctx().request_repaint();
+        }
+        if placement_editor.use_rotation {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Rotation Y °");
+                ui.add(
+                    egui::TextEdit::singleline(&mut placement_editor.rotation_y)
+                        .desired_width(64.0),
+                );
+            });
+        }
+
+        if ui
+            .checkbox(&mut placement_editor.use_scale, "Scale override")
+            .changed()
+        {
+            ui.ctx().request_repaint();
+        }
+        if placement_editor.use_scale {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Scale");
+                ui.add(egui::TextEdit::singleline(&mut placement_editor.scale).desired_width(64.0));
+            });
+        }
+
+        if ui
+            .checkbox(&mut placement_editor.use_tint, "Tint override")
+            .changed()
+        {
+            ui.ctx().request_repaint();
+        }
+        if placement_editor.use_tint {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("RGB");
+                ui.add(
+                    egui::TextEdit::singleline(&mut placement_editor.tint_r).desired_width(48.0),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut placement_editor.tint_g).desired_width(48.0),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut placement_editor.tint_b).desired_width(48.0),
+                );
+            });
+        }
+
+        ui.horizontal(|ui| {
+            ui.label("Blocking:");
+            egui::ComboBox::from_id_salt("landscape_placement_blocking_override")
+                .selected_text(placement_editor.blocking_override.name())
+                .show_ui(ui, |ui| {
+                    for mode in LandscapeBlockingOverride::all() {
+                        ui.push_id(mode.name(), |ui| {
+                            if ui
+                                .selectable_value(
+                                    &mut placement_editor.blocking_override,
+                                    *mode,
+                                    mode.name(),
+                                )
+                                .changed()
+                            {
+                                ui.ctx().request_repaint();
+                            }
+                        });
+                    }
+                });
+        });
+
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("🎲 Randomize Overrides").clicked() {
+                if let Ok(mut placement) = placement_editor.to_placement() {
+                    let seed = landscape_variation_seed(
+                        placement_editor.editing_index.unwrap_or(usize::MAX),
+                        &placement,
+                    );
+                    placement = randomized_landscape_placement(&placement, seed);
+                    let editing_index = placement_editor.editing_index;
+                    *placement_editor = LandscapePlacementEditorState::from_placement(
+                        editing_index.unwrap_or(0),
+                        &placement,
+                    );
+                    placement_editor.editing_index = editing_index;
+                    ui.ctx().request_repaint();
+                }
+            }
+        });
+
+        ui.separator();
+
+        let editing_index = placement_editor.editing_index;
+        let mut save_request: Option<Result<LandscapePlacement, String>> = None;
+        let mut cancel = false;
+        ui.horizontal_wrapped(|ui| {
+            let save_label = if editing_index.is_some() {
+                "💾 Update Landscape"
+            } else {
+                "➕ Add Landscape"
+            };
+            if ui.button(save_label).clicked() {
+                save_request = Some(placement_editor.to_placement());
+            }
+            if ui.button("❌ Cancel").clicked() {
+                cancel = true;
+            }
+        });
+
+        if cancel {
+            editor.landscape_placement_editor = None;
+            if editor.current_tool == EditorTool::PlaceLandscape {
+                editor.current_tool = EditorTool::Select;
+            }
+            ui.ctx().request_repaint();
+            return;
+        }
+
+        if let Some(result) = save_request {
+            match result {
+                Ok(placement) => {
+                    if !editor.map.is_valid_position(placement.position) {
+                        ui.colored_label(
+                            egui::Color32::RED,
+                            "Error: position is outside map bounds",
+                        );
+                        return;
+                    }
+
+                    if let Some(idx) = editing_index {
+                        editor.replace_landscape_placement(idx, placement);
+                    } else {
+                        editor.add_landscape_placement(placement);
+                    }
+                    editor.landscape_placement_editor = None;
+                    editor.current_tool = EditorTool::Select;
+                    ui.ctx().request_repaint();
+                }
+                Err(err) => {
+                    ui.colored_label(egui::Color32::RED, format!("Error: {err}"));
+                }
+            }
+        }
+    }
+
     /// Show NPC placement editor with NPC picker
     fn show_npc_placement_editor(
         ui: &mut egui::Ui,
@@ -7112,11 +7757,18 @@ impl MapsEditorState {
                     )
                     .show_ui(ui, |ui| {
                         for npc in npcs {
-                            ui.selectable_value(
-                                &mut placement_editor.selected_npc_id,
-                                npc.id.clone(),
-                                &npc.name,
-                            );
+                            ui.push_id(&npc.id, |ui| {
+                                if ui
+                                    .selectable_value(
+                                        &mut placement_editor.selected_npc_id,
+                                        npc.id.clone(),
+                                        &npc.name,
+                                    )
+                                    .changed()
+                                {
+                                    ui.ctx().request_repaint();
+                                }
+                            });
                         }
                     });
             });
@@ -7214,6 +7866,7 @@ impl MapsEditorState {
             if ui.button("❌ Cancel").clicked() {
                 editor.npc_placement_editor = None;
                 editor.current_tool = EditorTool::Select;
+                ui.ctx().request_repaint();
             }
 
             // Apply after borrow ends
@@ -7222,6 +7875,7 @@ impl MapsEditorState {
                     editor.replace_npc_placement(idx, placement);
                     editor.npc_placement_editor = None;
                     editor.current_tool = EditorTool::Select;
+                    ui.ctx().request_repaint();
                 }
             } else if add_placement {
                 if let Some(placement) = placement_to_add {
@@ -7229,6 +7883,7 @@ impl MapsEditorState {
                     if let Some(ref mut ed) = editor.npc_placement_editor {
                         ed.clear();
                     }
+                    ui.ctx().request_repaint();
                 }
             }
         } else {
@@ -9758,6 +10413,176 @@ mod tests {
             state.map.landscape_placements[1].position,
             Position::new(2, 2)
         );
+    }
+
+    #[test]
+    fn test_load_maps_preserves_landscape_placements() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let tmpdir = tempdir().expect("Failed to create tempdir");
+        let campaign_dir_buf = tmpdir.path().to_path_buf();
+        let maps_dir = "maps";
+        let maps_path = tmpdir.path().join(maps_dir);
+        fs::create_dir_all(&maps_path).expect("Failed to create maps dir");
+
+        let mut map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
+        let mut placement = LandscapePlacement::new(5, Position::new(6, 7));
+        placement.offset = Some([0.1, -0.2]);
+        placement.scale = Some(1.2);
+        placement.blocking = Some(false);
+        map.landscape_placements.push(placement.clone());
+
+        fs::write(
+            maps_path.join("map_1.ron"),
+            ron::ser::to_string_pretty(&map, ron::ser::PrettyConfig::default())
+                .expect("Serialize map"),
+        )
+        .expect("Write map_1");
+
+        let mut loaded_maps = Vec::new();
+        let mut status_message = String::new();
+        let state = MapsEditorState::new();
+        state.load_maps(
+            &mut loaded_maps,
+            Some(&campaign_dir_buf),
+            maps_dir,
+            &mut status_message,
+        );
+
+        assert_eq!(loaded_maps.len(), 1);
+        assert_eq!(loaded_maps[0].landscape_placements, vec![placement]);
+    }
+
+    #[test]
+    fn test_save_map_round_trips_landscape_placements() {
+        use tempfile::tempdir;
+
+        let tmpdir = tempdir().expect("Failed to create tempdir");
+        let campaign_dir_buf = tmpdir.path().to_path_buf();
+        let maps_dir = "maps";
+        let mut map = Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10);
+        let mut placement = LandscapePlacement::new(8, Position::new(2, 3));
+        placement.y_offset = Some(0.25);
+        placement.rotation_y = Some(180.0);
+        placement.color_tint = Some([0.8, 0.9, 1.0]);
+        map.landscape_placements.push(placement.clone());
+
+        let state = MapsEditorState::new();
+        state
+            .save_map(&map, Some(&campaign_dir_buf), maps_dir)
+            .expect("save map should succeed");
+        let saved = std::fs::read_to_string(tmpdir.path().join("maps/map_1.ron"))
+            .expect("saved map should exist");
+        let round_trip = ron::from_str::<Map>(&saved).expect("saved map should parse");
+
+        assert_eq!(round_trip.landscape_placements, vec![placement]);
+    }
+
+    #[test]
+    fn test_landscape_placement_editor_state_round_trips_all_fields() {
+        let mut placement = LandscapePlacement::new(7, Position::new(2, 3));
+        placement.offset = Some([0.25, -0.125]);
+        placement.y_offset = Some(0.5);
+        placement.rotation_y = Some(450.0);
+        placement.scale = Some(1.25);
+        placement.color_tint = Some([0.8, 0.9, 1.1]);
+        placement.blocking = Some(false);
+
+        let state = LandscapePlacementEditorState::from_placement(4, &placement);
+        assert_eq!(state.editing_index, Some(4));
+        assert!(state.use_offset);
+        assert!(state.use_y_offset);
+        assert!(state.use_rotation);
+        assert!(state.use_scale);
+        assert!(state.use_tint);
+        assert_eq!(
+            state.blocking_override,
+            LandscapeBlockingOverride::NonBlocking
+        );
+
+        let round_trip = state.to_placement().unwrap();
+        assert_eq!(round_trip.landscape_id, placement.landscape_id);
+        assert_eq!(round_trip.position, placement.position);
+        assert_eq!(round_trip.offset, placement.offset);
+        assert_eq!(round_trip.y_offset, placement.y_offset);
+        assert_eq!(round_trip.rotation_y, Some(90.0));
+        assert_eq!(round_trip.scale, placement.scale);
+        assert_eq!(round_trip.color_tint, placement.color_tint);
+        assert_eq!(round_trip.blocking, placement.blocking);
+    }
+
+    #[test]
+    fn test_landscape_placement_replace_all_transform_fields_undo_redo() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let original = LandscapePlacement::new(1, Position::new(2, 2));
+        state.add_landscape_placement(original.clone());
+
+        let mut updated = LandscapePlacement::new(2, Position::new(4, 5));
+        updated.offset = Some([0.1, -0.2]);
+        updated.y_offset = Some(0.3);
+        updated.rotation_y = Some(180.0);
+        updated.scale = Some(1.4);
+        updated.color_tint = Some([0.7, 0.8, 0.9]);
+        updated.blocking = Some(true);
+
+        state.replace_landscape_placement(0, updated.clone());
+        assert_eq!(state.map.landscape_placements[0], updated);
+
+        state.undo();
+        assert_eq!(state.map.landscape_placements[0], original);
+
+        state.redo();
+        assert_eq!(state.map.landscape_placements[0], updated);
+    }
+
+    #[test]
+    fn test_save_to_ron_includes_landscape_placements_with_overrides() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let mut placement = LandscapePlacement::new(3, Position::new(4, 5));
+        placement.offset = Some([0.25, -0.25]);
+        placement.y_offset = Some(0.1);
+        placement.rotation_y = Some(270.0);
+        placement.scale = Some(0.85);
+        placement.color_tint = Some([1.0, 0.9, 0.8]);
+        placement.blocking = Some(false);
+        state.add_landscape_placement(placement.clone());
+
+        let ron = state.save_to_ron().unwrap();
+        let map = ron::from_str::<Map>(&ron).unwrap();
+
+        assert_eq!(map.landscape_placements, vec![placement]);
+    }
+
+    #[test]
+    fn test_map_with_applied_metadata_preserves_landscape_placements() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let placement = LandscapePlacement::new(1, Position::new(2, 2));
+        state.add_landscape_placement(placement.clone());
+        state.metadata.name = "Renamed".to_string();
+
+        let map = state.map_with_applied_metadata();
+
+        assert_eq!(map.name, "Renamed");
+        assert_eq!(map.landscape_placements, vec![placement]);
+    }
+
+    #[test]
+    fn test_randomized_landscape_placement_is_deterministic_and_bounded() {
+        let mut placement = LandscapePlacement::new(1, Position::new(2, 2));
+        placement.scale = Some(1.0);
+        let a = randomized_landscape_placement(&placement, 42);
+        let b = randomized_landscape_placement(&placement, 42);
+
+        assert_eq!(a, b);
+        let [offset_x, offset_z] = a.offset.unwrap();
+        assert!((-0.25..=0.25).contains(&offset_x));
+        assert!((-0.25..=0.25).contains(&offset_z));
+        assert!((0.0..360.0).contains(&a.rotation_y.unwrap()));
+        assert!((0.85..=1.15).contains(&a.scale.unwrap()));
     }
 
     #[test]

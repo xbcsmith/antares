@@ -8,8 +8,11 @@
 //! meshes are created through the Importer tab and upserted into this list.
 
 use crate::ui_helpers::{show_standard_list_item, MetadataBadge, StandardListItemConfig};
+use antares::domain::visual::{CreatureDefinition, CreatureReference};
 use antares::domain::world::landscape::{LandscapeCategory, LandscapeDefinition};
 use eframe::egui;
+use std::fs;
+use std::path::Path;
 
 /// Signal requested by the Landscape editor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,7 +50,12 @@ impl LandscapeEditorState {
     }
 
     /// Renders the landscape definition list and selected definition preview.
-    pub fn show(&mut self, ui: &mut egui::Ui, defs: &mut [LandscapeDefinition]) {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        defs: &mut [LandscapeDefinition],
+        campaign_dir: Option<&Path>,
+    ) {
         ui.horizontal(|ui| {
             ui.heading("🌳 Landscape");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -72,14 +80,24 @@ impl LandscapeEditorState {
                         .unwrap_or("All"),
                 )
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.category_filter, None, "All");
+                    if ui
+                        .selectable_value(&mut self.category_filter, None, "All")
+                        .changed()
+                    {
+                        ui.ctx().request_repaint();
+                    }
                     for category in LandscapeCategory::all() {
                         ui.push_id(*category as u8, |ui| {
-                            ui.selectable_value(
-                                &mut self.category_filter,
-                                Some(*category),
-                                category.name(),
-                            );
+                            if ui
+                                .selectable_value(
+                                    &mut self.category_filter,
+                                    Some(*category),
+                                    category.name(),
+                                )
+                                .changed()
+                            {
+                                ui.ctx().request_repaint();
+                            }
                         });
                     }
                 });
@@ -97,31 +115,7 @@ impl LandscapeEditorState {
                     .auto_shrink([true, false])
                     .show(ui, |ui| {
                         let rows = self.filtered_rows(defs);
-                        for idx in rows {
-                            let definition = &defs[idx];
-                            ui.push_id(definition.id, |ui| {
-                                let selected = self.selected_landscape == Some(idx);
-                                let (clicked, _action) = show_standard_list_item(
-                                    ui,
-                                    StandardListItemConfig::new(&definition.name)
-                                        .selected(selected)
-                                        .with_icon(definition.display_icon())
-                                        .with_id(definition.id)
-                                        .with_badges(vec![
-                                            MetadataBadge::new(definition.category.name()),
-                                            if definition.mesh_id.is_some() {
-                                                MetadataBadge::new("mesh")
-                                            } else {
-                                                MetadataBadge::new("procedural")
-                                            },
-                                        ]),
-                                );
-                                if clicked {
-                                    self.selected_landscape = Some(idx);
-                                    ui.ctx().request_repaint();
-                                }
-                            });
-                        }
+                        self.show_grouped_rows(ui, defs, &rows);
                     });
             });
 
@@ -129,9 +123,57 @@ impl LandscapeEditorState {
                 egui::ScrollArea::vertical()
                     .id_salt("landscape_editor_preview_scroll")
                     .auto_shrink([true, false])
-                    .show(ui, |ui| self.show_preview(ui, defs));
+                    .show(ui, |ui| self.show_preview(ui, defs, campaign_dir));
             });
         });
+    }
+
+    fn show_grouped_rows(
+        &mut self,
+        ui: &mut egui::Ui,
+        defs: &[LandscapeDefinition],
+        rows: &[usize],
+    ) {
+        for category in LandscapeCategory::all() {
+            let category_rows: Vec<usize> = rows
+                .iter()
+                .copied()
+                .filter(|idx| defs[*idx].category == *category)
+                .collect();
+            if category_rows.is_empty() {
+                continue;
+            }
+
+            ui.push_id(*category as u8, |ui| {
+                ui.heading(category.name());
+                for idx in category_rows {
+                    let definition = &defs[idx];
+                    ui.push_id(definition.id, |ui| {
+                        let selected = self.selected_landscape == Some(idx);
+                        let (clicked, _action) = show_standard_list_item(
+                            ui,
+                            StandardListItemConfig::new(&definition.name)
+                                .selected(selected)
+                                .with_icon(definition.display_icon())
+                                .with_id(definition.id)
+                                .with_badges(vec![
+                                    MetadataBadge::new(definition.category.name()),
+                                    if definition.mesh_id.is_some() {
+                                        MetadataBadge::new("mesh")
+                                    } else {
+                                        MetadataBadge::new("procedural")
+                                    },
+                                ]),
+                        );
+                        if clicked {
+                            self.selected_landscape = Some(idx);
+                            ui.ctx().request_repaint();
+                        }
+                    });
+                }
+                ui.add_space(6.0);
+            });
+        }
     }
 
     fn filtered_rows(&self, defs: &[LandscapeDefinition]) -> Vec<usize> {
@@ -154,7 +196,12 @@ impl LandscapeEditorState {
             .collect()
     }
 
-    fn show_preview(&self, ui: &mut egui::Ui, defs: &[LandscapeDefinition]) {
+    fn show_preview(
+        &self,
+        ui: &mut egui::Ui,
+        defs: &[LandscapeDefinition],
+        campaign_dir: Option<&Path>,
+    ) {
         let Some(idx) = self.selected_landscape.filter(|idx| *idx < defs.len()) else {
             ui.label("Select a landscape definition to preview it.");
             return;
@@ -174,6 +221,10 @@ impl LandscapeEditorState {
                 .map(|id| id.to_string())
                 .unwrap_or_else(|| "None".to_string())
         ));
+        ui.label(format!(
+            "Texture status: {}",
+            landscape_texture_validation_status(definition, campaign_dir)
+        ));
         if !definition.tags.is_empty() {
             ui.label(format!("Tags: {}", definition.tags.join(", ")));
         }
@@ -181,5 +232,129 @@ impl LandscapeEditorState {
             ui.separator();
             ui.label(description);
         }
+    }
+}
+
+fn landscape_texture_validation_status(
+    definition: &LandscapeDefinition,
+    campaign_dir: Option<&Path>,
+) -> String {
+    let Some(mesh_id) = definition.mesh_id else {
+        return "procedural fallback (no mesh)".to_string();
+    };
+    let Some(campaign_dir) = campaign_dir else {
+        return "open a campaign to validate textures".to_string();
+    };
+
+    let registry_path = campaign_dir.join("data/landscape_mesh_registry.ron");
+    let Ok(registry_contents) = fs::read_to_string(&registry_path) else {
+        return "mesh registry not found".to_string();
+    };
+    let Ok(registry) = ron::from_str::<Vec<CreatureReference>>(&registry_contents) else {
+        return "mesh registry parse error".to_string();
+    };
+    let Some(reference) = registry.iter().find(|entry| entry.id == mesh_id) else {
+        return "mesh ID missing from registry".to_string();
+    };
+
+    let mesh_path = campaign_dir.join(&reference.filepath);
+    let Ok(mesh_contents) = fs::read_to_string(&mesh_path) else {
+        return "mesh asset missing".to_string();
+    };
+    let Ok(creature) = ron::from_str::<CreatureDefinition>(&mesh_contents) else {
+        return "mesh asset parse error".to_string();
+    };
+
+    let mut checked_textures = 0usize;
+    for mesh in &creature.meshes {
+        if let Some(texture_path) = &mesh.texture_path {
+            checked_textures += 1;
+            if !texture_path.starts_with("assets/") {
+                return format!("invalid texture path: {texture_path}");
+            }
+            if !campaign_dir.join(texture_path).exists() {
+                return format!("missing texture: {texture_path}");
+            }
+        }
+    }
+
+    if checked_textures == 0 {
+        "mesh has no texture paths".to_string()
+    } else {
+        format!("{checked_textures} texture path(s) valid")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use antares::domain::world::landscape::LandscapeFlags;
+
+    fn landscape_definition(
+        id: antares::domain::types::LandscapeId,
+        name: &str,
+        category: LandscapeCategory,
+        tags: &[&str],
+    ) -> LandscapeDefinition {
+        LandscapeDefinition {
+            id,
+            name: name.to_string(),
+            category,
+            default_scale: 1.0,
+            color_tint: None,
+            flags: LandscapeFlags::default(),
+            icon: None,
+            tags: tags.iter().map(|tag| (*tag).to_string()).collect(),
+            mesh_id: None,
+            description: None,
+        }
+    }
+
+    #[test]
+    fn test_landscape_editor_new_defaults_empty_state() {
+        let state = LandscapeEditorState::new();
+        assert!(state.search_query.is_empty());
+        assert_eq!(state.category_filter, None);
+        assert_eq!(state.selected_landscape, None);
+        assert_eq!(state.requested_signal, None);
+    }
+
+    #[test]
+    fn test_filtered_rows_matches_name_and_tags() {
+        let defs = vec![
+            landscape_definition(1, "Oak Tree", LandscapeCategory::Tree, &["forest"]),
+            landscape_definition(2, "Granite Rock", LandscapeCategory::Rock, &["stone"]),
+        ];
+        let mut state = LandscapeEditorState::new();
+        state.search_query = "stone".to_string();
+
+        assert_eq!(state.filtered_rows(&defs), vec![1]);
+
+        state.search_query = "oak".to_string();
+        assert_eq!(state.filtered_rows(&defs), vec![0]);
+    }
+
+    #[test]
+    fn test_filtered_rows_combines_search_and_category() {
+        let defs = vec![
+            landscape_definition(1, "Oak Tree", LandscapeCategory::Tree, &["forest"]),
+            landscape_definition(2, "Pine Tree", LandscapeCategory::Tree, &["needle"]),
+            landscape_definition(3, "Forest Rock", LandscapeCategory::Rock, &["forest"]),
+        ];
+        let mut state = LandscapeEditorState::new();
+        state.search_query = "forest".to_string();
+        state.category_filter = Some(LandscapeCategory::Tree);
+
+        assert_eq!(state.filtered_rows(&defs), vec![0]);
+    }
+
+    #[test]
+    fn test_texture_validation_reports_procedural_fallback() {
+        let def = landscape_definition(1, "Grass", LandscapeCategory::Grass, &[]);
+
+        assert_eq!(
+            landscape_texture_validation_status(&def, None),
+            "procedural fallback (no mesh)"
+        );
     }
 }
