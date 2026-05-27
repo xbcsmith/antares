@@ -2,6 +2,31 @@
 
 ---
 
+## Landscape Phase 2 Domain Loading, Validation, and Serialization (2026)
+
+**Goal:** Complete landscape domain loading, map serialization, and validation so campaign content can safely load optional landscape data, round-trip placements, and reject invalid or movement-conflicting landscape placements.
+
+### Files Changed
+
+| Area                    | Action                                                                                                                  |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Domain validation       | Added map-aware landscape placement validation, effective blocking checks, and blocking movement-conflict diagnostics   |
+| Content loading         | Integrated landscape mesh, texture, definition, placement, and teleport-destination validation into SDK content loading |
+| Map serialization/tests | Added explicit tests for omitted empty placement lists and minimal placement deserialization defaults                   |
+| Fixtures                | Added fixture landscape placements to `data/test_campaign/data/maps/map_1.ron`                                          |
+| SDK validation          | Reported landscape placement and blocked teleport/starting-position issues through validator checks                     |
+| Documentation           | Recorded this Phase 2 implementation slice                                                                              |
+
+### What Changed
+
+- `LandscapeDatabase::validate_map_placements` validates definition references, map bounds, and blocking placement conflicts with wall/blocked tiles, map events, NPC placements, and dropped items.
+- `LandscapeDatabase::is_position_blocked_by_landscape` resolves definition defaults plus placement overrides for validation and SDK checks.
+- `ContentDatabase` now validates landscape meshes, `assets/` texture paths, definition-to-mesh references, map placements, and teleport destinations blocked by landscapes during `load_campaign`, `load_core`, and `validate`.
+- Map RON remains migration-safe: missing `landscape_placements` defaults to an empty vector, empty vectors skip serialization, and minimal placement entries deserialize optional transform/override fields as `None`.
+- `data/test_campaign` now includes map-level landscape placements that exercise fixture loading without referencing the live tutorial campaign.
+
+---
+
 ## Landscape Phase 1 Tree and Brush Asset Baseline (2026)
 
 **Goal:** Fix the default tree/brush asset baseline so tutorial and test campaign landscape assets use valid campaign-relative texture paths, real mesh payloads, reliable diagnostics, and imported defaults where practical while preserving procedural vegetation fallback.

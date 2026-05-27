@@ -47,6 +47,7 @@ use thiserror::Error;
 
 use crate::domain::types::{LandscapeId, LandscapeMeshId, Position};
 use crate::domain::visual::creature_database::{CreatureDatabase, CreatureDatabaseError};
+use crate::domain::world::{Map, WallType};
 
 /// Errors that can occur when working with landscape definitions and mesh registries.
 #[derive(Error, Debug)]
@@ -100,6 +101,19 @@ pub enum LandscapeDatabaseError {
         width: u32,
         /// Map height.
         height: u32,
+    },
+
+    /// A blocking landscape placement conflicts with movement-critical map content.
+    #[error("Blocking landscape ID {landscape_id} at ({x}, {y}) conflicts with movement rules: {reason}")]
+    BlockingPlacementConflict {
+        /// Landscape definition ID used by the placement.
+        landscape_id: LandscapeId,
+        /// Placement x coordinate.
+        x: i32,
+        /// Placement y coordinate.
+        y: i32,
+        /// Human-readable conflict reason.
+        reason: String,
     },
 
     /// Landscape mesh registry or one of its asset files failed to load.
@@ -537,6 +551,130 @@ impl LandscapeDatabase {
 
         Ok(())
     }
+
+    /// Returns whether a position is blocked by an effective blocking landscape placement.
+    ///
+    /// A placement is considered blocking when its own `blocking` override is
+    /// `Some(true)` or, when no override is present, its referenced definition's
+    /// [`LandscapeFlags::blocking`] flag is true.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::Position;
+    /// use antares::domain::world::landscape::{
+    ///     LandscapeCategory, LandscapeDatabase, LandscapeDefinition, LandscapeFlags,
+    ///     LandscapePlacement,
+    /// };
+    ///
+    /// let mut db = LandscapeDatabase::new();
+    /// db.add(LandscapeDefinition {
+    ///     id: 1,
+    ///     name: "Boulder".to_string(),
+    ///     category: LandscapeCategory::Rock,
+    ///     default_scale: 1.0,
+    ///     color_tint: None,
+    ///     flags: LandscapeFlags { blocking: true },
+    ///     icon: None,
+    ///     tags: vec![],
+    ///     mesh_id: None,
+    ///     description: None,
+    /// }).unwrap();
+    ///
+    /// let placements = [LandscapePlacement::new(1, Position::new(2, 3))];
+    /// assert!(db.is_position_blocked_by_landscape(&placements, Position::new(2, 3)));
+    /// ```
+    pub fn is_position_blocked_by_landscape(
+        &self,
+        placements: &[LandscapePlacement],
+        position: Position,
+    ) -> bool {
+        placements.iter().any(|placement| {
+            placement.position == position
+                && self
+                    .get_by_id(placement.landscape_id)
+                    .is_some_and(|definition| {
+                        placement.effective_blocking(definition.flags.blocking)
+                    })
+        })
+    }
+
+    /// Validates all landscape placements on a map, including movement conflicts.
+    ///
+    /// This extends [`Self::validate_placements`] with map-aware checks for
+    /// blocking landscape placements that would hide or prevent access to map
+    /// events, NPC placements, dropped items, wall tiles, or already-blocked tiles.
+    ///
+    /// # Errors
+    ///
+    /// Returns a landscape validation error for the first invalid placement or
+    /// blocking movement conflict.
+    pub fn validate_map_placements(&self, map: &Map) -> Result<(), LandscapeDatabaseError> {
+        self.validate_placements(&map.landscape_placements, map.width, map.height)?;
+
+        for placement in &map.landscape_placements {
+            let definition = self.get_by_id(placement.landscape_id).ok_or(
+                LandscapeDatabaseError::MissingPlacementDefinition {
+                    landscape_id: placement.landscape_id,
+                    x: placement.position.x,
+                    y: placement.position.y,
+                },
+            )?;
+
+            if !placement.effective_blocking(definition.flags.blocking) {
+                continue;
+            }
+
+            if let Some(tile) = map.get_tile(placement.position) {
+                if tile.blocked || tile.wall_type != WallType::None {
+                    return Err(Self::blocking_conflict(
+                        placement,
+                        "tile is already blocked or contains a wall",
+                    ));
+                }
+            }
+
+            if map.events.contains_key(&placement.position) {
+                return Err(Self::blocking_conflict(
+                    placement,
+                    "tile contains a map event",
+                ));
+            }
+
+            if map
+                .npc_placements
+                .iter()
+                .any(|npc| npc.position == placement.position)
+            {
+                return Err(Self::blocking_conflict(
+                    placement,
+                    "tile contains an NPC placement",
+                ));
+            }
+
+            if map
+                .dropped_items
+                .iter()
+                .any(|item| item.position == placement.position)
+            {
+                return Err(Self::blocking_conflict(
+                    placement,
+                    "tile contains a dropped item",
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn blocking_conflict(placement: &LandscapePlacement, reason: &str) -> LandscapeDatabaseError {
+        LandscapeDatabaseError::BlockingPlacementConflict {
+            landscape_id: placement.landscape_id,
+            x: placement.position.x,
+            y: placement.position.y,
+            reason: reason.to_string(),
+        }
+    }
 }
 
 /// Database of custom landscape meshes loaded from `landscape_mesh_registry.ron`.
@@ -857,6 +995,28 @@ mod tests {
     }
 
     #[test]
+    fn test_landscape_definition_minimal_ron_defaults_optional_fields() {
+        let ron = r#"[
+            (
+                id: 1,
+                name: "Minimal Brush",
+                category: Brush,
+                default_scale: 1.0,
+            ),
+        ]"#;
+
+        let db = LandscapeDatabase::load_from_string(ron).unwrap();
+        let def = db.get_by_id(1).unwrap();
+
+        assert_eq!(def.color_tint, None);
+        assert_eq!(def.flags, LandscapeFlags::default());
+        assert_eq!(def.icon, None);
+        assert!(def.tags.is_empty());
+        assert_eq!(def.mesh_id, None);
+        assert_eq!(def.description, None);
+    }
+
+    #[test]
     fn test_landscape_placement_ron_roundtrip() {
         let placement = LandscapePlacement {
             landscape_id: 1,
@@ -895,6 +1055,90 @@ mod tests {
             db.validate_placements(&placements, 10, 10),
             Err(LandscapeDatabaseError::PlacementOutOfBounds { .. })
         ));
+    }
+
+    #[test]
+    fn test_validate_mesh_references_rejects_missing_mesh() {
+        let mut db = LandscapeDatabase::new();
+        db.add(LandscapeDefinition {
+            mesh_id: Some(11001),
+            ..make_definition(1, "Oak")
+        })
+        .unwrap();
+        let meshes = LandscapeMeshDatabase::new();
+
+        assert!(matches!(
+            db.validate_mesh_references(&meshes),
+            Err(LandscapeDatabaseError::MissingMeshReference {
+                landscape_id: 1,
+                mesh_id: 11001
+            })
+        ));
+    }
+
+    #[test]
+    fn test_is_position_blocked_by_landscape_respects_definition_and_override() {
+        let mut db = LandscapeDatabase::new();
+        db.add(LandscapeDefinition {
+            flags: LandscapeFlags { blocking: true },
+            ..make_definition(1, "Blocking Oak")
+        })
+        .unwrap();
+        let mut placement = LandscapePlacement::new(1, Position::new(2, 2));
+
+        assert!(db.is_position_blocked_by_landscape(&[placement.clone()], Position::new(2, 2)));
+
+        placement.blocking = Some(false);
+        assert!(!db.is_position_blocked_by_landscape(&[placement], Position::new(2, 2)));
+    }
+
+    #[test]
+    fn test_validate_map_placements_rejects_blocking_event_conflict() {
+        let mut db = LandscapeDatabase::new();
+        db.add(LandscapeDefinition {
+            flags: LandscapeFlags { blocking: true },
+            ..make_definition(1, "Blocking Oak")
+        })
+        .unwrap();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4);
+        map.events.insert(
+            Position::new(1, 1),
+            crate::domain::world::MapEvent::Sign {
+                name: "Sign".to_string(),
+                description: String::new(),
+                text: "Read me".to_string(),
+                time_condition: None,
+                facing: None,
+            },
+        );
+        map.landscape_placements
+            .push(LandscapePlacement::new(1, Position::new(1, 1)));
+
+        assert!(matches!(
+            db.validate_map_placements(&map),
+            Err(LandscapeDatabaseError::BlockingPlacementConflict { .. })
+        ));
+    }
+
+    #[test]
+    fn test_validate_map_placements_allows_non_blocking_event_overlap() {
+        let mut db = LandscapeDatabase::new();
+        db.add(make_definition(1, "Nonblocking Brush")).unwrap();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4);
+        map.events.insert(
+            Position::new(1, 1),
+            crate::domain::world::MapEvent::Sign {
+                name: "Sign".to_string(),
+                description: String::new(),
+                text: "Read me".to_string(),
+                time_condition: None,
+                facing: None,
+            },
+        );
+        map.landscape_placements
+            .push(LandscapePlacement::new(1, Position::new(1, 1)));
+
+        db.validate_map_placements(&map).unwrap();
     }
 
     #[test]

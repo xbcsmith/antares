@@ -8547,4 +8547,24 @@
             dialogue_override: None,
         ),
     ],
+    landscape_placements: [
+        (
+            landscape_id: 1,
+            position: (
+                x: 6,
+                y: 6,
+            ),
+            rotation_y: Some(15.0),
+            scale: Some(0.9),
+        ),
+        (
+            landscape_id: 5,
+            position: (
+                x: 6,
+                y: 6,
+            ),
+            scale: Some(0.75),
+            blocking: Some(false),
+        ),
+    ],
 )

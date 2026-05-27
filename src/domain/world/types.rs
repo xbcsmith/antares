@@ -3391,6 +3391,54 @@ mod map_landscape_placement_tests {
     }
 
     #[test]
+    fn test_empty_landscape_placements_are_skipped_during_serialization() {
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 2, 2);
+
+        let ron = ron::ser::to_string_pretty(&map, ron::ser::PrettyConfig::default()).unwrap();
+
+        assert!(!ron.contains("landscape_placements"));
+    }
+
+    #[test]
+    fn test_map_deserializes_landscape_placement_defaults() {
+        let ron = r#"(
+            id: 1,
+            width: 1,
+            height: 1,
+            name: "Map With Minimal Landscape",
+            description: "Only required placement fields",
+            tiles: [
+                (
+                    terrain: Ground,
+                    wall_type: None,
+                    blocked: false,
+                    is_special: false,
+                    is_dark: false,
+                    visited: false,
+                    x: 0,
+                    y: 0,
+                ),
+            ],
+            landscape_placements: [
+                (
+                    landscape_id: 1,
+                    position: (x: 0, y: 0),
+                ),
+            ],
+        )"#;
+
+        let map: Map = ron::from_str(ron).unwrap();
+        assert_eq!(map.landscape_placements.len(), 1);
+        let placement = &map.landscape_placements[0];
+        assert_eq!(placement.offset, None);
+        assert_eq!(placement.y_offset, None);
+        assert_eq!(placement.rotation_y, None);
+        assert_eq!(placement.scale, None);
+        assert_eq!(placement.color_tint, None);
+        assert_eq!(placement.blocking, None);
+    }
+
+    #[test]
     fn test_map_landscape_placements_roundtrip() {
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 3, 3);
         map.landscape_placements.push(LandscapePlacement {
