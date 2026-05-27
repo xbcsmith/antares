@@ -2,6 +2,31 @@
 
 ---
 
+## Landscape Phase 3 Runtime Rendering and Map Spawn Integration (2026)
+
+**Goal:** Complete runtime map-spawn integration for authored landscape placements so imported landscape meshes render from campaign registries, fallback markers remain available, and map reloads cleanly remove old landscape entities.
+
+### Files Changed
+
+| Area              | Action                                                                                                                                                                              |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime rendering | Added landscape render hints, propagated imported mesh LOD data, and kept texture-aware landscape material creation in map spawning                                                 |
+| Map spawn order   | Confirmed authored landscape placements spawn after terrain/procedural vegetation and before event/NPC visuals                                                                      |
+| Map lifecycle     | Chained map-change handling before marker respawn so map reload cleanup/spawn order is deterministic                                                                                |
+| Tests             | Added runtime coverage for fallback placements, imported fixture meshes, multiple placements on one tile, transforms, invalid placement skips, render hints, and map reload cleanup |
+| Documentation     | Recorded this Phase 3 runtime implementation slice                                                                                                                                  |
+
+### What Changed
+
+- `LandscapeEntity` roots now carry `LandscapeRenderHints`, giving future dense-landscape culling systems a stable query hook without changing persisted `Map` or landscape RON data.
+- Imported landscape mesh spawning reuses the existing `MeshDefinition` conversion path and now preserves mesh LOD levels by inserting `LodState` on child mesh entities when LOD data is present.
+- Authored placements still apply tile center positioning, sub-tile offsets, vertical offsets, Y-axis rotation in degrees, placement/default scale, mesh scale, and tint-aware materials.
+- Fallback markers remain available for definitions without a mesh or with a missing mesh registry entry; blocking metadata remains domain validation/movement metadata rather than making every render entity collidable.
+- Runtime tests verify that `data/test_campaign` renders the two authored fixture placements on tile `(6, 6)` from imported mesh IDs `11001` and `11005`, while terrain-only/procedural fallback behavior remains unaffected.
+- Map transition tests verify that stale landscape entities from the previous map are despawned through the existing `MapEntity` lifecycle.
+
+---
+
 ## Landscape Phase 2 Domain Loading, Validation, and Serialization (2026)
 
 **Goal:** Complete landscape domain loading, map serialization, and validation so campaign content can safely load optional landscape data, round-trip placements, and reject invalid or movement-conflicting landscape placements.
