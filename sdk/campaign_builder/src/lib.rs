@@ -1126,16 +1126,18 @@ impl eframe::App for CampaignBuilderApp {
                 ];
 
                 for tab in &tabs {
-                    let is_selected = self.ui_state.active_tab == *tab;
-                    if ui.selectable_label(is_selected, tab.name()).clicked() {
-                        let previous_tab = self.ui_state.active_tab;
-                        self.ui_state.active_tab = *tab;
-                        self.logger.debug(
-                            category::EDITOR,
-                            &format!("Tab changed: {} -> {}", previous_tab.name(), tab.name()),
-                        );
-                        ui.ctx().request_repaint();
-                    }
+                    ui.push_id(tab.name(), |ui| {
+                        let is_selected = self.ui_state.active_tab == *tab;
+                        if ui.selectable_label(is_selected, tab.name()).clicked() {
+                            let previous_tab = self.ui_state.active_tab;
+                            self.ui_state.active_tab = *tab;
+                            self.logger.debug(
+                                category::EDITOR,
+                                &format!("Tab changed: {} -> {}", previous_tab.name(), tab.name()),
+                            );
+                            ui.ctx().request_repaint();
+                        }
+                    });
                 }
 
                 ui.separator();
@@ -1348,6 +1350,12 @@ impl eframe::App for CampaignBuilderApp {
                 {
                     self.ui_state.active_tab = EditorTab::Importer;
                     self.obj_importer_state.export_type = obj_importer::ExportType::Landscape;
+                    let next_landscape_mesh_id =
+                        obj_importer_ui::suggest_next_landscape_mesh_id_from_dir(
+                            self.campaign_dir.as_deref(),
+                        );
+                    self.obj_importer_state
+                        .set_next_landscape_mesh_id(next_landscape_mesh_id);
                     self.ui_state.status_message =
                         "Opening OBJ Importer for landscape mesh work".to_string();
                     ui.ctx().request_repaint();
@@ -1389,6 +1397,7 @@ impl eframe::App for CampaignBuilderApp {
                     ui,
                     &mut self.obj_importer_state,
                     self.campaign_dir.as_ref(),
+                    &self.campaign.landscape_file,
                     &mut self.logger,
                 ) {
                     self.ui_state.status_message = self.obj_importer_state.status_message.clone();
@@ -1433,6 +1442,12 @@ impl eframe::App for CampaignBuilderApp {
                         obj_importer_ui::ObjImporterUiSignal::Landscape => {
                             let importer_status = self.obj_importer_state.status_message.clone();
                             self.load_landscape();
+                            let next_landscape_mesh_id =
+                                obj_importer_ui::suggest_next_landscape_mesh_id_from_dir(
+                                    self.campaign_dir.as_deref(),
+                                );
+                            self.obj_importer_state
+                                .set_next_landscape_mesh_id(next_landscape_mesh_id);
                             self.ui_state.status_message = importer_status;
                             self.ui_state.active_tab = EditorTab::Landscape;
                             ui.ctx().request_repaint();

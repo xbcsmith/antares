@@ -37,7 +37,7 @@ use crate::mesh_obj_io::{
     ImportedObjMesh, ImportedObjMeshColorSource, ImportedObjMtlSourceKind, ImportedObjScene,
     ObjError, ObjImportOptions,
 };
-use antares::domain::types::{CreatureId, FurnitureMeshId, LandscapeMeshId};
+use antares::domain::types::{CreatureId, FurnitureMeshId, LandscapeMeshId, LANDSCAPE_MESH_ID_MIN};
 use antares::domain::visual::{AlphaMode, MeshDefinition};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -441,7 +441,7 @@ impl Default for ObjImporterState {
             export_type: ExportType::Creature,
             creature_id: 4000,
             furniture_id: 10001,
-            landscape_mesh_id: 11001,
+            landscape_mesh_id: LANDSCAPE_MESH_ID_MIN,
             creature_name: String::new(),
             category: String::new(),
             scale: 0.01,
@@ -747,6 +747,7 @@ mod tests {
         ExportType, ImportSourceFormat, ImportedMesh, ImportedMeshColorSource,
         ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
     };
+    use antares::domain::types::LANDSCAPE_MESH_ID_MIN;
     use antares::domain::visual::{AlphaMode, MaterialDefinition, MeshDefinition};
     use std::fs;
     use std::path::PathBuf;
@@ -1114,11 +1115,19 @@ mod tests {
     }
 
     #[test]
+    fn test_obj_importer_default_landscape_mesh_id_uses_domain_min() {
+        let state = ObjImporterState::default();
+
+        assert_eq!(state.landscape_mesh_id, LANDSCAPE_MESH_ID_MIN);
+    }
+
+    #[test]
     fn test_obj_importer_state_clear_preserves_scale_palette_and_id() {
         let mut state = ObjImporterState::new();
         state.scale = 0.05;
         state.creature_id = 4012;
         state.furniture_id = 10042;
+        state.landscape_mesh_id = 11042;
         state.export_type = ExportType::Furniture;
         state.category = "tables".to_string();
         state.manual_mtl_path = Some(PathBuf::from("materials/hero_override.mtl"));
@@ -1133,6 +1142,7 @@ mod tests {
         assert_eq!(state.scale, 0.05);
         assert_eq!(state.creature_id, 4012);
         assert_eq!(state.furniture_id, 10042);
+        assert_eq!(state.landscape_mesh_id, 11042);
         assert_eq!(state.export_type, ExportType::Furniture);
         assert_eq!(state.category, "tables");
         assert_eq!(

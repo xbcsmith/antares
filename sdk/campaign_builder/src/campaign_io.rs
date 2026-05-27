@@ -205,6 +205,14 @@ impl CampaignBuilderApp {
                 &format!("Failed to determine next importer creature ID: {}", error),
             ),
         }
+
+        if self.obj_importer_state.export_type == obj_importer::ExportType::Landscape {
+            let next_landscape_mesh_id = obj_importer_ui::suggest_next_landscape_mesh_id_from_dir(
+                self.campaign_dir.as_deref(),
+            );
+            self.obj_importer_state
+                .set_next_landscape_mesh_id(next_landscape_mesh_id);
+        }
     }
 
     /// Validate item IDs for uniqueness

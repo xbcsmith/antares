@@ -2,6 +2,32 @@
 
 ---
 
+## Landscape Phase 4 Importer Landscape Export Support (2026)
+
+**Goal:** Complete Campaign Builder importer support for first-class Landscape exports so imported OBJ/GLB models create reusable landscape mesh registry entries and landscape definitions that reload immediately in the SDK.
+
+### Files Changed
+
+| Area               | Action                                                                                                                                                                   |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Importer state     | Used `LANDSCAPE_MESH_ID_MIN` for default landscape mesh IDs and preserved landscape mesh IDs across importer clears                                                      |
+| Importer UI        | Exposed configured landscape export plumbing, landscape-aware copy text, category combo ID scoping, and target-specific export options                                   |
+| Export persistence | Wrote landscape mesh assets under `assets/meshes/landscape/`, upserted `data/landscape_mesh_registry.ron`, and upserted the configured landscape definitions file        |
+| SDK reload flow    | Suggested the next free `LandscapeMeshId`, refreshed it when opening/exporting landscapes, reloaded landscape definitions, and returned to the Landscape tab             |
+| Tests              | Added coverage for ID allocation, registry upsert, definition upsert, configured landscape file export, exported mesh RON IDs, landscape texture paths, and UI rendering |
+| Documentation      | Recorded this Phase 4 importer implementation slice                                                                                                                      |
+
+### What Changed
+
+- `ExportType::Landscape` now participates in the full importer export path using `LandscapeMeshId` allocation from `LANDSCAPE_MESH_ID_MIN` and the shared `CreatureDefinition` / `MeshDefinition` RON asset format required by architecture.
+- Landscape exports create or update `data/landscape_mesh_registry.ron` and create or update a reusable `LandscapeDefinition` referencing the exported mesh ID.
+- The exporter honors the active campaign metadata `landscape_file` instead of hardcoding `data/landscape.ron`, so the Campaign Builder reloads the same definitions file that export updates.
+- OBJ/MTL and GLB texture copies for Landscape exports remain portable and campaign-relative under `assets/textures/landscape/<export_stem>/`.
+- The importer emits `ObjImporterUiSignal::Landscape`; the app reloads landscape definitions, advances the suggested landscape mesh ID, switches back to the Landscape tab, and requests repaint so the new asset appears without restarting.
+- The importer category dropdown loops now wrap row widgets in `push_id`, and the top-level tab loop also uses stable `push_id` scopes to satisfy the SDK egui ID audit.
+
+---
+
 ## Landscape Phase 3 Runtime Rendering and Map Spawn Integration (2026)
 
 **Goal:** Complete runtime map-spawn integration for authored landscape placements so imported landscape meshes render from campaign registries, fallback markers remain available, and map reloads cleanly remove old landscape entities.
