@@ -26,7 +26,7 @@
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Load configuration from file, falling back to defaults
-//! let config = GameConfig::load_or_default(Path::new("campaigns/tutorial/config.ron"))?;
+//! let config = GameConfig::load_or_default(Path::new("data/test_campaign/config.ron"))?;
 //!
 //! // Use default configuration
 //! let default_config = GameConfig::default();
@@ -186,7 +186,7 @@ impl GameConfig {
     /// use std::path::Path;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let config = GameConfig::load_or_default(Path::new("campaigns/tutorial/config.ron"))?;
+    /// let config = GameConfig::load_or_default(Path::new("data/test_campaign/config.ron"))?;
     /// # Ok(())
     /// # }
     /// ```

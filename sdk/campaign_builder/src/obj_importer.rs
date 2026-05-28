@@ -55,6 +55,15 @@ pub enum ImporterMode {
 }
 
 /// Target asset type for the importer.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::obj_importer::ExportType;
+///
+/// let export_type = ExportType::Landscape;
+/// assert_eq!(export_type, ExportType::Landscape);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExportType {
     /// Export as a creature asset.
@@ -188,7 +197,7 @@ pub struct ObjImporterState {
     pub imported_material_palette: Vec<ImportedMaterialSwatch>,
     /// Parsed meshes currently loaded in the importer.
     pub meshes: Vec<ImportedMesh>,
-    /// Whether the export target is a creature or an item.
+    /// Export target selected by the author.
     pub export_type: ExportType,
     /// Suggested next creature ID for export.
     pub creature_id: CreatureId,
@@ -705,6 +714,16 @@ impl ObjImporterState {
     }
 
     /// Updates the suggested landscape mesh ID shown by the importer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::obj_importer::ObjImporterState;
+    ///
+    /// let mut state = ObjImporterState::new();
+    /// state.set_next_landscape_mesh_id(11042);
+    /// assert_eq!(state.landscape_mesh_id, 11042);
+    /// ```
     pub fn set_next_landscape_mesh_id(&mut self, landscape_mesh_id: LandscapeMeshId) {
         self.landscape_mesh_id = landscape_mesh_id;
     }

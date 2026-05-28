@@ -13,20 +13,26 @@ A typical campaign has the following data files:
 ```
 campaigns/my_campaign/
 ├── campaign.ron           # Campaign metadata and configuration
-└── data/
-    ├── classes.ron        # Character classes
-    ├── races.ron          # Character races
-    ├── items.ron          # Items and equipment
-    ├── spells.ron         # Spells and magic
-    ├── monsters.ron       # Monster definitions
-    ├── skills.ron         # Numeric skill definitions and scaling rules
-    ├── characters.ron     # Pre-made character definitions
-    ├── quests.ron         # Quest definitions
-    ├── dialogues.ron      # NPC dialogues
-    └── maps/              # Map data files
-        ├── map_001.ron
-        ├── map_002.ron
-        └── ...
+├── data/
+│   ├── classes.ron        # Character classes
+│   ├── races.ron          # Character races
+│   ├── items.ron          # Items and equipment
+│   ├── spells.ron         # Spells and magic
+│   ├── monsters.ron       # Monster definitions
+│   ├── skills.ron         # Numeric skill definitions and scaling rules
+│   ├── characters.ron     # Pre-made character definitions
+│   ├── quests.ron         # Quest definitions
+│   ├── dialogues.ron      # NPC dialogues
+│   ├── landscape.ron      # Reusable static landscape definitions
+│   ├── landscape_mesh_registry.ron # Imported landscape mesh registry
+│   └── maps/              # Map data files
+│       ├── map_001.ron
+│       ├── map_002.ron
+│       └── ...
+└── assets/
+    ├── meshes/landscape/  # Imported landscape mesh RON files
+    ├── textures/trees/    # Shared tree/foliage textures
+    └── textures/landscape/<asset_slug>/ # Importer-copied landscape textures
 ```
 
 ---
@@ -433,6 +439,73 @@ Validation:
 
 ---
 
+## landscape.ron Schema
+
+The `landscape.ron` file defines reusable static environmental decorations for
+maps and SDK palettes. Use Landscape for ambient, usually non-interactable props
+such as trees, shrubs, brush, rocks, grass clumps, ground cover, and decorative
+ruin fragments. Use Furniture instead for interactable objects, containers,
+doors, chairs, tables, torches, and inspectable structures.
+
+### File Format
+
+`landscape.ron` is a list of `LandscapeDefinition` entries:
+
+```antares/campaigns/tutorial/data/landscape.ron#L1-62
+[
+    (
+        id: 1,
+        name: "Oak Tree Short",
+        category: Tree,
+        default_scale: 1.0,
+        color_tint: None,
+        flags: (blocking: true),
+        icon: Some("🌳"),
+        tags: ["tree", "oak", "imported"],
+        mesh_id: Some(11001),
+        description: Some("Imported short oak tree landscape mesh."),
+    ),
+]
+```
+
+### LandscapeDefinition Fields
+
+- **`id`** (`LandscapeId = u32`): Unique campaign-local definition ID. `0` is reserved.
+- **`name`** (`String`): Display name shown in the SDK and map editor.
+- **`category`** (`LandscapeCategory`): One of `Tree`, `Shrub`, `Brush`, `Rock`, `Grass`, `GroundCover`, `Ruin`, or `Custom`.
+- **`default_scale`** (`f32`): Scale used by placements that do not override scale.
+- **`color_tint`** (`Option<[f32; 3]>`): Optional RGB tint applied multiplicatively.
+- **`flags`** (`LandscapeFlags`): Default behavior flags, currently `blocking`.
+- **`icon`** (`Option<String>`): Optional SDK palette icon or emoji.
+- **`tags`** (`Vec<String>`): Free-form search/filter tags.
+- **`mesh_id`** (`Option<LandscapeMeshId>`): Optional imported mesh registry entry.
+- **`description`** (`Option<String>`): Editor preview text.
+
+## landscape_mesh_registry.ron Schema
+
+The `landscape_mesh_registry.ron` file maps `LandscapeMeshId` values to imported
+mesh RON files. It uses the shared creature-style registry shape and points at
+`CreatureDefinition` / `MeshDefinition` RON assets under the active campaign
+root.
+
+```antares/campaigns/tutorial/data/landscape_mesh_registry.ron#L1-27
+[
+    (
+        id: 11001,
+        name: "OakTreeShort",
+        filepath: "assets/meshes/landscape/oak_tree_short.ron",
+    ),
+]
+```
+
+Landscape mesh files may live directly under `assets/meshes/landscape/` for seed
+assets or under SDK exporter category subdirectories such as
+`assets/meshes/landscape/tree/`. Every `texture_path` inside the referenced mesh
+RON must be campaign-relative, start with `assets/`, and resolve under the
+campaign root. Seed tree/brush assets intentionally reuse the canonical
+`assets/textures/trees/` texture set, while newly imported landscape models copy
+textures under `assets/textures/landscape/<asset_slug>/`.
+
 ## Validation
 
 Use the `antares-sdk campaign validate` subcommand to check campaign content:
@@ -459,14 +532,15 @@ The validator performs:
 4. **Quest validation**: Quest objectives and rewards are valid
 5. **Dialogue validation**: Dialogue trees are well-formed
 6. **Map validation**: Map events reference valid entities
+7. **Landscape validation**: Landscape definitions have unique IDs, definition `mesh_id` values reference registered meshes, mesh texture paths start with `assets/`, referenced textures exist under the campaign root, map placements reference existing definitions, placement coordinates are in bounds, and blocking landscape placements do not conflict with movement-critical map content.
 
 ---
 
 ## GLB Texture Export Convention
 
 When a `.glb` file is imported via the Campaign Builder importer and exported as
-a Creature, Item, or Furniture asset, embedded textures are extracted and written
-to the campaign directory following a predictable path convention.
+a Creature, Item, Furniture, or Landscape asset, embedded textures are extracted
+and written to the campaign directory following a predictable path convention.
 
 ### Texture Destination Path
 
@@ -476,9 +550,16 @@ Embedded GLB base-color textures are written to:
 assets/textures/imported/<asset_name>/<image_file>
 ```
 
+Landscape exports use a landscape-specific destination:
+
+```text
+assets/textures/landscape/<asset_name>/<image_file>
+```
+
 - `<asset_name>` is derived from the exported RON file stem. For example, a
   creature exported to `assets/creatures/stone_golem.ron` places its textures
-  under `assets/textures/imported/stone_golem/`.
+  under `assets/textures/imported/stone_golem/`, while a landscape export places
+  its textures under `assets/textures/landscape/<asset_name>/`.
 - `<image_file>` is derived from the glTF image `name` field when present,
   sanitized to lowercase with non-alphanumeric characters replaced by `_`. When
   no name is present the fallback is `image_<index>.<ext>`.
@@ -556,15 +637,16 @@ roughness factor, emissive factor, alpha mode) are still imported normally.
 After export, the game runtime does **not** require the original `.glb` file. It
 uses only:
 
-1. The exported RON file (`CreatureDefinition` / item / furniture) containing
+1. The exported RON file (`CreatureDefinition` / item / furniture / landscape mesh) containing
    `MeshDefinition` entries with campaign-relative `texture_path` strings.
-2. The copied texture files under `assets/textures/imported/`.
+2. The copied texture files under `assets/textures/imported/` or `assets/textures/landscape/`.
 
 This is the same path convention used for OBJ imports. Creature rendering uses
-`texture_loading_system` to load these paths. Item and Furniture exports also
-preserve the same campaign-relative `texture_path` strings in RON and copy the
-texture files, but their current runtime rendering paths do not yet apply those
-textures uniformly; those runtime integrations are tracked as deferred work.
+`texture_loading_system` to load these paths. Landscape map spawning also applies
+imported mesh textures from `assets/` paths. Item and Furniture exports preserve
+the same campaign-relative `texture_path` strings in RON and copy the texture
+files, but their current runtime rendering paths do not yet apply those textures
+uniformly; those runtime integrations are tracked as deferred work.
 
 ---
 

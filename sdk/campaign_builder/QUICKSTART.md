@@ -71,6 +71,18 @@ That's it! The Campaign Builder UI should launch.
 - Notice the status bar at the bottom
 - Make changes and see "● Unsaved changes" indicator
 
+### Try Landscape Authoring
+
+1. Open the tutorial campaign or another campaign with `data/landscape.ron`
+2. Click the **Landscape** tab and select an existing tree or brush definition
+3. Open the **Map Editor** tab and choose the **Place Landscape** tool
+4. Place the selected definition on a map tile
+5. Use the placement inspector to adjust rotation, scale, offset, tint, or
+   blocking override
+6. Try duplicate, rotate, delete, undo, and redo
+7. Save, close, reopen, and verify the placement persists in
+   `landscape_placements`
+
 ### Test Quest Editing
 
 1. Navigate to the **Quests** tab

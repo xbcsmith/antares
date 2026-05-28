@@ -2103,6 +2103,11 @@ mod tests {
             std::path::Path::new(manifest_dir).join("data/test_campaign"),
         )
         .expect("test_campaign must load");
+        assert!(db.landscape.len() >= 5);
+        assert!(db.landscape.has_definition(1));
+        assert!(db.landscape_meshes.count() >= 5);
+        assert!(db.landscape_meshes.has_mesh(11001));
+
         let map = db.maps.get_map(1).expect("map 1 fixture must load");
 
         assert!(map.landscape_placements.len() >= 2);

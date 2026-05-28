@@ -307,7 +307,7 @@ impl ErrorFormatter {
             ValidationError::InnkeeperMissingDialogue { innkeeper_id } => {
                 vec![
                     format!("Innkeeper '{}' must have a dialogue tree configured (set `dialogue_id` in `data/npcs.ron`)", innkeeper_id),
-                    "Use the default template Dialogue ID 999 (see campaigns/tutorial/data/dialogues.ron) as a starting point"
+                    "Use the default innkeeper dialogue template (Dialogue ID 999) as a starting point"
                         .to_string(),
                     "Ensure your innkeeper dialogue offers a party-management option via `OpenInnManagement { innkeeper_id }` or a node that triggers `TriggerEvent(event_name: \"open_inn_party_management\")`"
                         .to_string(),

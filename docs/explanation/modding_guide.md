@@ -141,11 +141,16 @@ campaigns/my_campaign/
 │   ├── items.ron         # All items
 │   ├── monsters.ron      # All monsters
 │   ├── spells.ron        # All spells
+│   ├── landscape.ron     # Reusable static landscape definitions
+│   ├── landscape_mesh_registry.ron # Imported landscape mesh registry
 │   └── maps/             # Map files
 │       ├── town.ron
 │       ├── dungeon_01.ron
 │       └── ...
 ├── assets/ (optional)
+│   ├── meshes/landscape/ # Imported tree/brush/rock mesh RON files
+│   ├── textures/trees/   # Shared tree/foliage texture set
+│   ├── textures/landscape/ # Importer-copied landscape textures
 │   ├── music/
 │   └── images/
 └── docs/ (optional)
@@ -183,11 +188,45 @@ Each content type has its own RON file:
 
 **spells.ron**: HashMap of SpellId → Spell
 
+**landscape.ron**: List of reusable `LandscapeDefinition` entries for static environmental props
+
+**landscape_mesh_registry.ron**: List of imported landscape mesh registry entries
+
 **maps/\*.ron**: Individual map files (one per map)
 
 ---
 
 ## Content Design Patterns
+
+### Authoring Landscape Props
+
+Use Landscape for static environmental decoration: trees, shrubs, brush, rocks,
+grass clumps, ground cover, and decorative ruin fragments. Use Furniture for
+interactable or structure-like content such as doors, containers, chairs, tables,
+torches, and inspectable objects.
+
+The recommended workflow is:
+
+1. Open the Campaign Builder and load your campaign.
+2. Use the **Importer** tab and choose export target **Landscape** for an `.obj`
+   or `.glb` model.
+3. Export creates or updates the landscape mesh RON under
+   `assets/meshes/landscape/`, copies textures under
+   `assets/textures/landscape/<asset_slug>/`, upserts
+   `data/landscape_mesh_registry.ron`, and upserts `data/landscape.ron` or the
+   campaign's configured landscape file.
+4. Use the **Landscape** tab to browse definitions grouped by category and check
+   mesh/texture validation status.
+5. Use the Map Editor **Place Landscape** tool to place decorations on tiles,
+   then edit position, offset, y-offset, rotation, scale, tint, and blocking
+   override in the placement inspector.
+6. Save the map. Reopening the campaign reloads the same stable
+   `landscape_placements` RON data.
+
+Keep all mesh and texture references campaign-relative and under `assets/`.
+Seed tree/brush landscape meshes may reuse `assets/textures/trees/`; newly
+imported landscape textures normally live under
+`assets/textures/landscape/<asset_slug>/`.
 
 ### Pattern 1: Progressive Equipment
 

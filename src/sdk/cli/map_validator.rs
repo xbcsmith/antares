@@ -27,8 +27,8 @@
 //!
 //! let args = MapArgs {
 //!     command: MapSubcommand::Validate(MapValidateArgs {
-//!         files: vec![PathBuf::from("campaigns/tutorial/data/maps/map_1.ron")],
-//!         campaign_dir: Some(PathBuf::from("campaigns/tutorial")),
+//!         files: vec![PathBuf::from("data/test_campaign/data/maps/map_1.ron")],
+//!         campaign_dir: Some(PathBuf::from("data/test_campaign")),
 //!     }),
 //! };
 //! // run(args).unwrap();
@@ -114,7 +114,7 @@ pub struct MapValidateArgs {
 ///
 /// let args = MapArgs {
 ///     command: MapSubcommand::Validate(MapValidateArgs {
-///         files: vec![PathBuf::from("campaigns/tutorial/data/maps/map_1.ron")],
+///         files: vec![PathBuf::from("data/test_campaign/data/maps/map_1.ron")],
 ///         campaign_dir: None,
 ///     }),
 /// };
@@ -539,14 +539,14 @@ mod tests {
         let args = MapArgs {
             command: MapSubcommand::Validate(MapValidateArgs {
                 files: vec![PathBuf::from("map_1.ron"), PathBuf::from("map_2.ron")],
-                campaign_dir: Some(PathBuf::from("campaigns/tutorial")),
+                campaign_dir: Some(PathBuf::from("data/test_campaign")),
             }),
         };
         match args.command {
             MapSubcommand::Build => panic!("expected Validate, got Build"),
             MapSubcommand::Validate(v) => {
                 assert_eq!(v.files.len(), 2);
-                assert_eq!(v.campaign_dir, Some(PathBuf::from("campaigns/tutorial")));
+                assert_eq!(v.campaign_dir, Some(PathBuf::from("data/test_campaign")));
             }
         }
     }
@@ -568,9 +568,9 @@ mod tests {
     fn test_map_validate_args_with_campaign_dir() {
         let args = MapValidateArgs {
             files: vec![PathBuf::from("map_1.ron")],
-            campaign_dir: Some(PathBuf::from("campaigns/tutorial")),
+            campaign_dir: Some(PathBuf::from("data/test_campaign")),
         };
-        assert_eq!(args.campaign_dir, Some(PathBuf::from("campaigns/tutorial")));
+        assert_eq!(args.campaign_dir, Some(PathBuf::from("data/test_campaign")));
         assert_eq!(args.files, vec![PathBuf::from("map_1.ron")]);
     }
 

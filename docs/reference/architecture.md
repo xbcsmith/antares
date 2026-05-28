@@ -105,6 +105,7 @@ src/
 │   ├── validation.rs            # `ValidationError` — unified domain validation error type
 │   ├── visual/
 │   └── world/
+│       └── landscape.rs         # `LandscapeDefinition`, placements, validation, mesh registry wrapper
 ├── game/                        # Bevy ECS integration (components/systems/resources)
 │   ├── mod.rs
 │   ├── components/
@@ -139,11 +140,12 @@ sdk/campaign_builder/            # Separate workspace member (eframe/egui GUI SD
 ```
 
 Runtime campaign content that affects gameplay (`items`, `spells`, `classes`,
-`races`, `dialogues`, `NPCs`, `skills`, and related databases) is loaded through
-the SDK `ContentDatabase` path used by `GameState::new_game`. The legacy
-`src/domain/campaign_loader.rs` `GameData` type is limited to visual/runtime
-asset support such as creature visuals, item meshes, furniture, and level tables;
-do not treat it as the authoritative gameplay-content database for skills.
+`races`, `dialogues`, `NPCs`, `skills`, landscape definitions, authored landscape
+placements, and related databases) is loaded through the SDK `ContentDatabase`
+path used by `GameState::new_game`. The legacy `src/domain/campaign_loader.rs`
+`GameData` type is limited to visual/runtime asset support such as creature
+visuals, item meshes, furniture, landscape mesh registries, and level tables; do
+not treat it as the authoritative gameplay-content database for skills.
 
 #### 3.3 Layer Architecture Details
 
@@ -1658,6 +1660,8 @@ pub struct GameData {
     pub quests: QuestDatabase,
     pub conditions: ConditionDatabase,
     pub proficiencies: ProficiencyDatabase,
+    pub landscape: LandscapeDatabase,
+    pub landscape_meshes: LandscapeMeshDatabase,
     pub skills: SkillDatabase,
 }
 
@@ -2372,6 +2376,8 @@ data/                                    # Base game data
 ├── npcs.ron                        # NPC definitions
 ├── npc_stock_templates.ron         # Merchant stock templates
 ├── creatures.ron                   # Creature visual registry
+├── landscape.ron                   # Reusable static landscape definitions
+├── landscape_mesh_registry.ron     # Imported landscape mesh registry
 ├── dialogues.ron                  # NPC dialogue trees
 ├── quests.ron                     # Quest definitions and objectives
 └── maps/                          # Map data directory
@@ -2389,12 +2395,17 @@ campaigns/                            # Campaign-specific content
     │   ├── items.ron               # Override base items
     │   ├── npcs.ron                # Campaign NPC overrides
     │   ├── creatures.ron           # Campaign creature registry override
+    │   ├── landscape.ron           # Campaign landscape definitions
+    │   ├── landscape_mesh_registry.ron # Campaign landscape mesh registry
     │   ├── skills.ron              # Campaign skill definitions
     │   ├── maps/                   # Campaign-specific maps
     │   │   └── tutorial_dungeon.ron
     │   └── dialogues.ron          # Campaign dialogues
     └── assets/                      # Campaign assets
-        ├── textures/                 # Custom textures
+        ├── meshes/landscape/        # Imported landscape mesh RON files
+        ├── textures/trees/          # Canonical tree/foliage texture set
+        ├── textures/landscape/      # Importer-copied landscape textures
+        ├── textures/                # Custom textures
         ├── audio/                   # Custom audio
         └── portraits/               # Character portraits
 ```
@@ -3007,9 +3018,10 @@ All CLI tools are available via the unified `antares-sdk` binary (`src/bin/antar
 
 - Import `.obj` (Wavefront OBJ + MTL) and `.glb` (binary glTF) 3D model files
 - Per-mesh color editing with imported material palette and custom color swatches
-- Export as Creature, Item, or Furniture RON asset with campaign-relative texture paths
-- GLB embedded textures automatically extracted and written to `assets/textures/imported/`
-- OBJ MTL texture maps copied to campaign texture directory on export
+- Export as Creature, Item, Furniture, or Landscape RON asset with campaign-relative texture paths
+- Landscape exports allocate `LandscapeMeshId` values from `LANDSCAPE_MESH_ID_MIN`, write mesh RON under `assets/meshes/landscape/`, upsert `data/landscape_mesh_registry.ron`, and upsert the configured `landscape_file`
+- GLB embedded textures automatically extracted and written to `assets/textures/imported/` for creature/item/furniture assets or `assets/textures/landscape/<asset_stem>/` for landscape assets
+- OBJ MTL texture maps copied to the target campaign texture directory on export
 - Format-neutral importer state: `ObjImporterState` handles both OBJ and GLB workflows
 - User-facing error messages for unsupported GLB features (external URI textures,
   missing POSITION data, unsupported primitive modes, no mesh primitives)

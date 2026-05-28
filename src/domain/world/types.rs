@@ -3458,6 +3458,27 @@ mod map_landscape_placement_tests {
     }
 
     #[test]
+    fn test_test_campaign_map_1_landscape_placements_roundtrip() {
+        let map_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("data/test_campaign/data/maps/map_1.ron");
+        let map: Map = ron::from_str(&std::fs::read_to_string(map_path).unwrap()).unwrap();
+        assert_eq!(map.landscape_placements.len(), 2);
+
+        let ron = ron::ser::to_string_pretty(&map, ron::ser::PrettyConfig::default()).unwrap();
+        let roundtrip: Map = ron::from_str(&ron).unwrap();
+
+        assert_eq!(roundtrip.landscape_placements, map.landscape_placements);
+        assert!(roundtrip
+            .landscape_placements
+            .iter()
+            .any(|placement| placement.landscape_id == 1));
+        assert!(roundtrip
+            .landscape_placements
+            .iter()
+            .any(|placement| placement.landscape_id == 5));
+    }
+
+    #[test]
     fn test_resize_shrink_removes_out_of_bounds_landscape_placements() {
         let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
         map.landscape_placements
@@ -3469,6 +3490,43 @@ mod map_landscape_placement_tests {
 
         assert_eq!(map.landscape_placements.len(), 1);
         assert_eq!(map.landscape_placements[0].landscape_id, 1);
+    }
+
+    #[test]
+    fn test_resize_zero_dimensions_preserves_landscape_placements() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let placement = LandscapePlacement::new(1, Position::new(8, 8));
+        map.landscape_placements.push(placement.clone());
+
+        map.resize(0, 5);
+        assert_eq!(map.landscape_placements, vec![placement.clone()]);
+
+        map.resize(5, 0);
+        assert_eq!(map.landscape_placements, vec![placement]);
+    }
+
+    #[test]
+    fn test_resize_grow_preserves_landscape_placements() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 2, 2);
+        let placement = LandscapePlacement::new(1, Position::new(1, 1));
+        map.landscape_placements.push(placement.clone());
+
+        map.resize(5, 5);
+
+        assert_eq!(map.landscape_placements, vec![placement]);
+    }
+
+    #[test]
+    fn test_resize_shrink_keeps_landscape_on_new_boundary() {
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let boundary_placement = LandscapePlacement::new(1, Position::new(4, 4));
+        let out_of_bounds_placement = LandscapePlacement::new(2, Position::new(5, 5));
+        map.landscape_placements.push(boundary_placement.clone());
+        map.landscape_placements.push(out_of_bounds_placement);
+
+        map.resize(5, 5);
+
+        assert_eq!(map.landscape_placements, vec![boundary_placement]);
     }
 }
 

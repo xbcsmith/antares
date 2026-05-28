@@ -45,11 +45,22 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::domain::types::{LandscapeId, LandscapeMeshId, Position};
+use crate::domain::types::{
+    LandscapeId, LandscapeMeshId, Position, LANDSCAPE_ID_MIN, LANDSCAPE_MESH_ID_MIN,
+};
 use crate::domain::visual::creature_database::{CreatureDatabase, CreatureDatabaseError};
 use crate::domain::world::{Map, WallType};
 
 /// Errors that can occur when working with landscape definitions and mesh registries.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::landscape::LandscapeDatabaseError;
+///
+/// let error = LandscapeDatabaseError::NotFound(42);
+/// assert!(error.to_string().contains("Landscape ID 42"));
+/// ```
 #[derive(Error, Debug)]
 pub enum LandscapeDatabaseError {
     /// File could not be read from disk.
@@ -67,6 +78,26 @@ pub enum LandscapeDatabaseError {
     /// An entry with the same ID already exists.
     #[error("Duplicate landscape ID {0} detected")]
     DuplicateId(LandscapeId),
+
+    /// A landscape definition used the reserved zero ID.
+    #[error("Landscape ID {id} is invalid; IDs must be >= {min}")]
+    InvalidLandscapeId {
+        /// Invalid landscape definition ID.
+        id: LandscapeId,
+        /// Minimum valid landscape definition ID.
+        min: LandscapeId,
+    },
+
+    /// A landscape definition referenced a mesh ID outside the landscape mesh range.
+    #[error("Landscape ID {landscape_id} references invalid landscape mesh ID {mesh_id}; mesh IDs must be >= {min}")]
+    InvalidLandscapeMeshId {
+        /// Landscape definition containing the invalid mesh reference.
+        landscape_id: LandscapeId,
+        /// Invalid mesh ID.
+        mesh_id: LandscapeMeshId,
+        /// Minimum valid landscape mesh ID.
+        min: LandscapeMeshId,
+    },
 
     /// A landscape definition referenced a mesh ID that is not registered.
     #[error("Landscape ID {landscape_id} references missing landscape mesh ID {mesh_id}")]
@@ -122,6 +153,16 @@ pub enum LandscapeDatabaseError {
 }
 
 /// Broad palette grouping for reusable landscape definitions.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::landscape::LandscapeCategory;
+///
+/// let category = LandscapeCategory::Tree;
+/// assert_eq!(category.name(), "Tree");
+/// assert_eq!(category.default_icon(), "🌳");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum LandscapeCategory {
     /// Trees with trunks and canopies, such as oak, pine, palm, willow, or dead trees.
@@ -212,6 +253,15 @@ impl LandscapeCategory {
 }
 
 /// Default behavior flags for a landscape definition.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::landscape::LandscapeFlags;
+///
+/// let flags = LandscapeFlags { blocking: true };
+/// assert!(flags.blocking);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct LandscapeFlags {
     /// Whether the landscape object blocks party movement when map systems opt into collision.
@@ -220,6 +270,28 @@ pub struct LandscapeFlags {
 }
 
 /// A reusable landscape template loaded from `data/landscape.ron`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::landscape::{
+///     LandscapeCategory, LandscapeDefinition, LandscapeFlags,
+/// };
+///
+/// let oak = LandscapeDefinition {
+///     id: 1,
+///     name: "Oak Tree".to_string(),
+///     category: LandscapeCategory::Tree,
+///     default_scale: 1.0,
+///     color_tint: None,
+///     flags: LandscapeFlags { blocking: true },
+///     icon: Some("🌳".to_string()),
+///     tags: vec!["tree".to_string(), "oak".to_string()],
+///     mesh_id: Some(11001),
+///     description: Some("Imported oak tree mesh.".to_string()),
+/// };
+/// assert!(oak.has_custom_mesh());
+/// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LandscapeDefinition {
     /// Unique landscape definition identifier within a campaign.
@@ -305,6 +377,19 @@ impl LandscapeDefinition {
 }
 
 /// A single authored landscape instance on a map.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::types::Position;
+/// use antares::domain::world::landscape::LandscapePlacement;
+///
+/// let mut placement = LandscapePlacement::new(1, Position::new(4, 5));
+/// placement.rotation_y = Some(90.0);
+/// placement.scale = Some(1.25);
+/// assert_eq!(placement.position, Position::new(4, 5));
+/// assert_eq!(placement.effective_scale(1.0), 1.25);
+/// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LandscapePlacement {
     /// Reusable landscape definition to spawn.
@@ -394,6 +479,29 @@ impl LandscapePlacement {
 }
 
 /// In-memory index of all [`LandscapeDefinition`] entries for a campaign.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::landscape::{
+///     LandscapeCategory, LandscapeDatabase, LandscapeDefinition, LandscapeFlags,
+/// };
+///
+/// let mut db = LandscapeDatabase::new();
+/// db.add(LandscapeDefinition {
+///     id: 1,
+///     name: "Boulder".to_string(),
+///     category: LandscapeCategory::Rock,
+///     default_scale: 1.0,
+///     color_tint: None,
+///     flags: LandscapeFlags::default(),
+///     icon: None,
+///     tags: vec![],
+///     mesh_id: None,
+///     description: None,
+/// }).unwrap();
+/// assert!(db.has_definition(1));
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct LandscapeDatabase {
     /// Definitions indexed by `LandscapeId` for O(1) lookup.
@@ -410,9 +518,23 @@ crate::impl_ron_database!(
     dup_err: LandscapeDatabaseError::DuplicateId,
     read_err: LandscapeDatabaseError::ReadError,
     parse_err: LandscapeDatabaseError::ParseError,
+    post_load: |db: &LandscapeDatabase| db.validate_definition_ids(),
 );
 
 impl LandscapeDatabase {
+    fn validate_definition_ids(&self) -> Result<(), LandscapeDatabaseError> {
+        for def in self.items.values() {
+            if def.id < LANDSCAPE_ID_MIN {
+                return Err(LandscapeDatabaseError::InvalidLandscapeId {
+                    id: def.id,
+                    min: LANDSCAPE_ID_MIN,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
     /// Creates an empty landscape database.
     ///
     /// # Examples
@@ -435,7 +557,36 @@ impl LandscapeDatabase {
     ///
     /// Returns [`LandscapeDatabaseError::DuplicateId`] if a definition with the
     /// same `id` already exists.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::{
+    ///     LandscapeCategory, LandscapeDatabase, LandscapeDefinition, LandscapeFlags,
+    /// };
+    ///
+    /// let mut db = LandscapeDatabase::new();
+    /// let def = LandscapeDefinition {
+    ///     id: 1,
+    ///     name: "Oak Tree".to_string(),
+    ///     category: LandscapeCategory::Tree,
+    ///     default_scale: 1.0,
+    ///     color_tint: None,
+    ///     flags: LandscapeFlags::default(),
+    ///     icon: None,
+    ///     tags: vec![],
+    ///     mesh_id: None,
+    ///     description: None,
+    /// };
+    /// assert!(db.add(def).is_ok());
+    /// ```
     pub fn add(&mut self, def: LandscapeDefinition) -> Result<(), LandscapeDatabaseError> {
+        if def.id < LANDSCAPE_ID_MIN {
+            return Err(LandscapeDatabaseError::InvalidLandscapeId {
+                id: def.id,
+                min: LANDSCAPE_ID_MIN,
+            });
+        }
         if self.items.contains_key(&def.id) {
             return Err(LandscapeDatabaseError::DuplicateId(def.id));
         }
@@ -458,11 +609,57 @@ impl LandscapeDatabase {
     }
 
     /// Returns the first definition whose `name` field matches case-sensitively.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::{
+    ///     LandscapeCategory, LandscapeDatabase, LandscapeDefinition, LandscapeFlags,
+    /// };
+    ///
+    /// let mut db = LandscapeDatabase::new();
+    /// db.add(LandscapeDefinition {
+    ///     id: 1,
+    ///     name: "Brush Shrub".to_string(),
+    ///     category: LandscapeCategory::Brush,
+    ///     default_scale: 1.0,
+    ///     color_tint: None,
+    ///     flags: LandscapeFlags::default(),
+    ///     icon: None,
+    ///     tags: vec![],
+    ///     mesh_id: None,
+    ///     description: None,
+    /// }).unwrap();
+    /// assert_eq!(db.get_by_name("Brush Shrub").unwrap().id, 1);
+    /// ```
     pub fn get_by_name(&self, name: &str) -> Option<&LandscapeDefinition> {
         self.items.values().find(|d| d.name == name)
     }
 
     /// Returns all definitions belonging to the specified category.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::{
+    ///     LandscapeCategory, LandscapeDatabase, LandscapeDefinition, LandscapeFlags,
+    /// };
+    ///
+    /// let mut db = LandscapeDatabase::new();
+    /// db.add(LandscapeDefinition {
+    ///     id: 1,
+    ///     name: "Pine Tree".to_string(),
+    ///     category: LandscapeCategory::Tree,
+    ///     default_scale: 1.0,
+    ///     color_tint: None,
+    ///     flags: LandscapeFlags::default(),
+    ///     icon: None,
+    ///     tags: vec![],
+    ///     mesh_id: None,
+    ///     description: None,
+    /// }).unwrap();
+    /// assert_eq!(db.get_by_category(LandscapeCategory::Tree).len(), 1);
+    /// ```
     pub fn get_by_category(&self, category: LandscapeCategory) -> Vec<&LandscapeDefinition> {
         self.items
             .values()
@@ -471,21 +668,56 @@ impl LandscapeDatabase {
     }
 
     /// Returns all definitions in the database.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::LandscapeDatabase;
+    ///
+    /// let db = LandscapeDatabase::new();
+    /// assert!(db.all_definitions().is_empty());
+    /// ```
     pub fn all_definitions(&self) -> Vec<&LandscapeDefinition> {
         self.items.values().collect()
     }
 
     /// Returns the number of definitions in the database.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::LandscapeDatabase;
+    ///
+    /// let db = LandscapeDatabase::new();
+    /// assert_eq!(db.len(), 0);
+    /// ```
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
     /// Returns `true` if the database contains no definitions.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::LandscapeDatabase;
+    ///
+    /// assert!(LandscapeDatabase::new().is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 
     /// Returns `true` if a definition with the given ID exists.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::LandscapeDatabase;
+    ///
+    /// let db = LandscapeDatabase::new();
+    /// assert!(!db.has_definition(1));
+    /// ```
     pub fn has_definition(&self, id: LandscapeId) -> bool {
         self.items.contains_key(&id)
     }
@@ -496,12 +728,30 @@ impl LandscapeDatabase {
     ///
     /// Returns [`LandscapeDatabaseError::MissingMeshReference`] if a definition
     /// references a mesh that is not registered.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::{LandscapeDatabase, LandscapeMeshDatabase};
+    ///
+    /// let definitions = LandscapeDatabase::new();
+    /// let meshes = LandscapeMeshDatabase::new();
+    /// assert!(definitions.validate_mesh_references(&meshes).is_ok());
+    /// ```
     pub fn validate_mesh_references(
         &self,
         meshes: &LandscapeMeshDatabase,
     ) -> Result<(), LandscapeDatabaseError> {
         for def in self.items.values() {
             if let Some(mesh_id) = def.mesh_id {
+                if mesh_id < LANDSCAPE_MESH_ID_MIN {
+                    return Err(LandscapeDatabaseError::InvalidLandscapeMeshId {
+                        landscape_id: def.id,
+                        mesh_id,
+                        min: LANDSCAPE_MESH_ID_MIN,
+                    });
+                }
+
                 if !meshes.has_mesh(mesh_id) {
                     return Err(LandscapeDatabaseError::MissingMeshReference {
                         landscape_id: def.id,
@@ -519,6 +769,32 @@ impl LandscapeDatabase {
     /// # Errors
     ///
     /// Returns a landscape validation error for the first invalid placement.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::Position;
+    /// use antares::domain::world::landscape::{
+    ///     LandscapeCategory, LandscapeDatabase, LandscapeDefinition, LandscapeFlags,
+    ///     LandscapePlacement,
+    /// };
+    ///
+    /// let mut db = LandscapeDatabase::new();
+    /// db.add(LandscapeDefinition {
+    ///     id: 1,
+    ///     name: "Oak".to_string(),
+    ///     category: LandscapeCategory::Tree,
+    ///     default_scale: 1.0,
+    ///     color_tint: None,
+    ///     flags: LandscapeFlags::default(),
+    ///     icon: None,
+    ///     tags: vec![],
+    ///     mesh_id: None,
+    ///     description: None,
+    /// }).unwrap();
+    /// let placements = [LandscapePlacement::new(1, Position::new(1, 1))];
+    /// assert!(db.validate_placements(&placements, 4, 4).is_ok());
+    /// ```
     pub fn validate_placements(
         &self,
         placements: &[LandscapePlacement],
@@ -609,6 +885,34 @@ impl LandscapeDatabase {
     ///
     /// Returns a landscape validation error for the first invalid placement or
     /// blocking movement conflict.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::Position;
+    /// use antares::domain::world::{Map, landscape::{
+    ///     LandscapeCategory, LandscapeDatabase, LandscapeDefinition, LandscapeFlags,
+    ///     LandscapePlacement,
+    /// }};
+    ///
+    /// let mut map = Map::new(1, "Forest".to_string(), "Test map".to_string(), 8, 8);
+    /// map.landscape_placements.push(LandscapePlacement::new(1, Position::new(2, 2)));
+    ///
+    /// let mut db = LandscapeDatabase::new();
+    /// db.add(LandscapeDefinition {
+    ///     id: 1,
+    ///     name: "Oak".to_string(),
+    ///     category: LandscapeCategory::Tree,
+    ///     default_scale: 1.0,
+    ///     color_tint: None,
+    ///     flags: LandscapeFlags::default(),
+    ///     icon: None,
+    ///     tags: vec![],
+    ///     mesh_id: None,
+    ///     description: None,
+    /// }).unwrap();
+    /// assert!(db.validate_map_placements(&map).is_ok());
+    /// ```
     pub fn validate_map_placements(&self, map: &Map) -> Result<(), LandscapeDatabaseError> {
         self.validate_placements(&map.landscape_placements, map.width, map.height)?;
 
@@ -683,6 +987,15 @@ impl LandscapeDatabase {
 /// [`crate::domain::visual::CreatureDefinition`] format as creature, item, and
 /// furniture mesh assets. This wrapper keeps landscape mesh concerns separate
 /// while reusing the validated registry loader.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::landscape::LandscapeMeshDatabase;
+///
+/// let db = LandscapeMeshDatabase::new();
+/// assert_eq!(db.count(), 0);
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct LandscapeMeshDatabase {
     /// Wrapped creature-style registry database for landscape mesh assets.
@@ -716,6 +1029,19 @@ impl LandscapeMeshDatabase {
     ///
     /// Returns an error if the registry file or any referenced mesh asset file
     /// cannot be read, parsed, or validated.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::LandscapeMeshDatabase;
+    /// use std::path::Path;
+    ///
+    /// let db = LandscapeMeshDatabase::load_from_registry(
+    ///     Path::new("data/test_campaign/data/landscape_mesh_registry.ron"),
+    ///     Path::new("data/test_campaign"),
+    /// ).unwrap();
+    /// assert!(db.has_mesh(11001));
+    /// ```
     pub fn load_from_registry(
         registry_path: &Path,
         campaign_root: &Path,
@@ -725,26 +1051,67 @@ impl LandscapeMeshDatabase {
     }
 
     /// Returns the underlying creature-style mesh database.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::LandscapeMeshDatabase;
+    ///
+    /// let db = LandscapeMeshDatabase::new();
+    /// assert!(db.as_creature_database().is_empty());
+    /// ```
     pub fn as_creature_database(&self) -> &CreatureDatabase {
         &self.inner
     }
 
     /// Returns `true` when no landscape mesh entries are loaded.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::LandscapeMeshDatabase;
+    ///
+    /// assert!(LandscapeMeshDatabase::new().is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
     /// Returns the number of registered landscape mesh entries.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::LandscapeMeshDatabase;
+    ///
+    /// assert_eq!(LandscapeMeshDatabase::new().count(), 0);
+    /// ```
     pub fn count(&self) -> usize {
         self.inner.count()
     }
 
     /// Returns `true` if a mesh with the given landscape mesh ID exists.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::LandscapeMeshDatabase;
+    ///
+    /// assert!(!LandscapeMeshDatabase::new().has_mesh(11001));
+    /// ```
     pub fn has_mesh(&self, id: LandscapeMeshId) -> bool {
         self.inner.has_creature(id)
     }
 
     /// Returns a registered mesh asset by landscape mesh ID.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::LandscapeMeshDatabase;
+    ///
+    /// assert!(LandscapeMeshDatabase::new().get_mesh(11001).is_none());
+    /// ```
     pub fn get_mesh(
         &self,
         id: LandscapeMeshId,
@@ -757,6 +1124,14 @@ impl LandscapeMeshDatabase {
     /// # Errors
     ///
     /// Returns a validation error if any referenced mesh asset is malformed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::LandscapeMeshDatabase;
+    ///
+    /// assert!(LandscapeMeshDatabase::new().validate().is_ok());
+    /// ```
     pub fn validate(&self) -> Result<(), CreatureDatabaseError> {
         self.inner.validate()
     }
@@ -769,6 +1144,15 @@ impl LandscapeMeshDatabase {
     /// # Errors
     ///
     /// Returns a validation error for the first invalid texture path.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::landscape::LandscapeMeshDatabase;
+    ///
+    /// let db = LandscapeMeshDatabase::new();
+    /// assert!(db.validate_texture_paths(None).is_ok());
+    /// ```
     pub fn validate_texture_paths(
         &self,
         campaign_root: Option<&Path>,
@@ -901,6 +1285,27 @@ mod tests {
     }
 
     #[test]
+    fn test_landscape_category_ron_roundtrip_all_variants() {
+        for category in LandscapeCategory::all() {
+            let ron = ron::to_string(category).unwrap();
+            let roundtrip: LandscapeCategory = ron::from_str(&ron).unwrap();
+            assert_eq!(
+                roundtrip, *category,
+                "category {category:?} must round-trip"
+            );
+        }
+    }
+
+    #[test]
+    fn test_landscape_category_and_flags_defaults() {
+        assert_eq!(LandscapeCategory::default(), LandscapeCategory::Tree);
+        assert_eq!(
+            LandscapeFlags::default(),
+            LandscapeFlags { blocking: false }
+        );
+    }
+
+    #[test]
     fn test_landscape_definition_display_icon_override() {
         let def = LandscapeDefinition {
             icon: Some("🌴".to_string()),
@@ -974,6 +1379,39 @@ mod tests {
     }
 
     #[test]
+    fn test_landscape_database_rejects_zero_id() {
+        let mut db = LandscapeDatabase::new();
+
+        assert!(matches!(
+            db.add(make_definition(0, "Invalid Oak")),
+            Err(LandscapeDatabaseError::InvalidLandscapeId {
+                id: 0,
+                min: LANDSCAPE_ID_MIN
+            })
+        ));
+    }
+
+    #[test]
+    fn test_landscape_database_load_from_string_rejects_zero_id() {
+        let ron = r#"[
+            (
+                id: 0,
+                name: "Invalid Oak",
+                category: Tree,
+                default_scale: 1.0,
+            ),
+        ]"#;
+
+        assert!(matches!(
+            LandscapeDatabase::load_from_string(ron),
+            Err(LandscapeDatabaseError::InvalidLandscapeId {
+                id: 0,
+                min: LANDSCAPE_ID_MIN
+            })
+        ));
+    }
+
+    #[test]
     fn test_landscape_database_load_from_string() {
         let ron = r#"[
             (
@@ -1014,6 +1452,27 @@ mod tests {
         assert!(def.tags.is_empty());
         assert_eq!(def.mesh_id, None);
         assert_eq!(def.description, None);
+    }
+
+    #[test]
+    fn test_landscape_definition_ron_roundtrip_preserves_all_fields() {
+        let definition = LandscapeDefinition {
+            id: 7,
+            name: "Crystal Ruin".to_string(),
+            category: LandscapeCategory::Ruin,
+            default_scale: 1.35,
+            color_tint: Some([0.7, 0.8, 1.0]),
+            flags: LandscapeFlags { blocking: true },
+            icon: Some("🏛️".to_string()),
+            tags: vec!["ruin".to_string(), "crystal".to_string()],
+            mesh_id: Some(11077),
+            description: Some("A luminous ruin fragment.".to_string()),
+        };
+
+        let ron = ron::to_string(&definition).unwrap();
+        let roundtrip: LandscapeDefinition = ron::from_str(&ron).unwrap();
+
+        assert_eq!(roundtrip, definition);
     }
 
     #[test]
@@ -1058,6 +1517,50 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_placements_rejects_negative_x() {
+        let mut db = LandscapeDatabase::new();
+        db.add(make_definition(1, "Oak")).unwrap();
+        let placements = [LandscapePlacement::new(1, Position::new(-1, 0))];
+
+        assert!(matches!(
+            db.validate_placements(&placements, 10, 10),
+            Err(LandscapeDatabaseError::PlacementOutOfBounds { x: -1, y: 0, .. })
+        ));
+    }
+
+    #[test]
+    fn test_validate_placements_rejects_negative_y() {
+        let mut db = LandscapeDatabase::new();
+        db.add(make_definition(1, "Oak")).unwrap();
+        let placements = [LandscapePlacement::new(1, Position::new(0, -1))];
+
+        assert!(matches!(
+            db.validate_placements(&placements, 10, 10),
+            Err(LandscapeDatabaseError::PlacementOutOfBounds { x: 0, y: -1, .. })
+        ));
+    }
+
+    #[test]
+    fn test_validate_mesh_references_rejects_mesh_id_below_landscape_range() {
+        let mut db = LandscapeDatabase::new();
+        db.add(LandscapeDefinition {
+            mesh_id: Some(LANDSCAPE_MESH_ID_MIN - 1),
+            ..make_definition(1, "Oak")
+        })
+        .unwrap();
+        let meshes = LandscapeMeshDatabase::new();
+
+        assert!(matches!(
+            db.validate_mesh_references(&meshes),
+            Err(LandscapeDatabaseError::InvalidLandscapeMeshId {
+                landscape_id: 1,
+                mesh_id,
+                min: LANDSCAPE_MESH_ID_MIN,
+            }) if mesh_id == LANDSCAPE_MESH_ID_MIN - 1
+        ));
+    }
+
+    #[test]
     fn test_validate_mesh_references_rejects_missing_mesh() {
         let mut db = LandscapeDatabase::new();
         db.add(LandscapeDefinition {
@@ -1092,14 +1595,19 @@ mod tests {
         assert!(!db.is_position_blocked_by_landscape(&[placement], Position::new(2, 2)));
     }
 
-    #[test]
-    fn test_validate_map_placements_rejects_blocking_event_conflict() {
+    fn blocking_landscape_database() -> LandscapeDatabase {
         let mut db = LandscapeDatabase::new();
         db.add(LandscapeDefinition {
             flags: LandscapeFlags { blocking: true },
             ..make_definition(1, "Blocking Oak")
         })
         .unwrap();
+        db
+    }
+
+    #[test]
+    fn test_validate_map_placements_rejects_blocking_event_conflict() {
+        let db = blocking_landscape_database();
         let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4);
         map.events.insert(
             Position::new(1, 1),
@@ -1121,6 +1629,72 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_map_placements_rejects_blocking_wall_tile_conflict() {
+        let db = blocking_landscape_database();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4);
+        let position = Position::new(1, 1);
+        let tile = map.get_tile_mut(position).unwrap();
+        tile.wall_type = WallType::Normal;
+        tile.blocked = false;
+        map.landscape_placements
+            .push(LandscapePlacement::new(1, position));
+
+        let error = db.validate_map_placements(&map).unwrap_err().to_string();
+
+        assert!(error.contains("tile is already blocked or contains a wall"));
+    }
+
+    #[test]
+    fn test_validate_map_placements_rejects_blocking_blocked_tile_conflict() {
+        let db = blocking_landscape_database();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4);
+        let position = Position::new(1, 1);
+        let tile = map.get_tile_mut(position).unwrap();
+        tile.wall_type = WallType::None;
+        tile.blocked = true;
+        map.landscape_placements
+            .push(LandscapePlacement::new(1, position));
+
+        let error = db.validate_map_placements(&map).unwrap_err().to_string();
+
+        assert!(error.contains("tile is already blocked or contains a wall"));
+    }
+
+    #[test]
+    fn test_validate_map_placements_rejects_blocking_npc_conflict() {
+        let db = blocking_landscape_database();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4);
+        let position = Position::new(1, 1);
+        map.npc_placements
+            .push(crate::domain::world::NpcPlacement::new("guard", position));
+        map.landscape_placements
+            .push(LandscapePlacement::new(1, position));
+
+        let error = db.validate_map_placements(&map).unwrap_err().to_string();
+
+        assert!(error.contains("tile contains an NPC placement"));
+    }
+
+    #[test]
+    fn test_validate_map_placements_rejects_blocking_dropped_item_conflict() {
+        let db = blocking_landscape_database();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4);
+        let position = Position::new(1, 1);
+        map.dropped_items.push(crate::domain::world::DroppedItem {
+            item_id: 1,
+            charges: 0,
+            position,
+            map_id: map.id,
+        });
+        map.landscape_placements
+            .push(LandscapePlacement::new(1, position));
+
+        let error = db.validate_map_placements(&map).unwrap_err().to_string();
+
+        assert!(error.contains("tile contains a dropped item"));
+    }
+
+    #[test]
     fn test_validate_map_placements_allows_non_blocking_event_overlap() {
         let mut db = LandscapeDatabase::new();
         db.add(make_definition(1, "Nonblocking Brush")).unwrap();
@@ -1139,6 +1713,45 @@ mod tests {
             .push(LandscapePlacement::new(1, Position::new(1, 1)));
 
         db.validate_map_placements(&map).unwrap();
+    }
+
+    #[test]
+    fn test_validate_map_placements_allows_multiple_non_blocking_placements_on_same_tile() {
+        let mut db = LandscapeDatabase::new();
+        db.add(make_definition(1, "Nonblocking Brush")).unwrap();
+        db.add(make_definition(2, "Nonblocking Grass")).unwrap();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4);
+        map.landscape_placements
+            .push(LandscapePlacement::new(1, Position::new(1, 1)));
+        map.landscape_placements
+            .push(LandscapePlacement::new(2, Position::new(1, 1)));
+
+        db.validate_map_placements(&map).unwrap();
+    }
+
+    #[test]
+    fn test_validate_map_placements_respects_blocking_override_true() {
+        let mut db = LandscapeDatabase::new();
+        db.add(make_definition(1, "Nonblocking Brush")).unwrap();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4);
+        map.events.insert(
+            Position::new(1, 1),
+            crate::domain::world::MapEvent::Sign {
+                name: "Sign".to_string(),
+                description: String::new(),
+                text: "Read me".to_string(),
+                time_condition: None,
+                facing: None,
+            },
+        );
+
+        let mut placement = LandscapePlacement::new(1, Position::new(1, 1));
+        placement.blocking = Some(true);
+        map.landscape_placements.push(placement);
+
+        let error = db.validate_map_placements(&map).unwrap_err().to_string();
+
+        assert!(error.contains("tile contains a map event"));
     }
 
     #[test]

@@ -8837,6 +8837,9 @@ mod tests {
         assert_eq!(state.current_tool, EditorTool::Select);
         assert!(!state.show_metadata_editor);
         assert_eq!(state.metadata.name, "Map 1");
+        assert!(state.show_landscapes);
+        assert_eq!(state.selected_landscape_id, None);
+        assert_eq!(state.landscape_placement_editor, None);
     }
 
     #[test]
@@ -10394,6 +10397,114 @@ mod tests {
 
         state.undo();
         assert_eq!(state.map.landscape_placements[0], rotated);
+
+        state.redo();
+        assert!(state.map.landscape_placements.is_empty());
+    }
+
+    #[test]
+    fn test_remove_landscape_placement_out_of_range_noop() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let placement = LandscapePlacement::new(1, Position::new(2, 2));
+        state.map.landscape_placements.push(placement.clone());
+
+        state.remove_landscape_placement(3);
+
+        assert_eq!(state.map.landscape_placements, vec![placement]);
+        assert!(!state.has_changes);
+        assert!(!state.undo_stack.can_undo());
+    }
+
+    #[test]
+    fn test_replace_landscape_placement_out_of_range_noop() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let placement = LandscapePlacement::new(1, Position::new(2, 2));
+        let replacement = LandscapePlacement::new(2, Position::new(3, 3));
+        state.map.landscape_placements.push(placement.clone());
+
+        state.replace_landscape_placement(2, replacement);
+
+        assert_eq!(state.map.landscape_placements, vec![placement]);
+        assert!(!state.has_changes);
+        assert!(!state.undo_stack.can_undo());
+    }
+
+    #[test]
+    fn test_add_landscape_placement_undo_redo_preserves_existing_entries() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let existing = LandscapePlacement::new(1, Position::new(1, 1));
+        let added = LandscapePlacement::new(2, Position::new(2, 2));
+        state.map.landscape_placements.push(existing.clone());
+
+        state.add_landscape_placement(added.clone());
+        assert_eq!(
+            state.map.landscape_placements,
+            vec![existing.clone(), added.clone()]
+        );
+
+        state.undo();
+        assert_eq!(state.map.landscape_placements, vec![existing.clone()]);
+
+        state.redo();
+        assert_eq!(state.map.landscape_placements, vec![existing, added]);
+    }
+
+    #[test]
+    fn test_remove_middle_landscape_placement_undo_redo_preserves_order() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let first = LandscapePlacement::new(1, Position::new(1, 1));
+        let middle = LandscapePlacement::new(2, Position::new(2, 2));
+        let last = LandscapePlacement::new(3, Position::new(3, 3));
+        state.map.landscape_placements = vec![first.clone(), middle.clone(), last.clone()];
+
+        state.remove_landscape_placement(1);
+        assert_eq!(
+            state.map.landscape_placements,
+            vec![first.clone(), last.clone()]
+        );
+
+        state.undo();
+        assert_eq!(
+            state.map.landscape_placements,
+            vec![first.clone(), middle.clone(), last.clone()]
+        );
+
+        state.redo();
+        assert_eq!(state.map.landscape_placements, vec![first, last]);
+    }
+
+    #[test]
+    fn test_replace_middle_landscape_placement_undo_redo_preserves_neighbors() {
+        let mut state =
+            MapEditorState::new(Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10));
+        let first = LandscapePlacement::new(1, Position::new(1, 1));
+        let middle = LandscapePlacement::new(2, Position::new(2, 2));
+        let last = LandscapePlacement::new(3, Position::new(3, 3));
+        let mut replacement = LandscapePlacement::new(4, Position::new(4, 4));
+        replacement.rotation_y = Some(90.0);
+        state.map.landscape_placements = vec![first.clone(), middle.clone(), last.clone()];
+
+        state.replace_landscape_placement(1, replacement.clone());
+        assert_eq!(
+            state.map.landscape_placements,
+            vec![first.clone(), replacement.clone(), last.clone()]
+        );
+
+        state.undo();
+        assert_eq!(
+            state.map.landscape_placements,
+            vec![first.clone(), middle.clone(), last.clone()]
+        );
+
+        state.redo();
+        assert_eq!(
+            state.map.landscape_placements,
+            vec![first, replacement, last]
+        );
     }
 
     #[test]
@@ -10510,6 +10621,147 @@ mod tests {
         assert_eq!(round_trip.scale, placement.scale);
         assert_eq!(round_trip.color_tint, placement.color_tint);
         assert_eq!(round_trip.blocking, placement.blocking);
+    }
+
+    #[test]
+    fn test_landscape_blocking_override_maps_all_persisted_values() {
+        assert_eq!(
+            LandscapeBlockingOverride::all(),
+            &[
+                LandscapeBlockingOverride::Inherit,
+                LandscapeBlockingOverride::Blocking,
+                LandscapeBlockingOverride::NonBlocking,
+            ]
+        );
+        assert_eq!(LandscapeBlockingOverride::Inherit.to_option(), None);
+        assert_eq!(LandscapeBlockingOverride::Blocking.to_option(), Some(true));
+        assert_eq!(
+            LandscapeBlockingOverride::NonBlocking.to_option(),
+            Some(false)
+        );
+        assert_eq!(
+            LandscapeBlockingOverride::from_option(None),
+            LandscapeBlockingOverride::Inherit
+        );
+        assert_eq!(
+            LandscapeBlockingOverride::from_option(Some(true)),
+            LandscapeBlockingOverride::Blocking
+        );
+        assert_eq!(
+            LandscapeBlockingOverride::from_option(Some(false)),
+            LandscapeBlockingOverride::NonBlocking
+        );
+    }
+
+    #[test]
+    fn test_landscape_placement_editor_requires_landscape_id() {
+        let state = LandscapePlacementEditorState {
+            position_x: "1".to_string(),
+            position_y: "2".to_string(),
+            ..LandscapePlacementEditorState::default()
+        };
+
+        assert_eq!(
+            state.to_placement().unwrap_err(),
+            "Select a landscape definition"
+        );
+    }
+
+    #[test]
+    fn test_landscape_placement_editor_rejects_invalid_coordinates() {
+        let invalid_x = LandscapePlacementEditorState {
+            selected_landscape_id: Some(1),
+            position_x: "west".to_string(),
+            position_y: "2".to_string(),
+            ..LandscapePlacementEditorState::default()
+        };
+        assert_eq!(
+            invalid_x.to_placement().unwrap_err(),
+            "Invalid X coordinate"
+        );
+
+        let invalid_y = LandscapePlacementEditorState {
+            selected_landscape_id: Some(1),
+            position_x: "1".to_string(),
+            position_y: "north".to_string(),
+            ..LandscapePlacementEditorState::default()
+        };
+        assert_eq!(
+            invalid_y.to_placement().unwrap_err(),
+            "Invalid Y coordinate"
+        );
+    }
+
+    #[test]
+    fn test_landscape_placement_editor_rejects_invalid_enabled_overrides() {
+        let base = LandscapePlacementEditorState {
+            selected_landscape_id: Some(1),
+            position_x: "1".to_string(),
+            position_y: "2".to_string(),
+            ..LandscapePlacementEditorState::default()
+        };
+
+        let mut invalid_offset_x = base.clone();
+        invalid_offset_x.use_offset = true;
+        invalid_offset_x.offset_x = "east".to_string();
+        assert_eq!(
+            invalid_offset_x.to_placement().unwrap_err(),
+            "Invalid offset X"
+        );
+
+        let mut invalid_offset_z = base.clone();
+        invalid_offset_z.use_offset = true;
+        invalid_offset_z.offset_z = "north".to_string();
+        assert_eq!(
+            invalid_offset_z.to_placement().unwrap_err(),
+            "Invalid offset Z"
+        );
+
+        let mut invalid_y_offset = base.clone();
+        invalid_y_offset.use_y_offset = true;
+        invalid_y_offset.y_offset = "up".to_string();
+        assert_eq!(
+            invalid_y_offset.to_placement().unwrap_err(),
+            "Invalid Y offset"
+        );
+
+        let mut invalid_rotation = base.clone();
+        invalid_rotation.use_rotation = true;
+        invalid_rotation.rotation_y = "clockwise".to_string();
+        assert_eq!(
+            invalid_rotation.to_placement().unwrap_err(),
+            "Invalid rotation Y"
+        );
+
+        let mut invalid_tint = base;
+        invalid_tint.use_tint = true;
+        invalid_tint.tint_g = "green".to_string();
+        assert_eq!(
+            invalid_tint.to_placement().unwrap_err(),
+            "Invalid tint green"
+        );
+    }
+
+    #[test]
+    fn test_landscape_placement_editor_rejects_non_positive_scale() {
+        let mut zero_scale = LandscapePlacementEditorState {
+            selected_landscape_id: Some(1),
+            position_x: "1".to_string(),
+            position_y: "2".to_string(),
+            use_scale: true,
+            scale: "0.0".to_string(),
+            ..LandscapePlacementEditorState::default()
+        };
+        assert_eq!(
+            zero_scale.to_placement().unwrap_err(),
+            "Scale must be greater than 0"
+        );
+
+        zero_scale.scale = "-1.0".to_string();
+        assert_eq!(
+            zero_scale.to_placement().unwrap_err(),
+            "Scale must be greater than 0"
+        );
     }
 
     #[test]

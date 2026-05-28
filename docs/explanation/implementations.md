@@ -2,6 +2,62 @@
 
 ---
 
+## Landscape Phase 6 Testing, Fixtures, and Quality Gates (2026)
+
+**Goal:** Complete the landscape testing and fixture validation slice so domain data, campaign loading, map RON persistence, runtime spawning, importer export, and SDK map-editor state behavior have explicit regression coverage backed by `data/test_campaign` fixtures.
+
+### Files Changed
+
+| Area                 | Action                                                                                                                                          |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain tests         | Added exhaustive landscape category RON round-trip/default tests, full `LandscapeDefinition` round-trip coverage, and missing conflict tests    |
+| Map RON tests        | Added a `data/test_campaign` map fixture round-trip test proving fixture `landscape_placements` survive serialization                           |
+| Content loader tests | Strengthened `ContentDatabase::load_campaign` fixture assertions for landscape definitions and mesh registries                                  |
+| Runtime tests        | Added imported/fallback transform assertions, missing-mesh fallback coverage, terrain-derived default tree spawning, and imported child cleanup |
+| Importer tests       | Added exhaustive landscape category helper coverage and OBJ texture-copy validation for Landscape exports                                       |
+| SDK map editor tests | Added remove redo coverage and out-of-range no-op tests for landscape placement remove/replace actions                                          |
+| Fixture compliance   | Kept all test I/O on `data/test_campaign` or temp directories; no tests reference the live tutorial campaign                                    |
+
+### What Changed
+
+- `LandscapeCategory` now has explicit RON round-trip coverage for every variant and direct default checks for `LandscapeCategory::Tree` and non-blocking `LandscapeFlags`.
+- `LandscapeDefinition` now has full serialize/deserialize equality coverage across ID, name, category, scale, tint, flags, icon, tags, mesh ID, and description.
+- `LandscapeDatabase::validate_map_placements` now has branch coverage for blocking conflicts with wall/blocked tiles, NPC placements, dropped items, and map events, plus existing non-blocking overlap coverage.
+- `data/test_campaign/data/maps/map_1.ron` is read directly in a map RON round-trip test to guard authored fixture placement stability.
+- Runtime tests now prove authored fallback placements apply rotation/scale, definitions with missing mesh registry entries fall back to marker rendering, imported fixture placements apply transforms, terrain-derived Oak forest visuals spawn imported default landscape meshes, and map reload cleanup despawns imported landscape roots plus child mesh entities.
+- Campaign Builder importer tests now prove Landscape OBJ texture copies use `assets/textures/landscape/<asset_stem>/` instead of the generic imported texture root and preserve copied bytes.
+- Campaign Builder map editor tests now prove landscape placement remove redo removes again and out-of-range remove/replace calls do not mutate state or enqueue undo history.
+
+---
+
+## Landscape Phase 7 Documentation and Cleanup (2026)
+
+**Goal:** Complete the final landscape documentation and cleanup pass so the feature is documented for modders/SDK users, public landscape APIs have examples, stale tree/brush paths are clearly deprecated or removed, and tutorial/test campaign landscape data matches the validated exporter format.
+
+### Files Changed
+
+| Area                    | Action                                                                                                                                        |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Implementation docs     | Recorded this Phase 7 documentation and cleanup slice                                                                                         |
+| Reference docs          | Added landscape data files, map placement format, SDK content loading, validation rules, importer output paths, and architecture references   |
+| Modding/SDK docs        | Documented the Campaign Builder landscape workflow, model importer Landscape export target, Landscape tab, and map placement workflow         |
+| Rustdoc comments        | Added examples for landscape ID aliases/constants, domain types/databases, runtime landscape entity metadata, and SDK landscape/importer APIs |
+| Cleanup/data            | Removed the stale tutorial brush furniture mesh registry and normalized tutorial/test landscape mesh RON IDs/names to registry IDs            |
+| Procedural fallback     | Clarified that foliage texture constants are deprecated diagnostic-only paths while imported landscape definitions are preferred              |
+| Test fixture compliance | Updated parser-only CLI tests to use `data/test_campaign` instead of `campaigns/tutorial`                                                     |
+
+### What Changed
+
+- `docs/reference/campaign_content_format.md`, `docs/reference/map_ron_format.md`, `docs/reference/sdk_api.md`, and `docs/reference/architecture.md` now describe `data/landscape.ron`, `data/landscape_mesh_registry.ron`, `assets/meshes/landscape/`, `assets/textures/trees/`, `assets/textures/landscape/`, `Map.landscape_placements`, and landscape validation behavior.
+- `docs/explanation/modding_guide.md`, `sdk/campaign_builder/README.md`, and `sdk/campaign_builder/QUICKSTART.md` now explain how authors import Landscape meshes, browse definitions, place/edit decorations, and save/reload placements.
+- Public landscape-related Rust items now include runnable or explicitly ignored examples, including domain database methods, placement validation helpers, `LandscapeEntity`, `LandscapeEditorState`, `LandscapeEditorSignal`, and `ExportType::Landscape`.
+- Tutorial and `data/test_campaign` landscape mesh RON files now embed the same IDs/names as their registry entries (`11001` through `11005`) instead of the old generic `10001` seed ID.
+- The invalid tutorial `data/furniture_mesh_registry.ron` brush entry was removed because brush is now authored through landscape definitions and the referenced furniture mesh file did not exist.
+- Procedural fallback tree docs/logging now state that foliage materials use generated geometry and species colors; the old foliage texture constants are gated to tests as deprecated fixture completeness anchors.
+- CLI parser tests that need a campaign path now use the stable `data/test_campaign` fixture path, keeping tests independent from the live tutorial campaign.
+
+---
+
 ## Landscape Phase 5 SDK Landscape Editor and Map Placement (2026)
 
 **Goal:** Complete SDK authoring support for landscape definitions and map placements so campaign authors can browse grouped landscape assets, inspect validation metadata, place decorations on maps, edit placement overrides, and save/reopen stable placement RON.

@@ -22,7 +22,7 @@
 //!
 //! let args = CampaignArgs {
 //!     command: CampaignSubcommand::Validate(CampaignValidateArgs {
-//!         campaign: Some(PathBuf::from("campaigns/tutorial")),
+//!         campaign: Some(PathBuf::from("data/test_campaign")),
 //!         all: false,
 //!         campaigns_dir: PathBuf::from("campaigns"),
 //!         verbose: false,
@@ -117,7 +117,7 @@ pub struct CampaignValidateArgs {
 ///
 /// let args = CampaignArgs {
 ///     command: CampaignSubcommand::Validate(CampaignValidateArgs {
-///         campaign: Some(PathBuf::from("campaigns/tutorial")),
+///         campaign: Some(PathBuf::from("data/test_campaign")),
 ///         all: false,
 ///         campaigns_dir: PathBuf::from("campaigns"),
 ///         verbose: false,
@@ -581,7 +581,7 @@ mod tests {
     #[test]
     fn test_campaign_validate_args_with_path() {
         let args = CampaignValidateArgs {
-            campaign: Some(PathBuf::from("campaigns/tutorial")),
+            campaign: Some(PathBuf::from("data/test_campaign")),
             all: false,
             campaigns_dir: PathBuf::from("campaigns"),
             verbose: true,
@@ -589,7 +589,7 @@ mod tests {
             errors_only: false,
         };
 
-        assert_eq!(args.campaign, Some(PathBuf::from("campaigns/tutorial")));
+        assert_eq!(args.campaign, Some(PathBuf::from("data/test_campaign")));
         assert!(!args.all);
         assert!(args.verbose);
         assert!(args.json);

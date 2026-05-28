@@ -156,6 +156,21 @@ pub struct MapEntity(pub types::MapId);
 pub struct TileCoord(pub types::Position);
 
 /// Component tagging an entity as a spawned landscape placement.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::map::LandscapeEntity;
+///
+/// let entity = LandscapeEntity {
+///     map_id: 1,
+///     landscape_id: 1,
+///     mesh_id: Some(11001),
+///     placement_index: Some(0),
+/// };
+/// assert_eq!(entity.map_id, 1);
+/// assert_eq!(entity.mesh_id, Some(11001));
+/// ```
 #[derive(bevy::prelude::Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LandscapeEntity {
     /// Map containing the landscape placement.
@@ -1829,6 +1844,9 @@ fn spawn_map(
             }
         }
 
+        // Authored landscape placements spawn after terrain/procedural vegetation
+        // and before map event/NPC/dropped-item markers so imported decoration
+        // avoids z-fighting with tile geometry without obscuring gameplay markers.
         spawn_landscape_placements(
             &mut commands,
             meshes.as_mut(),
@@ -4128,6 +4146,53 @@ mod tests {
         assert!((transform.translation.x - 2.75).abs() < 0.001);
         assert!((transform.translation.y - 0.2).abs() < 0.001);
         assert!((transform.translation.z - 3.4).abs() < 0.001);
+        assert!((transform.scale.x - 1.25).abs() < 0.001);
+        assert!((transform.scale.y - 1.25).abs() < 0.001);
+        assert!((transform.scale.z - 1.25).abs() < 0.001);
+        let expected_rotation = Quat::from_rotation_y(45.0_f32.to_radians());
+        assert!((transform.rotation.dot(expected_rotation).abs() - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_spawn_map_falls_back_when_landscape_mesh_reference_missing_at_runtime() {
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        db.landscape
+            .add(make_landscape_definition(
+                1,
+                "Missing Mesh Tree",
+                world::LandscapeCategory::Tree,
+                Some(11001),
+                &["tree"],
+            ))
+            .expect("landscape definition should insert");
+
+        let mut app = make_spawn_app(db);
+        let mut game_state = crate::application::GameState::new();
+        let mut map = world::Map::new(
+            1,
+            "Missing Mesh Landscape Test".to_string(),
+            "D".to_string(),
+            4,
+            4,
+        );
+        map.landscape_placements
+            .push(world::LandscapePlacement::new(1, Position::new(1, 1)));
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        app.insert_resource(GlobalState(game_state));
+
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<(&LandscapeEntity, Option<&Mesh3d>, Option<&Children>)>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+        assert_eq!(results.len(), 1);
+        let (entity, mesh, children) = results[0];
+        assert_eq!(entity.landscape_id, 1);
+        assert_eq!(entity.mesh_id, None);
+        assert_eq!(entity.placement_index, Some(0));
+        assert!(mesh.is_some(), "fallback marker should own a mesh directly");
+        assert!(children.is_none_or(Children::is_empty));
     }
 
     #[test]
@@ -4224,6 +4289,97 @@ mod tests {
     }
 
     #[test]
+    fn test_spawn_map_applies_transform_to_imported_fixture_landscape_entities() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let db = crate::sdk::database::ContentDatabase::load_campaign(
+            std::path::Path::new(manifest_dir).join("data/test_campaign"),
+        )
+        .expect("data/test_campaign must load");
+        let map = db
+            .maps
+            .get_map(1)
+            .expect("map 1 fixture must exist")
+            .clone();
+        let mut app = make_spawn_app(db);
+        let mut game_state = crate::application::GameState::new();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        app.insert_resource(GlobalState(game_state));
+
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<(&LandscapeEntity, &Transform, &TileCoord)>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+
+        let (_, oak_transform, oak_tile) = results
+            .iter()
+            .find(|(entity, _, _)| {
+                entity.landscape_id == 1
+                    && entity.mesh_id == Some(11001)
+                    && entity.placement_index == Some(0)
+            })
+            .expect("oak fixture landscape should spawn");
+        assert_eq!(oak_tile.0, Position::new(6, 6));
+        assert!((oak_transform.translation.x - 6.5).abs() < 0.001);
+        assert!((oak_transform.translation.y - 0.0).abs() < 0.001);
+        assert!((oak_transform.translation.z - 6.5).abs() < 0.001);
+        assert!((oak_transform.scale.x - 0.9).abs() < 0.001);
+        assert!((oak_transform.scale.y - 0.9).abs() < 0.001);
+        assert!((oak_transform.scale.z - 0.9).abs() < 0.001);
+        let oak_rotation = Quat::from_rotation_y(15.0_f32.to_radians());
+        assert!((oak_transform.rotation.dot(oak_rotation).abs() - 1.0).abs() < 0.001);
+
+        let (_, brush_transform, brush_tile) = results
+            .iter()
+            .find(|(entity, _, _)| {
+                entity.landscape_id == 5
+                    && entity.mesh_id == Some(11005)
+                    && entity.placement_index == Some(1)
+            })
+            .expect("brush fixture landscape should spawn");
+        assert_eq!(brush_tile.0, Position::new(6, 6));
+        assert!((brush_transform.scale.x - 0.75).abs() < 0.001);
+        assert!((brush_transform.scale.y - 0.75).abs() < 0.001);
+        assert!((brush_transform.scale.z - 0.75).abs() < 0.001);
+        assert!((brush_transform.rotation.dot(Quat::IDENTITY).abs() - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_spawn_map_uses_imported_default_tree_landscape_for_forest_tile() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let db = crate::sdk::database::ContentDatabase::load_campaign(
+            std::path::Path::new(manifest_dir).join("data/test_campaign"),
+        )
+        .expect("data/test_campaign must load");
+        let mut app = make_spawn_app(db);
+        let mut game_state = crate::application::GameState::new();
+        let mut map = world::Map::new(42, "Forest".to_string(), "D".to_string(), 3, 3);
+        let forest_pos = Position::new(1, 1);
+        let tile = map.get_tile_mut(forest_pos).unwrap();
+        tile.terrain = world::TerrainType::Forest;
+        tile.visual.tree_type = Some(world::TreeType::Oak);
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(42);
+        app.insert_resource(GlobalState(game_state));
+
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<(&LandscapeEntity, &MapEntity, &TileCoord)>();
+        assert!(query
+            .iter(&*world_ref)
+            .any(|(entity, map_entity, tile_coord)| {
+                entity.map_id == 42
+                    && entity.landscape_id == 1
+                    && entity.mesh_id == Some(11001)
+                    && entity.placement_index.is_none()
+                    && map_entity.0 == 42
+                    && tile_coord.0 == forest_pos
+            }));
+    }
+
+    #[test]
     fn test_map_reload_despawns_old_landscape_entities() {
         let mut db = crate::sdk::database::ContentDatabase::new();
         db.landscape
@@ -4280,6 +4436,74 @@ mod tests {
             0,
             "old map landscape entities must be despawned after map reload"
         );
+    }
+
+    #[test]
+    fn test_map_reload_despawns_imported_landscape_roots_and_children() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let db = crate::sdk::database::ContentDatabase::load_campaign(
+            std::path::Path::new(manifest_dir).join("data/test_campaign"),
+        )
+        .expect("data/test_campaign must load");
+        let map_one = db
+            .maps
+            .get_map(1)
+            .expect("map 1 fixture must exist")
+            .clone();
+        let mut app = make_spawn_app(db);
+        let mut game_state = crate::application::GameState::new();
+        let map_two = world::Map::new(2, "Two".to_string(), "D".to_string(), 4, 4);
+        game_state.world.add_map(map_one);
+        game_state.world.add_map(map_two);
+        game_state.world.set_current_map(1);
+        app.insert_resource(GlobalState(game_state));
+
+        app.update();
+        let (roots, children): (Vec<Entity>, Vec<Entity>) = {
+            let world_ref = app.world_mut();
+            let mut query = world_ref.query::<(Entity, &LandscapeEntity, Option<&Children>)>();
+            let mut roots = Vec::new();
+            let mut children = Vec::new();
+            for (root, entity, root_children) in query.iter(&*world_ref) {
+                if entity.map_id == 1 && entity.mesh_id.is_some() {
+                    roots.push(root);
+                    if let Some(root_children) = root_children {
+                        children.extend(root_children.iter());
+                    }
+                }
+            }
+            (roots, children)
+        };
+        assert!(
+            !roots.is_empty(),
+            "fixture should spawn imported landscape roots"
+        );
+        assert!(
+            !children.is_empty(),
+            "imported landscape roots should have mesh children"
+        );
+
+        app.world_mut()
+            .resource_mut::<Messages<MapChangeEvent>>()
+            .write(MapChangeEvent {
+                target_map: 2,
+                target_pos: Position::new(0, 0),
+                is_portal: true,
+            });
+        app.update();
+
+        for root in roots {
+            assert!(
+                app.world().get_entity(root).is_err(),
+                "imported landscape root should be despawned on map reload"
+            );
+        }
+        for child in children {
+            assert!(
+                app.world().get_entity(child).is_err(),
+                "imported landscape child should be despawned on map reload"
+            );
+        }
     }
 
     #[test]

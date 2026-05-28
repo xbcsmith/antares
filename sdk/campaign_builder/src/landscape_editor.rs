@@ -15,6 +15,15 @@ use std::fs;
 use std::path::Path;
 
 /// Signal requested by the Landscape editor.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::landscape_editor::LandscapeEditorSignal;
+///
+/// let signal = LandscapeEditorSignal::OpenInObjImporter;
+/// assert_eq!(signal, LandscapeEditorSignal::OpenInObjImporter);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LandscapeEditorSignal {
     /// Switch to the Importer tab and prepare it for landscape mesh export.
@@ -22,6 +31,16 @@ pub enum LandscapeEditorSignal {
 }
 
 /// View state for the Landscape editor tab.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::landscape_editor::LandscapeEditorState;
+///
+/// let state = LandscapeEditorState::new();
+/// assert!(state.search_query.is_empty());
+/// assert!(state.category_filter.is_none());
+/// ```
 #[derive(Debug, Default)]
 pub struct LandscapeEditorState {
     /// Search text used to filter landscape definitions by name or tag.
@@ -50,6 +69,18 @@ impl LandscapeEditorState {
     }
 
     /// Renders the landscape definition list and selected definition preview.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use campaign_builder::landscape_editor::LandscapeEditorState;
+    ///
+    /// # fn render(ui: &mut eframe::egui::Ui) {
+    /// let mut state = LandscapeEditorState::new();
+    /// let mut definitions = Vec::new();
+    /// state.show(ui, &mut definitions, None);
+    /// # }
+    /// ```
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
