@@ -37,7 +37,7 @@ pub fn make_test_campaign(id: &str, name: &str, version: &str) -> Campaign {
         config: CampaignConfig::default(),
         data: CampaignData::default(),
         assets: CampaignAssets::default(),
-        root_path: PathBuf::from(format!("campaigns/{}", id)),
+        root_path: PathBuf::from("data").join(id),
         game_config: GameConfig::default(),
     }
 }

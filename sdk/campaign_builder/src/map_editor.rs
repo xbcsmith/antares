@@ -2089,6 +2089,19 @@ impl MapEditorState {
     }
 
     /// Adds a landscape placement and records undo history.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::Position;
+    /// use antares::domain::world::{Map, landscape::LandscapePlacement};
+    /// use campaign_builder::map_editor::MapEditorState;
+    ///
+    /// let mut editor = MapEditorState::new(Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4));
+    /// editor.add_landscape_placement(LandscapePlacement::new(1, Position::new(2, 2)));
+    /// assert_eq!(editor.map.landscape_placements.len(), 1);
+    /// assert!(editor.has_changes);
+    /// ```
     pub fn add_landscape_placement(&mut self, placement: LandscapePlacement) {
         let index = self.map.landscape_placements.len();
         self.map.landscape_placements.push(placement.clone());
@@ -2098,6 +2111,21 @@ impl MapEditorState {
     }
 
     /// Removes a landscape placement by index and records undo history.
+    ///
+    /// Out-of-range indices are ignored and do not mark the editor dirty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::Position;
+    /// use antares::domain::world::{Map, landscape::LandscapePlacement};
+    /// use campaign_builder::map_editor::MapEditorState;
+    ///
+    /// let mut editor = MapEditorState::new(Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4));
+    /// editor.add_landscape_placement(LandscapePlacement::new(1, Position::new(2, 2)));
+    /// editor.remove_landscape_placement(0);
+    /// assert!(editor.map.landscape_placements.is_empty());
+    /// ```
     pub fn remove_landscape_placement(&mut self, index: usize) {
         if index < self.map.landscape_placements.len() {
             let placement = self.map.landscape_placements.remove(index);
@@ -2108,6 +2136,21 @@ impl MapEditorState {
     }
 
     /// Replaces a landscape placement and records undo history.
+    ///
+    /// Out-of-range indices are ignored and do not mark the editor dirty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::Position;
+    /// use antares::domain::world::{Map, landscape::LandscapePlacement};
+    /// use campaign_builder::map_editor::MapEditorState;
+    ///
+    /// let mut editor = MapEditorState::new(Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4));
+    /// editor.add_landscape_placement(LandscapePlacement::new(1, Position::new(2, 2)));
+    /// editor.replace_landscape_placement(0, LandscapePlacement::new(2, Position::new(3, 3)));
+    /// assert_eq!(editor.map.landscape_placements[0].landscape_id, 2);
+    /// ```
     pub fn replace_landscape_placement(&mut self, index: usize, new_placement: LandscapePlacement) {
         if index < self.map.landscape_placements.len() {
             let old_placement = self.map.landscape_placements[index].clone();
@@ -3065,6 +3108,16 @@ pub struct NpcPlacementEditorState {
 }
 
 /// Blocking override mode for an authored landscape placement.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::map_editor::LandscapeBlockingOverride;
+///
+/// assert_eq!(LandscapeBlockingOverride::Inherit.to_option(), None);
+/// assert_eq!(LandscapeBlockingOverride::Blocking.to_option(), Some(true));
+/// assert_eq!(LandscapeBlockingOverride::NonBlocking.to_option(), Some(false));
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LandscapeBlockingOverride {
     /// Use the referenced landscape definition's default blocking flag.
@@ -3078,11 +3131,27 @@ pub enum LandscapeBlockingOverride {
 
 impl LandscapeBlockingOverride {
     /// Returns all blocking override choices in UI order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::map_editor::LandscapeBlockingOverride;
+    ///
+    /// assert_eq!(LandscapeBlockingOverride::all()[0], LandscapeBlockingOverride::Inherit);
+    /// ```
     pub const fn all() -> &'static [Self] {
         &[Self::Inherit, Self::Blocking, Self::NonBlocking]
     }
 
     /// Returns the user-facing name for this blocking override.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::map_editor::LandscapeBlockingOverride;
+    ///
+    /// assert_eq!(LandscapeBlockingOverride::NonBlocking.name(), "Non-blocking");
+    /// ```
     pub const fn name(self) -> &'static str {
         match self {
             Self::Inherit => "Inherit",
@@ -3092,6 +3161,15 @@ impl LandscapeBlockingOverride {
     }
 
     /// Converts this UI choice into the persisted optional override value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::map_editor::LandscapeBlockingOverride;
+    ///
+    /// assert_eq!(LandscapeBlockingOverride::Inherit.to_option(), None);
+    /// assert_eq!(LandscapeBlockingOverride::Blocking.to_option(), Some(true));
+    /// ```
     pub const fn to_option(self) -> Option<bool> {
         match self {
             Self::Inherit => None,
@@ -3101,6 +3179,15 @@ impl LandscapeBlockingOverride {
     }
 
     /// Converts a persisted optional override into a UI choice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::map_editor::LandscapeBlockingOverride;
+    ///
+    /// assert_eq!(LandscapeBlockingOverride::from_option(None), LandscapeBlockingOverride::Inherit);
+    /// assert_eq!(LandscapeBlockingOverride::from_option(Some(false)), LandscapeBlockingOverride::NonBlocking);
+    /// ```
     pub const fn from_option(value: Option<bool>) -> Self {
         match value {
             None => Self::Inherit,
@@ -3115,6 +3202,18 @@ impl LandscapeBlockingOverride {
 /// The map editor stores optional placement overrides as text plus explicit
 /// enable flags so authors can distinguish “inherit definition/default value”
 /// from an override set to `0.0`.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::types::Position;
+/// use campaign_builder::map_editor::LandscapePlacementEditorState;
+///
+/// let state = LandscapePlacementEditorState::new_for_position(Position::new(2, 3), Some(7));
+/// assert_eq!(state.selected_landscape_id, Some(7));
+/// assert_eq!(state.position_x, "2");
+/// assert_eq!(state.position_y, "3");
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct LandscapePlacementEditorState {
     /// Selected reusable landscape definition.
@@ -3182,6 +3281,18 @@ impl Default for LandscapePlacementEditorState {
 
 impl LandscapePlacementEditorState {
     /// Creates an editor buffer for adding a placement at `position`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::Position;
+    /// use campaign_builder::map_editor::LandscapePlacementEditorState;
+    ///
+    /// let state = LandscapePlacementEditorState::new_for_position(Position::new(4, 5), Some(1));
+    /// assert_eq!(state.position_x, "4");
+    /// assert_eq!(state.position_y, "5");
+    /// assert_eq!(state.selected_landscape_id, Some(1));
+    /// ```
     pub fn new_for_position(
         position: Position,
         selected_landscape_id: Option<LandscapeId>,
@@ -3241,6 +3352,18 @@ impl LandscapePlacementEditorState {
     ///
     /// Returns a human-readable validation error when a required ID, coordinate,
     /// or enabled numeric override is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::Position;
+    /// use campaign_builder::map_editor::LandscapePlacementEditorState;
+    ///
+    /// let state = LandscapePlacementEditorState::new_for_position(Position::new(1, 2), Some(9));
+    /// let placement = state.to_placement().unwrap();
+    /// assert_eq!(placement.landscape_id, 9);
+    /// assert_eq!(placement.position, Position::new(1, 2));
+    /// ```
     pub fn to_placement(&self) -> Result<LandscapePlacement, String> {
         let landscape_id = self
             .selected_landscape_id
@@ -4065,6 +4188,7 @@ pub struct MapEditorRefs<'a> {
     pub conditions: &'a [antares::domain::conditions::ConditionDefinition],
     pub npcs: &'a [NpcDefinition],
     pub furniture_definitions: &'a [antares::domain::world::furniture::FurnitureDefinition],
+    /// Reusable landscape definitions displayed by the `PlaceLandscape` tool.
     pub landscape_definitions: &'a [antares::domain::LandscapeDefinition],
     pub characters: &'a [antares::domain::character_definition::CharacterDefinition],
     pub display_config: &'a DisplayConfig,
@@ -4078,6 +4202,7 @@ pub struct MapInspectorData<'a> {
     pub conditions: &'a [antares::domain::conditions::ConditionDefinition],
     pub npcs: &'a [NpcDefinition],
     pub furniture_definitions: &'a [antares::domain::world::furniture::FurnitureDefinition],
+    /// Reusable landscape definitions used to label and edit selected placements.
     pub landscape_definitions: &'a [antares::domain::LandscapeDefinition],
     pub characters: &'a [antares::domain::character_definition::CharacterDefinition],
 }

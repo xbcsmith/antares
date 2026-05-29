@@ -4,8 +4,9 @@
 //! Unified content database for all game content types
 //!
 //! This module provides the ContentDatabase structure that loads and manages
-//! all game content (classes, races, items, monsters, spells, maps) from a
-//! campaign directory structure.
+//! all game content (classes, races, items, monsters, spells, maps, furniture,
+//! landscape definitions, landscape mesh registries, NPCs, stock templates,
+//! skills, and related data) from a campaign directory structure.
 //!
 //! # Architecture Reference
 //!
@@ -21,7 +22,7 @@
 //! let core_db = ContentDatabase::load_core("data")?;
 //!
 //! // Load campaign-specific content
-//! let campaign_db = ContentDatabase::load_campaign("campaigns/my_campaign")?;
+//! let campaign_db = ContentDatabase::load_campaign("data/test_campaign")?;
 //!
 //! // Get statistics
 //! let stats = campaign_db.stats();

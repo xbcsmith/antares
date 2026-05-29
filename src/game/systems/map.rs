@@ -1172,6 +1172,26 @@ fn spawn_fallback_landscape_marker(
         .id()
 }
 
+/// Builds landscape render hints from an imported creature-style mesh definition.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::visual::CreatureDefinition;
+/// use antares::game::systems::map::LandscapeRenderHints;
+///
+/// let creature = CreatureDefinition {
+///     id: 11001,
+///     name: "Oak".to_string(),
+///     meshes: vec![],
+///     mesh_transforms: vec![],
+///     scale: 1.0,
+///     color_tint: None,
+/// };
+/// let hints = LandscapeRenderHints::from(&creature);
+/// assert_eq!(hints.mesh_part_count, 0);
+/// assert!(!hints.has_lod_meshes);
+/// ```
 impl From<&crate::domain::visual::CreatureDefinition> for LandscapeRenderHints {
     fn from(creature_def: &crate::domain::visual::CreatureDefinition) -> Self {
         let mut has_lod_meshes = false;

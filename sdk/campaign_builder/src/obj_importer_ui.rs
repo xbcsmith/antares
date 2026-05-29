@@ -67,6 +67,15 @@ enum ObjImportError {
 }
 
 /// Signal emitted by the importer tab when an export completes.
+///
+/// # Examples
+///
+/// ```ignore
+/// use campaign_builder::obj_importer_ui::ObjImporterUiSignal;
+///
+/// let signal = ObjImporterUiSignal::Landscape;
+/// assert_eq!(signal, ObjImporterUiSignal::Landscape);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ObjImporterUiSignal {
     /// A creature asset was exported and the creature registry should be reloaded.
@@ -155,6 +164,21 @@ enum ObjImporterExportError {
 }
 
 /// Renders the OBJ importer tab and returns a signal when export completes.
+///
+/// # Examples
+///
+/// ```ignore
+/// use campaign_builder::logging::Logger;
+/// use campaign_builder::obj_importer::ObjImporterState;
+/// use campaign_builder::obj_importer_ui::show_obj_importer_tab;
+///
+/// # fn render(ui: &mut eframe::egui::Ui) {
+/// let mut state = ObjImporterState::new();
+/// let mut logger = Logger::default();
+/// let signal = show_obj_importer_tab(ui, &mut state, None, "data/landscape.ron", &mut logger);
+/// assert!(signal.is_none());
+/// # }
+/// ```
 pub(crate) fn show_obj_importer_tab(
     ui: &mut egui::Ui,
     state: &mut ObjImporterState,
@@ -471,6 +495,15 @@ fn suggest_next_creature_id_from_dir(
 /// and returns the first unused ID in the landscape importer allocation range.
 /// Missing or unparsable registries fall back to [`LANDSCAPE_MESH_ID_MIN`] so a
 /// new campaign can export its first landscape mesh without setup.
+///
+/// # Examples
+///
+/// ```ignore
+/// use antares::domain::types::LANDSCAPE_MESH_ID_MIN;
+/// use campaign_builder::obj_importer_ui::suggest_next_landscape_mesh_id_from_dir;
+///
+/// assert_eq!(suggest_next_landscape_mesh_id_from_dir(None), LANDSCAPE_MESH_ID_MIN);
+/// ```
 pub(crate) fn suggest_next_landscape_mesh_id_from_dir(
     campaign_dir: Option<&Path>,
 ) -> LandscapeMeshId {

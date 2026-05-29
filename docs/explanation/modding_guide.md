@@ -211,8 +211,8 @@ The recommended workflow is:
 2. Use the **Importer** tab and choose export target **Landscape** for an `.obj`
    or `.glb` model.
 3. Export creates or updates the landscape mesh RON under
-   `assets/meshes/landscape/`, copies textures under
-   `assets/textures/landscape/<asset_slug>/`, upserts
+   `assets/meshes/landscape/` or `assets/meshes/landscape/<category>/`, copies
+   textures under `assets/textures/landscape/<asset_slug>/`, upserts
    `data/landscape_mesh_registry.ron`, and upserts `data/landscape.ron` or the
    campaign's configured landscape file.
 4. Use the **Landscape** tab to browse definitions grouped by category and check
@@ -226,7 +226,10 @@ The recommended workflow is:
 Keep all mesh and texture references campaign-relative and under `assets/`.
 Seed tree/brush landscape meshes may reuse `assets/textures/trees/`; newly
 imported landscape textures normally live under
-`assets/textures/landscape/<asset_slug>/`.
+`assets/textures/landscape/<asset_slug>/`. Tutorial seed definitions and SDK
+exporter-created definitions use the same validated `LandscapeDefinition`
+format; curated data may customize icons, tags, descriptions, and blocking flags
+after export as long as IDs, mesh references, and asset paths remain valid.
 
 ### Pattern 1: Progressive Equipment
 

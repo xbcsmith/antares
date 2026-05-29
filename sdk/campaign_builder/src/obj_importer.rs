@@ -175,6 +175,18 @@ pub struct ImportedMesh {
 }
 
 /// State owned by the OBJ importer tab.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::types::LANDSCAPE_MESH_ID_MIN;
+/// use campaign_builder::obj_importer::{ExportType, ObjImporterState};
+///
+/// let mut state = ObjImporterState::new();
+/// state.export_type = ExportType::Landscape;
+/// state.set_next_landscape_mesh_id(LANDSCAPE_MESH_ID_MIN + 1);
+/// assert_eq!(state.landscape_mesh_id, LANDSCAPE_MESH_ID_MIN + 1);
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjImporterState {
     /// Current importer lifecycle mode.
@@ -207,7 +219,10 @@ pub struct ObjImporterState {
     pub landscape_mesh_id: LandscapeMeshId,
     /// Name entered by the user for the export.
     pub creature_name: String,
-    /// Optional category subfolder used when exporting item or furniture meshes.
+    /// Optional category subfolder used when exporting item, furniture, or landscape meshes.
+    ///
+    /// Landscape exports also map this display value to `LandscapeCategory` and
+    /// use it to build `assets/meshes/landscape/<category>/...` output paths.
     pub category: String,
     /// Uniform OBJ import scale.
     pub scale: f32,
@@ -477,6 +492,20 @@ impl ObjImporterState {
     /// default state: `scale`, `custom_palette`, `creature_id`,
     /// `furniture_id`, `landscape_mesh_id`, `export_type`, `category`,
     /// `new_custom_color`, `manual_mtl_path`, and `open_after_export`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::LANDSCAPE_MESH_ID_MIN;
+    /// use campaign_builder::obj_importer::{ExportType, ObjImporterState};
+    ///
+    /// let mut state = ObjImporterState::new();
+    /// state.export_type = ExportType::Landscape;
+    /// state.landscape_mesh_id = LANDSCAPE_MESH_ID_MIN + 7;
+    /// state.clear();
+    /// assert_eq!(state.export_type, ExportType::Landscape);
+    /// assert_eq!(state.landscape_mesh_id, LANDSCAPE_MESH_ID_MIN + 7);
+    /// ```
     pub fn clear(&mut self) {
         let scale = self.scale;
         let custom_palette = self.custom_palette.clone();

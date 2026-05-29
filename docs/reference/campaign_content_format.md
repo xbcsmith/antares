@@ -506,6 +506,12 @@ campaign root. Seed tree/brush assets intentionally reuse the canonical
 `assets/textures/trees/` texture set, while newly imported landscape models copy
 textures under `assets/textures/landscape/<asset_slug>/`.
 
+SDK-exported landscape definitions and curated tutorial seed definitions share
+the same validated `LandscapeDefinition` and `CreatureReference` / `MeshDefinition`
+RON formats. Curated data may override blocking defaults, icons, tags, and
+descriptions after export as long as IDs, mesh references, and asset paths remain
+valid.
+
 ## Validation
 
 Use the `antares-sdk campaign validate` subcommand to check campaign content:

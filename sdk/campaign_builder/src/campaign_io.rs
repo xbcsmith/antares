@@ -161,6 +161,18 @@ impl CampaignBuilderApp {
     }
 
     /// Synchronize importer state that depends on the active campaign.
+    ///
+    /// This refreshes importer palette data plus suggested creature, furniture,
+    /// and landscape mesh IDs from the currently open campaign directory.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use campaign_builder::CampaignBuilderApp;
+    ///
+    /// let mut app = CampaignBuilderApp::default();
+    /// app.sync_obj_importer_campaign_state();
+    /// ```
     pub fn sync_obj_importer_campaign_state(&mut self) {
         if let Some(campaign_dir) = self.campaign_dir.clone() {
             match self.obj_importer_state.load_custom_palette(&campaign_dir) {
@@ -1879,6 +1891,15 @@ impl CampaignBuilderApp {
     /// Load landscape definitions from the campaign landscape RON file.
     ///
     /// Missing file is not an error — landscape support is opt-in per campaign.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use campaign_builder::CampaignBuilderApp;
+    ///
+    /// let mut app = CampaignBuilderApp::default();
+    /// app.load_landscape();
+    /// ```
     pub fn load_landscape(&mut self) {
         if let Some(defs) = read_ron_collection::<antares::domain::LandscapeDefinition>(
             &self.campaign_dir,
@@ -1906,7 +1927,20 @@ impl CampaignBuilderApp {
 
     /// Save landscape definitions to the campaign landscape RON file.
     ///
-    /// Returns an `Err` on failure so the caller can aggregate warnings.
+    /// # Errors
+    ///
+    /// Returns [`CampaignIoError`] when the landscape RON file cannot be written
+    /// or serialized.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use campaign_builder::CampaignBuilderApp;
+    ///
+    /// let mut app = CampaignBuilderApp::default();
+    /// app.save_landscape()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn save_landscape(&mut self) -> Result<(), CampaignIoError> {
         write_ron_collection(
             &self.campaign_dir,

@@ -1,6 +1,6 @@
 (
-    id: 10001,
-    name: "palm_tree",
+    id: 11004,
+    name: "PalmTree",
     meshes: [
         (
             name: Some("Mesh1.0_0"),

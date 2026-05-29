@@ -103,8 +103,9 @@ serialised to RON format.
 
 - **Import Formats**: Load `.obj`/MTL or `.glb` model files
 - **Export Targets**: Creature, Item, Furniture, and Landscape
-- **Landscape Output**: Writes mesh RON below `assets/meshes/landscape/`, copies
-  textures below `assets/textures/landscape/<asset_stem>/`, upserts
+- **Landscape Output**: Writes mesh RON below `assets/meshes/landscape/` or
+  `assets/meshes/landscape/<category>/`, copies textures below
+  `assets/textures/landscape/<asset_stem>/`, upserts
   `data/landscape_mesh_registry.ron`, and upserts `data/landscape.ron` or the
   configured landscape file
 - **Immediate Reload**: Landscape exports switch back to the Landscape tab and
@@ -224,17 +225,23 @@ make sdk
 ```
 my_campaign/
 ├── campaign.ron         # Metadata (edited directly in the Campaign Builder)
-└── data/
-    ├── items.ron
-    ├── spells.ron
-    ├── monsters.ron
-    ├── classes.ron
-    ├── races.ron
-    ├── quests.ron
-    ├── dialogue.ron
-    └── maps/
-        ├── town.ron
-        └── dungeon.ron
+├── data/
+│   ├── items.ron
+│   ├── spells.ron
+│   ├── monsters.ron
+│   ├── classes.ron
+│   ├── races.ron
+│   ├── quests.ron
+│   ├── dialogues.ron
+│   ├── landscape.ron
+│   ├── landscape_mesh_registry.ron
+│   └── maps/
+│       ├── town.ron
+│       └── dungeon.ron
+└── assets/
+    ├── meshes/landscape/
+    ├── textures/landscape/
+    └── textures/trees/
 ```
 
 Use **Tools → Refresh File Tree** to update the file browser after external changes.

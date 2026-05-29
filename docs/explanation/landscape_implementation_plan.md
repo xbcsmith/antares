@@ -1,10 +1,20 @@
 # Landscape Implementation Plan
 
+> **Status:** Completed. This document is retained as the historical implementation plan.
+> For current behavior, see `docs/reference/architecture.md`,
+> `docs/reference/campaign_content_format.md`, `docs/reference/map_ron_format.md`,
+> and `docs/explanation/implementations.md`.
+>
+> Active campaign and fixture landscape meshes now live under
+> `campaigns/tutorial/assets/meshes/landscape/` and
+> `data/test_campaign/assets/meshes/landscape/`. SDK exports may create category
+> subdirectories below `assets/meshes/landscape/<category>/`.
+
 ## Goal
 
 Add a data-driven `landscape` category to the importer and SDK so campaign authors can import and place outdoor decoration meshes such as trees, shrubs, brush, rocks, and similar environmental props. The feature should also replace or repair the current default procedural tree/brush visuals by using the imported tree RON assets in `assets/meshes/` and the tree texture set in `campaigns/tutorial/assets/textures/trees/`.
 
-## Current State
+## Historical Pre-implementation State
 
 - `Map` data currently stores terrain tiles, map events, NPC placements, dropped items, locks, outdoor flags, and sky configuration. It does not have a first-class collection for static landscape placements.
 - `TileVisualMetadata` already supports terrain-tied procedural variation through fields such as `tree_type`, `grass_density`, `rock_variant`, `foliage_density`, color tint, scale, height, offset, and rotation.
@@ -43,13 +53,13 @@ Add `landscape_placements: Vec<LandscapePlacement>` to `Map` after architecture 
 
 Recommended campaign layout:
 
-| Purpose | Path |
-| --- | --- |
-| Reusable landscape definitions | `data/landscape.ron` |
-| Landscape mesh registry | `data/landscape_mesh_registry.ron` |
-| Imported landscape mesh RON files | `assets/meshes/landscape/*.ron` |
-| Tree and foliage textures | `assets/textures/trees/*.png` |
-| Other landscape textures | `assets/textures/landscape/<asset_slug>/*` |
+| Purpose                           | Path                                       |
+| --------------------------------- | ------------------------------------------ |
+| Reusable landscape definitions    | `data/landscape.ron`                       |
+| Landscape mesh registry           | `data/landscape_mesh_registry.ron`         |
+| Imported landscape mesh RON files | `assets/meshes/landscape/*.ron`            |
+| Tree and foliage textures         | `assets/textures/trees/*.png`              |
+| Other landscape textures          | `assets/textures/landscape/<asset_slug>/*` |
 
 The existing `assets/meshes/*.ron` files can be used as the seed assets, but the final campaign-facing registry should point at campaign-relative asset paths so runtime loading and packaging stay consistent.
 

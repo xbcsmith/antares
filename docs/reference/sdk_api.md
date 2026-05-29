@@ -147,6 +147,18 @@ Summary statistics for content database.
 - `monster_count: usize`
 - `spell_count: usize`
 - `map_count: usize`
+- `quest_count: usize`
+- `dialogue_count: usize`
+- `condition_count: usize`
+- `character_count: usize`
+- `npc_count: usize`
+- `creature_count: usize`
+- `npc_stock_template_count: usize`
+- `skill_count: usize`
+
+Landscape counts are not currently exposed through `ContentStats`. Use
+`ContentDatabase::landscape.len()` and `ContentDatabase::landscape_meshes.count()`
+when tooling needs landscape definition or mesh registry counts.
 
 ---
 

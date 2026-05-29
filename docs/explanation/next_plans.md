@@ -190,8 +190,7 @@ Write a plan with a phased approach to add this support to the game engine and S
 
 ## Landscape Category
 
-Need to add a `landscape` category to the importer and SDK so we can import meshes of Trees, Shrubs, Rocks, etc... Add support to the Map editor to place landscape meshes on maps. Write a plan with a phased approach to add landscape category and SDK support for placing landscape on the maps.
-As part of this plan I want to fix the default tree procedural meshes. I have created tree ron files in [@meshes](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/assets/meshes/) and placed the textures in [@trees](file:///Users/bsmith/go/src/github.com/xbcsmith/antares/campaigns/tutorial/assets/textures/trees/) Use these files to fix the trees and brush in the game engine.
+Status: completed. Landscape is now a first-class importer, SDK, map-editor, runtime, and campaign-data feature. Current campaign-facing assets live under `assets/meshes/landscape/`, landscape definitions live in `data/landscape.ron`, and landscape mesh registries live in `data/landscape_mesh_registry.ron`. See `docs/explanation/landscape_implementation_plan.md` for the historical plan and `docs/explanation/implementations.md` for implementation summaries.
 
 [landscape implementation plan](./landscape_implementation_plan.md)
 

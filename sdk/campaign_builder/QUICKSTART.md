@@ -74,13 +74,17 @@ That's it! The Campaign Builder UI should launch.
 ### Try Landscape Authoring
 
 1. Open the tutorial campaign or another campaign with `data/landscape.ron`
-2. Click the **Landscape** tab and select an existing tree or brush definition
-3. Open the **Map Editor** tab and choose the **Place Landscape** tool
-4. Place the selected definition on a map tile
-5. Use the placement inspector to adjust rotation, scale, offset, tint, or
+2. Optional: open the **Importer** tab, load an OBJ or GLB model, choose export
+   target **Landscape**, choose a category, and export. The Campaign Builder
+   writes the mesh registry, landscape definition, and copied textures, then
+   reloads the Landscape tab.
+3. Click the **Landscape** tab and select an existing tree or brush definition
+4. Open the **Map Editor** tab and choose the **Place Landscape** tool
+5. Place the selected definition on a map tile
+6. Use the placement inspector to adjust rotation, scale, offset, tint, or
    blocking override
-6. Try duplicate, rotate, delete, undo, and redo
-7. Save, close, reopen, and verify the placement persists in
+7. Try duplicate, rotate, delete, undo, and redo
+8. Save, close, reopen, and verify the placement persists in
    `landscape_placements`
 
 ### Test Quest Editing
