@@ -4379,7 +4379,65 @@ impl MapsEditorState {
             ToolbarAction::None => {}
         }
 
+        // Navigation row: shown only in Edit/Add mode so users always have a
+        // visible path back to the map list. The TwoColumnLayout in show_editor
+        // consumes all remaining vertical space, making a bottom action row
+        // unreliable, so these buttons live next to the toolbar instead.
+        let mut nav_back = false;
+        let mut nav_cancel = false;
+        if matches!(self.mode, MapsEditorMode::Add | MapsEditorMode::Edit) {
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("⬅ Back to List").clicked() {
+                    nav_back = true;
+                    ui.ctx().request_repaint();
+                }
+                if ui.button("❌ Cancel").clicked() {
+                    nav_cancel = true;
+                    ui.ctx().request_repaint();
+                }
+            });
+        }
+
         ui.separator();
+
+        // Handle navigation before rendering the editor so we never enter
+        // show_editor with a stale mode.
+        if nav_cancel {
+            self.active_editor = None;
+            self.selected_map_idx = None;
+            self.mode = MapsEditorMode::List;
+            return;
+        }
+
+        if nav_back {
+            let map_opt: Option<Map> = self.active_editor.as_mut().and_then(|editor| {
+                if editor.has_changes {
+                    Some(Self::synchronized_editor_map(editor))
+                } else {
+                    None
+                }
+            });
+            if let Some(map) = map_opt {
+                if let Some(idx) = self.selected_map_idx {
+                    if idx < maps.len() {
+                        maps[idx] = map.clone();
+                    }
+                }
+                if let Err(e) = self.save_map(&map, ctx.campaign_dir, ctx.data_file) {
+                    *ctx.status_message = format!("Failed to save map: {}", e);
+                } else {
+                    *ctx.status_message = "Map saved".to_string();
+                    *ctx.unsaved_changes = true;
+                    if let Some(editor) = self.active_editor.as_mut() {
+                        editor.map = map;
+                        editor.has_changes = false;
+                    }
+                }
+            }
+            self.active_editor = None;
+            self.mode = MapsEditorMode::List;
+            return;
+        }
 
         // Show appropriate view based on mode
         match self.mode {
@@ -4755,11 +4813,15 @@ impl MapsEditorState {
 
             // Main content: grid on left, inspector on right
             {
-                // Compute overall panel height and left column width for TwoColumnLayout
-                let panel_height = crate::ui_helpers::compute_panel_height(
+                // Compute overall panel height and left column width for TwoColumnLayout.
+                // Reserve ~44px for the separator + Back/Save/Cancel footer row so those
+                // buttons remain visible below the TwoColumnLayout.
+                let footer_reserved = 44.0;
+                let panel_height = (crate::ui_helpers::compute_panel_height(
                     ui,
                     crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT,
-                );
+                ) - footer_reserved)
+                    .max(crate::ui_helpers::DEFAULT_PANEL_MIN_HEIGHT);
 
                 let total_width = ui.available_width();
                 let sep_margin = 12.0;

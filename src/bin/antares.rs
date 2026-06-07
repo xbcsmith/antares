@@ -13,10 +13,19 @@ use antares::game::systems::hud::HudPlugin;
 use antares::game::systems::map::MapRenderingPlugin;
 use antares::sdk::campaign_loader::{Campaign, CampaignLoader};
 use antares::sdk::game_config::ShadowQuality;
+use bevy::asset::uuid::Uuid;
+use bevy::asset::RenderAssetUsages;
+use bevy::core_pipeline::tonemapping::TonemappingLuts;
 use bevy::log::{BoxedFmtLayer, BoxedLayer, LogPlugin, DEFAULT_FILTER};
 use bevy::prelude::*;
+use bevy::render::render_asset::RenderAssets;
+use bevy::render::render_resource::{
+    Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
+};
+use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
-use bevy::render::RenderPlugin;
+use bevy::render::texture::{DefaultImageSampler, GpuImage};
+use bevy::render::{RenderApp, RenderPlugin, RenderStartup};
 use bevy::window::{MonitorSelection, PresentMode, WindowMode};
 use bevy_egui::EguiPlugin;
 use clap::Parser;
@@ -143,8 +152,10 @@ fn main() {
                 custom_layer: antares_file_custom_layer,
                 fmt_layer: antares_console_fmt_layer,
             }),
-    )
-    .insert_resource(GraphicsConfigResource {
+    );
+    install_compatible_tonemapping_luts(&mut app);
+
+    app.insert_resource(GraphicsConfigResource {
         msaa_samples: graphics_config.msaa_samples,
         shadow_quality: graphics_config.shadow_quality,
     })
@@ -165,6 +176,97 @@ fn main() {
     .add_plugins(antares::game::systems::ui::UiPlugin);
 
     app.run();
+}
+
+/// Installs a render-safe 3D tonemapping LUT for Bevy view bind groups.
+const ANTARES_TONEMAPPING_LUT_UUID: u128 = 0xaea7_0000_0000_0000_0000_0000_0000_0001;
+
+fn install_compatible_tonemapping_luts(app: &mut App) {
+    let lut_handle = Handle::<Image>::from(Uuid::from_u128(ANTARES_TONEMAPPING_LUT_UUID));
+    {
+        let mut images = app.world_mut().resource_mut::<Assets<Image>>();
+        images
+            .insert(lut_handle.id(), create_neutral_tonemapping_lut_image())
+            .expect("UUID-backed tonemapping LUT insertion cannot fail");
+    }
+
+    let luts = TonemappingLuts {
+        blender_filmic: lut_handle.clone(),
+        agx: lut_handle.clone(),
+        tony_mc_mapface: lut_handle.clone(),
+    };
+    app.insert_resource(luts.clone());
+
+    if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+        render_app.insert_resource(luts);
+        render_app.add_systems(
+            RenderStartup,
+            move |render_device: Res<RenderDevice>,
+                  render_queue: Res<RenderQueue>,
+                  default_sampler: Res<DefaultImageSampler>,
+                  mut render_images: ResMut<RenderAssets<GpuImage>>| {
+                render_images.insert(
+                    lut_handle.id(),
+                    create_neutral_tonemapping_gpu_image(
+                        &render_device,
+                        &render_queue,
+                        &default_sampler,
+                    ),
+                );
+            },
+        );
+    }
+}
+
+/// Creates a neutral 1×1×1 LUT with an explicit 3D texture view.
+fn create_neutral_tonemapping_lut_image() -> Image {
+    let mut image = Image::new_fill(
+        Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D3,
+        &[255, 255, 255, 255],
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::all(),
+    );
+    image.texture_view_descriptor = Some(TextureViewDescriptor {
+        dimension: Some(TextureViewDimension::D3),
+        ..default()
+    });
+    image
+}
+
+/// Creates the render-world GPU image for Antares' neutral tonemapping LUT.
+fn create_neutral_tonemapping_gpu_image(
+    render_device: &RenderDevice,
+    render_queue: &RenderQueue,
+    default_sampler: &DefaultImageSampler,
+) -> GpuImage {
+    let image = create_neutral_tonemapping_lut_image();
+    let texture = render_device.create_texture_with_data(
+        render_queue,
+        &image.texture_descriptor,
+        image.data_order,
+        image
+            .data
+            .as_ref()
+            .expect("neutral tonemapping LUT image must include pixel data"),
+    );
+    let texture_view = texture.create_view(&TextureViewDescriptor {
+        dimension: Some(TextureViewDimension::D3),
+        ..default()
+    });
+
+    GpuImage {
+        texture,
+        texture_view,
+        texture_format: image.texture_descriptor.format,
+        sampler: (**default_sampler).clone(),
+        size: image.texture_descriptor.size,
+        mip_level_count: image.texture_descriptor.mip_level_count,
+    }
 }
 
 /// Console fmt layer that suppresses noisy relayout debug messages from cosmic_text

@@ -1346,6 +1346,7 @@ impl eframe::App for CampaignBuilderApp {
                     ui,
                     &mut self.campaign_data.landscape_definitions,
                     self.campaign_dir.as_deref(),
+                    &mut self.unsaved_changes,
                 );
                 if let Some(landscape_editor::LandscapeEditorSignal::OpenInObjImporter) =
                     self.editor_registry.landscape_editor_state.requested_signal.take()

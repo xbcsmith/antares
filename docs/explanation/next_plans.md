@@ -210,8 +210,13 @@ Sorcerer Spell point bar does not go down as spell points are used.
 
 Can not select a Rest option of (1) (2) or (3) because it opens the 1,2, or 3 character sheet. Remove triggering character sheet by number
 
+When playing tutorial campaign ./campaigns/tutorial The oak and pine trees in the middle of that map_1 are not rendering. See the screenshot ./screenshots/trees_map_1.png The forrest of multiple different types of trees in map_1 are not using the new tree models. They look weird as you can see in the screenshot ./screenshots/forrest_map_1.png None of the trees on map_2 are rendering. I am assuming something changed in the tree rendering code and it broke the trees in the tutorial campaign. We should fix the tree rendering code so that the trees in the tutorial campaign render correctly.
+
+
 ### SDK Bugs
 
 Campaign Builder --> Monster Editor --> Edit save button at the bottom of the editor does not always Save the monster when it returns to the list
 
 Campaign Builder --> Importer --> Items and Furniture do not have category drop down like Creatures. Importing Furnture does not update the furniture.ron
+
+Campaign Builder --> Landscape Editor layout is broken. The left hand list is horizontal and it does not follow the patterns in @sdk/AGENTS.md for how to layout an editor. The list should be vertical and the editor should follow the same patterns as the other editors in the Campaign Builder.

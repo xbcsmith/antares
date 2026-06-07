@@ -2,6 +2,28 @@
 
 ---
 
+## Bevy Tonemapping LUT Render Panic Fix (2026)
+
+**Goal:** Fix a startup render panic where Bevy/wgpu rejected view bind groups because tonemapping LUT bindings expected a 3D texture but received a 2D texture view.
+
+### Files Changed
+
+| Area           | Action                                                                                                        |
+| -------------- | ------------------------------------------------------------------------------------------------------------- |
+| Game binary    | Installed a UUID-backed, known-compatible 1×1×1 3D tonemapping LUT in both the main app and render app        |
+| Render startup | Inserts the neutral LUT directly into `RenderAssets<GpuImage>` before view bind groups are prepared           |
+| Camera setup   | Set the main 3D camera to `Tonemapping::None` so the game does not depend on Bevy's default LUT sampling path |
+| Documentation  | Recorded the render panic fix and validation results                                                          |
+
+### What Changed
+
+- `src/bin/antares.rs` now replaces Bevy's default `TonemappingLuts` handles with a neutral, UUID-backed D3 `Image` whose texture view descriptor is explicitly `TextureViewDimension::D3`.
+- The same LUT is inserted directly into the render world's `RenderAssets<GpuImage>` during `RenderStartup`, avoiding timing issues where view bind groups could still see Bevy's incompatible D2 LUT render asset.
+- `src/game/systems/camera.rs` now spawns the main game camera with `Tonemapping::None`, avoiding LUT-dependent visual transforms while preserving Bevy's required LUT bind-group shape for sprite, mesh2d, and PBR view bindings.
+- This addresses wgpu validation errors like `Texture binding ... expects dimension = D3, but given a view with dimension = D2` in `prepare_sprite_view_bind_groups` and `prepare_mesh_view_bind_groups`.
+
+---
+
 ## Landscape Deliverables Audit Fixture Compliance (2026)
 
 **Goal:** Verify the completed landscape implementation plan against repository state and close any remaining fixture-rule gaps found during the audit.
