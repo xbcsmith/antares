@@ -439,6 +439,32 @@ fn apply_color_to_mesh_definition(mesh_def: &mut MeshDefinition, color: [f32; 4]
     }
 }
 
+/// Shifts all mesh vertices upward so the global Y minimum across all parts is 0.0.
+///
+/// Imported geometry (OBJ/GLB from Blender) is typically exported with the origin at
+/// the center of the bounding box, placing vertices in the range [-1, +1] in Y. When
+/// the mesh is placed at world Y=0 this buries the bottom half underground. Grounding
+/// at import time fixes the data once so every downstream consumer — editor preview,
+/// export, placement — sees a correctly grounded mesh without special-casing.
+fn ground_meshes_to_y_zero(mut meshes: Vec<ImportedMesh>) -> Vec<ImportedMesh> {
+    let min_y = meshes
+        .iter()
+        .flat_map(|m| m.mesh_def.vertices.iter())
+        .map(|v| v[1])
+        .fold(f32::INFINITY, f32::min);
+
+    if min_y.is_finite() && min_y < 0.0 {
+        let lift = -min_y;
+        for mesh in &mut meshes {
+            for vertex in &mut mesh.mesh_def.vertices {
+                vertex[1] += lift;
+            }
+        }
+    }
+
+    meshes
+}
+
 fn has_imported_material_color(mesh_def: &MeshDefinition) -> bool {
     mesh_def.color != [1.0, 1.0, 1.0, 1.0]
 }
@@ -609,7 +635,7 @@ impl ObjImporterState {
         self.declared_mtl_libraries = declared_mtl_libraries;
         self.resolved_mtl_paths = resolved_mtl_paths;
         self.imported_material_palette = imported_material_palette;
-        self.meshes = meshes;
+        self.meshes = ground_meshes_to_y_zero(meshes);
         self.active_mesh_index = (!self.meshes.is_empty()).then_some(0);
         self.mode = if self.meshes.is_empty() {
             ImporterMode::Idle
@@ -792,8 +818,9 @@ impl ObjImporterState {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExportType, ImportSourceFormat, ImportedMesh, ImportedMeshColorSource,
-        ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
+        ground_meshes_to_y_zero, ExportType, ImportSourceFormat, ImportedMesh,
+        ImportedMeshColorSource, ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode,
+        ObjImporterState,
     };
     use antares::domain::types::LANDSCAPE_MESH_ID_MIN;
     use antares::domain::visual::{AlphaMode, MaterialDefinition, MeshDefinition};
@@ -1596,6 +1623,145 @@ mod tests {
             !state.is_error,
             "is_error should be false for successful load"
         );
+    }
+
+    #[test]
+    fn test_ground_meshes_lifts_negative_y_vertices_to_zero() {
+        let mesh = MeshDefinition {
+            name: None,
+            vertices: vec![[-0.5, -1.0, -0.5], [0.5, -1.0, -0.5], [0.0, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let imported = ImportedMesh::from_mesh_definition(mesh);
+        let result = ground_meshes_to_y_zero(vec![imported]);
+
+        let min_y = result[0]
+            .mesh_def
+            .vertices
+            .iter()
+            .map(|v| v[1])
+            .fold(f32::INFINITY, f32::min);
+        assert_eq!(min_y, 0.0, "lowest vertex must be at Y=0 after grounding");
+
+        let max_y = result[0]
+            .mesh_def
+            .vertices
+            .iter()
+            .map(|v| v[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert_eq!(
+            max_y, 2.0,
+            "mesh height must be preserved (1.0 - (-1.0) = 2.0)"
+        );
+    }
+
+    #[test]
+    fn test_ground_meshes_does_not_adjust_already_grounded_mesh() {
+        let mesh = MeshDefinition {
+            name: None,
+            vertices: vec![[-0.5, 0.0, -0.5], [0.5, 0.0, -0.5], [0.0, 1.5, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let imported = ImportedMesh::from_mesh_definition(mesh);
+        let result = ground_meshes_to_y_zero(vec![imported]);
+
+        assert_eq!(result[0].mesh_def.vertices[0][1], 0.0);
+        assert_eq!(result[0].mesh_def.vertices[2][1], 1.5);
+    }
+
+    #[test]
+    fn test_ground_meshes_uses_global_min_across_all_parts() {
+        let part_a = MeshDefinition {
+            name: None,
+            vertices: vec![[0.0, -0.5, 0.0], [1.0, 0.5, 0.0]],
+            indices: vec![0, 1, 0],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let part_b = MeshDefinition {
+            name: None,
+            vertices: vec![[0.0, -1.0, 0.0], [1.0, 1.0, 0.0]],
+            indices: vec![0, 1, 0],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let meshes = vec![
+            ImportedMesh::from_mesh_definition(part_a),
+            ImportedMesh::from_mesh_definition(part_b),
+        ];
+        let result = ground_meshes_to_y_zero(meshes);
+
+        // Global min was -1.0 (from part_b), so lift = 1.0 applied to both parts.
+        assert_eq!(result[0].mesh_def.vertices[0][1], 0.5); // -0.5 + 1.0
+        assert_eq!(result[0].mesh_def.vertices[1][1], 1.5); //  0.5 + 1.0
+        assert_eq!(result[1].mesh_def.vertices[0][1], 0.0); // -1.0 + 1.0
+        assert_eq!(result[1].mesh_def.vertices[1][1], 2.0); //  1.0 + 1.0
+    }
+
+    #[test]
+    fn test_load_mesh_definitions_grounds_vertices_for_all_export_types() {
+        // All export types use load_mesh_definitions -> load_imported_mesh_rows,
+        // so grounding applies regardless of whether the mesh is a creature, item,
+        // furniture, or landscape asset.
+        let centered_mesh = MeshDefinition {
+            name: None,
+            vertices: vec![[-0.5, -1.0, 0.0], [0.5, -1.0, 0.0], [0.0, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+
+        for export_type in [
+            ExportType::Creature,
+            ExportType::Item,
+            ExportType::Furniture,
+            ExportType::Landscape,
+        ] {
+            let mut state = ObjImporterState::new();
+            state.export_type = export_type;
+            state.load_mesh_definitions(None, vec![centered_mesh.clone()]);
+
+            let min_y = state.meshes[0]
+                .mesh_def
+                .vertices
+                .iter()
+                .map(|v| v[1])
+                .fold(f32::INFINITY, f32::min);
+            assert_eq!(
+                min_y, 0.0,
+                "min Y must be 0.0 after load for {:?}",
+                export_type
+            );
+        }
     }
 
     #[test]

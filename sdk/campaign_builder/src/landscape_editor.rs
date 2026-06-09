@@ -77,6 +77,10 @@ pub struct LandscapeEditorState {
     // blocking file reads in landscape_texture_validation_status are not
     // called on every render frame (which caused the right-click "timeout").
     texture_validation_cache: Option<(u32, String)>,
+    /// Cached mesh options loaded from `landscape_mesh_registry.ron` when
+    /// entering edit mode. Populated once per edit session; used to drive
+    /// the Mesh picker ComboBox without re-reading the registry every frame.
+    available_meshes: Vec<CreatureReference>,
 }
 
 impl LandscapeEditorState {
@@ -129,7 +133,7 @@ impl LandscapeEditorState {
         if self.mode == LandscapeEditorMode::Edit {
             self.show_edit(ui, defs, unsaved_changes);
         } else {
-            self.show_list(ui, defs, campaign_dir);
+            self.show_list(ui, defs, campaign_dir, unsaved_changes);
         }
     }
 
@@ -140,8 +144,9 @@ impl LandscapeEditorState {
     fn show_list(
         &mut self,
         ui: &mut egui::Ui,
-        defs: &[LandscapeDefinition],
+        defs: &mut Vec<LandscapeDefinition>,
         campaign_dir: Option<&Path>,
+        unsaved_changes: &mut bool,
     ) {
         // SDK Rule 12: use horizontal_wrapped for filter rows so they reflow
         // rather than clip when the window is narrow.
@@ -210,6 +215,7 @@ impl LandscapeEditorState {
         // Deferred mutations applied after show_split (Rule 10).
         let mut pending_selection: Option<usize> = None;
         let mut pending_edit: Option<usize> = None;
+        let mut pending_delete: Option<usize> = None;
 
         // SDK Rule 9: always use TwoColumnLayout for list/detail splits.
         // TwoColumnLayout::show_split already wraps both columns in a ScrollArea,
@@ -259,6 +265,10 @@ impl LandscapeEditorState {
                                     pending_edit = Some(idx);
                                     ui.ctx().request_repaint();
                                 }
+                                if action == ItemAction::Delete {
+                                    pending_delete = Some(idx);
+                                    ui.ctx().request_repaint();
+                                }
                             });
                         }
                         ui.add_space(6.0);
@@ -290,7 +300,26 @@ impl LandscapeEditorState {
         }
         if let Some(idx) = pending_edit {
             self.selected_landscape = Some(idx);
-            self.enter_edit(idx, defs);
+            self.enter_edit(idx, defs, campaign_dir);
+        }
+        if let Some(idx) = pending_delete {
+            if idx < defs.len() {
+                let deleted = defs.remove(idx);
+                // Adjust the stored selection so it stays valid after the removal.
+                match self.selected_landscape {
+                    Some(sel) if sel == idx => self.selected_landscape = None,
+                    Some(sel) if sel > idx => self.selected_landscape = Some(sel - 1),
+                    _ => {}
+                }
+                // Remove the associated mesh registry entry when the landscape
+                // had a custom mesh — keeps landscape_mesh_registry.ron in sync.
+                if let (Some(mesh_id), Some(dir)) = (deleted.mesh_id, campaign_dir) {
+                    let _ = remove_landscape_mesh_registry_entry(dir, mesh_id);
+                }
+                self.texture_validation_cache = None;
+                *unsaved_changes = true;
+                ui.ctx().request_repaint();
+            }
         }
     }
 
@@ -298,7 +327,12 @@ impl LandscapeEditorState {
     // Edit view
     // =========================================================================
 
-    fn enter_edit(&mut self, idx: usize, defs: &[LandscapeDefinition]) {
+    fn enter_edit(
+        &mut self,
+        idx: usize,
+        defs: &[LandscapeDefinition],
+        campaign_dir: Option<&Path>,
+    ) {
         if idx >= defs.len() {
             return;
         }
@@ -308,6 +342,7 @@ impl LandscapeEditorState {
         self.description_buffer = def.description.clone().unwrap_or_default();
         self.icon_buffer = def.icon.clone().unwrap_or_default();
         self.edit_buffer = Some(def.clone());
+        self.available_meshes = load_available_meshes(campaign_dir);
         self.mode = LandscapeEditorMode::Edit;
     }
 
@@ -351,6 +386,15 @@ impl LandscapeEditorState {
 
         ui.heading(format!("Edit: {}", buf.name));
         ui.separator();
+
+        // Pre-compute mesh options from the cached list before entering the
+        // ScrollArea/Grid closures to avoid closure-capture conflicts between
+        // the `buf` borrow (from self.edit_buffer) and self.available_meshes.
+        let mesh_options_snapshot: Vec<(u32, String)> = self
+            .available_meshes
+            .iter()
+            .map(|m| (m.id, format!("#{} \u{2013} {}", m.id, m.name)))
+            .collect();
 
         // Reserve ~44px for the separator + button row below, so the ScrollArea
         // never consumes all available height and the action buttons stay visible.
@@ -398,12 +442,46 @@ impl LandscapeEditorState {
                         ui.checkbox(&mut buf.flags.blocking, "");
                         ui.end_row();
 
-                        ui.label("Mesh ID:");
-                        ui.label(
-                            buf.mesh_id
-                                .map(|id| id.to_string())
-                                .unwrap_or_else(|| "None (procedural)".to_string()),
-                        );
+                        ui.label("Mesh:");
+                        {
+                            let mesh_options: Vec<(u32, String)> = mesh_options_snapshot
+                                .iter()
+                                .map(|(id, label)| (*id, label.clone()))
+                                .collect();
+                            if mesh_options.is_empty() {
+                                ui.label(
+                                    buf.mesh_id
+                                        .map(|id| format!("#{id}"))
+                                        .unwrap_or_else(|| "None (procedural)".to_string()),
+                                )
+                                .on_hover_text(
+                                    "Open a campaign with imported landscape meshes to assign one here.",
+                                );
+                            } else {
+                                let selected_text = mesh_options
+                                    .iter()
+                                    .find(|(id, _)| Some(*id) == buf.mesh_id)
+                                    .map(|(_, label)| label.clone())
+                                    .unwrap_or_else(|| "None (procedural)".to_string());
+                                egui::ComboBox::from_id_salt("landscape_edit_mesh_id")
+                                    .selected_text(selected_text)
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(
+                                            &mut buf.mesh_id,
+                                            None,
+                                            "None (procedural)",
+                                        );
+                                        ui.separator();
+                                        for (mesh_id, label) in &mesh_options {
+                                            ui.selectable_value(
+                                                &mut buf.mesh_id,
+                                                Some(*mesh_id),
+                                                label.as_str(),
+                                            );
+                                        }
+                                    });
+                            }
+                        }
                         ui.end_row();
 
                         ui.label("Icon:");
@@ -572,6 +650,52 @@ fn landscape_texture_validation_status(
     }
 }
 
+/// Reads `data/landscape_mesh_registry.ron` and returns the list of available
+/// mesh entries for the Mesh picker ComboBox in the edit form.
+///
+/// Returns an empty `Vec` when `campaign_dir` is `None`, the file does not
+/// exist, or it cannot be parsed — none of those conditions are errors from the
+/// editor's perspective.
+fn load_available_meshes(campaign_dir: Option<&Path>) -> Vec<CreatureReference> {
+    let Some(dir) = campaign_dir else {
+        return Vec::new();
+    };
+    let registry_path = dir.join("data/landscape_mesh_registry.ron");
+    let Ok(contents) = fs::read_to_string(&registry_path) else {
+        return Vec::new();
+    };
+    ron::from_str::<Vec<CreatureReference>>(&contents).unwrap_or_default()
+}
+
+/// Removes the `landscape_mesh_registry.ron` entry whose `id` matches `mesh_id`.
+///
+/// Called when a [`LandscapeDefinition`] that references a custom mesh is
+/// deleted, so the registry stays in sync with the definition list.
+///
+/// Silently succeeds if the registry file does not exist, if the ID is not
+/// present, or if any I/O error occurs — a failed registry pruning must never
+/// block the delete operation in the UI.
+///
+/// Returns `true` when an entry was actually removed and the file rewritten.
+fn remove_landscape_mesh_registry_entry(campaign_dir: &Path, mesh_id: u32) -> bool {
+    let registry_path = campaign_dir.join("data/landscape_mesh_registry.ron");
+    let Ok(contents) = fs::read_to_string(&registry_path) else {
+        return false;
+    };
+    let Ok(mut refs) = ron::from_str::<Vec<CreatureReference>>(&contents) else {
+        return false;
+    };
+    let before = refs.len();
+    refs.retain(|entry| entry.id != mesh_id);
+    if refs.len() == before {
+        return false; // nothing to remove
+    }
+    let Ok(updated) = ron::ser::to_string_pretty(&refs, ron::ser::PrettyConfig::new()) else {
+        return false;
+    };
+    fs::write(&registry_path, updated).is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -656,7 +780,7 @@ mod tests {
             &["oak", "short"],
         )];
         let mut state = LandscapeEditorState::new();
-        state.enter_edit(0, &defs);
+        state.enter_edit(0, &defs, None);
 
         assert_eq!(state.mode, LandscapeEditorMode::Edit);
         assert_eq!(state.edit_index, Some(0));
@@ -675,7 +799,7 @@ mod tests {
             &[],
         )];
         let mut state = LandscapeEditorState::new();
-        state.enter_edit(0, &defs);
+        state.enter_edit(0, &defs, None);
 
         // Mutate the buffer as the user would.
         state.edit_buffer.as_mut().unwrap().name = "Short Oak".to_string();
@@ -701,11 +825,262 @@ mod tests {
             &[],
         )];
         let mut state = LandscapeEditorState::new();
-        state.enter_edit(0, &defs);
+        state.enter_edit(0, &defs, None);
         state.description_buffer = String::new();
 
         state.apply_edit(&mut defs);
 
         assert!(defs[0].description.is_none());
+    }
+
+    #[test]
+    fn test_delete_clears_selection_when_selected_item_removed() {
+        let mut defs = vec![
+            landscape_definition(1, "Oak Tree", LandscapeCategory::Tree, &[]),
+            landscape_definition(2, "Pine Tree", LandscapeCategory::Tree, &[]),
+            landscape_definition(3, "Granite Rock", LandscapeCategory::Rock, &[]),
+        ];
+        let mut state = LandscapeEditorState::new();
+        state.selected_landscape = Some(1); // Pine Tree selected
+
+        // Simulate delete of index 1 (the selected item).
+        let idx = 1;
+        defs.remove(idx);
+        match state.selected_landscape {
+            Some(sel) if sel == idx => state.selected_landscape = None,
+            Some(sel) if sel > idx => state.selected_landscape = Some(sel - 1),
+            _ => {}
+        }
+
+        assert_eq!(defs.len(), 2);
+        assert_eq!(defs[0].name, "Oak Tree");
+        assert_eq!(defs[1].name, "Granite Rock");
+        assert_eq!(state.selected_landscape, None);
+    }
+
+    #[test]
+    fn test_delete_shifts_selection_down_when_earlier_item_removed() {
+        let mut defs = vec![
+            landscape_definition(1, "Oak Tree", LandscapeCategory::Tree, &[]),
+            landscape_definition(2, "Pine Tree", LandscapeCategory::Tree, &[]),
+            landscape_definition(3, "Granite Rock", LandscapeCategory::Rock, &[]),
+        ];
+        let mut state = LandscapeEditorState::new();
+        state.selected_landscape = Some(2); // Granite Rock selected
+
+        // Simulate delete of index 0 (an earlier item).
+        let idx = 0;
+        defs.remove(idx);
+        match state.selected_landscape {
+            Some(sel) if sel == idx => state.selected_landscape = None,
+            Some(sel) if sel > idx => state.selected_landscape = Some(sel - 1),
+            _ => {}
+        }
+
+        assert_eq!(defs.len(), 2);
+        // Selection shifted from 2 → 1 after the item at 0 was removed.
+        assert_eq!(state.selected_landscape, Some(1));
+        assert_eq!(defs[1].name, "Granite Rock");
+    }
+
+    #[test]
+    fn test_delete_leaves_selection_unchanged_when_later_item_removed() {
+        let mut defs = vec![
+            landscape_definition(1, "Oak Tree", LandscapeCategory::Tree, &[]),
+            landscape_definition(2, "Pine Tree", LandscapeCategory::Tree, &[]),
+            landscape_definition(3, "Granite Rock", LandscapeCategory::Rock, &[]),
+        ];
+        let mut state = LandscapeEditorState::new();
+        state.selected_landscape = Some(0); // Oak Tree selected
+
+        // Simulate delete of index 2 (a later item).
+        let idx = 2;
+        defs.remove(idx);
+        match state.selected_landscape {
+            Some(sel) if sel == idx => state.selected_landscape = None,
+            Some(sel) if sel > idx => state.selected_landscape = Some(sel - 1),
+            _ => {}
+        }
+
+        // Selection at 0 is unaffected by deleting index 2.
+        assert_eq!(defs.len(), 2);
+        assert_eq!(state.selected_landscape, Some(0));
+    }
+
+    #[test]
+    fn test_remove_landscape_mesh_registry_entry_removes_matching_id() {
+        use antares::domain::visual::CreatureReference;
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let data_dir = dir.path().join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        let registry = vec![
+            CreatureReference {
+                id: 11000,
+                name: "Mesh A".into(),
+                filepath: "assets/landscape/mesh_a.ron".into(),
+            },
+            CreatureReference {
+                id: 11001,
+                name: "Mesh B".into(),
+                filepath: "assets/landscape/mesh_b.ron".into(),
+            },
+            CreatureReference {
+                id: 11002,
+                name: "Mesh C".into(),
+                filepath: "assets/landscape/mesh_c.ron".into(),
+            },
+        ];
+        let registry_path = data_dir.join("landscape_mesh_registry.ron");
+        fs::write(
+            &registry_path,
+            ron::ser::to_string_pretty(&registry, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        let removed = remove_landscape_mesh_registry_entry(dir.path(), 11001);
+        assert!(removed, "should report that an entry was removed");
+
+        let contents = fs::read_to_string(&registry_path).unwrap();
+        let updated: Vec<CreatureReference> = ron::from_str(&contents).unwrap();
+        assert_eq!(updated.len(), 2);
+        assert!(updated.iter().all(|e| e.id != 11001));
+        assert!(updated.iter().any(|e| e.id == 11000));
+        assert!(updated.iter().any(|e| e.id == 11002));
+    }
+
+    #[test]
+    fn test_remove_landscape_mesh_registry_entry_returns_false_for_missing_id() {
+        use antares::domain::visual::CreatureReference;
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let data_dir = dir.path().join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        let registry = vec![CreatureReference {
+            id: 11000,
+            name: "Mesh A".into(),
+            filepath: "assets/landscape/mesh_a.ron".into(),
+        }];
+        let registry_path = data_dir.join("landscape_mesh_registry.ron");
+        fs::write(
+            &registry_path,
+            ron::ser::to_string_pretty(&registry, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        let removed = remove_landscape_mesh_registry_entry(dir.path(), 99999);
+        assert!(!removed, "should return false when id is not in registry");
+
+        // File should be unchanged.
+        let contents = fs::read_to_string(&registry_path).unwrap();
+        let unchanged: Vec<CreatureReference> = ron::from_str(&contents).unwrap();
+        assert_eq!(unchanged.len(), 1);
+    }
+
+    #[test]
+    fn test_remove_landscape_mesh_registry_entry_returns_false_when_no_file() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        // No registry file created.
+        let removed = remove_landscape_mesh_registry_entry(dir.path(), 11000);
+        assert!(!removed);
+    }
+
+    #[test]
+    fn test_enter_edit_populates_available_meshes_from_registry() {
+        use antares::domain::visual::CreatureReference;
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let data_dir = dir.path().join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        let registry = vec![
+            CreatureReference {
+                id: 11000,
+                name: "Oak Tree Mesh".into(),
+                filepath: "assets/landscape/oak_tree.ron".into(),
+            },
+            CreatureReference {
+                id: 11001,
+                name: "Pine Tree Mesh".into(),
+                filepath: "assets/landscape/pine_tree.ron".into(),
+            },
+        ];
+        fs::write(
+            data_dir.join("landscape_mesh_registry.ron"),
+            ron::ser::to_string_pretty(&registry, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        let defs = vec![landscape_definition(
+            1,
+            "Oak Tree",
+            LandscapeCategory::Tree,
+            &[],
+        )];
+        let mut state = LandscapeEditorState::new();
+        state.enter_edit(0, &defs, Some(dir.path()));
+
+        assert_eq!(state.available_meshes.len(), 2);
+        assert_eq!(state.available_meshes[0].id, 11000);
+        assert_eq!(state.available_meshes[0].name, "Oak Tree Mesh");
+        assert_eq!(state.available_meshes[1].id, 11001);
+    }
+
+    #[test]
+    fn test_enter_edit_with_no_campaign_dir_produces_empty_mesh_list() {
+        let defs = vec![landscape_definition(
+            1,
+            "Rock",
+            LandscapeCategory::Rock,
+            &[],
+        )];
+        let mut state = LandscapeEditorState::new();
+        state.enter_edit(0, &defs, None);
+
+        assert!(
+            state.available_meshes.is_empty(),
+            "no campaign dir → no available meshes"
+        );
+    }
+
+    #[test]
+    fn test_apply_edit_saves_mesh_id_assignment() {
+        use antares::domain::world::landscape::LandscapeFlags;
+
+        let mut defs = vec![antares::domain::world::landscape::LandscapeDefinition {
+            id: 5,
+            name: "Oak Tree".to_string(),
+            category: LandscapeCategory::Tree,
+            default_scale: 1.0,
+            color_tint: None,
+            flags: LandscapeFlags::default(),
+            icon: None,
+            tags: vec![],
+            mesh_id: None,
+            description: None,
+        }];
+        let mut state = LandscapeEditorState::new();
+        state.enter_edit(0, &defs, None);
+
+        // Simulate the user picking mesh #11000 in the ComboBox.
+        state.edit_buffer.as_mut().unwrap().mesh_id = Some(11000);
+
+        state.apply_edit(&mut defs);
+
+        assert_eq!(
+            defs[0].mesh_id,
+            Some(11000),
+            "mesh_id should be saved back to the definition"
+        );
     }
 }

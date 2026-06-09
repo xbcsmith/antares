@@ -56015,14 +56015,14 @@
                 metallic: 0.0,
                 roughness: 0.8,
                 emissive: None,
-                alpha_mode: Mask,
+                alpha_mode: Opaque,
             )),
             texture_path: Some("assets/textures/trees/foliage_oak.png"),
         ),
     ],
     mesh_transforms: [
         (
-            translation: (0.0, 0.0, 0.0),
+            translation: (0.0, 0.655241, 0.0),
             rotation: (0.0, 0.0, 0.0),
             scale: (1.0, 1.0, 1.0),
         ),

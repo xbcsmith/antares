@@ -2,6 +2,69 @@
 
 ---
 
+## Bug Fix: Landscape Editor Mesh Picker — Cannot Assign Mesh to Definition (2026)
+
+**Goal:** Fix the Campaign Builder → Landscape Editor → Edit form having no way to assign or change the `mesh_id` on a `LandscapeDefinition`. The Mesh field was a read-only label; users who imported new meshes via the OBJ Importer had no way to connect them to an existing definition.
+
+### Root Cause
+
+The `show_edit` function displayed `mesh_id` as a static `ui.label(...)`. The field was never made interactive. Additionally, `enter_edit` did not load the list of available meshes from `landscape_mesh_registry.ron`, so there was nothing to pick from even if the UI existed.
+
+### Files Changed
+
+| File                                           | Change                                                                                                          |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/landscape_editor.rs` | Add `available_meshes` field, load registry in `enter_edit`, replace read-only label with ComboBox, add 3 tests |
+
+### What Changed
+
+- `LandscapeEditorState` gains `available_meshes: Vec<CreatureReference>` — populated once per edit session from `data/landscape_mesh_registry.ron`.
+- `enter_edit` now takes `campaign_dir: Option<&Path>` and calls `load_available_meshes(campaign_dir)` to populate the field.
+- New free function `load_available_meshes` reads the registry file and returns an empty `Vec` gracefully on any error.
+- The "Mesh ID" read-only grid row in `show_edit` is replaced with:
+  - A **`ComboBox` picker** (when a campaign is open and meshes exist) listing all registry entries as `#<id> – <name>` plus a `None (procedural)` option at the top.
+  - A read-only label with a hover hint when no meshes are available (no campaign open, empty registry, or unparseable file).
+- `mesh_options_snapshot` is pre-computed before the `ScrollArea`/`Grid` closures to avoid Rust closure-capture conflicts between the `buf` borrow (`self.edit_buffer`) and `self.available_meshes`.
+- `apply_edit` already writes `buf.mesh_id` back to `defs[idx]` — no change needed there.
+- `show_list`'s `pending_edit` branch now forwards `campaign_dir` to `enter_edit`.
+- 3 new tests: registry loaded into state, no-campaign produces empty list, `apply_edit` saves the new mesh ID.
+
+### Usage
+
+1. Import your tree/rock meshes via **Importer → Landscape** (as before). The OBJ importer writes entries to `landscape_mesh_registry.ron` and creates/updates matching definitions in `landscape.ron`.
+2. Open **Landscape** tab → right-click any definition → **Edit**.
+3. The **Mesh** row now shows a dropdown populated from `landscape_mesh_registry.ron`. Select the desired mesh, click **Save**.
+4. The map engine reads `definition.mesh_id` at runtime to spawn the imported mesh. No `.ron` map changes are needed — the definition is the link.
+
+---
+
+**Goal:** Fix the Campaign Builder → Landscape Editor → Delete action doing nothing. Deleting a landscape definition via the right-click context menu should remove the definition from the in-memory list (which propagates to `landscape.ron` on the next save) and immediately prune the corresponding entry from `landscape_mesh_registry.ron` for any definition that had a custom mesh.
+
+### Root Cause
+
+Three compounding issues in `landscape_editor.rs`:
+
+1. `show_list` took `defs: &[LandscapeDefinition]` (immutable slice) — it physically could not remove items even if the delete was handled.
+2. `show_list` had no `unsaved_changes: &mut bool` parameter — even if removal worked, it could not mark the campaign dirty.
+3. Inside the list loop, the code only reacted to `ItemAction::Edit`; `ItemAction::Delete` (returned by the right-click context menu) fell through silently.
+
+### Files Changed
+
+| File                                           | Change                                                                                                          |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/landscape_editor.rs` | Fix `show_list` signature, handle `ItemAction::Delete`, add `remove_landscape_mesh_registry_entry`, add 6 tests |
+
+### What Changed
+
+- `show_list` now takes `defs: &mut Vec<LandscapeDefinition>` and `unsaved_changes: &mut bool`.
+- The call site in `show` passes the mutable defs and `unsaved_changes` through.
+- A `pending_delete: Option<usize>` deferred variable is set when `ItemAction::Delete` is captured inside the loop (mirrors the existing `pending_edit` / `pending_selection` pattern).
+- After `TwoColumnLayout::show_split` closes, the delete is applied: item removed via `defs.remove(idx)`, selection adjusted (cleared if the deleted row was selected, shifted down if selection was after it), `unsaved_changes` set to `true`, and the texture-validation cache cleared.
+- New `remove_landscape_mesh_registry_entry(campaign_dir, mesh_id) -> bool` helper reads `data/landscape_mesh_registry.ron`, retains all entries except the one with the given `id`, and rewrites the file. Silently returns `false` on any I/O error so deletion is never blocked by registry state.
+- 6 new unit tests: three for selection-adjustment logic (delete selected item, delete earlier item, delete later item) and three for the registry helper (matching ID removed, missing ID returns false, no file returns false).
+
+---
+
 ## Bevy Tonemapping LUT Render Panic Fix (2026)
 
 **Goal:** Fix a startup render panic where Bevy/wgpu rejected view bind groups because tonemapping LUT bindings expected a 3D texture but received a 2D texture view.

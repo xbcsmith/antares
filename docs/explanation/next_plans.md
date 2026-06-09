@@ -220,3 +220,5 @@ Campaign Builder --> Monster Editor --> Edit save button at the bottom of the ed
 Campaign Builder --> Importer --> Items and Furniture do not have category drop down like Creatures. Importing Furnture does not update the furniture.ron
 
 Campaign Builder --> Landscape Editor layout is broken. The left hand list is horizontal and it does not follow the patterns in @sdk/AGENTS.md for how to layout an editor. The list should be vertical and the editor should follow the same patterns as the other editors in the Campaign Builder.
+
+Campaign Builder --> Landscape Editor --> Delete does nothing. It should delete the landscape and update the landscape.ron file and the landscape_mesh_registry.ron file.

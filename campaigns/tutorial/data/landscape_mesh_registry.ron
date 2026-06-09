@@ -1,32 +1,32 @@
 [
     (
         id: 11000,
-        name: "Birch",
-        filepath: "assets/meshes/landscape/tree/birch.ron",
+        name: "Short Oak Tree",
+        filepath: "assets/meshes/landscape/tree/short_oak_tree.ron",
     ),
     (
         id: 11001,
-        name: "OakTreeShort",
-        filepath: "assets/meshes/landscape/oak_tree_short.ron",
+        name: "Pine Tree",
+        filepath: "assets/meshes/landscape/tree/pine_tree.ron",
     ),
     (
         id: 11002,
-        name: "PineTree",
-        filepath: "assets/meshes/landscape/pine_tree.ron",
+        name: "Palm Tree",
+        filepath: "assets/meshes/landscape/tree/palm_tree.ron",
     ),
     (
         id: 11003,
-        name: "DeadTree",
-        filepath: "assets/meshes/landscape/dead_tree.ron",
+        name: "Birch Tree",
+        filepath: "assets/meshes/landscape/tree/birch_tree.ron",
     ),
     (
         id: 11004,
-        name: "PalmTree",
-        filepath: "assets/meshes/landscape/palm_tree.ron",
+        name: "Dead Tree",
+        filepath: "assets/meshes/landscape/tree/dead_tree.ron",
     ),
     (
         id: 11005,
-        name: "BrushShrub",
-        filepath: "assets/meshes/landscape/brush.ron",
+        name: "Shrub",
+        filepath: "assets/meshes/landscape/brush/shrub.ron",
     ),
 ]
