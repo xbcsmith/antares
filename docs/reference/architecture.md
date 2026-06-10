@@ -110,7 +110,8 @@ src/
 │   ├── mod.rs
 │   ├── components/
 │   ├── resources/
-│   └── systems/                # combat, map, camera, menu, inventory_ui, inn_ui, etc.
+│   └── systems/                # combat, map, camera, menu, inventory_ui, inn_ui, sky, skill_training, etc.
+│       └── sky.rs              # SkyPlugin: updates ClearColor per frame from SkyConfig + TimeOfDay
 ├── sdk/                         # Library SDK: loading, validation, packaging, templates
 │   ├── mod.rs
 │   ├── cache.rs
@@ -389,7 +390,11 @@ pub struct Tile {
     pub is_special: bool,
     pub is_dark: bool,
     pub visited: bool,
-    pub event_trigger: Option<EventId>,
+    pub x: i32,
+    pub y: i32,
+    /// Optional visual rendering metadata (dimensions, color, vegetation, etc.)
+    /// All fields default to None; runtime uses terrain/wall-type-specific defaults.
+    pub visual: TileVisualMetadata,
 }
 
 pub enum WallType {
@@ -398,7 +403,63 @@ pub enum WallType {
     Door,
     Torch,
 }
+
+pub struct GrassBladeConfig {
+    pub length: f32,           // blade length multiplier (0.5–2.0, default 1.0)
+    pub width: f32,            // blade width multiplier  (0.5–2.0, default 1.0)
+    pub tilt: f32,             // tilt angle in radians   (0.0–0.5,  default 0.3)
+    pub curve: f32,            // curvature amount        (0.0–1.0,  default 0.3)
+    pub color_variation: f32,  // color variation         (0.0–1.0,  default 0.2)
+}
 ```
+
+#### 4.2.1 Tile Visual Metadata
+
+`TileVisualMetadata` stores per-tile visual overrides and terrain-specific parameters.
+All fields are `Option`; when `None` the runtime falls back to terrain/wall-type defaults.
+The visual metadata is authored through the Campaign Builder Map Editor inspector and
+stored in map RON files. Procedural trees, grass, and rocks are generated at runtime
+based on `TerrainType` (Forest → trees, Grass → grass, Mountain → rocks) and
+optionally refined by the metadata fields below.
+
+```rust
+pub struct TileVisualMetadata {
+    // ── Visual geometry ──────────────────────────────────────────────────────
+    pub height: Option<f32>,        // Y-axis feature height (wall=2.5, tree=2.2, mountain=3.0)
+    pub width_x: Option<f32>,       // X-axis width override (default 1.0)
+    pub width_z: Option<f32>,       // Z-axis depth override (default 1.0)
+    pub scale: Option<f32>,         // Uniform scale multiplier (default 1.0)
+    pub y_offset: Option<f32>,      // Vertical offset from ground (default 0.0)
+    pub rotation_y: Option<f32>,    // Y-axis rotation in degrees (default 0.0)
+    pub color_tint: Option<(f32, f32, f32)>, // RGB multiplicative tint
+
+    // ── Sprite system ─────────────────────────────────────────────────────────
+    pub sprite: Option<SpriteReference>,
+    pub sprite_layers: Vec<LayeredSprite>,
+    pub sprite_rule: Option<SpriteSelectionRule>,
+
+    // ── Terrain-specific vegetation / geology ─────────────────────────────────
+    pub grass_density: Option<GrassDensity>,         // Forest / Grass tiles
+    pub tree_type: Option<TreeType>,                 // Forest tiles (Oak, Pine, Dead, Palm, Willow, Birch, Shrub)
+    pub rock_variant: Option<RockVariant>,           // Mountain tiles (Smooth, Jagged, Layered, Crystal)
+    pub water_flow_direction: Option<WaterFlowDirection>, // Water / Swamp tiles
+    pub foliage_density: Option<f32>,                // 0.0–2.0 canopy/understory multiplier
+    pub snow_coverage: Option<f32>,                  // 0.0–1.0 snow overlay fraction
+    pub grass_blade_config: Option<GrassBladeConfig>,// custom blade geometry
+}
+
+pub enum GrassDensity   { None, Low, Medium, High, VeryHigh }
+pub enum TreeType       { Oak, Pine, Dead, Palm, Willow, Birch, Shrub }
+pub enum RockVariant    { Smooth, Jagged, Layered, Crystal }
+pub enum WaterFlowDirection { Still, North, South, East, West }
+```
+
+**Inspector terrain-type editing**: the Campaign Builder Map Editor inspector exposes
+the tile `terrain` field as an editable dropdown (all nine `TerrainType` values).
+Changing terrain type updates `blocked` automatically (Mountain and Water → blocked),
+clears stale terrain-specific visual metadata, and is fully undo/redo-able via `set_tile`.
+This is the canonical way to remove procedural trees: change `Forest → Ground` (or any
+non-Forest terrain) directly from the inspector.
 
 #### 4.3 Character
 
@@ -437,13 +498,17 @@ pub struct Character {
     pub spells: SpellBook,              // Known spells
     pub conditions: Condition,          // Active status conditions (bitflags)
     pub active_conditions: Vec<ActiveCondition>, // Data-driven conditions
+    pub timed_stat_boosts: Vec<TimedStatBoost>,  // Active consumable attribute boosts (reversed when expired)
     pub resistances: Resistances,       // Damage resistances
     pub quest_flags: QuestFlags,        // Per-character quest/event tracking
     pub portrait_id: String,            // Portrait/avatar ID (string key/path stem)
     pub worthiness: u8,                 // Special quest attribute
     pub gold: u32,                      // Individual gold (0-max)
     pub gems: u32,                      // Individual gems (0-max)
-    pub food: u8,                       // Individual food units (max 40, starts at 10)
+    /// Persistent NPC-trained skill ranks. Auto-derived ranks (class/race/level)
+    /// are computed on demand by SkillResolver and are NOT stored here.
+    pub skill_ranks: CharacterSkillRanks,
+    // Note: food is a party-level resource (Party::food), not stored per-character.
 }
 
 /// Core pattern: base value + current temporary value for buffs/debuffs
@@ -1274,29 +1339,69 @@ impl RaceDefinition {
 
 #### 4.6.2 Skill System
 
-Skills are numeric, level-scaled character capabilities. They are distinct from
-proficiencies: proficiencies remain binary item-use permissions, while skills
-represent ranked capabilities such as perception, disarm traps, item lore, and
-diplomacy.
+Skills are numeric, level-scaled character capabilities implemented in
+`src/domain/skills.rs`, `src/domain/skill_resolver.rs`, and
+`src/domain/skill_checks.rs`. They are distinct from proficiencies:
+proficiencies remain binary item-use permissions, while skills represent
+ranked capabilities such as perception, disarm traps, item lore, and diplomacy.
 
-```antares/src/domain/skills.rs#L1-80
-pub type SkillId = String;
-pub type SkillRank = u16;
+**Status**: Fully implemented including domain definitions, effective-rank
+resolver, deterministic skill checks, character sheet display, Campaign Builder
+Skills Editor, NPC skill training (domain + service + GameMode + UI), and full
+validation coverage.
 
-pub enum SkillCategory {
-    Combat,
-    Exploration,
-    Knowledge,
-    Social,
-    Utility,
+```rust
+// ── src/domain/skills.rs ────────────────────────────────────────────────────
+
+pub type SkillId   = String;   // lowercase snake_case (e.g. "disarm_traps")
+pub type SkillRank = u16;      // 0 = untrained; capped at SkillDefinition::max_rank
+
+pub enum SkillError {
+    SkillNotFound(String),
+    LoadError(String),
+    ParseError(String),
+    ValidationError(String),
+    DuplicateId(String),
+    ClassNotFound(String),
+    RaceNotFound(String),
+    InvalidSkillReference(String),
 }
+
+pub enum SkillCategory { Combat, Exploration, Knowledge, Social, Utility }
 
 pub enum SkillScalingMode {
     Flat,
     Linear { base: SkillRank, per_level: u16 },
-    Step { base: SkillRank, per_levels: u16, amount: u16 },
-    Table { ranks_by_level: Vec<SkillRank> },
+    Step   { base: SkillRank, per_levels: u16, amount: u16 },
+    Table  { ranks_by_level: Vec<SkillRank> },
 }
+
+/// Identifies which system contributed a rank to a SkillBreakdown entry.
+pub enum SkillGrantSource { Class, Race, Character, Training, Temporary }
+
+/// Determines which party members are evaluated for a dialogue SkillCheck.
+pub enum PartySkillScope { AnyMember, ActiveSpeaker, PartyAverage, PartyTotal }
+
+pub struct SkillGrant {
+    pub skill_id: SkillId,
+    pub flat_bonus: i16,
+    pub per_level_bonus: i16,
+    pub minimum_rank: Option<SkillRank>,
+    pub maximum_rank_override: Option<SkillRank>,
+}
+
+pub struct SkillBreakdownEntry {
+    pub source: SkillGrantSource,
+    pub contribution: SkillRank,
+}
+
+pub struct SkillBreakdown {
+    pub skill_id: SkillId,
+    pub effective_rank: SkillRank,
+    pub entries: Vec<SkillBreakdownEntry>,
+}
+
+pub struct CharacterSkillRanks(pub HashMap<SkillId, SkillRank>);
 
 pub struct SkillDefinition {
     pub id: SkillId,
@@ -1308,25 +1413,73 @@ pub struct SkillDefinition {
     pub is_trainable: bool,
 }
 
-pub struct SkillGrant {
-    pub skill_id: SkillId,
-    pub flat_bonus: i16,
-    pub per_level_bonus: i16,
-    pub minimum_rank: Option<SkillRank>,
-    pub maximum_rank_override: Option<SkillRank>,
-}
-
-pub struct CharacterSkillRanks(pub HashMap<SkillId, SkillRank>);
-
 pub struct SkillDatabase {
     skills: HashMap<SkillId, SkillDefinition>,
 }
+
+// Helper free functions
+pub fn rank_for_level(scaling: &SkillScalingMode, level: u32) -> SkillRank;
+pub fn rank_for_level_with_bonus(scaling: &SkillScalingMode, level: u32, bonus: i16) -> SkillRank;
+pub fn validate_skill_id(id: &str) -> Result<(), SkillError>;
+pub fn validate_skill_rank(rank: SkillRank, max: SkillRank) -> Result<(), SkillError>;
+
+// ── src/domain/skill_resolver.rs ────────────────────────────────────────────
+
+/// Context passed to SkillResolver: character level + class/race grant sources.
+pub struct SkillResolverContext<'a> {
+    pub level: u32,
+    pub class_grants: &'a [SkillGrant],
+    pub race_grants: &'a [SkillGrant],
+    pub persistent_ranks: &'a CharacterSkillRanks,
+    pub skill_db: &'a SkillDatabase,
+}
+
+/// Resolves a character's effective skill rank from all contributing sources.
+pub struct SkillResolver;
+impl SkillResolver {
+    pub fn effective_rank(ctx: &SkillResolverContext, skill_id: &str) -> SkillRank;
+    pub fn breakdown(ctx: &SkillResolverContext, skill_id: &str) -> SkillBreakdown;
+    pub fn all_effective_ranks(ctx: &SkillResolverContext) -> HashMap<SkillId, SkillRank>;
+}
+
+// ── src/domain/skill_checks.rs ──────────────────────────────────────────────
+
+pub enum SkillCheckDifficulty { Trivial, Easy, Normal, Hard, Heroic, Legendary }
+
+pub struct SkillCheckRequest {
+    pub skill_id: SkillId,
+    pub difficulty: SkillCheckDifficulty,
+    pub scope: PartySkillScope,
+}
+
+pub struct SkillCheckResult {
+    pub passed: bool,
+    pub effective_rank: SkillRank,
+    pub threshold: SkillRank,
+}
+
+pub fn skill_check_for_character(request: &SkillCheckRequest, rank: SkillRank) -> SkillCheckResult;
+pub fn evaluate_party_skill_scope(...) -> SkillCheckResult;
 ```
 
-Classes and races may grant skill bonuses through `skill_grants`. Runtime
-characters store only persistent trained/manual ranks in `CharacterSkillRanks`;
-auto-scaled ranks and class/race grants are resolved on demand by the skill
-resolver.
+**Skill grants** on classes and races: both `ClassDefinition` and `RaceDefinition`
+carry a `skill_grants: Vec<SkillGrant>` field. Characters store only their persistent
+NPC-trained ranks in `Character::skill_ranks: CharacterSkillRanks`; auto-scaled ranks
+and class/race grants are resolved on demand by `SkillResolver`.
+
+**NPC Skill Training**: an NPC marked as a skill trainer (`npc.skill_trainer` fields)
+offers skills for sale through the `OpenSkillTraining` dialogue action, which triggers
+`GameMode::SkillTraining`. The training service checks affordability, applies a rank
+to `Character::skill_ranks`, and deducts the gold fee. The full flow mirrors the
+existing level-up trainer route.
+
+**Dialogue integration**: `DialogueCondition::SkillCheck` accepts a `SkillCheckRequest`
+and uses `PartySkillScope` to evaluate which party members qualify. Deterministic skill
+checks (rank vs. threshold) are fully implemented; randomized checks are deferred.
+
+**Campaign Builder**: a dedicated Skills Editor tab covers definition CRUD, scaling
+configuration, and tag/category filtering. Class and Race editors expose `skill_grants`
+editing with skill-ID autocomplete. All skill references are cross-validated.
 
 #### 4.7 Character Definition (Data-Driven Templates)
 
@@ -1712,6 +1865,7 @@ campaigns/
     └── README.md            # Campaign documentation
 ```
 
+```rust
 /// Cardinal directions #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
 North,
@@ -2059,7 +2213,7 @@ pub healing: Option<i32>, // For healing spells
 pub affected_targets: Vec<usize>, // Indices of affected targets
 }
 
-````
+```
 
 ---
 
@@ -2140,7 +2294,7 @@ fn calculate_sp_from_stat(stat: u8, level: u32) -> u16 {
     let base_sp = level as u16 * 2; // 2 SP per level minimum
     base_sp + (stat_bonus * level as u16 / 2)
 }
-````
+```
 
 **Spell Access by Level:**
 
@@ -3449,6 +3603,29 @@ pub fn max_spell_level(character_level: u32, class: Class) -> u8 {
 - Clerics: Full divine magic access from level 1
 - Sorcerers: Full arcane magic access from level 1
 
+#### 12.5.1 NPC Skill Training
+
+NPC trainers offer skill rank increases for a gold fee, mirroring the NPC
+level-up trainer flow. The full path is implemented:
+
+1. **Authoring**: an NPC definition carries `skill_trainer` metadata (list of
+   trainable skill IDs, fee formula, and optional level requirements).
+2. **Dialogue action**: `DialogueAction::OpenSkillTraining { npc_id }` triggers
+   `GameMode::SkillTraining` with the selected NPC's trainer data loaded.
+3. **Service**: `SkillTrainingService::train_skill(character, skill_id, fee)` —
+   validates affordability and rank cap, writes the new rank to
+   `Character::skill_ranks`, deducts gold.
+4. **UI**: `SkillTrainingScreen` shows available skills with current/next rank,
+   gold cost, and a Buy button; mirrors the level-up trainer UX.
+5. **SDK Authoring**: the Campaign Builder NPC editor exposes skill-trainer fields
+   with skill-ID autocomplete and fee configuration.
+6. **Validation**: the SDK validator cross-references all trainable skill IDs
+   against the active skill database.
+
+Auto-scaled skill ranks (from class/race grants and level scaling) are computed
+on demand by `SkillResolver` and are **not** stored in `Character::skill_ranks`.
+Only ranks paid for through NPC training are persisted.
+
 #### 12.6 Item Charge System
 
 **Charge Mechanics:**
@@ -3813,6 +3990,89 @@ The Antares architecture has evolved significantly from its initial design:
 - NPC restock (`tick_restock`) updated to use `total_days()` for day-change detection,
   preventing incorrect multiple restocks per year on month rollover
 
+**Phase 6: Sky System**
+
+- `SkyConfig` struct added to `src/domain/world/types.rs` with twelve fields
+  (day/dusk-dawn/night sky colors, sun count/color/size, star count/density,
+  cloud coverage/color/density/speed). All fields `#[serde(default)]` for
+  backward compatibility with existing map RON files.
+- `is_outdoor: bool` and `sky: Option<SkyConfig>` fields added to `Map`; both
+  default to `false`/`None` so existing maps load unchanged.
+- `SkyConfig` exported from `src/domain/world/mod.rs`.
+- `src/game/systems/sky.rs` — `SkyPlugin` registers `update_sky_background`
+  (runs after `apply_time_advance`, before `update_ambient_light`):
+  - Reads current map's `is_outdoor` flag and `sky: Option<SkyConfig>`.
+  - Calls pure function `sky_color_for_time(config, time_of_day)` which
+    interpolates between `day_sky_color`, `dusk_dawn_sky_color`, and
+    `night_sky_color` using linear blending at Dawn/Dusk transition periods.
+  - Writes the result to Bevy's global `ClearColor` resource.
+  - Indoor maps use a fixed dark ambient color (`INDOOR_SKY_COLOR`).
+- Constants: `INDOOR_SKY_COLOR`, `DEFAULT_OUTDOOR_DAY_SKY_COLOR`,
+  `DEFAULT_OUTDOOR_NIGHT_SKY_COLOR`, `DEFAULT_OUTDOOR_DUSK_DAWN_SKY_COLOR`.
+- Campaign Builder Map Editor `show_metadata_editor` extended with an
+  Outdoor/Indoor toggle and a sky configuration panel (color pickers,
+  sliders for sun/star/cloud parameters). `MapMetadata.is_outdoor` and
+  `sky_config: Option<SkyConfig>` are persisted to map RON on save.
+- Celestial bodies (sun discs, star field), cloud layer animation, and
+  dawn/dusk opacity transitions are planned follow-on rendering work.
+
+**Phase 7: Skill System (Level-Scaled Numeric Skills)**
+
+- `src/domain/skills.rs` — `SkillDefinition`, `SkillDatabase`, `SkillScalingMode`
+  (Flat/Linear/Step/Table), `SkillGrant`, `SkillGrantSource`, `PartySkillScope`,
+  `SkillBreakdown`, `CharacterSkillRanks`, error types, and helper functions.
+- `src/domain/skill_resolver.rs` — `SkillResolver` + `SkillResolverContext`:
+  computes effective rank from auto-scaling + class/race grants + persistent ranks.
+- `src/domain/skill_checks.rs` — `SkillCheckDifficulty`, `SkillCheckRequest`,
+  `SkillCheckResult`, and `skill_check_for_character` / `evaluate_party_skill_scope`.
+- `Character` gains `skill_ranks: CharacterSkillRanks` for persisted NPC-trained
+  ranks. Auto-derived ranks are never stored.
+- Classes and races carry `skill_grants: Vec<SkillGrant>` in their definitions.
+- `DialogueCondition::SkillCheck` evaluates party skill scope deterministically.
+- `DialogueAction::OpenSkillTraining` → `GameMode::SkillTraining` → NPC trainer
+  UI → `SkillTrainingService::train_skill()` — full NPC skill training flow.
+- Campaign Builder: Skills Editor tab, Class/Race skill-grant editing with
+  autocomplete, cross-reference validation across all skill references.
+- `skills.ron` present in base data, test campaign fixture, and tutorial campaign.
+
+**Phase 8: Landscape and Vegetation Enhancement**
+
+- `LandscapeDefinition.mesh_id: Option<LandscapeMeshId>` links authored landscape
+  definitions to imported mesh registry entries.
+- `LandscapeMeshDatabase` wraps `CreatureDatabase` for the mesh registry
+  (`data/landscape_mesh_registry.ron`); mesh IDs allocated from `11000..=u32::MAX`.
+- `Map.landscape_placements: Vec<LandscapePlacement>` — authored per-map static
+  decoration placements; serialized with `skip_serializing_if = "Vec::is_empty"`.
+- `TileVisualMetadata` expanded with terrain-specific vegetation fields:
+  `tree_type`, `grass_density`, `foliage_density`, `rock_variant`,
+  `water_flow_direction`, `snow_coverage`, `grass_blade_config`.
+- `GrassBladeConfig` struct — per-tile custom grass blade geometry (length, width,
+  tilt, curve, color variation).
+- Runtime vegetation generated from `TerrainType` (Forest → procedural trees, Grass
+  → procedural grass, Mountain → procedural rocks) and optionally refined by
+  `TileVisualMetadata` fields.
+- Campaign Builder: Landscape Editor with definition CRUD, mesh assignment ComboBox,
+  delete (removes definition and prunes mesh registry entry), and quick-place section
+  in the Map Editor inspector for placing imported landscape meshes on tiles.
+- SDK validation: `LandscapeDatabase::validate_mesh_references`,
+  `validate_placements`, `validate_map_placements` (blocking conflict detection).
+
+**Phase 9: SDK Map Editor Inspector — Terrain Type Editing**
+
+- Map Editor inspector: `Terrain` field changed from a read-only label to an
+  editable `ComboBox` listing all nine `TerrainType` values. Selecting a new terrain
+  type calls `set_tile` (full undo/redo support), recalculates `tile.blocked`
+  (Mountain and Water → blocked), and clears stale terrain-specific visual metadata.
+- Clear root cause for "procedural trees cannot be removed": trees are generated by
+  `TerrainType::Forest`, not by `TileVisualMetadata`. The inspector now exposes the
+  terrain type directly; changing `Forest → Ground` removes procedural trees.
+- **Vegetation Authoring** section in inspector shows a yellow tip on Forest tiles:
+  "Procedural trees come from Forest terrain — change terrain type above to remove them."
+- `TerrainEditorState` gains `use_terrain_override: bool`; when false, `Apply`
+  clears terrain-specific metadata instead of re-writing enum defaults.
+- Reset Vegetation / Clear Terrain Properties / Reset to Defaults buttons all
+  properly invalidate position caches, preventing stale-state UI glitches.
+
 #### 13.2 Current Architecture Compliance
 
 **✅ Excellent Compliance Areas:**
@@ -3826,11 +4086,19 @@ The Antares architecture has evolved significantly from its initial design:
   serde defaults; `total_days()` used consistently for cumulative-day comparisons
 - **Event Conditions**: `TimeCondition` covers all time granularities (period, hour,
   day, month, year) with RON roundtrip support for all variants
+- **Sky System**: `SkyConfig` on `Map`; `SkyPlugin` updates `ClearColor` per frame;
+  Campaign Builder exposes full sky authoring; all fields backward-compatible via `#[serde(default)]`
+- **Skill System**: Full implementation from domain definitions through NPC training UI,
+  Campaign Builder authoring, and cross-reference validation; `Character::skill_ranks`
+  stores only persisted training ranks; auto-derived ranks resolved on demand
+- **Landscape / Vegetation**: `LandscapePlacement` on `Map`; `TileVisualMetadata`
+  vegetation fields; mesh registry integration; Campaign Builder landscape editor and
+  map inspector quick-place workflow; procedural tree/grass/rock generation from terrain type
 
 **🔄 Areas Requiring Updates:**
 
-- **Documentation cadence**: Keep architectural sections synchronized with ongoing engine + SDK refactors
 - **Procedural generation depth**: Additional map/content generation systems remain a future expansion area
+- **Celestial body rendering**: Sun disc, star field, cloud layer, and dawn/dusk opacity transitions are planned sky system follow-ons
 - **Cross-layer cleanup**: Continue converging legacy examples and newer implementation details in long-form reference sections
 
 #### 13.3 Architectural Strengths
