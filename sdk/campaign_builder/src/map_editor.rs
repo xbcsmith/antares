@@ -1289,6 +1289,12 @@ pub struct TerrainEditorState {
 
     /// Snow coverage slider value (0.0 to 1.0)
     pub snow_coverage: f32,
+
+    /// When `false` the terrain-specific fields are not written on Apply;
+    /// `apply_terrain_state_to_tile` calls `clear_metadata` instead.
+    /// Set to `false` after Clear/Reset operations and after `from_metadata`
+    /// on a tile that has no explicit terrain overrides.
+    pub use_terrain_override: bool,
 }
 
 impl Default for TerrainEditorState {
@@ -1302,6 +1308,7 @@ impl Default for TerrainEditorState {
             water_flow_direction: WaterFlowDirection::Still,
             foliage_density: 1.0,
             snow_coverage: 0.0,
+            use_terrain_override: true,
         }
     }
 }
@@ -1322,6 +1329,13 @@ impl TerrainEditorState {
     pub fn from_metadata(metadata: &TileVisualMetadata) -> Self {
         let grass_blade_config_enabled = metadata.grass_blade_config.is_some();
         let grass_blade_config = metadata.grass_blade_config.unwrap_or_default();
+        let use_terrain_override = metadata.tree_type.is_some()
+            || metadata.grass_density.is_some()
+            || metadata.rock_variant.is_some()
+            || metadata.water_flow_direction.is_some()
+            || metadata.foliage_density.is_some()
+            || metadata.snow_coverage.is_some()
+            || metadata.grass_blade_config.is_some();
 
         Self {
             grass_density: metadata.grass_density(),
@@ -1332,6 +1346,7 @@ impl TerrainEditorState {
             water_flow_direction: metadata.water_flow_direction(),
             foliage_density: metadata.foliage_density(),
             snow_coverage: metadata.snow_coverage(),
+            use_terrain_override,
         }
     }
 
@@ -1540,6 +1555,11 @@ pub struct MapEditorState {
     pub resize_new_height: u32,
     /// User has acknowledged the shrink-warning and confirmed data loss.
     pub resize_confirm_shrink: bool,
+    /// Scale value for the quick-place Landscape section (0.1–3.0, default 1.0).
+    pub landscape_quick_scale: f32,
+    /// Position last loaded into the quick-place Landscape section.
+    /// Used to auto-populate the Landscape section when the selected tile changes.
+    pub last_landscape_load_position: Option<Position>,
 }
 
 impl MapEditorState {
@@ -1606,6 +1626,8 @@ impl MapEditorState {
             resize_new_width: initial_width,
             resize_new_height: initial_height,
             resize_confirm_shrink: false,
+            landscape_quick_scale: 1.0,
+            last_landscape_load_position: None,
         }
     }
 
@@ -1799,7 +1821,13 @@ impl MapEditorState {
             .or_else(|| self.map.get_tile(pos).map(|tile| tile.visual.clone()))
             .unwrap_or_default();
 
-        terrain_state.apply_to_metadata_for_terrain(&mut updated_metadata, terrain_type);
+        if terrain_state.use_terrain_override {
+            terrain_state.apply_to_metadata_for_terrain(&mut updated_metadata, terrain_type);
+        } else {
+            // Explicit "no override" — clear all terrain-specific fields so the
+            // runtime falls back to its built-in defaults.
+            TerrainEditorState::clear_metadata(&mut updated_metadata);
+        }
 
         if let Some(tile) = self.map.get_tile_mut(pos) {
             tile.visual = updated_metadata.clone();
@@ -5267,27 +5295,74 @@ impl MapsEditorState {
 
         // Selected tile info
         if let Some(pos) = editor.selected_position {
+            // Snapshot immutable tile fields before the mutable group closure to
+            // avoid holding a borrow of editor.map across mutations inside it.
+            let tile_snapshot = editor
+                .map
+                .get_tile(pos)
+                .map(|t| (t.terrain, t.wall_type, t.blocked, t.visual.clone()));
+            let mut change_terrain_to: Option<TerrainType> = None;
+
             ui.group(|ui| {
                 ui.label(format!("Position: ({}, {})", pos.x, pos.y));
 
-                if let Some(tile) = editor.map.get_tile(pos) {
-                    ui.label(format!("Terrain: {:?}", tile.terrain));
-                    ui.label(format!("Wall: {:?}", tile.wall_type));
-                    ui.label(format!("Blocked: {}", tile.blocked));
+                if let Some((terrain_type, wall_type, blocked, ref visual)) = tile_snapshot {
+                    // Terrain type — editable ComboBox so authors can change
+                    // e.g. Forest → Ground without switching to Paint Tile tool.
+                    ui.horizontal(|ui| {
+                        ui.label("Terrain:");
+                        let mut sel = terrain_type;
+                        egui::ComboBox::from_id_salt("inspector_tile_terrain")
+                            .selected_text(format!("{:?}", terrain_type))
+                            .show_ui(ui, |ui| {
+                                for &t in &[
+                                    TerrainType::Ground,
+                                    TerrainType::Grass,
+                                    TerrainType::Stone,
+                                    TerrainType::Dirt,
+                                    TerrainType::Forest,
+                                    TerrainType::Water,
+                                    TerrainType::Swamp,
+                                    TerrainType::Lava,
+                                    TerrainType::Mountain,
+                                ] {
+                                    if ui
+                                        .selectable_value(&mut sel, t, format!("{:?}", t))
+                                        .clicked()
+                                    {
+                                        ui.ctx().request_repaint();
+                                    }
+                                }
+                            });
+                        if sel != terrain_type {
+                            change_terrain_to = Some(sel);
+                        }
+                    });
+                    ui.label(format!("Wall: {:?}", wall_type));
+                    ui.label(format!("Blocked: {}", blocked));
                     ui.separator();
                     ui.label(
                         egui::RichText::new("🌿 Vegetation Authoring")
                             .strong()
                             .color(egui::Color32::LIGHT_GREEN),
                     );
-                    ui.label(Self::vegetation_authoring_summary(&tile.visual));
+                    // Explain the source of procedural trees so authors know
+                    // to change the terrain type rather than clearing metadata.
+                    if terrain_type == TerrainType::Forest {
+                        ui.label(
+                            egui::RichText::new(
+                                "💡 Procedural trees come from Forest terrain. \
+                                 Change terrain type above to remove them.",
+                            )
+                            .small()
+                            .color(egui::Color32::YELLOW),
+                        );
+                    }
+                    ui.label(Self::vegetation_authoring_summary(visual));
                     ui.label(
-                        egui::RichText::new(Self::vegetation_runtime_hint(
-                            tile.terrain,
-                            &tile.visual,
-                        ))
-                        .small()
-                        .color(egui::Color32::GRAY),
+                        egui::RichText::new(Self::vegetation_runtime_hint(terrain_type, visual))
+                            .small()
+                            .color(egui::Color32::GRAY),
                     );
                 }
 
@@ -5748,6 +5823,32 @@ impl MapsEditorState {
                 }
             });
 
+            // Apply terrain type change queued from the inspector ComboBox.
+            // Uses set_tile for full undo/redo support and mirrors the
+            // blocked-flag logic from paint_tile.
+            if let Some(new_terrain) = change_terrain_to {
+                if let Some(old_tile) = editor.map.get_tile(pos).cloned() {
+                    let mut new_tile = old_tile;
+                    new_tile.terrain = new_terrain;
+                    new_tile.blocked =
+                        matches!(new_terrain, TerrainType::Mountain | TerrainType::Water)
+                            || matches!(new_tile.wall_type, WallType::Normal);
+                    // Clear terrain-specific visual metadata (tree_type,
+                    // grass_density, rock_variant, etc.) that no longer applies
+                    // to the new terrain type, so the runtime uses its defaults.
+                    TerrainEditorState::clear_metadata(&mut new_tile.visual);
+                    editor.set_tile(pos, new_tile);
+                    // Reset the staged terrain state to reflect the cleared tile.
+                    editor.terrain_editor_state = TerrainEditorState::default();
+                    editor.terrain_editor_state.use_terrain_override = false;
+                    // Invalidate both caches so the terrain and visual panels
+                    // reload from the newly written tile on the next frame.
+                    editor.last_loaded_terrain_position = None;
+                    editor.last_loaded_visual_position = None;
+                    ui.ctx().request_repaint();
+                }
+            }
+
             // Visual metadata editor
             ui.separator();
             ui.group(|ui| {
@@ -5828,32 +5929,22 @@ impl MapsEditorState {
                         }
 
                         editor.terrain_editor_state = TerrainEditorState::default();
+                        // Mark as "no override" so the Apply button does not
+                        // re-write enum defaults back to the (now-cleared) tile.
+                        editor.terrain_editor_state.use_terrain_override = false;
                         editor.has_changes = true;
+                        // Invalidate terrain position cache so the panel reloads
+                        // from the cleared tile on the next frame.
+                        editor.last_loaded_terrain_position = None;
                         ui.ctx().request_repaint();
                     }
                 }
             });
 
-            // Visual preset palette
+            // Landscape quick-place section (replaces Visual Presets palette).
             ui.separator();
             ui.group(|ui| {
-                if let Some(selected_preset) = Self::show_preset_palette(ui, editor) {
-                    let metadata = selected_preset.to_metadata();
-
-                    // Apply visual fields only; preserve each tile's terrain-specific settings.
-                    // The Visual Presets palette and the Terrain-Specific Settings panel are
-                    // fully independent.
-                    editor.apply_preset_to_selection_preserving_terrain(&metadata);
-
-                    // Update the visual editor to reflect the preset's visual fields.
-                    editor.visual_editor.load_from_metadata(&metadata);
-
-                    // Mark position as loaded so the next frame does not snap back.
-                    editor.last_loaded_visual_position = editor.selected_position;
-
-                    // NOTE: terrain_editor_state is intentionally NOT overwritten here.
-                    ui.ctx().request_repaint();
-                }
+                Self::show_landscape_quick_place(ui, editor, pos, data.landscape_definitions);
             });
         } else {
             ui.label("No tile selected");
@@ -8210,6 +8301,10 @@ impl MapsEditorState {
         // Load tile's current visual metadata into editor if selection changed
         editor.maybe_load_visual_from_selected_position();
 
+        // One flag per visual field cleared this frame via the ✕ button.
+        // Indices: 0=height 1=width_x 2=width_z 3=scale 4=y_offset 5=rotation_y 6=color_tint
+        let mut clear_field = [false; 7];
+
         // Height
         ui.horizontal(|ui| {
             ui.checkbox(&mut editor.visual_editor.enable_height, "Height:");
@@ -8220,6 +8315,14 @@ impl MapsEditorState {
                     .range(0.1..=10.0),
             );
             ui.label("units");
+            if editor.visual_editor.enable_height
+                && ui
+                    .small_button("✕")
+                    .on_hover_text("Clear height from tile(s)")
+                    .clicked()
+            {
+                clear_field[0] = true;
+            }
         });
 
         // Width X
@@ -8231,6 +8334,14 @@ impl MapsEditorState {
                     .speed(0.05)
                     .range(0.1..=1.0),
             );
+            if editor.visual_editor.enable_width_x
+                && ui
+                    .small_button("✕")
+                    .on_hover_text("Clear width X from tile(s)")
+                    .clicked()
+            {
+                clear_field[1] = true;
+            }
         });
 
         // Width Z
@@ -8242,6 +8353,14 @@ impl MapsEditorState {
                     .speed(0.05)
                     .range(0.1..=1.0),
             );
+            if editor.visual_editor.enable_width_z
+                && ui
+                    .small_button("✕")
+                    .on_hover_text("Clear width Z from tile(s)")
+                    .clicked()
+            {
+                clear_field[2] = true;
+            }
         });
 
         // Scale
@@ -8253,6 +8372,14 @@ impl MapsEditorState {
                     .speed(0.05)
                     .range(0.1..=3.0),
             );
+            if editor.visual_editor.enable_scale
+                && ui
+                    .small_button("✕")
+                    .on_hover_text("Clear scale from tile(s)")
+                    .clicked()
+            {
+                clear_field[3] = true;
+            }
         });
 
         // Y Offset
@@ -8264,6 +8391,14 @@ impl MapsEditorState {
                     .speed(0.1)
                     .range(-2.0..=2.0),
             );
+            if editor.visual_editor.enable_y_offset
+                && ui
+                    .small_button("✕")
+                    .on_hover_text("Clear Y offset from tile(s)")
+                    .clicked()
+            {
+                clear_field[4] = true;
+            }
         });
 
         // Rotation Y
@@ -8276,11 +8411,27 @@ impl MapsEditorState {
                     .range(0.0..=360.0)
                     .suffix("°"),
             );
+            if editor.visual_editor.enable_rotation_y
+                && ui
+                    .small_button("✕")
+                    .on_hover_text("Clear rotation from tile(s)")
+                    .clicked()
+            {
+                clear_field[5] = true;
+            }
         });
 
         // Color Tint
         ui.horizontal(|ui| {
             ui.checkbox(&mut editor.visual_editor.enable_color_tint, "Color Tint:");
+            if editor.visual_editor.enable_color_tint
+                && ui
+                    .small_button("✕")
+                    .on_hover_text("Clear color tint from tile(s)")
+                    .clicked()
+            {
+                clear_field[6] = true;
+            }
         });
         if editor.visual_editor.enable_color_tint {
             ui.horizontal(|ui| {
@@ -8303,6 +8454,66 @@ impl MapsEditorState {
                         .range(0.0..=1.0),
                 );
             });
+        }
+
+        // Apply any immediate ✕ clears — writes directly to tile(s) without
+        // requiring the user to click the separate Apply button.
+        if clear_field.iter().any(|&b| b) {
+            let target_positions: Vec<Position> = if editor.selected_tiles.is_empty() {
+                vec![pos]
+            } else {
+                editor.selected_tiles.clone()
+            };
+            for tile_pos in target_positions {
+                if let Some(tile) = editor.map.get_tile_mut(tile_pos) {
+                    if clear_field[0] {
+                        tile.visual.height = None;
+                    }
+                    if clear_field[1] {
+                        tile.visual.width_x = None;
+                    }
+                    if clear_field[2] {
+                        tile.visual.width_z = None;
+                    }
+                    if clear_field[3] {
+                        tile.visual.scale = None;
+                    }
+                    if clear_field[4] {
+                        tile.visual.y_offset = None;
+                    }
+                    if clear_field[5] {
+                        tile.visual.rotation_y = None;
+                    }
+                    if clear_field[6] {
+                        tile.visual.color_tint = None;
+                    }
+                }
+            }
+            // Update visual editor to match cleared tile fields.
+            if clear_field[0] {
+                editor.visual_editor.enable_height = false;
+            }
+            if clear_field[1] {
+                editor.visual_editor.enable_width_x = false;
+            }
+            if clear_field[2] {
+                editor.visual_editor.enable_width_z = false;
+            }
+            if clear_field[3] {
+                editor.visual_editor.enable_scale = false;
+            }
+            if clear_field[4] {
+                editor.visual_editor.enable_y_offset = false;
+            }
+            if clear_field[5] {
+                editor.visual_editor.enable_rotation_y = false;
+            }
+            if clear_field[6] {
+                editor.visual_editor.enable_color_tint = false;
+            }
+            editor.has_changes = true;
+            editor.last_loaded_visual_position = None;
+            ui.ctx().request_repaint();
         }
 
         ui.separator();
@@ -8339,9 +8550,12 @@ impl MapsEditorState {
                 // Resetting visual also clears any terrain overrides on the tile.
                 editor.visual_editor.reset();
                 editor.terrain_editor_state = TerrainEditorState::default();
-                // Invalidate position cache so the next frame reloads both
-                // panels from the tile (now reset to defaults).
+                // Mark as "no override" so Apply does not re-write defaults.
+                editor.terrain_editor_state.use_terrain_override = false;
+                // Invalidate both position caches so the next frame reloads
+                // both panels from the tile (now reset to all-None).
                 editor.last_loaded_visual_position = None;
+                editor.last_loaded_terrain_position = None;
                 ui.ctx().request_repaint();
             }
 
@@ -8364,11 +8578,17 @@ impl MapsEditorState {
                     }
                 }
 
-                editor.visual_editor.reset();
+                // Do NOT call visual_editor.reset() here — vegetation clearing must
+                // not discard staged visual properties (height, scale, etc.).
+                // Instead, reload the visual editor from the tile on the next frame.
                 editor.terrain_editor_state = TerrainEditorState::default();
+                // Mark as "no override" so Apply does not re-write defaults.
+                editor.terrain_editor_state.use_terrain_override = false;
                 editor.has_changes = true;
-                // Invalidate position cache so the next frame reloads from tile.
+                // Invalidate both caches so the next frame reloads both panels
+                // from the cleared tile data.
                 editor.last_loaded_visual_position = None;
+                editor.last_loaded_terrain_position = None;
                 ui.ctx().request_repaint();
             }
         });
@@ -8423,6 +8643,25 @@ impl MapsEditorState {
         state: &mut TerrainEditorState,
     ) -> bool {
         let mut changed = false;
+
+        // Override toggle — when unchecked, Apply clears all terrain-specific
+        // settings so the runtime falls back to its built-in defaults.
+        changed |= ui
+            .checkbox(&mut state.use_terrain_override, "Override terrain settings")
+            .on_hover_text(
+                "When unchecked, clicking Apply will remove all terrain-specific \
+                 settings from the tile so the runtime uses its built-in defaults.",
+            )
+            .changed();
+
+        if !state.use_terrain_override {
+            ui.label(
+                egui::RichText::new("⚪ No terrain overrides — runtime uses defaults")
+                    .small()
+                    .color(egui::Color32::GRAY),
+            );
+            return changed;
+        }
 
         match terrain_type {
             TerrainType::Grass => {
@@ -8676,6 +8915,181 @@ impl MapsEditorState {
         changed
     }
 
+    /// Render the quick-place Landscape section in the inspector panel.
+    ///
+    /// Shows a mesh picker (populated from landscape definitions that have an
+    /// imported mesh), a scale slider, and Place / Remove buttons.
+    /// Auto-populates from the first placement at `pos` whenever the selected
+    /// position changes.
+    fn show_landscape_quick_place(
+        ui: &mut egui::Ui,
+        editor: &mut MapEditorState,
+        pos: Position,
+        landscape_definitions: &[LandscapeDefinition],
+    ) {
+        ui.heading("🌳 Landscape");
+
+        // Auto-populate the dropdown and scale from the tile's first placement
+        // whenever the selected position changes.
+        if editor.last_landscape_load_position != Some(pos) {
+            let first = editor
+                .map
+                .landscape_placements
+                .iter()
+                .find(|p| p.position == pos)
+                .cloned();
+            if let Some(ref placement) = first {
+                editor.selected_landscape_id = Some(placement.landscape_id);
+                editor.landscape_quick_scale = placement.scale.unwrap_or(1.0);
+            }
+            editor.last_landscape_load_position = Some(pos);
+        }
+
+        // Only offer definitions that have an imported mesh.
+        let mesh_defs: Vec<&LandscapeDefinition> = landscape_definitions
+            .iter()
+            .filter(|d| d.mesh_id.is_some())
+            .collect();
+
+        if mesh_defs.is_empty() {
+            ui.colored_label(
+                egui::Color32::YELLOW,
+                "No imported landscape meshes found.\nUse Importer → Landscape to add meshes.",
+            );
+            return;
+        }
+
+        // Auto-select the first available definition when nothing is selected.
+        if editor.selected_landscape_id.is_none()
+            || !mesh_defs
+                .iter()
+                .any(|d| Some(d.id) == editor.selected_landscape_id)
+        {
+            editor.selected_landscape_id = mesh_defs.first().map(|d| d.id);
+        }
+
+        // Mesh dropdown.
+        let selected_label = editor
+            .selected_landscape_id
+            .and_then(|id| landscape_definitions.iter().find(|d| d.id == id))
+            .map(|d| d.name.as_str())
+            .unwrap_or("Select mesh");
+
+        ui.horizontal(|ui| {
+            ui.label("Mesh:");
+            egui::ComboBox::from_id_salt("landscape_quick_place_mesh")
+                .selected_text(selected_label)
+                .show_ui(ui, |ui| {
+                    for def in &mesh_defs {
+                        ui.push_id(def.id, |ui| {
+                            if ui
+                                .selectable_value(
+                                    &mut editor.selected_landscape_id,
+                                    Some(def.id),
+                                    &def.name,
+                                )
+                                .changed()
+                            {
+                                // Reset scale to the definition default when switching mesh.
+                                editor.landscape_quick_scale = def.default_scale;
+                                ui.ctx().request_repaint();
+                            }
+                        });
+                    }
+                });
+        });
+
+        // Scale: slider + drag-value text field (mirrors Terrain Settings style).
+        ui.horizontal(|ui| {
+            ui.label("Scale:");
+            ui.add(
+                egui::Slider::new(&mut editor.landscape_quick_scale, 0.1_f32..=3.0_f32)
+                    .step_by(0.05),
+            );
+            ui.add(
+                egui::DragValue::new(&mut editor.landscape_quick_scale)
+                    .speed(0.05)
+                    .range(0.1_f32..=3.0_f32),
+            );
+        });
+
+        // Snapshot existing placement index before any mutable borrow.
+        let existing_idx: Option<usize> = editor.selected_landscape_id.and_then(|id| {
+            editor
+                .map
+                .landscape_placements
+                .iter()
+                .enumerate()
+                .find(|(_, p)| p.position == pos && p.landscape_id == id)
+                .map(|(i, _)| i)
+        });
+
+        let mut place_action: Option<(Option<usize>, LandscapePlacement)> = None;
+        let mut remove_action: Option<usize> = None;
+
+        ui.horizontal_wrapped(|ui| {
+            let place_label = if existing_idx.is_some() {
+                "🌳 Update"
+            } else {
+                "🌳 Place"
+            };
+
+            if ui
+                .button(place_label)
+                .on_hover_text(if existing_idx.is_some() {
+                    "Update the mesh placement on this tile"
+                } else {
+                    "Place this mesh on the selected tile"
+                })
+                .clicked()
+            {
+                if let Some(landscape_id) = editor.selected_landscape_id {
+                    let scale = editor.landscape_quick_scale;
+                    let mut placement = LandscapePlacement::new(landscape_id, pos);
+                    // Only write scale when it differs from the definition default
+                    // (avoids storing redundant data in map RON).
+                    let def_scale = landscape_definitions
+                        .iter()
+                        .find(|d| d.id == landscape_id)
+                        .map(|d| d.default_scale)
+                        .unwrap_or(1.0);
+                    if (scale - def_scale).abs() > 1e-4 {
+                        placement.scale = Some(scale);
+                    }
+                    place_action = Some((existing_idx, placement));
+                }
+            }
+
+            if let Some(idx) = existing_idx {
+                if ui
+                    .button("🗑️ Remove")
+                    .on_hover_text("Remove the landscape placement from this tile")
+                    .clicked()
+                {
+                    remove_action = Some(idx);
+                }
+            }
+        });
+
+        // Apply deferred mutations — must happen outside the ui.horizontal closure.
+        if let Some((idx_opt, placement)) = place_action {
+            if let Some(idx) = idx_opt {
+                editor.replace_landscape_placement(idx, placement);
+            } else {
+                editor.add_landscape_placement(placement);
+            }
+            editor.has_changes = true;
+            ui.ctx().request_repaint();
+        }
+        if let Some(idx) = remove_action {
+            editor.remove_landscape_placement(idx);
+            // Reset the quick-scale to 1.0 so the panel doesn't show stale data.
+            editor.landscape_quick_scale = 1.0;
+            editor.has_changes = true;
+            ui.ctx().request_repaint();
+        }
+    }
+
     /// Show visual preset palette with category filtering
     ///
     /// Displays a grid of preset buttons organized by category with filter tabs
@@ -8688,6 +9102,7 @@ impl MapsEditorState {
     /// # Returns
     ///
     /// `Option<VisualPreset>` if a preset was clicked, None otherwise
+    #[allow(dead_code)]
     fn show_preset_palette(ui: &mut egui::Ui, state: &mut MapEditorState) -> Option<VisualPreset> {
         let mut selected_preset = None;
 
@@ -11940,6 +12355,7 @@ mod tests {
             water_flow_direction: WaterFlowDirection::North,
             foliage_density: 1.7,
             snow_coverage: 0.4,
+            use_terrain_override: true,
         };
 
         let mut metadata = TileVisualMetadata::default();
@@ -11970,6 +12386,7 @@ mod tests {
             water_flow_direction: WaterFlowDirection::South,
             foliage_density: 0.6,
             snow_coverage: 0.25,
+            use_terrain_override: true,
         };
 
         let mut metadata = TileVisualMetadata::default();
@@ -13576,6 +13993,9 @@ mod tests {
         assert_eq!(state.last_loaded_terrain_position, Some(pos));
 
         // User stages terrain changes (not applied to tile yet).
+        // In the real UI the "Override terrain settings" checkbox must be
+        // checked before any controls appear; mirror that here.
+        state.terrain_editor_state.use_terrain_override = true;
         state.terrain_editor_state.grass_density = GrassDensity::High;
         state.terrain_editor_state.foliage_density = 1.8;
 
@@ -14021,5 +14441,356 @@ mod tests {
             state.map.sky.is_none(),
             "apply_metadata must clear map.sky for indoor maps even when metadata is stale"
         );
+    }
+
+    #[test]
+    fn test_landscape_quick_place_auto_populates_from_tile() {
+        use antares::domain::types::Position;
+        use antares::domain::world::landscape::LandscapePlacement;
+
+        let mut state = MapEditorState::new(Map::new(1, "Map".to_string(), "".to_string(), 10, 10));
+        let pos = Position::new(3, 4);
+
+        // Pre-place a landscape placement at the tile.
+        state.map.landscape_placements.push(LandscapePlacement {
+            landscape_id: 2,
+            position: pos,
+            scale: Some(1.5),
+            offset: None,
+            y_offset: None,
+            rotation_y: None,
+            color_tint: None,
+            blocking: None,
+        });
+
+        // Simulate the auto-populate that show_landscape_quick_place performs
+        // when the selected position changes.
+        if state.last_landscape_load_position != Some(pos) {
+            let first = state
+                .map
+                .landscape_placements
+                .iter()
+                .find(|p| p.position == pos)
+                .cloned();
+            if let Some(ref placement) = first {
+                state.selected_landscape_id = Some(placement.landscape_id);
+                state.landscape_quick_scale = placement.scale.unwrap_or(1.0);
+            }
+            state.last_landscape_load_position = Some(pos);
+        }
+
+        assert_eq!(state.selected_landscape_id, Some(2));
+        assert!((state.landscape_quick_scale - 1.5).abs() < 1e-4);
+        assert_eq!(state.last_landscape_load_position, Some(pos));
+    }
+
+    #[test]
+    fn test_landscape_quick_place_uses_default_scale_on_no_placement() {
+        let state = MapEditorState::new(Map::new(1, "Map".to_string(), "".to_string(), 10, 10));
+        // Default quick scale must be 1.0 when no tile is pre-loaded.
+        assert!((state.landscape_quick_scale - 1.0).abs() < 1e-4);
+        assert!(state.last_landscape_load_position.is_none());
+    }
+
+    #[test]
+    fn test_visual_property_clear_removes_field_from_tile() {
+        use antares::domain::types::Position;
+
+        let mut state = MapEditorState::new(Map::new(1, "Map".to_string(), "".to_string(), 10, 10));
+        let pos = Position::new(2, 2);
+
+        // Set a height on the tile.
+        if let Some(tile) = state.map.get_tile_mut(pos) {
+            tile.visual.height = Some(3.5);
+        }
+
+        // Simulate the ✕ button clear for height.
+        {
+            if let Some(tile) = state.map.get_tile_mut(pos) {
+                tile.visual.height = None;
+            }
+            state.visual_editor.enable_height = false;
+            state.has_changes = true;
+            state.last_loaded_visual_position = None;
+        }
+
+        assert!(state.map.get_tile(pos).unwrap().visual.height.is_none());
+        assert!(!state.visual_editor.enable_height);
+        assert!(state.has_changes);
+    }
+
+    #[test]
+    fn test_terrain_editor_from_metadata_no_fields_sets_use_override_false() {
+        let metadata = TileVisualMetadata::default();
+        let state = TerrainEditorState::from_metadata(&metadata);
+        assert!(
+            !state.use_terrain_override,
+            "from_metadata with all-None terrain fields should set use_terrain_override = false"
+        );
+    }
+
+    #[test]
+    fn test_terrain_editor_from_metadata_with_tree_type_sets_use_override_true() {
+        let metadata = TileVisualMetadata {
+            tree_type: Some(TreeType::Pine),
+            ..Default::default()
+        };
+        let state = TerrainEditorState::from_metadata(&metadata);
+        assert!(state.use_terrain_override);
+        assert_eq!(state.tree_type, TreeType::Pine);
+    }
+
+    #[test]
+    fn test_clear_terrain_sets_use_override_false() {
+        use antares::domain::types::Position;
+
+        let mut editor =
+            MapEditorState::new(Map::new(1, "Map".to_string(), "".to_string(), 10, 10));
+        let pos = Position::new(3, 3);
+        editor.selected_position = Some(pos);
+
+        // Give the tile an explicit tree type.
+        if let Some(tile) = editor.map.get_tile_mut(pos) {
+            tile.visual.tree_type = Some(TreeType::Pine);
+        }
+
+        // Simulate what "Clear Terrain Properties" does.
+        if let Some(tile) = editor.map.get_tile_mut(pos) {
+            TerrainEditorState::clear_metadata(&mut tile.visual);
+        }
+        editor.terrain_editor_state = TerrainEditorState::default();
+        editor.terrain_editor_state.use_terrain_override = false;
+        editor.last_loaded_terrain_position = None;
+
+        // Tile should have no terrain data.
+        assert!(editor.map.get_tile(pos).unwrap().visual.tree_type.is_none());
+        // State reflects "no override".
+        assert!(!editor.terrain_editor_state.use_terrain_override);
+    }
+
+    #[test]
+    fn test_apply_terrain_with_no_override_clears_tile() {
+        use antares::domain::types::Position;
+
+        let mut editor =
+            MapEditorState::new(Map::new(1, "Map".to_string(), "".to_string(), 10, 10));
+        let pos = Position::new(4, 4);
+        editor.selected_position = Some(pos);
+
+        // Give the tile an explicit tree type.
+        if let Some(tile) = editor.map.get_tile_mut(pos) {
+            tile.visual.tree_type = Some(TreeType::Oak);
+        }
+
+        // Set terrain to Forest so apply_to_metadata_for_terrain would normally write tree_type.
+        if let Some(tile) = editor.map.get_tile_mut(pos) {
+            tile.terrain = TerrainType::Forest;
+        }
+
+        // Apply with use_terrain_override = false must clear the tile.
+        editor.terrain_editor_state = TerrainEditorState::default();
+        editor.terrain_editor_state.use_terrain_override = false;
+        editor.apply_terrain_state_to_selection();
+
+        assert!(
+            editor.map.get_tile(pos).unwrap().visual.tree_type.is_none(),
+            "Apply with use_terrain_override=false must clear tree_type"
+        );
+    }
+
+    #[test]
+    fn test_reset_vegetation_does_not_clear_visual_height() {
+        use antares::domain::types::Position;
+
+        let mut editor =
+            MapEditorState::new(Map::new(1, "Map".to_string(), "".to_string(), 10, 10));
+        let pos = Position::new(2, 2);
+        editor.selected_position = Some(pos);
+
+        // Set height and tree_type on the tile.
+        if let Some(tile) = editor.map.get_tile_mut(pos) {
+            tile.visual.height = Some(3.0);
+            tile.visual.tree_type = Some(TreeType::Oak);
+        }
+
+        // Simulate "Reset Vegetation" (the corrected version does NOT call visual_editor.reset()).
+        TerrainEditorState::clear_vegetation_metadata(
+            &mut editor.map.get_tile_mut(pos).unwrap().visual,
+        );
+
+        // height must still be present.
+        assert_eq!(
+            editor.map.get_tile(pos).unwrap().visual.height,
+            Some(3.0),
+            "Reset Vegetation must not remove visual height"
+        );
+        // tree_type must be gone.
+        assert!(
+            editor.map.get_tile(pos).unwrap().visual.tree_type.is_none(),
+            "Reset Vegetation must clear tree_type"
+        );
+    }
+
+    // ── Terrain type inspector ComboBox ──────────────────────────────────────
+
+    #[test]
+    fn test_change_terrain_forest_to_ground_clears_tree_type_and_changes_terrain() {
+        use antares::domain::types::Position;
+
+        let mut editor =
+            MapEditorState::new(Map::new(1, "Map".to_string(), "".to_string(), 10, 10));
+        let pos = Position::new(3, 3);
+        editor.selected_position = Some(pos);
+
+        // Give the tile Forest terrain and an explicit tree_type override.
+        if let Some(tile) = editor.map.get_tile_mut(pos) {
+            tile.terrain = TerrainType::Forest;
+            tile.visual.tree_type = Some(TreeType::Pine);
+            tile.visual.foliage_density = Some(1.5);
+        }
+
+        // Simulate the terrain ComboBox selecting Ground.
+        let new_terrain = TerrainType::Ground;
+        if let Some(old_tile) = editor.map.get_tile(pos).cloned() {
+            let mut new_tile = old_tile;
+            new_tile.terrain = new_terrain;
+            new_tile.blocked = matches!(new_terrain, TerrainType::Mountain | TerrainType::Water)
+                || matches!(new_tile.wall_type, WallType::Normal);
+            TerrainEditorState::clear_metadata(&mut new_tile.visual);
+            editor.set_tile(pos, new_tile);
+            editor.terrain_editor_state = TerrainEditorState::default();
+            editor.terrain_editor_state.use_terrain_override = false;
+            editor.last_loaded_terrain_position = None;
+            editor.last_loaded_visual_position = None;
+        }
+
+        let tile = editor.map.get_tile(pos).unwrap();
+        assert_eq!(tile.terrain, TerrainType::Ground, "terrain must be Ground");
+        assert!(
+            tile.visual.tree_type.is_none(),
+            "tree_type must be cleared after terrain change"
+        );
+        assert!(
+            tile.visual.foliage_density.is_none(),
+            "foliage_density must be cleared after terrain change"
+        );
+        assert!(editor.has_changes, "has_changes must be set");
+    }
+
+    #[test]
+    fn test_change_terrain_creates_undo_action_for_forest_to_grass() {
+        use antares::domain::types::Position;
+
+        let mut editor =
+            MapEditorState::new(Map::new(1, "Map".to_string(), "".to_string(), 10, 10));
+        let pos = Position::new(4, 4);
+        editor.selected_position = Some(pos);
+
+        if let Some(tile) = editor.map.get_tile_mut(pos) {
+            tile.terrain = TerrainType::Forest;
+            tile.visual.tree_type = Some(TreeType::Oak);
+        }
+
+        // Apply terrain change.
+        let new_terrain = TerrainType::Grass;
+        if let Some(old_tile) = editor.map.get_tile(pos).cloned() {
+            let mut new_tile = old_tile;
+            new_tile.terrain = new_terrain;
+            new_tile.blocked = false;
+            TerrainEditorState::clear_metadata(&mut new_tile.visual);
+            editor.set_tile(pos, new_tile);
+        }
+
+        assert_eq!(
+            editor.map.get_tile(pos).unwrap().terrain,
+            TerrainType::Grass
+        );
+        assert!(
+            editor.can_undo(),
+            "undo must be available after terrain change"
+        );
+
+        // Undo — tile should revert to Forest with tree_type restored.
+        editor.undo();
+        let tile = editor.map.get_tile(pos).unwrap();
+        assert_eq!(
+            tile.terrain,
+            TerrainType::Forest,
+            "undo must restore Forest terrain"
+        );
+        assert_eq!(
+            tile.visual.tree_type,
+            Some(TreeType::Oak),
+            "undo must restore original tree_type"
+        );
+    }
+
+    #[test]
+    fn test_change_terrain_mountain_to_ground_unblocks_tile() {
+        use antares::domain::types::Position;
+
+        let mut editor =
+            MapEditorState::new(Map::new(1, "Map".to_string(), "".to_string(), 10, 10));
+        let pos = Position::new(5, 5);
+
+        // Make tile Mountain (blocked by terrain rules).
+        if let Some(tile) = editor.map.get_tile_mut(pos) {
+            tile.terrain = TerrainType::Mountain;
+            tile.blocked = true;
+            tile.visual.rock_variant = Some(RockVariant::Jagged);
+        }
+
+        // Change to Ground.
+        let new_terrain = TerrainType::Ground;
+        if let Some(old_tile) = editor.map.get_tile(pos).cloned() {
+            let mut new_tile = old_tile;
+            new_tile.terrain = new_terrain;
+            new_tile.blocked = matches!(new_terrain, TerrainType::Mountain | TerrainType::Water)
+                || matches!(new_tile.wall_type, WallType::Normal);
+            TerrainEditorState::clear_metadata(&mut new_tile.visual);
+            editor.set_tile(pos, new_tile);
+        }
+
+        let tile = editor.map.get_tile(pos).unwrap();
+        assert_eq!(tile.terrain, TerrainType::Ground);
+        assert!(!tile.blocked, "Ground tile must not be blocked");
+        assert!(
+            tile.visual.rock_variant.is_none(),
+            "rock_variant must be cleared after terrain change"
+        );
+    }
+
+    #[test]
+    fn test_change_terrain_preserves_visual_height_when_clearing_metadata() {
+        use antares::domain::types::Position;
+
+        let mut editor =
+            MapEditorState::new(Map::new(1, "Map".to_string(), "".to_string(), 10, 10));
+        let pos = Position::new(2, 2);
+
+        // Tile has both a visual height override and a tree_type override.
+        if let Some(tile) = editor.map.get_tile_mut(pos) {
+            tile.terrain = TerrainType::Forest;
+            tile.visual.height = Some(3.5);
+            tile.visual.tree_type = Some(TreeType::Willow);
+        }
+
+        // Apply terrain change to Ground.
+        if let Some(old_tile) = editor.map.get_tile(pos).cloned() {
+            let mut new_tile = old_tile;
+            new_tile.terrain = TerrainType::Ground;
+            new_tile.blocked = false;
+            TerrainEditorState::clear_metadata(&mut new_tile.visual);
+            editor.set_tile(pos, new_tile);
+        }
+
+        let tile = editor.map.get_tile(pos).unwrap();
+        // clear_metadata must not touch height (a visual-only field).
+        assert_eq!(
+            tile.visual.height,
+            Some(3.5),
+            "visual height must be preserved across terrain type change"
+        );
+        assert!(tile.visual.tree_type.is_none(), "tree_type must be cleared");
     }
 }

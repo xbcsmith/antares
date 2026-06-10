@@ -2,6 +2,136 @@
 
 ---
 
+## Bug Fix: Map Editor Inspector — Cannot Remove Procedural Trees (2026)
+
+**Goal:** Fix the Campaign Builder Map Editor inspector having no way to remove procedural trees from Forest tiles. The inspector showed `Terrain: Forest` as a read-only label; all vegetation clear/reset buttons only operated on `TileVisualMetadata` (tree species, foliage density, etc.) but never changed `tile.terrain`. Since procedural trees are spawned by `TerrainType::Forest`, they could not be removed from the inspector at all.
+
+### Root Cause
+
+Procedural trees are generated at runtime by `TerrainType::Forest`. The inspector only showed this as a static `ui.label(format!("Terrain: {:?}", tile.terrain))`. Every existing button (Reset Vegetation, Clear Terrain Properties, Reset to Defaults) operated solely on `TileVisualMetadata` fields — not on `tile.terrain`. There was no path from the inspector to change the terrain type.
+
+### Fix
+
+**`show_inspector_panel`** (`sdk/campaign_builder/src/map_editor.rs`):
+
+- Tile data is now captured as an owned snapshot (`tile_snapshot`) before the mutable `ui.group` closure, avoiding borrow conflicts.
+- The static `ui.label("Terrain: {:?}")` is replaced with a **`ComboBox`** listing all nine terrain types (`Ground`, `Grass`, `Stone`, `Dirt`, `Forest`, `Water`, `Swamp`, `Lava`, `Mountain`).
+- Selecting a different terrain queues a change in `change_terrain_to: Option<TerrainType>`, applied after the group closure via `set_tile` (full undo/redo support).
+- Applying the terrain change also:
+  - Recalculates `tile.blocked` using the same logic as `paint_tile` (Mountain and Water → blocked; others → unblocked unless wall is Normal).
+  - Calls `TerrainEditorState::clear_metadata` on the new tile to remove stale terrain-specific visual overrides (e.g. `tree_type` metadata left on a tile that is no longer Forest).
+  - Resets `terrain_editor_state` and invalidates both position caches so both panels reload from the new tile on the next frame.
+- **Vegetation Authoring** section now shows a yellow tip when the tile is Forest: `"💡 Procedural trees come from Forest terrain. Change terrain type above to remove them."` — prevents future confusion about which button removes trees.
+
+**`landscape_editor.rs`** (pre-existing clippy violations fixed in same pass):
+
+- `apply_edit` signature changed from `&mut Vec<LandscapeDefinition>` → `&mut [LandscapeDefinition]` (clippy `ptr_arg`).
+- `show_edit` signature changed the same way.
+
+### Files Changed
+
+| File                                           | Change                                                                |
+| ---------------------------------------------- | --------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/map_editor.rs`       | Terrain ComboBox in inspector, Forest vegetation tip, 4 new tests     |
+| `sdk/campaign_builder/src/landscape_editor.rs` | `&mut Vec` → `&mut [_]` for `apply_edit` and `show_edit` (clippy fix) |
+
+### Tests Added
+
+- `test_change_terrain_forest_to_ground_clears_tree_type_and_changes_terrain` — terrain changes from Forest to Ground; tree_type and foliage_density are cleared.
+- `test_change_terrain_creates_undo_action_for_forest_to_grass` — undo after terrain change restores original terrain and tree_type.
+- `test_change_terrain_mountain_to_ground_unblocks_tile` — blocked flag is correctly recalculated; rock_variant cleared.
+- `test_change_terrain_preserves_visual_height_when_clearing_metadata` — `clear_metadata` does not touch the visual `height` field.
+
+### Usage
+
+1. Open **Map Editor** → select a tile that has procedural trees (Forest terrain).
+2. The **Terrain** row in the inspector is now a dropdown. Change `Forest` → `Ground` (or any other terrain type).
+3. The tile is immediately updated with full undo support (`Ctrl+Z` restores it). The terrain-specific visual overrides (tree type, foliage density) are also cleared automatically.
+4. Save the map.
+
+---
+
+## Bug Fix: Map Editor Reset/Clear Terrain Buttons Broken (2026)
+
+**Goal:** Fix four compounding bugs that caused "Reset Vegetation", "Reset to Defaults", and "Clear Terrain Properties" to appear to do nothing and, worse, corrupt tile data when Apply was clicked afterwards.
+
+### Root Causes
+
+| #   | Bug                                                                                                       | Effect                                                                                                                                             |
+| --- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `last_loaded_terrain_position` never invalidated after clear buttons                                      | Terrain panel never reloads from tile; old (default) values stick                                                                                  |
+| 2   | After clearing, `terrain_editor_state = TerrainEditorState::default()` writes `tree_type = TreeType::Oak` | Panel looks identical before/after clear; user thinks nothing happened. Clicking Apply afterwards re-writes Oak to the tile, **undoing the clear** |
+| 3   | "Reset Vegetation" called `visual_editor.reset()`                                                         | Incorrectly cleared height/scale/etc. from the staging buffer (one-frame glitch, wrong semantics)                                                  |
+| 4   | `apply_terrain_state_to_tile` always wrote `Some(tree_type)`                                              | No way to express "no override — use runtime default" through the Apply pathway                                                                    |
+
+### Fix
+
+**`TerrainEditorState`** gains `use_terrain_override: bool`:
+
+- `default()` → `true` (a freshly-created state is an override by definition)
+- `from_metadata()` → `true` only when at least one terrain `Option` field is `Some`; `false` on a tile with no terrain overrides
+- `apply_terrain_state_to_tile` → when `false`, calls `clear_metadata` (writes all terrain fields as `None`) instead of writing enum defaults back
+
+**`show_terrain_specific_controls`** adds an "Override terrain settings" checkbox at the top. When unchecked, the dropdowns/sliders are hidden and a grey "No terrain overrides — runtime uses defaults" label is shown.
+
+**"Reset to Defaults"** now sets `use_terrain_override = false` and `last_loaded_terrain_position = None`.
+
+**"Reset Vegetation"** removes the erroneous `visual_editor.reset()` call; sets `use_terrain_override = false`; invalidates both position caches.
+
+**"Clear Terrain Properties"** sets `use_terrain_override = false` and `last_loaded_terrain_position = None`.
+
+**5 new tests** covering: `from_metadata` with no-override tile, `from_metadata` with explicit tree type, clear sets override=false, Apply with override=false clears the tile, Reset Vegetation does not clear visual height.
+
+### Files Changed
+
+`sdk/campaign_builder/src/map_editor.rs`
+
+---
+
+## Map Editor: Landscape Quick-Place + Visual Property Delete Buttons (2026)
+
+**Goal:** Replace the redundant Visual Presets palette panel with a focused Landscape section that lets authors place/remove imported landscape meshes on a tile directly from the inspector. Also add per-property ✕ delete buttons to Visual Properties so individual fields can be cleared without wiping the whole tile.
+
+### Files Changed
+
+| File                                     | Change                                                                                                        |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `sdk/campaign_builder/src/map_editor.rs` | New `show_landscape_quick_place`, ✕ buttons in `show_visual_metadata_editor`, 2 new state fields, 3 new tests |
+| `docs/explanation/implementations.md`    | This entry                                                                                                    |
+
+### What Changed
+
+**Removed**: The bottom "Visual Presets" `ui.group` (the category-filtered 3×N grid of preset buttons). The preset _dropdown_ inside Visual Properties is kept — it was not redundant, it's a different widget that stages a preset into the editor buffer.
+
+**Added — Landscape section** (replaces Visual Presets panel):
+
+- `MapEditorState` gains `landscape_quick_scale: f32` (default 1.0) and `last_landscape_load_position: Option<Position>`.
+- New `show_landscape_quick_place(ui, editor, pos, landscape_definitions)` renders:
+  - **Mesh dropdown** — only landscape definitions that have an imported `mesh_id` are shown.
+  - **Scale** — `Slider` (0.1–3.0) + `DragValue` text field side by side, matching the Terrain Settings style.
+  - **🌳 Place / 🌳 Update** — adds a new `LandscapePlacement` or replaces the existing one for this definition at this tile.
+  - **🗑️ Remove** — removes the existing placement (only visible when one exists).
+- **Auto-populate**: when `selected_position` changes, the section reads the tile's first `LandscapePlacement` and sets the dropdown + scale to match, so selecting a tile with a placed mesh immediately shows its values.
+- Scale is omitted from the stored `LandscapePlacement` when it equals the definition's `default_scale` (keeps RON output clean).
+
+**Added — Visual Property ✕ delete buttons**:
+
+- A `clear_field: [bool; 7]` array is declared at the top of the property block (indices: height, width_x, width_z, scale, y_offset, rotation_y, color_tint).
+- Each enabled property row now has a small `✕` button that sets the corresponding flag.
+- After all rows, a single block applies any flagged clears: writes `None` directly to the tile (and all selected tiles in multi-select), unchecks the editor buffer, marks `has_changes = true`, and invalidates `last_loaded_visual_position`.
+- Result: the user can remove e.g. the custom height from a tile with one click, without affecting any other property and without needing to click the Apply button.
+
+### Usage
+
+1. Select a tile on the map.
+2. Scroll to the **🌳 Landscape** section (where Visual Presets used to be).
+3. Pick a mesh from the dropdown — only imported meshes (definitions with a `mesh_id`) appear.
+4. Adjust Scale if needed.
+5. Click **🌳 Place** — the mesh is placed. Click again to return and **🌳 Update** or **🗑️ Remove** it.
+6. To clear a single Visual Property (e.g. Height), click the small **✕** next to it — the field is removed from the tile immediately.
+
+---
+
 ## Bug Fix: Landscape Editor Mesh Picker — Cannot Assign Mesh to Definition (2026)
 
 **Goal:** Fix the Campaign Builder → Landscape Editor → Edit form having no way to assign or change the `mesh_id` on a `LandscapeDefinition`. The Mesh field was a read-only label; users who imported new meshes via the OBJ Importer had no way to connect them to an existing definition.

@@ -13,7 +13,7 @@
             "imported",
         ],
         mesh_id: Some(11000),
-        description: Some("Imported landscape mesh \'Short Oak Tree\'"),
+        description: Some("Short Grizzled Oak Tree"),
     ),
     (
         id: 2,
@@ -29,7 +29,7 @@
             "imported",
         ],
         mesh_id: Some(11001),
-        description: Some("Imported landscape mesh \'Pine Tree\'"),
+        description: Some("Pine Tree"),
     ),
     (
         id: 3,

@@ -346,7 +346,7 @@ impl LandscapeEditorState {
         self.mode = LandscapeEditorMode::Edit;
     }
 
-    fn apply_edit(&mut self, defs: &mut Vec<LandscapeDefinition>) {
+    fn apply_edit(&mut self, defs: &mut [LandscapeDefinition]) {
         let (Some(idx), Some(mut buf)) = (self.edit_index, self.edit_buffer.take()) else {
             return;
         };
@@ -375,7 +375,7 @@ impl LandscapeEditorState {
     fn show_edit(
         &mut self,
         ui: &mut egui::Ui,
-        defs: &mut Vec<LandscapeDefinition>,
+        defs: &mut [LandscapeDefinition],
         unsaved_changes: &mut bool,
     ) {
         let Some(buf) = self.edit_buffer.as_mut() else {
