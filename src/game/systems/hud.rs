@@ -423,10 +423,17 @@ pub struct HudPlugin;
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(PortraitAssets::default())
-            .init_resource::<Assets<Image>>()
             .init_resource::<FullPortraitAssets>()
+            // PostStartup (not Startup): the mini-map/automap canvas images
+            // must be allocated AFTER every Startup-issued asset load has
+            // reserved its asset index. If a canvas allocation interleaves
+            // with (or precedes) the terrain texture loads, the render world
+            // intermittently binds the canvas image to terrain materials —
+            // water/mountain tiles then display the map canvas instead of
+            // their texture. PostStartup runs in the same startup tick, after
+            // all Startup systems, so the allocation order is deterministic.
             .add_systems(
-                Startup,
+                PostStartup,
                 (
                     initialize_mini_map_image,
                     initialize_automap_image,
@@ -1047,6 +1054,7 @@ fn update_mini_map(
     mini_map_image: Res<MiniMapImage>,
     mut images: ResMut<Assets<Image>>,
     mut mini_map_root_query: Query<&mut Node, With<MiniMapRoot>>,
+    mut last_painted_state: Local<Option<u64>>,
 ) {
     let show_minimap = global_state.0.config.graphics.show_minimap;
 
@@ -1062,9 +1070,37 @@ fn update_mini_map(
         return;
     }
 
+    // Diagnostic kill-switch: skip all canvas writes to distinguish
+    // image-creation effects from image-modification effects.
+    if std::env::var("ANTARES_DIAG_NO_PAINT").is_ok() {
+        return;
+    }
+
     let Some(map) = global_state.0.world.get_current_map() else {
         return;
     };
+
+    // Repaint only when the rendered content can actually have changed.
+    // Rewriting the image every frame floods the renderer with per-frame
+    // GPU texture re-uploads and has been observed to corrupt unrelated
+    // material texture bindings during asset loading.
+    let paint_state = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::hash::DefaultHasher::new();
+        map.id.hash(&mut hasher);
+        global_state.0.world.party_position.x.hash(&mut hasher);
+        global_state.0.world.party_position.y.hash(&mut hasher);
+        (global_state.0.world.party_facing as u8).hash(&mut hasher);
+        for npc in &map.npc_placements {
+            npc.position.x.hash(&mut hasher);
+            npc.position.y.hash(&mut hasher);
+        }
+        hasher.finish()
+    };
+    if *last_painted_state == Some(paint_state) {
+        return;
+    }
+    *last_painted_state = Some(paint_state);
 
     let Some(image) = images.get_mut(&mini_map_image.handle) else {
         return;
@@ -1096,6 +1132,15 @@ fn update_mini_map(
     let Some(data) = image.data.as_mut() else {
         return;
     };
+
+    // Diagnostic: paint the whole canvas solid magenta so any surface that
+    // wrongly samples this image is unambiguously identifiable.
+    if std::env::var("ANTARES_DIAG_SOLID").is_ok() {
+        for px in data.chunks_exact_mut(4) {
+            px.copy_from_slice(&[255, 0, 255, 255]);
+        }
+        return;
+    }
 
     for tile_y in 0..viewport_diameter {
         for tile_x in 0..viewport_diameter {
@@ -1463,10 +1508,38 @@ fn update_automap_image(
     automap_image: Res<AutomapImage>,
     mut images: ResMut<Assets<Image>>,
     mut canvas_query: Query<&mut Node, With<AutomapCanvas>>,
+    mut last_painted_state: Local<Option<u64>>,
 ) {
     let Some(map) = global_state.0.world.get_current_map() else {
         return;
     };
+
+    // Diagnostic kill-switch: skip all canvas writes to distinguish
+    // image-creation effects from image-modification effects.
+    if std::env::var("ANTARES_DIAG_NO_PAINT").is_ok() {
+        return;
+    }
+
+    // Repaint only when the rendered content can actually have changed (see
+    // `update_mini_map` for why per-frame image rewrites are harmful).
+    let pois = map.collect_map_pois(&global_state.0.quests);
+    let paint_state = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::hash::DefaultHasher::new();
+        map.id.hash(&mut hasher);
+        global_state.0.world.party_position.x.hash(&mut hasher);
+        global_state.0.world.party_position.y.hash(&mut hasher);
+        (global_state.0.world.party_facing as u8).hash(&mut hasher);
+        for (poi_position, _) in &pois {
+            poi_position.x.hash(&mut hasher);
+            poi_position.y.hash(&mut hasher);
+        }
+        hasher.finish()
+    };
+    if *last_painted_state == Some(paint_state) {
+        return;
+    }
+    *last_painted_state = Some(paint_state);
 
     let max_dimension = map.width.max(map.height).max(1);
     let tile_px =
@@ -1500,6 +1573,15 @@ fn update_automap_image(
         return;
     };
 
+    // Diagnostic: paint the whole canvas solid cyan so any surface that
+    // wrongly samples this image is unambiguously identifiable.
+    if std::env::var("ANTARES_DIAG_SOLID").is_ok() {
+        for px in data.chunks_exact_mut(4) {
+            px.copy_from_slice(&[0, 255, 255, 255]);
+        }
+        return;
+    }
+
     for y in 0..map.height {
         for x in 0..map.width {
             let pos = Position::new(x as i32, y as i32);
@@ -1512,7 +1594,7 @@ fn update_automap_image(
         }
     }
 
-    for (poi_position, poi) in map.collect_map_pois(&global_state.0.quests) {
+    for (poi_position, poi) in pois {
         if poi_position.x < 0 || poi_position.y < 0 {
             continue;
         }
@@ -3358,6 +3440,9 @@ mod tests {
         // Build an App and add minimal plugins + HUD plugin (keeps test lightweight)
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        // HudPlugin's startup systems write the mini-map/automap canvases into
+        // `Assets<Image>`; in the real app the asset plugins provide it.
+        app.init_resource::<Assets<Image>>();
         app.add_plugins(HudPlugin);
         app.insert_resource(GlobalState(state));
 
@@ -3410,6 +3495,9 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        // HudPlugin's startup systems write the mini-map/automap canvases into
+        // `Assets<Image>`; in the real app the asset plugins provide it.
+        app.init_resource::<Assets<Image>>();
         app.add_plugins(HudPlugin);
         app.insert_resource(GlobalState(state));
 
@@ -3461,6 +3549,9 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        // HudPlugin's startup systems write the mini-map/automap canvases into
+        // `Assets<Image>`; in the real app the asset plugins provide it.
+        app.init_resource::<Assets<Image>>();
         app.add_plugins(HudPlugin);
         app.insert_resource(GlobalState(state));
 
@@ -3508,6 +3599,9 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        // HudPlugin's startup systems write the mini-map/automap canvases into
+        // `Assets<Image>`; in the real app the asset plugins provide it.
+        app.init_resource::<Assets<Image>>();
         app.add_plugins(HudPlugin);
         app.insert_resource(GlobalState(state));
 
@@ -3571,6 +3665,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(bevy::asset::AssetPlugin::default());
+        // Register `Assets<Image>` with the asset server; in the real app
+        // ImagePlugin does this. HudPlugin's startup systems require it.
+        app.init_asset::<Image>();
         app.add_plugins(HudPlugin);
         app.insert_resource(GlobalState(state));
 
@@ -3628,6 +3725,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(bevy::asset::AssetPlugin::default());
+        // Register `Assets<Image>` with the asset server; in the real app
+        // ImagePlugin does this. HudPlugin's startup systems require it.
+        app.init_asset::<Image>();
         app.add_plugins(HudPlugin);
         app.insert_resource(GlobalState(state));
 
@@ -3777,6 +3877,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(bevy::asset::AssetPlugin::default());
+        // Register `Assets<Image>` with the asset server; in the real app
+        // ImagePlugin does this. HudPlugin's startup systems require it.
+        app.init_asset::<Image>();
         app.add_plugins(HudPlugin);
         app.insert_resource(GlobalState(state));
 
@@ -4542,6 +4645,9 @@ mod clock_tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        // HudPlugin's startup systems write the mini-map/automap canvases into
+        // `Assets<Image>`; in the real app the asset plugins provide it.
+        app.init_resource::<Assets<Image>>();
         app.add_plugins(HudPlugin);
         app.insert_resource(GlobalState(GameState::new()));
 
@@ -4586,6 +4692,9 @@ mod clock_tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        // HudPlugin's startup systems write the mini-map/automap canvases into
+        // `Assets<Image>`; in the real app the asset plugins provide it.
+        app.init_resource::<Assets<Image>>();
         app.add_plugins(HudPlugin);
         app.insert_resource(GlobalState(GameState::new()));
 
@@ -4629,6 +4738,9 @@ mod clock_tests {
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        // HudPlugin's startup systems write the mini-map/automap canvases into
+        // `Assets<Image>`; in the real app the asset plugins provide it.
+        app.init_resource::<Assets<Image>>();
         app.add_plugins(HudPlugin);
         app.insert_resource(GlobalState(state));
 

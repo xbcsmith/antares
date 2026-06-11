@@ -676,15 +676,14 @@
             x: 11,
             y: 1,
             visual: (
-                height: Some(0.4),
+                height: None,
                 width_x: None,
                 width_z: None,
-                color_tint: Some((0.5, 0.85, 0.5)),
-                scale: Some(1.0),
+                color_tint: None,
+                scale: None,
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
-                grass_density: Some(Medium),
             ),
         ),
         (
@@ -1086,15 +1085,14 @@
             x: 11,
             y: 2,
             visual: (
-                height: Some(0.4),
+                height: None,
                 width_x: None,
                 width_z: None,
-                color_tint: Some((0.5, 0.85, 0.5)),
-                scale: Some(1.0),
+                color_tint: None,
+                scale: None,
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
-                grass_density: Some(Medium),
             ),
         ),
         (
@@ -3493,8 +3491,6 @@
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
-                water_flow_direction: Some(Still),
-                snow_coverage: Some(0.0),
             ),
         ),
         (
@@ -3515,8 +3511,6 @@
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
-                water_flow_direction: Some(Still),
-                snow_coverage: Some(0.0),
             ),
         ),
         (
@@ -3883,8 +3877,6 @@
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
-                water_flow_direction: Some(Still),
-                snow_coverage: Some(0.0),
             ),
         ),
         (
@@ -3905,8 +3897,6 @@
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
-                water_flow_direction: Some(Still),
-                snow_coverage: Some(0.0),
             ),
         ),
         (
@@ -3927,8 +3917,6 @@
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
-                water_flow_direction: Some(Still),
-                snow_coverage: Some(0.0),
             ),
         ),
         (
@@ -4305,8 +4293,6 @@
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
-                water_flow_direction: Some(Still),
-                snow_coverage: Some(0.0),
             ),
         ),
         (
@@ -4327,8 +4313,6 @@
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
-                water_flow_direction: Some(Still),
-                snow_coverage: Some(0.0),
             ),
         ),
         (
@@ -4349,8 +4333,6 @@
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
-                water_flow_direction: Some(Still),
-                snow_coverage: Some(0.0),
             ),
         ),
         (
@@ -4698,7 +4680,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4718,7 +4700,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4738,7 +4720,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6043,7 +6025,7 @@
             ),
         ),
         (
-            terrain: Grass,
+            terrain: Ground,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6085,7 +6067,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6499,7 +6481,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6519,7 +6501,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6539,7 +6521,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6559,7 +6541,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6880,7 +6862,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6900,7 +6882,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6960,7 +6942,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7364,7 +7346,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7778,7 +7760,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8101,7 +8083,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8121,7 +8103,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8141,7 +8123,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8161,7 +8143,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8181,7 +8163,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8201,7 +8183,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8581,13 +8563,6 @@
     ],
     landscape_placements: [
         (
-            landscape_id: 1,
-            position: (
-                x: 8,
-                y: 11,
-            ),
-        ),
-        (
             landscape_id: 2,
             position: (
                 x: 9,
@@ -8600,6 +8575,7 @@
                 x: 14,
                 y: 14,
             ),
+            scale: Some(2.0),
         ),
         (
             landscape_id: 4,
@@ -8635,30 +8611,6 @@
                 x: 19,
                 y: 15,
             ),
-        ),
-        (
-            landscape_id: 1,
-            position: (
-                x: 14,
-                y: 16,
-            ),
-            scale: Some(1.55),
-        ),
-        (
-            landscape_id: 1,
-            position: (
-                x: 15,
-                y: 16,
-            ),
-            scale: Some(2.0),
-        ),
-        (
-            landscape_id: 5,
-            position: (
-                x: 16,
-                y: 16,
-            ),
-            scale: Some(1.9),
         ),
         (
             landscape_id: 2,
@@ -8740,6 +8692,27 @@
                 y: 11,
             ),
             scale: Some(1.35),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 8,
+                y: 11,
+            ),
+        ),
+        (
+            landscape_id: 4,
+            position: (
+                x: 15,
+                y: 15,
+            ),
+        ),
+        (
+            landscape_id: 4,
+            position: (
+                x: 14,
+                y: 15,
+            ),
         ),
     ],
     is_outdoor: true,

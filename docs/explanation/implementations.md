@@ -2,6 +2,71 @@
 
 ---
 
+## Bug Fix: Intermittent Terrain Texture Failure at Startup (2026)
+
+**Goal:** Fix the intermittent startup bug where one terrain tile texture (most
+often water or mountain) would display as an error checkerboard instead of its
+correct texture.
+
+### Root Cause — Async Texture Loading Race
+
+Bevy's render world assigns each `Assets<Image>` entry a slot in the bindless
+texture array when it first prepares the image as a `GpuImage`. The
+`StandardMaterial` for each terrain tile stores the slot index for its
+`base_color_texture` in a GPU buffer; once written, that slot is never
+corrected if the texture was still loading when the bind group was first
+prepared.
+
+The terrain textures in `campaigns/tutorial/assets/textures/terrain/` are
+**3.8–8.1 MB** each (real photorealistic PNGs). The original implementation
+used `asset_server.load()`, which is asynchronous — each PNG is decoded in a
+thread-pool worker and inserted into `Assets<Image>` in a later `PreUpdate`
+frame. Large files take long enough to decode that, on typical hardware, they
+are still loading when the render world's first `PrepareAssets` pass runs.
+Whichever texture loses the race has its bind-group slot permanently set to a
+fallback (the Bevy error checkerboard), with no subsequent correction.
+
+Two earlier incremental fixes addressed related symptoms but not the root cause:
+
+1. **HudPlugin** — mini-map and automap canvas images moved from `Startup` to
+   `PostStartup` to prevent index-based handles from interleaving with terrain
+   texture registrations. This eliminated those specific races but left the core
+   async-load timing issue intact.
+2. **SkyBodyPlugin** — cloud noise texture moved from first-`Update` lazy
+   allocation to a `PostStartup` pre-allocation (`preallocate_cloud_noise_system`)
+   for the same reason. Also still left the core issue.
+
+### Fix — Synchronous Texture Loading at Startup
+
+**`src/game/systems/terrain_materials.rs`** — `load_terrain_materials_system`:
+
+- Added `mut images: ResMut<Assets<Image>>` parameter.
+- Added a `load_terrain_image_sync` helper that reads each PNG with
+  `std::fs::read()` and decodes it with `Image::from_buffer()` in the Startup
+  system's thread — **before the first render frame**.
+- `images.add(decoded_image)` inserts the decoded image directly into
+  `Assets<Image>` with an index-based handle that is immediately valid.
+- The material is created with `base_color_texture: Some(handle)` where
+  `handle` is the just-inserted, already-loaded image. When the render world's
+  `PrepareAssets` first runs, the `GpuImage` already exists and the correct
+  slot is written into the material's GPU buffer from the very first frame.
+- If the sync read or decode fails (unusual launch context, missing file),
+  the helper falls back to `asset_server.load()` (async) and emits a
+  `warn!` log, preserving a working path for tests and CI.
+- The `BEVY_ASSET_ROOT` env var (set in `main()` before `App::new()`) is
+  read to build the full absolute file path, matching the path resolution
+  the `AssetPlugin` would use.
+
+### Files Changed
+
+| File                                    | Change                                                                                               |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `src/game/systems/terrain_materials.rs` | Sync load via `load_terrain_image_sync`; added `images` parameter to `load_terrain_materials_system` |
+| `src/game/systems/sky_bodies.rs`        | Added `preallocate_cloud_noise_system` PostStartup (earlier fix retained)                            |
+| `docs/explanation/implementations.md`   | This entry                                                                                           |
+
+---
+
 ## Bug Fix: Map Editor Inspector — Cannot Remove Procedural Trees (2026)
 
 **Goal:** Fix the Campaign Builder Map Editor inspector having no way to remove procedural trees from Forest tiles. The inspector showed `Terrain: Forest` as a read-only label; all vegetation clear/reset buttons only operated on `TileVisualMetadata` (tree species, foliage density, etc.) but never changed `tile.terrain`. Since procedural trees are spawned by `TerrainType::Forest`, they could not be removed from the inspector at all.

@@ -212,6 +212,8 @@ Can not select a Rest option of (1) (2) or (3) because it opens the 1,2, or 3 ch
 
 When playing tutorial campaign ./campaigns/tutorial The oak and pine trees in the middle of that map_1 are not rendering. See the screenshot ./screenshots/trees_map_1.png The forrest of multiple different types of trees in map_1 are not using the new tree models. They look weird as you can see in the screenshot ./screenshots/forrest_map_1.png None of the trees on map_2 are rendering. I am assuming something changed in the tree rendering code and it broke the trees in the tutorial campaign. We should fix the tree rendering code so that the trees in the tutorial campaign render correctly.
 
+Hit A Trap. Everyone died. Mode is Gamever but I can keep moving around and the game is still responsive. I should not be able to move around when the mode is GameOver. The game should be frozen and I should only be able to click on the Game Over menu options.
+2026-06-11T20:14:50.026220Z  INFO antares::game::systems::input::global_toggles: Rest key pressed but mode is GameOver — ignoring
 
 ### SDK Bugs
 

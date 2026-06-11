@@ -182,6 +182,10 @@ fn main() {
 const ANTARES_TONEMAPPING_LUT_UUID: u128 = 0xaea7_0000_0000_0000_0000_0000_0000_0001;
 
 fn install_compatible_tonemapping_luts(app: &mut App) {
+    // Diagnostic kill-switch for isolating render-world image-map issues.
+    if std::env::var("ANTARES_DIAG_NO_LUT").is_ok() {
+        return;
+    }
     let lut_handle = Handle::<Image>::from(Uuid::from_u128(ANTARES_TONEMAPPING_LUT_UUID));
     {
         let mut images = app.world_mut().resource_mut::<Assets<Image>>();
@@ -197,8 +201,17 @@ fn install_compatible_tonemapping_luts(app: &mut App) {
     };
     app.insert_resource(luts.clone());
 
+    // Diagnostic: skip the manual render-world GpuImage insertion; the
+    // main-world image above is extracted and prepared by the normal
+    // render-asset machinery (RenderSet::PrepareAssets runs before bind
+    // groups), so the manual insert may be redundant.
+    let skip_render_world_insert = std::env::var("ANTARES_DIAG_NO_RW_INSERT").is_ok();
+
     if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
         render_app.insert_resource(luts);
+        if skip_render_world_insert {
+            return;
+        }
         render_app.add_systems(
             RenderStartup,
             move |render_device: Res<RenderDevice>,

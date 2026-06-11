@@ -522,6 +522,11 @@ impl Plugin for MapRenderingPlugin {
             .init_resource::<super::advanced_grass::GrassRenderConfig>() // Add grass render config
             .init_resource::<super::advanced_grass::GrassInstanceConfig>()
             .add_systems(
+                PreStartup,
+                // Diagnostic only; no-op unless ANTARES_DIAG_DUMMY_IMAGES is set.
+                super::terrain_materials::debug_allocate_dummy_images_system,
+            )
+            .add_systems(
                 Startup,
                 // Load terrain textures/materials before map spawn runs so the
                 // cache is populated when spawn_map_system executes.
@@ -535,6 +540,8 @@ impl Plugin for MapRenderingPlugin {
             .add_systems(
                 Update,
                 (
+                    // Temporary diagnostics for intermittent wrong terrain textures
+                    super::terrain_materials::debug_terrain_texture_bindings_system,
                     // Vegetation performance systems for culling and LOD
                     super::advanced_trees::tree_lod_switching_system,
                     super::advanced_grass::grass_distance_culling_system,
