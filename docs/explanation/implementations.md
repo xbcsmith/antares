@@ -1245,3 +1245,59 @@ cargo nextest → 5095 passed, 8 skipped, 0 failed
 ```
 
 ---
+
+## Phase 3: Bark Normal Map + Lit Bark
+
+**Branch**: `pr-vegetation-updates`
+**Date**: 2026-06-12
+
+### Overview
+
+Switched bark materials from unlit to lit shading and added a Sobel-derived
+normal map so tree trunks show groove depth under the scene directional light.
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `src/bin/generate_normal_map.rs` | New binary — reads `bark.png`, applies 3×3 Sobel, writes `bark_normal.png` to both asset locations |
+| `assets/textures/trees/bark_normal.png` | Generated RGB normal map (9.2 KB) |
+| `campaigns/tutorial/assets/textures/trees/bark_normal.png` | Copied from assets |
+| `src/game/systems/procedural_meshes.rs` | Constant + material + test updates (see below) |
+| `Cargo.toml` | Added `[[bin]]` entry for `generate-normal-map` |
+
+### Key Decisions
+
+- **Sobel scale 4.0**: Moderate bumpiness; tunable via `SOBEL_SCALE` constant without regenerating from scratch.
+- **`flip_normal_map_y: false`**: DirectX convention; flip to `true` if grooves appear inverted in one axis.
+- **Clamp-to-edge sampling**: Avoids seam artefacts at bark texture borders; no wrapping.
+
+### Constant Added
+
+```rust
+const TREE_BARK_NORMAL_TEXTURE: &str = "assets/textures/trees/bark_normal.png";
+```
+
+### Material Changes (`get_or_create_bark_material` + variant fallback)
+
+- `unlit: true` → `unlit: false` in both `get_or_create_bark_material` and the inline fallback in `get_or_create_bark_material_variant`.
+- `normal_map_texture: Some(normal_handle)` and `flip_normal_map_y: false` added to both.
+- Normal handle loaded via `super::creature_meshes::load_texture`.
+
+### Tests Updated
+
+| Test | Change |
+|---|---|
+| `test_bark_material_uses_texture_and_is_lit_with_normal_map` | Renamed from `…is_unlit`; asserts `!material.unlit` and `normal_map_texture.is_some()` |
+| `test_bark_material_variant_cache_reuses_equivalent_tint_bucket_and_is_lit` | Renamed from `…is_unlit`; same assertion updates |
+
+### Quality Gates
+
+```text
+cargo fmt     → clean (no output)
+cargo check   → Finished 0 errors
+cargo clippy  → Finished 0 warnings
+cargo nextest → 5204 passed, 8 skipped, 0 failed
+```
+
+---

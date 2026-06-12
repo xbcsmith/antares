@@ -338,13 +338,17 @@ impl ProceduralMeshCache {
                 texture_path = TREE_BARK_TEXTURE,
                 "loading procedural tree bark material"
             );
+            let normal_handle =
+                super::creature_meshes::load_texture(asset_server, TREE_BARK_NORMAL_TEXTURE);
             let handle = materials.add(StandardMaterial {
                 base_color_texture: Some(asset_server.load(TREE_BARK_TEXTURE)),
                 // Keep the textured bark as the primary trunk colour source.
                 // Dark species/map tints are applied only to texture-free fallback paths.
                 base_color: Color::WHITE,
+                normal_map_texture: Some(normal_handle),
+                flip_normal_map_y: false,
                 perceptual_roughness: 0.9,
-                unlit: true,
+                unlit: false,
                 ..default()
             });
             self.tree_bark_material = Some(handle.clone());
@@ -421,17 +425,19 @@ impl ProceduralMeshCache {
         }
 
         let base_handle = self.get_or_create_bark_material(asset_server, materials);
-        let mut material =
-            materials
-                .get(&base_handle)
-                .cloned()
-                .unwrap_or_else(|| StandardMaterial {
-                    base_color_texture: Some(asset_server.load(TREE_BARK_TEXTURE)),
-                    base_color: Color::WHITE,
-                    perceptual_roughness: 0.9,
-                    unlit: true,
-                    ..default()
-                });
+        let mut material = materials.get(&base_handle).cloned().unwrap_or_else(|| {
+            let normal_handle =
+                super::creature_meshes::load_texture(asset_server, TREE_BARK_NORMAL_TEXTURE);
+            StandardMaterial {
+                base_color_texture: Some(asset_server.load(TREE_BARK_TEXTURE)),
+                base_color: Color::WHITE,
+                normal_map_texture: Some(normal_handle),
+                flip_normal_map_y: false,
+                perceptual_roughness: 0.9,
+                unlit: false,
+                ..default()
+            }
+        });
 
         if material.base_color_texture.is_some() {
             // Texture-bearing bark must not be multiplied by dark species/tile
@@ -937,6 +943,8 @@ const TREE_TRUNK_COLOR: Color = Color::srgb(0.4, 0.25, 0.15); // Brown
 // Tree texture asset paths
 /// Asset path for the bark texture applied to all non-Dead procedural tree trunks.
 const TREE_BARK_TEXTURE: &str = "assets/textures/trees/bark.png";
+/// Asset path for the bark normal-map texture used to add surface groove detail to lit trunk materials.
+const TREE_BARK_NORMAL_TEXTURE: &str = "assets/textures/trees/bark_normal.png";
 /// Asset path for the Oak foliage detail texture used by the lit foliage material.
 const TREE_FOLIAGE_TEXTURE_OAK: &str = "assets/textures/trees/foliage_oak.png";
 /// Asset path for the Pine foliage detail texture used by the lit foliage material.
@@ -4463,9 +4471,9 @@ mod tests {
         const { assert!(TREE_FOLIAGE_ALPHA_CUTOFF < 1.0) };
     }
 
-    /// Tests that bark materials keep a base texture assigned and render visibly in dim scenes.
+    /// Tests that bark materials keep a base texture assigned, use a normal map, and are lit.
     #[test]
-    fn test_bark_material_uses_texture_and_is_unlit() {
+    fn test_bark_material_uses_texture_and_is_lit_with_normal_map() {
         fn create_bark_material_system(
             asset_server: Res<AssetServer>,
             mut materials: ResMut<Assets<StandardMaterial>>,
@@ -4486,8 +4494,12 @@ mod tests {
                 "Textured bark must use a white base color so the texture remains the primary trunk color"
             );
             assert!(
-                material.unlit,
-                "Tree bark material must be unlit so species colors remain visible in dim scenes"
+                !material.unlit,
+                "Tree bark material must be lit to show normal-map groove shading"
+            );
+            assert!(
+                material.normal_map_texture.is_some(),
+                "Bark material must have a normal-map texture for groove shading"
             );
         }
 
@@ -4571,9 +4583,9 @@ mod tests {
         app.update();
     }
 
-    /// Tests that tinted bark material variants are cached, reused, and keep the unlit setting.
+    /// Tests that tinted bark material variants are cached, reused, and use lit shading with a normal map.
     #[test]
-    fn test_bark_material_variant_cache_reuses_equivalent_tint_bucket_and_is_unlit() {
+    fn test_bark_material_variant_cache_reuses_equivalent_tint_bucket_and_is_lit() {
         fn create_bark_variants_system(
             asset_server: Res<AssetServer>,
             mut materials: ResMut<Assets<StandardMaterial>>,
@@ -4603,8 +4615,12 @@ mod tests {
                 .get(&first)
                 .expect("bark material variant should be inserted into material assets");
             assert!(
-                material.unlit,
-                "Cached bark material variants must remain unlit"
+                !material.unlit,
+                "Cached bark material variants must be lit to show normal-map groove shading"
+            );
+            assert!(
+                material.normal_map_texture.is_some(),
+                "Cached bark material variants must carry the normal-map texture"
             );
             assert!(
                 material.base_color_texture.is_some(),

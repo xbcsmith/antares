@@ -48,5 +48,9 @@ path = "src/bin/antares_sdk.rs"
 name = "generate-foliage-textures"
 path = "src/bin/generate_foliage_textures.rs"
 
+[[bin]]
+name = "generate-normal-map"
+path = "src/bin/generate_normal_map.rs"
+
 [dev-dependencies]
 tempfile = "3.23"
