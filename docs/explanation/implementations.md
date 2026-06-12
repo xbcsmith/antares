@@ -2,6 +2,66 @@
 
 ---
 
+## Phase 1: Foliage Detail Texturing + Lit Foliage (2026)
+
+**Goal:** Apply tiling leaf detail textures over existing geometric leaf
+silhouettes and switch foliage to lit shading, so each tree species shows
+realistic surface detail and light/shade variation.
+
+### What Changed
+
+**`src/bin/generate_foliage_textures.rs`** (new)  
+Deterministic binary that generates six 512×512 RGBA8 tiling leaf detail
+textures. Uses a splitmix64 PRNG (inline, no `rand` crate) and writes to both
+`assets/textures/trees/` and `campaigns/tutorial/assets/textures/trees/`.
+Each species has a fixed seed (101–106), per-species stamp shape (5-lobe oak,
+needle pine, ovate birch, lanceolate willow, frond palm, round shrub), and
+neutral-luminance base colour so the `base_color` multiply tint system remains
+the species/variant colour mechanism. Self-validates output spec (512×512, 40–85%
+opaque coverage, 0.65–0.90 mean luminance) and exits non-zero on violation.
+
+**`Cargo.toml`** — added `[[bin]]` entry for `generate-foliage-textures`.
+
+**`src/game/systems/procedural_meshes.rs`**  
+- Removed `#[cfg(test)]` from the six `TREE_FOLIAGE_TEXTURE_*` constants,
+  `TREE_FOLIAGE_ALPHA_CUTOFF`, and `foliage_texture_path()`.
+- `get_or_create_foliage_material`: now loads the species detail texture via
+  `super::creature_meshes::load_texture`, sets `base_color_texture: Some(…)`,
+  switches to `AlphaMode::Mask(TREE_FOLIAGE_ALPHA_CUTOFF)`, `unlit: false`,
+  and `perceptual_roughness: 0.9`. The species `base_color` multiply tint is
+  preserved (not forced to WHITE) so the variant-tint system keeps working.
+- `get_or_create_foliage_material_variant`: removed the force-reset of
+  `base_color_texture = None` and `alpha_mode = Opaque`; variants now inherit
+  the detail texture and mask mode from the base material.
+- Tests updated: assertions on `base_color_texture`, `alpha_mode`, and `unlit`
+  flipped to match the new lit/textured material.
+
+**`tests/foliage_texture_spec_test.rs`** (new)  
+Integration tests that open the six committed PNGs and assert all output-spec
+properties: 512×512 dimensions, 40–85% opaque coverage, 0.65–0.90 mean
+luminance, edge-strip presence (confirming seamless wrap). Also asserts that
+the `assets/` and `campaigns/tutorial/` copies are byte-identical.
+
+### Per-Card UV Verification
+
+All leaf-card generators in `advanced_trees.rs` already span 0..1 in both U
+and V:
+- `append_quad`: `[0,0],[1,0],[1,1],[0,1]` ✓
+- `append_diamond`: `[0.5,0],[1,0.5],[0.5,1],[0,0.5]` ✓
+- `append_triangle`: `[0,0],[1,0],[0.5,1]` ✓
+
+No UV fixes were needed.
+
+### Bug Fixed During Implementation
+
+`draw_ellipse` originally used `semi_a` as the x-bound and `semi_b` as the
+y-bound for the pixel iteration loop. A rotated ellipse (e.g. a pine needle
+at 90°) extends to `semi_a` pixels in the *y* direction, so the loop was
+missing the body of every non-horizontal needle. Fixed by using
+`max(semi_a, semi_b)` as the bound in both directions.
+
+---
+
 ## Bug Fix: Intermittent Terrain Texture Failure at Startup (2026)
 
 **Goal:** Fix the intermittent startup bug where one terrain tile texture (most

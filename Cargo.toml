@@ -44,5 +44,9 @@ path = "src/bin/antares.rs"
 name = "antares-sdk"
 path = "src/bin/antares_sdk.rs"
 
+[[bin]]
+name = "generate-foliage-textures"
+path = "src/bin/generate_foliage_textures.rs"
+
 [dev-dependencies]
 tempfile = "3.23"
