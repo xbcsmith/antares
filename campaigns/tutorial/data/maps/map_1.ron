@@ -3625,7 +3625,7 @@
             x: 16,
             y: 8,
             visual: (
-                height: Some(3.5),
+                height: None,
                 width_x: None,
                 width_z: None,
                 color_tint: None,
@@ -3633,7 +3633,6 @@
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
-                snow_coverage: Some(0.0),
             ),
         ),
         (
@@ -3646,7 +3645,7 @@
             x: 17,
             y: 8,
             visual: (
-                height: Some(3.5),
+                height: None,
                 width_x: None,
                 width_z: None,
                 color_tint: None,
@@ -3654,7 +3653,6 @@
                 y_offset: None,
                 rotation_y: None,
                 sprite: None,
-                snow_coverage: Some(0.0),
             ),
         ),
         (
@@ -8464,16 +8462,6 @@
         ),
         (
             x: 16,
-            y: 8,
-        ): Treasure(
-            name: "Hidden Chest",
-            description: "A chest containing a key to a nearby locked room.",
-            loot: [
-                200,
-            ],
-        ),
-        (
-            x: 16,
             y: 17,
         ): Encounter(
             name: "Ancient Skeleton",
@@ -8489,22 +8477,30 @@
         ),
         (
             x: 17,
-            y: 8,
-        ): LockedContainer(
-            name: "Locked Chest",
-            lock_id: "tutorial_locked_chest",
-            key_item_id: Some(200),
-            items: [],
-            initial_trap_chance: 0,
-        ),
-        (
-            x: 17,
             y: 12,
         ): LockedDoor(
             name: "Barred Passage",
             lock_id: "tutorial_barred_passage",
             key_item_id: None,
             initial_trap_chance: 15,
+        ),
+        (
+            x: 18,
+            y: 1,
+        ): Treasure(
+            name: "Locked Chest",
+            description: "",
+            loot: [],
+        ),
+        (
+            x: 18,
+            y: 7,
+        ): Treasure(
+            name: "Hidden Chest",
+            description: "A chest containing a key to a nearby locked room.",
+            loot: [
+                200,
+            ],
         ),
         (
             x: 18,
@@ -8563,19 +8559,12 @@
     ],
     landscape_placements: [
         (
-            landscape_id: 2,
-            position: (
-                x: 9,
-                y: 11,
-            ),
-        ),
-        (
             landscape_id: 6,
             position: (
                 x: 14,
                 y: 14,
             ),
-            scale: Some(2.0),
+            scale: Some(2.25),
         ),
         (
             landscape_id: 4,
@@ -8583,6 +8572,7 @@
                 x: 16,
                 y: 14,
             ),
+            scale: Some(2.05),
         ),
         (
             landscape_id: 4,
@@ -8590,6 +8580,7 @@
                 x: 16,
                 y: 15,
             ),
+            scale: Some(2.2),
         ),
         (
             landscape_id: 5,
@@ -8597,6 +8588,7 @@
                 x: 17,
                 y: 15,
             ),
+            scale: Some(2.2),
         ),
         (
             landscape_id: 2,
@@ -8604,6 +8596,7 @@
                 x: 18,
                 y: 15,
             ),
+            scale: Some(2.0),
         ),
         (
             landscape_id: 1,
@@ -8611,6 +8604,7 @@
                 x: 19,
                 y: 15,
             ),
+            scale: Some(2.4),
         ),
         (
             landscape_id: 2,
@@ -8618,6 +8612,7 @@
                 x: 19,
                 y: 16,
             ),
+            scale: Some(2.3),
         ),
         (
             landscape_id: 2,
@@ -8625,6 +8620,7 @@
                 x: 19,
                 y: 17,
             ),
+            scale: Some(1.55),
         ),
         (
             landscape_id: 2,
@@ -8640,6 +8636,7 @@
                 x: 19,
                 y: 19,
             ),
+            scale: Some(1.95),
         ),
         (
             landscape_id: 4,
@@ -8647,6 +8644,7 @@
                 x: 18,
                 y: 19,
             ),
+            scale: Some(2.15),
         ),
         (
             landscape_id: 4,
@@ -8654,7 +8652,7 @@
                 x: 17,
                 y: 19,
             ),
-            scale: Some(1.45),
+            scale: Some(2.05),
         ),
         (
             landscape_id: 2,
@@ -8662,6 +8660,7 @@
                 x: 16,
                 y: 19,
             ),
+            scale: Some(2.1),
         ),
         (
             landscape_id: 2,
@@ -8669,6 +8668,7 @@
                 x: 15,
                 y: 19,
             ),
+            scale: Some(2.0),
         ),
         (
             landscape_id: 2,
@@ -8676,7 +8676,7 @@
                 x: 14,
                 y: 19,
             ),
-            scale: Some(1.45),
+            scale: Some(1.8),
         ),
         (
             landscape_id: 6,
@@ -8691,7 +8691,7 @@
                 x: 10,
                 y: 11,
             ),
-            scale: Some(1.35),
+            scale: Some(1.3),
         ),
         (
             landscape_id: 1,
@@ -8699,6 +8699,7 @@
                 x: 8,
                 y: 11,
             ),
+            scale: Some(1.35),
         ),
         (
             landscape_id: 4,
@@ -8713,6 +8714,14 @@
                 x: 14,
                 y: 15,
             ),
+        ),
+        (
+            landscape_id: 6,
+            position: (
+                x: 9,
+                y: 11,
+            ),
+            scale: Some(1.3),
         ),
     ],
     is_outdoor: true,
