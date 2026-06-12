@@ -538,6 +538,10 @@ impl Plugin for MapRenderingPlugin {
                     .chain(),
             )
             .add_systems(
+                PostStartup,
+                super::terrain_materials::refresh_terrain_materials_after_startup_allocations_system,
+            )
+            .add_systems(
                 Update,
                 (
                     // Temporary diagnostics for intermittent wrong terrain textures

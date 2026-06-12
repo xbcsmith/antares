@@ -36,9 +36,18 @@ Two earlier incremental fixes addressed related symptoms but not the root cause:
    allocation to a `PostStartup` pre-allocation (`preallocate_cloud_noise_system`)
    for the same reason. Also still left the core issue.
 
-### Fix — Synchronous Texture Loading at Startup
+### Fix — Stable Terrain Handles at Startup
 
-**`src/game/systems/terrain_materials.rs`** — `load_terrain_materials_system`:
+**`src/game/systems/terrain_materials.rs`** — `load_terrain_materials_system` now uses the stable `AssetServer` path for terrain image registration instead of inserting pathless `Assets<Image>` handles directly. This keeps terrain texture asset IDs reserved before later runtime image allocations occur, which prevents the bind-group slot drift that was causing the intermittent wrong-texture tile result.
+
+The startup path now:
+
+- synchronously decodes each PNG with `Image::from_buffer()`;
+- registers the decoded image through `asset_server.add(image)` so its asset ID is reserved early;
+- falls back to `asset_server.load()` only if the sync read/decode path fails.
+
+This complements the existing `PostStartup` refresh and keeps terrain materials aligned with the final image set during the first render pass.
+
 
 - Added `mut images: ResMut<Assets<Image>>` parameter.
 - Added a `load_terrain_image_sync` helper that reads each PNG with

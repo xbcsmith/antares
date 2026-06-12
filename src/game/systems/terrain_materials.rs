@@ -105,12 +105,12 @@ pub fn roughness_for(terrain: TerrainType) -> f32 {
 /// For each of the nine [`TerrainType`] variants the system:
 ///
 /// 1. **Synchronously** reads and decodes the PNG texture from disk (via
-///    [`load_terrain_image_sync`]) so the image is immediately present in
-///    `Assets<Image>` before the first render frame.  This prevents the
-///    intermittent startup corruption where the render world's bindless
-///    material pipeline prepares a bind group before large terrain PNG files
-///    finish their async decode, permanently locking a wrong texture slot into
-///    the material's GPU buffer.
+///    [`load_terrain_image_sync`]) and registers each image with the
+///    [`AssetServer`] so its handle ID is reserved before later runtime image
+///    allocations. This prevents the intermittent startup corruption where the
+///    render world's bindless material pipeline prepares a bind group before
+///    large terrain PNG files finish their async decode, permanently locking a
+///    wrong texture slot into the material's GPU buffer.
 /// 2. Creates a [`StandardMaterial`] with `base_color_texture` set and the
 ///    per-terrain `perceptual_roughness` value from the implementation plan.
 /// 3. Stores the material handle in [`TerrainMaterialCache`].
@@ -128,7 +128,6 @@ pub fn load_terrain_materials_system(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut images: ResMut<Assets<Image>>,
 ) {
     let mut cache = TerrainMaterialCache::default();
 
@@ -152,8 +151,7 @@ pub fn load_terrain_materials_system(
 
     for terrain in terrain_types {
         let texture_path = texture_path_for(terrain);
-        let texture_handle =
-            load_terrain_image_sync(texture_path, &asset_root, &asset_server, &mut images);
+        let texture_handle = load_terrain_image_sync(texture_path, &asset_root, &asset_server);
 
         let material_handle = materials.add(StandardMaterial {
             base_color_texture: Some(texture_handle),
@@ -165,6 +163,47 @@ pub fn load_terrain_materials_system(
     }
 
     commands.insert_resource(cache);
+}
+
+/// Marks every cached terrain material as changed after startup image
+/// allocation has settled.
+///
+/// Terrain textures are synchronously decoded during [`load_terrain_materials_system`],
+/// then other startup systems can still allocate runtime images before the
+/// first render extraction. Touching each cached [`StandardMaterial`] in
+/// `PostStartup` forces Bevy to rebuild the material bindings from the final
+/// image set, preventing stale bindless texture indices from surviving into the
+/// first rendered frame.
+///
+/// # System Parameters
+///
+/// * `terrain_cache` - Cached terrain material handles created at startup.
+/// * `materials` - Mutable access to the terrain [`StandardMaterial`] assets.
+pub(crate) fn refresh_terrain_materials_after_startup_allocations_system(
+    terrain_cache: Option<Res<TerrainMaterialCache>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Some(terrain_cache) = terrain_cache else {
+        return;
+    };
+
+    for terrain in all_terrain_types() {
+        let Some(material_handle) = terrain_cache.get(terrain) else {
+            continue;
+        };
+        let Some(material) = materials.get_mut(material_handle) else {
+            continue;
+        };
+
+        // Reassign the existing handle and roughness values. The semantic
+        // material does not change, but Assets::get_mut marks it as modified so
+        // Bevy rebuilds the render-world material binding after all startup
+        // image allocations have occurred.
+        if let Some(texture_handle) = material.base_color_texture.clone() {
+            material.base_color_texture = Some(texture_handle);
+        }
+        material.perceptual_roughness = roughness_for(terrain);
+    }
 }
 
 /// Synchronously reads and decodes a terrain PNG texture into [`Assets<Image>`],
@@ -184,7 +223,6 @@ fn load_terrain_image_sync(
     texture_path: &str,
     asset_root: &str,
     asset_server: &AssetServer,
-    images: &mut Assets<Image>,
 ) -> Handle<Image> {
     let full_path = if asset_root.is_empty() {
         std::path::PathBuf::from(texture_path)
@@ -207,7 +245,7 @@ fn load_terrain_image_sync(
                         "terrain-load: synchronously decoded '{}'",
                         full_path.display()
                     );
-                    images.add(image)
+                    asset_server.add(image)
                 }
                 Err(e) => {
                     tracing::warn!(
@@ -228,6 +266,20 @@ fn load_terrain_image_sync(
             asset_server.load(texture_path.to_string())
         }
     }
+}
+
+fn all_terrain_types() -> [TerrainType; 9] {
+    [
+        TerrainType::Ground,
+        TerrainType::Grass,
+        TerrainType::Stone,
+        TerrainType::Mountain,
+        TerrainType::Dirt,
+        TerrainType::Water,
+        TerrainType::Lava,
+        TerrainType::Swamp,
+        TerrainType::Forest,
+    ]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -621,5 +673,75 @@ mod tests {
                 "Cached material for {terrain:?} must preserve base_color_texture"
             );
         }
+    }
+
+    /// The PostStartup refresh must mark cached terrain materials as updated
+    /// without replacing their texture handle.
+    #[test]
+    fn test_refresh_terrain_materials_after_startup_allocations_preserves_texture_handle() {
+        let mut app = App::new();
+
+        let mut materials = Assets::<StandardMaterial>::default();
+        let texture_handle = Handle::<Image>::default();
+        let material_handle = materials.add(StandardMaterial {
+            base_color_texture: Some(texture_handle.clone()),
+            perceptual_roughness: 1.0,
+            ..default()
+        });
+        let mut cache = TerrainMaterialCache::default();
+        cache.set(TerrainType::Water, material_handle.clone());
+
+        app.add_plugins(bevy::app::PluginGroup::set(
+            bevy::MinimalPlugins,
+            bevy::app::ScheduleRunnerPlugin::default(),
+        ))
+        .insert_resource(materials)
+        .insert_resource(cache)
+        .add_systems(
+            PostStartup,
+            refresh_terrain_materials_after_startup_allocations_system,
+        );
+
+        app.update();
+
+        let materials = app
+            .world()
+            .get_resource::<Assets<StandardMaterial>>()
+            .expect("Assets<StandardMaterial> should be present");
+        let material = materials
+            .get(&material_handle)
+            .expect("water material should remain present");
+
+        assert_eq!(material.base_color_texture, Some(texture_handle));
+        assert!(
+            (material.perceptual_roughness - roughness_for(TerrainType::Water)).abs()
+                < f32::EPSILON
+        );
+    }
+
+    /// The PostStartup refresh must tolerate tests and minimal apps that do not
+    /// insert the terrain cache resource.
+    #[test]
+    fn test_refresh_terrain_materials_after_startup_allocations_no_cache_is_noop() {
+        let mut app = App::new();
+
+        app.add_plugins(bevy::app::PluginGroup::set(
+            bevy::MinimalPlugins,
+            bevy::app::ScheduleRunnerPlugin::default(),
+        ))
+        .insert_resource(Assets::<StandardMaterial>::default())
+        .add_systems(
+            PostStartup,
+            refresh_terrain_materials_after_startup_allocations_system,
+        );
+
+        app.update();
+
+        assert!(
+            app.world()
+                .get_resource::<Assets<StandardMaterial>>()
+                .is_some(),
+            "refresh without TerrainMaterialCache should leave material storage intact"
+        );
     }
 }
