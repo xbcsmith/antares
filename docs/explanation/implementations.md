@@ -1301,3 +1301,66 @@ cargo nextest → 5204 passed, 8 skipped, 0 failed
 ```
 
 ---
+
+## Phase 4: Cubic Bezier Grass Blades + Three-Color Gradient
+
+**Branch**: `pr-vegetation-updates`
+**Date**: 2026-06-12
+
+### Overview
+
+Upgraded grass blade geometry from quadratic to cubic Bezier (S-curve shape) and replaced the two-stop base/tip color gradient with a three-stop AO base / mid-green / tip highlight gradient.
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `src/game/systems/advanced_grass.rs` | All geometry, color, and struct changes (see below) |
+
+### GrassColorScheme: New Fields
+
+| Old field | New field | Default value |
+|---|---|---|
+| `base_color` | `ao_color` | `srgb(0.08, 0.12, 0.06)` — dark AO base |
+| _(new)_ | `mid_color` | `srgb(0.2, 0.5, 0.1)` — primary mid-blade green |
+| `tip_color` | `tip_color` | `srgb(0.72, 0.82, 0.45)` — lighter tip highlight |
+
+### Cubic Bezier Control Points
+
+| Point | Lateral (X) | Height (Y) |
+|---|---|---|
+| `p0` | `0` | `0` |
+| `p1` | `tilt * height * 0.25` | `height * 0.33` |
+| `p2` | `tilt * height * 0.4 + curve_amount * 0.5` | `height * 0.66` |
+| `p3` | `curve_amount` | `height` |
+
+Formula: `B(t) = (1-t)³p0 + 3(1-t)²t·p1 + 3(1-t)t²·p2 + t³p3`
+
+### Three-Stop Gradient
+
+- `t ∈ [0.0, 0.4]` → lerp `ao_color` → `mid_color`
+- `t ∈ [0.4, 1.0]` → lerp `mid_color` → `tip_color`
+
+### Sites Updated
+
+- `GrassColorScheme` struct definition and doc example
+- `sample_blade_color`: blends `mid_color` + `tip_color` (70/30)
+- `GrassColorScheme::default`: three new field values
+- `cached_material_color`: `ao_color` as zero-variation endpoint
+- `create_curved_grass_card_mesh`: cubic Bezier + `&[Color; 3]`
+- `create_grass_clump_mesh`: three-color derivation per card
+- `create_grass_blade_mesh` (test helper): `&[Color::WHITE; 3]`
+- `spawn_grass_cached_with_exclusions`: `ao_color`, `mid_color`, `tip_color` from tint
+- Doc comment: `GrassColorScheme.base_color` → `GrassColorScheme.mid_color`
+- 3 test construction sites updated
+
+### Quality Gates
+
+```text
+cargo fmt     → clean (no output)
+cargo check   → Finished 0 errors
+cargo clippy  → Finished 0 warnings
+cargo nextest → 5204 passed, 8 skipped, 0 failed
+```
+
+---

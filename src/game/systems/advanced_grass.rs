@@ -623,10 +623,12 @@ impl From<&world::GrassBladeConfig> for BladeConfig {
     }
 }
 
-/// Color scheme for grass blades with variation support
+/// Color scheme for grass blades with a three-stop gradient and variation support.
 ///
-/// Provides base and tip colors with random variation to create
-/// natural-looking grass.
+/// Stores an AO shadow colour at the base, a mid-blade primary green, and a
+/// tip highlight. Per-vertex colours interpolate `ao_color` → `mid_color` over
+/// the lower 40 % of blade height, and `mid_color` → `tip_color` over the
+/// upper 60 %.
 ///
 /// # Examples
 ///
@@ -635,16 +637,19 @@ impl From<&world::GrassBladeConfig> for BladeConfig {
 /// use bevy::prelude::Color;
 ///
 /// let scheme = GrassColorScheme {
-///     base_color: Color::srgb(0.2, 0.5, 0.1),
-///     tip_color: Color::srgb(0.3, 0.7, 0.2),
+///     ao_color: Color::srgb(0.08, 0.12, 0.06),
+///     mid_color: Color::srgb(0.2, 0.5, 0.1),
+///     tip_color: Color::srgb(0.72, 0.82, 0.45),
 ///     variation: 0.3,
 /// };
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct GrassColorScheme {
-    /// Base color at blade bottom
-    pub base_color: Color,
-    /// Tip color at blade top
+    /// Dark ambient-occlusion colour at blade base
+    pub ao_color: Color,
+    /// Primary mid-blade green
+    pub mid_color: Color,
+    /// Tip highlight colour at blade top
     pub tip_color: Color,
     /// Variation amount (0.0-1.0)
     pub variation: f32,
@@ -652,6 +657,9 @@ pub struct GrassColorScheme {
 
 impl GrassColorScheme {
     /// Sample a random blade color with variation
+    ///
+    /// Blends `mid_color` (70 %) with `tip_color` (30 %) to produce a
+    /// representative mid-blade colour, then applies random variation.
     ///
     /// # Arguments
     ///
@@ -663,11 +671,11 @@ impl GrassColorScheme {
     pub fn sample_blade_color(&self, rng: &mut impl rand::Rng) -> Color {
         let base_blend = 0.7;
         let blended = Color::srgb(
-            self.base_color.to_srgba().red * base_blend
+            self.mid_color.to_srgba().red * base_blend
                 + self.tip_color.to_srgba().red * (1.0 - base_blend),
-            self.base_color.to_srgba().green * base_blend
+            self.mid_color.to_srgba().green * base_blend
                 + self.tip_color.to_srgba().green * (1.0 - base_blend),
-            self.base_color.to_srgba().blue * base_blend
+            self.mid_color.to_srgba().blue * base_blend
                 + self.tip_color.to_srgba().blue * (1.0 - base_blend),
         );
 
@@ -687,8 +695,9 @@ impl GrassColorScheme {
 impl Default for GrassColorScheme {
     fn default() -> Self {
         Self {
-            base_color: Color::srgb(0.2, 0.5, 0.1),
-            tip_color: Color::srgb(0.3, 0.7, 0.2),
+            ao_color: Color::srgb(0.08, 0.12, 0.06),
+            mid_color: Color::srgb(0.2, 0.5, 0.1),
+            tip_color: Color::srgb(0.72, 0.82, 0.45),
             variation: 0.2,
         }
     }
@@ -762,13 +771,13 @@ fn quantize_mesh_value(value: f32) -> u16 {
 
 fn cached_material_color(key: GrassMaterialKey, color_scheme: &GrassColorScheme) -> Color {
     let variation = f32::from(key.variation) / 255.0;
-    let base = color_scheme.base_color.to_srgba();
+    let ao = color_scheme.ao_color.to_srgba();
     let tip = color_scheme.tip_color.to_srgba();
 
     Color::srgb(
-        (base.red * (1.0 - variation) + tip.red * variation).clamp(0.0, 1.0),
-        (base.green * (1.0 - variation) + tip.green * variation).clamp(0.0, 1.0),
-        (base.blue * (1.0 - variation) + tip.blue * variation).clamp(0.0, 1.0),
+        (ao.red * (1.0 - variation) + tip.red * variation).clamp(0.0, 1.0),
+        (ao.green * (1.0 - variation) + tip.green * variation).clamp(0.0, 1.0),
+        (ao.blue * (1.0 - variation) + tip.blue * variation).clamp(0.0, 1.0),
     )
 }
 
@@ -879,7 +888,7 @@ fn create_grass_blade_mesh(height: f32, width: f32, curve_amount: f32) -> Mesh {
         0.0,
         curve_amount,
         GrassMeshQuality::Medium.segment_count(),
-        &[Color::WHITE; 2],
+        &[Color::WHITE; 3],
     )
 }
 
@@ -889,7 +898,7 @@ fn create_curved_grass_card_mesh(
     tilt: f32,
     curve_amount: f32,
     segment_count: usize,
-    vertex_colors: &[Color; 2],
+    vertex_colors: &[Color; 3],
 ) -> Mesh {
     let mut positions = Vec::new();
     let mut normals = Vec::new();
@@ -898,20 +907,30 @@ fn create_curved_grass_card_mesh(
     let mut indices = Vec::new();
     let mut curve_points = Vec::with_capacity(segment_count + 1);
 
+    // Cubic Bezier control points:
+    //   p0 = base, anchored at origin
+    //   p1 = first lean control (lower)
+    //   p2 = second lean control (mid, with curve)
+    //   p3 = tip
+    let p0_x = 0.0_f32;
+    let p0_y = 0.0_f32;
+    let p1_x = tilt * height * 0.25;
+    let p1_y = height * 0.33;
+    let p2_x = tilt * height * 0.4 + curve_amount * 0.5;
+    let p2_y = height * 0.66;
+    let p3_x = curve_amount;
+    let p3_y = height;
+
     for i in 0..=segment_count {
         let t = i as f32 / segment_count as f32;
-
-        let p0_y = 0.0;
-        let p1_y = height * 0.5;
-        let p2_y = height;
-
         let one_minus_t = 1.0 - t;
-        let coeff0 = one_minus_t * one_minus_t;
-        let coeff1 = 2.0 * one_minus_t * t;
-        let coeff2 = t * t;
+        let c0 = one_minus_t * one_minus_t * one_minus_t;
+        let c1 = 3.0 * one_minus_t * one_minus_t * t;
+        let c2 = 3.0 * one_minus_t * t * t;
+        let c3 = t * t * t;
 
-        let curve_x = coeff0 * 0.0 + coeff1 * (tilt * height * 0.25) + coeff2 * curve_amount;
-        let curve_y = coeff0 * p0_y + coeff1 * p1_y + coeff2 * p2_y;
+        let curve_x = c0 * p0_x + c1 * p1_x + c2 * p2_x + c3 * p3_x;
+        let curve_y = c0 * p0_y + c1 * p1_y + c2 * p2_y + c3 * p3_y;
 
         curve_points.push(Vec3::new(0.0, curve_y, curve_x));
     }
@@ -929,7 +948,15 @@ fn create_curved_grass_card_mesh(
 
         let normal = Vec3::X.cross(tangent).normalize_or_zero();
         let taper_width = width * (1.0 - t).max(0.08);
-        let color = vertex_colors[0].mix(&vertex_colors[1], t).to_linear();
+
+        // Three-stop gradient: ao_color → mid_color (lower 40%) then mid_color → tip_color (upper 60%)
+        let color = if t <= 0.4 {
+            let t2 = t / 0.4;
+            vertex_colors[0].mix(&vertex_colors[1], t2).to_linear()
+        } else {
+            let t2 = (t - 0.4) / 0.6;
+            vertex_colors[1].mix(&vertex_colors[2], t2).to_linear()
+        };
 
         positions.push([-taper_width / 2.0, point.y, point.z]);
         normals.push([normal.x, normal.y, normal.z]);
@@ -987,7 +1014,16 @@ fn create_grass_clump_mesh(
         let rotation =
             Quat::from_rotation_y(card_index as f32 * std::f32::consts::TAU / card_count as f32);
         let color_lift = 1.0 + (card_index as f32 / card_count as f32 - 0.5) * 0.18;
-        let base_color = Color::srgb(0.85 * color_lift, 0.95 * color_lift, 0.75 * color_lift);
+        let ao_color = Color::srgb(
+            (0.08 * color_lift).min(1.0),
+            (0.12 * color_lift).min(1.0),
+            (0.06 * color_lift).min(1.0),
+        );
+        let mid_color = Color::srgb(
+            (0.85 * color_lift).min(1.0),
+            (0.95 * color_lift).min(1.0),
+            (0.75 * color_lift).min(1.0),
+        );
         let tip_color = Color::srgb(1.0, (1.05 * color_lift).min(1.0), 0.85 * color_lift);
         let card = create_curved_grass_card_mesh(
             height,
@@ -995,7 +1031,7 @@ fn create_grass_clump_mesh(
             tilt,
             curve_amount,
             segment_count,
-            &[base_color, tip_color],
+            &[ao_color, mid_color, tip_color],
         );
 
         let card_positions = card
@@ -1170,7 +1206,7 @@ fn spawn_grass_clump(
 /// * `map_id` - Map identifier for cleanup
 /// * `visual_metadata` - Optional per-tile visual customization
 /// * `tile_tint` - Optional explicit RGB colour tint that overrides
-///   `visual_metadata.color_tint`; multiplied into `GrassColorScheme.base_color`
+///   `visual_metadata.color_tint`; multiplied into `GrassColorScheme.mid_color`
 ///   before blade colours are sampled.  Pass `None` to use the tint embedded
 ///   in `visual_metadata` (or the natural-green default if that is also `None`).
 /// * `quality_settings` - Performance settings for grass density scaling
@@ -1296,19 +1332,25 @@ pub fn spawn_grass_cached_with_exclusions(
         .or_else(|| visual_metadata.and_then(|m| m.color_tint))
         .unwrap_or((0.3, 0.65, 0.2));
 
-    let base_color = Color::srgb(
-        0.2 * resolved_tint.0,
-        0.5 * resolved_tint.1,
-        0.1 * resolved_tint.2,
+    let ao_color = Color::srgb(
+        (0.08 * resolved_tint.0).min(1.0),
+        (0.12 * resolved_tint.1).min(1.0),
+        (0.06 * resolved_tint.2).min(1.0),
+    );
+    let mid_color = Color::srgb(
+        (0.2 * resolved_tint.0).min(1.0),
+        (0.5 * resolved_tint.1).min(1.0),
+        (0.1 * resolved_tint.2).min(1.0),
     );
     let tip_color = Color::srgb(
-        0.3 * resolved_tint.0,
-        0.7 * resolved_tint.1,
-        0.2 * resolved_tint.2,
+        (0.72 * resolved_tint.0).min(1.0),
+        (0.82 * resolved_tint.1).min(1.0),
+        (0.45 * resolved_tint.2).min(1.0),
     );
 
     let color_scheme = GrassColorScheme {
-        base_color,
+        ao_color,
+        mid_color,
         tip_color,
         variation: blade_config.color_variation,
     };
@@ -2273,8 +2315,9 @@ mod tests {
     #[test]
     fn test_grass_color_scheme_no_variation_is_stable() {
         let scheme = GrassColorScheme {
-            base_color: Color::srgb(0.2, 0.5, 0.1),
-            tip_color: Color::srgb(0.3, 0.7, 0.2),
+            ao_color: Color::srgb(0.08, 0.12, 0.06),
+            mid_color: Color::srgb(0.2, 0.5, 0.1),
+            tip_color: Color::srgb(0.72, 0.82, 0.45),
             variation: 0.0,
         };
 
@@ -2679,8 +2722,9 @@ mod tests {
     #[test]
     fn test_grass_color_scheme_variation_can_change_color() {
         let scheme = GrassColorScheme {
-            base_color: Color::srgb(0.2, 0.5, 0.1),
-            tip_color: Color::srgb(0.3, 0.7, 0.2),
+            ao_color: Color::srgb(0.08, 0.12, 0.06),
+            mid_color: Color::srgb(0.2, 0.5, 0.1),
+            tip_color: Color::srgb(0.72, 0.82, 0.45),
             variation: 0.5,
         };
 
@@ -3057,7 +3101,8 @@ mod tests {
     #[test]
     fn test_cached_material_color_uses_variation_bucket() {
         let scheme = GrassColorScheme {
-            base_color: Color::srgb(0.1, 0.2, 0.3),
+            ao_color: Color::srgb(0.1, 0.2, 0.3),
+            mid_color: Color::srgb(0.4, 0.5, 0.6),
             tip_color: Color::srgb(0.7, 0.8, 0.9),
             variation: 1.0,
         };
@@ -3065,12 +3110,12 @@ mod tests {
         let no_variation_key = GrassMaterialKey::from_tint((1.0, 1.0, 1.0), 0.0);
         let full_variation_key = GrassMaterialKey::from_tint((1.0, 1.0, 1.0), 1.0);
 
-        let base_color = cached_material_color(no_variation_key, &scheme).to_srgba();
+        let ao_color = cached_material_color(no_variation_key, &scheme).to_srgba();
         let tip_color = cached_material_color(full_variation_key, &scheme).to_srgba();
 
-        assert!((base_color.red - 0.1).abs() < 0.001);
-        assert!((base_color.green - 0.2).abs() < 0.001);
-        assert!((base_color.blue - 0.3).abs() < 0.001);
+        assert!((ao_color.red - 0.1).abs() < 0.001);
+        assert!((ao_color.green - 0.2).abs() < 0.001);
+        assert!((ao_color.blue - 0.3).abs() < 0.001);
 
         assert!((tip_color.red - 0.7).abs() < 0.001);
         assert!((tip_color.green - 0.8).abs() < 0.001);
