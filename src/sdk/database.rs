@@ -4,8 +4,9 @@
 //! Unified content database for all game content types
 //!
 //! This module provides the ContentDatabase structure that loads and manages
-//! all game content (classes, races, items, monsters, spells, maps) from a
-//! campaign directory structure.
+//! all game content (classes, races, items, monsters, spells, maps, furniture,
+//! landscape definitions, landscape mesh registries, NPCs, stock templates,
+//! skills, and related data) from a campaign directory structure.
 //!
 //! # Architecture Reference
 //!
@@ -21,7 +22,7 @@
 //! let core_db = ContentDatabase::load_core("data")?;
 //!
 //! // Load campaign-specific content
-//! let campaign_db = ContentDatabase::load_campaign("campaigns/my_campaign")?;
+//! let campaign_db = ContentDatabase::load_campaign("data/test_campaign")?;
 //!
 //! // Get statistics
 //! let stats = campaign_db.stats();
@@ -43,6 +44,7 @@ use crate::domain::races::{RaceDatabase, RaceError};
 use crate::domain::skills::SkillDatabase;
 use crate::domain::types::{MapId, MonsterId, SpellId};
 use crate::domain::world::furniture::FurnitureDatabase;
+use crate::domain::world::landscape::{LandscapeDatabase, LandscapeMeshDatabase};
 use crate::domain::world::{Map, MapBlueprint};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -92,6 +94,12 @@ pub enum DatabaseError {
 
     #[error("Failed to load furniture: {0}")]
     FurnitureLoadError(String),
+
+    #[error("Failed to load landscape: {0}")]
+    LandscapeLoadError(String),
+
+    #[error("Failed to load landscape meshes: {0}")]
+    LandscapeMeshLoadError(String),
 
     #[error("Failed to load skills: {0}")]
     SkillLoadError(String),
@@ -1086,6 +1094,18 @@ pub struct ContentDatabase {
     /// Missing file is not an error — furniture support is opt-in per campaign.
     pub furniture: FurnitureDatabase,
 
+    /// Landscape definition database — named, reusable static environment templates.
+    ///
+    /// Loaded from `data/landscape.ron` in the campaign directory.
+    /// Missing file is not an error — landscape support is opt-in per campaign.
+    pub landscape: LandscapeDatabase,
+
+    /// Landscape mesh database — imported landscape mesh registry.
+    ///
+    /// Loaded from `data/landscape_mesh_registry.ron` in the campaign directory.
+    /// Missing file is not an error.
+    pub landscape_meshes: LandscapeMeshDatabase,
+
     /// Skill definitions database.
     ///
     /// Loaded from `data/skills.ron` in the campaign directory.
@@ -1121,6 +1141,8 @@ impl ContentDatabase {
             npc_stock_templates:
                 crate::domain::world::npc_runtime::MerchantStockTemplateDatabase::new(),
             furniture: FurnitureDatabase::new(),
+            landscape: LandscapeDatabase::new(),
+            landscape_meshes: LandscapeMeshDatabase::new(),
             skills: SkillDatabase::new(),
         }
     }
@@ -1304,6 +1326,32 @@ impl ContentDatabase {
             FurnitureDatabase::new()
         };
 
+        // Load landscape definitions (opt-in per campaign; missing file is not an error)
+        let landscape = if data_dir.join("landscape.ron").exists() {
+            LandscapeDatabase::load_from_file(data_dir.join("landscape.ron"))
+                .map_err(|e| DatabaseError::LandscapeLoadError(e.to_string()))?
+        } else {
+            LandscapeDatabase::new()
+        };
+
+        // Load landscape mesh registry (opt-in per campaign; missing file is not an error)
+        let landscape_meshes = if data_dir.join("landscape_mesh_registry.ron").exists() {
+            let db = LandscapeMeshDatabase::load_from_registry(
+                &data_dir.join("landscape_mesh_registry.ron"),
+                campaign_path,
+            )
+            .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?;
+            db.validate_texture_paths(Some(campaign_path))
+                .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?;
+            db
+        } else {
+            LandscapeMeshDatabase::new()
+        };
+
+        landscape
+            .validate_mesh_references(&landscape_meshes)
+            .map_err(|e| DatabaseError::LandscapeLoadError(e.to_string()))?;
+
         // Load skill definitions (opt-in per campaign; missing file is not an error)
         let configured_skills_path = Path::new(skills_file);
         let skills_path = if configured_skills_path.is_absolute() {
@@ -1318,7 +1366,7 @@ impl ContentDatabase {
             SkillDatabase::new()
         };
 
-        Ok(Self {
+        let db = Self {
             classes,
             races,
             items,
@@ -1333,8 +1381,12 @@ impl ContentDatabase {
             npc_stock_templates,
             creatures,
             furniture,
+            landscape,
+            landscape_meshes,
             skills,
-        })
+        };
+        db.validate_landscape_content(Some(campaign_path))?;
+        Ok(db)
     }
 
     /// Loads core game content from the data directory
@@ -1354,6 +1406,7 @@ impl ContentDatabase {
     /// ```
     pub fn load_core<P: AsRef<Path>>(data_dir: P) -> Result<Self, DatabaseError> {
         let data_path = data_dir.as_ref();
+        let asset_root = data_path.parent().unwrap_or(data_path);
 
         if !data_path.exists() {
             return Err(DatabaseError::CampaignNotFound(data_path.to_path_buf()));
@@ -1433,7 +1486,6 @@ impl ContentDatabase {
         };
 
         // Load NPCs
-        let data_path = data_dir.as_ref();
         let npcs = if data_path.join("npcs.ron").exists() {
             NpcDatabase::load_from_file(data_path.join("npcs.ron"))?
         } else {
@@ -1452,10 +1504,9 @@ impl ContentDatabase {
 
         // Load creatures
         let creatures = if data_path.join("creatures.ron").exists() {
-            let root_path = data_path.parent().unwrap_or(data_path);
             crate::domain::visual::creature_database::CreatureDatabase::load_from_registry(
                 &data_path.join("creatures.ron"),
-                root_path,
+                asset_root,
             )
             .map_err(|e| DatabaseError::CreatureLoadError(e.to_string()))?
         } else {
@@ -1470,6 +1521,30 @@ impl ContentDatabase {
             FurnitureDatabase::new()
         };
 
+        let landscape = if data_path.join("landscape.ron").exists() {
+            LandscapeDatabase::load_from_file(data_path.join("landscape.ron"))
+                .map_err(|e| DatabaseError::LandscapeLoadError(e.to_string()))?
+        } else {
+            LandscapeDatabase::new()
+        };
+
+        let landscape_meshes = if data_path.join("landscape_mesh_registry.ron").exists() {
+            let db = LandscapeMeshDatabase::load_from_registry(
+                &data_path.join("landscape_mesh_registry.ron"),
+                asset_root,
+            )
+            .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?;
+            db.validate_texture_paths(Some(asset_root))
+                .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?;
+            db
+        } else {
+            LandscapeMeshDatabase::new()
+        };
+
+        landscape
+            .validate_mesh_references(&landscape_meshes)
+            .map_err(|e| DatabaseError::LandscapeLoadError(e.to_string()))?;
+
         // Load skill definitions (opt-in; missing file is not an error)
         let skills = if data_path.join("skills.ron").exists() {
             SkillDatabase::load_from_file(data_path.join("skills.ron"))
@@ -1478,7 +1553,7 @@ impl ContentDatabase {
             SkillDatabase::new()
         };
 
-        Ok(Self {
+        let db = Self {
             classes,
             races,
             items,
@@ -1493,8 +1568,73 @@ impl ContentDatabase {
             npc_stock_templates,
             creatures,
             furniture,
+            landscape,
+            landscape_meshes,
             skills,
-        })
+        };
+        db.validate_landscape_content(Some(asset_root))?;
+        Ok(db)
+    }
+
+    fn validate_landscape_content(&self, asset_root: Option<&Path>) -> Result<(), DatabaseError> {
+        self.landscape_meshes
+            .validate()
+            .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?;
+        self.landscape_meshes
+            .validate_texture_paths(asset_root)
+            .map_err(|e| DatabaseError::LandscapeMeshLoadError(e.to_string()))?;
+        self.landscape
+            .validate_mesh_references(&self.landscape_meshes)
+            .map_err(|e| DatabaseError::LandscapeLoadError(e.to_string()))?;
+
+        for map_id in self.maps.all_maps() {
+            let Some(map) = self.maps.get_map(map_id) else {
+                continue;
+            };
+            self.landscape.validate_map_placements(map).map_err(|e| {
+                DatabaseError::ValidationError(format!(
+                    "Map {} landscape placement validation failed: {}",
+                    map.id, e
+                ))
+            })?;
+        }
+
+        self.validate_landscape_teleport_destinations()
+    }
+
+    fn validate_landscape_teleport_destinations(&self) -> Result<(), DatabaseError> {
+        for source_map_id in self.maps.all_maps() {
+            let Some(source_map) = self.maps.get_map(source_map_id) else {
+                continue;
+            };
+            for (position, event) in &source_map.events {
+                if let crate::domain::world::MapEvent::Teleport {
+                    map_id,
+                    destination,
+                    ..
+                } = event
+                {
+                    if let Some(target_map) = self.maps.get_map(*map_id) {
+                        if self.landscape.is_position_blocked_by_landscape(
+                            &target_map.landscape_placements,
+                            *destination,
+                        ) {
+                            return Err(DatabaseError::ValidationError(format!(
+                                "Map {} teleport at ({}, {}) targets map {} position ({}, {}) blocked by a landscape placement",
+                                source_map.id,
+                                position.x,
+                                position.y,
+                                map_id,
+                                destination.x,
+                                destination.y
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn validate_skill_conditions(
@@ -1605,6 +1745,10 @@ impl ContentDatabase {
         self.dialogues
             .validate()
             .map_err(|e| DatabaseError::ValidationError(e.to_string()))?;
+
+        // Validate landscape definitions, mesh references, texture prefixes,
+        // map placements, and movement-critical blocking conflicts.
+        self.validate_landscape_content(None)?;
 
         // Cross-reference validation
 
@@ -1883,6 +2027,203 @@ impl ContentStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::types::Position;
+    use crate::domain::world::landscape::LandscapePlacement;
+    use crate::domain::world::MapEvent;
+
+    fn write_temp_map(root: &std::path::Path, map: &Map) {
+        let maps_dir = root.join("data/maps");
+        std::fs::create_dir_all(&maps_dir).unwrap();
+        std::fs::write(
+            maps_dir.join(format!("map_{}.ron", map.id)),
+            ron::ser::to_string_pretty(map, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn write_temp_landscape(root: &std::path::Path, blocking: bool) {
+        let data_dir = root.join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        let ron = format!(
+            r#"[
+                (
+                    id: 1,
+                    name: "Fixture Oak",
+                    category: Tree,
+                    default_scale: 1.0,
+                    flags: (blocking: {blocking}),
+                    tags: ["oak"],
+                ),
+            ]"#
+        );
+        std::fs::write(data_dir.join("landscape.ron"), ron).unwrap();
+    }
+
+    #[test]
+    fn test_content_database_allows_missing_landscape_files_without_placements() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4);
+        write_temp_map(temp.path(), &map);
+
+        let db = ContentDatabase::load_campaign(temp.path()).unwrap();
+
+        assert!(db.landscape.is_empty());
+        assert!(db.landscape_meshes.is_empty());
+    }
+
+    #[test]
+    fn test_content_database_rejects_landscape_definition_missing_mesh_reference() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let map = Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4);
+        write_temp_map(temp.path(), &map);
+        std::fs::write(
+            temp.path().join("data/landscape.ron"),
+            r#"[
+                (
+                    id: 1,
+                    name: "Imported Oak",
+                    category: Tree,
+                    default_scale: 1.0,
+                    mesh_id: Some(11001),
+                ),
+            ]"#,
+        )
+        .unwrap();
+
+        let error = ContentDatabase::load_campaign(temp.path()).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("missing landscape mesh ID 11001"));
+    }
+
+    #[test]
+    fn test_content_database_loads_test_campaign_landscape_placements() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let db = ContentDatabase::load_campaign(
+            std::path::Path::new(manifest_dir).join("data/test_campaign"),
+        )
+        .expect("test_campaign must load");
+        assert!(db.landscape.len() >= 5);
+        assert!(db.landscape.has_definition(1));
+        assert!(db.landscape_meshes.count() >= 5);
+        assert!(db.landscape_meshes.has_mesh(11001));
+
+        let map = db.maps.get_map(1).expect("map 1 fixture must load");
+
+        assert!(map.landscape_placements.len() >= 2);
+        assert!(map
+            .landscape_placements
+            .iter()
+            .any(|placement| placement.landscape_id == 1));
+        assert!(map
+            .landscape_placements
+            .iter()
+            .any(|placement| placement.landscape_id == 5));
+    }
+
+    #[test]
+    fn test_content_database_rejects_unknown_landscape_placement_definition() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4);
+        map.landscape_placements
+            .push(LandscapePlacement::new(99, Position::new(1, 1)));
+        write_temp_map(temp.path(), &map);
+
+        let error = ContentDatabase::load_campaign(temp.path()).unwrap_err();
+
+        assert!(error.to_string().contains("missing landscape ID 99"));
+    }
+
+    #[test]
+    fn test_content_database_rejects_out_of_bounds_landscape_placement() {
+        let temp = tempfile::TempDir::new().unwrap();
+        write_temp_landscape(temp.path(), false);
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4);
+        map.landscape_placements
+            .push(LandscapePlacement::new(1, Position::new(9, 1)));
+        write_temp_map(temp.path(), &map);
+
+        let error = ContentDatabase::load_campaign(temp.path()).unwrap_err();
+
+        assert!(error.to_string().contains("outside map bounds"));
+    }
+
+    #[test]
+    fn test_content_database_rejects_blocking_landscape_on_event_tile() {
+        let temp = tempfile::TempDir::new().unwrap();
+        write_temp_landscape(temp.path(), true);
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4);
+        map.events.insert(
+            Position::new(1, 1),
+            MapEvent::Sign {
+                name: "Sign".to_string(),
+                description: String::new(),
+                text: "Read me".to_string(),
+                time_condition: None,
+                facing: None,
+            },
+        );
+        map.landscape_placements
+            .push(LandscapePlacement::new(1, Position::new(1, 1)));
+        write_temp_map(temp.path(), &map);
+
+        let error = ContentDatabase::load_campaign(temp.path()).unwrap_err();
+
+        assert!(error.to_string().contains("tile contains a map event"));
+    }
+
+    #[test]
+    fn test_content_database_rejects_teleport_destination_blocked_by_landscape() {
+        let temp = tempfile::TempDir::new().unwrap();
+        write_temp_landscape(temp.path(), true);
+        let mut source = Map::new(1, "Source".to_string(), "Desc".to_string(), 4, 4);
+        source.events.insert(
+            Position::new(1, 1),
+            MapEvent::Teleport {
+                name: "Portal".to_string(),
+                description: String::new(),
+                destination: Position::new(2, 2),
+                map_id: 2,
+            },
+        );
+        write_temp_map(temp.path(), &source);
+
+        let mut target = Map::new(2, "Target".to_string(), "Desc".to_string(), 4, 4);
+        target
+            .landscape_placements
+            .push(LandscapePlacement::new(1, Position::new(2, 2)));
+        write_temp_map(temp.path(), &target);
+
+        let error = ContentDatabase::load_campaign(temp.path()).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("blocked by a landscape placement"));
+    }
+
+    #[test]
+    fn test_content_database_allows_non_blocking_landscape_on_event_tile() {
+        let temp = tempfile::TempDir::new().unwrap();
+        write_temp_landscape(temp.path(), true);
+        let mut map = Map::new(1, "Map".to_string(), "Desc".to_string(), 4, 4);
+        map.events.insert(
+            Position::new(1, 1),
+            MapEvent::Sign {
+                name: "Sign".to_string(),
+                description: String::new(),
+                text: "Read me".to_string(),
+                time_condition: None,
+                facing: None,
+            },
+        );
+        let mut placement = LandscapePlacement::new(1, Position::new(1, 1));
+        placement.blocking = Some(false);
+        map.landscape_placements.push(placement);
+        write_temp_map(temp.path(), &map);
+
+        ContentDatabase::load_campaign(temp.path()).unwrap();
+    }
 
     #[test]
     fn test_content_stats_includes_skill_count() {

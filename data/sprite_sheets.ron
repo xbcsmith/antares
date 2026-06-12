@@ -245,6 +245,3 @@
         ],
     ),
 }
-```
-
-Now let me re-enable tools and add the necessary tests to the sprite assets module:

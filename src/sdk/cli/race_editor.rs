@@ -11,7 +11,7 @@
 //!
 //! ```text
 //! antares-sdk race                                   # edit data/races.ron
-//! antares-sdk race campaigns/tutorial/data/races.ron
+//! antares-sdk race data/test_campaign/data/races.ron
 //! ```
 
 use crate::domain::races::{
@@ -47,8 +47,8 @@ pub struct RaceArgs {
     /// Campaign directory. When provided, opens `<DIR>/data/races.ron`
     /// instead of the positional FILE argument.
     ///
-    /// Example: `antares-sdk race --campaign campaigns/tutorial`
-    /// is equivalent to: `antares-sdk race campaigns/tutorial/data/races.ron`
+    /// Example: `antares-sdk race --campaign data/test_campaign`
+    /// is equivalent to: `antares-sdk race data/test_campaign/data/races.ron`
     #[arg(long, value_name = "DIR")]
     pub campaign: Option<PathBuf>,
 }
@@ -789,7 +789,7 @@ mod tests {
             args: RaceArgs,
         }
 
-        let result = TestCli::try_parse_from(["test", "--campaign", "campaigns/tutorial"]);
+        let result = TestCli::try_parse_from(["test", "--campaign", "data/test_campaign"]);
         assert!(
             result.is_ok(),
             "RaceArgs should parse --campaign: {:?}",
@@ -798,7 +798,7 @@ mod tests {
         let args = result.unwrap().args;
         assert_eq!(
             args.campaign,
-            Some(PathBuf::from("campaigns/tutorial")),
+            Some(PathBuf::from("data/test_campaign")),
             "--campaign should be set to the provided directory"
         );
         assert_eq!(

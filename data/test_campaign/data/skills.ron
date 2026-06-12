@@ -1,7 +1,7 @@
 // skills.ron — Stable test fixture for the Antares skill system.
 //
 // These definitions are used exclusively by unit tests and integration tests.
-// DO NOT load this file from campaigns/tutorial. Tests MUST reference this file.
+// Tests MUST reference this stable fixture instead of the live campaign data.
 //
 // Covers all four SkillScalingMode variants so that tests can exercise each code path.
 [

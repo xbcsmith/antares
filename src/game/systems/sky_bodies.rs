@@ -180,11 +180,38 @@ pub struct CloudNoiseTexture {
 /// ```
 pub struct SkyBodyPlugin;
 
+/// `PostStartup` system: pre-allocates the cloud noise texture into
+/// [`Assets<Image>`] before the first `Update` frame.
+///
+/// Without this, [`get_or_create_cloud_noise_texture`] is called lazily by
+/// [`manage_sky_bodies_on_map_change`] in the first `Update` frame, which
+/// races with terrain texture async loads completing in that same frame.
+/// Pre-allocating in `PostStartup` — after all `Startup`-issued
+/// [`AssetServer::load`](bevy::asset::AssetServer::load) calls have reserved
+/// their asset indices — makes the allocation order deterministic and prevents
+/// the render world from intermittently binding the cloud noise image to
+/// terrain materials.
+fn preallocate_cloud_noise_system(
+    mut images: ResMut<Assets<Image>>,
+    mut cloud_noise: ResMut<CloudNoiseTexture>,
+) {
+    get_or_create_cloud_noise_texture(&mut images, &mut cloud_noise);
+}
+
 impl Plugin for SkyBodyPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SkyBodyState>();
         app.init_resource::<CloudNoiseTexture>();
         app.init_asset::<Image>();
+        // PostStartup (not Update): the cloud noise texture must be allocated
+        // AFTER every Startup-issued asset load has reserved its asset index.
+        // If the cloud noise image allocation interleaves with terrain texture
+        // async loads completing in the first Update frame, the render world
+        // can intermittently bind the cloud noise image to terrain materials —
+        // water/mountain tiles then display the cloud noise instead of their
+        // texture. PostStartup runs after all Startup systems but before the
+        // first Update, so the allocation order is deterministic.
+        app.add_systems(PostStartup, preallocate_cloud_noise_system);
         app.add_systems(
             Update,
             (
@@ -1054,14 +1081,24 @@ pub fn update_sky_body_visibility(
         Visibility::Hidden
     };
 
+    // Diagnostic kill-switch for isolating material-mutation-driven render
+    // corruption: skip all material writes when set.
+    let skip_material_writes = std::env::var("ANTARES_DIAG_NO_MAT_MUT").is_ok();
+
     for (mut vis, material_handle) in sun_query.iter_mut() {
         *vis = sun_vis;
+        if skip_material_writes {
+            continue;
+        }
         if let Some(material) = materials.get_mut(&material_handle.0) {
             apply_material_alpha(material, render_state.sun_alpha);
         }
     }
     for (mut vis, material_handle) in star_query.iter_mut() {
         *vis = star_vis;
+        if skip_material_writes {
+            continue;
+        }
         if let Some(material) = materials.get_mut(&material_handle.0) {
             apply_material_alpha(material, render_state.star_alpha);
         }

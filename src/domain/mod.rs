@@ -59,8 +59,8 @@ pub use inventory::{
 pub use quest::QuestId;
 pub use transactions::{ServiceOutcome, TransactionError};
 pub use types::{
-    CharacterId, CreatureId, EventId, FurnitureId, FurnitureMeshId, InnkeeperId, ItemId, MapId,
-    MeshId, MonsterId, RaceId, SpellId,
+    CharacterId, CreatureId, EventId, FurnitureId, FurnitureMeshId, InnkeeperId, ItemId,
+    LandscapeId, LandscapeMeshId, MapId, MeshId, MonsterId, RaceId, SpellId,
 };
 pub use types::{DiceRoll, Direction, GameTime, Position};
 
@@ -103,3 +103,9 @@ pub use levels::{ClassLevelThresholds, LevelDatabase, LevelError};
 
 // Re-export furniture types
 pub use world::furniture::{FurnitureDatabase, FurnitureDatabaseError, FurnitureDefinition};
+
+// Re-export landscape types
+pub use world::landscape::{
+    LandscapeCategory, LandscapeDatabase, LandscapeDatabaseError, LandscapeDefinition,
+    LandscapeFlags, LandscapeMeshDatabase, LandscapePlacement,
+};

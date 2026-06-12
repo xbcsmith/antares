@@ -20,6 +20,7 @@
 use crate::domain::types::Direction;
 use crate::game::resources::GlobalState;
 use crate::sdk::game_config::{CameraConfig, CameraMode};
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
 
 /// Camera plugin that sets up and manages the game camera
@@ -150,6 +151,7 @@ fn setup_first_person_camera(commands: &mut Commands, config: &CameraConfig) {
     commands.spawn((
         Camera3d::default(),
         projection,
+        Tonemapping::None,
         Transform::from_xyz(0.0, config.eye_height, 0.0).looking_at(Vec3::NEG_Z, Vec3::Y),
         MainCamera,
     ));

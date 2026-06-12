@@ -1,13 +1,13 @@
-# Tutorial Campaign
+# Test Campaign Fixture
 
-A minimal tutorial campaign used by the Antares project for examples, tests,
-and developer onboarding. This campaign demonstrates the innkeeper-based inn
-system and provides a small set of maps, NPCs, and premade characters.
+A minimal stable campaign fixture used by the Antares project for examples,
+tests, and developer onboarding. This campaign demonstrates the innkeeper-based
+inn system and provides a small set of maps, NPCs, and premade characters.
 
 ## Overview
 
-- Campaign ID: `tutorial` (directory name)
-- Purpose: Example/tutorial content and test fixture for campaign tooling
+- Campaign ID: `tutorial` (fixture metadata ID)
+- Purpose: Stable test fixture and example content for campaign tooling
 - Format: RON data files under `data/` (maps, npcs, characters, etc.)
 - Default starting innkeeper: `tutorial_innkeeper_town` (`starting_innkeeper: "tutorial_innkeeper_town"` in `campaign.ron`)
 
@@ -40,11 +40,11 @@ See dialogue ID `4` or `9` in `data/dialogues.ron` for reference implementations
 
 ## How to Run & Validate
 
-- Run the game with this campaign:
-  `cargo run --bin antares -- --campaign campaigns/tutorial`
+- Run the game with this fixture:
+  `cargo run --bin antares -- --campaign data/test_campaign`
 
 - Validate campaign structure and content:
-  `cargo run --bin campaign_validator -- campaigns/tutorial`
+  `cargo run --bin campaign_validator -- data/test_campaign`
 
 The validator checks:
 
@@ -171,7 +171,7 @@ The `sprite` field in NPC and monster definitions is optional. When `visual_id` 
 1. Verify the creature ID exists in `data/creatures.ron`
 2. Check that the filepath in the registry is correct
 3. Ensure the individual creature file exists at the specified path
-4. Run the campaign validator: `cargo run --bin campaign_validator -- campaigns/tutorial`
+4. Run the campaign validator: `cargo run --bin campaign_validator -- data/test_campaign`
 
 **Wrong creature appearing**:
 

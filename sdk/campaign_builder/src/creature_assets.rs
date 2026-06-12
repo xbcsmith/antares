@@ -346,7 +346,7 @@ impl CreatureAssetManager {
     /// use std::path::PathBuf;
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let manager = CreatureAssetManager::new(PathBuf::from("campaigns/tutorial"));
+    /// let manager = CreatureAssetManager::new(PathBuf::from("data/test_campaign"));
     /// manager.delete_creature(42)?;
     /// # Ok(())
     /// # }

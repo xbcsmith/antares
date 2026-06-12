@@ -20,7 +20,7 @@
 //!     paths: PathConfig(
 //!         data_dir: Some("data"),
 //!         campaigns_dir: Some("campaigns"),
-//!         recent_files: ["campaigns/tutorial/campaign.ron"],
+//!         recent_files: ["data/test_campaign/campaign.ron"],
 //!     ),
 //!     display: DisplayConfig(
 //!         color: true,

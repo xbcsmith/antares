@@ -12,9 +12,8 @@
 //! 5. The complete test campaign content (skills + classes + races + dialogues)
 //!    validates end-to-end without errors.
 //!
-//! All tests use `data/test_campaign` as the fixture.  Tests MUST NOT
-//! reference `campaigns/tutorial` or any path under it — see
-//! `AGENTS.md` Implementation Rule 5.
+//! All tests use `data/test_campaign` as the fixture and must not load live
+//! campaign data; see `AGENTS.md` Implementation Rule 5.
 
 use std::path::Path;
 

@@ -22,7 +22,13 @@
 //! let campaign_dir = Some(PathBuf::from("/tmp/campaign"));
 //!
 //! egui::CentralPanel::default().show(&ctx, |ui| {
-//!     let _ = show_obj_importer_tab(ui, &mut importer, campaign_dir.as_ref(), &mut logger);
+//!     let _ = show_obj_importer_tab(
+//!         ui,
+//!         &mut importer,
+//!         campaign_dir.as_ref(),
+//!         "data/landscape.ron",
+//!         &mut logger,
+//!     );
 //! });
 //! ```
 
@@ -35,9 +41,13 @@ use crate::obj_importer::{
     ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
 };
 use crate::ui_helpers::TwoColumnLayout;
+use antares::domain::types::{
+    LandscapeId, LandscapeMeshId, LANDSCAPE_ID_MIN, LANDSCAPE_MESH_ID_MIN,
+};
 use antares::domain::visual::item_mesh::ItemMeshCategory;
 use antares::domain::visual::{CreatureDefinition, CreatureReference, MeshTransform};
 use antares::domain::world::furniture::FurnitureDefinition;
+use antares::domain::world::landscape::{LandscapeCategory, LandscapeDefinition, LandscapeFlags};
 use antares::domain::world::{FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType};
 use eframe::egui;
 use std::collections::HashMap;
@@ -57,6 +67,15 @@ enum ObjImportError {
 }
 
 /// Signal emitted by the importer tab when an export completes.
+///
+/// # Examples
+///
+/// ```ignore
+/// use campaign_builder::obj_importer_ui::ObjImporterUiSignal;
+///
+/// let signal = ObjImporterUiSignal::Landscape;
+/// assert_eq!(signal, ObjImporterUiSignal::Landscape);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ObjImporterUiSignal {
     /// A creature asset was exported and the creature registry should be reloaded.
@@ -65,6 +84,8 @@ pub(crate) enum ObjImporterUiSignal {
     Item,
     /// A furniture mesh asset was exported.
     Furniture,
+    /// A landscape mesh asset was exported.
+    Landscape,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -117,6 +138,12 @@ enum ObjImporterExportError {
     #[error("Enter a name before exporting")]
     MissingName,
 
+    #[error("Landscape mesh ID {id} is invalid; importer landscape mesh IDs must be >= {min}")]
+    InvalidLandscapeMeshId {
+        id: LandscapeMeshId,
+        min: LandscapeMeshId,
+    },
+
     #[error("Failed to save creature asset: {0}")]
     CreatureAsset(#[from] CreatureAssetError),
 
@@ -137,14 +164,30 @@ enum ObjImporterExportError {
 }
 
 /// Renders the OBJ importer tab and returns a signal when export completes.
+///
+/// # Examples
+///
+/// ```ignore
+/// use campaign_builder::logging::Logger;
+/// use campaign_builder::obj_importer::ObjImporterState;
+/// use campaign_builder::obj_importer_ui::show_obj_importer_tab;
+///
+/// # fn render(ui: &mut eframe::egui::Ui) {
+/// let mut state = ObjImporterState::new();
+/// let mut logger = Logger::default();
+/// let signal = show_obj_importer_tab(ui, &mut state, None, "data/landscape.ron", &mut logger);
+/// assert!(signal.is_none());
+/// # }
+/// ```
 pub(crate) fn show_obj_importer_tab(
     ui: &mut egui::Ui,
     state: &mut ObjImporterState,
     campaign_dir: Option<&PathBuf>,
+    landscape_file: &str,
     logger: &mut Logger,
 ) -> Option<ObjImporterUiSignal> {
     ui.heading("Model Importer");
-    ui.label("Load a Wavefront OBJ or binary glTF (GLB) model, adjust mesh colors, then export a creature, item, or furniture RON asset.");
+    ui.label("Load a Wavefront OBJ or binary glTF (GLB) model, adjust mesh colors, then export a creature, item, furniture, or landscape RON asset.");
 
     if !state.status_message.is_empty() {
         ui.add_space(4.0);
@@ -169,7 +212,7 @@ pub(crate) fn show_obj_importer_tab(
             render_idle_mode(ui, state, campaign_dir, logger);
             None
         }
-        ImporterMode::Loaded => render_loaded_mode(ui, state, campaign_dir, logger),
+        ImporterMode::Loaded => render_loaded_mode(ui, state, campaign_dir, landscape_file, logger),
         ImporterMode::Exporting => {
             ui.add(egui::Spinner::new());
             ui.label("Exporting importer asset...");
@@ -206,6 +249,18 @@ const ALL_ITEM_MESH_CATEGORIES: &[ItemMeshCategory] = &[
     ItemMeshCategory::Scroll,
     ItemMeshCategory::Ammo,
     ItemMeshCategory::QuestItem,
+];
+
+/// All selectable landscape categories in importer display order.
+const ALL_LANDSCAPE_CATEGORIES: &[LandscapeCategory] = &[
+    LandscapeCategory::Tree,
+    LandscapeCategory::Shrub,
+    LandscapeCategory::Brush,
+    LandscapeCategory::Rock,
+    LandscapeCategory::Grass,
+    LandscapeCategory::GroundCover,
+    LandscapeCategory::Ruin,
+    LandscapeCategory::Custom,
 ];
 
 /// Maps a category display-name string back to a [`CreatureCategory`].
@@ -277,6 +332,18 @@ fn furniture_category_from_str(s: &str) -> FurnitureCategory {
         .unwrap_or(FurnitureCategory::Seating)
 }
 
+fn landscape_category_name(category: LandscapeCategory) -> &'static str {
+    category.name()
+}
+
+fn landscape_category_from_str(s: &str) -> LandscapeCategory {
+    LandscapeCategory::all()
+        .iter()
+        .copied()
+        .find(|category| category.name() == s)
+        .unwrap_or(LandscapeCategory::Custom)
+}
+
 fn default_furniture_type_for_category(category: FurnitureCategory) -> FurnitureType {
     match category {
         FurnitureCategory::Seating => FurnitureType::Chair,
@@ -301,11 +368,13 @@ fn render_export_category_control(
                 .selected_text(creature_category_from_str(&state.category).display_name())
                 .show_ui(ui, |ui| {
                     for cat in ALL_CREATURE_CATEGORIES {
-                        ui.selectable_value(
-                            &mut state.category,
-                            cat.display_name().to_string(),
-                            cat.display_name(),
-                        );
+                        ui.push_id(cat.display_name(), |ui| {
+                            ui.selectable_value(
+                                &mut state.category,
+                                cat.display_name().to_string(),
+                                cat.display_name(),
+                            );
+                        });
                     }
                 });
             if state.category != category_before {
@@ -325,11 +394,13 @@ fn render_export_category_control(
                 .selected_text(selected_name)
                 .show_ui(ui, |ui| {
                     for category in ALL_ITEM_MESH_CATEGORIES {
-                        ui.selectable_value(
-                            &mut state.category,
-                            item_mesh_category_name(*category).to_string(),
-                            item_mesh_category_name(*category),
-                        );
+                        ui.push_id(item_mesh_category_name(*category), |ui| {
+                            ui.selectable_value(
+                                &mut state.category,
+                                item_mesh_category_name(*category).to_string(),
+                                item_mesh_category_name(*category),
+                            );
+                        });
                     }
                 });
             if state.category != category_before {
@@ -346,11 +417,37 @@ fn render_export_category_control(
                 .selected_text(selected.name())
                 .show_ui(ui, |ui| {
                     for category in FurnitureCategory::all() {
-                        ui.selectable_value(
-                            &mut state.category,
-                            category.name().to_string(),
-                            category.name(),
-                        );
+                        ui.push_id(category.name(), |ui| {
+                            ui.selectable_value(
+                                &mut state.category,
+                                category.name().to_string(),
+                                category.name(),
+                            );
+                        });
+                    }
+                });
+            if state.category != category_before {
+                ui.ctx().request_repaint();
+            }
+        }
+        ExportType::Landscape => {
+            let selected = landscape_category_from_str(&state.category);
+            let selected_name = landscape_category_name(selected);
+            if state.category != selected_name {
+                state.category = selected_name.to_string();
+            }
+            let category_before = state.category.clone();
+            egui::ComboBox::from_id_salt(id_salt)
+                .selected_text(selected_name)
+                .show_ui(ui, |ui| {
+                    for category in ALL_LANDSCAPE_CATEGORIES {
+                        ui.push_id(landscape_category_name(*category), |ui| {
+                            ui.selectable_value(
+                                &mut state.category,
+                                landscape_category_name(*category).to_string(),
+                                landscape_category_name(*category),
+                            );
+                        });
                     }
                 });
             if state.category != category_before {
@@ -390,6 +487,47 @@ fn suggest_next_creature_id_from_dir(
         }
     }
     range.start
+}
+
+/// Returns the next available landscape mesh registry ID for importer exports.
+///
+/// The helper reads `data/landscape_mesh_registry.ron` when a campaign is open
+/// and returns the first unused ID in the landscape importer allocation range.
+/// Missing or unparsable registries fall back to [`LANDSCAPE_MESH_ID_MIN`] so a
+/// new campaign can export its first landscape mesh without setup.
+///
+/// # Examples
+///
+/// ```ignore
+/// use antares::domain::types::LANDSCAPE_MESH_ID_MIN;
+/// use campaign_builder::obj_importer_ui::suggest_next_landscape_mesh_id_from_dir;
+///
+/// assert_eq!(suggest_next_landscape_mesh_id_from_dir(None), LANDSCAPE_MESH_ID_MIN);
+/// ```
+pub(crate) fn suggest_next_landscape_mesh_id_from_dir(
+    campaign_dir: Option<&Path>,
+) -> LandscapeMeshId {
+    let Some(campaign_dir) = campaign_dir else {
+        return LANDSCAPE_MESH_ID_MIN;
+    };
+
+    let registry_path = campaign_dir.join("data/landscape_mesh_registry.ron");
+    let Ok(refs) = read_ron_vec_or_empty::<CreatureReference>(&registry_path) else {
+        return LANDSCAPE_MESH_ID_MIN;
+    };
+
+    let used_ids: std::collections::HashSet<LandscapeMeshId> = refs
+        .iter()
+        .filter_map(|entry| (entry.id >= LANDSCAPE_MESH_ID_MIN).then_some(entry.id))
+        .collect();
+
+    for id in LANDSCAPE_MESH_ID_MIN..=LandscapeMeshId::MAX {
+        if !used_ids.contains(&id) {
+            return id;
+        }
+    }
+
+    LANDSCAPE_MESH_ID_MIN
 }
 
 fn render_idle_mode(
@@ -441,6 +579,12 @@ fn render_idle_mode(
                 }
                 if ui
                     .radio_value(&mut state.export_type, ExportType::Furniture, "Furniture")
+                    .changed()
+                {
+                    ui.ctx().request_repaint();
+                }
+                if ui
+                    .radio_value(&mut state.export_type, ExportType::Landscape, "Landscape")
                     .changed()
                 {
                     ui.ctx().request_repaint();
@@ -524,6 +668,7 @@ fn render_loaded_mode(
     ui: &mut egui::Ui,
     state: &mut ObjImporterState,
     campaign_dir: Option<&PathBuf>,
+    landscape_file: &str,
     logger: &mut Logger,
 ) -> Option<ObjImporterUiSignal> {
     if state.active_mesh_index.is_none() && !state.meshes.is_empty() {
@@ -594,6 +739,12 @@ fn render_loaded_mode(
                 {
                     ui.ctx().request_repaint();
                 }
+                if ui
+                    .radio_value(&mut state.export_type, ExportType::Landscape, "Landscape")
+                    .changed()
+                {
+                    ui.ctx().request_repaint();
+                }
             });
             ui.end_row();
 
@@ -612,6 +763,17 @@ fn render_loaded_mode(
                     ExportType::Furniture => {
                         if ui
                             .add(egui::DragValue::new(&mut state.furniture_id).range(0..=u32::MAX))
+                            .changed()
+                        {
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                    ExportType::Landscape => {
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut state.landscape_mesh_id)
+                                    .range(LANDSCAPE_MESH_ID_MIN..=u32::MAX),
+                            )
                             .changed()
                         {
                             ui.ctx().request_repaint();
@@ -677,6 +839,7 @@ fn render_loaded_mode(
                 &state.creature_name,
                 match state.export_type {
                     ExportType::Furniture => state.furniture_id,
+                    ExportType::Landscape => state.landscape_mesh_id,
                     ExportType::Creature | ExportType::Item => state.creature_id,
                 },
                 &state.category,
@@ -757,12 +920,13 @@ fn render_loaded_mode(
             ui.ctx().request_repaint();
         }
 
-        if ui
-            .checkbox(
-                &mut state.open_after_export,
-                "Open exported creature in editor after export",
-            )
-            .changed()
+        if state.export_type == ExportType::Creature
+            && ui
+                .checkbox(
+                    &mut state.open_after_export,
+                    "Open exported creature in editor after export",
+                )
+                .changed()
         {
             ui.ctx().request_repaint();
         }
@@ -773,12 +937,17 @@ fn render_loaded_mode(
             .clicked()
         {
             state.mode = ImporterMode::Exporting;
-            match export_state_to_campaign(state, campaign_dir.map(|path| path.as_path())) {
+            match export_state_to_campaign_with_landscape_file(
+                state,
+                campaign_dir.map(|path| path.as_path()),
+                landscape_file,
+            ) {
                 Ok(outcome) => {
                     let signal = match outcome.export_type {
                         ExportType::Creature => ObjImporterUiSignal::Creature,
                         ExportType::Item => ObjImporterUiSignal::Item,
                         ExportType::Furniture => ObjImporterUiSignal::Furniture,
+                        ExportType::Landscape => ObjImporterUiSignal::Landscape,
                     };
                     logger.info(category::FILE_IO, &outcome.status_message);
                     state.clear();
@@ -1588,14 +1757,33 @@ fn build_creature_definition(
     })
 }
 
+#[cfg(test)]
 fn export_state_to_campaign(
     state: &ObjImporterState,
     campaign_dir: Option<&Path>,
 ) -> Result<ExportOutcome, ObjImporterExportError> {
+    export_state_to_campaign_with_landscape_file(state, campaign_dir, "data/landscape.ron")
+}
+
+fn export_state_to_campaign_with_landscape_file(
+    state: &ObjImporterState,
+    campaign_dir: Option<&Path>,
+    landscape_file: &str,
+) -> Result<ExportOutcome, ObjImporterExportError> {
     let campaign_dir = campaign_dir.ok_or(ObjImporterExportError::MissingCampaignDir)?;
+    if state.export_type == ExportType::Landscape && state.landscape_mesh_id < LANDSCAPE_MESH_ID_MIN
+    {
+        return Err(ObjImporterExportError::InvalidLandscapeMeshId {
+            id: state.landscape_mesh_id,
+            min: LANDSCAPE_MESH_ID_MIN,
+        });
+    }
+
     let mut creature = build_creature_definition(state)?;
-    if matches!(state.export_type, ExportType::Furniture) {
-        creature.id = state.furniture_id;
+    match state.export_type {
+        ExportType::Furniture => creature.id = state.furniture_id,
+        ExportType::Landscape => creature.id = state.landscape_mesh_id,
+        ExportType::Creature | ExportType::Item => {}
     }
     let relative_path = preview_export_relative_path(
         state.export_type,
@@ -1640,6 +1828,21 @@ fn export_state_to_campaign(
                 &relative_path,
             )?;
             upsert_furniture_definition(campaign_dir, state, &creature)?;
+        }
+        ExportType::Landscape => {
+            if let Some(parent) = absolute_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let contents = ron::ser::to_string_pretty(&creature, ron::ser::PrettyConfig::new())?;
+            fs::write(&absolute_path, contents)?;
+            upsert_mesh_registry_entry(
+                campaign_dir,
+                "data/landscape_mesh_registry.ron",
+                creature.id,
+                &creature.name,
+                &relative_path,
+            )?;
+            upsert_landscape_definition(campaign_dir, landscape_file, state, &creature)?;
         }
     }
 
@@ -1748,6 +1951,52 @@ fn upsert_furniture_definition(
     write_ron_vec(&furniture_path, &defs)
 }
 
+fn next_landscape_definition_id(defs: &[LandscapeDefinition]) -> LandscapeId {
+    defs.iter()
+        .map(|definition| definition.id)
+        .max()
+        .map(|max_id| max_id.saturating_add(1).max(LANDSCAPE_ID_MIN))
+        .unwrap_or(LANDSCAPE_ID_MIN)
+}
+
+fn upsert_landscape_definition(
+    campaign_dir: &Path,
+    landscape_file: &str,
+    state: &ObjImporterState,
+    creature: &CreatureDefinition,
+) -> Result<(), ObjImporterExportError> {
+    let landscape_path = campaign_dir.join(landscape_file);
+    let mut defs = read_ron_vec_or_empty::<LandscapeDefinition>(&landscape_path)?;
+    let category = landscape_category_from_str(&state.category);
+    let definition = LandscapeDefinition {
+        id: defs
+            .iter()
+            .find(|definition| definition.mesh_id == Some(creature.id))
+            .map(|definition| definition.id)
+            .unwrap_or_else(|| next_landscape_definition_id(&defs)),
+        name: creature.name.clone(),
+        category,
+        default_scale: state.scale,
+        color_tint: None,
+        flags: LandscapeFlags { blocking: false },
+        icon: None,
+        tags: vec!["imported".to_string()],
+        mesh_id: Some(creature.id),
+        description: Some(format!("Imported landscape mesh '{}'", creature.name)),
+    };
+
+    if let Some(existing) = defs
+        .iter_mut()
+        .find(|existing| existing.mesh_id == Some(creature.id))
+    {
+        *existing = definition;
+    } else {
+        defs.push(definition);
+    }
+    defs.sort_by_key(|definition| definition.id);
+    write_ron_vec(&landscape_path, &defs)
+}
+
 /// Describes how a mesh texture will be obtained during campaign export.
 ///
 /// Returned by [`resolve_imported_texture_source`] and consumed by
@@ -1794,7 +2043,12 @@ fn copy_imported_textures_into_campaign(
         .file_stem()
         .and_then(|stem| stem.to_str())
         .unwrap_or("imported_model");
-    let texture_dir = PathBuf::from("assets/textures/imported").join(export_stem);
+    let texture_root = if state.export_type == ExportType::Landscape {
+        PathBuf::from("assets/textures/landscape")
+    } else {
+        PathBuf::from("assets/textures/imported")
+    };
+    let texture_dir = texture_root.join(export_stem);
     // Keyed on a 64-bit hash of the file/byte content to deduplicate identical payloads.
     let mut content_hash_to_dest: HashMap<u64, String> = HashMap::new();
     let mut used_destinations: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -2135,6 +2389,16 @@ fn preview_export_relative_path(
                 format!("assets/furniture/{}/{}.ron", category_path, file_stem)
             }
         }
+        ExportType::Landscape => {
+            if category_path.is_empty() {
+                format!("assets/meshes/landscape/{}.ron", file_stem)
+            } else {
+                format!(
+                    "assets/meshes/landscape/{}/{}.ron",
+                    category_path, file_stem
+                )
+            }
+        }
     }
 }
 
@@ -2156,6 +2420,7 @@ fn sanitized_export_stem(name: &str, id: u32, export_type: ExportType) -> String
             ExportType::Creature => format!("creature_{}", id),
             ExportType::Item => format!("item_{}", id),
             ExportType::Furniture => format!("furniture_{}", id),
+            ExportType::Landscape => format!("landscape_{}", id),
         }
     } else {
         sanitized
@@ -2189,6 +2454,7 @@ fn export_type_label(export_type: ExportType) -> &'static str {
         ExportType::Creature => "creature",
         ExportType::Item => "item",
         ExportType::Furniture => "furniture",
+        ExportType::Landscape => "landscape",
     }
 }
 
@@ -2211,11 +2477,13 @@ fn parse_glb_embedded_image_count(status: &str) -> Option<u32> {
 mod tests {
     use super::{
         build_creature_definition, creature_category_from_str, describe_mesh_color_source,
-        export_state_to_campaign, format_mtl_source_detail, format_mtl_source_summary,
-        furniture_category_from_str, item_mesh_category_from_str, item_mesh_category_name,
+        export_state_to_campaign, export_state_to_campaign_with_landscape_file,
+        format_mtl_source_detail, format_mtl_source_summary, furniture_category_from_str,
+        item_mesh_category_from_str, item_mesh_category_name, landscape_category_from_str,
         load_model_into_state, persist_custom_palette, preview_export_relative_path,
         show_obj_importer_tab, stage_imported_swatch_as_custom_draft,
-        suggest_next_creature_id_from_dir, ObjImportError, ObjImporterExportError,
+        suggest_next_creature_id_from_dir, suggest_next_landscape_mesh_id_from_dir, ObjImportError,
+        ObjImporterExportError,
     };
     use crate::creature_id_manager::CreatureCategory;
     use crate::logging::Logger;
@@ -2223,11 +2491,15 @@ mod tests {
         ExportType, ImportSourceFormat, ImportedMaterialSwatch, ImportedMeshColorSource,
         ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
     };
+    use antares::domain::types::{LANDSCAPE_ID_MIN, LANDSCAPE_MESH_ID_MIN};
     use antares::domain::visual::item_mesh::ItemMeshCategory;
     use antares::domain::visual::{
         AlphaMode, CreatureDefinition, CreatureReference, MaterialDefinition,
     };
     use antares::domain::world::furniture::FurnitureDefinition;
+    use antares::domain::world::landscape::{
+        LandscapeCategory, LandscapeDefinition, LandscapeFlags,
+    };
     use antares::domain::world::FurnitureCategory;
     use eframe::egui;
     use std::fs;
@@ -2454,6 +2726,19 @@ mod tests {
             preview_export_relative_path(ExportType::Furniture, "Oak Table", 10001, "Tables"),
             "assets/furniture/tables/oak_table.ron"
         );
+        assert_eq!(
+            preview_export_relative_path(
+                ExportType::Landscape,
+                "Oak Tree",
+                LANDSCAPE_MESH_ID_MIN,
+                "Tree"
+            ),
+            "assets/meshes/landscape/tree/oak_tree.ron"
+        );
+        assert_eq!(
+            preview_export_relative_path(ExportType::Landscape, "", LANDSCAPE_MESH_ID_MIN, ""),
+            format!("assets/meshes/landscape/landscape_{LANDSCAPE_MESH_ID_MIN}.ron")
+        );
     }
 
     #[test]
@@ -2549,7 +2834,8 @@ mod tests {
 
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let signal = show_obj_importer_tab(ui, &mut state, None, &mut logger);
+                let signal =
+                    show_obj_importer_tab(ui, &mut state, None, "data/landscape.ron", &mut logger);
                 assert!(signal.is_none());
             });
         });
@@ -2568,7 +2854,8 @@ mod tests {
         // Verify that rendering does not panic when is_error is true.
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let signal = show_obj_importer_tab(ui, &mut state, None, &mut logger);
+                let signal =
+                    show_obj_importer_tab(ui, &mut state, None, "data/landscape.ron", &mut logger);
                 assert!(signal.is_none());
             });
         });
@@ -3070,6 +3357,7 @@ mod tests {
                         ui,
                         &mut state,
                         None,
+                        "data/landscape.ron",
                         &mut logger,
                     );
                 });
@@ -3163,6 +3451,479 @@ mod tests {
     }
 
     #[test]
+    fn test_suggest_next_landscape_mesh_id_uses_domain_min_without_registry() {
+        let campaign_dir = tempdir().unwrap();
+
+        assert_eq!(
+            suggest_next_landscape_mesh_id_from_dir(Some(campaign_dir.path())),
+            LANDSCAPE_MESH_ID_MIN
+        );
+    }
+
+    #[test]
+    fn test_suggest_next_landscape_mesh_id_skips_used_registry_ids() {
+        let campaign_dir = tempdir().unwrap();
+        fs::create_dir_all(campaign_dir.path().join("data")).unwrap();
+        let registry = vec![
+            CreatureReference {
+                id: LANDSCAPE_MESH_ID_MIN,
+                name: "Oak".to_string(),
+                filepath: "assets/meshes/landscape/tree/oak.ron".to_string(),
+            },
+            CreatureReference {
+                id: LANDSCAPE_MESH_ID_MIN + 1,
+                name: "Pine".to_string(),
+                filepath: "assets/meshes/landscape/tree/pine.ron".to_string(),
+            },
+        ];
+        fs::write(
+            campaign_dir.path().join("data/landscape_mesh_registry.ron"),
+            ron::ser::to_string_pretty(&registry, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            suggest_next_landscape_mesh_id_from_dir(Some(campaign_dir.path())),
+            LANDSCAPE_MESH_ID_MIN + 2
+        );
+    }
+
+    #[test]
+    fn test_suggest_next_landscape_mesh_id_fills_first_hole() {
+        let campaign_dir = tempdir().unwrap();
+        fs::create_dir_all(campaign_dir.path().join("data")).unwrap();
+        let registry = vec![
+            CreatureReference {
+                id: LANDSCAPE_MESH_ID_MIN,
+                name: "Oak".to_string(),
+                filepath: "assets/meshes/landscape/tree/oak.ron".to_string(),
+            },
+            CreatureReference {
+                id: LANDSCAPE_MESH_ID_MIN + 2,
+                name: "Dead Tree".to_string(),
+                filepath: "assets/meshes/landscape/tree/dead_tree.ron".to_string(),
+            },
+        ];
+        fs::write(
+            campaign_dir.path().join("data/landscape_mesh_registry.ron"),
+            ron::ser::to_string_pretty(&registry, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            suggest_next_landscape_mesh_id_from_dir(Some(campaign_dir.path())),
+            LANDSCAPE_MESH_ID_MIN + 1
+        );
+    }
+
+    #[test]
+    fn test_suggest_next_landscape_mesh_id_ignores_non_landscape_ids() {
+        let campaign_dir = tempdir().unwrap();
+        fs::create_dir_all(campaign_dir.path().join("data")).unwrap();
+        let registry = vec![
+            CreatureReference {
+                id: LANDSCAPE_MESH_ID_MIN - 1,
+                name: "Furniture Range Entry".to_string(),
+                filepath: "assets/meshes/furniture/table.ron".to_string(),
+            },
+            CreatureReference {
+                id: 42,
+                name: "Creature Range Entry".to_string(),
+                filepath: "assets/creatures/monster.ron".to_string(),
+            },
+        ];
+        fs::write(
+            campaign_dir.path().join("data/landscape_mesh_registry.ron"),
+            ron::ser::to_string_pretty(&registry, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            suggest_next_landscape_mesh_id_from_dir(Some(campaign_dir.path())),
+            LANDSCAPE_MESH_ID_MIN
+        );
+    }
+
+    #[test]
+    fn test_export_landscape_rejects_mesh_id_below_landscape_min() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Landscape;
+        state.creature_name = "Invalid Tree".to_string();
+        state.category = "Tree".to_string();
+        state.landscape_mesh_id = LANDSCAPE_MESH_ID_MIN - 1;
+
+        assert!(matches!(
+            export_state_to_campaign(&state, Some(campaign_dir.path())),
+            Err(ObjImporterExportError::InvalidLandscapeMeshId {
+                id,
+                min: LANDSCAPE_MESH_ID_MIN,
+            }) if id == LANDSCAPE_MESH_ID_MIN - 1
+        ));
+        assert!(!campaign_dir
+            .path()
+            .join("data/landscape_mesh_registry.ron")
+            .exists());
+        assert!(!campaign_dir.path().join("data/landscape.ron").exists());
+    }
+
+    #[test]
+    fn test_export_landscape_updates_registry_and_landscape_file() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Landscape;
+        state.creature_name = "Oak Tree".to_string();
+        state.category = "Tree".to_string();
+        state.landscape_mesh_id = LANDSCAPE_MESH_ID_MIN + 42;
+        state.scale = 0.75;
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+
+        let mesh_registry = ron::from_str::<Vec<CreatureReference>>(
+            &fs::read_to_string(campaign_dir.path().join("data/landscape_mesh_registry.ron"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(mesh_registry.len(), 1);
+        assert_eq!(mesh_registry[0].id, LANDSCAPE_MESH_ID_MIN + 42);
+        assert_eq!(
+            mesh_registry[0].filepath,
+            "assets/meshes/landscape/tree/oak_tree.ron"
+        );
+        assert_eq!(
+            outcome.absolute_path,
+            campaign_dir.path().join(&mesh_registry[0].filepath)
+        );
+
+        let landscape_defs = ron::from_str::<Vec<LandscapeDefinition>>(
+            &fs::read_to_string(campaign_dir.path().join("data/landscape.ron")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(landscape_defs.len(), 1);
+        assert_eq!(landscape_defs[0].id, LANDSCAPE_ID_MIN);
+        assert_eq!(landscape_defs[0].name, "Oak Tree");
+        assert_eq!(landscape_defs[0].category, LandscapeCategory::Tree);
+        assert_eq!(landscape_defs[0].default_scale, 0.75);
+        assert_eq!(landscape_defs[0].mesh_id, Some(LANDSCAPE_MESH_ID_MIN + 42));
+        assert!(!landscape_defs[0].flags.blocking);
+        assert_eq!(landscape_defs[0].tags, vec!["imported".to_string()]);
+
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let mesh_asset = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+        assert_eq!(mesh_asset.id, LANDSCAPE_MESH_ID_MIN + 42);
+        assert_eq!(mesh_asset.scale, 0.75);
+
+        let mesh_db = antares::domain::world::landscape::LandscapeMeshDatabase::load_from_registry(
+            &campaign_dir.path().join("data/landscape_mesh_registry.ron"),
+            campaign_dir.path(),
+        )
+        .expect("exported landscape registry should load");
+        assert!(mesh_db.has_mesh(LANDSCAPE_MESH_ID_MIN + 42));
+    }
+
+    #[test]
+    fn test_export_landscape_upserts_existing_definition_by_mesh_id() {
+        let campaign_dir = tempdir().unwrap();
+        fs::create_dir_all(campaign_dir.path().join("data")).unwrap();
+        let existing = LandscapeDefinition {
+            id: 12,
+            name: "Old Oak".to_string(),
+            category: LandscapeCategory::Shrub,
+            default_scale: 1.0,
+            color_tint: None,
+            flags: LandscapeFlags::default(),
+            icon: None,
+            tags: vec![],
+            mesh_id: Some(LANDSCAPE_MESH_ID_MIN + 42),
+            description: None,
+        };
+        fs::write(
+            campaign_dir.path().join("data/landscape.ron"),
+            ron::ser::to_string_pretty(&vec![existing], ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Landscape;
+        state.creature_name = "Updated Oak".to_string();
+        state.category = "Tree".to_string();
+        state.landscape_mesh_id = LANDSCAPE_MESH_ID_MIN + 42;
+
+        export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let landscape_defs = ron::from_str::<Vec<LandscapeDefinition>>(
+            &fs::read_to_string(campaign_dir.path().join("data/landscape.ron")).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(landscape_defs.len(), 1);
+        assert_eq!(landscape_defs[0].id, 12);
+        assert_eq!(landscape_defs[0].name, "Updated Oak");
+        assert_eq!(landscape_defs[0].category, LandscapeCategory::Tree);
+        assert_eq!(landscape_defs[0].mesh_id, Some(LANDSCAPE_MESH_ID_MIN + 42));
+    }
+
+    #[test]
+    fn test_export_landscape_appends_new_definition_after_existing_definitions() {
+        let campaign_dir = tempdir().unwrap();
+        fs::create_dir_all(campaign_dir.path().join("data")).unwrap();
+        let existing = vec![
+            LandscapeDefinition {
+                id: LANDSCAPE_ID_MIN,
+                name: "Existing Oak".to_string(),
+                category: LandscapeCategory::Tree,
+                default_scale: 1.0,
+                color_tint: None,
+                flags: LandscapeFlags::default(),
+                icon: None,
+                tags: vec!["existing".to_string()],
+                mesh_id: Some(LANDSCAPE_MESH_ID_MIN),
+                description: None,
+            },
+            LandscapeDefinition {
+                id: LANDSCAPE_ID_MIN + 2,
+                name: "Existing Rock".to_string(),
+                category: LandscapeCategory::Rock,
+                default_scale: 0.8,
+                color_tint: None,
+                flags: LandscapeFlags::default(),
+                icon: None,
+                tags: vec!["existing".to_string()],
+                mesh_id: Some(LANDSCAPE_MESH_ID_MIN + 2),
+                description: None,
+            },
+        ];
+        fs::write(
+            campaign_dir.path().join("data/landscape.ron"),
+            ron::ser::to_string_pretty(&existing, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Landscape;
+        state.creature_name = "New Brush".to_string();
+        state.category = "Brush".to_string();
+        state.landscape_mesh_id = LANDSCAPE_MESH_ID_MIN + 42;
+
+        export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let landscape_defs = ron::from_str::<Vec<LandscapeDefinition>>(
+            &fs::read_to_string(campaign_dir.path().join("data/landscape.ron")).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(landscape_defs.len(), 3);
+        assert_eq!(landscape_defs[0].id, LANDSCAPE_ID_MIN);
+        assert_eq!(landscape_defs[1].id, LANDSCAPE_ID_MIN + 2);
+        assert_eq!(landscape_defs[2].id, LANDSCAPE_ID_MIN + 3);
+        assert_eq!(landscape_defs[2].name, "New Brush");
+        assert_eq!(landscape_defs[2].category, LandscapeCategory::Brush);
+        assert_eq!(landscape_defs[2].mesh_id, Some(LANDSCAPE_MESH_ID_MIN + 42));
+    }
+
+    #[test]
+    fn test_export_landscape_upserts_existing_mesh_registry_entry_by_id() {
+        let campaign_dir = tempdir().unwrap();
+        fs::create_dir_all(campaign_dir.path().join("data")).unwrap();
+        let existing_registry = vec![CreatureReference {
+            id: LANDSCAPE_MESH_ID_MIN + 42,
+            name: "Old Tree".to_string(),
+            filepath: "assets/meshes/landscape/tree/old_tree.ron".to_string(),
+        }];
+        fs::write(
+            campaign_dir.path().join("data/landscape_mesh_registry.ron"),
+            ron::ser::to_string_pretty(&existing_registry, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Landscape;
+        state.creature_name = "Updated Tree".to_string();
+        state.category = "Tree".to_string();
+        state.landscape_mesh_id = LANDSCAPE_MESH_ID_MIN + 42;
+
+        export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let registry = ron::from_str::<Vec<CreatureReference>>(
+            &fs::read_to_string(campaign_dir.path().join("data/landscape_mesh_registry.ron"))
+                .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(registry.len(), 1);
+        assert_eq!(registry[0].id, LANDSCAPE_MESH_ID_MIN + 42);
+        assert_eq!(registry[0].name, "Updated Tree");
+        assert_eq!(
+            registry[0].filepath,
+            "assets/meshes/landscape/tree/updated_tree.ron"
+        );
+    }
+
+    #[test]
+    fn test_export_landscape_preserves_and_sorts_existing_mesh_registry_entries() {
+        let campaign_dir = tempdir().unwrap();
+        fs::create_dir_all(campaign_dir.path().join("data")).unwrap();
+        let existing_registry = vec![
+            CreatureReference {
+                id: LANDSCAPE_MESH_ID_MIN + 90,
+                name: "Late Tree".to_string(),
+                filepath: "assets/meshes/landscape/tree/late_tree.ron".to_string(),
+            },
+            CreatureReference {
+                id: LANDSCAPE_MESH_ID_MIN + 1,
+                name: "Early Tree".to_string(),
+                filepath: "assets/meshes/landscape/tree/early_tree.ron".to_string(),
+            },
+        ];
+        fs::write(
+            campaign_dir.path().join("data/landscape_mesh_registry.ron"),
+            ron::ser::to_string_pretty(&existing_registry, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Landscape;
+        state.creature_name = "Middle Tree".to_string();
+        state.category = "Tree".to_string();
+        state.landscape_mesh_id = LANDSCAPE_MESH_ID_MIN + 42;
+
+        export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let registry = ron::from_str::<Vec<CreatureReference>>(
+            &fs::read_to_string(campaign_dir.path().join("data/landscape_mesh_registry.ron"))
+                .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(registry.len(), 3);
+        assert_eq!(registry[0].id, LANDSCAPE_MESH_ID_MIN + 1);
+        assert_eq!(registry[1].id, LANDSCAPE_MESH_ID_MIN + 42);
+        assert_eq!(registry[1].name, "Middle Tree");
+        assert_eq!(
+            registry[1].filepath,
+            "assets/meshes/landscape/tree/middle_tree.ron"
+        );
+        assert_eq!(registry[2].id, LANDSCAPE_MESH_ID_MIN + 90);
+    }
+
+    #[test]
+    fn test_export_landscape_honors_configured_landscape_file() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Landscape;
+        state.creature_name = "Custom File Rock".to_string();
+        state.category = "Rock".to_string();
+        state.landscape_mesh_id = LANDSCAPE_MESH_ID_MIN + 77;
+
+        export_state_to_campaign_with_landscape_file(
+            &state,
+            Some(campaign_dir.path()),
+            "data/custom_landscape.ron",
+        )
+        .unwrap();
+
+        assert!(!campaign_dir.path().join("data/landscape.ron").exists());
+        let landscape_defs = ron::from_str::<Vec<LandscapeDefinition>>(
+            &fs::read_to_string(campaign_dir.path().join("data/custom_landscape.ron")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(landscape_defs.len(), 1);
+        assert_eq!(landscape_defs[0].category, LandscapeCategory::Rock);
+        assert_eq!(landscape_defs[0].mesh_id, Some(LANDSCAPE_MESH_ID_MIN + 77));
+    }
+
+    #[test]
+    fn test_show_obj_importer_tab_renders_landscape_controls_without_panicking() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Landscape;
+        state.category = "Ground Cover".to_string();
+        let ctx = egui::Context::default();
+        let mut logger = Logger::default();
+
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let signal = show_obj_importer_tab(
+                    ui,
+                    &mut state,
+                    Some(&campaign_dir.path().to_path_buf()),
+                    "data/landscape.ron",
+                    &mut logger,
+                );
+                assert!(signal.is_none());
+            });
+        });
+
+        assert_eq!(state.export_type, ExportType::Landscape);
+        assert_eq!(state.category, "Ground Cover");
+    }
+
+    #[test]
+    fn test_glb_landscape_export_uses_landscape_texture_path() {
+        let campaign_dir = tempdir().unwrap();
+        let texture_bytes = b"fake_leaf_texture".to_vec();
+
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Landscape;
+        state.creature_name = "Oak Tree".to_string();
+        state.landscape_mesh_id = LANDSCAPE_MESH_ID_MIN + 42;
+        state.meshes[0].mesh_def.texture_path = Some("__glb_embedded_0".to_string());
+        state.meshes[0].texture_payload =
+            Some(glb_embedded_payload("oak_leaves.png", texture_bytes));
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+
+        let texture_path = round_trip.meshes[0]
+            .texture_path
+            .as_ref()
+            .expect("Landscape export must preserve texture_path in RON");
+        assert!(
+            texture_path.starts_with("assets/textures/landscape/oak_tree/"),
+            "Landscape texture_path must be campaign-relative under \
+             assets/textures/landscape/, got: {texture_path}"
+        );
+        assert!(campaign_dir.path().join(texture_path).exists());
+    }
+
+    #[test]
+    fn test_export_landscape_obj_texture_copy_writes_landscape_texture_file() {
+        let campaign_dir = tempdir().unwrap();
+        let source_dir = tempdir().unwrap();
+        let bark_texture = source_dir.path().join("Bark Texture.PNG");
+        fs::write(&bark_texture, b"landscape_bark_texture").unwrap();
+
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Landscape;
+        state.creature_name = "Oak Tree".to_string();
+        state.category = "Tree".to_string();
+        state.landscape_mesh_id = LANDSCAPE_MESH_ID_MIN + 77;
+        state.meshes[0].mesh_def.texture_path = Some("textures/bark.png".to_string());
+        state.meshes[0].texture_payload = Some(ImportedTexturePayload {
+            source_label: "Bark Texture.PNG".to_string(),
+            file_name_hint: "Bark Texture.PNG".to_string(),
+            bytes: None,
+            source_path: Some(bark_texture),
+            mime_type: None,
+        });
+
+        let outcome = export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let exported = fs::read_to_string(&outcome.absolute_path).unwrap();
+        let round_trip = ron::from_str::<CreatureDefinition>(&exported).unwrap();
+        let texture_path = round_trip.meshes[0].texture_path.as_ref().unwrap();
+
+        assert!(
+            texture_path.starts_with("assets/textures/landscape/oak_tree/"),
+            "landscape OBJ texture must use the landscape texture root, got: {texture_path}"
+        );
+        assert!(
+            !texture_path.starts_with("assets/textures/imported/"),
+            "landscape OBJ texture must not use the generic imported texture root"
+        );
+        assert_eq!(
+            fs::read(campaign_dir.path().join(texture_path)).unwrap(),
+            b"landscape_bark_texture"
+        );
+    }
+
+    #[test]
     fn test_glb_furniture_export_preserves_texture_path() {
         let campaign_dir = tempdir().unwrap();
         let texture_bytes = b"fake_wood_texture".to_vec();
@@ -3221,6 +3982,32 @@ mod tests {
         assert_eq!(
             furniture_category_from_str("unknown"),
             FurnitureCategory::Seating
+        );
+        assert_eq!(
+            landscape_category_from_str("Ground Cover"),
+            LandscapeCategory::GroundCover
+        );
+        assert_eq!(
+            landscape_category_from_str("unknown"),
+            LandscapeCategory::Custom
+        );
+    }
+
+    #[test]
+    fn test_landscape_category_helpers_map_all_dropdown_values() {
+        for category in LandscapeCategory::all() {
+            let display_name = super::landscape_category_name(*category);
+            assert_eq!(
+                landscape_category_from_str(display_name),
+                *category,
+                "landscape category display name {display_name} should round-trip"
+            );
+        }
+        assert_eq!(landscape_category_from_str(""), LandscapeCategory::Custom);
+        assert_eq!(
+            landscape_category_from_str("ground cover"),
+            LandscapeCategory::Custom,
+            "category parsing is intentionally exact so ComboBox labels remain canonical"
         );
     }
 

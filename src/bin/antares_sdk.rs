@@ -12,14 +12,14 @@
 //! ```text
 //! antares-sdk names --theme fantasy --number 5
 //! antares-sdk names --theme star --number 10 --lore
-//! antares-sdk campaign validate campaigns/tutorial
+//! antares-sdk campaign validate data/test_campaign
 //! antares-sdk campaign validate --all
 //! antares-sdk campaign validate --all -d campaigns/
-//! antares-sdk --verbose campaign validate campaigns/tutorial
+//! antares-sdk --verbose campaign validate data/test_campaign
 //! antares-sdk --quiet names --theme fantasy --number 100
-//! antares-sdk class --campaign campaigns/tutorial
-//! antares-sdk race  --campaign campaigns/tutorial
-//! antares-sdk item  --campaign campaigns/tutorial
+//! antares-sdk class --campaign data/test_campaign
+//! antares-sdk race  --campaign data/test_campaign
+//! antares-sdk item  --campaign data/test_campaign
 //! ```
 
 use antares::sdk::cli;
@@ -220,14 +220,14 @@ mod tests {
         }
     }
 
-    /// `antares-sdk campaign validate campaigns/tutorial` must parse the
+    /// `antares-sdk campaign validate data/test_campaign` must parse the
     /// campaign path correctly.
     #[test]
     fn test_cli_parses_campaign_validate_with_path() {
         use antares::sdk::cli::campaign_validator::CampaignSubcommand;
 
         let result =
-            Cli::try_parse_from(["antares-sdk", "campaign", "validate", "campaigns/tutorial"]);
+            Cli::try_parse_from(["antares-sdk", "campaign", "validate", "data/test_campaign"]);
         assert!(
             result.is_ok(),
             "should parse campaign validate with path: {:?}",
@@ -236,7 +236,7 @@ mod tests {
         match result.unwrap().command {
             Commands::Campaign(args) => match args.command {
                 CampaignSubcommand::Validate(v) => {
-                    assert_eq!(v.campaign, Some(PathBuf::from("campaigns/tutorial")));
+                    assert_eq!(v.campaign, Some(PathBuf::from("data/test_campaign")));
                     assert!(!v.all);
                     assert!(!v.verbose);
                     assert!(!v.json);
@@ -293,7 +293,7 @@ mod tests {
         }
     }
 
-    /// `antares-sdk map validate --campaign-dir campaigns/tutorial map_1.ron`
+    /// `antares-sdk map validate --campaign-dir data/test_campaign map_1.ron`
     /// must set `campaign_dir`.
     #[test]
     fn test_cli_parses_map_validate_with_campaign_dir() {
@@ -304,7 +304,7 @@ mod tests {
             "map",
             "validate",
             "--campaign-dir",
-            "campaigns/tutorial",
+            "data/test_campaign",
             "map_1.ron",
             "map_2.ron",
         ]);
@@ -316,7 +316,7 @@ mod tests {
         match result.unwrap().command {
             Commands::Map(args) => match args.command {
                 MapSubcommand::Validate(v) => {
-                    assert_eq!(v.campaign_dir, Some(PathBuf::from("campaigns/tutorial")));
+                    assert_eq!(v.campaign_dir, Some(PathBuf::from("data/test_campaign")));
                     assert_eq!(v.files.len(), 2);
                 }
                 MapSubcommand::Build => panic!("expected Validate subcommand, not Build"),
@@ -577,12 +577,12 @@ mod tests {
         assert!(!cli.quiet, "quiet must default to false");
     }
 
-    /// `antares-sdk class --campaign campaigns/tutorial` must populate the
+    /// `antares-sdk class --campaign data/test_campaign` must populate the
     /// `campaign` field on `ClassArgs` and preserve the default `file`.
     #[test]
     fn test_cli_parses_class_with_campaign_flag() {
         let result =
-            Cli::try_parse_from(["antares-sdk", "class", "--campaign", "campaigns/tutorial"]);
+            Cli::try_parse_from(["antares-sdk", "class", "--campaign", "data/test_campaign"]);
         assert!(
             result.is_ok(),
             "should parse class --campaign: {:?}",
@@ -592,7 +592,7 @@ mod tests {
             Commands::Class(args) => {
                 assert_eq!(
                     args.campaign,
-                    Some(PathBuf::from("campaigns/tutorial")),
+                    Some(PathBuf::from("data/test_campaign")),
                     "--campaign must be forwarded to ClassArgs"
                 );
                 assert_eq!(args.file, PathBuf::from("data/classes.ron"));
@@ -601,12 +601,12 @@ mod tests {
         }
     }
 
-    /// `antares-sdk race --campaign campaigns/tutorial` must populate the
+    /// `antares-sdk race --campaign data/test_campaign` must populate the
     /// `campaign` field on `RaceArgs` and preserve the default `file`.
     #[test]
     fn test_cli_parses_race_with_campaign_flag() {
         let result =
-            Cli::try_parse_from(["antares-sdk", "race", "--campaign", "campaigns/tutorial"]);
+            Cli::try_parse_from(["antares-sdk", "race", "--campaign", "data/test_campaign"]);
         assert!(
             result.is_ok(),
             "should parse race --campaign: {:?}",
@@ -616,7 +616,7 @@ mod tests {
             Commands::Race(args) => {
                 assert_eq!(
                     args.campaign,
-                    Some(PathBuf::from("campaigns/tutorial")),
+                    Some(PathBuf::from("data/test_campaign")),
                     "--campaign must be forwarded to RaceArgs"
                 );
                 assert_eq!(args.file, PathBuf::from("data/races.ron"));
@@ -625,12 +625,12 @@ mod tests {
         }
     }
 
-    /// `antares-sdk item --campaign campaigns/tutorial` must populate the
+    /// `antares-sdk item --campaign data/test_campaign` must populate the
     /// `campaign` field on `ItemArgs` and preserve the default `file`.
     #[test]
     fn test_cli_parses_item_with_campaign_flag() {
         let result =
-            Cli::try_parse_from(["antares-sdk", "item", "--campaign", "campaigns/tutorial"]);
+            Cli::try_parse_from(["antares-sdk", "item", "--campaign", "data/test_campaign"]);
         assert!(
             result.is_ok(),
             "should parse item --campaign: {:?}",
@@ -640,7 +640,7 @@ mod tests {
             Commands::Item(args) => {
                 assert_eq!(
                     args.campaign,
-                    Some(PathBuf::from("campaigns/tutorial")),
+                    Some(PathBuf::from("data/test_campaign")),
                     "--campaign must be forwarded to ItemArgs"
                 );
                 assert_eq!(args.file, PathBuf::from("data/items.ron"));

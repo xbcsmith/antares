@@ -96,61 +96,33 @@ fn test_core_monsters_have_loot_experience() {
 }
 
 #[test]
-fn test_campaigns_monsters_have_loot_experience_and_no_top_level_experience_value() {
+fn test_test_campaign_monsters_have_loot_experience_and_no_top_level_experience_value() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
-    let campaigns_dir = Path::new(&manifest_dir).join("campaigns");
+    let monsters_path = Path::new(&manifest_dir).join("data/test_campaign/data/monsters.ron");
 
-    // If there are no campaigns checked in (CI skip), exit quietly.
-    if !campaigns_dir.exists() {
-        println!(
-            "No campaigns directory found at {:?}; skipping campaign monster checks.",
-            campaigns_dir
+    if !monsters_path.exists() {
+        panic!(
+            "Test campaign monsters file not found at {:?}",
+            monsters_path
         );
-        return;
     }
 
-    // Iterate campaign directories and validate any monsters.ron found in campaign/<id>/data/
-    for entry in fs::read_dir(&campaigns_dir).unwrap() {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-
-        let monsters_path = path.join("data").join("monsters.ron");
-        if monsters_path.exists() {
-            validate_monsters_file(&monsters_path);
-        } else {
-            // If campaign doesn't define monsters.ron (maybe intentionally), we just continue.
-            println!("No monsters.ron found for campaign {:?}, skipping.", path);
-        }
-    }
+    validate_monsters_file(&monsters_path);
 }
 
 #[test]
-fn test_no_monsters_have_top_level_experience_value_anywhere() {
+fn test_no_monsters_have_top_level_experience_value_in_stable_fixtures() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
+    let fixture_paths = [
+        Path::new(&manifest_dir).join("data/monsters.ron"),
+        Path::new(&manifest_dir).join("data/test_campaign/data/monsters.ron"),
+    ];
 
-    // Check the core file first
-    let core_path = Path::new(&manifest_dir).join("data/monsters.ron");
-    if core_path.exists() {
-        // We can reuse `validate_monsters_file()` which already asserts no top-level field
-        validate_monsters_file(&core_path);
-    }
-
-    // Walk campaign directories and validate if any monsters.ron exists
-    let campaigns_dir = Path::new(&manifest_dir).join("campaigns");
-    if campaigns_dir.exists() {
-        for entry in fs::read_dir(&campaigns_dir).unwrap() {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let monsters_path = path.join("data").join("monsters.ron");
-            if monsters_path.exists() {
-                validate_monsters_file(&monsters_path);
-            }
+    for monsters_path in fixture_paths {
+        if !monsters_path.exists() {
+            panic!("Monsters fixture file not found at {:?}", monsters_path);
         }
+
+        validate_monsters_file(&monsters_path);
     }
 }

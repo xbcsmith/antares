@@ -1500,7 +1500,7 @@ mod tests {
     }
 
     // ── Load from test campaign fixture ────────────────────────────────────
-    // RULE: All test fixture paths use data/test_campaign, NEVER campaigns/tutorial.
+    // RULE: All test fixture paths use data/test_campaign, never the live campaign.
 
     #[test]
     fn test_skill_database_loads_test_campaign_fixture() {

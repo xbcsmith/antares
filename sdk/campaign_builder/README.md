@@ -2,7 +2,8 @@
 
 A full-featured campaign editor for creating Antares RPG campaigns. Provides a
 complete graphical interface for authoring campaign metadata, game data, maps,
-quests, dialogues, and creature assets — all serialised to RON format.
+quests, dialogues, and creature, item, furniture, and landscape assets — all
+serialised to RON format.
 
 ## Features
 
@@ -45,11 +46,16 @@ quests, dialogues, and creature assets — all serialised to RON format.
 - **Races Editor** — race definitions and stat modifiers
 - **Conditions Editor** — status condition definitions
 - **Proficiencies Editor** — proficiency definitions with validation
+- **Landscape Editor** — reusable static environment definitions grouped by
+  category, with mesh availability and texture validation preview status
 
 ### Map Editor
 
 - **Tile Placement**: Terrain type selection and multi-tile editing
 - **Advanced Terrain Variants**: Trees, shrubs, grass, mountains, swamp, lava
+- **Landscape Placement**: Place static decorations from `data/landscape.ron`,
+  then edit position, offset, y-offset, rotation, scale, tint, and blocking
+  overrides with duplicate, rotate, delete, undo/redo, save, and reload support
 - **Event Editor**: Place and edit map events with full type coverage
   (Sign, NPC Dialogue, Encounter, Container, Teleport, Combat, etc.)
 - **Facing/Behaviour Fields**: Direction and AI behaviour per event
@@ -92,6 +98,18 @@ quests, dialogues, and creature assets — all serialised to RON format.
 - **Registry/Edit Modes**: Same two-mode navigation as the Creature Asset Editor
 - **Visual Properties**: Colors, scale, emissive settings with live 3D preview
 - **Undo/Redo**: Full editing history
+
+### Model Importer
+
+- **Import Formats**: Load `.obj`/MTL or `.glb` model files
+- **Export Targets**: Creature, Item, Furniture, and Landscape
+- **Landscape Output**: Writes mesh RON below `assets/meshes/landscape/` or
+  `assets/meshes/landscape/<category>/`, copies textures below
+  `assets/textures/landscape/<asset_stem>/`, upserts
+  `data/landscape_mesh_registry.ron`, and upserts `data/landscape.ron` or the
+  configured landscape file
+- **Immediate Reload**: Landscape exports switch back to the Landscape tab and
+  reload definitions without restarting the Campaign Builder
 
 ### Template Browser
 
@@ -207,17 +225,23 @@ make sdk
 ```
 my_campaign/
 ├── campaign.ron         # Metadata (edited directly in the Campaign Builder)
-└── data/
-    ├── items.ron
-    ├── spells.ron
-    ├── monsters.ron
-    ├── classes.ron
-    ├── races.ron
-    ├── quests.ron
-    ├── dialogue.ron
-    └── maps/
-        ├── town.ron
-        └── dungeon.ron
+├── data/
+│   ├── items.ron
+│   ├── spells.ron
+│   ├── monsters.ron
+│   ├── classes.ron
+│   ├── races.ron
+│   ├── quests.ron
+│   ├── dialogues.ron
+│   ├── landscape.ron
+│   ├── landscape_mesh_registry.ron
+│   └── maps/
+│       ├── town.ron
+│       └── dungeon.ron
+└── assets/
+    ├── meshes/landscape/
+    ├── textures/landscape/
+    └── textures/trees/
 ```
 
 Use **Tools → Refresh File Tree** to update the file browser after external changes.
@@ -328,8 +352,12 @@ sdk/campaign_builder/
 │   ├── item_mesh_editor.rs     # Item mesh asset editor
 │   ├── items_editor.rs         # Item database editor
 │   ├── keyboard_shortcuts.rs   # Keyboard shortcut manager
-│   ├── map_editor.rs           # Map tile and event editor
+│   ├── landscape_editor.rs     # Landscape definition palette/editor
+│   ├── map_editor.rs           # Map tile, event, and landscape placement editor
+│   ├── mesh_glb_io.rs          # GLB mesh import helpers
 │   ├── mesh_obj_io.rs          # OBJ mesh import/export
+│   ├── obj_importer.rs         # Model importer state and export target model
+│   ├── obj_importer_ui.rs      # Model importer UI and campaign upsert flow
 │   ├── monsters_editor.rs      # Monster database editor
 │   ├── npc_editor.rs           # NPC definitions editor
 │   ├── packager.rs             # Campaign packager / distribution tools

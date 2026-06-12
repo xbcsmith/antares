@@ -153,6 +153,12 @@ fn apply_sprite_uv_transform(
     sheet_path: &str,
     sprite_index: u32,
 ) {
+    // Diagnostic kill-switch for isolating material-mutation-driven render
+    // corruption: skip all material writes when set.
+    if std::env::var("ANTARES_DIAG_NO_MAT_MUT").is_ok() {
+        return;
+    }
+
     // Extract sheet key from path
     let sheet_key = extract_sheet_key(sheet_path);
 

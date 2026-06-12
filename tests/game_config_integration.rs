@@ -320,16 +320,10 @@ fn test_tutorial_campaign_loads_config() {
 fn test_config_template_is_valid_ron() {
     use std::path::Path;
 
-    let template_path = Path::new("campaigns/config.template.ron");
+    let template_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("data/config.template.ron");
 
-    // Skip if template doesn't exist (CI environment)
-    if !template_path.exists() {
-        eprintln!("Skipping: config template not found at {:?}", template_path);
-        return;
-    }
-
-    // Read template file
-    let contents = fs::read_to_string(template_path).unwrap();
+    // Read template fixture file
+    let contents = fs::read_to_string(&template_path).unwrap();
 
     // Parse as GameConfig (should succeed despite comments)
     let result: Result<GameConfig, _> = ron::from_str(&contents);
@@ -352,16 +346,10 @@ fn test_config_template_is_valid_ron() {
 fn test_campaign_defaults_match_template() {
     use std::path::Path;
 
-    let template_path = Path::new("campaigns/config.template.ron");
+    let template_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("data/config.template.ron");
 
-    // Skip if template doesn't exist (CI environment)
-    if !template_path.exists() {
-        eprintln!("Skipping: config template not found at {:?}", template_path);
-        return;
-    }
-
-    // Load template
-    let contents = fs::read_to_string(template_path).unwrap();
+    // Load template fixture
+    let contents = fs::read_to_string(&template_path).unwrap();
     let template_config: GameConfig = ron::from_str(&contents).unwrap();
 
     // Get defaults

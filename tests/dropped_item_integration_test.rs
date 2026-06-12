@@ -20,7 +20,7 @@
 //! - Item 3  = Short Sword  (Weapon, max_charges = 0)
 //! - Item 50 = Healing Potion (Consumable, max_charges = 1)
 //!
-//! No test references `campaigns/tutorial`.
+//! Tests stay on the stable fixture and do not load live campaign data.
 
 use antares::application::save_game::SaveGameManager;
 use antares::application::GameState;

@@ -283,6 +283,14 @@ macro_rules! impl_ron_database {
             ///
             /// Returns an error if parsing fails, a duplicate ID is found,
             /// or post-load validation fails.
+            ///
+            /// # Examples
+            ///
+            /// ```ignore
+            /// let db = DatabaseType::load_from_string("[]")?;
+            /// assert!(db.is_empty());
+            /// # Ok::<(), Box<dyn std::error::Error>>(())
+            /// ```
             pub fn load_from_string(data: &str) -> Result<Self, $error> {
                 let db = Self {
                     $field: $crate::domain::database_common::load_ron_entries(
@@ -299,6 +307,14 @@ macro_rules! impl_ron_database {
             ///
             /// Returns an error if the file cannot be read, parsing fails,
             /// a duplicate ID is found, or post-load validation fails.
+            ///
+            /// # Examples
+            ///
+            /// ```ignore
+            /// let db = DatabaseType::load_from_file("data/example.ron")?;
+            /// assert!(!db.is_empty());
+            /// # Ok::<(), Box<dyn std::error::Error>>(())
+            /// ```
             pub fn load_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, $error> {
                 let contents = std::fs::read_to_string(path.as_ref()).map_err($read_err)?;
                 Self::load_from_string(&contents)
@@ -323,6 +339,14 @@ macro_rules! impl_ron_database {
             /// # Errors
             ///
             /// Returns an error if parsing fails or a duplicate ID is found.
+            ///
+            /// # Examples
+            ///
+            /// ```ignore
+            /// let db = DatabaseType::load_from_string("[]")?;
+            /// assert!(db.is_empty());
+            /// # Ok::<(), Box<dyn std::error::Error>>(())
+            /// ```
             pub fn load_from_string(data: &str) -> Result<Self, $error> {
                 Ok(Self {
                     $field: $crate::domain::database_common::load_ron_entries(
@@ -337,6 +361,14 @@ macro_rules! impl_ron_database {
             ///
             /// Returns an error if the file cannot be read, parsing fails,
             /// or a duplicate ID is found.
+            ///
+            /// # Examples
+            ///
+            /// ```ignore
+            /// let db = DatabaseType::load_from_file("data/example.ron")?;
+            /// assert!(!db.is_empty());
+            /// # Ok::<(), Box<dyn std::error::Error>>(())
+            /// ```
             pub fn load_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, $error> {
                 let contents = std::fs::read_to_string(path.as_ref()).map_err($read_err)?;
                 Self::load_from_string(&contents)

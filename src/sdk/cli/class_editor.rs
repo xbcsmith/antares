@@ -11,7 +11,7 @@
 //!
 //! ```text
 //! antares-sdk class                                  # edit data/classes.ron
-//! antares-sdk class campaigns/tutorial/data/classes.ron
+//! antares-sdk class data/test_campaign/data/classes.ron
 //! ```
 
 use crate::domain::classes::{ClassDatabase, ClassDefinition, SpellSchool, SpellStat};
@@ -45,8 +45,8 @@ pub struct ClassArgs {
     /// Campaign directory. When provided, opens `<DIR>/data/classes.ron`
     /// instead of the positional FILE argument.
     ///
-    /// Example: `antares-sdk class --campaign campaigns/tutorial`
-    /// is equivalent to: `antares-sdk class campaigns/tutorial/data/classes.ron`
+    /// Example: `antares-sdk class --campaign data/test_campaign`
+    /// is equivalent to: `antares-sdk class data/test_campaign/data/classes.ron`
     #[arg(long, value_name = "DIR")]
     pub campaign: Option<PathBuf>,
 }
@@ -719,7 +719,7 @@ mod tests {
             args: ClassArgs,
         }
 
-        let result = TestCli::try_parse_from(["test", "--campaign", "campaigns/tutorial"]);
+        let result = TestCli::try_parse_from(["test", "--campaign", "data/test_campaign"]);
         assert!(
             result.is_ok(),
             "ClassArgs should parse --campaign: {:?}",
@@ -728,7 +728,7 @@ mod tests {
         let args = result.unwrap().args;
         assert_eq!(
             args.campaign,
-            Some(PathBuf::from("campaigns/tutorial")),
+            Some(PathBuf::from("data/test_campaign")),
             "--campaign should be set to the provided directory"
         );
     }

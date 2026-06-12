@@ -6,6 +6,8 @@ This guide explains how to use the terrain-specific visual controls in the Campa
 
 The map editor provides context-sensitive controls based on the terrain type of the selected tile. This allows you to fine-tune the visual appearance of different terrain types to create rich, varied landscapes.
 
+Terrain-specific controls affect `TileVisualMetadata` and procedural terrain variation. For authored reusable decorations such as imported trees, brush, rocks, or ruins, use the **Landscape** tab and the Map Editor's **Place Landscape** tool instead.
+
 ## Prerequisites
 
 - Campaign Builder installed and running
@@ -48,7 +50,7 @@ The specific controls shown depend on the tile's terrain type.
 
 **Available Controls**:
 
-- **Tree Type**: Dropdown selector (Oak, Pine, Dead, Palm, Willow)
+- **Tree Type**: Dropdown selector (Oak, Pine, Birch, Willow, Dead, Shrub, Palm)
 - **Foliage Density**: Slider from 0.0 to 2.0
 - **Snow Coverage**: Slider from 0.0 to 1.0 (for snowy forests)
 
@@ -277,6 +279,6 @@ To reset terrain-specific settings to their default values:
 
 ## See Also
 
-- [Map Editor Reference](../reference/map_editor_reference.md)
+- [Landscape Placements Array](../reference/map_ron_format.md#landscape-placements-array)
 - [TileVisualMetadata Specification](../reference/tile_visual_metadata_specification.md)
-- Tutorial map examples: `campaigns/tutorial/data/maps/`
+- Test fixture map examples: `data/test_campaign/data/maps/`
