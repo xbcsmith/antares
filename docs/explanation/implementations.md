@@ -2,6 +2,52 @@
 
 ---
 
+## Phase 2: Cross-Pattern Leaf Volume (2026)
+
+**Goal:** Add a perpendicular second pass of leaf geometry inside `append_leaf_card`
+so the canopy appears volumetric from all camera angles, not just face-on.
+
+### What Changed
+
+**`src/game/systems/advanced_trees.rs`**
+
+- **`append_leaf_shape`** (new private helper) — dispatches to the per-species
+  leaf/frond stamping function (Oak, Birch, Willow, Palm, Shrub) for one plane.
+  Separates the species dispatch from the cross-pattern logic so both passes
+  can reuse the same code path without duplication.
+
+- **`append_leaf_card_cross`** (new helper) — stamps two perpendicular passes:
+  first with `side` as-is, then with `side2 = side.cross(up).normalize_or_zero()`.
+  `side.cross(up)` is used instead of `direction` to avoid the near-vertical
+  collapse that occurs when `up ≈ direction` (because `up = Y.lerp(direction,
+  0.35)` for near-vertical branches). `double_sided: true` (from Phase 1)
+  covers both winding orders.
+
+- **`append_leaf_card`** updated — dispatches Oak/Birch/Willow/Palm/Shrub
+  through `append_leaf_card_cross`; Pine keeps its existing single-pass path
+  (triangular needles read well from all angles; cross pass would increase
+  overdraw on dense conifer canopy without visual benefit).
+
+- **`LeafPreset.count` reduced 30–40%** for the five cross-pattern species to
+  compensate for the doubled polygon budget per card:
+
+  | Species | Old count | New count | Reduction |
+  |---------|-----------|-----------|-----------|
+  | Oak     | 5         | 3         | 40 %      |
+  | Birch   | 3         | 2         | 33 %      |
+  | Willow  | 6         | 4         | 33 %      |
+  | Palm    | 8         | 5         | 37.5 %    |
+  | Shrub   | 6         | 4         | 33 %      |
+  | Pine    | 4         | 4         | 0 % (unchanged) |
+
+- **6 new tests** added to the `#[cfg(test)]` module verifying: cross-pattern
+  doubles vertex count for Oak, Pine uses single pass, all five cross-pattern
+  species produce ≥ 2× vertices vs single pass, `side2` is perpendicular to
+  `side`, `LeafPreset.count` reductions are in [30 %, 40 %], Pine count is
+  unchanged.
+
+---
+
 ## Phase 1: Foliage Detail Texturing + Lit Foliage (2026)
 
 **Goal:** Apply tiling leaf detail textures over existing geometric leaf
@@ -10,7 +56,7 @@ realistic surface detail and light/shade variation.
 
 ### What Changed
 
-**`src/bin/generate_foliage_textures.rs`** (new)  
+**`src/bin/generate_foliage_textures.rs`** (new)
 Deterministic binary that generates six 512×512 RGBA8 tiling leaf detail
 textures. Uses a splitmix64 PRNG (inline, no `rand` crate) and writes to both
 `assets/textures/trees/` and `campaigns/tutorial/assets/textures/trees/`.
@@ -22,7 +68,7 @@ opaque coverage, 0.65–0.90 mean luminance) and exits non-zero on violation.
 
 **`Cargo.toml`** — added `[[bin]]` entry for `generate-foliage-textures`.
 
-**`src/game/systems/procedural_meshes.rs`**  
+**`src/game/systems/procedural_meshes.rs`**
 - Removed `#[cfg(test)]` from the six `TREE_FOLIAGE_TEXTURE_*` constants,
   `TREE_FOLIAGE_ALPHA_CUTOFF`, and `foliage_texture_path()`.
 - `get_or_create_foliage_material`: now loads the species detail texture via
@@ -36,7 +82,7 @@ opaque coverage, 0.65–0.90 mean luminance) and exits non-zero on violation.
 - Tests updated: assertions on `base_color_texture`, `alpha_mode`, and `unlit`
   flipped to match the new lit/textured material.
 
-**`tests/foliage_texture_spec_test.rs`** (new)  
+**`tests/foliage_texture_spec_test.rs`** (new)
 Integration tests that open the six committed PNGs and assert all output-spec
 properties: 512×512 dimensions, 40–85% opaque coverage, 0.65–0.90 mean
 luminance, edge-strip presence (confirming seamless wrap). Also asserts that
