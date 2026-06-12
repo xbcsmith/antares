@@ -302,6 +302,10 @@ pub struct CampaignData {
     #[serde(default = "default_furniture_path")]
     pub furniture: String,
 
+    /// Landscape definitions data file
+    #[serde(default = "default_landscape_path")]
+    pub landscape: String,
+
     /// Skill definitions data file
     #[serde(default = "default_skills_path")]
     pub skills: String,
@@ -349,6 +353,10 @@ fn default_creatures_path() -> String {
 
 fn default_furniture_path() -> String {
     "data/furniture.ron".to_string()
+}
+
+fn default_landscape_path() -> String {
+    "data/landscape.ron".to_string()
 }
 
 fn default_skills_path() -> String {
@@ -454,6 +462,7 @@ impl Default for CampaignData {
             characters: default_characters_path(),
             creatures: default_creatures_path(),
             furniture: default_furniture_path(),
+            landscape: default_landscape_path(),
             skills: default_skills_path(),
         }
     }
@@ -604,6 +613,12 @@ pub struct CampaignMetadata {
     /// that lack this field continue to deserialize correctly.
     #[serde(default = "default_furniture_path")]
     pub furniture_file: String,
+    /// Landscape definitions data file.
+    ///
+    /// Defaults to `"data/landscape.ron"` so existing `campaign.ron` files
+    /// that lack this field continue to deserialize correctly.
+    #[serde(default = "default_landscape_path")]
+    pub landscape_file: String,
     /// Skill definitions data file.
     ///
     /// Defaults to `"data/skills.ron"` so existing `campaign.ron` files
@@ -682,6 +697,7 @@ impl TryFrom<CampaignMetadata> for Campaign {
                 characters: metadata.characters_file,
                 creatures: metadata.creatures_file,
                 furniture: metadata.furniture_file,
+                landscape: metadata.landscape_file,
                 skills: metadata.skills_file,
             },
             assets: CampaignAssets {
@@ -1097,6 +1113,7 @@ mod tests {
             characters: default_characters_path(),
             creatures: default_creatures_path(),
             furniture: default_furniture_path(),
+            landscape: default_landscape_path(),
             skills: default_skills_path(),
         };
 
@@ -1104,6 +1121,7 @@ mod tests {
         assert_eq!(data.maps, "data/maps");
         assert_eq!(data.quests, "data/quests.ron");
         assert_eq!(data.characters, "data/characters.ron");
+        assert_eq!(data.landscape, "data/landscape.ron");
         assert_eq!(data.skills, "data/skills.ron");
     }
 
@@ -1212,6 +1230,7 @@ mod tests {
             characters_file: "data/characters.ron".to_string(),
             creatures_file: "data/creatures.ron".to_string(),
             furniture_file: "data/furniture.ron".to_string(),
+            landscape_file: "data/landscape.ron".to_string(),
             skills_file: "data/skills.ron".to_string(),
             starting_time: GameTime::new(1, 8, 0),
         };

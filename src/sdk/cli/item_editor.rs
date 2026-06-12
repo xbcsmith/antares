@@ -54,8 +54,8 @@ pub struct ItemArgs {
     /// Campaign directory. When provided, opens `<DIR>/data/items.ron`
     /// instead of the positional FILE argument.
     ///
-    /// Example: `antares-sdk item --campaign campaigns/tutorial`
-    /// is equivalent to: `antares-sdk item campaigns/tutorial/data/items.ron`
+    /// Example: `antares-sdk item --campaign data/test_campaign`
+    /// is equivalent to: `antares-sdk item data/test_campaign/data/items.ron`
     #[arg(long, value_name = "DIR")]
     pub campaign: Option<PathBuf>,
 }
@@ -1799,7 +1799,7 @@ mod tests {
             args: ItemArgs,
         }
 
-        let result = TestCli::try_parse_from(["test", "--campaign", "campaigns/tutorial"]);
+        let result = TestCli::try_parse_from(["test", "--campaign", "data/test_campaign"]);
         assert!(
             result.is_ok(),
             "ItemArgs should parse --campaign: {:?}",
@@ -1808,7 +1808,7 @@ mod tests {
         let args = result.unwrap().args;
         assert_eq!(
             args.campaign,
-            Some(PathBuf::from("campaigns/tutorial")),
+            Some(PathBuf::from("data/test_campaign")),
             "--campaign should be set to the provided directory"
         );
         assert_eq!(

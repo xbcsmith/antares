@@ -11,10 +11,15 @@ Technical reference for the `TileVisualMetadata` struct and terrain-specific fie
 **Serialization Format**: RON (Rusty Object Notation)
 
 **Usage Context**:
+
 - Stored in `Tile.visual` field for each map tile
 - Loaded from map data files (`.ron` format)
 - Edited via Campaign Builder GUI
 - Applied by rendering system during mesh generation
+
+`TileVisualMetadata` is terrain-tied procedural visual metadata. Use
+`Map.landscape_placements` for reusable authored props, imported meshes, precise
+per-instance transforms, or multiple decorations on one tile.
 
 ## Struct Definition
 
@@ -53,6 +58,7 @@ pub struct TileVisualMetadata {
 **Range**: No enforced limits; typical range 0.0-5.0
 
 **Default Behavior**: If `None`, uses terrain-based defaults:
+
 - Ground, Grass, Water, Dirt, Forest: 1.0
 - Stone: 1.2
 - Lava, Swamp: 0.8
@@ -61,6 +67,7 @@ pub struct TileVisualMetadata {
 **Serialization**: Omitted from output if `None`
 
 **Example**:
+
 ```ron
 height: Some(2.5)
 ```
@@ -102,11 +109,13 @@ height: Some(2.5)
 **Serialization**: Omitted from output if `None`
 
 **Example**:
+
 ```ron
 color_tint: Some((200, 150, 100))  // Brownish tint
 ```
 
 **Common Values**:
+
 - `(255, 255, 255)` - White (no tinting effect)
 - `(128, 128, 128)` - Gray (darkens tile)
 - `(100, 150, 255)` - Blue (water-like)
@@ -125,6 +134,7 @@ color_tint: Some((200, 150, 100))  // Brownish tint
 **Effect**: Multiplied with `height`, `width_x`, `width_z` in render calculations
 
 **Example**:
+
 ```ron
 scale: Some(1.5)  // 50% larger
 ```
@@ -152,6 +162,7 @@ scale: Some(1.5)  // 50% larger
 **Serialization**: Omitted from output if `None`
 
 **Example**:
+
 ```ron
 rotation_y: Some(45.0)  // 45 degree rotation
 ```
@@ -165,6 +176,7 @@ rotation_y: Some(45.0)  // 45 degree rotation
 **Type**: `SpriteReference` struct
 
 **Structure**:
+
 ```rust
 pub struct SpriteReference {
     pub sheet_path: String,      // Path to sprite sheet (e.g., "sprites/trees.png")
@@ -183,6 +195,7 @@ pub struct SpriteReference {
 **Type**: Vector of `LayeredSprite` structs
 
 **Structure**:
+
 ```rust
 pub struct LayeredSprite {
     pub sprite: SpriteReference,
@@ -192,6 +205,7 @@ pub struct LayeredSprite {
 ```
 
 **Use Cases**:
+
 - Layered trees (trunk + foliage)
 - Composite structures (walls + decorations)
 - Depth-ordered visuals
@@ -203,6 +217,7 @@ pub struct LayeredSprite {
 **Type**: `SpriteSelectionRule` enum
 
 **Variants**:
+
 ```rust
 pub enum SpriteSelectionRule {
     Fixed {
@@ -222,6 +237,7 @@ pub enum SpriteSelectionRule {
 ```
 
 **Use Cases**:
+
 - Random grass variants for natural look
 - Autotiling for seamless transitions
 - Procedural terrain generation
@@ -237,6 +253,7 @@ These fields customize the appearance of terrain types without changing the base
 **Type**: `GrassDensity` enum
 
 **Variants**:
+
 ```rust
 pub enum GrassDensity {
     None,      // No grass
@@ -252,11 +269,13 @@ pub enum GrassDensity {
 **Serialization**: Omitted if `None`
 
 **Example**:
+
 ```ron
 grass_density: Some(High)
 ```
 
 **Rendering Impact**:
+
 - Affects grass mesh density in shader
 - Higher values increase polygon count
 - Visual quality vs. performance tradeoff
@@ -268,13 +287,16 @@ grass_density: Some(High)
 **Type**: `TreeType` enum
 
 **Variants**:
+
 ```rust
 pub enum TreeType {
     Oak,     // Broadleaf, deciduous
     Pine,    // Conifer, evergreen
-    Dead,    // Bare, leafless
-    Palm,    // Tropical, fronds
+    Birch,   // Thin trunk, light foliage
     Willow,  // Drooping, near-water
+    Dead,    // Bare, leafless
+    Shrub,   // Low bush/undergrowth
+    Palm,    // Tropical, fronds
 }
 ```
 
@@ -283,16 +305,26 @@ pub enum TreeType {
 **Serialization**: Omitted if `None`
 
 **Example**:
+
 ```ron
 tree_type: Some(Pine)
 ```
 
 **Visual Characteristics**:
+
 - **Oak**: Wide canopy, sturdy trunk
 - **Pine**: Tall, conical shape
-- **Dead**: Skeletal, branch-like
-- **Palm**: Tropical fronds, thin trunk
+- **Birch**: Thin trunk, light foliage
 - **Willow**: Drooping branches, graceful
+- **Dead**: Skeletal, branch-like
+- **Shrub**: Low multi-stem bush or undergrowth
+- **Palm**: Tropical fronds, thin trunk
+
+`tree_type` controls terrain-derived forest visuals. Oak, Pine, Dead, Palm, and
+Shrub terrain visuals may use imported default landscape definitions when those
+are registered; Birch and Willow remain procedural unless a campaign author
+creates matching landscape definitions. For authored reusable decorations, use
+`landscape_placements` instead.
 
 ### rock_variant: Option<RockVariant>
 
@@ -301,6 +333,7 @@ tree_type: Some(Pine)
 **Type**: `RockVariant` enum
 
 **Variants**:
+
 ```rust
 pub enum RockVariant {
     Smooth,   // Weathered, rounded edges
@@ -315,11 +348,13 @@ pub enum RockVariant {
 **Serialization**: Omitted if `None`
 
 **Example**:
+
 ```ron
 rock_variant: Some(Crystal)
 ```
 
 **Use Cases**:
+
 - **Smooth**: Natural, eroded terrain
 - **Jagged**: Combat arenas, hazardous areas
 - **Layered**: Mines, underground regions
@@ -332,6 +367,7 @@ rock_variant: Some(Crystal)
 **Type**: `WaterFlowDirection` enum
 
 **Variants**:
+
 ```rust
 pub enum WaterFlowDirection {
     Still,   // Stationary water
@@ -347,11 +383,13 @@ pub enum WaterFlowDirection {
 **Serialization**: Omitted if `None`
 
 **Example**:
+
 ```ron
 water_flow_direction: Some(East)
 ```
 
 **Rendering Impact**:
+
 - Affects UV animation in water shader
 - Directions follow standard compass conventions
 - Multiple tiles can form rivers/currents
@@ -369,11 +407,13 @@ water_flow_direction: Some(East)
 **Serialization**: Omitted if `None`
 
 **Example**:
+
 ```ron
 foliage_density: Some(1.5)
 ```
 
 **Interaction**:
+
 - Multiplies base foliage amount
 - Works with grass_density and tree_type
 - Affects polygon/draw call count
@@ -391,11 +431,13 @@ foliage_density: Some(1.5)
 **Serialization**: Omitted if `None`
 
 **Example**:
+
 ```ron
 snow_coverage: Some(0.8)
 ```
 
 **Rendering**:
+
 - Interpolates between base texture and snow texture
 - Value of 0.5 = 50% snow blend
 - High values may reduce performance
@@ -454,16 +496,19 @@ impl TileVisualMetadata {
 ### skip_serializing_if Attributes
 
 All optional fields use:
+
 ```rust
 #[serde(skip_serializing_if = "Option::is_none")]
 ```
 
 **Effect**:
+
 - `None` values are omitted from serialized output
 - Produces minimal RON with only set values
 - Reduces file size and improves readability
 
 **Example - Minimal Metadata**:
+
 ```ron
 visual: (
     height: Some(2.0),
@@ -472,6 +517,7 @@ visual: (
 ```
 
 **Example - Maximal Metadata**:
+
 ```ron
 visual: (
     height: Some(3.5),
@@ -560,26 +606,32 @@ tiles: [
 The rendering system enforces these constraints:
 
 ### Height Validation
+
 - Negative heights are clamped to 0.0
 - Very large heights (>100.0) may cause rendering artifacts
 
 ### Width Validation
+
 - Negative widths are treated as 1.0
 - Zero widths use default (1.0)
 
 ### Color Validation
+
 - RGB values are u8 (0-255 enforced at type level)
 - All combinations are valid
 
 ### Scale Validation
+
 - Scale of 0.0 collapses geometry (not recommended)
 - Negative scales may invert normals
 
 ### Density Validation
+
 - Foliage density is not clamped (values >2.0 allowed but may impact perf)
 - Snow coverage should be 0.0-1.0 (higher values blend fully)
 
 ### Rotation Validation
+
 - No validation; any f32 value accepted
 - Rendered modulo 360.0 for visual interpretation
 
@@ -588,6 +640,7 @@ The rendering system enforces these constraints:
 ### Backward Compatibility
 
 The struct uses `#[serde(default)]` on the impl, allowing:
+
 - Old maps without terrain fields to load correctly
 - Gradual migration of existing maps
 - Adding new fields without breaking old data
@@ -595,6 +648,7 @@ The struct uses `#[serde(default)]` on the impl, allowing:
 ### Memory Layout
 
 Total struct size: ~200 bytes (varies by platform)
+
 - Option<f32>: 8 bytes each
 - Option<(u8, u8, u8)>: 4 bytes
 - Option enums: 8-16 bytes depending on variant
@@ -638,6 +692,7 @@ impl Default for WaterFlowDirection {
 ### Why Optional Fields?
 
 Making terrain fields optional allows:
+
 - Minimal serialized output (only customized values stored)
 - Backward compatibility with older map formats
 - Clear distinction between "not set" and "set to default"
@@ -646,6 +701,7 @@ Making terrain fields optional allows:
 ### Why Separate Accessors?
 
 The accessor methods (e.g., `grass_density()`) provide:
+
 - Guaranteed non-null returns for game logic
 - Consistent defaults across the codebase
 - Type-safe defaults (no magic strings)
@@ -653,6 +709,7 @@ The accessor methods (e.g., `grass_density()`) provide:
 ### Why Enums for Terrain?
 
 Using enums instead of strings provides:
+
 - Compile-time checking of valid values
 - Efficient serialization (variants, not strings)
 - IDE autocomplete and refactoring support

@@ -81,6 +81,16 @@ Character definitions are pre-made character templates stored in `data/character
 
 Example: CharacterId `1` might be "Sir Roland the Knight"
 
+### Landscape IDs (LandscapeId = u32)
+
+Valid range: 1-4,294,967,295 (`0` is reserved/invalid).
+
+Map `landscape_placements` reference reusable definitions from
+`data/landscape.ron` by `LandscapeId`. They do **not** reference
+`LandscapeMeshId` directly; mesh IDs are used inside landscape definitions and
+`data/landscape_mesh_registry.ron`. SDK/importer-created landscape mesh IDs
+start at `11000`.
+
 ## RON Format Specification
 
 ### Complete Map Structure
@@ -130,6 +140,18 @@ Example: CharacterId `1` might be "Sir Roland the Knight"
             position: (x: 10, y: 5),
             dialogue_id: 101,
             shop_id: None,
+        ),
+    ],
+    landscape_placements: [
+        (
+            landscape_id: 1,
+            position: (x: 6, y: 6),
+            offset: Some([0.2, -0.1]),
+            y_offset: Some(0.0),
+            rotation_y: Some(45.0),
+            scale: Some(1.25),
+            color_tint: Some([1.0, 1.0, 1.0]),
+            blocking: None,
         ),
     ],
     exits: [
@@ -293,6 +315,45 @@ event_type: Quest((
 
 - **repeatable**: `true` = event can trigger multiple times, `false` = one-time only
 - **triggered**: `false` initially (engine sets to `true` after first trigger)
+
+#### Landscape Placements Array
+
+Landscape placements are authored static decorations stored directly on a map.
+They are separate from `TileVisualMetadata`: tile visual metadata describes
+terrain-tied procedural variety, while `landscape_placements` describes reusable,
+placed props that can use imported meshes and can appear multiple times on the
+same tile.
+
+**Placement Structure**:
+
+```ron
+(
+    landscape_id: 1,
+    position: (x: 6, y: 6),
+    offset: Some([0.2, -0.1]),
+    y_offset: Some(0.0),
+    rotation_y: Some(45.0),
+    scale: Some(1.25),
+    color_tint: Some([1.0, 1.0, 1.0]),
+    blocking: None,
+)
+```
+
+**Fields**:
+
+- **`landscape_id`** (`LandscapeId`): Required definition ID from `data/landscape.ron`.
+- **`position`** (`Position`): Required tile coordinate.
+- **`offset`** (`Option<[f32; 2]>`): Optional X/Z sub-tile offset from tile center.
+- **`y_offset`** (`Option<f32>`): Optional vertical offset from the ground plane.
+- **`rotation_y`** (`Option<f32>`): Optional Y-axis rotation in degrees.
+- **`scale`** (`Option<f32>`): Optional scale override; absent uses the definition default.
+- **`color_tint`** (`Option<[f32; 3]>`): Optional RGB tint override.
+- **`blocking`** (`Option<bool>`): Optional blocking override; absent uses the definition flags.
+
+Missing `landscape_placements` fields default to an empty vector, and empty
+vectors are skipped during serialization. Campaign validation checks definition
+references, map bounds, mesh references, texture paths, and blocking conflicts
+with movement-critical map content.
 
 #### NPCs Array
 
@@ -471,10 +532,15 @@ visual: (
 
 **Common Use Cases**:
 
-- **Visual Variety**: Using `grass_density` and `tree_type` to create diverse landscapes.
+- **Visual Variety**: Using `grass_density` and `tree_type` to create diverse terrain-tied procedural landscapes.
 - **Atmosphere**: Using `color_tint` to create mood lighting (e.g., green for swamps).
 - **Custom Heights**: Setting `height` for visual emphasis on certain walls or cliffs.
 - **Snowy Biomes**: Using `snow_coverage` on forest or mountain tiles.
+
+Use `TileVisualMetadata` for terrain-derived procedural forest/grass/rock
+variation. Use `landscape_placements` when authors need reusable definitions,
+imported meshes, precise per-instance transforms, or multiple decorations on one
+tile.
 
 ## Example: Minimal Valid Map
 

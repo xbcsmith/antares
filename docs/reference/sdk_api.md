@@ -32,7 +32,7 @@ This document provides a complete technical reference for the Antares SDK module
 
 The Antares SDK provides a unified content management system for creating, validating, and packaging game campaigns. It consists of:
 
-- **Content Database**: Centralized access to all game content (classes, races, items, monsters, spells, maps)
+- **Content Database**: Centralized access to all game content (classes, races, items, monsters, spells, maps, landscape definitions, and landscape mesh registries)
 - **Validation System**: Cross-reference checking and balance validation
 - **Serialization Utilities**: RON format helpers and data merging
 - **Content Templates**: Pre-configured templates for quick content creation
@@ -69,47 +69,58 @@ antares::sdk
 Central database for all campaign content.
 
 **Fields**:
-- `classes: HashMap<ClassId, ClassDefinition>` - All character classes
-- `races: HashMap<RaceId, RaceDefinition>` - All playable races
-- `items: HashMap<ItemId, Item>` - All items
-- `monsters: HashMap<MonsterId, Monster>` - All monsters
-- `spells: HashMap<SpellId, Spell>` - All spells
-- `maps: HashMap<MapId, Map>` - All maps
+
+- `classes: ClassDatabase` - All character classes
+- `races: RaceDatabase` - All playable races
+- `items: ItemDatabase` - All items
+- `monsters: MonsterDatabase` - All monsters
+- `spells: SpellDatabase` - All spells
+- `maps: MapDatabase` - All maps
+- `landscape: LandscapeDatabase` - Reusable static landscape definitions loaded from `data/landscape.ron` when present
+- `landscape_meshes: LandscapeMeshDatabase` - Imported landscape mesh registry loaded from `data/landscape_mesh_registry.ron` when present
 
 **Methods**:
 
 ```rust
 pub fn new() -> Self
 ```
+
 Creates an empty content database.
 
 ```rust
 pub fn load_campaign(path: &str) -> Result<Self, DatabaseError>
 ```
+
 Loads all content from a campaign directory structure:
+
 - `path/data/classes.ron`
 - `path/data/races.ron`
 - `path/data/items.ron`
 - `path/data/monsters.ron`
 - `path/data/spells.ron`
 - `path/data/maps/*.ron`
+- `path/data/landscape.ron` (optional unless maps contain landscape placements)
+- `path/data/landscape_mesh_registry.ron` (optional unless landscape definitions reference meshes)
 
-**Returns**: `Ok(ContentDatabase)` if all files load successfully.
-**Errors**: `DatabaseError` if files are missing, invalid, or have parse errors.
+**Returns**: `Ok(ContentDatabase)` if all required files load successfully.
+**Errors**: `DatabaseError` if required files are missing, data is invalid, RON parsing fails, landscape placement references are invalid, mesh references are missing, texture paths do not start with `assets/`, or referenced landscape textures are missing.
 
 ```rust
 pub fn load_core() -> Result<Self, DatabaseError>
 ```
+
 Loads core game content from `data/` directory.
 
 ```rust
 pub fn validate(&self) -> Result<(), Vec<ValidationError>>
 ```
-Performs basic structural validation (duplicate IDs, required fields).
+
+Performs structural and cross-reference validation, including duplicate IDs, required fields, landscape definition-to-mesh references, landscape mesh texture path prefixes, map placement references and bounds, and blocking landscape placement conflicts.
 
 ```rust
 pub fn stats(&self) -> ContentStats
 ```
+
 Returns summary statistics about loaded content.
 
 **Example**:
@@ -117,7 +128,7 @@ Returns summary statistics about loaded content.
 ```rust
 use antares::sdk::database::ContentDatabase;
 
-let db = ContentDatabase::load_campaign("campaigns/my_campaign")?;
+let db = ContentDatabase::load_campaign("data/test_campaign")?;
 let stats = db.stats();
 
 println!("Loaded {} classes, {} items, {} maps",
@@ -129,12 +140,25 @@ println!("Loaded {} classes, {} items, {} maps",
 Summary statistics for content database.
 
 **Fields**:
+
 - `class_count: usize`
 - `race_count: usize`
 - `item_count: usize`
 - `monster_count: usize`
 - `spell_count: usize`
 - `map_count: usize`
+- `quest_count: usize`
+- `dialogue_count: usize`
+- `condition_count: usize`
+- `character_count: usize`
+- `npc_count: usize`
+- `creature_count: usize`
+- `npc_stock_template_count: usize`
+- `skill_count: usize`
+
+Landscape counts are not currently exposed through `ContentStats`. Use
+`ContentDatabase::landscape.len()` and `ContentDatabase::landscape_meshes.count()`
+when tooling needs landscape definition or mesh registry counts.
 
 ---
 
@@ -151,6 +175,7 @@ Validates content references and game balance.
 ```rust
 pub fn new(db: &ContentDatabase) -> Self
 ```
+
 Creates a validator for the given content database.
 
 **Methods**:
@@ -158,7 +183,9 @@ Creates a validator for the given content database.
 ```rust
 pub fn validate_all(&self) -> Result<Vec<ValidationError>, String>
 ```
+
 Performs comprehensive validation:
+
 - Cross-reference checking (all IDs exist)
 - Map connectivity verification
 - Duplicate ID detection
@@ -169,16 +196,19 @@ Performs comprehensive validation:
 ```rust
 fn validate_references(&self) -> Vec<ValidationError>
 ```
+
 Internal: Validates all ID references exist.
 
 ```rust
 fn validate_connectivity(&self) -> Vec<ValidationError>
 ```
+
 Internal: Ensures maps are reachable from starting map.
 
 ```rust
 fn check_balance(&self) -> Vec<ValidationError>
 ```
+
 Internal: Checks for balance issues (optional warnings).
 
 **Example**:
@@ -208,41 +238,49 @@ Enumeration of all validation error types.
 ```rust
 MissingClass { context: String, class_id: ClassId }
 ```
+
 Referenced class ID does not exist.
 
 ```rust
 MissingRace { context: String, race_id: RaceId }
 ```
+
 Referenced race ID does not exist.
 
 ```rust
 MissingItem { context: String, item_id: ItemId }
 ```
+
 Referenced item ID does not exist.
 
 ```rust
 MissingMonster { map: String, monster_id: MonsterId }
 ```
+
 Monster referenced in map does not exist.
 
 ```rust
 MissingSpell { context: String, spell_id: SpellId }
 ```
+
 Spell ID referenced does not exist.
 
 ```rust
 DisconnectedMap { map_id: MapId }
 ```
+
 Map is not reachable from starting map.
 
 ```rust
 DuplicateId { entity_type: String, id: u32 }
 ```
+
 Multiple entities share the same ID.
 
 ```rust
 BalanceWarning { severity: Severity, message: String }
 ```
+
 Optional balance warning (informational).
 
 #### `Severity`
@@ -250,6 +288,7 @@ Optional balance warning (informational).
 Warning severity level.
 
 **Variants**:
+
 - `Info` - Informational message
 - `Warning` - Potential issue
 - `Error` - Critical problem
@@ -265,9 +304,11 @@ Warning severity level.
 ```rust
 pub fn format_ron<T: Serialize>(value: &T) -> Result<String, SerializationError>
 ```
+
 Formats a value as pretty-printed RON with proper indentation.
 
 **Parameters**:
+
 - `value` - Any serializable type
 
 **Returns**: Formatted RON string.
@@ -286,9 +327,11 @@ println!("{}", ron_string);
 ```rust
 pub fn validate_ron_syntax(ron_string: &str) -> Result<(), SerializationError>
 ```
+
 Checks if a RON string is syntactically valid.
 
 **Parameters**:
+
 - `ron_string` - RON text to validate
 
 **Returns**: `Ok(())` if valid, `Err` with parse error details.
@@ -297,6 +340,7 @@ Checks if a RON string is syntactically valid.
 pub fn merge_ron_data<T>(base: &T, overlay: &T) -> Result<T, SerializationError>
 where T: Serialize + DeserializeOwned
 ```
+
 Merges two RON-serializable structures (overlay takes precedence).
 
 **Use Case**: Campaign mods that override core content.
@@ -312,9 +356,11 @@ Merges two RON-serializable structures (overlay takes precedence).
 ```rust
 pub fn basic_weapon(name: &str, damage: (u8, u8)) -> Item
 ```
+
 Creates a basic weapon template.
 
 **Parameters**:
+
 - `name` - Weapon name
 - `damage` - Damage dice (count, sides), e.g., `(1, 8)` = 1d8
 
@@ -332,9 +378,11 @@ let longsword = basic_weapon("Longsword", (1, 8));
 ```rust
 pub fn basic_armor(name: &str, ac_bonus: i8) -> Item
 ```
+
 Creates a basic armor template.
 
 **Parameters**:
+
 - `name` - Armor name
 - `ac_bonus` - Armor class bonus
 
@@ -343,12 +391,15 @@ Creates a basic armor template.
 ```rust
 pub fn town_map(name: &str, width: u16, height: u16) -> Map
 ```
+
 Creates a town map template with standard features:
+
 - Outdoor environment
 - Floor tiles by default
 - Daylight lighting
 
 **Parameters**:
+
 - `name` - Map name
 - `width`, `height` - Map dimensions
 
@@ -357,12 +408,15 @@ Creates a town map template with standard features:
 ```rust
 pub fn dungeon_map(name: &str, width: u16, height: u16) -> Map
 ```
+
 Creates a dungeon map template with standard features:
+
 - Indoor environment
 - Wall tiles by default
 - Dark (requires light)
 
 **Parameters**:
+
 - `name` - Map name
 - `width`, `height` - Map dimensions
 
@@ -383,17 +437,21 @@ Loads and validates complete campaigns.
 ```rust
 pub fn new() -> Self
 ```
+
 Creates a new campaign loader.
 
 ```rust
 pub fn load(&self, path: &str) -> Result<Campaign, CampaignError>
 ```
+
 Loads a campaign from a directory.
 
 **Parameters**:
+
 - `path` - Campaign root directory
 
 **Expected Structure**:
+
 ```
 campaigns/my_campaign/
 ├── campaign.ron         # Campaign metadata
@@ -415,6 +473,7 @@ campaigns/my_campaign/
 ```rust
 pub fn validate(&self, campaign: &Campaign) -> ValidationReport
 ```
+
 Validates a loaded campaign and generates a report.
 
 **Returns**: `ValidationReport` with errors, warnings, and statistics.
@@ -424,6 +483,7 @@ Validates a loaded campaign and generates a report.
 Represents a complete campaign with all content.
 
 **Fields**:
+
 - `info: CampaignInfo` - Campaign metadata
 - `content: ContentDatabase` - All campaign content
 
@@ -432,6 +492,7 @@ Represents a complete campaign with all content.
 Campaign metadata from `campaign.ron`.
 
 **Fields**:
+
 - `id: String` - Unique campaign identifier
 - `name: String` - Display name
 - `version: String` - Campaign version (semver)
@@ -445,6 +506,7 @@ Campaign metadata from `campaign.ron`.
 Campaign validation report.
 
 **Fields**:
+
 - `errors: Vec<ValidationError>` - Critical errors
 - `warnings: Vec<ValidationError>` - Non-critical warnings
 - `stats: ContentStats` - Content statistics
@@ -455,6 +517,7 @@ Campaign validation report.
 ```rust
 pub fn print_summary(&self)
 ```
+
 Prints a formatted summary to stdout.
 
 ---
@@ -472,21 +535,25 @@ Packages campaigns for distribution.
 ```rust
 pub fn new() -> Self
 ```
+
 Creates a new campaign packager.
 
 ```rust
 pub fn package(&self, campaign_path: &str, output_path: &str)
     -> Result<PackageManifest, PackageError>
 ```
+
 Packages a campaign into a distributable archive.
 
 **Parameters**:
+
 - `campaign_path` - Source campaign directory
 - `output_path` - Output `.tar.gz` or `.zip` file
 
 **Returns**: `PackageManifest` with package metadata.
 
 **Process**:
+
 1. Validates campaign
 2. Creates manifest
 3. Archives all content files
@@ -496,9 +563,11 @@ Packages a campaign into a distributable archive.
 pub fn unpack(&self, package_path: &str, destination: &str)
     -> Result<(), PackageError>
 ```
+
 Unpacks a campaign package.
 
 **Parameters**:
+
 - `package_path` - Source `.tar.gz` or `.zip` file
 - `destination` - Destination directory
 
@@ -507,6 +576,7 @@ Unpacks a campaign package.
 Package metadata.
 
 **Fields**:
+
 - `campaign_info: CampaignInfo` - Campaign details
 - `packaged_at: String` - ISO 8601 timestamp
 - `files: Vec<String>` - List of included files
@@ -525,9 +595,11 @@ Package metadata.
 ```rust
 pub fn validate_map(map: &Map, db: &ContentDatabase) -> Vec<ValidationError>
 ```
+
 Validates a map against the content database.
 
 **Checks**:
+
 - Tile positions within bounds
 - Monster IDs exist
 - Item IDs exist
@@ -537,9 +609,11 @@ Validates a map against the content database.
 ```rust
 pub fn suggest_item_ids(db: &ContentDatabase, query: &str) -> Vec<(ItemId, String)>
 ```
+
 Returns item suggestions matching the query string.
 
 **Parameters**:
+
 - `db` - Content database
 - `query` - Search string (case-insensitive substring match)
 
@@ -548,56 +622,67 @@ Returns item suggestions matching the query string.
 ```rust
 pub fn suggest_monster_ids(db: &ContentDatabase, query: &str) -> Vec<(MonsterId, String)>
 ```
+
 Returns monster suggestions matching the query string.
 
 ```rust
 pub fn suggest_spell_ids(db: &ContentDatabase, query: &str) -> Vec<(SpellId, String)>
 ```
+
 Returns spell suggestions matching the query string.
 
 ```rust
 pub fn suggest_map_ids(db: &ContentDatabase, query: &str) -> Vec<(MapId, String)>
 ```
+
 Returns map suggestions matching the query string.
 
 ```rust
 pub fn browse_items(db: &ContentDatabase) -> Vec<(ItemId, String, String)>
 ```
+
 Returns all items with ID, name, and type.
 
 ```rust
 pub fn browse_monsters(db: &ContentDatabase) -> Vec<(MonsterId, String, u8)>
 ```
+
 Returns all monsters with ID, name, and level.
 
 ```rust
 pub fn browse_spells(db: &ContentDatabase) -> Vec<(SpellId, String, u8)>
 ```
+
 Returns all spells with ID, name, and level.
 
 ```rust
 pub fn browse_maps(db: &ContentDatabase) -> Vec<(MapId, String, String)>
 ```
+
 Returns all maps with ID, name, and environment type.
 
 ```rust
 pub fn is_valid_item_id(db: &ContentDatabase, id: ItemId) -> bool
 ```
+
 Checks if an item ID exists.
 
 ```rust
 pub fn is_valid_monster_id(db: &ContentDatabase, id: MonsterId) -> bool
 ```
+
 Checks if a monster ID exists.
 
 ```rust
 pub fn is_valid_spell_id(db: &ContentDatabase, id: SpellId) -> bool
 ```
+
 Checks if a spell ID exists.
 
 ```rust
 pub fn is_valid_map_id(db: &ContentDatabase, id: MapId) -> bool
 ```
+
 Checks if a map ID exists.
 
 ---
@@ -612,9 +697,11 @@ Checks if a map ID exists.
 pub fn validate_quest(quest: &Quest, db: &ContentDatabase)
     -> Result<(), Vec<QuestValidationError>>
 ```
+
 Validates a quest definition.
 
 **Checks**:
+
 - Objective item/monster IDs exist
 - Reward item/spell IDs exist
 - Completion event IDs exist
@@ -622,11 +709,13 @@ Validates a quest definition.
 ```rust
 pub fn get_quest_dependencies(quest: &Quest) -> QuestDependencies
 ```
+
 Extracts all content IDs referenced by a quest.
 
 ```rust
 pub fn generate_quest_summary(quest: &Quest) -> String
 ```
+
 Generates a human-readable quest summary.
 
 ---
@@ -641,9 +730,11 @@ Generates a human-readable quest summary.
 pub fn validate_dialogue(dialogue: &Dialogue, db: &ContentDatabase)
     -> Result<(), Vec<DialogueValidationError>>
 ```
+
 Validates a dialogue tree.
 
 **Checks**:
+
 - Response branch IDs exist
 - Item/quest references exist
 - No circular loops (infinite dialogue)
@@ -651,6 +742,7 @@ Validates a dialogue tree.
 ```rust
 pub fn analyze_dialogue(dialogue: &Dialogue) -> DialogueStats
 ```
+
 Analyzes dialogue structure.
 
 **Returns**: `DialogueStats` with node count, branch count, depth.
@@ -658,6 +750,7 @@ Analyzes dialogue structure.
 ```rust
 pub fn generate_dialogue_summary(dialogue: &Dialogue) -> String
 ```
+
 Generates a text summary of dialogue flow.
 
 ---
@@ -703,6 +796,7 @@ See `docs/reference/architecture.md` Section 4 for complete type definitions.
 Errors from content database operations.
 
 **Variants**:
+
 - `FileNotFound(String)` - Required file missing
 - `ParseError(String)` - RON parse error
 - `IoError(std::io::Error)` - File I/O error
@@ -712,6 +806,7 @@ Errors from content database operations.
 Errors from RON serialization operations.
 
 **Variants**:
+
 - `ParseError(String)` - Invalid RON syntax
 - `SerializationError(String)` - Serialization failed
 - `MergeError(String)` - Data merge failed
@@ -721,6 +816,7 @@ Errors from RON serialization operations.
 Errors from campaign loading.
 
 **Variants**:
+
 - `InvalidStructure(String)` - Missing required directories/files
 - `ConfigError(String)` - Invalid `campaign.ron`
 - `ContentError(DatabaseError)` - Content loading failed
@@ -731,6 +827,7 @@ Errors from campaign loading.
 Errors from campaign packaging.
 
 **Variants**:
+
 - `ValidationFailed(Vec<ValidationError>)` - Campaign invalid
 - `IoError(std::io::Error)` - File I/O error
 - `CompressionError(String)` - Archive creation failed

@@ -37,7 +37,7 @@ use crate::mesh_obj_io::{
     ImportedObjMesh, ImportedObjMeshColorSource, ImportedObjMtlSourceKind, ImportedObjScene,
     ObjError, ObjImportOptions,
 };
-use antares::domain::types::{CreatureId, FurnitureMeshId};
+use antares::domain::types::{CreatureId, FurnitureMeshId, LandscapeMeshId, LANDSCAPE_MESH_ID_MIN};
 use antares::domain::visual::{AlphaMode, MeshDefinition};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -55,6 +55,15 @@ pub enum ImporterMode {
 }
 
 /// Target asset type for the importer.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::obj_importer::ExportType;
+///
+/// let export_type = ExportType::Landscape;
+/// assert_eq!(export_type, ExportType::Landscape);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExportType {
     /// Export as a creature asset.
@@ -64,6 +73,8 @@ pub enum ExportType {
     Item,
     /// Export as a furniture mesh asset.
     Furniture,
+    /// Export as a static landscape mesh asset.
+    Landscape,
 }
 
 /// Records how the importer's current mesh color was chosen.
@@ -164,6 +175,18 @@ pub struct ImportedMesh {
 }
 
 /// State owned by the OBJ importer tab.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::types::LANDSCAPE_MESH_ID_MIN;
+/// use campaign_builder::obj_importer::{ExportType, ObjImporterState};
+///
+/// let mut state = ObjImporterState::new();
+/// state.export_type = ExportType::Landscape;
+/// state.set_next_landscape_mesh_id(LANDSCAPE_MESH_ID_MIN + 1);
+/// assert_eq!(state.landscape_mesh_id, LANDSCAPE_MESH_ID_MIN + 1);
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjImporterState {
     /// Current importer lifecycle mode.
@@ -186,15 +209,20 @@ pub struct ObjImporterState {
     pub imported_material_palette: Vec<ImportedMaterialSwatch>,
     /// Parsed meshes currently loaded in the importer.
     pub meshes: Vec<ImportedMesh>,
-    /// Whether the export target is a creature or an item.
+    /// Export target selected by the author.
     pub export_type: ExportType,
     /// Suggested next creature ID for export.
     pub creature_id: CreatureId,
     /// Suggested next furniture mesh ID for export.
     pub furniture_id: FurnitureMeshId,
+    /// Suggested next landscape mesh ID for export.
+    pub landscape_mesh_id: LandscapeMeshId,
     /// Name entered by the user for the export.
     pub creature_name: String,
-    /// Optional category subfolder used when exporting item or furniture meshes.
+    /// Optional category subfolder used when exporting item, furniture, or landscape meshes.
+    ///
+    /// Landscape exports also map this display value to `LandscapeCategory` and
+    /// use it to build `assets/meshes/landscape/<category>/...` output paths.
     pub category: String,
     /// Uniform OBJ import scale.
     pub scale: f32,
@@ -411,6 +439,32 @@ fn apply_color_to_mesh_definition(mesh_def: &mut MeshDefinition, color: [f32; 4]
     }
 }
 
+/// Shifts all mesh vertices upward so the global Y minimum across all parts is 0.0.
+///
+/// Imported geometry (OBJ/GLB from Blender) is typically exported with the origin at
+/// the center of the bounding box, placing vertices in the range [-1, +1] in Y. When
+/// the mesh is placed at world Y=0 this buries the bottom half underground. Grounding
+/// at import time fixes the data once so every downstream consumer — editor preview,
+/// export, placement — sees a correctly grounded mesh without special-casing.
+fn ground_meshes_to_y_zero(mut meshes: Vec<ImportedMesh>) -> Vec<ImportedMesh> {
+    let min_y = meshes
+        .iter()
+        .flat_map(|m| m.mesh_def.vertices.iter())
+        .map(|v| v[1])
+        .fold(f32::INFINITY, f32::min);
+
+    if min_y.is_finite() && min_y < 0.0 {
+        let lift = -min_y;
+        for mesh in &mut meshes {
+            for vertex in &mut mesh.mesh_def.vertices {
+                vertex[1] += lift;
+            }
+        }
+    }
+
+    meshes
+}
+
 fn has_imported_material_color(mesh_def: &MeshDefinition) -> bool {
     mesh_def.color != [1.0, 1.0, 1.0, 1.0]
 }
@@ -437,6 +491,7 @@ impl Default for ObjImporterState {
             export_type: ExportType::Creature,
             creature_id: 4000,
             furniture_id: 10001,
+            landscape_mesh_id: LANDSCAPE_MESH_ID_MIN,
             creature_name: String::new(),
             category: String::new(),
             scale: 0.01,
@@ -461,13 +516,28 @@ impl ObjImporterState {
     ///
     /// The following fields survive a clear and are restored into the new
     /// default state: `scale`, `custom_palette`, `creature_id`,
-    /// `furniture_id`, `export_type`, `category`, `new_custom_color`,
-    /// `manual_mtl_path`, and `open_after_export`.
+    /// `furniture_id`, `landscape_mesh_id`, `export_type`, `category`,
+    /// `new_custom_color`, `manual_mtl_path`, and `open_after_export`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::LANDSCAPE_MESH_ID_MIN;
+    /// use campaign_builder::obj_importer::{ExportType, ObjImporterState};
+    ///
+    /// let mut state = ObjImporterState::new();
+    /// state.export_type = ExportType::Landscape;
+    /// state.landscape_mesh_id = LANDSCAPE_MESH_ID_MIN + 7;
+    /// state.clear();
+    /// assert_eq!(state.export_type, ExportType::Landscape);
+    /// assert_eq!(state.landscape_mesh_id, LANDSCAPE_MESH_ID_MIN + 7);
+    /// ```
     pub fn clear(&mut self) {
         let scale = self.scale;
         let custom_palette = self.custom_palette.clone();
         let creature_id = self.creature_id;
         let furniture_id = self.furniture_id;
+        let landscape_mesh_id = self.landscape_mesh_id;
         let export_type = self.export_type;
         let category = self.category.clone();
         let new_custom_color = self.new_custom_color;
@@ -479,6 +549,7 @@ impl ObjImporterState {
             custom_palette,
             creature_id,
             furniture_id,
+            landscape_mesh_id,
             export_type,
             category,
             new_custom_color,
@@ -564,7 +635,7 @@ impl ObjImporterState {
         self.declared_mtl_libraries = declared_mtl_libraries;
         self.resolved_mtl_paths = resolved_mtl_paths;
         self.imported_material_palette = imported_material_palette;
-        self.meshes = meshes;
+        self.meshes = ground_meshes_to_y_zero(meshes);
         self.active_mesh_index = (!self.meshes.is_empty()).then_some(0);
         self.mode = if self.meshes.is_empty() {
             ImporterMode::Idle
@@ -697,6 +768,21 @@ impl ObjImporterState {
         self.furniture_id = furniture_id;
     }
 
+    /// Updates the suggested landscape mesh ID shown by the importer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::obj_importer::ObjImporterState;
+    ///
+    /// let mut state = ObjImporterState::new();
+    /// state.set_next_landscape_mesh_id(11042);
+    /// assert_eq!(state.landscape_mesh_id, 11042);
+    /// ```
+    pub fn set_next_landscape_mesh_id(&mut self, landscape_mesh_id: LandscapeMeshId) {
+        self.landscape_mesh_id = landscape_mesh_id;
+    }
+
     /// Sets the mesh currently targeted by the color editor.
     pub fn set_active_mesh(&mut self, index: Option<usize>) {
         self.active_mesh_index = index.filter(|idx| *idx < self.meshes.len());
@@ -732,9 +818,11 @@ impl ObjImporterState {
 #[cfg(test)]
 mod tests {
     use super::{
-        ExportType, ImportSourceFormat, ImportedMesh, ImportedMeshColorSource,
-        ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
+        ground_meshes_to_y_zero, ExportType, ImportSourceFormat, ImportedMesh,
+        ImportedMeshColorSource, ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode,
+        ObjImporterState,
     };
+    use antares::domain::types::LANDSCAPE_MESH_ID_MIN;
     use antares::domain::visual::{AlphaMode, MaterialDefinition, MeshDefinition};
     use std::fs;
     use std::path::PathBuf;
@@ -1102,11 +1190,19 @@ mod tests {
     }
 
     #[test]
+    fn test_obj_importer_default_landscape_mesh_id_uses_domain_min() {
+        let state = ObjImporterState::default();
+
+        assert_eq!(state.landscape_mesh_id, LANDSCAPE_MESH_ID_MIN);
+    }
+
+    #[test]
     fn test_obj_importer_state_clear_preserves_scale_palette_and_id() {
         let mut state = ObjImporterState::new();
         state.scale = 0.05;
         state.creature_id = 4012;
         state.furniture_id = 10042;
+        state.landscape_mesh_id = 11042;
         state.export_type = ExportType::Furniture;
         state.category = "tables".to_string();
         state.manual_mtl_path = Some(PathBuf::from("materials/hero_override.mtl"));
@@ -1121,6 +1217,7 @@ mod tests {
         assert_eq!(state.scale, 0.05);
         assert_eq!(state.creature_id, 4012);
         assert_eq!(state.furniture_id, 10042);
+        assert_eq!(state.landscape_mesh_id, 11042);
         assert_eq!(state.export_type, ExportType::Furniture);
         assert_eq!(state.category, "tables");
         assert_eq!(
@@ -1526,6 +1623,145 @@ mod tests {
             !state.is_error,
             "is_error should be false for successful load"
         );
+    }
+
+    #[test]
+    fn test_ground_meshes_lifts_negative_y_vertices_to_zero() {
+        let mesh = MeshDefinition {
+            name: None,
+            vertices: vec![[-0.5, -1.0, -0.5], [0.5, -1.0, -0.5], [0.0, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let imported = ImportedMesh::from_mesh_definition(mesh);
+        let result = ground_meshes_to_y_zero(vec![imported]);
+
+        let min_y = result[0]
+            .mesh_def
+            .vertices
+            .iter()
+            .map(|v| v[1])
+            .fold(f32::INFINITY, f32::min);
+        assert_eq!(min_y, 0.0, "lowest vertex must be at Y=0 after grounding");
+
+        let max_y = result[0]
+            .mesh_def
+            .vertices
+            .iter()
+            .map(|v| v[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert_eq!(
+            max_y, 2.0,
+            "mesh height must be preserved (1.0 - (-1.0) = 2.0)"
+        );
+    }
+
+    #[test]
+    fn test_ground_meshes_does_not_adjust_already_grounded_mesh() {
+        let mesh = MeshDefinition {
+            name: None,
+            vertices: vec![[-0.5, 0.0, -0.5], [0.5, 0.0, -0.5], [0.0, 1.5, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let imported = ImportedMesh::from_mesh_definition(mesh);
+        let result = ground_meshes_to_y_zero(vec![imported]);
+
+        assert_eq!(result[0].mesh_def.vertices[0][1], 0.0);
+        assert_eq!(result[0].mesh_def.vertices[2][1], 1.5);
+    }
+
+    #[test]
+    fn test_ground_meshes_uses_global_min_across_all_parts() {
+        let part_a = MeshDefinition {
+            name: None,
+            vertices: vec![[0.0, -0.5, 0.0], [1.0, 0.5, 0.0]],
+            indices: vec![0, 1, 0],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let part_b = MeshDefinition {
+            name: None,
+            vertices: vec![[0.0, -1.0, 0.0], [1.0, 1.0, 0.0]],
+            indices: vec![0, 1, 0],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+        let meshes = vec![
+            ImportedMesh::from_mesh_definition(part_a),
+            ImportedMesh::from_mesh_definition(part_b),
+        ];
+        let result = ground_meshes_to_y_zero(meshes);
+
+        // Global min was -1.0 (from part_b), so lift = 1.0 applied to both parts.
+        assert_eq!(result[0].mesh_def.vertices[0][1], 0.5); // -0.5 + 1.0
+        assert_eq!(result[0].mesh_def.vertices[1][1], 1.5); //  0.5 + 1.0
+        assert_eq!(result[1].mesh_def.vertices[0][1], 0.0); // -1.0 + 1.0
+        assert_eq!(result[1].mesh_def.vertices[1][1], 2.0); //  1.0 + 1.0
+    }
+
+    #[test]
+    fn test_load_mesh_definitions_grounds_vertices_for_all_export_types() {
+        // All export types use load_mesh_definitions -> load_imported_mesh_rows,
+        // so grounding applies regardless of whether the mesh is a creature, item,
+        // furniture, or landscape asset.
+        let centered_mesh = MeshDefinition {
+            name: None,
+            vertices: vec![[-0.5, -1.0, 0.0], [0.5, -1.0, 0.0], [0.0, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            normals: None,
+            uvs: None,
+            color: [1.0, 1.0, 1.0, 1.0],
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        };
+
+        for export_type in [
+            ExportType::Creature,
+            ExportType::Item,
+            ExportType::Furniture,
+            ExportType::Landscape,
+        ] {
+            let mut state = ObjImporterState::new();
+            state.export_type = export_type;
+            state.load_mesh_definitions(None, vec![centered_mesh.clone()]);
+
+            let min_y = state.meshes[0]
+                .mesh_def
+                .vertices
+                .iter()
+                .map(|v| v[1])
+                .fold(f32::INFINITY, f32::min);
+            assert_eq!(
+                min_y, 0.0,
+                "min Y must be 0.0 after load for {:?}",
+                export_type
+            );
+        }
     }
 
     #[test]

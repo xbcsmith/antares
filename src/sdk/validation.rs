@@ -1002,6 +1002,55 @@ impl<'a> Validator<'a> {
             });
         }
 
+        if !self.db.maps.all_maps().is_empty() {
+            if let Some(map) = self.db.maps.get_map(config.starting_map) {
+                if !map.is_valid_position(config.starting_position) {
+                    errors.push(ValidationError::BalanceWarning {
+                        severity: Severity::Error,
+                        message: format!(
+                            "Campaign starting position ({}, {}) is outside map {}",
+                            config.starting_position.x,
+                            config.starting_position.y,
+                            config.starting_map
+                        ),
+                    });
+                } else if map.get_tile(config.starting_position).is_some_and(|tile| {
+                    tile.blocked || tile.wall_type != crate::domain::world::WallType::None
+                }) {
+                    errors.push(ValidationError::BalanceWarning {
+                        severity: Severity::Error,
+                        message: format!(
+                            "Campaign starting position ({}, {}) on map {} is blocked by terrain or a wall",
+                            config.starting_position.x,
+                            config.starting_position.y,
+                            config.starting_map
+                        ),
+                    });
+                } else if self.db.landscape.is_position_blocked_by_landscape(
+                    &map.landscape_placements,
+                    config.starting_position,
+                ) {
+                    errors.push(ValidationError::BalanceWarning {
+                        severity: Severity::Error,
+                        message: format!(
+                            "Campaign starting position ({}, {}) on map {} is blocked by a landscape placement",
+                            config.starting_position.x,
+                            config.starting_position.y,
+                            config.starting_map
+                        ),
+                    });
+                }
+            } else {
+                errors.push(ValidationError::BalanceWarning {
+                    severity: Severity::Error,
+                    message: format!(
+                        "Campaign starting map {} does not exist",
+                        config.starting_map
+                    ),
+                });
+            }
+        }
+
         errors
     }
 
@@ -1202,8 +1251,20 @@ impl<'a> Validator<'a> {
                         });
                     }
 
-                    // Check if destination is valid (we can't fully validate without loading the target map)
-                    let _ = destination; // Used in error message if needed
+                    if let Some(target_map) = self.db.maps.get_map(*map_id) {
+                        if self.db.landscape.is_position_blocked_by_landscape(
+                            &target_map.landscape_placements,
+                            *destination,
+                        ) {
+                            errors.push(ValidationError::BalanceWarning {
+                                severity: Severity::Error,
+                                message: format!(
+                                    "Map {} has teleport at ({}, {}) to map {} position ({}, {}) blocked by a landscape placement",
+                                    map.id, pos.x, pos.y, map_id, destination.x, destination.y
+                                ),
+                            });
+                        }
+                    }
                 }
                 crate::domain::world::MapEvent::Trap { damage, .. } => {
                     // Balance check for trap damage
@@ -1450,6 +1511,17 @@ impl<'a> Validator<'a> {
                     lock_id: dup_id,
                 });
             }
+        }
+
+        // Validate landscape placements and movement-critical blocking conflicts.
+        if let Err(error) = self.db.landscape.validate_map_placements(map) {
+            errors.push(ValidationError::BalanceWarning {
+                severity: Severity::Error,
+                message: format!(
+                    "Map {} landscape placement validation failed: {}",
+                    map.id, error
+                ),
+            });
         }
 
         // Validate NPC placements

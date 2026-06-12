@@ -161,6 +161,18 @@ impl CampaignBuilderApp {
     }
 
     /// Synchronize importer state that depends on the active campaign.
+    ///
+    /// This refreshes importer palette data plus suggested creature, furniture,
+    /// and landscape mesh IDs from the currently open campaign directory.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use campaign_builder::CampaignBuilderApp;
+    ///
+    /// let mut app = CampaignBuilderApp::default();
+    /// app.sync_obj_importer_campaign_state();
+    /// ```
     pub fn sync_obj_importer_campaign_state(&mut self) {
         if let Some(campaign_dir) = self.campaign_dir.clone() {
             match self.obj_importer_state.load_custom_palette(&campaign_dir) {
@@ -204,6 +216,14 @@ impl CampaignBuilderApp {
                 category::APP,
                 &format!("Failed to determine next importer creature ID: {}", error),
             ),
+        }
+
+        if self.obj_importer_state.export_type == obj_importer::ExportType::Landscape {
+            let next_landscape_mesh_id = obj_importer_ui::suggest_next_landscape_mesh_id_from_dir(
+                self.campaign_dir.as_deref(),
+            );
+            self.obj_importer_state
+                .set_next_landscape_mesh_id(next_landscape_mesh_id);
         }
     }
 
@@ -1868,6 +1888,76 @@ impl CampaignBuilderApp {
         }
     }
 
+    /// Load landscape definitions from the campaign landscape RON file.
+    ///
+    /// Missing file is not an error — landscape support is opt-in per campaign.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use campaign_builder::CampaignBuilderApp;
+    ///
+    /// let mut app = CampaignBuilderApp::default();
+    /// app.load_landscape();
+    /// ```
+    pub fn load_landscape(&mut self) {
+        if let Some(defs) = read_ron_collection::<antares::domain::LandscapeDefinition>(
+            &self.campaign_dir,
+            &self.campaign.landscape_file,
+            "landscape",
+            &mut self.ui_state.status_message,
+        ) {
+            let count = defs.len();
+            self.campaign_data.landscape_definitions = defs;
+            self.editor_registry.landscape_editor_state =
+                landscape_editor::LandscapeEditorState::new();
+            self.logger.info(
+                category::FILE_IO,
+                &format!("Loaded {} landscape definitions", count),
+            );
+            self.ui_state.status_message = format!("Loaded {} landscape definitions", count);
+        } else {
+            self.campaign_data.landscape_definitions.clear();
+            self.editor_registry.landscape_editor_state =
+                landscape_editor::LandscapeEditorState::new();
+            self.logger
+                .debug(category::FILE_IO, "No landscape.ron found (opt-in)");
+        }
+    }
+
+    /// Save landscape definitions to the campaign landscape RON file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CampaignIoError`] when the landscape RON file cannot be written
+    /// or serialized.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use campaign_builder::CampaignBuilderApp;
+    ///
+    /// let mut app = CampaignBuilderApp::default();
+    /// app.save_landscape()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn save_landscape(&mut self) -> Result<(), CampaignIoError> {
+        write_ron_collection(
+            &self.campaign_dir,
+            &self.campaign.landscape_file,
+            &self.campaign_data.landscape_definitions,
+            "landscape",
+        )?;
+        self.logger.info(
+            category::FILE_IO,
+            &format!(
+                "Saved {} landscape definitions",
+                self.campaign_data.landscape_definitions.len()
+            ),
+        );
+        Ok(())
+    }
+
     /// Save furniture definitions to the campaign furniture RON file.
     ///
     /// Returns an `Err` on failure so the caller can aggregate warnings.
@@ -2764,6 +2854,8 @@ impl CampaignBuilderApp {
 
         self.campaign_data.furniture_definitions.clear();
         self.editor_registry.furniture_editor_state = furniture_editor::FurnitureEditorState::new();
+        self.campaign_data.landscape_definitions.clear();
+        self.editor_registry.landscape_editor_state = landscape_editor::LandscapeEditorState::new();
 
         self.campaign_data.maps.clear();
         self.editor_registry.maps_editor_state = MapsEditorState::new();
@@ -2896,6 +2988,10 @@ impl CampaignBuilderApp {
 
         if let Err(e) = self.save_furniture() {
             save_warnings.push(format!("Furniture: {}", e));
+        }
+
+        if let Err(e) = self.save_landscape() {
+            save_warnings.push(format!("Landscape: {}", e));
         }
 
         if let Err(e) = self.save_quests() {
@@ -3078,6 +3174,7 @@ impl CampaignBuilderApp {
                     self.load_maps();
                     self.load_conditions();
                     self.load_furniture();
+                    self.load_landscape();
 
                     // Load quests and dialogues
                     if let Err(e) = self.load_quests() {

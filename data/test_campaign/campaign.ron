@@ -33,5 +33,6 @@ CampaignMetadata(
     skills_file: "data/skills.ron",
     creatures_file: "data/creatures.ron",
     furniture_file: "data/furniture.ron",
+    landscape_file: "data/landscape.ron",
     starting_time: (day: 1, hour: 8, minute: 0),
 )
