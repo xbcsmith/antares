@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Brett Smith <xbcsmith@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
+use super::advanced_grass::{GrassMaterial, GrassWindUniform, WindNoiseTexture};
 use crate::domain::types;
 use crate::domain::world;
 use crate::domain::world::mark_visible_area;
@@ -11,6 +12,7 @@ use crate::game::components::sprite::{ActorType, AnimatedSprite, TileSprite};
 use crate::game::resources::sprite_assets::SpriteAssets;
 use crate::game::resources::GlobalState;
 use crate::game::resources::TerrainMaterialCache;
+use crate::game::resources::WindConfig;
 use crate::game::systems::actor::spawn_actor_sprite;
 use crate::game::systems::creature_meshes::{
     create_material_from_color, create_material_with_texture, material_definition_to_bevy,
@@ -521,6 +523,7 @@ impl Plugin for MapRenderingPlugin {
             .init_resource::<super::advanced_grass::GrassAssetCache>()
             .init_resource::<super::advanced_grass::GrassRenderConfig>() // Add grass render config
             .init_resource::<super::advanced_grass::GrassInstanceConfig>()
+            .add_plugins(bevy::pbr::MaterialPlugin::<GrassMaterial>::default())
             .add_systems(
                 PreStartup,
                 // Diagnostic only; no-op unless ANTARES_DIAG_DUMMY_IMAGES is set.
@@ -533,6 +536,7 @@ impl Plugin for MapRenderingPlugin {
                 (
                     super::terrain_materials::load_terrain_materials_system,
                     register_sprite_sheets_system,
+                    super::advanced_grass::setup_wind_noise_texture_system,
                     spawn_map_system,
                 )
                     .chain(),
@@ -567,6 +571,7 @@ fn spawn_map_system(
     commands: Commands,
     meshes: ResMut<Assets<Mesh>>,
     materials: ResMut<Assets<StandardMaterial>>,
+    grass_materials: ResMut<Assets<GrassMaterial>>,
     sprite_assets: ResMut<SpriteAssets>,
     asset_server: Res<AssetServer>,
     global_state: Res<GlobalState>,
@@ -575,11 +580,24 @@ fn spawn_map_system(
     mut grass_cache: ResMut<super::advanced_grass::GrassAssetCache>,
     terrain_cache: Res<TerrainMaterialCache>,
     mut cache: Local<super::procedural_meshes::ProceduralMeshCache>,
+    wind_config: Option<Res<WindConfig>>,
+    wind_noise: Option<Res<WindNoiseTexture>>,
 ) {
+    let wind_uniform = wind_config
+        .as_deref()
+        .map(|wc| GrassWindUniform::from_config(&wc.0))
+        .unwrap_or_default();
+    let noise_handle = wind_noise
+        .as_deref()
+        .map(|wn| wn.0.clone())
+        .unwrap_or_default();
+    grass_cache.set_wind(wind_uniform, noise_handle);
+
     spawn_map(
         commands,
         meshes,
         materials,
+        Some(grass_materials),
         sprite_assets,
         asset_server,
         global_state,
@@ -774,6 +792,7 @@ fn spawn_map_markers(
     mut commands: Commands,
     meshes: ResMut<Assets<Mesh>>,
     materials: ResMut<Assets<StandardMaterial>>,
+    grass_materials: Option<ResMut<Assets<GrassMaterial>>>,
     sprite_assets: ResMut<SpriteAssets>,
     asset_server: Res<AssetServer>,
     global_state: Res<GlobalState>,
@@ -782,6 +801,8 @@ fn spawn_map_markers(
     terrain_cache: Option<Res<TerrainMaterialCache>>,
     query_existing: Query<(Entity, &MapEntity)>,
     mut last_map: Local<Option<types::MapId>>,
+    wind_config: Option<Res<WindConfig>>,
+    wind_noise: Option<Res<WindNoiseTexture>>,
 ) {
     let current = global_state.0.world.current_map;
 
@@ -837,10 +858,20 @@ fn spawn_map_markers(
 
         let mut procedural_cache = super::procedural_meshes::ProceduralMeshCache::default();
         let mut grass_cache = super::advanced_grass::GrassAssetCache::default();
+        let wind_uniform = wind_config
+            .as_deref()
+            .map(|wc| GrassWindUniform::from_config(&wc.0))
+            .unwrap_or_default();
+        let noise_handle = wind_noise
+            .as_deref()
+            .map(|wn| wn.0.clone())
+            .unwrap_or_default();
+        grass_cache.set_wind(wind_uniform, noise_handle);
         spawn_map(
             commands,
             meshes,
             materials,
+            grass_materials,
             sprite_assets,
             asset_server,
             global_state,
@@ -1350,6 +1381,7 @@ fn spawn_map(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut grass_materials: Option<ResMut<Assets<GrassMaterial>>>,
     mut sprite_assets: ResMut<SpriteAssets>,
     asset_server: Res<AssetServer>,
     global_state: Res<crate::game::resources::GlobalState>,
@@ -1685,19 +1717,21 @@ fn spawn_map(
                             // Always spawn grass ground cover for these terrains, avoiding known
                             // tree and shrub exclusion zones from the deterministic vegetation plan.
                             if should_spawn_procedural_vegetation {
-                                super::advanced_grass::spawn_grass_cached_with_exclusions(
-                                    &mut commands,
-                                    &mut materials,
-                                    &mut meshes,
-                                    &asset_server,
-                                    grass_cache,
-                                    &vegetation_plan.grass_exclusion_zones,
-                                    pos,
-                                    map.id,
-                                    Some(&tile.visual),
-                                    tile.visual.color_tint,
-                                    &quality_settings,
-                                );
+                                if let Some(ref mut gm) = grass_materials {
+                                    super::advanced_grass::spawn_grass_cached_with_exclusions(
+                                        &mut commands,
+                                        gm,
+                                        &mut meshes,
+                                        &asset_server,
+                                        grass_cache,
+                                        &vegetation_plan.grass_exclusion_zones,
+                                        pos,
+                                        map.id,
+                                        Some(&tile.visual),
+                                        tile.visual.color_tint,
+                                        &quality_settings,
+                                    );
+                                }
                             }
                         }
                         _ => {

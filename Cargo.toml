@@ -35,6 +35,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ordered-float = "4.0"
 image = { version = "0.25", features = ["png"] }
+noise = "0.9"
 
 [[bin]]
 name = "antares"

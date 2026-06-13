@@ -1433,3 +1433,66 @@ cargo nextest → 5212 passed, 8 skipped, 0 failed
 ```
 
 ---
+
+## Phase 6: WGSL Grass Wind Shader (Sine + Perlin)
+
+**Branch**: `pr-vegetation-updates`
+**Date**: 2026-06-13
+
+### Overview
+
+Implemented a custom WGSL vertex shader for grass blades that supports three wind animation modes: `None` (static), `Sine` (sinusoidal sway driven by global time), and `Perlin` (spatially coherent fBm noise). The shader uses `ExtendedMaterial<StandardMaterial, GrassWindExtension>` so the grass keeps full PBR lighting while adding per-blade sway.
+
+### New Files
+
+| File | Purpose |
+|---|---|
+| `assets/shaders/grass.wgsl` | WGSL vertex shader with None/Sine/Perlin wind paths; uses `@group(2) @binding(100..102)` for wind extension bindings |
+
+### Modified Files
+
+| File | Change |
+|---|---|
+| `Cargo.toml` | Added `noise = "0.9"` dependency for fBm Perlin noise texture generation |
+| `src/game/systems/advanced_grass.rs` | New types `GrassWindUniform`, `GrassWindExtension`, `GrassMaterial`, `WindNoiseTexture`; migrated all `Handle<StandardMaterial>` to `Handle<GrassMaterial>`; added `generate_wind_noise_texture` and `setup_wind_noise_texture_system` |
+| `src/game/systems/map.rs` | Registered `MaterialPlugin::<GrassMaterial>`, added `setup_wind_noise_texture_system` to Startup, updated `spawn_map` and `spawn_map_markers` to propagate `Option<ResMut<Assets<GrassMaterial>>>` |
+| `benches/grass_instancing.rs` | Updated to use `GrassMaterial` instead of `StandardMaterial` |
+
+### New Types (advanced_grass.rs)
+
+| Type | Description |
+|---|---|
+| `GrassWindUniform` | GPU-aligned uniform struct (`ShaderType`): strength, frequency, direction, wind_system, perlin_scale, `_pad` |
+| `GrassWindExtension` | `MaterialExtension` with `#[uniform(100)]` wind + `#[texture(101)]`/`#[sampler(102)]` noise |
+| `GrassMaterial` | Type alias for `ExtendedMaterial<StandardMaterial, GrassWindExtension>` |
+| `WindNoiseTexture` | Bevy resource wrapping `Handle<Image>` for the 512×512 fBm Perlin noise texture |
+
+### WGSL Binding Layout
+
+Bindings start at 100 to avoid collisions with `StandardMaterial`'s reserved groups:
+
+| Binding | Type | Purpose |
+|---|---|---|
+| `@group(2) @binding(100)` | `uniform GrassWindUniform` | Wind parameters |
+| `@group(2) @binding(101)` | `texture_2d<f32>` | Perlin noise texture |
+| `@group(2) @binding(102)` | `sampler` | Noise sampler |
+
+### Key Design Decisions
+
+- **`textureSampleLevel` not `textureSample`**: vertex shaders in WGSL require explicit LOD; used level 0.
+- **`bevy::shader::ShaderRef`** (not `bevy::render::render_resource::ShaderRef`): the type is in the `bevy_shader` crate.
+- **`Option<ResMut<Assets<GrassMaterial>>>`** in `spawn_map` / `spawn_map_markers`: makes the parameter optional so tests using `MapManagerPlugin` (without `MaterialPlugin::<GrassMaterial>`) don't fail resource validation; grass is silently skipped when the resource is absent.
+- **512×512 RGBA8 fBm noise texture**: generated at startup by `setup_wind_noise_texture_system`; falls back to a 1×1 white placeholder when `WindConfig` is absent or `wind_system` is not `Perlin`.
+- **`GrassAssetCache.set_wind()`**: clears cached materials so they are recreated with updated wind uniforms on map transition.
+- **`#[allow(clippy::too_many_arguments)]`** on `build_grass_chunks_system`: adding `Res<Assets<GrassMaterial>>` pushed arg count to 8.
+
+### Quality Gates
+
+```text
+cargo fmt     → clean (no output)
+cargo check   → Finished 0 errors
+cargo clippy  → Finished 0 warnings
+cargo nextest → 5212 passed, 8 skipped, 0 failed
+```
+
+---
