@@ -521,8 +521,11 @@ impl Plugin for MapRenderingPlugin {
             .init_resource::<crate::game::resources::GrassQualitySettings>()
             .init_resource::<crate::game::resources::VegetationQualitySettings>()
             .init_resource::<super::advanced_grass::GrassAssetCache>()
-            .init_resource::<super::advanced_grass::GrassRenderConfig>() // Add grass render config
+            .init_resource::<super::advanced_grass::GrassRenderConfig>()
             .init_resource::<super::advanced_grass::GrassInstanceConfig>()
+            // Phase-7 GPU instancing plugin — must be added before the material
+            // plugin so the GrassRenderMode resource is available at startup.
+            .add_plugins(super::grass_instancing::GrassInstancingPlugin)
             .add_plugins(bevy::pbr::MaterialPlugin::<GrassMaterial>::default())
             .add_systems(
                 PreStartup,
@@ -554,7 +557,7 @@ impl Plugin for MapRenderingPlugin {
                     super::advanced_trees::tree_lod_switching_system,
                     super::advanced_grass::grass_distance_culling_system,
                     super::advanced_grass::grass_lod_system,
-                    // Instance batching for diagnostics
+                    // Instance batching — active when GrassRenderMode::Instanced
                     super::advanced_grass::build_grass_instance_batches_system,
                     // Advanced grass chunking + culling systems
                     super::advanced_grass::build_grass_chunks_system,
@@ -582,6 +585,7 @@ fn spawn_map_system(
     mut cache: Local<super::procedural_meshes::ProceduralMeshCache>,
     wind_config: Option<Res<WindConfig>>,
     wind_noise: Option<Res<WindNoiseTexture>>,
+    render_mode: Option<Res<super::grass_instancing::GrassRenderMode>>,
 ) {
     let wind_uniform = wind_config
         .as_deref()
@@ -592,6 +596,8 @@ fn spawn_map_system(
         .map(|wn| wn.0.clone())
         .unwrap_or_default();
     grass_cache.set_wind(wind_uniform, noise_handle);
+
+    let effective_render_mode = render_mode.as_deref().copied().unwrap_or_default();
 
     spawn_map(
         commands,
@@ -607,6 +613,7 @@ fn spawn_map_system(
         grass_cache.as_mut(),
         &terrain_cache,
         &mut cache,
+        effective_render_mode,
     );
 }
 
@@ -803,6 +810,7 @@ fn spawn_map_markers(
     mut last_map: Local<Option<types::MapId>>,
     wind_config: Option<Res<WindConfig>>,
     wind_noise: Option<Res<WindNoiseTexture>>,
+    render_mode: Option<Res<super::grass_instancing::GrassRenderMode>>,
 ) {
     let current = global_state.0.world.current_map;
 
@@ -867,6 +875,7 @@ fn spawn_map_markers(
             .map(|wn| wn.0.clone())
             .unwrap_or_default();
         grass_cache.set_wind(wind_uniform, noise_handle);
+        let effective_render_mode = render_mode.as_deref().copied().unwrap_or_default();
         spawn_map(
             commands,
             meshes,
@@ -885,6 +894,7 @@ fn spawn_map_markers(
             &mut grass_cache,
             cache_ref,
             &mut procedural_cache,
+            effective_render_mode,
         );
     } else {
         // Current map id is set to an unknown map - leave the world empty
@@ -1391,6 +1401,7 @@ fn spawn_map(
     grass_cache: &mut super::advanced_grass::GrassAssetCache,
     terrain_cache: &TerrainMaterialCache,
     procedural_cache: &mut super::procedural_meshes::ProceduralMeshCache,
+    render_mode: super::grass_instancing::GrassRenderMode,
 ) {
     debug!("spawn_map system called");
     let game_state = &global_state.0;
@@ -1730,6 +1741,7 @@ fn spawn_map(
                                         Some(&tile.visual),
                                         tile.visual.color_tint,
                                         &quality_settings,
+                                        render_mode,
                                     );
                                 }
                             }

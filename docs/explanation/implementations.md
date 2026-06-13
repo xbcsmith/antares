@@ -2,6 +2,124 @@
 
 ---
 
+## Phase 7: GPU Instancing for Grass (2026)
+
+**Goal:** Connect the existing `GrassInstanceBatch` infrastructure to a real render
+pass so all grass clumps in a spatial chunk share a single indexed draw call,
+dramatically reducing entity count and CPU overhead on grass-dense maps.
+
+### What Changed
+
+**`Cargo.toml`**
+- Added `bytemuck = { version = "1", features = ["derive"] }` as a direct
+  dependency for `cast_slice` in the GPU buffer upload path.
+
+**`assets/shaders/grass_instanced.wgsl`** (new)
+- Instanced grass vertex shader with two vertex buffer inputs:
+  - Buffer 0 (`VertexStepMode::Vertex`): standard mesh attributes from Bevy's
+    `Vertex` struct — position, normal, UV, vertex color.
+  - Buffer 1 (`VertexStepMode::Instance`): `GrassInstance` struct at
+    `@location(8-12)` — world position, wind phase, surface normal, scale,
+    Y-axis rotation.
+- Reproduces the Phase-6 wind paths (`None` / `Sine` / `Perlin`) and the
+  three-stop vertex-color gradient from Phase-4.
+- Per-instance `i_phase` offset staggers the sine wave so adjacent clumps
+  don't sway in perfect synchrony.
+- Wind bind group at `@group(3)` (after Bevy's three standard MeshPipeline
+  groups at 0–2): `wind: GrassWindUniform`, `wind_noise`, `wind_sampler`.
+- `textureSampleLevel` used in the vertex stage (WGSL vertex stage cannot use
+  implicit-derivative `textureSample`).
+
+**`src/game/systems/grass_instancing.rs`** (new)
+- **`GrassRenderMode`** resource — `PerEntity` (Phase-6 path) vs. `Instanced`
+  (Phase-7, default).  Guards both the per-blade `Mesh3d` spawn and the
+  instanced batch spawn so the two paths never render simultaneously.
+- **`GrassRenderWorldAvailable`** marker resource — only inserted when
+  `RenderApp` is present. Prevents `build_grass_instance_batches_system` from
+  spawning `Mesh3d` entities (which trigger Bevy's render-world sync hook) in
+  unit-test environments that use `MinimalPlugins`.
+- **`GrassInstanceGpu`** (`repr(C)`, `bytemuck::Pod + Zeroable`, 48 bytes) —
+  per-instance GPU data matching the WGSL `GrassInstance` struct layout.
+- **`GrassInstanceBuffer`** render-world component — holds the uploaded GPU
+  vertex buffer and instance count.
+- **`GrassWindBindGroupResource`** render-world resource — holds the wind
+  uniform bind group for `@group(3)`.
+- **`GrassInstancedPipeline`** — `SpecializedMeshPipeline` wrapping
+  `MeshPipeline`; appends the instance vertex buffer layout and the wind bind
+  group layout to every specialized descriptor.
+- **`DrawGrassInstanced`** type alias for the render-command chain:
+  `SetItemPipeline → SetMeshViewBindGroup<0> →
+  SetMeshViewBindingArrayBindGroup<1> → SetMeshBindGroup<2> →
+  SetGrassWindBindGroup<3> → DrawGrassInstancedInner`.
+- Systems wired into `RenderApp`:
+  - `init_grass_instanced_pipeline` (`RenderStartup`) — creates the pipeline
+    and wind bind group layout.
+  - `prepare_grass_instance_buffers` (`PrepareResources`) — uploads
+    `GrassInstanceBatch.instances` via `bytemuck::cast_slice`.
+  - `prepare_grass_wind_bind_group` (`PrepareBindGroups`) — builds the wind
+    uniform buffer + noise texture bind group from extracted resources.
+  - `queue_grass_instanced` (`QueueMeshes`) — queues each `GrassInstanceBatch`
+    entity into `Opaque3d` using `BinnedRenderPhaseType::NonMesh`.
+- **`GrassInstancingPlugin`** — gates all render wiring (including
+  `ExtractComponentPlugin`) on `RenderApp` being present.  Without a render
+  world (test environments), only `GrassRenderMode` is registered.
+
+**`src/game/systems/advanced_grass.rs`** (modified)
+- `ExtractComponent` implemented for `GrassInstanceBatch` (in
+  `grass_instancing.rs`) so it is copied to the render world.
+- `spawn_grass_clump` gains a `render_mode: GrassRenderMode` parameter.
+  - `PerEntity`: per-clump entity gets `Mesh3d + MeshMaterial3d` (Phase-6 path).
+  - `Instanced` (default): per-clump entity spawns WITHOUT render components so
+    the standard material pipeline ignores it; instance data is gathered by
+    `build_grass_instance_batches_system`.
+- `spawn_grass_cached`, `spawn_grass_cached_with_exclusions`, and `spawn_grass`
+  gain a matching `render_mode` parameter threaded through to
+  `spawn_grass_clump`.
+- `build_grass_instance_batches_system` gains two additional system parameters:
+  - `render_mode: Option<Res<GrassRenderMode>>` — activates the instanced path
+    when `GrassRenderMode::Instanced` (replaces the `config.enabled` flag check).
+  - `render_world_available: Option<Res<GrassRenderWorldAvailable>>` — gates
+    `Mesh3d` + `NoFrustumCulling` spawning on render world presence.
+  - In instanced + render-world mode, each `GrassInstanceBatch` entity gets
+    `Mesh3d(clump_mesh)` (so Bevy allocates GPU vertex/index buffers) plus
+    `NoFrustumCulling` (culling happens at `GrassCluster` level).
+- Imports `NoFrustumCulling` and `GrassRenderMode` from the new module.
+- All three in-module test spawn calls updated to pass
+  `GrassRenderMode::PerEntity` so existing assertions on `GrassBlade` and
+  `GrassClump` counts remain valid.
+
+**`src/game/systems/map.rs`** (modified)
+- `MapRenderingPlugin::build` adds `GrassInstancingPlugin` before
+  `MaterialPlugin::<GrassMaterial>`.
+- `spawn_map_system`, `spawn_map`, and `spawn_map_markers` gain a
+  `render_mode: GrassRenderMode` parameter threaded through to the single
+  `spawn_grass_cached_with_exclusions` call site.
+
+**`src/game/systems/mod.rs`** (modified)
+- Added `pub mod grass_instancing`.
+
+### Design Decisions
+
+| Decision | Rationale |
+|---|---|
+| `SpecializedMeshPipeline` (not `SpecializedRenderPipeline`) | Reuses `MeshPipeline::specialize(key, layout)` for the automatic mesh vertex buffer layout + view/mesh bind group setup. Avoids duplicating Bevy's attribute-location mapping. |
+| `BinnedRenderPhaseType::NonMesh` | Bypasses GPU preprocessing (indirect draw buffers). Our per-instance transforms live in vertex buffer 1, not in Bevy's mesh uniform buffer, so preprocessing would add overhead for no gain. |
+| `Opaque3d` phase | Grass is opaque/masked — no sorting needed. Binned phase allows multi-draw batching in future. |
+| Wind at `@group(3)` | `MeshPipeline::specialize` occupies bind group indices 0–2. Appending at index 3 avoids collision without forking the base pipeline. |
+| `GrassRenderWorldAvailable` marker | `ExtractComponentPlugin` adds `SyncComponentPlugin` which registers a component hook requiring `PendingSyncEntity`. Gating both on `RenderApp` presence prevents panics in MinimalPlugins test environments. |
+| Per-clump entities kept (no `Mesh3d`) | Preserves the existing `GrassCluster` distance-culling and LOD systems. In instanced mode the per-clump entities are invisible (no render components); their transforms feed `build_grass_instance_batches_system`. |
+
+### Quality Gate Results
+
+```
+cargo fmt         → no output (all files formatted)
+cargo check       → Finished with 0 errors
+cargo clippy      → Finished with 0 warnings
+cargo nextest run → 5221/5221 passed, 0 failed
+```
+
+---
+
 ## Phase 2: Cross-Pattern Leaf Volume (2026)
 
 **Goal:** Add a perpendicular second pass of leaf geometry inside `append_leaf_card`

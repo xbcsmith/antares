@@ -24,6 +24,7 @@ pub mod events;
 pub mod exploration_spells;
 pub mod facing;
 pub mod furniture_rendering;
+pub mod grass_instancing;
 pub mod hud;
 pub mod ik;
 pub mod inn_ui;

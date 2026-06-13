@@ -210,7 +210,7 @@ Recruitable Characters 3d models turn there back on the party when talking to th
 
 Sorcerer Spell point bar does not go down as spell points are used.
 
-Can not select a Rest option of (1) (2) or (3) because it opens the 1,2, or 3 character sheet. Remove triggering character sheet by number
+Can not select a Rest option of (1) (2) or (3) because it opens the 1,2, or 3 character sheet. Remove triggering character sheet by number when in the rest menu. The rest menu should be navigable by number but it should not trigger the character sheet.
 
 ✅ COMPLETED - When playing tutorial campaign ./campaigns/tutorial The oak and pine trees in the middle of that map_1 are not rendering. See the screenshot ./screenshots/trees_map_1.png The forrest of multiple different types of trees in map_1 are not using the new tree models. They look weird as you can see in the screenshot ./screenshots/forrest_map_1.png None of the trees on map_2 are rendering. I am assuming something changed in the tree rendering code and it broke the trees in the tutorial campaign. We should fix the tree rendering code so that the trees in the tutorial campaign render correctly.
 

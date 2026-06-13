@@ -12,7 +12,16 @@
 //! Grass rendering consumes **domain** content density (`GrassDensity`) and
 //! applies **performance scaling** (`GrassPerformanceLevel`) to determine
 //! the final blade count per tile.
+//!
+//! # Phase 7 — GPU instancing
+//!
+//! When [`GrassRenderMode::Instanced`] is active (default), per-clump entities
+//! are spawned WITHOUT `Mesh3d`/`MeshMaterial3d`.  The
+//! [`build_grass_instance_batches_system`] instead creates [`GrassInstanceBatch`]
+//! entities with `Mesh3d` (for GPU buffer allocation) and no material, and the
+//! [`grass_instancing`] pipeline renders them in a single draw call per batch.
 
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::log::debug;
 use bevy::prelude::*;
 use rand::rngs::StdRng;
@@ -26,6 +35,7 @@ use crate::game::resources::WindConfig;
 use crate::game::resources::{
     GrassPerformanceLevel, GrassQualitySettings, VegetationQualityLevel, VegetationQualitySettings,
 };
+use crate::game::systems::grass_instancing::GrassRenderMode;
 use crate::game::systems::map::{MapEntity, TileCoord};
 use crate::game::systems::vegetation_placement::VegetationExclusionZone;
 use bevy::asset::RenderAssetUsages;
@@ -1303,6 +1313,7 @@ fn spawn_grass_clump(
     lod_index: u32,
     rng: &mut StdRng,
     parent_entity: Entity,
+    render_mode: GrassRenderMode,
 ) {
     let height_variation = rng.random_range(MIN_HEIGHT_VARIATION..=MAX_HEIGHT_VARIATION);
     let width_variation = rng.random_range(MIN_WIDTH_VARIATION..=MAX_WIDTH_VARIATION);
@@ -1330,35 +1341,59 @@ fn spawn_grass_clump(
     };
     let final_rotation = Quat::from_rotation_y(rotation_y) * tilt_rotation;
 
-    let clump = commands
-        .spawn((
-            Mesh3d(clump_mesh.clone()),
-            MeshMaterial3d(clump_material.clone()),
-            Transform::from_xyz(
-                clump_center.x,
-                GRASS_BLADE_Y_OFFSET + GRASS_GROUND_CLEARANCE,
-                clump_center.y,
-            )
-            .with_rotation(final_rotation)
-            .with_scale(Vec3::new(
-                width_variation,
-                height_variation,
-                width_variation,
-            )),
-            GlobalTransform::default(),
-            Visibility::default(),
-            // Grass should not cast/receive dynamic shadows; this avoids
-            // heavy shadow-map cost and dark first-person self-shadowing.
-            bevy::light::NotShadowCaster,
-            bevy::light::NotShadowReceiver,
-            GrassClump { card_count },
-            GrassBlade { lod_index },
-            GrassBladeInstance {
-                mesh: clump_mesh.clone(),
-                material: clump_material.clone(),
-            },
-        ))
-        .id();
+    // In Instanced mode the per-clump entities carry only the transform and
+    // component data used by the batch-building system; they do NOT have
+    // Mesh3d/MeshMaterial3d so the standard material pipeline skips them.
+    // In PerEntity mode the Phase-6 ExtendedMaterial path renders each clump
+    // directly with Mesh3d + MeshMaterial3d.
+    let clump_transform = Transform::from_xyz(
+        clump_center.x,
+        GRASS_BLADE_Y_OFFSET + GRASS_GROUND_CLEARANCE,
+        clump_center.y,
+    )
+    .with_rotation(final_rotation)
+    .with_scale(Vec3::new(
+        width_variation,
+        height_variation,
+        width_variation,
+    ));
+
+    let clump = if render_mode == GrassRenderMode::PerEntity {
+        commands
+            .spawn((
+                Mesh3d(clump_mesh.clone()),
+                MeshMaterial3d(clump_material.clone()),
+                clump_transform,
+                GlobalTransform::default(),
+                Visibility::default(),
+                // Grass should not cast/receive dynamic shadows; this avoids
+                // heavy shadow-map cost and dark first-person self-shadowing.
+                bevy::light::NotShadowCaster,
+                bevy::light::NotShadowReceiver,
+                GrassClump { card_count },
+                GrassBlade { lod_index },
+                GrassBladeInstance {
+                    mesh: clump_mesh.clone(),
+                    material: clump_material.clone(),
+                },
+            ))
+            .id()
+    } else {
+        // GrassRenderMode::Instanced — no render components on per-clump entity
+        commands
+            .spawn((
+                clump_transform,
+                GlobalTransform::default(),
+                Visibility::default(),
+                GrassClump { card_count },
+                GrassBlade { lod_index },
+                GrassBladeInstance {
+                    mesh: clump_mesh.clone(),
+                    material: clump_material.clone(),
+                },
+            ))
+            .id()
+    };
 
     commands.entity(parent_entity).add_child(clump);
 }
@@ -1384,6 +1419,8 @@ fn spawn_grass_clump(
 ///   before blade colours are sampled.  Pass `None` to use the tint embedded
 ///   in `visual_metadata` (or the natural-green default if that is also `None`).
 /// * `quality_settings` - Performance settings for grass density scaling
+/// * `render_mode` - Whether to spawn per-entity render components or headless
+///   clumps only for instanced rendering.
 ///
 /// # Returns
 ///
@@ -1394,8 +1431,8 @@ fn spawn_grass_clump(
 /// ```rust
 /// use antares::domain::types::{MapId, Position};
 /// use antares::game::resources::GrassQualitySettings;
-/// use antares::game::systems::advanced_grass::{spawn_grass_cached, GrassAssetCache};
 /// use antares::game::systems::advanced_grass::{spawn_grass_cached, GrassAssetCache, GrassMaterial};
+/// use antares::game::systems::grass_instancing::GrassRenderMode;
 /// use bevy::prelude::{Assets, AssetServer, Commands, Mesh, Res, ResMut};
 ///
 /// fn spawn_example(
@@ -1417,6 +1454,7 @@ fn spawn_grass_clump(
 ///         None,
 ///         None,
 ///         &settings,
+///         GrassRenderMode::Instanced,
 ///     );
 /// }
 /// ```
@@ -1432,6 +1470,7 @@ pub fn spawn_grass_cached(
     visual_metadata: Option<&TileVisualMetadata>,
     tile_tint: Option<(f32, f32, f32)>,
     quality_settings: &GrassQualitySettings,
+    render_mode: GrassRenderMode,
 ) -> Entity {
     spawn_grass_cached_with_exclusions(
         commands,
@@ -1445,6 +1484,7 @@ pub fn spawn_grass_cached(
         visual_metadata,
         tile_tint,
         quality_settings,
+        render_mode,
     )
 }
 
@@ -1467,6 +1507,8 @@ pub fn spawn_grass_cached(
 /// * `visual_metadata` - Optional per-tile visual customization
 /// * `tile_tint` - Optional explicit RGB colour tint
 /// * `quality_settings` - Performance settings for grass density scaling
+/// * `render_mode` - Whether to spawn per-entity render components (PerEntity)
+///   or headless clump entities only (Instanced, default).
 ///
 /// # Returns
 ///
@@ -1484,6 +1526,7 @@ pub fn spawn_grass_cached_with_exclusions(
     visual_metadata: Option<&TileVisualMetadata>,
     tile_tint: Option<(f32, f32, f32)>,
     quality_settings: &GrassQualitySettings,
+    render_mode: GrassRenderMode,
 ) -> Entity {
     debug!(
         "spawn_grass called at tile ({}, {}) map {:?}",
@@ -1631,6 +1674,7 @@ pub fn spawn_grass_cached_with_exclusions(
             clump_index,
             &mut rng,
             parent,
+            render_mode,
         );
     }
 
@@ -1671,8 +1715,8 @@ pub fn spawn_grass_cached_with_exclusions(
 /// ```rust
 /// use antares::domain::types::Position;
 /// use antares::game::resources::GrassQualitySettings;
-/// use antares::game::systems::advanced_grass::spawn_grass;
-/// use antares::game::systems::advanced_grass::GrassMaterial;
+/// use antares::game::systems::advanced_grass::{spawn_grass, GrassMaterial};
+/// use antares::game::systems::grass_instancing::GrassRenderMode;
 /// use bevy::prelude::{Assets, AssetServer, Commands, Mesh, Res, ResMut};
 ///
 /// fn spawn_example(
@@ -1692,6 +1736,7 @@ pub fn spawn_grass_cached_with_exclusions(
 ///         None,
 ///         None,
 ///         &settings,
+///         GrassRenderMode::Instanced,
 ///     );
 /// }
 /// ```
@@ -1706,6 +1751,7 @@ pub fn spawn_grass(
     visual_metadata: Option<&TileVisualMetadata>,
     tile_tint: Option<(f32, f32, f32)>,
     quality_settings: &GrassQualitySettings,
+    render_mode: GrassRenderMode,
 ) -> Entity {
     let mut grass_cache = GrassAssetCache::default();
     spawn_grass_cached(
@@ -1719,6 +1765,7 @@ pub fn spawn_grass(
         visual_metadata,
         tile_tint,
         quality_settings,
+        render_mode,
     )
 }
 
@@ -1854,10 +1901,14 @@ struct InstanceBatchEntry {
     instances: Vec<world::InstanceData>,
 }
 
-/// Build instance batches from existing grass blades
+/// Build instance batches from existing grass clumps.
 ///
-/// This system aggregates per-blade instance data into batch components to
-/// support performance diagnostics and future GPU instancing pipelines.
+/// When [`GrassRenderMode::Instanced`] is active (or `config.enabled` is set),
+/// this system aggregates per-clump instance data into [`GrassInstanceBatch`]
+/// entities.  In instanced mode each batch entity gets a [`Mesh3d`] component
+/// (so Bevy allocates the mesh's GPU vertex/index buffers) plus
+/// [`NoFrustumCulling`] (frustum culling happens at the cluster level, not the
+/// batch level).
 ///
 /// # Examples
 ///
@@ -1878,10 +1929,24 @@ pub fn build_grass_instance_batches_system(
     blade_query: Query<(&Transform, Option<&GlobalTransform>, &GrassBladeInstance)>,
     mut existing_batches: Query<Entity, With<GrassInstanceBatch>>,
     config: Res<GrassInstanceConfig>,
+    render_mode: Option<Res<GrassRenderMode>>,
+    render_world_available: Option<
+        Res<crate::game::systems::grass_instancing::GrassRenderWorldAvailable>,
+    >,
 ) {
-    if !config.enabled {
+    // Run when either the legacy enabled flag is set OR the instancing mode
+    // is active (default path for Phase 7).
+    let instanced = render_mode.as_deref() == Some(&GrassRenderMode::Instanced);
+    if !config.enabled && !instanced {
         return;
     }
+
+    // Only add Mesh3d render components when the Bevy render world is present.
+    // In test environments (MinimalPlugins / no RenderApp), Mesh3d triggers a
+    // sync hook that panics on a missing PendingSyncEntity resource.
+    let can_spawn_mesh3d = render_world_available.is_some();
+    // Use instanced render path only when both modes agree and render world exists.
+    let spawn_as_instanced = instanced && can_spawn_mesh3d;
 
     for ent in existing_batches.iter_mut() {
         commands.entity(ent).despawn();
@@ -1934,15 +1999,38 @@ pub fn build_grass_instance_batches_system(
     let max_instances = config.max_instances_per_batch.max(1);
     for (key, entry) in buckets.into_iter() {
         for (batch_index, chunk) in entry.instances.chunks(max_instances).enumerate() {
-            commands.spawn((
-                GrassInstanceBatch {
-                    mesh: entry.mesh.clone(),
-                    material: entry.material.clone(),
-                    instances: chunk.to_vec(),
-                },
-                MapEntity(key.map_id),
-                Name::new(format!("GrassInstanceBatch_{}_{}", key.map_id, batch_index)),
-            ));
+            if spawn_as_instanced {
+                // Instanced mode: add Mesh3d so Bevy allocates GPU buffers for
+                // the mesh, and NoFrustumCulling so the batch entity is never
+                // frustum-culled (culling happens at GrassCluster level).
+                commands.spawn((
+                    GrassInstanceBatch {
+                        mesh: entry.mesh.clone(),
+                        material: entry.material.clone(),
+                        instances: chunk.to_vec(),
+                    },
+                    Mesh3d(entry.mesh.clone()),
+                    Transform::default(),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                    NoFrustumCulling,
+                    bevy::light::NotShadowCaster,
+                    bevy::light::NotShadowReceiver,
+                    MapEntity(key.map_id),
+                    Name::new(format!("GrassInstanceBatch_{}_{}", key.map_id, batch_index)),
+                ));
+            } else {
+                // Legacy diagnostics mode (or no render world): no render components.
+                commands.spawn((
+                    GrassInstanceBatch {
+                        mesh: entry.mesh.clone(),
+                        material: entry.material.clone(),
+                        instances: chunk.to_vec(),
+                    },
+                    MapEntity(key.map_id),
+                    Name::new(format!("GrassInstanceBatch_{}_{}", key.map_id, batch_index)),
+                ));
+            }
         }
     }
 }
@@ -2185,6 +2273,7 @@ pub fn grass_chunk_culling_system(
 mod tests {
     use super::*;
     use crate::domain::world::GrassDensity;
+    use crate::game::systems::grass_instancing::GrassRenderMode;
     use bevy::mesh::Mesh;
 
     fn compute_bounds(positions: &[[f32; 3]]) -> (Vec3, Vec3) {
@@ -2953,6 +3042,7 @@ mod tests {
                 Some(&metadata),
                 None,
                 &settings,
+                GrassRenderMode::PerEntity,
             );
         }
 
@@ -3037,6 +3127,7 @@ mod tests {
                 Some(&metadata),
                 None,
                 &settings,
+                GrassRenderMode::PerEntity,
             );
         }
 
@@ -3101,6 +3192,7 @@ mod tests {
                 Some(&metadata),
                 None,
                 &settings,
+                GrassRenderMode::PerEntity,
             );
             spawn_grass_cached(
                 &mut commands,
@@ -3113,6 +3205,7 @@ mod tests {
                 Some(&metadata),
                 None,
                 &settings,
+                GrassRenderMode::PerEntity,
             );
         }
 
@@ -3213,6 +3306,7 @@ mod tests {
                 Some(&metadata),
                 None,
                 &settings,
+                GrassRenderMode::PerEntity,
             );
         }
 
