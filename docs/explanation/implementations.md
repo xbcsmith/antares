@@ -1364,3 +1364,72 @@ cargo nextest → 5204 passed, 8 skipped, 0 failed
 ```
 
 ---
+
+## Phase 5: Per-Campaign Wind Configuration
+
+**Branch**: `pr-vegetation-updates`
+**Date**: 2026-06-12
+
+### Overview
+
+Added a `data/wind.ron` file to the campaign format so each campaign can configure its own grass-wind parameters. Introduced domain types (`WindSystemKind`, `CampaignWindConfig`), a Bevy resource (`WindConfig`), SDK loading and validation support, and sample data files for both the tutorial campaign and the test fixture.
+
+### New Files
+
+| File | Purpose |
+|---|---|
+| `src/domain/world/wind.rs` | `WindSystemKind` enum + `CampaignWindConfig` struct with serde defaults |
+| `src/game/resources/wind_config.rs` | `WindConfig(pub CampaignWindConfig)` Bevy `Resource` newtype |
+| `campaigns/tutorial/data/wind.ron` | Tutorial campaign uses `Sine` wind (strength 0.04, frequency 0.65) |
+| `data/test_campaign/data/wind.ron` | Test campaign uses `None` (exercises serde defaults) |
+
+### Modified Files
+
+| File | Change |
+|---|---|
+| `src/domain/world/mod.rs` | `pub mod wind;` + re-export `CampaignWindConfig`, `WindSystemKind` |
+| `src/domain/mod.rs` | Re-export wind types from domain root |
+| `src/domain/campaign_loader.rs` | `GameData.wind` field, `load_wind_config` method, call in `load_game_data` |
+| `src/game/resources/mod.rs` | `pub mod wind_config;` + `pub use wind_config::WindConfig;` |
+| `src/game/systems/campaign_loading.rs` | Insert `WindConfig` resource in all 4 Ok/Err branches |
+| `src/sdk/database.rs` | `DatabaseError::WindLoadError`, `ContentDatabase.wind` field, load in `load_campaign_with_skills_file` and `load_core` |
+| `src/sdk/validation.rs` | `ValidationError::WindConfigInvalid`, `validate_wind_config`, call in `validate_all` |
+| `src/sdk/error_formatter.rs` | `get_suggestions` arm for `WindConfigInvalid` |
+
+### WindSystemKind Variants
+
+| Variant | Description |
+|---|---|
+| `None` (default) | No wind animation |
+| `Sine` | Sinusoidal sway driven by `strength` and `frequency` |
+| `Perlin` | Spatially coherent noise; enables `perlin_scale`, `perlin_octaves`, `perlin_seed` |
+
+### CampaignWindConfig Fields and Defaults
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `wind_system` | `WindSystemKind` | `None` | Required only if sway is desired |
+| `strength` | `f32` | `0.04` | World-unit sway amplitude (>= 0.0) |
+| `frequency` | `f32` | `0.65` | Cycles per second (> 0.0) |
+| `direction` | `[f32; 2]` | `[1.0, 0.0]` | Normalised XZ; must be finite and non-zero |
+| `perlin_scale` | `f32` | `100.0` | Noise tiling scale (Perlin only, > 0.0) |
+| `perlin_octaves` | `u32` | `4` | Octave count (Perlin only, 1-8) |
+| `perlin_seed` | `u32` | `0` | RNG seed (Perlin only) |
+
+### Key Design Decisions
+
+- **Opt-in loading**: missing `data/wind.ron` silently returns `CampaignWindConfig::default()` (same pattern as `landscape` and `levels`).
+- **Newtype resource**: `WindConfig(pub CampaignWindConfig)` keeps the Bevy layer thin — no duplication of fields.
+- **SDK validation range checks**: five rules enforced at validation time, not load time, so missing fields with defaults never fail.
+- **`#[derive(Default)]` on WindConfig**: satisfies `clippy::derivable_impls` because `CampaignWindConfig` already implements `Default`.
+
+### Quality Gates
+
+```text
+cargo fmt     → clean (no output)
+cargo check   → Finished 0 errors
+cargo clippy  → Finished 0 warnings
+cargo nextest → 5212 passed, 8 skipped, 0 failed
+```
+
+---

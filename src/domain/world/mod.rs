@@ -33,6 +33,7 @@ pub mod npc;
 pub mod npc_runtime;
 pub mod sprite_selection;
 mod types;
+pub mod wind;
 
 pub use blueprint::MapBlueprint;
 pub use creature_binding::CreatureBound;
@@ -65,3 +66,4 @@ pub use types::{
     SpriteSelectionRule, StructureType, TerrainType, Tile, TileVisualMetadata, TimeCondition,
     TreeType, WallSegmentConfig, WallType, WaterFlowDirection, World,
 };
+pub use wind::{CampaignWindConfig, WindSystemKind};

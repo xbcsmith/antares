@@ -23,6 +23,7 @@ use bevy::prelude::*;
 
 use crate::domain::campaign_loader::{CampaignLoader, GameData};
 use crate::game::resources::GameDataResource;
+use crate::game::resources::WindConfig;
 
 /// Loads campaign data on startup
 ///
@@ -60,15 +61,16 @@ pub fn load_campaign_data(mut commands: Commands) {
                 creature_count
             );
 
-            // Insert the game data as a resource
+            let wind = game_data.wind.clone();
             commands.insert_resource(GameDataResource::new(game_data));
+            commands.insert_resource(WindConfig(wind));
         }
         Err(e) => {
             error!("Failed to load campaign data: {}", e);
             warn!("Continuing with empty game data");
 
-            // Insert empty game data to prevent crashes
             commands.insert_resource(GameDataResource::new(GameData::new()));
+            commands.insert_resource(WindConfig::default());
         }
     }
 }
@@ -119,13 +121,16 @@ pub fn load_campaign_data_from_path(
                     creature_count
                 );
 
+                let wind = game_data.wind.clone();
                 commands.insert_resource(GameDataResource::new(game_data));
+                commands.insert_resource(WindConfig(wind));
             }
             Err(e) => {
                 error!("Failed to load campaign data: {}", e);
                 warn!("Continuing with empty game data");
 
                 commands.insert_resource(GameDataResource::new(GameData::new()));
+                commands.insert_resource(WindConfig::default());
             }
         }
     }
