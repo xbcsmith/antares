@@ -133,6 +133,12 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
   - In instanced + render-world mode, each `GrassInstanceBatch` entity gets
     `Mesh3d(clump_mesh)` (so Bevy allocates GPU vertex/index buffers) plus
     `NoFrustumCulling` (culling happens at `GrassCluster` level).
+- **Chunk-level visibility** (Phase 7.4/7.6 deliverable): `build_grass_instance_batches_system`
+  now queries `Option<&Visibility>` on each `GrassCluster` and skips clusters
+  with `Visibility::Hidden`. This makes `grass_distance_culling_system` the
+  chunk-level culling mechanism for the instanced path — instances from culled
+  clusters are excluded from every frame's batch rebuild.  Covered by
+  `test_build_grass_instance_batches_skips_hidden_clusters`.
 - Imports `NoFrustumCulling` and `GrassRenderMode` from the new module.
 - All three in-module test spawn calls updated to pass
   `GrassRenderMode::PerEntity` so existing assertions on `GrassBlade` and
@@ -163,6 +169,10 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
 
 ```
 cargo fmt         → no output (all files formatted)
+cargo check       → Finished with 0 errors
+cargo clippy      → Finished with 0 warnings
+cargo nextest run → 5222/5222 passed, 0 failed
+```
 cargo check       → Finished with 0 errors
 cargo clippy      → Finished with 0 warnings
 cargo nextest run → 5221/5221 passed, 0 failed

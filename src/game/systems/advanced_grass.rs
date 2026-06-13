@@ -1925,7 +1925,10 @@ struct InstanceBatchEntry {
 /// ```
 pub fn build_grass_instance_batches_system(
     mut commands: Commands,
-    cluster_query: Query<(&Children, &GlobalTransform, &MapEntity), With<GrassCluster>>,
+    cluster_query: Query<
+        (&Children, &GlobalTransform, &MapEntity, Option<&Visibility>),
+        With<GrassCluster>,
+    >,
     blade_query: Query<(&Transform, Option<&GlobalTransform>, &GrassBladeInstance)>,
     mut existing_batches: Query<Entity, With<GrassInstanceBatch>>,
     config: Res<GrassInstanceConfig>,
@@ -1954,7 +1957,16 @@ pub fn build_grass_instance_batches_system(
 
     let mut buckets: HashMap<InstanceBatchKey, InstanceBatchEntry> = HashMap::new();
 
-    for (children, cluster_global, map_entity) in cluster_query.iter() {
+    for (children, cluster_global, map_entity, cluster_visibility) in cluster_query.iter() {
+        // Chunk-level visibility: skip clusters that have been culled by
+        // grass_distance_culling_system. This ensures that instances from
+        // far-away clusters are not uploaded or drawn, giving the instanced
+        // path the same culling granularity as the per-entity path.
+        // Treat absent Visibility component as visible (backward compatibility).
+        if cluster_visibility == Some(&Visibility::Hidden) {
+            continue;
+        }
+
         for child in children.iter() {
             if let Ok((child_local, child_global_opt, blade_inst)) = blade_query.get(child) {
                 let world_transform = if let Some(child_global) = child_global_opt {
@@ -2971,6 +2983,101 @@ mod tests {
         let total_instances: usize = batches.iter().map(|b| b.instances.len()).sum();
         assert_eq!(total_instances, 3);
         assert!(batches.len() >= 2);
+    }
+
+    /// Hidden clusters must not contribute instances to any batch.
+    ///
+    /// `grass_distance_culling_system` sets `Visibility::Hidden` on far-away
+    /// `GrassCluster` entities. `build_grass_instance_batches_system` must
+    /// respect this so instance data from culled clusters is not uploaded or
+    /// drawn — providing chunk-level visibility parity with the per-entity path.
+    #[test]
+    fn test_build_grass_instance_batches_skips_hidden_clusters() {
+        let mut app = App::new();
+        app.insert_resource(GrassInstanceConfig {
+            enabled: true,
+            max_instances_per_batch: 100,
+        });
+        app.add_systems(Update, build_grass_instance_batches_system);
+
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+        app.insert_resource(Assets::<GrassMaterial>::default());
+
+        let mesh = {
+            let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
+            let mut test_mesh = Mesh::new(
+                bevy::mesh::PrimitiveTopology::TriangleList,
+                bevy::asset::RenderAssetUsages::all(),
+            );
+            test_mesh.insert_attribute(
+                Mesh::ATTRIBUTE_POSITION,
+                vec![[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.1, 0.0]],
+            );
+            test_mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; 3]);
+            test_mesh.insert_attribute(
+                Mesh::ATTRIBUTE_UV_0,
+                vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            );
+            test_mesh.insert_indices(bevy::mesh::Indices::U32(vec![0, 1, 2]));
+            meshes.add(test_mesh)
+        };
+        let material = {
+            let mut grass_mats = app.world_mut().resource_mut::<Assets<GrassMaterial>>();
+            grass_mats.add(GrassMaterial::default())
+        };
+
+        // Spawn one VISIBLE cluster and one HIDDEN cluster.
+        let visible_cluster = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(Vec3::ZERO),
+                GlobalTransform::default(),
+                Visibility::Inherited,
+                GrassCluster::default(),
+                MapEntity(1),
+            ))
+            .id();
+        let hidden_cluster = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(Vec3::new(999.0, 0.0, 0.0)),
+                GlobalTransform::default(),
+                Visibility::Hidden, // simulates grass_distance_culling_system output
+                GrassCluster::default(),
+                MapEntity(1),
+            ))
+            .id();
+
+        // Attach one blade to each cluster.
+        for cluster in [visible_cluster, hidden_cluster] {
+            let blade = app
+                .world_mut()
+                .spawn((
+                    Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)),
+                    GlobalTransform::default(),
+                    GrassBladeInstance {
+                        mesh: mesh.clone(),
+                        material: material.clone(),
+                    },
+                ))
+                .id();
+            app.world_mut().entity_mut(cluster).add_child(blade);
+        }
+
+        app.update();
+
+        let batches: Vec<_> = {
+            let world = app.world_mut();
+            world.query::<&GrassInstanceBatch>().iter(world).collect()
+        };
+
+        let total_instances: usize = batches.iter().map(|b| b.instances.len()).sum();
+        assert_eq!(
+            total_instances, 1,
+            "hidden cluster must not contribute instances; expected 1 (visible only), got {}",
+            total_instances
+        );
     }
 
     #[test]
