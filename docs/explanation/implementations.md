@@ -2,6 +2,56 @@
 
 ---
 
+## Phase 8: Vegetation Documentation Updates (2026)
+
+**Goal:** Update existing reference documentation for the wind configuration,
+domain types, GPU instancing pipeline, and rendering behaviour introduced in
+Phases 5–7 of the Vegetation Visual Improvement Plan. Per AGENTS.md, only
+existing documents are updated — no new documentation files are created.
+
+### What Changed
+
+**`docs/reference/campaign_content_format.md`**
+- Added `data/wind.ron` to the campaign file structure listing.
+- Added `## wind.ron Schema` section before `## Validation` — includes: field
+  table (name, type, default, valid range), minimal Sine example, full Perlin
+  example, `WindSystemKind` reference table, missing-file behaviour, and
+  validation rules.  A campaign author can implement `wind.ron` from this section
+  alone.
+
+**`docs/reference/architecture.md`**
+- Module structure (§3.2): added `domain/world/wind.rs` (`CampaignWindConfig`,
+  `WindSystemKind`), `game/resources/wind_config.rs` (`WindConfig`),
+  `game/systems/advanced_grass.rs` (wind extension material, GPU batch), and
+  `game/systems/grass_instancing.rs` (instancing pipeline).
+- Game Layer description (§3.3): noted `WindConfig` Bevy resource.
+- Data structures (§4.2.2 Wind Configuration): new subsection with
+  `WindSystemKind` and `CampaignWindConfig` structs; relationship between domain
+  type and Bevy resource.
+- Architecture evolution (§13.1): added **Phase 10: Vegetation Visual Improvement
+  (Wind + GPU Instancing)** entry covering all seven new source files and the
+  bytemuck dependency.
+- Compliance (§13.2): added **Wind System** compliance bullet confirming full
+  stack from domain through render pipeline.
+
+**`docs/reference/sdk_api.md`**
+- Added `wind: CampaignWindConfig` to `ContentDatabase` fields table.
+- Added `path/data/wind.ron (optional)` to the `load_campaign` file list.
+- Added `#### Wind Configuration` subsection with field table, validation rules,
+  and a runnable usage example.
+
+**`CHANGELOG.md`**
+- Added four ADDED entries under `## [Unreleased]` for Phases 5, 6, 7, and 8 of
+  the Vegetation Visual Improvement Plan, using conventional-commit style
+  consistent with the existing changelog format.
+
+### Quality Gate Results
+
+Documentation-only changes — no Rust source modified.  The four quality gates
+(fmt, check, clippy, nextest) remain passing from Phase 7.
+
+---
+
 ## Phase 7: GPU Instancing for Grass (2026)
 
 **Goal:** Connect the existing `GrassInstanceBatch` infrastructure to a real render
