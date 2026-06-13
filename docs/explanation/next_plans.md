@@ -219,7 +219,12 @@ Sorcerer Spell point bar does not go down as spell points are used.
 
 ✅ COMPLETED - Bug: Open a Chest. Select item and click take. Item modes to inventory. TAB back to chest Item reapears in the chest. It should be removed from the chest when taken. Once item is taken there is no way to exit the Chest. ESC does not work. The chest menu should be exited when pressing ESC.
 
-Treasure events have no way to associate a mesh with them be it procedural or imported. The Barred Passage in map_1.ron in the tutorial campaign is labeled a Treasure. We probably want to treat these more as 
+Treasure events have no way to associate a mesh with them be it procedural or imported. The Barred Passage in map_1.ron in the tutorial campaign is labeled a Treasure. We probably want to treat these more as interactive objects that can have a mesh and a trigger event. We should be able to place them on the map and then place a trigger event when the player interacts with them. For example, the barred passage could have a mesh of a door and when the player interacts with it, it could trigger a dialogue event that says "The door is locked." or "You need a key to open this door."
+
+Unify the way we handle interactive objects like chests, doors, and treasure. They should all be able to have a mesh and trigger events when interacted with.
+
+Recruitable Characters --> Meet at the Inn dialogue --> Mesh does not disapear from the map and character is still recruitable from mesh on map even if character is in the party already.
+
 
 ### SDK Bugs
 
@@ -230,3 +235,6 @@ Treasure events have no way to associate a mesh with them be it procedural or im
 ✅ COMPLETED - Campaign Builder --> Landscape Editor layout is broken. The left hand list is horizontal and it does not follow the patterns in @sdk/AGENTS.md for how to layout an editor. The list should be vertical and the editor should follow the same patterns as the other editors in the Campaign Builder.
 
 ✅ COMPLETED - Campaign Builder --> Landscape Editor --> Delete does nothing. It should delete the landscape and update the landscape.ron file and the landscape_mesh_registry.ron file.
+
+
+Maps have scroll bar even when they are small. They should fit the default SDK window size without a scroll bar. This is a regression.
