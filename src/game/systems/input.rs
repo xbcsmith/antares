@@ -63,6 +63,20 @@ pub use exploration_movement::{
 pub use frame_input::{decode_frame_input, FrameInputIntent};
 pub use global_toggles::handle_global_mode_toggles;
 pub use helpers::get_adjacent_positions;
+
+/// System-set label for the global input toggle phase.
+///
+/// Other plugins (e.g. `ContainerInventoryPlugin`) use this label to schedule
+/// their input systems *after* the global toggles so that modal-close logic
+/// always runs before per-screen keyboard handlers.  This prevents a race
+/// where a per-screen handler processes `Esc` first (e.g. cancelling an action
+/// selection) and the global toggle then sees `Esc` on the same frame as
+/// `GameMode::Exploration`, incorrectly opening the game menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
+pub enum GlobalInputSet {
+    /// The phase in which `handle_global_input_toggles` runs.
+    GlobalToggles,
+}
 pub use keymap::{parse_key_code, GameAction, KeyMap};
 pub use menu_toggle::toggle_menu_state;
 pub use mode_guards::{
@@ -116,7 +130,7 @@ impl Plugin for InputPlugin {
         app.add_systems(
             Update,
             (
-                handle_global_input_toggles,
+                handle_global_input_toggles.in_set(GlobalInputSet::GlobalToggles),
                 handle_exploration_input_interact.after(handle_global_input_toggles),
                 handle_exploration_input_movement.after(handle_exploration_input_interact),
             ),

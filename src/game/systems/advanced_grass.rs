@@ -97,7 +97,7 @@ const MAX_WIDTH_VARIATION: f32 = 1.15;
 const GRASS_GROUND_CLEARANCE: f32 = 0.015;
 
 /// Asset path for the grass wind vertex shader (relative to the `assets/` directory).
-const GRASS_WIND_SHADER_PATH: &str = "shaders/grass.wgsl";
+const GRASS_WIND_SHADER_PATH: &str = "assets/shaders/grass.wgsl";
 
 // ==================== Wind Shader Types ====================
 

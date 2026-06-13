@@ -151,8 +151,22 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
   `render_mode: GrassRenderMode` parameter threaded through to the single
   `spawn_grass_cached_with_exclusions` call site.
 
-**`src/game/systems/mod.rs`** (modified)
-- Added `pub mod grass_instancing`.
+**`campaigns/tutorial/assets/shaders/`** (new directory)
+- `grass.wgsl` and `grass_instanced.wgsl` copied here so Bevy can resolve them.
+  The game binary sets `BEVY_ASSET_ROOT` to the active campaign directory with
+  `file_path: ""`, so every asset path is resolved relative to that root.
+  `"assets/shaders/grass.wgsl"` → `<campaign>/assets/shaders/grass.wgsl`,
+  matching the same convention as textures (`"assets/textures/…"`).
+  The original `assets/shaders/` copies at the repo root remain as the
+  authoritative source; campaign copies are deployed from there.
+
+**`GRASS_WIND_SHADER_PATH`** and **`GRASS_INSTANCED_SHADER_PATH`** updated from
+`"shaders/grass.wgsl"` / `"shaders/grass_instanced.wgsl"` to
+`"assets/shaders/grass.wgsl"` / `"assets/shaders/grass_instanced.wgsl"`.
+The original `"shaders/…"` paths resolved to `<campaign>/shaders/…` which did
+not exist, producing `Path not found` errors and no grass rendering.
+
+
 
 ### Design Decisions
 

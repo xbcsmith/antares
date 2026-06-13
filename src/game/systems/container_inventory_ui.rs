@@ -33,7 +33,7 @@
 //! | `1`–`6`          | Switch active character (number key maps to party index 0–5)   |
 //! | `←` `→` `↑` `↓` | Navigate the slot grid / item list inside the focused panel    |
 //! | `Enter`          | Enter **Action Navigation** for the highlighted slot           |
-//! | `Esc`         | Close container inventory (handled by global toggle)              |
+//! | `Esc`         | Close container inventory (handled by `handle_global_input_toggles` via `close_modal`) |
 //!
 //! ### Action Navigation
 //!
@@ -41,7 +41,7 @@
 //! |---------|----------------------------------------------------------------------|
 //! | `←` `→` | Cycle between action buttons (Take / Take All  or  Stash)           |
 //! | `Enter`  | Execute the focused action; return to Slot Navigation at slot 0    |
-//! | `Esc`    | Cancel; return to Slot Navigation at the previously selected slot  |
+//! | `Esc`    | Close container inventory (same as Slot Navigation — global toggle handles it) |
 
 use crate::application::container_inventory_state::{ContainerFocus, ContainerInventoryState};
 use crate::application::resources::GameContent;
@@ -50,6 +50,7 @@ use crate::domain::character::{Inventory, InventorySlot};
 use crate::domain::world::MapEvent;
 
 use crate::game::resources::GlobalState;
+use crate::game::systems::input::GlobalInputSet;
 use crate::game::systems::inventory_ui_common::{
     NavigationPhase, ACTION_FOCUSED_COLOR, FOCUSED_BORDER_COLOR, GRID_LINE_COLOR, HEADER_BG_COLOR,
     PANEL_ACTION_H, PANEL_BG_COLOR, PANEL_HEADER_H, SELECT_HIGHLIGHT_COLOR, SLOT_COLS,
@@ -88,7 +89,13 @@ impl Plugin for ContainerInventoryPlugin {
             .add_systems(
                 Update,
                 (
-                    container_inventory_input_system,
+                    // Run AFTER global toggles so that Esc always closes the
+                    // container first (via handle_global_input_toggles →
+                    // close_modal).  Without this ordering, the container
+                    // input system could change navigation phase on the same
+                    // frame that global toggles try to close the modal, leaving
+                    // the mode as Exploration and causing the game menu to open.
+                    container_inventory_input_system.after(GlobalInputSet::GlobalToggles),
                     container_inventory_ui_system,
                     container_inventory_action_system,
                 )
@@ -1481,6 +1488,26 @@ fn render_container_items_panel(
 
 /// Executes Take, Take All, Stash, and mouse-selection actions.
 ///
+/// Extracts current container state and writes it to the world-map event
+/// immediately, so partial takes/stashes persist even if the player exits the
+/// container screen through a path that does not call `close_modal` (e.g. the
+/// inventory or character-sheet toggle keys).  Called after every mutation in
+/// `container_inventory_action_system`.
+fn sync_container_to_map(global_state: &mut GlobalState) {
+    let (id, items, gold, gems) = if let GameMode::ContainerInventory(ref cs) = global_state.0.mode
+    {
+        (
+            cs.container_event_id.clone(),
+            cs.items.clone(),
+            cs.gold,
+            cs.gems,
+        )
+    } else {
+        return;
+    };
+    write_container_items_back(&mut global_state.0, &id, items, gold, gems);
+}
+
 /// Reads `TakeItemAction`, `TakeAllAction`, `StashItemAction`,
 /// `SelectContainerSlotAction`, and `SelectContainerCharacterSlotAction`
 /// messages, mutates `GlobalState` (both party inventory and container item
@@ -1609,6 +1636,10 @@ fn container_inventory_action_system(
             }
         }
 
+        // Persist the updated item list immediately so that re-entering the
+        // container (or exiting via a non-close_modal path) reflects the take.
+        sync_container_to_map(&mut global_state);
+
         nav_state.selected_slot_index = None;
         nav_state.focused_action_index = 0;
         nav_state.phase = NavigationPhase::SlotNavigation;
@@ -1688,6 +1719,8 @@ fn container_inventory_action_system(
             info!("TakeAll: awarded {} gems to party", container_gems);
         }
 
+        sync_container_to_map(&mut global_state);
+
         nav_state.selected_slot_index = None;
         nav_state.focused_action_index = 0;
         nav_state.phase = NavigationPhase::SlotNavigation;
@@ -1713,6 +1746,7 @@ fn container_inventory_action_system(
             "TakeCurrencyAction: awarded {} gold, {} gems to party",
             gold, gems
         );
+        sync_container_to_map(&mut global_state);
     }
 
     // ── Stash events ──────────────────────────────────────────────────────
@@ -1752,6 +1786,8 @@ fn container_inventory_action_system(
                 );
             }
         }
+
+        sync_container_to_map(&mut global_state);
 
         nav_state.selected_slot_index = None;
         nav_state.focused_action_index = 0;
@@ -2476,6 +2512,139 @@ mod tests {
                 cs.items.is_empty(),
                 "Container should be empty after Take All"
             );
+        }
+    }
+
+    // ── sync_container_to_map ─────────────────────────────────────────────
+
+    /// `sync_container_to_map` must write the current in-memory container
+    /// state to the corresponding world-map event immediately, so that
+    /// re-entering the container (or exiting via a non-`close_modal` path)
+    /// never shows stale items.
+    #[test]
+    fn test_sync_container_to_map_writes_current_items_immediately() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let pos = Position::new(5, 5);
+        let mut game_state = make_game_state_with_container(
+            "sync_chest",
+            vec![make_slot(1), make_slot(2), make_slot(3)],
+            pos,
+        );
+        let character = Character::new(
+            "Syncer".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        game_state.party.add_member(character).expect("add");
+
+        // Enter ContainerInventory with the current map items.
+        game_state.enter_container_inventory(
+            "sync_chest".to_string(),
+            "Sync Chest".to_string(),
+            vec![make_slot(1), make_slot(2), make_slot(3)],
+            0,
+            0,
+        );
+
+        // Simulate taking item at slot 0 (item_id=1).
+        if let GameMode::ContainerInventory(ref mut cs) = game_state.mode {
+            cs.take_item(0);
+        }
+
+        // Wrap in GlobalState-like struct to call sync_container_to_map.
+        use crate::game::resources::GlobalState;
+        let mut gs = GlobalState(game_state);
+        sync_container_to_map(&mut gs);
+
+        // The world-map event must now have only items 2 and 3.
+        let event =
+            gs.0.world
+                .get_current_map()
+                .unwrap()
+                .get_event(pos)
+                .unwrap();
+        if let MapEvent::Container { items, .. } = event {
+            assert_eq!(
+                items.len(),
+                2,
+                "map event must reflect the take immediately"
+            );
+            assert_eq!(items[0].item_id, 2);
+            assert_eq!(items[1].item_id, 3);
+        } else {
+            panic!("Expected Container event");
+        }
+    }
+
+    /// After `sync_container_to_map`, re-opening the same chest must NOT show
+    /// the previously taken item — the world-map event is already up to date.
+    #[test]
+    fn test_taken_item_does_not_reappear_after_sync() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let pos = Position::new(6, 6);
+        let mut game_state =
+            make_game_state_with_container("reopen_chest", vec![make_slot(10), make_slot(20)], pos);
+        let character = Character::new(
+            "Reopener".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        game_state.party.add_member(character).expect("add");
+
+        // Enter and take item 10.
+        game_state.enter_container_inventory(
+            "reopen_chest".to_string(),
+            "Reopen Chest".to_string(),
+            vec![make_slot(10), make_slot(20)],
+            0,
+            0,
+        );
+        if let GameMode::ContainerInventory(ref mut cs) = game_state.mode {
+            cs.take_item(0); // takes item_id=10
+        }
+
+        use crate::game::resources::GlobalState;
+        let mut gs = GlobalState(game_state);
+        sync_container_to_map(&mut gs);
+
+        // Close the container (simulates ESC via close_modal).
+        gs.0.close_modal();
+        assert!(matches!(gs.0.mode, GameMode::Exploration));
+
+        // Re-enter the container: map event must only have item 20.
+        let map_items = {
+            let event =
+                gs.0.world
+                    .get_current_map()
+                    .unwrap()
+                    .get_event(pos)
+                    .unwrap();
+            if let MapEvent::Container { items, .. } = event {
+                items.clone()
+            } else {
+                panic!("Expected Container event");
+            }
+        };
+
+        gs.0.enter_container_inventory(
+            "reopen_chest".to_string(),
+            "Reopen Chest".to_string(),
+            map_items,
+            0,
+            0,
+        );
+
+        if let GameMode::ContainerInventory(ref cs) = gs.0.mode {
+            assert_eq!(cs.items.len(), 1, "item 10 must not reappear on reopen");
+            assert_eq!(cs.items[0].item_id, 20);
+        } else {
+            panic!("Expected ContainerInventory");
         }
     }
 

@@ -178,9 +178,9 @@ The `baked_basecolor.png` texture file in `whisper_new.ron` was likely exported 
 
 ## Creature Mesh Selector
 
-Campaing Builder --> Monster --> Edit --> Visual Asset hangs constantly when trying to change the creature mesh. It hangs when trying to scroll the window and it constantly hangs trying to select the mesh. It should work like the Character or NPC mesh selection wich is a text box with autocomplete.
+✅ COMPLETED - Campaing Builder --> Monster --> Edit --> Visual Asset hangs constantly when trying to change the creature mesh. It hangs when trying to scroll the window and it constantly hangs trying to select the mesh. It should work like the Character or NPC mesh selection wich is a text box with autocomplete.
 
-✅ COMPLETED -
+
 
 ## Game Engine Sky
 
@@ -204,26 +204,28 @@ Status: completed. Landscape is now a first-class importer, SDK, map-editor, run
 
 Party Inventory screen Mouse does not work on the Next Back or Party Overview buttons in the inventory screen.
 
-Party Overview only shows the character that opened the inventory. It should show the whole party.
+✅ COMPLETED - Party Overview only shows the character that opened the inventory. It should show the whole party.
 
-Recruitable Characters 3d models turn there back on the party when talking to them. There is no way to turn off auto rotate towards party in the SDK. For some reason the models seem to be oriented backwards causing the user to set which direction they face in the SDK. This causes the model to turn the other direction when facing the party and dialogue is engaged.
+✅ COMPLETED - Recruitable Characters 3d models turn there back on the party when talking to them. There is no way to turn off auto rotate towards party in the SDK. For some reason the models seem to be oriented backwards causing the user to set which direction they face in the SDK. This causes the model to turn the other direction when facing the party and dialogue is engaged.
 
 Sorcerer Spell point bar does not go down as spell points are used.
 
-Can not select a Rest option of (1) (2) or (3) because it opens the 1,2, or 3 character sheet. Remove triggering character sheet by number when in the rest menu. The rest menu should be navigable by number but it should not trigger the character sheet.
+✅ COMPLETED - Can not select a Rest option of (1) (2) or (3) because it opens the 1,2, or 3 character sheet. Remove triggering character sheet by number when in the rest menu. The rest menu should be navigable by number but it should not trigger the character sheet.
 
 ✅ COMPLETED - When playing tutorial campaign ./campaigns/tutorial The oak and pine trees in the middle of that map_1 are not rendering. See the screenshot ./screenshots/trees_map_1.png The forrest of multiple different types of trees in map_1 are not using the new tree models. They look weird as you can see in the screenshot ./screenshots/forrest_map_1.png None of the trees on map_2 are rendering. I am assuming something changed in the tree rendering code and it broke the trees in the tutorial campaign. We should fix the tree rendering code so that the trees in the tutorial campaign render correctly.
 
-Hit A Trap. Everyone died. Mode is Gamever but I can keep moving around and the game is still responsive. I should not be able to move around when the mode is GameOver. The game should be frozen and I should only be able to click on the Game Over menu options.
+✅ COMPLETED - Hit A Trap. Everyone died. Mode is Gamever but I can keep moving around and the game is still responsive. I should not be able to move around when the mode is GameOver. The game should be frozen and I should only be able to click on the Game Over menu options.
 2026-06-11T20:14:50.026220Z  INFO antares::game::systems::input::global_toggles: Rest key pressed but mode is GameOver — ignoring
 
-Open a Chest. Select item aad click take. Item modes to inventory. TAB back to chest Item reapears in the chest. It should be removed from the chest when taken. Once item is taken there is no way to exit the Chest. ESC does not work. The chest menu should be exited when pressing ESC.
+✅ COMPLETED - Bug: Open a Chest. Select item and click take. Item modes to inventory. TAB back to chest Item reapears in the chest. It should be removed from the chest when taken. Once item is taken there is no way to exit the Chest. ESC does not work. The chest menu should be exited when pressing ESC.
+
+Treasure events have no way to associate a mesh with them be it procedural or imported. The Barred Passage in map_1.ron in the tutorial campaign is labeled a Treasure. We probably want to treat these more as 
 
 ### SDK Bugs
 
 ✅ COMPLETED - Campaign Builder --> Monster Editor --> Edit save button at the bottom of the editor does not always Save the monster when it returns to the list
 
-Campaign Builder --> Importer --> Items and Furniture do not have category drop down like Creatures. Importing Furnture does not update the furniture.ron
+✅ COMPLETED - Campaign Builder --> Importer --> Items and Furniture do not have category drop down like Creatures. Importing Furnture does not update the furniture.ron
 
 ✅ COMPLETED - Campaign Builder --> Landscape Editor layout is broken. The left hand list is horizontal and it does not follow the patterns in @sdk/AGENTS.md for how to layout an editor. The list should be vertical and the editor should follow the same patterns as the other editors in the Campaign Builder.
 

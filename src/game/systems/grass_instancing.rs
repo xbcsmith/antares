@@ -238,7 +238,7 @@ pub struct GrassWindBindGroupResource {
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 
 /// Asset path for the instanced grass vertex shader.
-const GRASS_INSTANCED_SHADER_PATH: &str = "shaders/grass_instanced.wgsl";
+const GRASS_INSTANCED_SHADER_PATH: &str = "assets/shaders/grass_instanced.wgsl";
 
 /// Custom mesh pipeline for GPU-instanced grass.
 ///
@@ -270,11 +270,13 @@ impl SpecializedMeshPipeline for GrassInstancedPipeline {
         // layouts (view, mesh-view-array, mesh-uniforms).
         let mut descriptor = self.mesh_pipeline.specialize(key, layout)?;
 
-        // Override both the vertex and fragment shaders with our custom shader.
+        // Override only the VERTEX shader — our custom shader defines a
+        // @vertex entry point that applies per-instance transforms and wind
+        // displacement.  The fragment stage is left as-is so the standard
+        // PBR fragment shader handles lighting; overriding the fragment with
+        // a shader that has no @fragment entry point causes a wgpu validation
+        // error ("no entry point was found").
         descriptor.vertex.shader = self.shader.clone();
-        if let Some(fragment) = descriptor.fragment.as_mut() {
-            fragment.shader = self.shader.clone();
-        }
 
         // Append vertex buffer 1 — per-instance data (VertexStepMode::Instance).
         descriptor.vertex.buffers.push(VertexBufferLayout {

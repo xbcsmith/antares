@@ -22,6 +22,7 @@ use crate::application::GameMode;
 /// - `Resting`
 /// - `RestMenu`
 /// - `GameLog`
+/// - `GameOver`
 ///
 /// Dialogue is intentionally **not** blocked for movement because the current
 /// input flow allows "move to cancel" behavior.
@@ -56,6 +57,7 @@ pub fn movement_blocked_for_mode(mode: &GameMode) -> bool {
             | GameMode::SpellCasting(_)
             | GameMode::TrapNotification(_)
             | GameMode::SkillTraining(_)
+            | GameMode::GameOver
     )
 }
 
@@ -277,6 +279,30 @@ mod tests {
         assert!(
             movement_blocked_for_mode(&mode),
             "Movement must be blocked while the trap notification is showing"
+        );
+    }
+
+    #[test]
+    fn test_movement_blocked_for_game_over() {
+        assert!(
+            movement_blocked_for_mode(&GameMode::GameOver),
+            "Movement must be blocked in GameOver — the party is dead"
+        );
+    }
+
+    #[test]
+    fn test_interaction_blocked_for_game_over() {
+        assert!(
+            interaction_blocked_for_mode(&GameMode::GameOver),
+            "Interaction must be blocked in GameOver — the party is dead"
+        );
+    }
+
+    #[test]
+    fn test_input_blocked_for_game_over() {
+        assert!(
+            input_blocked_for_mode(&GameMode::GameOver),
+            "All exploration input must be blocked in GameOver — the party is dead"
         );
     }
 }
