@@ -219,11 +219,13 @@ Sorcerer Spell point bar does not go down as spell points are used.
 
 ✅ COMPLETED - Bug: Open a Chest. Select item and click take. Item modes to inventory. TAB back to chest Item reapears in the chest. It should be removed from the chest when taken. Once item is taken there is no way to exit the Chest. ESC does not work. The chest menu should be exited when pressing ESC.
 
-Treasure events have no way to associate a mesh with them be it procedural or imported. The Barred Passage in map_1.ron in the tutorial campaign is labeled a Treasure. We probably want to treat these more as interactive objects that can have a mesh and a trigger event. We should be able to place them on the map and then place a trigger event when the player interacts with them. For example, the barred passage could have a mesh of a door and when the player interacts with it, it could trigger a dialogue event that says "The door is locked." or "You need a key to open this door." We will need support in the Map editor for creating these 
+Treasure events have no way to associate a mesh with them be it procedural or imported. The Barred Passage in map_1.ron in the tutorial campaign is labeled a Treasure. We probably want to treat these more as interactive objects that can have a mesh and a trigger event. We should be able to place them on the map and then place a trigger event when the player interacts with them. For example, the barred passage could have a mesh of a door and when the player interacts with it, it could trigger a dialogue event that says "The door is locked." or "You need a key to open this door." We will need support in the Map editor for placing the mesh and creating the event that is triggered.
 
-Unify the way we handle interactive objects like chests, doors, and treasure. They should all be able to have a mesh and trigger events when interacted with. They should all follow the landscape pattern of import mesh, register mesh, place mesh, add event to same tile, things happen when characters interact with the [E] button. 
+Unify the way we handle interactive objects like chests, doors, and treasure. They should all be able to have a mesh and trigger events when interacted with. They should all follow the landscape pattern of import mesh, register mesh, place mesh, add event to same tile, things happen when characters interact with the [E] button.
 
-Write a plan with a phased approach to unify how we handle furniture, items, doors,  and landscape. 
+Write a plan with a phased approach to unify how we handle furniture, items, doors, and landscape. THINK HARD and follow the rules in @PLAN.md
+
+[Unify Object Placement and Events](./unified_objects_and_events.md)
 
 Recruitable Characters --> Meet at the Inn dialogue --> Mesh does not disapear from the map and character is still recruitable from mesh on map even if character is in the party already.
 
