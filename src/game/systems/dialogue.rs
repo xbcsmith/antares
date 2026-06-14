@@ -893,6 +893,110 @@ fn execute_recruit_to_party(
     }
 }
 
+/// Executes the "send to inn" recruitment flow and handles map event cleanup.
+///
+/// Used by both [`DialogueAction::RecruitToInn`] and the
+/// `TriggerEvent("recruit_character_to_inn")` path so the logic lives in one place.
+///
+/// Unlike [`execute_recruit_to_party`] this helper does **not** call
+/// `return_to_exploration` — callers that want the dialogue to continue (e.g. to
+/// show a farewell node) can let the dialogue advance naturally after this returns.
+fn execute_recruit_to_inn(
+    character_id: &str,
+    innkeeper_id: &str,
+    game_state: &mut crate::application::GameState,
+    db: &crate::sdk::database::ContentDatabase,
+    dialogue_state: Option<&crate::application::dialogue::DialogueState>,
+    game_log: &mut Option<&mut crate::game::systems::ui::GameLog>,
+    despawn_recruitable_visuals: &mut Option<
+        &mut MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
+    >,
+) {
+    if game_state.encountered_characters.contains(character_id) {
+        warn!(
+            "Cannot route '{}' to inn: already encountered",
+            character_id
+        );
+        if let Some(log) = game_log.as_deref_mut() {
+            log.add_system(format!("{} has already been recruited.", character_id));
+        }
+        return;
+    }
+
+    if db.npcs.get_npc(innkeeper_id).is_none() {
+        error!("Innkeeper '{}' not found in database", innkeeper_id);
+        if let Some(log) = game_log.as_deref_mut() {
+            log.add_system(format!("Error: Innkeeper '{}' not found.", innkeeper_id));
+        }
+        return;
+    }
+
+    let char_def = match db.characters.get_character(character_id) {
+        Some(def) => def,
+        None => {
+            error!("Character definition '{}' not found", character_id);
+            if let Some(log) = game_log.as_deref_mut() {
+                log.add_system(format!("Error: Character '{}' not found.", character_id));
+            }
+            return;
+        }
+    };
+
+    let character = match char_def.instantiate(&db.races, &db.classes, &db.items, &db.spells) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to instantiate '{}': {}", character_id, e);
+            if let Some(log) = game_log.as_deref_mut() {
+                log.add_system(format!("Error creating character: {}", e));
+            }
+            return;
+        }
+    };
+
+    let location = crate::domain::character::CharacterLocation::AtInn(innkeeper_id.to_string());
+    if let Err(e) = game_state.roster.add_character(character, location) {
+        error!("Failed to add '{}' to roster: {}", character_id, e);
+        if let Some(log) = game_log.as_deref_mut() {
+            log.add_system(format!("Error: {}", e));
+        }
+        return;
+    }
+
+    game_state
+        .encountered_characters
+        .insert(character_id.to_string());
+
+    info!(
+        "Successfully routed '{}' to inn '{}'",
+        character_id, innkeeper_id
+    );
+    if let Some(log) = game_log.as_deref_mut() {
+        log.add_dialogue(format!("{} will wait at the inn.", char_def.name));
+    }
+
+    // Remove the map event so the visual entity is cleaned up this frame.
+    if let Some(dlg_state) = dialogue_state {
+        if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
+            if let Some(current_map) = game_state.world.get_current_map_mut() {
+                let current_map_id = current_map.id;
+                if let Some(_removed) = current_map.remove_event(recruitment_ctx.event_position) {
+                    info!(
+                        "Removed recruitment event at {:?}",
+                        recruitment_ctx.event_position
+                    );
+                    if let Some(writer) = despawn_recruitable_visuals.as_deref_mut() {
+                        writer.write(crate::game::systems::map::DespawnRecruitableVisual {
+                            map_id: current_map_id,
+                            position: recruitment_ctx.event_position,
+                            character_id: character_id.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Execute a single `DialogueAction`.
 ///
 /// Supported actions:
@@ -1055,6 +1159,41 @@ fn execute_action(
                 }
             }
 
+            if event_name == "recruit_character_to_inn" {
+                let resolved_character_id =
+                    resolve_recruitment_character_id(dialogue_state, game_state, db);
+
+                if let Some(character_id) = resolved_character_id {
+                    let innkeeper_id = game_state
+                        .find_nearest_inn()
+                        .unwrap_or_else(|| "tutorial_innkeeper_town".to_string());
+                    info!(
+                        "TriggerEvent '{}' resolved recruitment target '{}' → inn '{}'",
+                        event_name, character_id, innkeeper_id
+                    );
+                    execute_recruit_to_inn(
+                        &character_id,
+                        &innkeeper_id,
+                        game_state,
+                        db,
+                        dialogue_state,
+                        &mut game_log,
+                        despawn_recruitable_visuals,
+                    );
+                } else {
+                    warn!(
+                        "TriggerEvent '{}' fired without resolvable recruitment context",
+                        event_name
+                    );
+                    if let Some(log) = game_log.as_deref_mut() {
+                        log.add_system(
+                            "Error: Could not resolve recruitable character for this dialogue."
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+
             // Generic event logging (kept for visibility/audit)
             info!("Dialogue triggered event: {}", event_name);
             if let Some(log) = game_log.as_mut() {
@@ -1088,104 +1227,15 @@ fn execute_action(
                 "Executing RecruitToInn action for character '{}' at inn '{}'",
                 character_id, innkeeper_id
             );
-
-            // NOTE: recruit_from_map() handles inn assignment automatically when party is full,
-            // but this action explicitly sends to a specific innkeeper regardless of party capacity.
-            // We need to manually implement this logic.
-
-            // 1. Verify character not already encountered
-            if game_state.encountered_characters.contains(character_id) {
-                warn!("Cannot recruit '{}': already encountered", character_id);
-                if let Some(log) = game_log.as_mut() {
-                    log.add_system(format!("{} has already been recruited.", character_id));
-                }
-                return;
-            }
-
-            // 2. Verify innkeeper exists
-            if db.npcs.get_npc(innkeeper_id).is_none() {
-                error!("Innkeeper '{}' not found in database", innkeeper_id);
-                if let Some(log) = game_log.as_mut() {
-                    log.add_system(format!("Error: Innkeeper '{}' not found.", innkeeper_id));
-                }
-                return;
-            }
-
-            // 3. Get character definition
-            let char_def = match db.characters.get_character(character_id) {
-                Some(def) => def,
-                None => {
-                    error!(
-                        "Character definition '{}' not found in database",
-                        character_id
-                    );
-                    if let Some(log) = game_log.as_mut() {
-                        log.add_system(format!("Error: Character '{}' not found.", character_id));
-                    }
-                    return;
-                }
-            };
-
-            // 4. Instantiate character
-            let character =
-                match char_def.instantiate(&db.races, &db.classes, &db.items, &db.spells) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        error!("Failed to instantiate character '{}': {}", character_id, e);
-                        if let Some(log) = game_log.as_mut() {
-                            log.add_system(format!("Error creating character: {}", e));
-                        }
-                        return;
-                    }
-                };
-
-            // 5. Add to roster at specified inn
-            let location = crate::domain::character::CharacterLocation::AtInn(innkeeper_id.clone());
-            if let Err(e) = game_state.roster.add_character(character, location) {
-                error!("Failed to add character to roster: {}", e);
-                if let Some(log) = game_log.as_mut() {
-                    log.add_system(format!("Error: {}", e));
-                }
-                return;
-            }
-
-            // 6. Mark as encountered
-            game_state
-                .encountered_characters
-                .insert(character_id.to_string());
-
-            // 7. Log success
-            info!(
-                "Successfully recruited '{}' to inn '{}'",
-                character_id, innkeeper_id
+            execute_recruit_to_inn(
+                character_id,
+                innkeeper_id,
+                game_state,
+                db,
+                dialogue_state,
+                &mut game_log,
+                despawn_recruitable_visuals,
             );
-            if let Some(log) = game_log.as_mut() {
-                log.add_dialogue(format!("{} will wait at the inn.", char_def.name));
-            }
-
-            // Remove recruitment event from map and despawn visual
-            if let Some(dlg_state) = dialogue_state {
-                if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
-                    if let Some(current_map) = game_state.world.get_current_map_mut() {
-                        let current_map_id = current_map.id;
-                        if let Some(_removed_event) =
-                            current_map.remove_event(recruitment_ctx.event_position)
-                        {
-                            info!(
-                                "Removed recruitment event at {:?}",
-                                recruitment_ctx.event_position
-                            );
-                            if let Some(writer) = despawn_recruitable_visuals.as_deref_mut() {
-                                writer.write(crate::game::systems::map::DespawnRecruitableVisual {
-                                    map_id: current_map_id,
-                                    position: recruitment_ctx.event_position,
-                                    character_id: character_id.to_string(),
-                                });
-                            }
-                        }
-                    }
-                }
-            }
         }
 
         DialogueAction::OpenInnManagement { innkeeper_id } => {
@@ -2886,6 +2936,193 @@ mod tests {
         assert_eq!(game_state.party.size(), 0);
         assert_eq!(game_state.roster.characters.len(), 0);
         assert!(game_state.encountered_characters.is_empty());
+    }
+
+    #[test]
+    fn test_trigger_event_recruit_character_to_inn_adds_to_roster_and_removes_map_event() {
+        use crate::domain::character::{Alignment, CharacterLocation, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+        use crate::domain::world::npc::NpcDefinition;
+
+        // Arrange
+        let mut game_state = crate::application::GameState::new();
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let char_def = CharacterDefinition::new(
+            "kira".to_string(),
+            "Kira".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        db.characters.add_character(char_def).unwrap();
+
+        // Register the innkeeper NPC so the helper can validate it exists.
+        // find_nearest_inn() returns None (no campaign set), so the unwrap_or_else
+        // fallback in the TriggerEvent handler resolves to "tutorial_innkeeper_town".
+        let innkeeper = NpcDefinition::new(
+            "tutorial_innkeeper_town".to_string(),
+            "Town Innkeeper".to_string(),
+            "innkeeper.png".to_string(),
+        );
+        db.npcs.add_npc(innkeeper).unwrap();
+
+        // Place a RecruitableCharacter map event so remove_event() can succeed.
+        let event_pos = crate::domain::types::Position::new(5, 5);
+        let mut map =
+            crate::domain::world::Map::new(1, "Test".to_string(), "Test Map".to_string(), 10, 10);
+        map.add_event(
+            event_pos,
+            crate::domain::world::MapEvent::RecruitableCharacter {
+                name: "Kira".to_string(),
+                description: "A recruitable warrior".to_string(),
+                character_id: "kira".to_string(),
+                dialogue_id: None,
+                time_condition: None,
+                facing: None,
+                face_on_dialogue: false,
+            },
+        );
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+
+        let mut dlg_state = crate::application::dialogue::DialogueState::start(
+            100,
+            1,
+            Some(event_pos),
+            Some("npc_kira".to_string()),
+        );
+        dlg_state.recruitment_context = Some(crate::application::dialogue::RecruitmentContext {
+            character_id: "npc_kira".to_string(),
+            event_position: event_pos,
+        });
+
+        // Act
+        let mut despawn_recruitable_visuals = None;
+        execute_action(
+            &crate::domain::dialogue::DialogueAction::TriggerEvent {
+                event_name: "recruit_character_to_inn".to_string(),
+            },
+            &mut game_state,
+            &db,
+            Some(&dlg_state),
+            None,
+            None,
+            None,
+            &mut despawn_recruitable_visuals,
+        );
+
+        // Assert: character is in the roster at the inn, NOT in the party.
+        assert_eq!(
+            game_state.party.size(),
+            0,
+            "recruit_to_inn must not add character to the active party"
+        );
+        assert_eq!(game_state.roster.characters.len(), 1);
+        assert_eq!(game_state.roster.characters[0].name, "Kira");
+        assert!(
+            matches!(
+                game_state.roster.character_locations.first(),
+                Some(CharacterLocation::AtInn(id)) if id == "tutorial_innkeeper_town"
+            ),
+            "character should be AtInn(tutorial_innkeeper_town)"
+        );
+        assert!(game_state.encountered_characters.contains("kira"));
+
+        // The map event must have been removed so the visual can be despawned.
+        assert!(
+            game_state
+                .world
+                .get_current_map()
+                .and_then(|m| m.get_event(event_pos))
+                .is_none(),
+            "map event must be removed after recruit_to_inn"
+        );
+    }
+
+    #[test]
+    fn test_trigger_event_recruit_character_to_inn_noop_when_already_encountered() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+        use crate::domain::world::npc::NpcDefinition;
+
+        let mut game_state = crate::application::GameState::new();
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        let char_def = CharacterDefinition::new(
+            "kira".to_string(),
+            "Kira".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        db.characters.add_character(char_def).unwrap();
+
+        let innkeeper = NpcDefinition::new(
+            "tutorial_innkeeper_town".to_string(),
+            "Town Innkeeper".to_string(),
+            "innkeeper.png".to_string(),
+        );
+        db.npcs.add_npc(innkeeper).unwrap();
+
+        // Pre-mark as already encountered.
+        game_state.encountered_characters.insert("kira".to_string());
+
+        let mut dlg_state = crate::application::dialogue::DialogueState::start(
+            100,
+            1,
+            Some(crate::domain::types::Position::new(5, 5)),
+            Some("npc_kira".to_string()),
+        );
+        dlg_state.recruitment_context = Some(crate::application::dialogue::RecruitmentContext {
+            character_id: "npc_kira".to_string(),
+            event_position: crate::domain::types::Position::new(5, 5),
+        });
+
+        let mut despawn_recruitable_visuals = None;
+        execute_action(
+            &crate::domain::dialogue::DialogueAction::TriggerEvent {
+                event_name: "recruit_character_to_inn".to_string(),
+            },
+            &mut game_state,
+            &db,
+            Some(&dlg_state),
+            None,
+            None,
+            None,
+            &mut despawn_recruitable_visuals,
+        );
+
+        // Already-encountered guard: roster must stay empty.
+        assert_eq!(game_state.roster.characters.len(), 0);
     }
 
     #[test]
