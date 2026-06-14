@@ -29,6 +29,7 @@ use crate::domain::levels::LevelDatabase;
 use crate::domain::visual::creature_database::CreatureDatabase;
 use crate::domain::world::furniture::{FurnitureDatabase, FurnitureMeshDatabase};
 use crate::domain::world::landscape::{LandscapeDatabase, LandscapeMeshDatabase};
+use crate::domain::world::wind::CampaignWindConfig;
 
 /// Campaign validation errors
 #[derive(Debug, Error)]
@@ -79,6 +80,7 @@ pub enum CampaignError {
 /// use antares::domain::items::database::ItemMeshDatabase;
 /// use antares::domain::world::furniture::{FurnitureDatabase, FurnitureMeshDatabase};
 /// use antares::domain::world::landscape::{LandscapeDatabase, LandscapeMeshDatabase};
+/// use antares::domain::world::wind::CampaignWindConfig;
 ///
 /// let game_data = GameData {
 ///     creatures: CreatureDatabase::new(),
@@ -88,6 +90,7 @@ pub enum CampaignError {
 ///     landscape: LandscapeDatabase::new(),
 ///     landscape_meshes: LandscapeMeshDatabase::new(),
 ///     levels: None,
+///     wind: CampaignWindConfig::default(),
 /// };
 ///
 /// assert!(game_data.creatures.is_empty());
@@ -117,6 +120,11 @@ pub struct GameData {
     /// `None` means the file was absent; all XP calculations fall back to
     /// the formula in [`crate::domain::progression::experience_for_level`].
     pub levels: Option<LevelDatabase>,
+
+    /// Per-campaign wind configuration loaded from `data/wind.ron`.
+    ///
+    /// Absent file → [`CampaignWindConfig::default()`] (no wind animation).
+    pub wind: CampaignWindConfig,
 }
 
 impl GameData {
@@ -140,6 +148,7 @@ impl GameData {
             landscape: LandscapeDatabase::new(),
             landscape_meshes: LandscapeMeshDatabase::new(),
             levels: None,
+            wind: CampaignWindConfig::default(),
         }
     }
 
@@ -268,6 +277,9 @@ impl CampaignLoader {
         // Load per-class XP tables (opt-in per campaign; missing file is OK —
         // absent levels.ron means "use formula for all classes")
         game_data.levels = self.load_levels()?;
+
+        // Load wind configuration (opt-in per campaign; missing file is OK)
+        game_data.wind = self.load_wind_config()?;
 
         // Validate all loaded data
         game_data.validate()?;
@@ -498,6 +510,31 @@ impl CampaignLoader {
             })?;
 
         Ok(db)
+    }
+
+    /// Loads wind configuration from the campaign.
+    ///
+    /// Looks for `data/wind.ron` inside the campaign directory. If the file
+    /// does not exist, returns [`CampaignWindConfig::default()`] without error.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CampaignError::ParseError` if the file exists but cannot be
+    /// parsed.
+    fn load_wind_config(&self) -> Result<CampaignWindConfig, CampaignError> {
+        let wind_path = self.campaign_path.join("data/wind.ron");
+
+        if !wind_path.exists() {
+            return Ok(CampaignWindConfig::default());
+        }
+
+        let content = std::fs::read_to_string(&wind_path).map_err(|e| {
+            CampaignError::ReadError(format!("wind.ron '{}': {}", wind_path.display(), e))
+        })?;
+
+        ron::from_str(&content).map_err(|e| {
+            CampaignError::ParseError(format!("wind.ron '{}': {}", wind_path.display(), e))
+        })
     }
 
     /// Gets the campaign path

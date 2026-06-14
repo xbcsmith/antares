@@ -78,6 +78,7 @@ Central database for all campaign content.
 - `maps: MapDatabase` - All maps
 - `landscape: LandscapeDatabase` - Reusable static landscape definitions loaded from `data/landscape.ron` when present
 - `landscape_meshes: LandscapeMeshDatabase` - Imported landscape mesh registry loaded from `data/landscape_mesh_registry.ron` when present
+- `wind: CampaignWindConfig` - Per-campaign grass wind configuration loaded from `data/wind.ron`; absent file defaults to no wind animation
 
 **Methods**:
 
@@ -101,6 +102,7 @@ Loads all content from a campaign directory structure:
 - `path/data/maps/*.ron`
 - `path/data/landscape.ron` (optional unless maps contain landscape placements)
 - `path/data/landscape_mesh_registry.ron` (optional unless landscape definitions reference meshes)
+- `path/data/wind.ron` (optional; absent file means no wind animation)
 
 **Returns**: `Ok(ContentDatabase)` if all required files load successfully.
 **Errors**: `DatabaseError` if required files are missing, data is invalid, RON parsing fails, landscape placement references are invalid, mesh references are missing, texture paths do not start with `assets/`, or referenced landscape textures are missing.
@@ -159,6 +161,42 @@ Summary statistics for content database.
 Landscape counts are not currently exposed through `ContentStats`. Use
 `ContentDatabase::landscape.len()` and `ContentDatabase::landscape_meshes.count()`
 when tooling needs landscape definition or mesh registry counts.
+
+#### Wind Configuration
+
+`ContentDatabase.wind` holds the campaign's grass wind parameters loaded from
+`data/wind.ron`.  The field is always present; a missing file silently defaults to
+`CampaignWindConfig::default()` (no wind animation).
+
+**`CampaignWindConfig` fields:**
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `wind_system` | `WindSystemKind` | `None` | `None`, `Sine`, or `Perlin` |
+| `strength` | `f32` | `0.04` | Sway amplitude in world units |
+| `frequency` | `f32` | `0.65` | Cycles per second |
+| `direction` | `[f32; 2]` | `[1.0, 0.0]` | Normalised XZ wind direction |
+| `perlin_scale` | `f32` | `100.0` | Noise tiling scale (Perlin only) |
+| `perlin_octaves` | `u32` | `4` | fBm octave count 1–8 (Perlin only) |
+| `perlin_seed` | `u32` | `0` | Noise RNG seed (Perlin only) |
+
+**Validation rules:**
+
+- Unknown `wind_system` variant → `DatabaseError::WindLoadError` (RON parse failure).
+- All other fields are unchecked; the runtime clamps `perlin_octaves` to 1–8.
+- Perlin-only fields are silently ignored for `None` and `Sine` wind systems.
+
+**Example:**
+
+```rust
+use antares::sdk::database::ContentDatabase;
+use antares::domain::world::wind::WindSystemKind;
+
+let db = ContentDatabase::load_campaign("data/test_campaign")?;
+if db.wind.wind_system == WindSystemKind::Sine {
+    println!("Campaign uses sinusoidal grass wind");
+}
+```
 
 ---
 

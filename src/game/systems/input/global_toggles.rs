@@ -144,9 +144,13 @@ pub fn handle_global_mode_toggles(
                     }
                 }
             }
-            GameMode::Menu(_) | GameMode::Combat(_) | GameMode::SkillTraining(_) => {
-                // Inventory toggle is ignored in menu, combat, and skill training, but
-                // still consumes the frame to preserve top-of-function behavior.
+            GameMode::Menu(_)
+            | GameMode::Combat(_)
+            | GameMode::SkillTraining(_)
+            | GameMode::GameOver => {
+                // Inventory toggle is ignored in menu, combat, skill training, and
+                // game over, but still consumes the frame to preserve top-of-function
+                // behavior.
             }
             _ => {
                 game_state.enter_inventory();
@@ -230,7 +234,8 @@ pub fn handle_global_mode_toggles(
             | GameMode::Dialogue(_)
             | GameMode::Training(_)
             | GameMode::SkillTraining(_)
-            | GameMode::MerchantInventory(_) => {
+            | GameMode::MerchantInventory(_)
+            | GameMode::GameOver => {
                 bevy::prelude::info!(
                     "Character sheet key pressed but mode is {:?} — ignoring",
                     game_state.mode
@@ -1057,5 +1062,60 @@ mod tests {
             "RestMenu must receive digit keys 1/2/3 instead of global character select"
         );
         assert!(matches!(state.mode, GameMode::RestMenu));
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_inventory_ignored_in_game_over() {
+        let mut state = GameState::new();
+        state.mode = GameMode::GameOver;
+
+        let consumed = handle_global_mode_toggles(&mut state, inventory_toggle_intent(), None);
+
+        assert!(
+            consumed,
+            "inventory toggle must consume the frame even when ignored"
+        );
+        assert!(
+            matches!(state.mode, GameMode::GameOver),
+            "inventory toggle must not open inventory when the game is over"
+        );
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_character_sheet_ignored_in_game_over() {
+        let mut state = GameState::new();
+        state.mode = GameMode::GameOver;
+
+        let intent = FrameInputIntent {
+            character_sheet_toggle: true,
+            ..FrameInputIntent::default()
+        };
+        let consumed = handle_global_mode_toggles(&mut state, intent, None);
+
+        assert!(
+            consumed,
+            "character sheet toggle must consume the frame even when ignored"
+        );
+        assert!(
+            matches!(state.mode, GameMode::GameOver),
+            "character sheet must not open when the game is over"
+        );
+    }
+
+    #[test]
+    fn test_handle_global_mode_toggles_automap_ignored_in_game_over() {
+        let mut state = GameState::new();
+        state.mode = GameMode::GameOver;
+
+        let consumed = handle_global_mode_toggles(&mut state, automap_toggle_intent(), None);
+
+        assert!(
+            consumed,
+            "automap toggle must consume the frame even when ignored"
+        );
+        assert!(
+            matches!(state.mode, GameMode::GameOver),
+            "automap must not open when the game is over"
+        );
     }
 }

@@ -521,6 +521,15 @@ impl ErrorFormatter {
                     "Run 'cargo nextest run --all-features' to verify the fix".to_string(),
                 ]
             }
+
+            ValidationError::WindConfigInvalid { message } => {
+                vec![
+                    format!("Wind configuration error: {message}"),
+                    "Edit 'data/wind.ron' and correct the invalid field value.".to_string(),
+                    "Valid ranges: strength ≥ 0.0, frequency > 0.0, direction non-zero and finite, perlin_scale > 0.0, perlin_octaves in [1, 8].".to_string(),
+                    "Run 'cargo nextest run --all-features' to verify the fix".to_string(),
+                ]
+            }
         }
     }
 

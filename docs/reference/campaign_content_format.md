@@ -25,6 +25,7 @@ campaigns/my_campaign/
 │   ├── dialogues.ron      # NPC dialogues
 │   ├── landscape.ron      # Reusable static landscape definitions
 │   ├── landscape_mesh_registry.ron # Imported landscape mesh registry
+│   ├── wind.ron           # Per-campaign grass wind configuration (optional)
 │   └── maps/              # Map data files
 │       ├── map_001.ron
 │       ├── map_002.ron
@@ -511,6 +512,75 @@ the same validated `LandscapeDefinition` and `CreatureReference` / `MeshDefiniti
 RON formats. Curated data may override blocking defaults, icons, tags, and
 descriptions after export as long as IDs, mesh references, and asset paths remain
 valid.
+
+## wind.ron Schema
+
+The `wind.ron` file configures the grass wind animation for a campaign. It is
+**optional** — if the file is absent, the campaign defaults to no wind animation
+(`wind_system: None`) and all other fields use their built-in defaults.
+
+### File Format
+
+`wind.ron` contains a single `CampaignWindConfig` struct. All fields carry
+serde defaults, so a file containing only `wind_system: Sine` is valid:
+
+```
+(
+    wind_system: Sine,
+    strength: 0.04,
+    frequency: 0.65,
+)
+```
+
+Full example with Perlin noise wind:
+
+```
+(
+    wind_system: Perlin,
+    strength: 0.06,
+    frequency: 0.5,
+    direction: (1.0, 0.0),
+    perlin_scale: 80.0,
+    perlin_octaves: 4,
+    perlin_seed: 12345,
+)
+```
+
+### CampaignWindConfig Fields
+
+| Field | Type | Default | Valid Range | Notes |
+|---|---|---|---|---|
+| `wind_system` | `WindSystemKind` | `None` | `None`, `Sine`, `Perlin` | Selects the wind animation algorithm |
+| `strength` | `f32` | `0.04` | `0.0` – `1.0` | World-unit sway amplitude |
+| `frequency` | `f32` | `0.65` | `> 0.0` | Cycles per second |
+| `direction` | `[f32; 2]` | `[1.0, 0.0]` | Normalised XZ vector | Wind direction in the XZ plane |
+| `perlin_scale` | `f32` | `100.0` | `> 0.0` | Noise tiling scale in world units (Perlin only) |
+| `perlin_octaves` | `u32` | `4` | `1` – `8` | fBm octave count (Perlin only) |
+| `perlin_seed` | `u32` | `0` | Any `u32` | RNG seed for the Perlin generator (Perlin only) |
+
+### Wind System Kinds
+
+| Kind | Behaviour |
+|---|---|
+| `None` | Grass is stationary. No GPU work per frame. |
+| `Sine` | World-coherent sinusoidal sway driven by `globals.time * frequency + world_x * 0.17 + world_z * 0.13`. Adjacent blades with nearby world positions sway in phase. |
+| `Perlin` | Spatially varying gusts from a tiling 512×512 Perlin noise texture generated at campaign load. Richer, less regular motion than Sine. |
+
+### Missing-File Behaviour
+
+A missing `data/wind.ron` is **not an error**. The SDK loader and game runtime
+silently fall back to `CampaignWindConfig::default()`, which selects
+`wind_system: None` and keeps all grass stationary. Campaign authors who want
+no wind animation do not need to create the file.
+
+### Validation Rules
+
+- `wind_system` must be one of `None`, `Sine`, or `Perlin`. Unknown variants
+  are a RON parse error.
+- `direction` should be normalised (length ≈ 1.0); the runtime does not
+  re-normalise it.
+- Perlin-only fields (`perlin_scale`, `perlin_octaves`, `perlin_seed`) are
+  silently ignored when `wind_system` is `None` or `Sine`.
 
 ## Validation
 

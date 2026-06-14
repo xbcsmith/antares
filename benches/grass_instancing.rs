@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use antares::game::systems::advanced_grass::{
     build_grass_instance_batches_system, GrassBladeInstance, GrassCluster, GrassInstanceConfig,
+    GrassMaterial,
 };
 use antares::game::systems::map::MapEntity;
 use bevy::prelude::*;
@@ -39,7 +40,7 @@ fn run_instance_bench(label: &str, cluster_count: u32, blades_per_cluster: u32) 
     app.add_systems(Update, build_grass_instance_batches_system);
 
     app.insert_resource(Assets::<Mesh>::default());
-    app.insert_resource(Assets::<StandardMaterial>::default());
+    app.insert_resource(Assets::<GrassMaterial>::default());
 
     let mesh = {
         let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
@@ -61,8 +62,8 @@ fn run_instance_bench(label: &str, cluster_count: u32, blades_per_cluster: u32) 
     };
 
     let material = {
-        let mut materials = app.world_mut().resource_mut::<Assets<StandardMaterial>>();
-        materials.add(StandardMaterial::default())
+        let mut grass_materials = app.world_mut().resource_mut::<Assets<GrassMaterial>>();
+        grass_materials.add(GrassMaterial::default())
     };
 
     for i in 0..cluster_count {

@@ -12,7 +12,16 @@
 //! Grass rendering consumes **domain** content density (`GrassDensity`) and
 //! applies **performance scaling** (`GrassPerformanceLevel`) to determine
 //! the final blade count per tile.
+//!
+//! # Phase 7 — GPU instancing
+//!
+//! When [`GrassRenderMode::Instanced`] is active (default), per-clump entities
+//! are spawned WITHOUT `Mesh3d`/`MeshMaterial3d`.  The
+//! [`build_grass_instance_batches_system`] instead creates [`GrassInstanceBatch`]
+//! entities with `Mesh3d` (for GPU buffer allocation) and no material, and the
+//! [`grass_instancing`] pipeline renders them in a single draw call per batch.
 
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::log::debug;
 use bevy::prelude::*;
 use rand::rngs::StdRng;
@@ -20,12 +29,23 @@ use rand::{Rng, SeedableRng};
 use std::collections::HashMap;
 
 use crate::domain::types;
+use crate::domain::world::wind::{CampaignWindConfig, WindSystemKind};
 use crate::domain::world::{self, TileVisualMetadata};
+use crate::game::resources::WindConfig;
 use crate::game::resources::{
     GrassPerformanceLevel, GrassQualitySettings, VegetationQualityLevel, VegetationQualitySettings,
 };
+use crate::game::systems::grass_instancing::GrassRenderMode;
 use crate::game::systems::map::{MapEntity, TileCoord};
 use crate::game::systems::vegetation_placement::VegetationExclusionZone;
+use bevy::asset::RenderAssetUsages;
+use bevy::pbr::{ExtendedMaterial, MaterialExtension};
+use bevy::reflect::TypePath;
+use bevy::render::render_resource::{
+    AsBindGroup, Extent3d, ShaderType, TextureDimension, TextureFormat,
+};
+use bevy::shader::ShaderRef;
+use noise::{NoiseFn, Perlin};
 
 // ==================== Constants ====================
 
@@ -76,6 +96,96 @@ const MAX_WIDTH_VARIATION: f32 = 1.15;
 /// Ground lift that prevents alpha-masked grass from z-fighting with floors.
 const GRASS_GROUND_CLEARANCE: f32 = 0.015;
 
+/// Asset path for the grass wind vertex shader (relative to the `assets/` directory).
+const GRASS_WIND_SHADER_PATH: &str = "assets/shaders/grass.wgsl";
+
+// ==================== Wind Shader Types ====================
+
+/// GPU-side wind uniform matching the WGSL `GrassWindUniform` struct in `shaders/grass.wgsl`.
+///
+/// Field order and `_pad` must match the WGSL layout exactly so `encase` can
+/// pack them without extra padding bytes.
+#[derive(ShaderType, Clone, Debug)]
+pub struct GrassWindUniform {
+    /// Sway amplitude in world units.
+    pub strength: f32,
+    /// Cycles per second.
+    pub frequency: f32,
+    /// Normalised XZ wind direction.
+    pub direction: Vec2,
+    /// Active wind mode: `0` = None, `1` = Sine, `2` = Perlin.
+    pub wind_system: u32,
+    /// Noise tiling scale in world units (Perlin only).
+    pub perlin_scale: f32,
+    /// Struct alignment padding — matches `_pad: vec2<f32>` in WGSL.
+    _pad: Vec2,
+}
+
+impl Default for GrassWindUniform {
+    fn default() -> Self {
+        Self {
+            strength: 0.0,
+            frequency: 1.0,
+            direction: Vec2::new(1.0, 0.0),
+            wind_system: 0,
+            perlin_scale: 100.0,
+            _pad: Vec2::ZERO,
+        }
+    }
+}
+
+impl GrassWindUniform {
+    /// Builds a [`GrassWindUniform`] from a campaign-level [`CampaignWindConfig`].
+    pub fn from_config(config: &CampaignWindConfig) -> Self {
+        Self {
+            strength: config.strength,
+            frequency: config.frequency,
+            direction: Vec2::new(config.direction[0], config.direction[1]),
+            wind_system: match config.wind_system {
+                WindSystemKind::None => 0,
+                WindSystemKind::Sine => 1,
+                WindSystemKind::Perlin => 2,
+            },
+            perlin_scale: config.perlin_scale,
+            _pad: Vec2::ZERO,
+        }
+    }
+}
+
+/// Material extension that adds a wind-driven vertex shader to grass blades.
+///
+/// Bound to `@group(2)` starting at binding 100 (after `StandardMaterial`'s
+/// low-index bindings) per Bevy's `ExtendedMaterial` convention.
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug, Default)]
+pub struct GrassWindExtension {
+    /// Wind parameters sent to the vertex shader at binding 100.
+    #[uniform(100)]
+    pub wind: GrassWindUniform,
+    /// Perlin noise texture at binding 101 / sampler at binding 102.
+    ///
+    /// `None` causes Bevy to bind a 1×1 white fallback automatically.
+    #[texture(101)]
+    #[sampler(102)]
+    pub noise: Option<Handle<Image>>,
+}
+
+impl MaterialExtension for GrassWindExtension {
+    fn vertex_shader() -> ShaderRef {
+        GRASS_WIND_SHADER_PATH.into()
+    }
+}
+
+/// Grass material: `StandardMaterial` extended with the wind vertex displacement shader.
+pub type GrassMaterial = ExtendedMaterial<StandardMaterial, GrassWindExtension>;
+
+/// Bevy resource holding the Perlin noise texture generated at campaign load time.
+///
+/// A 1×1 white placeholder is bound when `wind_system` is `None` or `Sine`.
+#[derive(Resource, Clone, Debug)]
+pub struct WindNoiseTexture(pub Handle<Image>);
+
+// ==================== Grass Asset Cache ====================
+
 /// Resource holding shared grass mesh and material assets.
 ///
 /// The cache is explicit so map spawning can reuse grass assets without relying
@@ -91,10 +201,14 @@ const GRASS_GROUND_CLEARANCE: f32 = 0.015;
 /// assert_eq!(cache.mesh_count(), 0);
 /// assert_eq!(cache.material_count(), 0);
 /// ```
-#[derive(Resource, Default, Debug)]
+#[derive(Resource, Debug, Default)]
 pub struct GrassAssetCache {
     mesh_handles: HashMap<GrassMeshKey, Handle<Mesh>>,
-    material_handles: HashMap<GrassMaterialKey, Handle<StandardMaterial>>,
+    material_handles: HashMap<GrassMaterialKey, Handle<GrassMaterial>>,
+    /// Wind uniform applied to all materials created by this cache.
+    pub wind_uniform: GrassWindUniform,
+    /// Perlin noise texture handle (or 1×1 white placeholder).
+    pub noise_handle: Handle<Image>,
 }
 
 impl GrassAssetCache {
@@ -106,6 +220,16 @@ impl GrassAssetCache {
     /// Returns the number of cached grass material variants.
     pub fn material_count(&self) -> usize {
         self.material_handles.len()
+    }
+
+    /// Updates the wind uniform and noise handle, clearing the material cache.
+    ///
+    /// All previously cached grass materials referenced the old wind config;
+    /// clearing them forces new materials to be created with the updated config.
+    pub fn set_wind(&mut self, wind_uniform: GrassWindUniform, noise_handle: Handle<Image>) {
+        self.wind_uniform = wind_uniform;
+        self.noise_handle = noise_handle;
+        self.material_handles.clear();
     }
 }
 
@@ -361,39 +485,6 @@ impl GrassPlacementSeed {
     }
 }
 
-/// Render-layer grass wind parameters.
-///
-/// Wind values are attached now so later animation work can consume them
-/// without changing the spawn pipeline.
-///
-/// # Examples
-///
-/// ```rust
-/// use antares::game::systems::advanced_grass::GrassWindParams;
-///
-/// let wind = GrassWindParams::default();
-/// assert!(wind.strength > 0.0);
-/// ```
-#[derive(Component, Clone, Copy, Debug)]
-pub struct GrassWindParams {
-    /// Wind sway strength in world units.
-    pub strength: f32,
-    /// Wind animation frequency in cycles per second.
-    pub frequency: f32,
-    /// Deterministic phase offset for this clump.
-    pub phase: f32,
-}
-
-impl Default for GrassWindParams {
-    fn default() -> Self {
-        Self {
-            strength: 0.04,
-            frequency: 0.65,
-            phase: 0.0,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 struct GrassMeshKey {
     quality: GrassMeshQuality,
@@ -431,10 +522,10 @@ pub struct GrassBlade {
 /// # Examples
 ///
 /// ```rust
-/// use antares::game::systems::advanced_grass::GrassBladeInstance;
-/// use bevy::prelude::{Handle, Mesh, StandardMaterial};
+/// use antares::game::systems::advanced_grass::{GrassBladeInstance, GrassMaterial};
+/// use bevy::prelude::{Handle, Mesh};
 ///
-/// fn build_instance(mesh: Handle<Mesh>, material: Handle<StandardMaterial>) -> GrassBladeInstance {
+/// fn build_instance(mesh: Handle<Mesh>, material: Handle<GrassMaterial>) -> GrassBladeInstance {
 ///     GrassBladeInstance { mesh, material }
 /// }
 /// ```
@@ -443,7 +534,7 @@ pub struct GrassBladeInstance {
     /// Mesh handle for this blade (copied from spawn-time mesh)
     pub mesh: Handle<Mesh>,
     /// Material handle for this blade (copied from spawn-time material)
-    pub material: Handle<StandardMaterial>,
+    pub material: Handle<GrassMaterial>,
 }
 
 /// Resource configuring grass rendering performance settings
@@ -545,13 +636,13 @@ impl Default for GrassInstanceConfig {
 /// # Examples
 ///
 /// ```rust
-/// use antares::game::systems::advanced_grass::GrassInstanceBatch;
+/// use antares::game::systems::advanced_grass::{GrassInstanceBatch, GrassMaterial};
 /// use antares::domain::world::InstanceData;
-/// use bevy::prelude::{Handle, Mesh, StandardMaterial};
+/// use bevy::prelude::{Handle, Mesh};
 ///
 /// let batch = GrassInstanceBatch {
 ///     mesh: Handle::<Mesh>::default(),
-///     material: Handle::<StandardMaterial>::default(),
+///     material: Handle::<GrassMaterial>::default(),
 ///     instances: vec![InstanceData::new([0.0, 0.0, 0.0])],
 /// };
 /// ```
@@ -560,7 +651,7 @@ pub struct GrassInstanceBatch {
     /// Mesh handle shared by all instances
     pub mesh: Handle<Mesh>,
     /// Material handle shared by all instances
-    pub material: Handle<StandardMaterial>,
+    pub material: Handle<GrassMaterial>,
     /// Per-instance transform data
     pub instances: Vec<world::InstanceData>,
 }
@@ -623,10 +714,12 @@ impl From<&world::GrassBladeConfig> for BladeConfig {
     }
 }
 
-/// Color scheme for grass blades with variation support
+/// Color scheme for grass blades with a three-stop gradient and variation support.
 ///
-/// Provides base and tip colors with random variation to create
-/// natural-looking grass.
+/// Stores an AO shadow colour at the base, a mid-blade primary green, and a
+/// tip highlight. Per-vertex colours interpolate `ao_color` → `mid_color` over
+/// the lower 40 % of blade height, and `mid_color` → `tip_color` over the
+/// upper 60 %.
 ///
 /// # Examples
 ///
@@ -635,16 +728,19 @@ impl From<&world::GrassBladeConfig> for BladeConfig {
 /// use bevy::prelude::Color;
 ///
 /// let scheme = GrassColorScheme {
-///     base_color: Color::srgb(0.2, 0.5, 0.1),
-///     tip_color: Color::srgb(0.3, 0.7, 0.2),
+///     ao_color: Color::srgb(0.08, 0.12, 0.06),
+///     mid_color: Color::srgb(0.2, 0.5, 0.1),
+///     tip_color: Color::srgb(0.72, 0.82, 0.45),
 ///     variation: 0.3,
 /// };
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct GrassColorScheme {
-    /// Base color at blade bottom
-    pub base_color: Color,
-    /// Tip color at blade top
+    /// Dark ambient-occlusion colour at blade base
+    pub ao_color: Color,
+    /// Primary mid-blade green
+    pub mid_color: Color,
+    /// Tip highlight colour at blade top
     pub tip_color: Color,
     /// Variation amount (0.0-1.0)
     pub variation: f32,
@@ -652,6 +748,9 @@ pub struct GrassColorScheme {
 
 impl GrassColorScheme {
     /// Sample a random blade color with variation
+    ///
+    /// Blends `mid_color` (70 %) with `tip_color` (30 %) to produce a
+    /// representative mid-blade colour, then applies random variation.
     ///
     /// # Arguments
     ///
@@ -663,11 +762,11 @@ impl GrassColorScheme {
     pub fn sample_blade_color(&self, rng: &mut impl rand::Rng) -> Color {
         let base_blend = 0.7;
         let blended = Color::srgb(
-            self.base_color.to_srgba().red * base_blend
+            self.mid_color.to_srgba().red * base_blend
                 + self.tip_color.to_srgba().red * (1.0 - base_blend),
-            self.base_color.to_srgba().green * base_blend
+            self.mid_color.to_srgba().green * base_blend
                 + self.tip_color.to_srgba().green * (1.0 - base_blend),
-            self.base_color.to_srgba().blue * base_blend
+            self.mid_color.to_srgba().blue * base_blend
                 + self.tip_color.to_srgba().blue * (1.0 - base_blend),
         );
 
@@ -687,8 +786,9 @@ impl GrassColorScheme {
 impl Default for GrassColorScheme {
     fn default() -> Self {
         Self {
-            base_color: Color::srgb(0.2, 0.5, 0.1),
-            tip_color: Color::srgb(0.3, 0.7, 0.2),
+            ao_color: Color::srgb(0.08, 0.12, 0.06),
+            mid_color: Color::srgb(0.2, 0.5, 0.1),
+            tip_color: Color::srgb(0.72, 0.82, 0.45),
             variation: 0.2,
         }
     }
@@ -762,13 +862,13 @@ fn quantize_mesh_value(value: f32) -> u16 {
 
 fn cached_material_color(key: GrassMaterialKey, color_scheme: &GrassColorScheme) -> Color {
     let variation = f32::from(key.variation) / 255.0;
-    let base = color_scheme.base_color.to_srgba();
+    let ao = color_scheme.ao_color.to_srgba();
     let tip = color_scheme.tip_color.to_srgba();
 
     Color::srgb(
-        (base.red * (1.0 - variation) + tip.red * variation).clamp(0.0, 1.0),
-        (base.green * (1.0 - variation) + tip.green * variation).clamp(0.0, 1.0),
-        (base.blue * (1.0 - variation) + tip.blue * variation).clamp(0.0, 1.0),
+        (ao.red * (1.0 - variation) + tip.red * variation).clamp(0.0, 1.0),
+        (ao.green * (1.0 - variation) + tip.green * variation).clamp(0.0, 1.0),
+        (ao.blue * (1.0 - variation) + tip.blue * variation).clamp(0.0, 1.0),
     )
 }
 
@@ -844,26 +944,123 @@ fn get_or_create_grass_mesh(
     handle
 }
 
+/// Generates a 512×512 tiling Perlin noise [`Image`] for the grass wind shader.
+///
+/// The noise is packed into the R channel (G/B/A = 255). `perlin_octaves`
+/// passes of fractional Brownian motion are applied for richer variation.
+pub fn generate_wind_noise_texture(config: &CampaignWindConfig) -> Image {
+    const SIZE: u32 = 512;
+    let perlin = Perlin::new(config.perlin_seed);
+    let octaves = config.perlin_octaves.clamp(1, 8) as usize;
+
+    let mut data = Vec::with_capacity((SIZE * SIZE * 4) as usize);
+
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let mut value = 0.0_f64;
+            let mut amplitude = 1.0_f64;
+            let mut frequency = 1.0_f64;
+            let mut max_value = 0.0_f64;
+
+            for _ in 0..octaves {
+                let nx = x as f64 / SIZE as f64 * frequency;
+                let ny = y as f64 / SIZE as f64 * frequency;
+                value += perlin.get([nx, ny, 0.0]) * amplitude;
+                max_value += amplitude;
+                amplitude *= 0.5;
+                frequency *= 2.0;
+            }
+
+            let normalized = if max_value > 0.0 {
+                ((value / max_value) + 1.0) * 0.5
+            } else {
+                0.5
+            };
+            let byte = (normalized.clamp(0.0, 1.0) * 255.0).round() as u8;
+
+            data.push(byte); // R — noise value
+            data.push(255); // G — unused
+            data.push(255); // B — unused
+            data.push(255); // A — unused
+        }
+    }
+
+    Image::new(
+        Extent3d {
+            width: SIZE,
+            height: SIZE,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::all(),
+    )
+}
+
+/// System that generates (or creates a placeholder for) the Perlin noise texture.
+///
+/// Called once at `Startup` — before `spawn_map_system` — so the
+/// [`WindNoiseTexture`] resource is available when grass is spawned.
+pub fn setup_wind_noise_texture_system(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    wind_config: Option<Res<WindConfig>>,
+) {
+    let noise_image = match wind_config.as_deref() {
+        Some(wc) if wc.0.wind_system == WindSystemKind::Perlin => {
+            generate_wind_noise_texture(&wc.0)
+        }
+        _ => {
+            // 1×1 white placeholder for None / Sine wind systems.
+            Image::new(
+                Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                vec![255, 255, 255, 255],
+                TextureFormat::Rgba8Unorm,
+                RenderAssetUsages::all(),
+            )
+        }
+    };
+
+    let handle = images.add(noise_image);
+    commands.insert_resource(WindNoiseTexture(handle));
+}
+
 fn get_or_create_grass_material(
-    materials: &mut ResMut<Assets<StandardMaterial>>,
+    grass_materials: &mut ResMut<Assets<GrassMaterial>>,
     asset_server: &Res<AssetServer>,
     grass_cache: &mut GrassAssetCache,
     key: GrassMaterialKey,
     color_scheme: &GrassColorScheme,
-) -> Handle<StandardMaterial> {
+) -> Handle<GrassMaterial> {
     if let Some(handle) = grass_cache.material_handles.get(&key).cloned() {
         return handle;
     }
 
     let texture_handle: Handle<Image> = asset_server.load(GRASS_BLADE_TEXTURE);
-    let handle = materials.add(StandardMaterial {
-        base_color: cached_material_color(key, color_scheme),
-        base_color_texture: Some(texture_handle),
-        alpha_mode: AlphaMode::Mask(GRASS_ALPHA_CUTOFF),
-        double_sided: true,
-        cull_mode: None,
-        perceptual_roughness: 0.7,
-        ..default()
+    let handle = grass_materials.add(GrassMaterial {
+        base: StandardMaterial {
+            base_color: cached_material_color(key, color_scheme),
+            base_color_texture: Some(texture_handle),
+            alpha_mode: AlphaMode::Mask(GRASS_ALPHA_CUTOFF),
+            double_sided: true,
+            cull_mode: None,
+            perceptual_roughness: 0.7,
+            ..default()
+        },
+        extension: GrassWindExtension {
+            wind: grass_cache.wind_uniform.clone(),
+            noise: if grass_cache.wind_uniform.wind_system == 2 {
+                Some(grass_cache.noise_handle.clone())
+            } else {
+                None
+            },
+        },
     });
 
     grass_cache.material_handles.insert(key, handle.clone());
@@ -879,7 +1076,7 @@ fn create_grass_blade_mesh(height: f32, width: f32, curve_amount: f32) -> Mesh {
         0.0,
         curve_amount,
         GrassMeshQuality::Medium.segment_count(),
-        &[Color::WHITE; 2],
+        &[Color::WHITE; 3],
     )
 }
 
@@ -889,7 +1086,7 @@ fn create_curved_grass_card_mesh(
     tilt: f32,
     curve_amount: f32,
     segment_count: usize,
-    vertex_colors: &[Color; 2],
+    vertex_colors: &[Color; 3],
 ) -> Mesh {
     let mut positions = Vec::new();
     let mut normals = Vec::new();
@@ -898,20 +1095,30 @@ fn create_curved_grass_card_mesh(
     let mut indices = Vec::new();
     let mut curve_points = Vec::with_capacity(segment_count + 1);
 
+    // Cubic Bezier control points:
+    //   p0 = base, anchored at origin
+    //   p1 = first lean control (lower)
+    //   p2 = second lean control (mid, with curve)
+    //   p3 = tip
+    let p0_x = 0.0_f32;
+    let p0_y = 0.0_f32;
+    let p1_x = tilt * height * 0.25;
+    let p1_y = height * 0.33;
+    let p2_x = tilt * height * 0.4 + curve_amount * 0.5;
+    let p2_y = height * 0.66;
+    let p3_x = curve_amount;
+    let p3_y = height;
+
     for i in 0..=segment_count {
         let t = i as f32 / segment_count as f32;
-
-        let p0_y = 0.0;
-        let p1_y = height * 0.5;
-        let p2_y = height;
-
         let one_minus_t = 1.0 - t;
-        let coeff0 = one_minus_t * one_minus_t;
-        let coeff1 = 2.0 * one_minus_t * t;
-        let coeff2 = t * t;
+        let c0 = one_minus_t * one_minus_t * one_minus_t;
+        let c1 = 3.0 * one_minus_t * one_minus_t * t;
+        let c2 = 3.0 * one_minus_t * t * t;
+        let c3 = t * t * t;
 
-        let curve_x = coeff0 * 0.0 + coeff1 * (tilt * height * 0.25) + coeff2 * curve_amount;
-        let curve_y = coeff0 * p0_y + coeff1 * p1_y + coeff2 * p2_y;
+        let curve_x = c0 * p0_x + c1 * p1_x + c2 * p2_x + c3 * p3_x;
+        let curve_y = c0 * p0_y + c1 * p1_y + c2 * p2_y + c3 * p3_y;
 
         curve_points.push(Vec3::new(0.0, curve_y, curve_x));
     }
@@ -929,7 +1136,15 @@ fn create_curved_grass_card_mesh(
 
         let normal = Vec3::X.cross(tangent).normalize_or_zero();
         let taper_width = width * (1.0 - t).max(0.08);
-        let color = vertex_colors[0].mix(&vertex_colors[1], t).to_linear();
+
+        // Three-stop gradient: ao_color → mid_color (lower 40%) then mid_color → tip_color (upper 60%)
+        let color = if t <= 0.4 {
+            let t2 = t / 0.4;
+            vertex_colors[0].mix(&vertex_colors[1], t2).to_linear()
+        } else {
+            let t2 = (t - 0.4) / 0.6;
+            vertex_colors[1].mix(&vertex_colors[2], t2).to_linear()
+        };
 
         positions.push([-taper_width / 2.0, point.y, point.z]);
         normals.push([normal.x, normal.y, normal.z]);
@@ -987,7 +1202,16 @@ fn create_grass_clump_mesh(
         let rotation =
             Quat::from_rotation_y(card_index as f32 * std::f32::consts::TAU / card_count as f32);
         let color_lift = 1.0 + (card_index as f32 / card_count as f32 - 0.5) * 0.18;
-        let base_color = Color::srgb(0.85 * color_lift, 0.95 * color_lift, 0.75 * color_lift);
+        let ao_color = Color::srgb(
+            (0.08 * color_lift).min(1.0),
+            (0.12 * color_lift).min(1.0),
+            (0.06 * color_lift).min(1.0),
+        );
+        let mid_color = Color::srgb(
+            (0.85 * color_lift).min(1.0),
+            (0.95 * color_lift).min(1.0),
+            (0.75 * color_lift).min(1.0),
+        );
         let tip_color = Color::srgb(1.0, (1.05 * color_lift).min(1.0), 0.85 * color_lift);
         let card = create_curved_grass_card_mesh(
             height,
@@ -995,7 +1219,7 @@ fn create_grass_clump_mesh(
             tilt,
             curve_amount,
             segment_count,
-            &[base_color, tip_color],
+            &[ao_color, mid_color, tip_color],
         );
 
         let card_positions = card
@@ -1075,7 +1299,7 @@ fn clump_count_for_blade_count(blade_count: u32) -> u32 {
 #[allow(clippy::too_many_arguments)]
 fn spawn_grass_clump(
     commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
+    grass_materials: &mut ResMut<Assets<GrassMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,
     asset_server: &Res<AssetServer>,
     grass_cache: &mut GrassAssetCache,
@@ -1089,6 +1313,7 @@ fn spawn_grass_clump(
     lod_index: u32,
     rng: &mut StdRng,
     parent_entity: Entity,
+    render_mode: GrassRenderMode,
 ) {
     let height_variation = rng.random_range(MIN_HEIGHT_VARIATION..=MAX_HEIGHT_VARIATION);
     let width_variation = rng.random_range(MIN_WIDTH_VARIATION..=MAX_WIDTH_VARIATION);
@@ -1097,7 +1322,7 @@ fn spawn_grass_clump(
     let clump_mesh =
         get_or_create_grass_mesh(meshes, grass_cache, mesh_key, blade_height, blade_config);
     let clump_material = get_or_create_grass_material(
-        materials,
+        grass_materials,
         asset_server,
         grass_cache,
         material_key,
@@ -1116,39 +1341,59 @@ fn spawn_grass_clump(
     };
     let final_rotation = Quat::from_rotation_y(rotation_y) * tilt_rotation;
 
-    let clump = commands
-        .spawn((
-            Mesh3d(clump_mesh.clone()),
-            MeshMaterial3d(clump_material.clone()),
-            Transform::from_xyz(
-                clump_center.x,
-                GRASS_BLADE_Y_OFFSET + GRASS_GROUND_CLEARANCE,
-                clump_center.y,
-            )
-            .with_rotation(final_rotation)
-            .with_scale(Vec3::new(
-                width_variation,
-                height_variation,
-                width_variation,
-            )),
-            GlobalTransform::default(),
-            Visibility::default(),
-            // Grass should not cast/receive dynamic shadows; this avoids
-            // heavy shadow-map cost and dark first-person self-shadowing.
-            bevy::light::NotShadowCaster,
-            bevy::light::NotShadowReceiver,
-            GrassClump { card_count },
-            GrassBlade { lod_index },
-            GrassBladeInstance {
-                mesh: clump_mesh.clone(),
-                material: clump_material.clone(),
-            },
-            GrassWindParams {
-                phase: rng.random_range(0.0..std::f32::consts::TAU),
-                ..Default::default()
-            },
-        ))
-        .id();
+    // In Instanced mode the per-clump entities carry only the transform and
+    // component data used by the batch-building system; they do NOT have
+    // Mesh3d/MeshMaterial3d so the standard material pipeline skips them.
+    // In PerEntity mode the Phase-6 ExtendedMaterial path renders each clump
+    // directly with Mesh3d + MeshMaterial3d.
+    let clump_transform = Transform::from_xyz(
+        clump_center.x,
+        GRASS_BLADE_Y_OFFSET + GRASS_GROUND_CLEARANCE,
+        clump_center.y,
+    )
+    .with_rotation(final_rotation)
+    .with_scale(Vec3::new(
+        width_variation,
+        height_variation,
+        width_variation,
+    ));
+
+    let clump = if render_mode == GrassRenderMode::PerEntity {
+        commands
+            .spawn((
+                Mesh3d(clump_mesh.clone()),
+                MeshMaterial3d(clump_material.clone()),
+                clump_transform,
+                GlobalTransform::default(),
+                Visibility::default(),
+                // Grass should not cast/receive dynamic shadows; this avoids
+                // heavy shadow-map cost and dark first-person self-shadowing.
+                bevy::light::NotShadowCaster,
+                bevy::light::NotShadowReceiver,
+                GrassClump { card_count },
+                GrassBlade { lod_index },
+                GrassBladeInstance {
+                    mesh: clump_mesh.clone(),
+                    material: clump_material.clone(),
+                },
+            ))
+            .id()
+    } else {
+        // GrassRenderMode::Instanced — no render components on per-clump entity
+        commands
+            .spawn((
+                clump_transform,
+                GlobalTransform::default(),
+                Visibility::default(),
+                GrassClump { card_count },
+                GrassBlade { lod_index },
+                GrassBladeInstance {
+                    mesh: clump_mesh.clone(),
+                    material: clump_material.clone(),
+                },
+            ))
+            .id()
+    };
 
     commands.entity(parent_entity).add_child(clump);
 }
@@ -1170,10 +1415,12 @@ fn spawn_grass_clump(
 /// * `map_id` - Map identifier for cleanup
 /// * `visual_metadata` - Optional per-tile visual customization
 /// * `tile_tint` - Optional explicit RGB colour tint that overrides
-///   `visual_metadata.color_tint`; multiplied into `GrassColorScheme.base_color`
+///   `visual_metadata.color_tint`; multiplied into `GrassColorScheme.mid_color`
 ///   before blade colours are sampled.  Pass `None` to use the tint embedded
 ///   in `visual_metadata` (or the natural-green default if that is also `None`).
 /// * `quality_settings` - Performance settings for grass density scaling
+/// * `render_mode` - Whether to spawn per-entity render components or headless
+///   clumps only for instanced rendering.
 ///
 /// # Returns
 ///
@@ -1184,12 +1431,13 @@ fn spawn_grass_clump(
 /// ```rust
 /// use antares::domain::types::{MapId, Position};
 /// use antares::game::resources::GrassQualitySettings;
-/// use antares::game::systems::advanced_grass::{spawn_grass_cached, GrassAssetCache};
-/// use bevy::prelude::{Assets, AssetServer, Commands, Mesh, Res, ResMut, StandardMaterial};
+/// use antares::game::systems::advanced_grass::{spawn_grass_cached, GrassAssetCache, GrassMaterial};
+/// use antares::game::systems::grass_instancing::GrassRenderMode;
+/// use bevy::prelude::{Assets, AssetServer, Commands, Mesh, Res, ResMut};
 ///
 /// fn spawn_example(
 ///     mut commands: Commands,
-///     mut materials: ResMut<Assets<StandardMaterial>>,
+///     mut grass_materials: ResMut<Assets<GrassMaterial>>,
 ///     mut meshes: ResMut<Assets<Mesh>>,
 ///     asset_server: Res<AssetServer>,
 ///     mut grass_cache: ResMut<GrassAssetCache>,
@@ -1197,7 +1445,7 @@ fn spawn_grass_clump(
 /// ) {
 ///     let _entity = spawn_grass_cached(
 ///         &mut commands,
-///         &mut materials,
+///         &mut grass_materials,
 ///         &mut meshes,
 ///         &asset_server,
 ///         grass_cache.as_mut(),
@@ -1206,13 +1454,14 @@ fn spawn_grass_clump(
 ///         None,
 ///         None,
 ///         &settings,
+///         GrassRenderMode::Instanced,
 ///     );
 /// }
 /// ```
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_grass_cached(
     commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
+    grass_materials: &mut ResMut<Assets<GrassMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,
     asset_server: &Res<AssetServer>,
     grass_cache: &mut GrassAssetCache,
@@ -1221,10 +1470,11 @@ pub fn spawn_grass_cached(
     visual_metadata: Option<&TileVisualMetadata>,
     tile_tint: Option<(f32, f32, f32)>,
     quality_settings: &GrassQualitySettings,
+    render_mode: GrassRenderMode,
 ) -> Entity {
     spawn_grass_cached_with_exclusions(
         commands,
-        materials,
+        grass_materials,
         meshes,
         asset_server,
         grass_cache,
@@ -1234,6 +1484,7 @@ pub fn spawn_grass_cached(
         visual_metadata,
         tile_tint,
         quality_settings,
+        render_mode,
     )
 }
 
@@ -1256,6 +1507,8 @@ pub fn spawn_grass_cached(
 /// * `visual_metadata` - Optional per-tile visual customization
 /// * `tile_tint` - Optional explicit RGB colour tint
 /// * `quality_settings` - Performance settings for grass density scaling
+/// * `render_mode` - Whether to spawn per-entity render components (PerEntity)
+///   or headless clump entities only (Instanced, default).
 ///
 /// # Returns
 ///
@@ -1263,7 +1516,7 @@ pub fn spawn_grass_cached(
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_grass_cached_with_exclusions(
     commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
+    grass_materials: &mut ResMut<Assets<GrassMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,
     asset_server: &Res<AssetServer>,
     grass_cache: &mut GrassAssetCache,
@@ -1273,6 +1526,7 @@ pub fn spawn_grass_cached_with_exclusions(
     visual_metadata: Option<&TileVisualMetadata>,
     tile_tint: Option<(f32, f32, f32)>,
     quality_settings: &GrassQualitySettings,
+    render_mode: GrassRenderMode,
 ) -> Entity {
     debug!(
         "spawn_grass called at tile ({}, {}) map {:?}",
@@ -1296,19 +1550,25 @@ pub fn spawn_grass_cached_with_exclusions(
         .or_else(|| visual_metadata.and_then(|m| m.color_tint))
         .unwrap_or((0.3, 0.65, 0.2));
 
-    let base_color = Color::srgb(
-        0.2 * resolved_tint.0,
-        0.5 * resolved_tint.1,
-        0.1 * resolved_tint.2,
+    let ao_color = Color::srgb(
+        (0.08 * resolved_tint.0).min(1.0),
+        (0.12 * resolved_tint.1).min(1.0),
+        (0.06 * resolved_tint.2).min(1.0),
+    );
+    let mid_color = Color::srgb(
+        (0.2 * resolved_tint.0).min(1.0),
+        (0.5 * resolved_tint.1).min(1.0),
+        (0.1 * resolved_tint.2).min(1.0),
     );
     let tip_color = Color::srgb(
-        0.3 * resolved_tint.0,
-        0.7 * resolved_tint.1,
-        0.2 * resolved_tint.2,
+        (0.72 * resolved_tint.0).min(1.0),
+        (0.82 * resolved_tint.1).min(1.0),
+        (0.45 * resolved_tint.2).min(1.0),
     );
 
     let color_scheme = GrassColorScheme {
-        base_color,
+        ao_color,
+        mid_color,
         tip_color,
         variation: blade_config.color_variation,
     };
@@ -1400,7 +1660,7 @@ pub fn spawn_grass_cached_with_exclusions(
 
         spawn_grass_clump(
             commands,
-            materials,
+            grass_materials,
             meshes,
             asset_server,
             grass_cache,
@@ -1414,6 +1674,7 @@ pub fn spawn_grass_cached_with_exclusions(
             clump_index,
             &mut rng,
             parent,
+            render_mode,
         );
     }
 
@@ -1454,19 +1715,20 @@ pub fn spawn_grass_cached_with_exclusions(
 /// ```rust
 /// use antares::domain::types::Position;
 /// use antares::game::resources::GrassQualitySettings;
-/// use antares::game::systems::advanced_grass::spawn_grass;
-/// use bevy::prelude::{Assets, AssetServer, Commands, Mesh, Res, ResMut, StandardMaterial};
+/// use antares::game::systems::advanced_grass::{spawn_grass, GrassMaterial};
+/// use antares::game::systems::grass_instancing::GrassRenderMode;
+/// use bevy::prelude::{Assets, AssetServer, Commands, Mesh, Res, ResMut};
 ///
 /// fn spawn_example(
 ///     mut commands: Commands,
-///     mut materials: ResMut<Assets<StandardMaterial>>,
+///     mut grass_materials: ResMut<Assets<GrassMaterial>>,
 ///     mut meshes: ResMut<Assets<Mesh>>,
 ///     asset_server: Res<AssetServer>,
 ///     settings: Res<GrassQualitySettings>,
 /// ) {
 ///     let _entity = spawn_grass(
 ///         &mut commands,
-///         &mut materials,
+///         &mut grass_materials,
 ///         &mut meshes,
 ///         &asset_server,
 ///         Position::new(1, 2),
@@ -1474,13 +1736,14 @@ pub fn spawn_grass_cached_with_exclusions(
 ///         None,
 ///         None,
 ///         &settings,
+///         GrassRenderMode::Instanced,
 ///     );
 /// }
 /// ```
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_grass(
     commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
+    grass_materials: &mut ResMut<Assets<GrassMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,
     asset_server: &Res<AssetServer>,
     position: types::Position,
@@ -1488,11 +1751,12 @@ pub fn spawn_grass(
     visual_metadata: Option<&TileVisualMetadata>,
     tile_tint: Option<(f32, f32, f32)>,
     quality_settings: &GrassQualitySettings,
+    render_mode: GrassRenderMode,
 ) -> Entity {
     let mut grass_cache = GrassAssetCache::default();
     spawn_grass_cached(
         commands,
-        materials,
+        grass_materials,
         meshes,
         asset_server,
         &mut grass_cache,
@@ -1501,6 +1765,7 @@ pub fn spawn_grass(
         visual_metadata,
         tile_tint,
         quality_settings,
+        render_mode,
     )
 }
 
@@ -1626,20 +1891,24 @@ pub fn grass_lod_system(
 #[derive(Hash, PartialEq, Eq)]
 struct InstanceBatchKey {
     mesh: bevy::asset::AssetId<Mesh>,
-    material: bevy::asset::AssetId<StandardMaterial>,
+    material: bevy::asset::AssetId<GrassMaterial>,
     map_id: types::MapId,
 }
 
 struct InstanceBatchEntry {
     mesh: Handle<Mesh>,
-    material: Handle<StandardMaterial>,
+    material: Handle<GrassMaterial>,
     instances: Vec<world::InstanceData>,
 }
 
-/// Build instance batches from existing grass blades
+/// Build instance batches from existing grass clumps.
 ///
-/// This system aggregates per-blade instance data into batch components to
-/// support performance diagnostics and future GPU instancing pipelines.
+/// When [`GrassRenderMode::Instanced`] is active (or `config.enabled` is set),
+/// this system aggregates per-clump instance data into [`GrassInstanceBatch`]
+/// entities.  In instanced mode each batch entity gets a [`Mesh3d`] component
+/// (so Bevy allocates the mesh's GPU vertex/index buffers) plus
+/// [`NoFrustumCulling`] (frustum culling happens at the cluster level, not the
+/// batch level).
 ///
 /// # Examples
 ///
@@ -1656,14 +1925,31 @@ struct InstanceBatchEntry {
 /// ```
 pub fn build_grass_instance_batches_system(
     mut commands: Commands,
-    cluster_query: Query<(&Children, &GlobalTransform, &MapEntity), With<GrassCluster>>,
+    cluster_query: Query<
+        (&Children, &GlobalTransform, &MapEntity, Option<&Visibility>),
+        With<GrassCluster>,
+    >,
     blade_query: Query<(&Transform, Option<&GlobalTransform>, &GrassBladeInstance)>,
     mut existing_batches: Query<Entity, With<GrassInstanceBatch>>,
     config: Res<GrassInstanceConfig>,
+    render_mode: Option<Res<GrassRenderMode>>,
+    render_world_available: Option<
+        Res<crate::game::systems::grass_instancing::GrassRenderWorldAvailable>,
+    >,
 ) {
-    if !config.enabled {
+    // Run when either the legacy enabled flag is set OR the instancing mode
+    // is active (default path for Phase 7).
+    let instanced = render_mode.as_deref() == Some(&GrassRenderMode::Instanced);
+    if !config.enabled && !instanced {
         return;
     }
+
+    // Only add Mesh3d render components when the Bevy render world is present.
+    // In test environments (MinimalPlugins / no RenderApp), Mesh3d triggers a
+    // sync hook that panics on a missing PendingSyncEntity resource.
+    let can_spawn_mesh3d = render_world_available.is_some();
+    // Use instanced render path only when both modes agree and render world exists.
+    let spawn_as_instanced = instanced && can_spawn_mesh3d;
 
     for ent in existing_batches.iter_mut() {
         commands.entity(ent).despawn();
@@ -1671,7 +1957,16 @@ pub fn build_grass_instance_batches_system(
 
     let mut buckets: HashMap<InstanceBatchKey, InstanceBatchEntry> = HashMap::new();
 
-    for (children, cluster_global, map_entity) in cluster_query.iter() {
+    for (children, cluster_global, map_entity, cluster_visibility) in cluster_query.iter() {
+        // Chunk-level visibility: skip clusters that have been culled by
+        // grass_distance_culling_system. This ensures that instances from
+        // far-away clusters are not uploaded or drawn, giving the instanced
+        // path the same culling granularity as the per-entity path.
+        // Treat absent Visibility component as visible (backward compatibility).
+        if cluster_visibility == Some(&Visibility::Hidden) {
+            continue;
+        }
+
         for child in children.iter() {
             if let Ok((child_local, child_global_opt, blade_inst)) = blade_query.get(child) {
                 let world_transform = if let Some(child_global) = child_global_opt {
@@ -1716,15 +2011,38 @@ pub fn build_grass_instance_batches_system(
     let max_instances = config.max_instances_per_batch.max(1);
     for (key, entry) in buckets.into_iter() {
         for (batch_index, chunk) in entry.instances.chunks(max_instances).enumerate() {
-            commands.spawn((
-                GrassInstanceBatch {
-                    mesh: entry.mesh.clone(),
-                    material: entry.material.clone(),
-                    instances: chunk.to_vec(),
-                },
-                MapEntity(key.map_id),
-                Name::new(format!("GrassInstanceBatch_{}_{}", key.map_id, batch_index)),
-            ));
+            if spawn_as_instanced {
+                // Instanced mode: add Mesh3d so Bevy allocates GPU buffers for
+                // the mesh, and NoFrustumCulling so the batch entity is never
+                // frustum-culled (culling happens at GrassCluster level).
+                commands.spawn((
+                    GrassInstanceBatch {
+                        mesh: entry.mesh.clone(),
+                        material: entry.material.clone(),
+                        instances: chunk.to_vec(),
+                    },
+                    Mesh3d(entry.mesh.clone()),
+                    Transform::default(),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                    NoFrustumCulling,
+                    bevy::light::NotShadowCaster,
+                    bevy::light::NotShadowReceiver,
+                    MapEntity(key.map_id),
+                    Name::new(format!("GrassInstanceBatch_{}_{}", key.map_id, batch_index)),
+                ));
+            } else {
+                // Legacy diagnostics mode (or no render world): no render components.
+                commands.spawn((
+                    GrassInstanceBatch {
+                        mesh: entry.mesh.clone(),
+                        material: entry.material.clone(),
+                        instances: chunk.to_vec(),
+                    },
+                    MapEntity(key.map_id),
+                    Name::new(format!("GrassInstanceBatch_{}_{}", key.map_id, batch_index)),
+                ));
+            }
         }
     }
 }
@@ -1768,17 +2086,19 @@ impl Default for GrassChunkConfig {
 }
 
 struct BladeGather {
-    material: Handle<StandardMaterial>,
+    material: Handle<GrassMaterial>,
     world_transform: GlobalTransform,
     map_id: crate::domain::types::MapId,
 }
 
 /// Build merged chunk meshes for existing grass blades.
+#[allow(clippy::too_many_arguments)]
 pub fn build_grass_chunks_system(
     mut commands: Commands,
     cluster_query: Query<(&Children, &GlobalTransform, &MapEntity), With<GrassCluster>>,
     blade_query: Query<(&Transform, Option<&GlobalTransform>, &GrassBladeInstance)>,
     mut meshes: ResMut<Assets<Mesh>>,
+    grass_mats: Res<Assets<GrassMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut existing_chunks: Query<Entity, With<GrassChunk>>,
     config: Option<Res<GrassChunkConfig>>,
@@ -1885,8 +2205,8 @@ pub fn build_grass_chunks_system(
 
         let material_color = blades
             .first()
-            .and_then(|b| materials.get(&b.material))
-            .map(|m| m.base_color)
+            .and_then(|b| grass_mats.get(&b.material))
+            .map(|m| m.base.base_color)
             .unwrap_or(Color::srgb(0.25, 0.6, 0.25));
 
         let material_handle = materials.add(StandardMaterial {
@@ -1965,6 +2285,7 @@ pub fn grass_chunk_culling_system(
 mod tests {
     use super::*;
     use crate::domain::world::GrassDensity;
+    use crate::game::systems::grass_instancing::GrassRenderMode;
     use bevy::mesh::Mesh;
 
     fn compute_bounds(positions: &[[f32; 3]]) -> (Vec3, Vec3) {
@@ -2273,8 +2594,9 @@ mod tests {
     #[test]
     fn test_grass_color_scheme_no_variation_is_stable() {
         let scheme = GrassColorScheme {
-            base_color: Color::srgb(0.2, 0.5, 0.1),
-            tip_color: Color::srgb(0.3, 0.7, 0.2),
+            ao_color: Color::srgb(0.08, 0.12, 0.06),
+            mid_color: Color::srgb(0.2, 0.5, 0.1),
+            tip_color: Color::srgb(0.72, 0.82, 0.45),
             variation: 0.0,
         };
 
@@ -2477,6 +2799,7 @@ mod tests {
 
         app.insert_resource(Assets::<Mesh>::default());
         app.insert_resource(Assets::<StandardMaterial>::default());
+        app.insert_resource(Assets::<GrassMaterial>::default());
 
         let cube = {
             let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
@@ -2498,10 +2821,13 @@ mod tests {
         };
 
         let mat = {
-            let mut materials = app.world_mut().resource_mut::<Assets<StandardMaterial>>();
-            materials.add(StandardMaterial {
-                base_color: Color::WHITE,
-                ..default()
+            let mut grass_mats = app.world_mut().resource_mut::<Assets<GrassMaterial>>();
+            grass_mats.add(GrassMaterial {
+                base: StandardMaterial {
+                    base_color: Color::WHITE,
+                    ..default()
+                },
+                extension: GrassWindExtension::default(),
             })
         };
 
@@ -2596,6 +2922,7 @@ mod tests {
 
         app.insert_resource(Assets::<Mesh>::default());
         app.insert_resource(Assets::<StandardMaterial>::default());
+        app.insert_resource(Assets::<GrassMaterial>::default());
 
         let mesh = {
             let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
@@ -2617,8 +2944,8 @@ mod tests {
         };
 
         let material = {
-            let mut materials = app.world_mut().resource_mut::<Assets<StandardMaterial>>();
-            materials.add(StandardMaterial::default())
+            let mut grass_mats = app.world_mut().resource_mut::<Assets<GrassMaterial>>();
+            grass_mats.add(GrassMaterial::default())
         };
 
         let cluster = app
@@ -2658,6 +2985,101 @@ mod tests {
         assert!(batches.len() >= 2);
     }
 
+    /// Hidden clusters must not contribute instances to any batch.
+    ///
+    /// `grass_distance_culling_system` sets `Visibility::Hidden` on far-away
+    /// `GrassCluster` entities. `build_grass_instance_batches_system` must
+    /// respect this so instance data from culled clusters is not uploaded or
+    /// drawn — providing chunk-level visibility parity with the per-entity path.
+    #[test]
+    fn test_build_grass_instance_batches_skips_hidden_clusters() {
+        let mut app = App::new();
+        app.insert_resource(GrassInstanceConfig {
+            enabled: true,
+            max_instances_per_batch: 100,
+        });
+        app.add_systems(Update, build_grass_instance_batches_system);
+
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+        app.insert_resource(Assets::<GrassMaterial>::default());
+
+        let mesh = {
+            let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
+            let mut test_mesh = Mesh::new(
+                bevy::mesh::PrimitiveTopology::TriangleList,
+                bevy::asset::RenderAssetUsages::all(),
+            );
+            test_mesh.insert_attribute(
+                Mesh::ATTRIBUTE_POSITION,
+                vec![[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.1, 0.0]],
+            );
+            test_mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; 3]);
+            test_mesh.insert_attribute(
+                Mesh::ATTRIBUTE_UV_0,
+                vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            );
+            test_mesh.insert_indices(bevy::mesh::Indices::U32(vec![0, 1, 2]));
+            meshes.add(test_mesh)
+        };
+        let material = {
+            let mut grass_mats = app.world_mut().resource_mut::<Assets<GrassMaterial>>();
+            grass_mats.add(GrassMaterial::default())
+        };
+
+        // Spawn one VISIBLE cluster and one HIDDEN cluster.
+        let visible_cluster = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(Vec3::ZERO),
+                GlobalTransform::default(),
+                Visibility::Inherited,
+                GrassCluster::default(),
+                MapEntity(1),
+            ))
+            .id();
+        let hidden_cluster = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(Vec3::new(999.0, 0.0, 0.0)),
+                GlobalTransform::default(),
+                Visibility::Hidden, // simulates grass_distance_culling_system output
+                GrassCluster::default(),
+                MapEntity(1),
+            ))
+            .id();
+
+        // Attach one blade to each cluster.
+        for cluster in [visible_cluster, hidden_cluster] {
+            let blade = app
+                .world_mut()
+                .spawn((
+                    Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)),
+                    GlobalTransform::default(),
+                    GrassBladeInstance {
+                        mesh: mesh.clone(),
+                        material: material.clone(),
+                    },
+                ))
+                .id();
+            app.world_mut().entity_mut(cluster).add_child(blade);
+        }
+
+        app.update();
+
+        let batches: Vec<_> = {
+            let world = app.world_mut();
+            world.query::<&GrassInstanceBatch>().iter(world).collect()
+        };
+
+        let total_instances: usize = batches.iter().map(|b| b.instances.len()).sum();
+        assert_eq!(
+            total_instances, 1,
+            "hidden cluster must not contribute instances; expected 1 (visible only), got {}",
+            total_instances
+        );
+    }
+
     #[test]
     fn test_blade_config_from_domain_config() {
         let domain = world::GrassBladeConfig {
@@ -2679,8 +3101,9 @@ mod tests {
     #[test]
     fn test_grass_color_scheme_variation_can_change_color() {
         let scheme = GrassColorScheme {
-            base_color: Color::srgb(0.2, 0.5, 0.1),
-            tip_color: Color::srgb(0.3, 0.7, 0.2),
+            ao_color: Color::srgb(0.08, 0.12, 0.06),
+            mid_color: Color::srgb(0.2, 0.5, 0.1),
+            tip_color: Color::srgb(0.72, 0.82, 0.45),
             variation: 0.5,
         };
 
@@ -2706,7 +3129,7 @@ mod tests {
     fn test_spawn_grass_with_none_density_spawns_no_blades() {
         fn spawn_none_density_system(
             mut commands: Commands,
-            mut materials: ResMut<Assets<StandardMaterial>>,
+            mut grass_materials: ResMut<Assets<GrassMaterial>>,
             mut meshes: ResMut<Assets<Mesh>>,
             asset_server: Res<AssetServer>,
             settings: Res<GrassQualitySettings>,
@@ -2718,7 +3141,7 @@ mod tests {
 
             spawn_grass(
                 &mut commands,
-                &mut materials,
+                &mut grass_materials,
                 &mut meshes,
                 &asset_server,
                 types::Position::new(0, 0),
@@ -2726,6 +3149,7 @@ mod tests {
                 Some(&metadata),
                 None,
                 &settings,
+                GrassRenderMode::PerEntity,
             );
         }
 
@@ -2736,7 +3160,7 @@ mod tests {
         ))
         .add_plugins(bevy::asset::AssetPlugin::default())
         .init_asset::<Image>()
-        .init_asset::<StandardMaterial>()
+        .init_asset::<GrassMaterial>()
         .init_asset::<Mesh>();
         app.insert_resource(GrassQualitySettings {
             performance_level:
@@ -2790,7 +3214,7 @@ mod tests {
     fn test_spawn_grass_with_density_spawns_blades_and_cluster() {
         fn spawn_low_density_system(
             mut commands: Commands,
-            mut materials: ResMut<Assets<StandardMaterial>>,
+            mut grass_materials: ResMut<Assets<GrassMaterial>>,
             mut meshes: ResMut<Assets<Mesh>>,
             asset_server: Res<AssetServer>,
             settings: Res<GrassQualitySettings>,
@@ -2802,7 +3226,7 @@ mod tests {
 
             spawn_grass(
                 &mut commands,
-                &mut materials,
+                &mut grass_materials,
                 &mut meshes,
                 &asset_server,
                 types::Position::new(1, 1),
@@ -2810,6 +3234,7 @@ mod tests {
                 Some(&metadata),
                 None,
                 &settings,
+                GrassRenderMode::PerEntity,
             );
         }
 
@@ -2820,7 +3245,7 @@ mod tests {
         ))
         .add_plugins(bevy::asset::AssetPlugin::default())
         .init_asset::<Image>()
-        .init_asset::<StandardMaterial>()
+        .init_asset::<GrassMaterial>()
         .init_asset::<Mesh>();
         app.insert_resource(GrassQualitySettings {
             performance_level:
@@ -2851,7 +3276,7 @@ mod tests {
     fn test_spawn_grass_cached_reuses_mesh_and_material_handles_for_similar_clumps() {
         fn spawn_two_cached_grass_patches(
             mut commands: Commands,
-            mut materials: ResMut<Assets<StandardMaterial>>,
+            mut grass_materials: ResMut<Assets<GrassMaterial>>,
             mut meshes: ResMut<Assets<Mesh>>,
             asset_server: Res<AssetServer>,
             mut grass_cache: ResMut<GrassAssetCache>,
@@ -2865,7 +3290,7 @@ mod tests {
 
             spawn_grass_cached(
                 &mut commands,
-                &mut materials,
+                &mut grass_materials,
                 &mut meshes,
                 &asset_server,
                 grass_cache.as_mut(),
@@ -2874,10 +3299,11 @@ mod tests {
                 Some(&metadata),
                 None,
                 &settings,
+                GrassRenderMode::PerEntity,
             );
             spawn_grass_cached(
                 &mut commands,
-                &mut materials,
+                &mut grass_materials,
                 &mut meshes,
                 &asset_server,
                 grass_cache.as_mut(),
@@ -2886,6 +3312,7 @@ mod tests {
                 Some(&metadata),
                 None,
                 &settings,
+                GrassRenderMode::PerEntity,
             );
         }
 
@@ -2896,7 +3323,7 @@ mod tests {
         ))
         .add_plugins(bevy::asset::AssetPlugin::default())
         .init_asset::<Image>()
-        .init_asset::<StandardMaterial>()
+        .init_asset::<GrassMaterial>()
         .init_asset::<Mesh>()
         .init_resource::<GrassAssetCache>();
         app.insert_resource(GrassQualitySettings {
@@ -2966,7 +3393,7 @@ mod tests {
     fn test_grass_material_uses_alpha_mask() {
         fn spawn_grass_for_alpha_test(
             mut commands: Commands,
-            mut materials: ResMut<Assets<StandardMaterial>>,
+            mut grass_materials: ResMut<Assets<GrassMaterial>>,
             mut meshes: ResMut<Assets<Mesh>>,
             asset_server: Res<AssetServer>,
             settings: Res<GrassQualitySettings>,
@@ -2978,7 +3405,7 @@ mod tests {
 
             spawn_grass(
                 &mut commands,
-                &mut materials,
+                &mut grass_materials,
                 &mut meshes,
                 &asset_server,
                 types::Position::new(5, 5),
@@ -2986,6 +3413,7 @@ mod tests {
                 Some(&metadata),
                 None,
                 &settings,
+                GrassRenderMode::PerEntity,
             );
         }
 
@@ -2996,7 +3424,7 @@ mod tests {
         ))
         .add_plugins(bevy::asset::AssetPlugin::default())
         .init_asset::<Image>()
-        .init_asset::<StandardMaterial>()
+        .init_asset::<GrassMaterial>()
         .init_asset::<Mesh>();
         app.insert_resource(GrassQualitySettings {
             performance_level:
@@ -3005,11 +3433,11 @@ mod tests {
         app.add_systems(Update, spawn_grass_for_alpha_test);
         app.update();
 
-        // Collect all StandardMaterial handles from spawned MeshMaterial3d components.
-        let material_handles: Vec<Handle<StandardMaterial>> = {
+        // Collect all GrassMaterial handles from spawned MeshMaterial3d components.
+        let material_handles: Vec<Handle<GrassMaterial>> = {
             let world = app.world_mut();
             world
-                .query::<&MeshMaterial3d<StandardMaterial>>()
+                .query::<&MeshMaterial3d<GrassMaterial>>()
                 .iter(world)
                 .map(|m| m.0.clone())
                 .collect()
@@ -3020,20 +3448,20 @@ mod tests {
             "Expected at least one spawned grass blade material"
         );
 
-        let materials = app
+        let grass_mats = app
             .world()
-            .get_resource::<Assets<StandardMaterial>>()
-            .expect("Assets<StandardMaterial> must exist");
+            .get_resource::<Assets<GrassMaterial>>()
+            .expect("Assets<GrassMaterial> must exist");
 
         for handle in &material_handles {
-            if let Some(mat) = materials.get(handle) {
+            if let Some(mat) = grass_mats.get(handle) {
                 assert!(
-                    matches!(mat.alpha_mode, AlphaMode::Mask(_)),
+                    matches!(mat.base.alpha_mode, AlphaMode::Mask(_)),
                     "Grass blade material must use AlphaMode::Mask, got {:?}",
-                    mat.alpha_mode
+                    mat.base.alpha_mode
                 );
                 assert!(
-                    mat.base_color_texture.is_some(),
+                    mat.base.base_color_texture.is_some(),
                     "Grass blade material must have a base_color_texture set"
                 );
             }
@@ -3057,7 +3485,8 @@ mod tests {
     #[test]
     fn test_cached_material_color_uses_variation_bucket() {
         let scheme = GrassColorScheme {
-            base_color: Color::srgb(0.1, 0.2, 0.3),
+            ao_color: Color::srgb(0.1, 0.2, 0.3),
+            mid_color: Color::srgb(0.4, 0.5, 0.6),
             tip_color: Color::srgb(0.7, 0.8, 0.9),
             variation: 1.0,
         };
@@ -3065,12 +3494,12 @@ mod tests {
         let no_variation_key = GrassMaterialKey::from_tint((1.0, 1.0, 1.0), 0.0);
         let full_variation_key = GrassMaterialKey::from_tint((1.0, 1.0, 1.0), 1.0);
 
-        let base_color = cached_material_color(no_variation_key, &scheme).to_srgba();
+        let ao_color = cached_material_color(no_variation_key, &scheme).to_srgba();
         let tip_color = cached_material_color(full_variation_key, &scheme).to_srgba();
 
-        assert!((base_color.red - 0.1).abs() < 0.001);
-        assert!((base_color.green - 0.2).abs() < 0.001);
-        assert!((base_color.blue - 0.3).abs() < 0.001);
+        assert!((ao_color.red - 0.1).abs() < 0.001);
+        assert!((ao_color.green - 0.2).abs() < 0.001);
+        assert!((ao_color.blue - 0.3).abs() < 0.001);
 
         assert!((tip_color.red - 0.7).abs() < 0.001);
         assert!((tip_color.green - 0.8).abs() < 0.001);

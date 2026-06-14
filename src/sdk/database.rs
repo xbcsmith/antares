@@ -104,6 +104,10 @@ pub enum DatabaseError {
     #[error("Failed to load skills: {0}")]
     SkillLoadError(String),
 
+    /// Failed to load or parse `data/wind.ron`
+    #[error("Failed to load wind configuration: {0}")]
+    WindLoadError(String),
+
     #[error("Failed to load map {map_id}: {error}")]
     MapLoadError { map_id: String, error: String },
 
@@ -1111,6 +1115,12 @@ pub struct ContentDatabase {
     /// Loaded from `data/skills.ron` in the campaign directory.
     /// Missing file is not an error — skills are added progressively.
     pub skills: SkillDatabase,
+
+    /// Per-campaign wind configuration.
+    ///
+    /// Loaded from `data/wind.ron` in the campaign directory.
+    /// Missing file is not an error — absent file means no wind animation.
+    pub wind: crate::domain::world::wind::CampaignWindConfig,
 }
 
 impl ContentDatabase {
@@ -1144,6 +1154,7 @@ impl ContentDatabase {
             landscape: LandscapeDatabase::new(),
             landscape_meshes: LandscapeMeshDatabase::new(),
             skills: SkillDatabase::new(),
+            wind: crate::domain::world::wind::CampaignWindConfig::default(),
         }
     }
 
@@ -1366,6 +1377,16 @@ impl ContentDatabase {
             SkillDatabase::new()
         };
 
+        // Load wind configuration (opt-in per campaign; missing file is not an error)
+        let wind = if data_dir.join("wind.ron").exists() {
+            let content = std::fs::read_to_string(data_dir.join("wind.ron"))
+                .map_err(|e| DatabaseError::WindLoadError(e.to_string()))?;
+            ron::from_str::<crate::domain::world::wind::CampaignWindConfig>(&content)
+                .map_err(|e| DatabaseError::WindLoadError(e.to_string()))?
+        } else {
+            crate::domain::world::wind::CampaignWindConfig::default()
+        };
+
         let db = Self {
             classes,
             races,
@@ -1384,6 +1405,7 @@ impl ContentDatabase {
             landscape,
             landscape_meshes,
             skills,
+            wind,
         };
         db.validate_landscape_content(Some(campaign_path))?;
         Ok(db)
@@ -1553,6 +1575,16 @@ impl ContentDatabase {
             SkillDatabase::new()
         };
 
+        // Load wind configuration (opt-in; missing file is not an error)
+        let wind = if data_path.join("wind.ron").exists() {
+            let content = std::fs::read_to_string(data_path.join("wind.ron"))
+                .map_err(|e| DatabaseError::WindLoadError(e.to_string()))?;
+            ron::from_str::<crate::domain::world::wind::CampaignWindConfig>(&content)
+                .map_err(|e| DatabaseError::WindLoadError(e.to_string()))?
+        } else {
+            crate::domain::world::wind::CampaignWindConfig::default()
+        };
+
         let db = Self {
             classes,
             races,
@@ -1571,6 +1603,7 @@ impl ContentDatabase {
             landscape,
             landscape_meshes,
             skills,
+            wind,
         };
         db.validate_landscape_content(Some(asset_root))?;
         Ok(db)

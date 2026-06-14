@@ -339,22 +339,25 @@ fn render_single_view(
     // Clone the character data we need to avoid borrow conflicts
     let character = global_state.0.party.members[safe_index].clone();
 
-    // -- Header
+    // -- Header: title + navigation buttons only.
+    // Keyboard hints are on a dedicated line below so they never compete with
+    // the buttons for horizontal space.  Mixing hints and buttons in the same
+    // right_to_left block caused the buttons' egui hit regions to be consumed
+    // by the hint labels on narrower windows, so mouse clicks never reached
+    // the `< Prev`, `Next >`, and `Party Overview` responses.
     ui.horizontal(|ui| {
-        ui.colored_label(
-            TITLE_COLOR,
-            egui::RichText::new(format!(
-                "{} -- Level {} {} {}",
-                character.name, character.level, character.race_id, character.class_id
-            ))
-            .size(16.0)
-            .strong(),
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(format!(
+                    "{} -- Level {} {} {}",
+                    character.name, character.level, character.race_id, character.class_id
+                ))
+                .color(TITLE_COLOR)
+                .size(16.0)
+                .strong(),
+            )
+            .truncate(),
         );
-
-        // Keep these buttons directly in the header row. A previous nested,
-        // fixed-width `allocate_ui` clipped their egui hit regions on narrower
-        // windows, so the labels were visible but mouse clicks never reached
-        // the `< Prev`, `Next >`, and `Party Overview` responses.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.small_button("Party Overview").clicked() {
                 if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
@@ -371,6 +374,13 @@ fn render_single_view(
                     cs.focus_prev(party_len);
                 }
             }
+        });
+    });
+
+    // -- Hint line: keyboard shortcuts only, never blocks button hit regions.
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.colored_label(HINT_COLOR, "[Esc/P] Close");
             ui.separator();
             ui.colored_label(HINT_COLOR, "[O] Overview");
             ui.separator();
@@ -919,7 +929,18 @@ fn render_party_overview_card(
     ui: &mut egui::Ui,
     character: &crate::domain::character::Character,
 ) -> bool {
-    let mut view_clicked = false;
+    let hp_frac = if character.hp.base > 0 {
+        character.hp.current as f32 / character.hp.base as f32
+    } else {
+        0.0
+    };
+    let hp_color = if hp_frac < 0.25 {
+        egui::Color32::from_rgb(220, 60, 60)
+    } else if hp_frac < 0.5 {
+        egui::Color32::from_rgb(220, 160, 40)
+    } else {
+        egui::Color32::from_rgb(60, 200, 60)
+    };
 
     egui::Frame::default()
         .inner_margin(egui::Margin::same(8))
@@ -927,23 +948,24 @@ fn render_party_overview_card(
         .show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             ui.vertical(|ui| {
-                ui.colored_label(TITLE_COLOR, egui::RichText::new(&character.name).strong());
-                ui.label(format!("{} Lv {}", character.class_id, character.level));
-                ui.label(character.race_id.to_string());
+                // Use truncate() on all text labels so long names/class IDs cannot
+                // wrap to extra lines and push the View button outside the card's
+                // clip rect.
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(&character.name)
+                            .color(TITLE_COLOR)
+                            .strong(),
+                    )
+                    .truncate(),
+                );
+                ui.add(
+                    egui::Label::new(format!("{} Lv {}", character.class_id, character.level))
+                        .truncate(),
+                );
+                ui.add(egui::Label::new(character.race_id.to_string()).truncate());
                 ui.separator();
 
-                let hp_frac = if character.hp.base > 0 {
-                    character.hp.current as f32 / character.hp.base as f32
-                } else {
-                    0.0
-                };
-                let hp_color = if hp_frac < 0.25 {
-                    egui::Color32::from_rgb(220, 60, 60)
-                } else if hp_frac < 0.5 {
-                    egui::Color32::from_rgb(220, 160, 40)
-                } else {
-                    egui::Color32::from_rgb(60, 200, 60)
-                };
                 ui.horizontal(|ui| {
                     ui.label("HP:");
                     ui.colored_label(
@@ -953,11 +975,11 @@ fn render_party_overview_card(
                 });
 
                 ui.add_space(4.0);
-                view_clicked = ui.small_button("View").clicked();
-            });
-        });
-
-    view_clicked
+                ui.small_button("View").clicked()
+            })
+            .inner
+        })
+        .inner
 }
 
 /// Renders the compact party overview as an all-member card grid.
@@ -968,9 +990,14 @@ fn render_party_overview(ui: &mut egui::Ui, global_state: &mut GlobalState, part
     }
 
     ui.horizontal(|ui| {
-        ui.colored_label(
-            TITLE_COLOR,
-            egui::RichText::new("Party Overview").size(16.0).strong(),
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new("Party Overview")
+                    .color(TITLE_COLOR)
+                    .size(16.0)
+                    .strong(),
+            )
+            .truncate(),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.small_button("Single View").clicked() {

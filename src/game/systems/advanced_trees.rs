@@ -870,7 +870,7 @@ impl TreeType {
                 },
                 leaves: LeafPreset {
                     enabled: true,
-                    count: 5,
+                    count: 3, // Reduced 40% from 5; cross-pattern doubles polygon budget
                     size: 0.55,
                     size_variance: 0.25,
                     angle_degrees: 35.0,
@@ -920,7 +920,7 @@ impl TreeType {
                 },
                 leaves: LeafPreset {
                     enabled: true,
-                    count: 3,
+                    count: 2, // Reduced 33% from 3; cross-pattern doubles polygon budget
                     size: 0.42,
                     size_variance: 0.20,
                     angle_degrees: 32.0,
@@ -945,7 +945,7 @@ impl TreeType {
                 },
                 leaves: LeafPreset {
                     enabled: true,
-                    count: 6,
+                    count: 4, // Reduced 33% from 6; cross-pattern doubles polygon budget
                     size: 0.60,
                     size_variance: 0.18,
                     angle_degrees: 75.0,
@@ -995,7 +995,7 @@ impl TreeType {
                 },
                 leaves: LeafPreset {
                     enabled: true,
-                    count: 6,
+                    count: 4, // Reduced 33% from 6; cross-pattern doubles polygon budget
                     size: 0.34,
                     size_variance: 0.30,
                     angle_degrees: 25.0,
@@ -1020,7 +1020,7 @@ impl TreeType {
                 },
                 leaves: LeafPreset {
                     enabled: true,
-                    count: 8,
+                    count: 5, // Reduced 37.5% from 8; cross-pattern doubles polygon budget
                     size: 0.85,
                     size_variance: 0.15,
                     angle_degrees: 82.0,
@@ -1349,11 +1349,93 @@ fn generate_branch_mesh_for_lod(
     merge_branch_meshes(branch_meshes)
 }
 
-/// Appends a single species-shaped leaf/frond polygon to mesh attribute buffers.
+/// Dispatches to the per-species leaf/frond stamping function for one plane.
 ///
-/// The mesh itself provides the silhouette instead of relying on a round alpha
-/// mask. This prevents Oak/Pine/Birch/Willow foliage from all reading as the
-/// same circular blob when viewed in first person.
+/// Used internally by [`append_leaf_card_cross`] to invoke the species stamp
+/// function on two perpendicular planes with the same `up` vector.
+/// [`TreeType::Pine`] and [`TreeType::Dead`] are excluded from this helper —
+/// Pine uses a dedicated single-pass path and Dead has no foliage.
+#[allow(clippy::too_many_arguments)]
+fn append_leaf_shape(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    origin: Vec3,
+    side: Vec3,
+    up: Vec3,
+    size: f32,
+    preset: &TreeSpeciesPreset,
+) {
+    match preset.tree_type {
+        TreeType::Oak => {
+            append_lobed_leaf_cluster(positions, normals, uvs, indices, origin, side, up, size)
+        }
+        TreeType::Birch => append_diamond_leaf(
+            positions,
+            normals,
+            uvs,
+            indices,
+            origin,
+            side,
+            up,
+            size * 0.72,
+        ),
+        TreeType::Willow => {
+            append_willow_hanging_strip(positions, normals, uvs, indices, origin, side, up, size)
+        }
+        TreeType::Palm => {
+            append_palm_frond(positions, normals, uvs, indices, origin, side, up, size)
+        }
+        TreeType::Shrub => {
+            append_clustered_shrub_leaf(positions, normals, uvs, indices, origin, side, up, size)
+        }
+        _ => {}
+    }
+}
+
+/// Stamps two perpendicular passes of the species leaf shape at `origin`.
+///
+/// The first pass uses `side` as-is. The second substitutes
+/// `side2 = side.cross(up).normalize_or_zero()` so the two planes are always
+/// non-degenerate when the first pass is. `side.cross(up)` is preferred over
+/// `direction` because `up ≈ direction` on near-vertical branches
+/// (`up = Y.lerp(direction, 0.35)`), which would collapse a direction-based
+/// second pass to near-zero area.
+///
+/// `double_sided: true` on the foliage material (Phase 1) covers both winding
+/// orders without needing reversed indices for the second pass.
+///
+/// Used by Oak, Birch, Willow, Palm, and Shrub. Pine uses a single pass
+/// because its triangular needle clusters read well from all angles and
+/// skipping the cross pass avoids overdraw on dense conifer canopy.
+#[allow(clippy::too_many_arguments)]
+fn append_leaf_card_cross(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    uvs: &mut Vec<[f32; 2]>,
+    indices: &mut Vec<u32>,
+    origin: Vec3,
+    side: Vec3,
+    up: Vec3,
+    size: f32,
+    preset: &TreeSpeciesPreset,
+) {
+    append_leaf_shape(
+        positions, normals, uvs, indices, origin, side, up, size, preset,
+    );
+    let side2 = side.cross(up).normalize_or_zero();
+    append_leaf_shape(
+        positions, normals, uvs, indices, origin, side2, up, size, preset,
+    );
+}
+
+/// Appends species-shaped leaf/frond geometry to mesh attribute buffers.
+///
+/// Oak, Birch, Willow, Palm, and Shrub use [`append_leaf_card_cross`] so the
+/// canopy appears volumetric from all camera angles. Pine uses a single pass
+/// because its triangular needle cluster already reads well from every angle,
+/// and a cross pass would add needless overdraw on dense conifer canopy.
 #[allow(clippy::too_many_arguments)]
 fn append_leaf_card(
     positions: &mut Vec<[f32; 3]>,
@@ -1379,29 +1461,10 @@ fn append_leaf_card(
         TreeType::Pine => {
             append_pine_needle_cluster(positions, normals, uvs, indices, origin, side, up, size)
         }
-        TreeType::Willow => {
-            append_willow_hanging_strip(positions, normals, uvs, indices, origin, side, up, size)
-        }
-        TreeType::Palm => {
-            append_palm_frond(positions, normals, uvs, indices, origin, side, up, size)
-        }
-        TreeType::Birch => append_diamond_leaf(
-            positions,
-            normals,
-            uvs,
-            indices,
-            origin,
-            side,
-            up,
-            size * 0.72,
-        ),
-        TreeType::Shrub => {
-            append_clustered_shrub_leaf(positions, normals, uvs, indices, origin, side, up, size)
-        }
-        TreeType::Oak => {
-            append_lobed_leaf_cluster(positions, normals, uvs, indices, origin, side, up, size)
-        }
         TreeType::Dead => {}
+        _ => append_leaf_card_cross(
+            positions, normals, uvs, indices, origin, side, up, size, preset,
+        ),
     }
 }
 
@@ -3773,5 +3836,179 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ==================== Phase 2: Cross-Pattern Leaf Volume Tests ====================
+
+    /// Tests that `append_leaf_card_cross` produces exactly twice the vertices
+    /// of a single `append_leaf_shape` call for Oak.
+    #[test]
+    fn test_cross_pattern_doubles_vertex_count_for_oak() {
+        let preset = TreeType::Oak.species_preset();
+        let origin = Vec3::ZERO;
+        let side = Vec3::X;
+        let up = Vec3::Y;
+        let size = 0.55_f32;
+
+        let mut p1 = Vec::new();
+        let mut n1 = Vec::new();
+        let mut u1 = Vec::new();
+        let mut i1 = Vec::new();
+        append_leaf_shape(
+            &mut p1, &mut n1, &mut u1, &mut i1, origin, side, up, size, &preset,
+        );
+        let single_verts = p1.len();
+
+        let mut p2 = Vec::new();
+        let mut n2 = Vec::new();
+        let mut u2 = Vec::new();
+        let mut i2 = Vec::new();
+        append_leaf_card_cross(
+            &mut p2, &mut n2, &mut u2, &mut i2, origin, side, up, size, &preset,
+        );
+        let cross_verts = p2.len();
+
+        assert!(
+            single_verts > 0,
+            "single Oak leaf shape must produce vertices"
+        );
+        assert_eq!(
+            cross_verts,
+            single_verts * 2,
+            "cross-pattern must produce exactly 2× vertices for Oak"
+        );
+    }
+
+    /// Tests that Pine uses a single pass (no cross-pattern duplication).
+    #[test]
+    fn test_pine_leaf_card_uses_single_pass() {
+        let preset = TreeType::Pine.species_preset();
+        let origin = Vec3::ZERO;
+        let direction = Vec3::Y;
+        let size = 0.42_f32;
+
+        let mut p_card = Vec::new();
+        let mut n_card = Vec::new();
+        let mut u_card = Vec::new();
+        let mut i_card = Vec::new();
+        append_leaf_card(
+            &mut p_card,
+            &mut n_card,
+            &mut u_card,
+            &mut i_card,
+            origin,
+            direction,
+            size,
+            &preset,
+        );
+
+        // append_pine_needle_cluster draws 2 triangles = 6 vertices
+        let pine_single = 6;
+        assert_eq!(
+            p_card.len(),
+            pine_single,
+            "Pine leaf card must use a single pass ({pine_single} verts), got {}",
+            p_card.len()
+        );
+    }
+
+    /// Tests that Oak, Birch, Willow, Palm, and Shrub use the cross-pattern,
+    /// producing more vertices than a single-pass call.
+    #[test]
+    fn test_cross_pattern_species_produce_more_geometry_than_single_pass() {
+        for tree_type in [
+            TreeType::Oak,
+            TreeType::Birch,
+            TreeType::Willow,
+            TreeType::Palm,
+            TreeType::Shrub,
+        ] {
+            let preset = tree_type.species_preset();
+            let origin = Vec3::ZERO;
+            let direction = Vec3::Y;
+            let size = preset.leaves.size;
+
+            // Single-pass via append_leaf_shape
+            let mut p1 = Vec::new();
+            let mut n1 = Vec::new();
+            let mut u1 = Vec::new();
+            let mut i1 = Vec::new();
+            let side = Vec3::X;
+            let up = Vec3::Y;
+            append_leaf_shape(
+                &mut p1, &mut n1, &mut u1, &mut i1, origin, side, up, size, &preset,
+            );
+
+            // Cross-pattern via append_leaf_card (which calls append_leaf_card_cross)
+            let mut p2 = Vec::new();
+            let mut n2 = Vec::new();
+            let mut u2 = Vec::new();
+            let mut i2 = Vec::new();
+            append_leaf_card(
+                &mut p2, &mut n2, &mut u2, &mut i2, origin, direction, size, &preset,
+            );
+
+            assert!(
+                !p1.is_empty(),
+                "{} single-pass must produce vertices",
+                tree_type.name()
+            );
+            assert!(
+                p2.len() >= p1.len() * 2,
+                "{} cross-pattern should produce at least 2× single-pass vertices \
+                 (single={}, cross={})",
+                tree_type.name(),
+                p1.len(),
+                p2.len()
+            );
+        }
+    }
+
+    /// Tests that the second-pass side vector is perpendicular to the first.
+    #[test]
+    fn test_cross_pattern_side2_is_perpendicular_to_side() {
+        let side = Vec3::X;
+        let up = Vec3::Y;
+        let side2 = side.cross(up).normalize_or_zero();
+        let dot = side.dot(side2).abs();
+        assert!(
+            dot < 1e-5,
+            "side2 must be perpendicular to side (dot product {dot} ≥ 1e-5)"
+        );
+    }
+
+    /// Tests that `LeafPreset.count` for cross-pattern species is 30–40% lower
+    /// than the pre-Phase-2 values (budget compensation for doubled polygon count).
+    #[test]
+    fn test_leaf_preset_count_reduced_for_cross_pattern_species() {
+        // Pre-Phase-2 counts: Oak=5, Birch=3, Willow=6, Palm=8, Shrub=6
+        // Post-Phase-2 target: each reduced 30–40%
+        let cases = [
+            (TreeType::Oak, 5u32),
+            (TreeType::Birch, 3),
+            (TreeType::Willow, 6),
+            (TreeType::Palm, 8),
+            (TreeType::Shrub, 6),
+        ];
+        for (tree_type, old_count) in cases {
+            let new_count = tree_type.species_preset().leaves.count;
+            let reduction = 1.0 - new_count as f32 / old_count as f32;
+            assert!(
+                (0.30..=0.40).contains(&reduction),
+                "{}: count reduction {:.0}% is outside [30%, 40%] (old={old_count}, new={new_count})",
+                tree_type.name(),
+                reduction * 100.0
+            );
+        }
+    }
+
+    /// Tests that `LeafPreset.count` for Pine is unchanged (single pass, no compensation).
+    #[test]
+    fn test_leaf_preset_count_unchanged_for_pine() {
+        let pine = TreeType::Pine.species_preset();
+        assert_eq!(
+            pine.leaves.count, 4,
+            "Pine leaf count must remain 4 (single pass, no cross-pattern compensation)"
+        );
     }
 }
