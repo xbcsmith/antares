@@ -23,7 +23,7 @@
 //!
 use bevy::prelude::*;
 
-use crate::application::dialogue::{DialogueState, RecruitmentContext};
+use crate::application::dialogue::{DialogueState, EventInteractionContext, RecruitmentContext};
 use crate::application::resources::GameContent;
 use crate::application::GameMode;
 use crate::game::components::dialogue::DialoguePanelRoot;
@@ -39,6 +39,15 @@ use crate::domain::dialogue::{DialogueAction, DialogueCondition, DialogueId};
 /// The context is consumed by handle_start_dialogue and cleared after use.
 #[derive(Resource, Default)]
 pub struct PendingRecruitmentContext(pub Option<RecruitmentContext>);
+
+/// Temporary storage for world-event interaction context during dialogue initialization.
+///
+/// Holds the [`EventInteractionContext`] between the moment an interactive world event
+/// (Treasure, Container, LockedDoor, etc.) is triggered via [`StartDialogue`] and when
+/// [`handle_start_dialogue`] initializes the [`DialogueState`].  The context is consumed
+/// and cleared after use.  Intentionally separate from [`PendingRecruitmentContext`].
+#[derive(Resource, Default)]
+pub struct PendingEventInteractionContext(pub Option<EventInteractionContext>);
 
 /// Message to request that a dialogue tree begin (e.g., NPC started talking).
 #[derive(Message, Clone, Debug)]
@@ -89,6 +98,7 @@ impl Plugin for DialoguePlugin {
             .init_resource::<crate::game::components::dialogue::ActiveDialogueUI>()
             .init_resource::<crate::game::components::dialogue::ChoiceSelectionState>()
             .insert_resource(PendingRecruitmentContext::default())
+            .insert_resource(PendingEventInteractionContext::default())
             .add_systems(
                 Update,
                 (
@@ -174,6 +184,8 @@ fn handle_start_dialogue(
     mut despawn_recruitable_visuals: Option<
         MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
     >,
+    mut pending_event_context: ResMut<PendingEventInteractionContext>,
+    mut despawn_event_mesh: Option<MessageWriter<crate::game::systems::map::DespawnEventMesh>>,
 ) {
     for ev in ev_reader.read() {
         let db = content.db();
@@ -209,6 +221,7 @@ fn handle_start_dialogue(
 
                 // Extract recruitment context if present
                 let recruitment_context = pending_recruitment.0.take();
+                let event_context = pending_event_context.0.take();
 
                 // Attempt to resolve NPC ID string from the speaker entity (if present)
                 let speaker_npc_id = ev
@@ -222,6 +235,7 @@ fn handle_start_dialogue(
                     speaker_npc_id,
                 );
                 new_state.recruitment_context = recruitment_context;
+                new_state.event_context = event_context;
 
                 global_state.0.mode = GameMode::Dialogue(new_state);
 
@@ -271,6 +285,7 @@ fn handle_start_dialogue(
                             game_log.as_mut().map(|r| r.as_mut()),
                             None,
                             &mut despawn_recruitable_visuals.as_mut(),
+                            &mut despawn_event_mesh.as_mut(),
                         );
                     }
                     if let Some(ref mut log) = game_log {
@@ -344,6 +359,7 @@ fn handle_simple_dialogue(
 ///
 /// Validates the choice's conditions, executes choice actions (and any resulting
 /// node actions after advancing), and ends dialogue if the choice terminates it.
+#[allow(clippy::too_many_arguments)]
 fn handle_select_choice(
     mut ev_reader: MessageReader<SelectDialogueChoice>,
     mut global_state: ResMut<GlobalState>,
@@ -354,6 +370,7 @@ fn handle_select_choice(
     mut despawn_recruitable_visuals: Option<
         MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
     >,
+    mut despawn_event_mesh: Option<MessageWriter<crate::game::systems::map::DespawnEventMesh>>,
 ) {
     for ev in ev_reader.read() {
         // --- Read-only phase: inspect mode and capture identifiers ---
@@ -425,6 +442,7 @@ fn handle_select_choice(
                             game_log.as_mut().map(|r| r.as_mut()),
                             game_log_writer.as_mut(),
                             &mut despawn_recruitable_visuals.as_mut(),
+                            &mut despawn_event_mesh.as_mut(),
                         );
                     }
 
@@ -502,6 +520,7 @@ fn handle_select_choice(
                                     game_log.as_mut().map(|r| r.as_mut()),
                                     game_log_writer.as_mut(),
                                     &mut despawn_recruitable_visuals.as_mut(),
+                                    &mut despawn_event_mesh.as_mut(),
                                 );
                             }
 
@@ -1018,6 +1037,9 @@ fn execute_action(
     despawn_recruitable_visuals: &mut Option<
         &mut MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
     >,
+    despawn_event_mesh: &mut Option<
+        &mut MessageWriter<crate::game::systems::map::DespawnEventMesh>,
+    >,
 ) {
     match action {
         DialogueAction::StartQuest { quest_id } => {
@@ -1191,6 +1213,347 @@ fn execute_action(
                                 .to_string(),
                         );
                     }
+                }
+            }
+
+            let event_ctx = dialogue_state
+                .and_then(|d| d.event_context.as_ref())
+                .cloned()
+                .or_else(|| {
+                    if let crate::application::GameMode::Dialogue(ref ds) = game_state.mode {
+                        ds.event_context.clone()
+                    } else {
+                        None
+                    }
+                });
+
+            if event_name == "collect_treasure" {
+                if let Some(ctx) = event_ctx.clone() {
+                    let map_id = ctx.map_id;
+                    let position = ctx.event_position;
+
+                    match game_state.collect_treasure_at_position(map_id, position) {
+                        Some(distributed) => {
+                            let msg =
+                                format!("Found treasure! {} item(s) collected.", distributed.len());
+                            info!("{}", msg);
+                            if let Some(log) = game_log.as_mut() {
+                                log.add_exploration(msg);
+                            }
+                            for (char_idx, item_id) in &distributed {
+                                let char_name = game_state
+                                    .party
+                                    .members
+                                    .get(*char_idx)
+                                    .map(|m| m.name.clone())
+                                    .unwrap_or_else(|| format!("Member {}", char_idx));
+                                let item_name = db
+                                    .items
+                                    .get_item(*item_id)
+                                    .map(|i| i.name.clone())
+                                    .unwrap_or_else(|| format!("Item {}", item_id));
+                                if let Some(log) = game_log.as_mut() {
+                                    log.add_exploration(format!(
+                                        "{} receives {}.",
+                                        char_name, item_name
+                                    ));
+                                }
+                            }
+                            if let Some(writer) = despawn_event_mesh.as_deref_mut() {
+                                writer.write(crate::game::systems::map::DespawnEventMesh {
+                                    map_id,
+                                    position,
+                                });
+                            }
+                        }
+                        None => {
+                            warn!(
+                                "TriggerEvent 'collect_treasure': no Treasure event at {:?}",
+                                position
+                            );
+                        }
+                    }
+                    game_state.return_to_exploration();
+                } else {
+                    warn!(
+                        "TriggerEvent 'collect_treasure' fired without event_context in DialogueState"
+                    );
+                }
+            }
+
+            if event_name == "open_container" {
+                if let Some(ctx) = event_ctx.clone() {
+                    let container_info = game_state
+                        .world
+                        .get_map(ctx.map_id)
+                        .and_then(|m| m.get_event(ctx.event_position))
+                        .and_then(|e| {
+                            if let crate::domain::world::MapEvent::Container {
+                                id,
+                                name,
+                                items,
+                                gold,
+                                gems,
+                                ..
+                            } = e
+                            {
+                                Some((id.clone(), name.clone(), items.clone(), *gold, *gems))
+                            } else {
+                                None
+                            }
+                        });
+
+                    if let Some((id, name, items, gold, gems)) = container_info {
+                        let msg = format!("Opening container: {}", name);
+                        info!("{}", msg);
+                        if let Some(log) = game_log.as_mut() {
+                            log.add_exploration(msg);
+                        }
+                        game_state.enter_container_inventory(id, name, items, gold, gems);
+                    } else {
+                        warn!(
+                            "TriggerEvent 'open_container': no Container event at {:?}",
+                            ctx.event_position
+                        );
+                        game_state.return_to_exploration();
+                    }
+                } else {
+                    warn!(
+                        "TriggerEvent 'open_container' fired without event_context in DialogueState"
+                    );
+                    game_state.return_to_exploration();
+                }
+            }
+
+            if event_name == "unlock_door" {
+                if let Some(ctx) = event_ctx.clone() {
+                    let door_info = game_state
+                        .world
+                        .get_map(ctx.map_id)
+                        .and_then(|m| m.get_event(ctx.event_position))
+                        .and_then(|e| {
+                            if let crate::domain::world::MapEvent::LockedDoor {
+                                lock_id,
+                                key_item_id,
+                                ..
+                            } = e
+                            {
+                                Some((lock_id.clone(), *key_item_id))
+                            } else {
+                                None
+                            }
+                        });
+
+                    if let Some((lock_id, key_item_id)) = door_info {
+                        let is_locked = game_state
+                            .world
+                            .get_map(ctx.map_id)
+                            .and_then(|m| m.lock_states.get(&lock_id))
+                            .map(|ls| ls.is_locked)
+                            .unwrap_or(true);
+
+                        if !is_locked {
+                            if let Some(map) = game_state.world.get_map_mut(ctx.map_id) {
+                                if let Some(tile) = map.get_tile_mut(ctx.event_position) {
+                                    tile.wall_type = crate::domain::world::WallType::None;
+                                    tile.blocked = false;
+                                }
+                            }
+                            game_state.return_to_exploration();
+                        } else {
+                            let key_found =
+                                key_item_id.and_then(|kid| {
+                                    game_state.party.members.iter().enumerate().find_map(
+                                        |(ci, ch)| {
+                                            ch.inventory
+                                                .items
+                                                .iter()
+                                                .position(|slot| slot.item_id == kid)
+                                                .map(|si| (ci, si, kid))
+                                        },
+                                    )
+                                });
+
+                            if let Some((char_idx, slot_idx, kid)) = key_found {
+                                game_state.party.members[char_idx]
+                                    .inventory
+                                    .items
+                                    .remove(slot_idx);
+                                let key_name = db
+                                    .items
+                                    .get_item(kid)
+                                    .map(|i| i.name.clone())
+                                    .unwrap_or_else(|| format!("key {}", kid));
+                                if let Some(map) = game_state.world.get_map_mut(ctx.map_id) {
+                                    if let Some(ls) = map.lock_states.get_mut(&lock_id) {
+                                        ls.unlock();
+                                    }
+                                    if let Some(tile) = map.get_tile_mut(ctx.event_position) {
+                                        tile.wall_type = crate::domain::world::WallType::None;
+                                        tile.blocked = false;
+                                    }
+                                    map.remove_event(ctx.event_position);
+                                }
+                                let msg = format!("You unlock the door with the {}.", key_name);
+                                info!("{}", msg);
+                                if let Some(log) = game_log.as_mut() {
+                                    log.add_exploration(msg);
+                                }
+                                if let Some(writer) = despawn_event_mesh.as_deref_mut() {
+                                    writer.write(crate::game::systems::map::DespawnEventMesh {
+                                        map_id: ctx.map_id,
+                                        position: ctx.event_position,
+                                    });
+                                }
+                                game_state.return_to_exploration();
+                            } else if key_item_id.is_some() {
+                                let msg = "The door is locked. You need a key.".to_string();
+                                info!("{}", msg);
+                                if let Some(log) = game_log.as_mut() {
+                                    log.add_exploration(msg);
+                                }
+                                game_state.return_to_exploration();
+                            } else {
+                                let msg = "The door is locked.".to_string();
+                                info!("{}", msg);
+                                if let Some(log) = game_log.as_mut() {
+                                    log.add_exploration(msg);
+                                }
+                                game_state.return_to_exploration();
+                            }
+                        }
+                    } else {
+                        warn!(
+                            "TriggerEvent 'unlock_door': no LockedDoor event at {:?}",
+                            ctx.event_position
+                        );
+                        game_state.return_to_exploration();
+                    }
+                } else {
+                    warn!(
+                        "TriggerEvent 'unlock_door' fired without event_context in DialogueState"
+                    );
+                    game_state.return_to_exploration();
+                }
+            }
+
+            if event_name == "unlock_container" {
+                if let Some(ctx) = event_ctx.clone() {
+                    let container_info = game_state
+                        .world
+                        .get_map(ctx.map_id)
+                        .and_then(|m| m.get_event(ctx.event_position))
+                        .and_then(|e| {
+                            if let crate::domain::world::MapEvent::LockedContainer {
+                                lock_id,
+                                key_item_id,
+                                name,
+                                items,
+                                ..
+                            } = e
+                            {
+                                Some((lock_id.clone(), *key_item_id, name.clone(), items.clone()))
+                            } else {
+                                None
+                            }
+                        });
+
+                    if let Some((lock_id, key_item_id, container_name, initial_items)) =
+                        container_info
+                    {
+                        let is_locked = game_state
+                            .world
+                            .get_map(ctx.map_id)
+                            .and_then(|m| m.lock_states.get(&lock_id))
+                            .map(|ls| ls.is_locked)
+                            .unwrap_or(true);
+
+                        if !is_locked {
+                            game_state.enter_container_inventory(
+                                lock_id,
+                                container_name,
+                                initial_items,
+                                0,
+                                0,
+                            );
+                        } else {
+                            let key_found =
+                                key_item_id.and_then(|kid| {
+                                    game_state.party.members.iter().enumerate().find_map(
+                                        |(ci, ch)| {
+                                            ch.inventory
+                                                .items
+                                                .iter()
+                                                .position(|slot| slot.item_id == kid)
+                                                .map(|si| (ci, si, kid))
+                                        },
+                                    )
+                                });
+
+                            if let Some((char_idx, slot_idx, kid)) = key_found {
+                                game_state.party.members[char_idx]
+                                    .inventory
+                                    .items
+                                    .remove(slot_idx);
+                                let key_name = db
+                                    .items
+                                    .get_item(kid)
+                                    .map(|i| i.name.clone())
+                                    .unwrap_or_else(|| format!("key {}", kid));
+                                if let Some(map) = game_state.world.get_map_mut(ctx.map_id) {
+                                    if let Some(ls) = map.lock_states.get_mut(&lock_id) {
+                                        ls.unlock();
+                                    }
+                                }
+                                let msg = format!(
+                                    "You unlock the {} with the {}.",
+                                    container_name, key_name
+                                );
+                                info!("{}", msg);
+                                if let Some(log) = game_log.as_mut() {
+                                    log.add_exploration(msg);
+                                }
+                                if let Some(writer) = despawn_event_mesh.as_deref_mut() {
+                                    writer.write(crate::game::systems::map::DespawnEventMesh {
+                                        map_id: ctx.map_id,
+                                        position: ctx.event_position,
+                                    });
+                                }
+                                game_state.enter_container_inventory(
+                                    lock_id,
+                                    container_name,
+                                    initial_items,
+                                    0,
+                                    0,
+                                );
+                            } else if key_item_id.is_some() {
+                                let msg = "The container is locked. You need a key.".to_string();
+                                info!("{}", msg);
+                                if let Some(log) = game_log.as_mut() {
+                                    log.add_exploration(msg);
+                                }
+                                game_state.return_to_exploration();
+                            } else {
+                                let msg = "The container is locked.".to_string();
+                                info!("{}", msg);
+                                if let Some(log) = game_log.as_mut() {
+                                    log.add_exploration(msg);
+                                }
+                                game_state.return_to_exploration();
+                            }
+                        }
+                    } else {
+                        warn!(
+                            "TriggerEvent 'unlock_container': no LockedContainer event at {:?}",
+                            ctx.event_position
+                        );
+                        game_state.return_to_exploration();
+                    }
+                } else {
+                    warn!(
+                        "TriggerEvent 'unlock_container' fired without event_context in DialogueState"
+                    );
+                    game_state.return_to_exploration();
                 }
             }
 
@@ -2035,6 +2398,7 @@ mod tests {
                         None,
                         None,
                         &mut despawn_recruitable_visuals,
+                        &mut None,
                     );
                 }
             }
@@ -2165,6 +2529,7 @@ mod tests {
                                 None,
                                 None,
                                 &mut despawn_recruitable_visuals,
+                                &mut None,
                             );
                         }
                     }
@@ -2382,6 +2747,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert
@@ -2461,6 +2827,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert - party still at max, character sent to inn
@@ -2519,6 +2886,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert - party size unchanged
@@ -2545,6 +2913,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert - no changes to party
@@ -2608,6 +2977,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert
@@ -2675,6 +3045,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Act - second recruitment attempt
@@ -2691,6 +3062,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert
@@ -2747,6 +3119,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert - should fail because innkeeper doesn't exist
@@ -2773,6 +3146,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert - mode is InnManagement and inn id is set
@@ -2821,6 +3195,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert: we transitioned into InnManagement for the expected innkeeper
@@ -2892,6 +3267,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert
@@ -2930,6 +3306,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert
@@ -3024,6 +3401,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert: character is in the roster at the inn, NOT in the party.
@@ -3119,6 +3497,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Already-encountered guard: roster must stay empty.
@@ -3275,6 +3654,7 @@ mod tests {
             Some(&mut log),
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert - message logged
@@ -3420,6 +3800,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert: gold decreased and item is in inventory
@@ -3517,6 +3898,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert: gold unchanged and inventory empty
@@ -3590,6 +3972,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert: HP restored and gold deducted
@@ -3659,6 +4042,7 @@ mod tests {
             Some(&mut game_log),
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         let last_entry = game_log
@@ -3729,6 +4113,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert: HP unchanged and gold unchanged
@@ -3779,6 +4164,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert: mode must be MerchantInventory
@@ -3814,6 +4200,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert: game mode is unchanged (no transition on unknown NPC)
@@ -3896,6 +4283,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // Assert: item removed from inventory and gold increased
@@ -4362,6 +4750,7 @@ mod tests {
             None,
             None,
             &mut despawn_recruitable_visuals,
+            &mut None,
         );
 
         // --- Assert ---
@@ -4444,7 +4833,9 @@ mod tests {
             spell_id,
             target_character_id,
         };
-        execute_action(&action, game_state, db, None, None, None, None, &mut None);
+        execute_action(
+            &action, game_state, db, None, None, None, None, &mut None, &mut None,
+        );
     }
 
     #[test]
@@ -4598,6 +4989,7 @@ mod tests {
             None,
             None,
             &mut None,
+            &mut None,
         );
     }
 
@@ -4671,6 +5063,118 @@ mod tests {
         assert!(
             matches!(gs.mode, GameMode::Exploration),
             "OpenSkillTraining for non-skill-trainer NPC must not change game mode"
+        );
+    }
+
+    #[test]
+    fn test_trigger_event_collect_treasure_distributes_loot_and_removes_event() {
+        // Arrange: game state with a party member and a map with a Treasure event
+        let mut game_state = crate::application::GameState::new();
+        let map_id = game_state.world.current_map;
+        let position = crate::domain::types::Position::new(3, 3);
+
+        // Add a character to the party
+        let character = crate::domain::character::Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Neutral,
+        );
+        game_state.party.add_member(character).unwrap();
+
+        // Add treasure event to map
+        if let Some(map) = game_state.world.get_current_map_mut() {
+            map.add_event(
+                position,
+                crate::domain::world::MapEvent::Treasure {
+                    name: "Gold Chest".to_string(),
+                    description: String::new(),
+                    loot: vec![1],
+                    mesh_id: None,
+                    dialogue_id: None,
+                },
+            );
+        }
+
+        // Set up dialogue state with event_context
+        use crate::application::dialogue::{DialogueState, EventInteractionContext};
+        let mut dlg_state = DialogueState::start(1, 1, None, None);
+        dlg_state.event_context = Some(EventInteractionContext {
+            event_position: position,
+            map_id,
+        });
+        game_state.mode = crate::application::GameMode::Dialogue(dlg_state.clone());
+
+        let db = crate::sdk::database::ContentDatabase::new();
+        let action = crate::domain::dialogue::DialogueAction::TriggerEvent {
+            event_name: "collect_treasure".to_string(),
+        };
+        let mut none_recruitable: Option<
+            &mut MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
+        > = None;
+        let mut none_mesh: Option<&mut MessageWriter<crate::game::systems::map::DespawnEventMesh>> =
+            None;
+
+        // Act
+        execute_action(
+            &action,
+            &mut game_state,
+            &db,
+            Some(&dlg_state),
+            None,
+            None,
+            None,
+            &mut none_recruitable,
+            &mut none_mesh,
+        );
+
+        // Assert: mode returned to exploration, event removed
+        assert!(
+            matches!(game_state.mode, crate::application::GameMode::Exploration),
+            "collect_treasure should return to exploration mode"
+        );
+        assert!(
+            game_state
+                .world
+                .get_current_map()
+                .and_then(|m| m.get_event(position))
+                .is_none(),
+            "Treasure event should be removed after collect_treasure"
+        );
+    }
+
+    #[test]
+    fn test_trigger_event_collect_treasure_noop_when_no_event_context() {
+        let mut game_state = crate::application::GameState::new();
+        let db = crate::sdk::database::ContentDatabase::new();
+        let action = crate::domain::dialogue::DialogueAction::TriggerEvent {
+            event_name: "collect_treasure".to_string(),
+        };
+        game_state.mode = crate::application::GameMode::Exploration;
+
+        let mut none_recruitable: Option<
+            &mut MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
+        > = None;
+        let mut none_mesh: Option<&mut MessageWriter<crate::game::systems::map::DespawnEventMesh>> =
+            None;
+
+        // Should not panic when no event_context is set
+        execute_action(
+            &action,
+            &mut game_state,
+            &db,
+            None,
+            None,
+            None,
+            None,
+            &mut none_recruitable,
+            &mut none_mesh,
+        );
+        // Mode unchanged (no dialogue to return from)
+        assert!(
+            matches!(game_state.mode, crate::application::GameMode::Exploration),
+            "collect_treasure with no context must not change mode"
         );
     }
 }

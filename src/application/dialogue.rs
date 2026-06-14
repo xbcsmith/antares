@@ -42,6 +42,21 @@ pub struct RecruitmentContext {
     pub event_position: crate::domain::types::Position,
 }
 
+/// Context information for world-event interaction dialogues.
+///
+/// Stores the map position and map ID of the originating event so that
+/// `TriggerEvent` handlers inside `execute_action` can locate and remove the
+/// event after the dialogue concludes.  Intentionally separate from
+/// [`RecruitmentContext`] which is recruitment-specific.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EventInteractionContext {
+    /// Position of the originating map event (used by `TriggerEvent` handlers
+    /// to find and remove the event).
+    pub event_position: crate::domain::types::Position,
+    /// Map ID on which the event lives.
+    pub map_id: crate::domain::types::MapId,
+}
+
 /// Tracks the currently active dialogue tree and progress through it.
 ///
 /// This structure is small and serializable so it can be persisted inside the
@@ -84,6 +99,14 @@ pub struct DialogueState {
 
     /// Context for recruitment dialogues (None if not a recruitment interaction)
     pub recruitment_context: Option<RecruitmentContext>,
+
+    /// Context for world-event interaction dialogues (Treasure, Container,
+    /// LockedDoor, etc.).
+    ///
+    /// Set when a dialogue is opened for a map event so that `TriggerEvent`
+    /// action handlers can locate and remove the originating event after the
+    /// dialogue concludes.  Separate from [`recruitment_context`].
+    pub event_context: Option<EventInteractionContext>,
 
     /// Fallback map position for visual placement if speaker_entity is missing
     pub fallback_position: Option<crate::domain::types::Position>,
@@ -136,6 +159,7 @@ impl DialogueState {
             speaker_entity: None,
             speaker_npc_id,
             recruitment_context: None,
+            event_context: None,
             fallback_position: fallback_pos,
         }
     }
@@ -157,6 +181,7 @@ impl DialogueState {
             speaker_entity,
             speaker_npc_id: None,
             recruitment_context: None,
+            event_context: None,
             fallback_position: fallback_pos,
         }
     }
@@ -248,6 +273,7 @@ impl DialogueState {
         self.current_speaker.clear();
         self.current_choices.clear();
         self.recruitment_context = None;
+        self.event_context = None;
         self.speaker_npc_id = None;
     }
 
@@ -398,6 +424,30 @@ mod tests {
     fn test_dialogue_state_start_recruitment_context_none() {
         let state = DialogueState::start(1 as DialogueId, 1 as NodeId, None, None);
         assert_eq!(state.recruitment_context, None);
+    }
+
+    #[test]
+    fn test_dialogue_state_event_context_none_by_default() {
+        let state = DialogueState::default();
+        assert_eq!(state.event_context, None);
+    }
+
+    #[test]
+    fn test_dialogue_state_start_event_context_none() {
+        let state = DialogueState::start(1 as DialogueId, 1 as NodeId, None, None);
+        assert_eq!(state.event_context, None);
+    }
+
+    #[test]
+    fn test_dialogue_state_end_clears_event_context() {
+        use crate::domain::types::Position;
+        let mut state = DialogueState::start(1 as DialogueId, 1 as NodeId, None, None);
+        state.event_context = Some(EventInteractionContext {
+            event_position: Position::new(3, 5),
+            map_id: 1,
+        });
+        state.end();
+        assert_eq!(state.event_context, None);
     }
 
     #[test]

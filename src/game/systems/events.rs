@@ -98,6 +98,16 @@ fn check_for_events(
                             current_pos
                         );
                     }
+                    MapEvent::Treasure {
+                        dialogue_id: Some(_),
+                        ..
+                    } => {
+                        info!(
+                            "Party at {:?} is on a Treasure with dialogue_id; \
+                             not auto-triggering (requires [E] interact)",
+                            current_pos
+                        );
+                    }
                     _ => {
                         // Trigger other event types automatically (traps, etc.)
                         event_writer.write(MapEventTriggered {

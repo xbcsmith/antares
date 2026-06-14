@@ -2,6 +2,122 @@
 
 ---
 
+## Unified Interactive Objects — Phase 3: Dialogue Routing for `dialogue_id` Events (2026)
+
+**Goal:** Implement Phase 3 of the Unified Interactive Objects plan — route the [E]
+interaction for `Treasure`, `Sign`, `Container`, `LockedContainer`, and `LockedDoor`
+events through a dialogue tree when the event carries `dialogue_id: Some(id)`, instead
+of immediately executing their default effect.
+
+### What Changed
+
+**`src/application/dialogue.rs`**
+
+- Added `EventInteractionContext` struct with `event_position: Position` and `map_id:
+MapId` — a generalized context for world-event interaction dialogues, deliberately
+  separate from the existing `RecruitmentContext`.
+- Added `event_context: Option<EventInteractionContext>` field to `DialogueState`.
+- Updated `start()`, `start_simple()` to initialise `event_context: None`.
+- Updated `end()` to clear `event_context`.
+- Added 3 new tests: default/start/end behaviour of `event_context`.
+
+**`src/application/mod.rs`**
+
+- Added `pub fn collect_treasure_at_position(map_id, position) -> Option<Vec<(usize, ItemId)>>`
+  to `GameState` — distributes loot items to party members and removes the event (shared
+  logic used by both `handle_events` and `TriggerEvent("collect_treasure")`).
+
+**`src/game/systems/dialogue.rs`**
+
+- Added `PendingEventInteractionContext` resource (parallel to `PendingRecruitmentContext`);
+  registered in `DialoguePlugin`.
+- Updated `handle_start_dialogue` to consume `PendingEventInteractionContext` and set
+  `event_context` on the new `DialogueState`, and to accept a `DespawnEventMesh` message
+  writer parameter.
+- Updated `handle_select_choice` to accept and pass a `DespawnEventMesh` writer.
+- Extended `execute_action` with a `despawn_event_mesh` parameter and four new
+  `TriggerEvent` branches:
+  - `"collect_treasure"` — calls `collect_treasure_at_position`, logs item distribution,
+    emits `DespawnEventMesh`, returns to exploration.
+  - `"open_container"` — reads `Container` event at `event_context.event_position`,
+    calls `enter_container_inventory`.
+  - `"unlock_door"` — checks party for key, unlocks and opens tile, emits
+    `DespawnEventMesh`, returns to exploration. Logs failure if no key.
+  - `"unlock_container"` — same as unlock_door but for `LockedContainer`; on success
+    calls `enter_container_inventory` so the party can take items.
+- Added 2 unit tests: `collect_treasure` distributes loot and removes event;
+  `collect_treasure` is a no-op when `event_context` is absent.
+
+**`src/game/systems/input/exploration_interact.rs`**
+
+- Added `open_dialogue_for_event(game_state, dialogue_id, event_position, writer,
+pending_ctx)` — sets `PendingEventInteractionContext` and writes `StartDialogue`.
+- Updated `try_interact_locked_door_event` and `try_interact_locked_container_event`
+  to extract `dialogue_id` and call `open_dialogue_for_event` when it is `Some`.
+- Updated `try_interact_adjacent_world_events` to:
+  - Add `dialogue_id` routing for `Container` (current + adjacent tiles).
+  - Add `Treasure` handling for both current and adjacent tiles with `dialogue_id`
+    routing.
+  - Add `Sign` `dialogue_id` routing in the adjacent-tile loop.
+- Updated `handle_exploration_interact` to pass the new `start_dialogue_writer` and
+  `pending_event_context` params to all updated sub-functions.
+- Added test `test_try_interact_adjacent_world_events_treasure_with_dialogue_id_opens_dialogue`
+  verifying the Treasure→dialogue routing and that no `MapEventTriggered` is sent and
+  the event is not removed.
+- Added test `test_open_dialogue_for_event_sets_pending_context`.
+
+**`src/game/systems/input.rs`**
+
+- Updated `handle_exploration_input_interact` to include `StartDialogue` writer and
+  `PendingEventInteractionContext` as Bevy system params and pass them to
+  `handle_exploration_interact`.
+
+**`src/game/systems/events.rs`**
+
+- Updated `check_for_events` to skip auto-triggering `MapEvent::Treasure` events that
+  carry `dialogue_id: Some(_)` (they require explicit [E] interaction).
+
+### Quality Gate Results
+
+```
+cargo fmt --all           → clean (no output)
+cargo check --all-targets --all-features → Finished, 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+cargo nextest run --all-features → 5249 passed, 0 failed
+```
+
+---
+
+## Unified Interactive Objects — Phase 3: `collect_treasure_at_position` (2026)
+
+**Goal:** Add `GameState::collect_treasure_at_position` to `src/application/mod.rs` as
+part of Phase 3 of the Unified Interactive Objects plan. This method provides a direct,
+testable API for collecting treasure from a map tile without going through the full
+`move_party_and_handle_events` path.
+
+### What Changed
+
+**`src/application/mod.rs`**
+
+- Added `pub fn collect_treasure_at_position(&mut self, map_id: MapId, position: Position) -> Option<Vec<(usize, ItemId)>>` to the `impl GameState` block, placed between `enter_container_inventory` and `return_to_exploration`.
+- The method:
+  1. Snapshots the `loot: Vec<u8>` from a `MapEvent::Treasure` at the given position (using `world.get_map` + `get_event`), returning `None` for any non-Treasure event or missing position.
+  2. Iterates over loot bytes and places each item into the first party member with inventory space via `Inventory::add_item`; items that cannot be placed are silently dropped.
+  3. Removes the event from the map via `world.get_map_mut` + `map.remove_event` (one-time collection semantics).
+  4. Returns `Some(distributed)` — a `Vec<(usize, ItemId)>` of `(character_index, item_id)` pairs for items successfully placed.
+- `ItemId = u8` so no cast is needed; `item_id` is assigned with an explicit type annotation to stay clippy-clean under `-D warnings`.
+
+### Quality Gate Results
+
+```
+cargo fmt --all           → clean (no output)
+cargo check --all-targets --all-features → Finished, 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+cargo nextest run --all-features → 5245 passed, 0 failed
+```
+
+---
+
 ## Phase 8: Vegetation Documentation Updates (2026)
 
 **Goal:** Update existing reference documentation for the wind configuration,
@@ -12,14 +128,16 @@ existing documents are updated — no new documentation files are created.
 ### What Changed
 
 **`docs/reference/campaign_content_format.md`**
+
 - Added `data/wind.ron` to the campaign file structure listing.
 - Added `## wind.ron Schema` section before `## Validation` — includes: field
   table (name, type, default, valid range), minimal Sine example, full Perlin
   example, `WindSystemKind` reference table, missing-file behaviour, and
-  validation rules.  A campaign author can implement `wind.ron` from this section
+  validation rules. A campaign author can implement `wind.ron` from this section
   alone.
 
 **`docs/reference/architecture.md`**
+
 - Module structure (§3.2): added `domain/world/wind.rs` (`CampaignWindConfig`,
   `WindSystemKind`), `game/resources/wind_config.rs` (`WindConfig`),
   `game/systems/advanced_grass.rs` (wind extension material, GPU batch), and
@@ -35,19 +153,21 @@ existing documents are updated — no new documentation files are created.
   stack from domain through render pipeline.
 
 **`docs/reference/sdk_api.md`**
+
 - Added `wind: CampaignWindConfig` to `ContentDatabase` fields table.
 - Added `path/data/wind.ron (optional)` to the `load_campaign` file list.
 - Added `#### Wind Configuration` subsection with field table, validation rules,
   and a runnable usage example.
 
 **`CHANGELOG.md`**
+
 - Added four ADDED entries under `## [Unreleased]` for Phases 5, 6, 7, and 8 of
   the Vegetation Visual Improvement Plan, using conventional-commit style
   consistent with the existing changelog format.
 
 ### Quality Gate Results
 
-Documentation-only changes — no Rust source modified.  The four quality gates
+Documentation-only changes — no Rust source modified. The four quality gates
 (fmt, check, clippy, nextest) remain passing from Phase 7.
 
 ---
@@ -61,10 +181,12 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
 ### What Changed
 
 **`Cargo.toml`**
+
 - Added `bytemuck = { version = "1", features = ["derive"] }` as a direct
   dependency for `cast_slice` in the GPU buffer upload path.
 
 **`assets/shaders/grass_instanced.wgsl`** (new)
+
 - Instanced grass vertex shader with two vertex buffer inputs:
   - Buffer 0 (`VertexStepMode::Vertex`): standard mesh attributes from Bevy's
     `Vertex` struct — position, normal, UV, vertex color.
@@ -81,8 +203,9 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
   implicit-derivative `textureSample`).
 
 **`src/game/systems/grass_instancing.rs`** (new)
+
 - **`GrassRenderMode`** resource — `PerEntity` (Phase-6 path) vs. `Instanced`
-  (Phase-7, default).  Guards both the per-blade `Mesh3d` spawn and the
+  (Phase-7, default). Guards both the per-blade `Mesh3d` spawn and the
   instanced batch spawn so the two paths never render simultaneously.
 - **`GrassRenderWorldAvailable`** marker resource — only inserted when
   `RenderApp` is present. Prevents `build_grass_instance_batches_system` from
@@ -99,8 +222,8 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
   group layout to every specialized descriptor.
 - **`DrawGrassInstanced`** type alias for the render-command chain:
   `SetItemPipeline → SetMeshViewBindGroup<0> →
-  SetMeshViewBindingArrayBindGroup<1> → SetMeshBindGroup<2> →
-  SetGrassWindBindGroup<3> → DrawGrassInstancedInner`.
+SetMeshViewBindingArrayBindGroup<1> → SetMeshBindGroup<2> →
+SetGrassWindBindGroup<3> → DrawGrassInstancedInner`.
 - Systems wired into `RenderApp`:
   - `init_grass_instanced_pipeline` (`RenderStartup`) — creates the pipeline
     and wind bind group layout.
@@ -111,10 +234,11 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
   - `queue_grass_instanced` (`QueueMeshes`) — queues each `GrassInstanceBatch`
     entity into `Opaque3d` using `BinnedRenderPhaseType::NonMesh`.
 - **`GrassInstancingPlugin`** — gates all render wiring (including
-  `ExtractComponentPlugin`) on `RenderApp` being present.  Without a render
+  `ExtractComponentPlugin`) on `RenderApp` being present. Without a render
   world (test environments), only `GrassRenderMode` is registered.
 
 **`src/game/systems/advanced_grass.rs`** (modified)
+
 - `ExtractComponent` implemented for `GrassInstanceBatch` (in
   `grass_instancing.rs`) so it is copied to the render world.
 - `spawn_grass_clump` gains a `render_mode: GrassRenderMode` parameter.
@@ -137,7 +261,7 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
   now queries `Option<&Visibility>` on each `GrassCluster` and skips clusters
   with `Visibility::Hidden`. This makes `grass_distance_culling_system` the
   chunk-level culling mechanism for the instanced path — instances from culled
-  clusters are excluded from every frame's batch rebuild.  Covered by
+  clusters are excluded from every frame's batch rebuild. Covered by
   `test_build_grass_instance_batches_skips_hidden_clusters`.
 - Imports `NoFrustumCulling` and `GrassRenderMode` from the new module.
 - All three in-module test spawn calls updated to pass
@@ -145,6 +269,7 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
   `GrassClump` counts remain valid.
 
 **`src/game/systems/map.rs`** (modified)
+
 - `MapRenderingPlugin::build` adds `GrassInstancingPlugin` before
   `MaterialPlugin::<GrassMaterial>`.
 - `spawn_map_system`, `spawn_map`, and `spawn_map_markers` gain a
@@ -152,6 +277,7 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
   `spawn_grass_cached_with_exclusions` call site.
 
 **`campaigns/tutorial/assets/shaders/`** (new directory)
+
 - `grass.wgsl` and `grass_instanced.wgsl` copied here so Bevy can resolve them.
   The game binary sets `BEVY_ASSET_ROOT` to the active campaign directory with
   `file_path: ""`, so every asset path is resolved relative to that root.
@@ -166,18 +292,16 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
 The original `"shaders/…"` paths resolved to `<campaign>/shaders/…` which did
 not exist, producing `Path not found` errors and no grass rendering.
 
-
-
 ### Design Decisions
 
-| Decision | Rationale |
-|---|---|
-| `SpecializedMeshPipeline` (not `SpecializedRenderPipeline`) | Reuses `MeshPipeline::specialize(key, layout)` for the automatic mesh vertex buffer layout + view/mesh bind group setup. Avoids duplicating Bevy's attribute-location mapping. |
-| `BinnedRenderPhaseType::NonMesh` | Bypasses GPU preprocessing (indirect draw buffers). Our per-instance transforms live in vertex buffer 1, not in Bevy's mesh uniform buffer, so preprocessing would add overhead for no gain. |
-| `Opaque3d` phase | Grass is opaque/masked — no sorting needed. Binned phase allows multi-draw batching in future. |
-| Wind at `@group(3)` | `MeshPipeline::specialize` occupies bind group indices 0–2. Appending at index 3 avoids collision without forking the base pipeline. |
-| `GrassRenderWorldAvailable` marker | `ExtractComponentPlugin` adds `SyncComponentPlugin` which registers a component hook requiring `PendingSyncEntity`. Gating both on `RenderApp` presence prevents panics in MinimalPlugins test environments. |
-| Per-clump entities kept (no `Mesh3d`) | Preserves the existing `GrassCluster` distance-culling and LOD systems. In instanced mode the per-clump entities are invisible (no render components); their transforms feed `build_grass_instance_batches_system`. |
+| Decision                                                    | Rationale                                                                                                                                                                                                           |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SpecializedMeshPipeline` (not `SpecializedRenderPipeline`) | Reuses `MeshPipeline::specialize(key, layout)` for the automatic mesh vertex buffer layout + view/mesh bind group setup. Avoids duplicating Bevy's attribute-location mapping.                                      |
+| `BinnedRenderPhaseType::NonMesh`                            | Bypasses GPU preprocessing (indirect draw buffers). Our per-instance transforms live in vertex buffer 1, not in Bevy's mesh uniform buffer, so preprocessing would add overhead for no gain.                        |
+| `Opaque3d` phase                                            | Grass is opaque/masked — no sorting needed. Binned phase allows multi-draw batching in future.                                                                                                                      |
+| Wind at `@group(3)`                                         | `MeshPipeline::specialize` occupies bind group indices 0–2. Appending at index 3 avoids collision without forking the base pipeline.                                                                                |
+| `GrassRenderWorldAvailable` marker                          | `ExtractComponentPlugin` adds `SyncComponentPlugin` which registers a component hook requiring `PendingSyncEntity`. Gating both on `RenderApp` presence prevents panics in MinimalPlugins test environments.        |
+| Per-clump entities kept (no `Mesh3d`)                       | Preserves the existing `GrassCluster` distance-culling and LOD systems. In instanced mode the per-clump entities are invisible (no render components); their transforms feed `build_grass_instance_batches_system`. |
 
 ### Quality Gate Results
 
@@ -187,10 +311,12 @@ cargo check       → Finished with 0 errors
 cargo clippy      → Finished with 0 warnings
 cargo nextest run → 5222/5222 passed, 0 failed
 ```
-cargo check       → Finished with 0 errors
-cargo clippy      → Finished with 0 warnings
+
+cargo check → Finished with 0 errors
+cargo clippy → Finished with 0 warnings
 cargo nextest run → 5221/5221 passed, 0 failed
-```
+
+````
 
 ---
 
@@ -1265,7 +1391,7 @@ cargo check   → 0 errors
 cargo clippy  → 0 warnings
 cargo nextest (antares)          → 5101 passed, 8 skipped, 0 failed
 cargo nextest (campaign_builder) → 2493 passed, 0 skipped, 0 failed
-```
+````
 
 ---
 
@@ -1450,13 +1576,13 @@ normal map so tree trunks show groove depth under the scene directional light.
 
 ### Files Changed
 
-| File | Change |
-|---|---|
-| `src/bin/generate_normal_map.rs` | New binary — reads `bark.png`, applies 3×3 Sobel, writes `bark_normal.png` to both asset locations |
-| `assets/textures/trees/bark_normal.png` | Generated RGB normal map (9.2 KB) |
-| `campaigns/tutorial/assets/textures/trees/bark_normal.png` | Copied from assets |
-| `src/game/systems/procedural_meshes.rs` | Constant + material + test updates (see below) |
-| `Cargo.toml` | Added `[[bin]]` entry for `generate-normal-map` |
+| File                                                       | Change                                                                                             |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `src/bin/generate_normal_map.rs`                           | New binary — reads `bark.png`, applies 3×3 Sobel, writes `bark_normal.png` to both asset locations |
+| `assets/textures/trees/bark_normal.png`                    | Generated RGB normal map (9.2 KB)                                                                  |
+| `campaigns/tutorial/assets/textures/trees/bark_normal.png` | Copied from assets                                                                                 |
+| `src/game/systems/procedural_meshes.rs`                    | Constant + material + test updates (see below)                                                     |
+| `Cargo.toml`                                               | Added `[[bin]]` entry for `generate-normal-map`                                                    |
 
 ### Key Decisions
 
@@ -1478,10 +1604,10 @@ const TREE_BARK_NORMAL_TEXTURE: &str = "assets/textures/trees/bark_normal.png";
 
 ### Tests Updated
 
-| Test | Change |
-|---|---|
-| `test_bark_material_uses_texture_and_is_lit_with_normal_map` | Renamed from `…is_unlit`; asserts `!material.unlit` and `normal_map_texture.is_some()` |
-| `test_bark_material_variant_cache_reuses_equivalent_tint_bucket_and_is_lit` | Renamed from `…is_unlit`; same assertion updates |
+| Test                                                                        | Change                                                                                 |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `test_bark_material_uses_texture_and_is_lit_with_normal_map`                | Renamed from `…is_unlit`; asserts `!material.unlit` and `normal_map_texture.is_some()` |
+| `test_bark_material_variant_cache_reuses_equivalent_tint_bucket_and_is_lit` | Renamed from `…is_unlit`; same assertion updates                                       |
 
 ### Quality Gates
 
@@ -1505,26 +1631,26 @@ Upgraded grass blade geometry from quadratic to cubic Bezier (S-curve shape) and
 
 ### Files Changed
 
-| File | Change |
-|---|---|
+| File                                 | Change                                              |
+| ------------------------------------ | --------------------------------------------------- |
 | `src/game/systems/advanced_grass.rs` | All geometry, color, and struct changes (see below) |
 
 ### GrassColorScheme: New Fields
 
-| Old field | New field | Default value |
-|---|---|---|
-| `base_color` | `ao_color` | `srgb(0.08, 0.12, 0.06)` — dark AO base |
-| _(new)_ | `mid_color` | `srgb(0.2, 0.5, 0.1)` — primary mid-blade green |
-| `tip_color` | `tip_color` | `srgb(0.72, 0.82, 0.45)` — lighter tip highlight |
+| Old field    | New field   | Default value                                    |
+| ------------ | ----------- | ------------------------------------------------ |
+| `base_color` | `ao_color`  | `srgb(0.08, 0.12, 0.06)` — dark AO base          |
+| _(new)_      | `mid_color` | `srgb(0.2, 0.5, 0.1)` — primary mid-blade green  |
+| `tip_color`  | `tip_color` | `srgb(0.72, 0.82, 0.45)` — lighter tip highlight |
 
 ### Cubic Bezier Control Points
 
-| Point | Lateral (X) | Height (Y) |
-|---|---|---|
-| `p0` | `0` | `0` |
-| `p1` | `tilt * height * 0.25` | `height * 0.33` |
-| `p2` | `tilt * height * 0.4 + curve_amount * 0.5` | `height * 0.66` |
-| `p3` | `curve_amount` | `height` |
+| Point | Lateral (X)                                | Height (Y)      |
+| ----- | ------------------------------------------ | --------------- |
+| `p0`  | `0`                                        | `0`             |
+| `p1`  | `tilt * height * 0.25`                     | `height * 0.33` |
+| `p2`  | `tilt * height * 0.4 + curve_amount * 0.5` | `height * 0.66` |
+| `p3`  | `curve_amount`                             | `height`        |
 
 Formula: `B(t) = (1-t)³p0 + 3(1-t)²t·p1 + 3(1-t)t²·p2 + t³p3`
 
@@ -1568,45 +1694,45 @@ Added a `data/wind.ron` file to the campaign format so each campaign can configu
 
 ### New Files
 
-| File | Purpose |
-|---|---|
-| `src/domain/world/wind.rs` | `WindSystemKind` enum + `CampaignWindConfig` struct with serde defaults |
-| `src/game/resources/wind_config.rs` | `WindConfig(pub CampaignWindConfig)` Bevy `Resource` newtype |
-| `campaigns/tutorial/data/wind.ron` | Tutorial campaign uses `Sine` wind (strength 0.04, frequency 0.65) |
-| `data/test_campaign/data/wind.ron` | Test campaign uses `None` (exercises serde defaults) |
+| File                                | Purpose                                                                 |
+| ----------------------------------- | ----------------------------------------------------------------------- |
+| `src/domain/world/wind.rs`          | `WindSystemKind` enum + `CampaignWindConfig` struct with serde defaults |
+| `src/game/resources/wind_config.rs` | `WindConfig(pub CampaignWindConfig)` Bevy `Resource` newtype            |
+| `campaigns/tutorial/data/wind.ron`  | Tutorial campaign uses `Sine` wind (strength 0.04, frequency 0.65)      |
+| `data/test_campaign/data/wind.ron`  | Test campaign uses `None` (exercises serde defaults)                    |
 
 ### Modified Files
 
-| File | Change |
-|---|---|
-| `src/domain/world/mod.rs` | `pub mod wind;` + re-export `CampaignWindConfig`, `WindSystemKind` |
-| `src/domain/mod.rs` | Re-export wind types from domain root |
-| `src/domain/campaign_loader.rs` | `GameData.wind` field, `load_wind_config` method, call in `load_game_data` |
-| `src/game/resources/mod.rs` | `pub mod wind_config;` + `pub use wind_config::WindConfig;` |
-| `src/game/systems/campaign_loading.rs` | Insert `WindConfig` resource in all 4 Ok/Err branches |
-| `src/sdk/database.rs` | `DatabaseError::WindLoadError`, `ContentDatabase.wind` field, load in `load_campaign_with_skills_file` and `load_core` |
-| `src/sdk/validation.rs` | `ValidationError::WindConfigInvalid`, `validate_wind_config`, call in `validate_all` |
-| `src/sdk/error_formatter.rs` | `get_suggestions` arm for `WindConfigInvalid` |
+| File                                   | Change                                                                                                                 |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/world/mod.rs`              | `pub mod wind;` + re-export `CampaignWindConfig`, `WindSystemKind`                                                     |
+| `src/domain/mod.rs`                    | Re-export wind types from domain root                                                                                  |
+| `src/domain/campaign_loader.rs`        | `GameData.wind` field, `load_wind_config` method, call in `load_game_data`                                             |
+| `src/game/resources/mod.rs`            | `pub mod wind_config;` + `pub use wind_config::WindConfig;`                                                            |
+| `src/game/systems/campaign_loading.rs` | Insert `WindConfig` resource in all 4 Ok/Err branches                                                                  |
+| `src/sdk/database.rs`                  | `DatabaseError::WindLoadError`, `ContentDatabase.wind` field, load in `load_campaign_with_skills_file` and `load_core` |
+| `src/sdk/validation.rs`                | `ValidationError::WindConfigInvalid`, `validate_wind_config`, call in `validate_all`                                   |
+| `src/sdk/error_formatter.rs`           | `get_suggestions` arm for `WindConfigInvalid`                                                                          |
 
 ### WindSystemKind Variants
 
-| Variant | Description |
-|---|---|
-| `None` (default) | No wind animation |
-| `Sine` | Sinusoidal sway driven by `strength` and `frequency` |
-| `Perlin` | Spatially coherent noise; enables `perlin_scale`, `perlin_octaves`, `perlin_seed` |
+| Variant          | Description                                                                       |
+| ---------------- | --------------------------------------------------------------------------------- |
+| `None` (default) | No wind animation                                                                 |
+| `Sine`           | Sinusoidal sway driven by `strength` and `frequency`                              |
+| `Perlin`         | Spatially coherent noise; enables `perlin_scale`, `perlin_octaves`, `perlin_seed` |
 
 ### CampaignWindConfig Fields and Defaults
 
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `wind_system` | `WindSystemKind` | `None` | Required only if sway is desired |
-| `strength` | `f32` | `0.04` | World-unit sway amplitude (>= 0.0) |
-| `frequency` | `f32` | `0.65` | Cycles per second (> 0.0) |
-| `direction` | `[f32; 2]` | `[1.0, 0.0]` | Normalised XZ; must be finite and non-zero |
-| `perlin_scale` | `f32` | `100.0` | Noise tiling scale (Perlin only, > 0.0) |
-| `perlin_octaves` | `u32` | `4` | Octave count (Perlin only, 1-8) |
-| `perlin_seed` | `u32` | `0` | RNG seed (Perlin only) |
+| Field            | Type             | Default      | Notes                                      |
+| ---------------- | ---------------- | ------------ | ------------------------------------------ |
+| `wind_system`    | `WindSystemKind` | `None`       | Required only if sway is desired           |
+| `strength`       | `f32`            | `0.04`       | World-unit sway amplitude (>= 0.0)         |
+| `frequency`      | `f32`            | `0.65`       | Cycles per second (> 0.0)                  |
+| `direction`      | `[f32; 2]`       | `[1.0, 0.0]` | Normalised XZ; must be finite and non-zero |
+| `perlin_scale`   | `f32`            | `100.0`      | Noise tiling scale (Perlin only, > 0.0)    |
+| `perlin_octaves` | `u32`            | `4`          | Octave count (Perlin only, 1-8)            |
+| `perlin_seed`    | `u32`            | `0`          | RNG seed (Perlin only)                     |
 
 ### Key Design Decisions
 
@@ -1637,37 +1763,37 @@ Implemented a custom WGSL vertex shader for grass blades that supports three win
 
 ### New Files
 
-| File | Purpose |
-|---|---|
+| File                        | Purpose                                                                                                              |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `assets/shaders/grass.wgsl` | WGSL vertex shader with None/Sine/Perlin wind paths; uses `@group(2) @binding(100..102)` for wind extension bindings |
 
 ### Modified Files
 
-| File | Change |
-|---|---|
-| `Cargo.toml` | Added `noise = "0.9"` dependency for fBm Perlin noise texture generation |
+| File                                 | Change                                                                                                                                                                                                                                 |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Cargo.toml`                         | Added `noise = "0.9"` dependency for fBm Perlin noise texture generation                                                                                                                                                               |
 | `src/game/systems/advanced_grass.rs` | New types `GrassWindUniform`, `GrassWindExtension`, `GrassMaterial`, `WindNoiseTexture`; migrated all `Handle<StandardMaterial>` to `Handle<GrassMaterial>`; added `generate_wind_noise_texture` and `setup_wind_noise_texture_system` |
-| `src/game/systems/map.rs` | Registered `MaterialPlugin::<GrassMaterial>`, added `setup_wind_noise_texture_system` to Startup, updated `spawn_map` and `spawn_map_markers` to propagate `Option<ResMut<Assets<GrassMaterial>>>` |
-| `benches/grass_instancing.rs` | Updated to use `GrassMaterial` instead of `StandardMaterial` |
+| `src/game/systems/map.rs`            | Registered `MaterialPlugin::<GrassMaterial>`, added `setup_wind_noise_texture_system` to Startup, updated `spawn_map` and `spawn_map_markers` to propagate `Option<ResMut<Assets<GrassMaterial>>>`                                     |
+| `benches/grass_instancing.rs`        | Updated to use `GrassMaterial` instead of `StandardMaterial`                                                                                                                                                                           |
 
 ### New Types (advanced_grass.rs)
 
-| Type | Description |
-|---|---|
-| `GrassWindUniform` | GPU-aligned uniform struct (`ShaderType`): strength, frequency, direction, wind_system, perlin_scale, `_pad` |
-| `GrassWindExtension` | `MaterialExtension` with `#[uniform(100)]` wind + `#[texture(101)]`/`#[sampler(102)]` noise |
-| `GrassMaterial` | Type alias for `ExtendedMaterial<StandardMaterial, GrassWindExtension>` |
-| `WindNoiseTexture` | Bevy resource wrapping `Handle<Image>` for the 512×512 fBm Perlin noise texture |
+| Type                 | Description                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `GrassWindUniform`   | GPU-aligned uniform struct (`ShaderType`): strength, frequency, direction, wind_system, perlin_scale, `_pad` |
+| `GrassWindExtension` | `MaterialExtension` with `#[uniform(100)]` wind + `#[texture(101)]`/`#[sampler(102)]` noise                  |
+| `GrassMaterial`      | Type alias for `ExtendedMaterial<StandardMaterial, GrassWindExtension>`                                      |
+| `WindNoiseTexture`   | Bevy resource wrapping `Handle<Image>` for the 512×512 fBm Perlin noise texture                              |
 
 ### WGSL Binding Layout
 
 Bindings start at 100 to avoid collisions with `StandardMaterial`'s reserved groups:
 
-| Binding | Type | Purpose |
-|---|---|---|
-| `@group(2) @binding(100)` | `uniform GrassWindUniform` | Wind parameters |
-| `@group(2) @binding(101)` | `texture_2d<f32>` | Perlin noise texture |
-| `@group(2) @binding(102)` | `sampler` | Noise sampler |
+| Binding                   | Type                       | Purpose              |
+| ------------------------- | -------------------------- | -------------------- |
+| `@group(2) @binding(100)` | `uniform GrassWindUniform` | Wind parameters      |
+| `@group(2) @binding(101)` | `texture_2d<f32>`          | Perlin noise texture |
+| `@group(2) @binding(102)` | `sampler`                  | Noise sampler        |
 
 ### Key Design Decisions
 

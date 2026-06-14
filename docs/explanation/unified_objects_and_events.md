@@ -253,17 +253,17 @@ with id `42` in `dialogues.ron` presents choices and ends with a `TriggerEvent` 
 
 #### 3.5 Deliverables
 
-- [ ] `EventInteractionContext` + `event_context: Option<EventInteractionContext>` field added to
+- [x] `EventInteractionContext` + `event_context: Option<EventInteractionContext>` field added to
   `DialogueState` (generalized, separate from `recruitment_context`)
-- [ ] New `open_dialogue_for_event` helper in `exploration_interact.rs` that builds `DialogueState`
+- [x] New `open_dialogue_for_event` helper in `exploration_interact.rs` that builds `DialogueState`
   and sets `event_context`
-- [ ] Loot-collection logic extracted from `try_interact_adjacent_world_events` into a shared
+- [x] Loot-collection logic extracted from `try_interact_adjacent_world_events` into a shared
   function callable from both [E]-dispatch and the dialogue handler
-- [ ] `dialogue_id` routing added to [E]-dispatch for Treasure, Sign, Container, LockedContainer,
+- [x] `dialogue_id` routing added to [E]-dispatch for Treasure, Sign, Container, LockedContainer,
   LockedDoor
-- [ ] `TriggerEvent` handlers: `"collect_treasure"`, `"open_container"`, `"unlock_door"`,
+- [x] `TriggerEvent` handlers: `"collect_treasure"`, `"open_container"`, `"unlock_door"`,
   `"unlock_container"`
-- [ ] Event removal + `DespawnEventMesh` wired inside each handler
+- [x] Event removal + `DespawnEventMesh` wired inside each handler
 
 #### 3.6 Success Criteria
 

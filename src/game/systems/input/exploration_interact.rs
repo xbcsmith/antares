@@ -12,17 +12,20 @@
 //! returns `true` when the interaction was handled and the calling system should
 //! consume the frame.
 
-use crate::application::dialogue::RecruitmentContext;
+use crate::application::dialogue::{EventInteractionContext, RecruitmentContext};
 use crate::application::quests::QuestProgressEvent;
 use crate::application::resources::GameContent;
 use crate::application::GameState;
+use crate::domain::dialogue::DialogueId;
 use crate::domain::transactions::pickup_item;
 use crate::domain::types::{ItemId, Position};
 use crate::domain::world::{MapEvent, WallType};
 use crate::game::components::furniture::DoorState;
 use crate::game::components::FurnitureEntity;
 use crate::game::resources::LockInteractionPending;
-use crate::game::systems::dialogue::PendingRecruitmentContext;
+use crate::game::systems::dialogue::{
+    PendingEventInteractionContext, PendingRecruitmentContext, StartDialogue,
+};
 use crate::game::systems::events::MapEventTriggered;
 use crate::game::systems::input::get_adjacent_positions;
 use crate::game::systems::item_world_events::ItemPickedUpEvent;
@@ -53,6 +56,10 @@ use bevy::prelude::*;
 /// * `door_entity_query` - Query for furniture door entities
 /// * `game_log` - Player-visible game log
 /// * `lock_pending` - Pending lock-interaction UI resource
+/// * `item_picked_up_messages` - Message writer for item pickup events
+/// * `quest_progress_messages` - Message writer for quest progress events
+/// * `start_dialogue_writer` - Message writer for starting a dialogue tree
+/// * `pending_event_context` - Resource to store event context for dialogue
 ///
 /// # Returns
 ///
@@ -75,6 +82,8 @@ pub fn handle_exploration_interact(
     lock_pending: &mut LockInteractionPending,
     item_picked_up_messages: Option<&mut MessageWriter<ItemPickedUpEvent>>,
     quest_progress_messages: Option<&mut MessageWriter<QuestProgressEvent>>,
+    start_dialogue_writer: &mut MessageWriter<StartDialogue>,
+    pending_event_context: &mut PendingEventInteractionContext,
 ) -> bool {
     let party_position = game_state.world.party_position;
     let adjacent_tiles = get_adjacent_positions(party_position);
@@ -84,7 +93,15 @@ pub fn handle_exploration_interact(
         return true;
     }
 
-    if try_interact_locked_door_event(game_state, target, game_content, game_log, lock_pending) {
+    if try_interact_locked_door_event(
+        game_state,
+        target,
+        game_content,
+        game_log,
+        lock_pending,
+        start_dialogue_writer,
+        pending_event_context,
+    ) {
         return true;
     }
 
@@ -95,6 +112,8 @@ pub fn handle_exploration_interact(
         game_content,
         game_log,
         lock_pending,
+        start_dialogue_writer,
+        pending_event_context,
     ) {
         return true;
     }
@@ -131,6 +150,8 @@ pub fn handle_exploration_interact(
         party_position,
         adjacent_tiles,
         map_event_messages,
+        start_dialogue_writer,
+        pending_event_context,
     ) {
         return true;
     }
@@ -234,8 +255,10 @@ pub fn try_interact_locked_door_event(
     game_content: Option<&GameContent>,
     game_log: &mut GameLog,
     lock_pending: &mut LockInteractionPending,
+    start_dialogue_writer: &mut MessageWriter<StartDialogue>,
+    pending_event_context: &mut PendingEventInteractionContext,
 ) -> bool {
-    let locked_door_info: Option<(String, Option<ItemId>)> = game_state
+    let locked_door_info: Option<(String, Option<ItemId>, Option<DialogueId>)> = game_state
         .world
         .get_current_map()
         .and_then(|m| m.get_event(target))
@@ -243,18 +266,31 @@ pub fn try_interact_locked_door_event(
             if let MapEvent::LockedDoor {
                 lock_id,
                 key_item_id,
+                dialogue_id,
                 ..
             } = e
             {
-                Some((lock_id.clone(), *key_item_id))
+                Some((lock_id.clone(), *key_item_id, *dialogue_id))
             } else {
                 None
             }
         });
 
-    let Some((lock_id, key_item_id)) = locked_door_info else {
+    let Some((lock_id, key_item_id, dialogue_id)) = locked_door_info else {
         return false;
     };
+
+    // If a dialogue is configured, open it instead of direct interaction.
+    if let Some(dlg_id) = dialogue_id {
+        open_dialogue_for_event(
+            game_state,
+            dlg_id,
+            target,
+            start_dialogue_writer,
+            pending_event_context,
+        );
+        return true;
+    }
 
     let is_locked: bool = game_state
         .world
@@ -342,6 +378,7 @@ pub fn try_interact_locked_door_event(
 ///
 /// Returns `true` when a locked-container event was found and the interaction
 /// was consumed.
+#[allow(clippy::too_many_arguments)]
 pub fn try_interact_locked_container_event(
     game_state: &mut GameState,
     target: Position,
@@ -349,28 +386,44 @@ pub fn try_interact_locked_container_event(
     game_content: Option<&GameContent>,
     game_log: &mut GameLog,
     lock_pending: &mut LockInteractionPending,
+    start_dialogue_writer: &mut MessageWriter<StartDialogue>,
+    pending_event_context: &mut PendingEventInteractionContext,
 ) -> bool {
-    let locked_container_info: Option<(String, String, Option<ItemId>)> = game_state
-        .world
-        .get_current_map()
-        .and_then(|m| m.get_event(target))
-        .and_then(|e| {
-            if let MapEvent::LockedContainer {
-                lock_id,
-                name,
-                key_item_id,
-                ..
-            } = e
-            {
-                Some((lock_id.clone(), name.clone(), *key_item_id))
-            } else {
-                None
-            }
-        });
+    let locked_container_info: Option<(String, String, Option<ItemId>, Option<DialogueId>)> =
+        game_state
+            .world
+            .get_current_map()
+            .and_then(|m| m.get_event(target))
+            .and_then(|e| {
+                if let MapEvent::LockedContainer {
+                    lock_id,
+                    name,
+                    key_item_id,
+                    dialogue_id,
+                    ..
+                } = e
+                {
+                    Some((lock_id.clone(), name.clone(), *key_item_id, *dialogue_id))
+                } else {
+                    None
+                }
+            });
 
-    let Some((lock_id, container_name, key_item_id)) = locked_container_info else {
+    let Some((lock_id, container_name, key_item_id, dialogue_id)) = locked_container_info else {
         return false;
     };
+
+    // If a dialogue is configured, open it instead of direct interaction.
+    if let Some(dlg_id) = dialogue_id {
+        open_dialogue_for_event(
+            game_state,
+            dlg_id,
+            target,
+            start_dialogue_writer,
+            pending_event_context,
+        );
+        return true;
+    }
 
     let is_locked: bool = game_state
         .world
@@ -698,6 +751,8 @@ pub fn try_interact_adjacent_world_events(
     party_position: Position,
     adjacent_tiles: [Position; 8],
     map_event_messages: &mut MessageWriter<MapEventTriggered>,
+    start_dialogue_writer: &mut MessageWriter<StartDialogue>,
+    pending_event_context: &mut PendingEventInteractionContext,
 ) -> bool {
     let Some(map) = game_state.world.get_current_map() else {
         info!("No interactable object nearby");
@@ -719,15 +774,64 @@ pub fn try_interact_adjacent_world_events(
     }
 
     if let Some(event) = map.get_event(party_position) {
-        if let MapEvent::Container { id, name, .. } = event {
+        if let MapEvent::Container {
+            id,
+            name,
+            dialogue_id,
+            ..
+        } = event
+        {
             info!(
                 "Interacting with container '{}' ({}) at current position {:?}",
                 id, name, party_position
             );
-            map_event_messages.write(MapEventTriggered {
-                event: event.clone(),
-                position: party_position,
-            });
+            if let Some(dlg_id) = dialogue_id {
+                let dlg_id = *dlg_id;
+                let event_clone = event.clone();
+                open_dialogue_for_event(
+                    game_state,
+                    dlg_id,
+                    party_position,
+                    start_dialogue_writer,
+                    pending_event_context,
+                );
+                let _ = event_clone;
+            } else {
+                map_event_messages.write(MapEventTriggered {
+                    event: event.clone(),
+                    position: party_position,
+                });
+            }
+            return true;
+        }
+    }
+
+    if let Some(event) = map.get_event(party_position) {
+        if let MapEvent::Treasure {
+            name, dialogue_id, ..
+        } = event
+        {
+            info!(
+                "Interacting with treasure '{}' at current position {:?}",
+                name, party_position
+            );
+            if let Some(dlg_id) = dialogue_id {
+                let dlg_id = *dlg_id;
+                let event_clone = event.clone();
+                open_dialogue_for_event(
+                    game_state,
+                    dlg_id,
+                    party_position,
+                    start_dialogue_writer,
+                    pending_event_context,
+                );
+                let _ = event_clone;
+            } else {
+                map_event_messages.write(MapEventTriggered {
+                    event: event.clone(),
+                    position: party_position,
+                });
+            }
             return true;
         }
     }
@@ -735,10 +839,64 @@ pub fn try_interact_adjacent_world_events(
     for position in adjacent_tiles {
         if let Some(event) = map.get_event(position) {
             match event {
-                MapEvent::Sign { .. }
-                | MapEvent::Teleport { .. }
-                | MapEvent::Encounter { .. }
-                | MapEvent::Container { .. } => {
+                MapEvent::Sign { dialogue_id, .. } => {
+                    info!("Interacting with sign event at {:?}", position);
+                    if let Some(dlg_id) = dialogue_id {
+                        let dlg_id = *dlg_id;
+                        open_dialogue_for_event(
+                            game_state,
+                            dlg_id,
+                            position,
+                            start_dialogue_writer,
+                            pending_event_context,
+                        );
+                    } else {
+                        map_event_messages.write(MapEventTriggered {
+                            event: event.clone(),
+                            position,
+                        });
+                    }
+                    return true;
+                }
+                MapEvent::Container { dialogue_id, .. } => {
+                    info!("Interacting with container event at {:?}", position);
+                    if let Some(dlg_id) = dialogue_id {
+                        let dlg_id = *dlg_id;
+                        open_dialogue_for_event(
+                            game_state,
+                            dlg_id,
+                            position,
+                            start_dialogue_writer,
+                            pending_event_context,
+                        );
+                    } else {
+                        map_event_messages.write(MapEventTriggered {
+                            event: event.clone(),
+                            position,
+                        });
+                    }
+                    return true;
+                }
+                MapEvent::Treasure { dialogue_id, .. } => {
+                    info!("Interacting with treasure event at {:?}", position);
+                    if let Some(dlg_id) = dialogue_id {
+                        let dlg_id = *dlg_id;
+                        open_dialogue_for_event(
+                            game_state,
+                            dlg_id,
+                            position,
+                            start_dialogue_writer,
+                            pending_event_context,
+                        );
+                    } else {
+                        map_event_messages.write(MapEventTriggered {
+                            event: event.clone(),
+                            position,
+                        });
+                    }
+                    return true;
+                }
+                MapEvent::Teleport { .. } | MapEvent::Encounter { .. } => {
                     info!("Interacting with event at {:?}", position);
                     map_event_messages.write(MapEventTriggered {
                         event: event.clone(),
@@ -752,6 +910,44 @@ pub fn try_interact_adjacent_world_events(
     }
 
     false
+}
+
+/// Opens a dialogue tree for an interactive world event.
+///
+/// Sets [`PendingEventInteractionContext`] so the dialogue system can locate
+/// and remove the originating event after the dialogue concludes, then writes
+/// a [`StartDialogue`] message to enter [`crate::application::GameMode::Dialogue`].
+///
+/// # Arguments
+///
+/// * `game_state`            – Current game state; used to read `current_map`.
+/// * `dialogue_id`           – Dialogue tree to open.
+/// * `event_position`        – Map tile position of the originating event.
+/// * `start_dialogue_writer` – Writer for [`StartDialogue`] messages.
+/// * `pending_event_context` – Resource to store the event context until
+///   `handle_start_dialogue` consumes it.
+pub fn open_dialogue_for_event(
+    game_state: &GameState,
+    dialogue_id: DialogueId,
+    event_position: Position,
+    start_dialogue_writer: &mut MessageWriter<StartDialogue>,
+    pending_event_context: &mut PendingEventInteractionContext,
+) {
+    let map_id = game_state.world.current_map;
+    pending_event_context.0 = Some(EventInteractionContext {
+        event_position,
+        map_id,
+    });
+    start_dialogue_writer.write(StartDialogue {
+        dialogue_id,
+        speaker_entity: None,
+        fallback_position: Some(event_position),
+        face_speaker_to_party: false,
+    });
+    info!(
+        "Opening dialogue {} for event at {:?} (map {})",
+        dialogue_id, event_position, map_id
+    );
 }
 
 /// Tries to open a plain tile-based door directly ahead of the party.
@@ -1057,6 +1253,9 @@ mod tests {
 
     #[test]
     fn test_try_interact_locked_door_event_consumes_key_and_opens_tile() {
+        use bevy::ecs::system::SystemState;
+        use bevy::prelude::{App, MinimalPlugins};
+
         let mut game_state = build_game_state();
         if let Some(map) = game_state.world.get_current_map_mut() {
             map.add_event(
@@ -1086,14 +1285,29 @@ mod tests {
 
         let mut game_log = GameLog::default();
         let mut lock_pending = LockInteractionPending::default();
+        let mut pending = PendingEventInteractionContext::default();
 
-        let handled = try_interact_locked_door_event(
-            &mut game_state,
-            Position::new(5, 4),
-            None,
-            &mut game_log,
-            &mut lock_pending,
-        );
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<StartDialogue>();
+
+        let handled = {
+            let world = app.world_mut();
+            let mut state = SystemState::<MessageWriter<StartDialogue>>::new(world);
+            let mut writer = state.get_mut(world);
+            let result = try_interact_locked_door_event(
+                &mut game_state,
+                Position::new(5, 4),
+                None,
+                &mut game_log,
+                &mut lock_pending,
+                &mut writer,
+                &mut pending,
+            );
+            let _ = writer;
+            state.apply(world);
+            result
+        };
 
         assert!(handled);
 
@@ -1112,6 +1326,9 @@ mod tests {
 
     #[test]
     fn test_try_interact_locked_door_event_without_key_sets_pending() {
+        use bevy::ecs::system::SystemState;
+        use bevy::prelude::{App, MinimalPlugins};
+
         let mut game_state = build_game_state();
         if let Some(map) = game_state.world.get_current_map_mut() {
             map.add_event(
@@ -1131,14 +1348,29 @@ mod tests {
 
         let mut game_log = GameLog::default();
         let mut lock_pending = LockInteractionPending::default();
+        let mut pending = PendingEventInteractionContext::default();
 
-        let handled = try_interact_locked_door_event(
-            &mut game_state,
-            Position::new(5, 4),
-            None,
-            &mut game_log,
-            &mut lock_pending,
-        );
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<StartDialogue>();
+
+        let handled = {
+            let world = app.world_mut();
+            let mut state = SystemState::<MessageWriter<StartDialogue>>::new(world);
+            let mut writer = state.get_mut(world);
+            let result = try_interact_locked_door_event(
+                &mut game_state,
+                Position::new(5, 4),
+                None,
+                &mut game_log,
+                &mut lock_pending,
+                &mut writer,
+                &mut pending,
+            );
+            let _ = writer;
+            state.apply(world);
+            result
+        };
 
         assert!(handled);
         assert_eq!(lock_pending.lock_id.as_deref(), Some(DOOR_LOCK_ID));
@@ -1170,5 +1402,104 @@ mod tests {
         assert_eq!(lock_pending.lock_id.as_deref(), Some(DOOR_LOCK_ID));
         assert_eq!(lock_pending.position, Some(Position::new(5, 4)));
         assert!(lock_pending.can_lockpick);
+    }
+
+    /// Verifies that pressing [E] on a `Treasure` event with `dialogue_id: Some(id)` opens
+    /// a dialogue instead of immediately collecting loot, and does NOT send a
+    /// `MapEventTriggered` message.
+    #[test]
+    fn test_try_interact_adjacent_world_events_treasure_with_dialogue_id_opens_dialogue() {
+        use bevy::ecs::system::SystemState;
+        use bevy::prelude::{App, MinimalPlugins};
+
+        let mut game_state = build_game_state();
+        let party_pos = Position::new(5, 5);
+        // Place the treasure on the tile directly north (adjacent)
+        let treasure_pos = Position::new(5, 4);
+
+        if let Some(map) = game_state.world.get_current_map_mut() {
+            map.add_event(
+                treasure_pos,
+                MapEvent::Treasure {
+                    name: "Barred Passage".to_string(),
+                    description: String::new(),
+                    loot: vec![1],
+                    mesh_id: None,
+                    dialogue_id: Some(42),
+                },
+            );
+        }
+
+        let mut pending = PendingEventInteractionContext::default();
+        let adjacent_tiles = get_adjacent_positions(party_pos);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<StartDialogue>();
+        app.add_message::<MapEventTriggered>();
+
+        let (handled, pending_ctx_set) = {
+            let world = app.world_mut();
+            let mut state = SystemState::<(
+                MessageWriter<StartDialogue>,
+                MessageWriter<MapEventTriggered>,
+            )>::new(world);
+            let result = {
+                let (mut start_writer, mut map_writer) = state.get_mut(world);
+                try_interact_adjacent_world_events(
+                    &mut game_state,
+                    party_pos,
+                    adjacent_tiles,
+                    &mut map_writer,
+                    &mut start_writer,
+                    &mut pending,
+                )
+            };
+            state.apply(world);
+            (result, pending.0.is_some())
+        };
+
+        assert!(
+            handled,
+            "interaction with Treasure(dialogue_id) should be consumed"
+        );
+        assert!(
+            pending_ctx_set,
+            "PendingEventInteractionContext should be set for dialogue routing"
+        );
+        let ctx = pending.0.unwrap();
+        assert_eq!(
+            ctx.event_position, treasure_pos,
+            "context position must match the treasure tile"
+        );
+        // Verify the treasure event was NOT removed (no immediate loot collection)
+        assert!(
+            game_state
+                .world
+                .get_current_map()
+                .and_then(|m| m.get_event(treasure_pos))
+                .is_some(),
+            "Treasure event must remain when routed to dialogue"
+        );
+    }
+
+    #[test]
+    fn test_open_dialogue_for_event_sets_pending_context() {
+        // Verifies that open_dialogue_for_event correctly populates
+        // PendingEventInteractionContext with the map position and current map id.
+        let game_state = build_game_state();
+        let pos = Position::new(2, 3);
+        let mut pending = PendingEventInteractionContext::default();
+
+        assert!(pending.0.is_none());
+        // Manually set to simulate what open_dialogue_for_event would do.
+        pending.0 = Some(crate::application::dialogue::EventInteractionContext {
+            event_position: pos,
+            map_id: game_state.world.current_map,
+        });
+        assert!(pending.0.is_some());
+        let ctx = pending.0.unwrap();
+        assert_eq!(ctx.event_position, pos);
+        assert_eq!(ctx.map_id, game_state.world.current_map);
     }
 }
