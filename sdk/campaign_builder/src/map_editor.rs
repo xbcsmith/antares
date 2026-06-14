@@ -2438,6 +2438,16 @@ pub struct EventEditorState {
     pub treasure_items: Vec<ItemId>,
     // Search query for treasure items (persisted across frames)
     pub treasure_items_query: String,
+    // Treasure mesh/dialogue fields (Phase 6)
+    /// Mesh ID string for the treasure event's 3-D visual (references ObjectMeshDatabase).
+    /// Empty string means no mesh.
+    pub treasure_mesh_id: String,
+    /// Parsed dialogue ID for the treasure event's pre-interaction dialogue.
+    /// `None` means no dialogue (immediate effect).
+    pub treasure_dialogue_id: Option<u16>,
+    /// Autocomplete display buffer for the dialogue ID picker.
+    /// Stores the formatted string "500 \u{2014} Barred Passage" or just "500".
+    pub treasure_dialogue_id_buf: String,
     // Teleport fields
     pub teleport_x: String,
     pub teleport_y: String,
@@ -2534,6 +2544,9 @@ impl Default for EventEditorState {
             encounter_combat_event_type: CombatEventType::Normal,
             treasure_items: Vec::new(),
             treasure_items_query: String::new(),
+            treasure_mesh_id: String::new(),
+            treasure_dialogue_id: None,
+            treasure_dialogue_id_buf: String::new(),
             teleport_x: String::new(),
             teleport_y: String::new(),
             teleport_map_id: String::new(),
@@ -2695,10 +2708,18 @@ impl EventEditorState {
             }
             EventType::Treasure => {
                 let loot: Vec<ItemId> = self.treasure_items.clone();
+                let mesh_id = if self.treasure_mesh_id.is_empty() {
+                    None
+                } else {
+                    Some(self.treasure_mesh_id.clone())
+                };
+                let dialogue_id = self.treasure_dialogue_id;
                 Ok(MapEvent::Treasure {
                     name: self.name.clone(),
                     description: self.description.clone(),
                     loot,
+                    mesh_id,
+                    dialogue_id,
                 })
             }
             EventType::Teleport => {
@@ -2765,6 +2786,8 @@ impl EventEditorState {
                     text: self.sign_text.clone(),
                     time_condition: None,
                     facing,
+                    mesh_id: None,
+                    dialogue_id: None,
                 })
             }
             EventType::NpcDialogue => {
@@ -2885,6 +2908,8 @@ impl EventEditorState {
                     items,
                     gold,
                     gems,
+                    mesh_id: None,
+                    dialogue_id: None,
                 })
             }
         }
@@ -2910,6 +2935,8 @@ impl EventEditorState {
     ///     text: "Hello".to_string(),
     ///     time_condition: None,
     ///     facing: None,
+    ///     mesh_id: None,
+    ///     dialogue_id: None,
     /// };
     ///
     /// let editor = EventEditorState::from_map_event(Position::new(1, 1), &event);
@@ -2944,11 +2971,18 @@ impl EventEditorState {
                 name,
                 description,
                 loot,
+                mesh_id,
+                dialogue_id,
+                ..
             } => {
                 s.event_type = EventType::Treasure;
                 s.name = name.clone();
                 s.description = description.clone();
                 s.treasure_items = loot.clone();
+                s.treasure_mesh_id = mesh_id.clone().unwrap_or_default();
+                s.treasure_dialogue_id = *dialogue_id;
+                s.treasure_dialogue_id_buf =
+                    dialogue_id.map(|id| id.to_string()).unwrap_or_default();
             }
             MapEvent::Teleport {
                 name,
@@ -4152,6 +4186,14 @@ pub struct MapsEditorState {
     pub zoom_level: f32,
     /// Request to open the NPC editor for a given NPC ID (set when user clicks Edit NPC)
     pub requested_open_npc: Option<String>,
+    /// Mesh IDs from the campaign's object mesh registry.
+    /// Rebuilt when `ctx.campaign_dir` changes. Never call the loader inside the render loop.
+    pub available_mesh_ids: Vec<String>,
+    /// Dialogue (id, title) pairs from the campaign dialogue database.
+    /// Rebuilt when `ctx.campaign_dir` changes. Never call the loader inside the render loop.
+    pub available_dialogue_ids: Vec<(u16, String)>,
+    /// Last campaign directory seen, used to detect when caches need to be rebuilt.
+    pub last_campaign_dir: Option<std::path::PathBuf>,
 }
 
 /// Minimum zoom level (25%)
@@ -4205,6 +4247,9 @@ impl Default for MapsEditorState {
             new_map_name: "New Map".to_string(),
             zoom_level: DEFAULT_ZOOM,
             requested_open_npc: None,
+            available_mesh_ids: Vec::new(),
+            available_dialogue_ids: Vec::new(),
+            last_campaign_dir: None,
         }
     }
 }
@@ -4297,6 +4342,46 @@ impl MapsEditorState {
     ) {
         ui.heading("🗺️ Maps Editor");
         ui.add_space(5.0);
+
+        // ── Autocomplete cache rebuild ──────────────────────────────────────────
+        // Rebuild available_mesh_ids and available_dialogue_ids when the campaign
+        // directory changes. Never load inside the render loop (Rule 10 / Rule 14).
+        let campaign_dir_changed = match (&self.last_campaign_dir, ctx.campaign_dir) {
+            (None, Some(_)) | (Some(_), None) => true,
+            (Some(last), Some(current)) => last != current,
+            (None, None) => false,
+        };
+        if campaign_dir_changed {
+            if let Some(dir) = ctx.campaign_dir {
+                // Load object mesh IDs
+                let registry_path = dir.join("data/object_mesh_registry.ron");
+                if let Ok(db) =
+                    antares::domain::world::object_mesh::ObjectMeshDatabase::load_from_registry(
+                        &registry_path,
+                        dir,
+                    )
+                {
+                    self.available_mesh_ids = antares::sdk::map_editor::browse_event_mesh_ids(&db);
+                } else {
+                    self.available_mesh_ids.clear();
+                }
+                // Load dialogue IDs
+                let dialogue_path = dir.join("data/dialogues.ron");
+                if let Ok(db) =
+                    antares::sdk::database::DialogueDatabase::load_from_file(&dialogue_path)
+                {
+                    self.available_dialogue_ids =
+                        antares::sdk::map_editor::browse_dialogue_ids(&db);
+                } else {
+                    self.available_dialogue_ids.clear();
+                }
+                self.last_campaign_dir = Some(dir.to_path_buf());
+            } else {
+                self.available_mesh_ids.clear();
+                self.available_dialogue_ids.clear();
+                self.last_campaign_dir = None;
+            }
+        }
 
         // Use shared EditorToolbar component
         let toolbar_action = EditorToolbar::new("Maps")
@@ -4976,9 +5061,13 @@ impl MapsEditorState {
                                         landscape_definitions: refs.landscape_definitions,
                                         characters: refs.characters,
                                     };
-                                    if let Some(npc_id) =
-                                        Self::show_inspector_panel(ui, editor_ref, &inspector_data)
-                                    {
+                                    if let Some(npc_id) = Self::show_inspector_panel(
+                                        ui,
+                                        editor_ref,
+                                        &inspector_data,
+                                        &self.available_mesh_ids,
+                                        &self.available_dialogue_ids,
+                                    ) {
                                         self.requested_open_npc = Some(npc_id);
                                     }
                                 });
@@ -5192,6 +5281,8 @@ impl MapsEditorState {
         ui: &mut egui::Ui,
         editor: &mut MapEditorState,
         data: &MapInspectorData<'_>,
+        available_mesh_ids: &[String],
+        available_dialogue_ids: &[(u16, String)],
     ) -> Option<String> {
         let mut requested_open_npc: Option<String> = None;
 
@@ -5818,6 +5909,8 @@ impl MapsEditorState {
                             data.conditions,
                             data.furniture_definitions,
                             data.characters,
+                            available_mesh_ids,
+                            available_dialogue_ids,
                         );
                     });
                 }
@@ -6654,6 +6747,8 @@ impl MapsEditorState {
         conditions: &[antares::domain::conditions::ConditionDefinition],
         furniture_definitions: &[antares::domain::world::furniture::FurnitureDefinition],
         characters: &[antares::domain::character_definition::CharacterDefinition],
+        available_mesh_ids: &[String],
+        available_dialogue_ids: &[(u16, String)],
     ) {
         if let Some(ref mut event_editor) = editor.event_editor {
             egui::ComboBox::from_id_salt("map_event_type_combo")
@@ -6801,6 +6896,38 @@ impl MapsEditorState {
                         items,
                     );
                     if changed {
+                        editor.has_changes = true;
+                    }
+
+                    // Mesh ID autocomplete (Rule 14 — no bare TextEdit for reference IDs)
+                    ui.separator();
+                    use crate::ui_helpers::{
+                        autocomplete_dialogue_selector, autocomplete_mesh_id_selector,
+                        parse_dialogue_id_from_buf,
+                    };
+                    ui.label("Visual Mesh (optional):");
+                    if autocomplete_mesh_id_selector(
+                        ui,
+                        "event_treasure_mesh_id",
+                        "Mesh ID:",
+                        &mut event_editor.treasure_mesh_id,
+                        available_mesh_ids,
+                    ) {
+                        editor.has_changes = true;
+                    }
+
+                    // Dialogue ID autocomplete (Rule 14)
+                    ui.label("Pre-interaction Dialogue (optional):");
+                    if autocomplete_dialogue_selector(
+                        ui,
+                        "event_treasure_dialogue_id",
+                        "Dialogue ID:",
+                        &mut event_editor.treasure_dialogue_id_buf,
+                        available_dialogue_ids,
+                    ) {
+                        // Parse and update the numeric dialogue_id from the buffer
+                        event_editor.treasure_dialogue_id =
+                            parse_dialogue_id_from_buf(&event_editor.treasure_dialogue_id_buf);
                         editor.has_changes = true;
                     }
                 }
@@ -9547,6 +9674,8 @@ mod tests {
             text: "Test".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         state.add_event(pos, event);
@@ -10517,6 +10646,8 @@ mod tests {
             text: "Hello UndoRedo".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         // Add event
@@ -10561,6 +10692,8 @@ mod tests {
                 text: "Test sign".to_string(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -10626,6 +10759,8 @@ mod tests {
             text: "Test sign".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         state.add_event_at_position(5, 5, event);
@@ -10653,6 +10788,8 @@ mod tests {
             text: "Welcome to town".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         let editor = EventEditorState::from_map_event(pos, &event);
@@ -10687,6 +10824,8 @@ mod tests {
             text: "Welcome to town".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         state.add_event_at_position(pos.x as u32, pos.y as u32, event);
         state.selected_position = Some(pos);
@@ -10713,7 +10852,7 @@ mod tests {
                 landscape_definitions: &[],
                 characters: &[],
             };
-            MapsEditorState::show_inspector_panel(ui, &mut state, &data);
+            MapsEditorState::show_inspector_panel(ui, &mut state, &data, &[], &[]);
         });
 
         // Verify selection was preserved and the inspector invocation completed
@@ -10741,6 +10880,8 @@ mod tests {
             text: "Hello, world!".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         state.add_event_at_position(pos.x as u32, pos.y as u32, event.clone());
         state.selected_position = Some(pos);
@@ -10772,7 +10913,7 @@ mod tests {
                 characters: &[],
             };
             // Must not panic.
-            MapsEditorState::show_inspector_panel(ui, &mut state, &data);
+            MapsEditorState::show_inspector_panel(ui, &mut state, &data, &[], &[]);
         });
 
         // The event editor state must still be intact after the panel has rendered;
@@ -10801,6 +10942,8 @@ mod tests {
             text: "Original".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         // Add the original event
@@ -10865,11 +11008,15 @@ mod tests {
             text: "Welcome".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         let event2 = MapEvent::Treasure {
             name: "Treasure".to_string(),
             description: "Desc".to_string(),
             loot: vec![1, 2, 3],
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         state.add_event_at_position(5, 5, event1);
@@ -11558,6 +11705,8 @@ mod tests {
             text: "Hello".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -11618,6 +11767,8 @@ mod tests {
             name: "Gold".to_string(),
             description: "A treasure".to_string(),
             loot: vec![1, 2, 3],
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -11658,6 +11809,8 @@ mod tests {
             text: "Text".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -11686,6 +11839,8 @@ mod tests {
             text: "Text".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos, event);
@@ -11715,6 +11870,8 @@ mod tests {
             text: "Text1".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         let event2 = MapEvent::Trap {
@@ -11802,6 +11959,8 @@ mod tests {
             name: "Test Treasure".to_string(),
             description: "A treasure".to_string(),
             loot: vec![],
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos1, event.clone());
@@ -11828,6 +11987,8 @@ mod tests {
             description: "A sign".to_string(),
             text: "Welcome to the dungeon!".to_string(),
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -11942,6 +12103,8 @@ mod tests {
             name: "Gold Coins".to_string(),
             description: "A pile of gold coins".to_string(),
             loot: vec![],
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -11982,6 +12145,8 @@ mod tests {
             name: "Event 2".to_string(),
             description: "Second event".to_string(),
             loot: vec![],
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         let event3 = MapEvent::Sign {
@@ -11990,6 +12155,8 @@ mod tests {
             text: "Third event".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos1, event1.clone());
@@ -12025,6 +12192,8 @@ mod tests {
             text: "Original text".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         state.add_event(pos, original_event.clone());
 
@@ -12082,6 +12251,8 @@ mod tests {
             text: "Text".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         state.add_event(pos, event.clone());
 
@@ -12123,6 +12294,8 @@ mod tests {
             text: "Text 1".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         let event2 = MapEvent::Trap {
             name: "Trap 1".to_string(),
@@ -12746,6 +12919,8 @@ mod tests {
             ],
             gold: 0,
             gems: 0,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         let editor = EventEditorState::from_map_event(Position::new(3, 4), &event);
@@ -12848,6 +13023,8 @@ mod tests {
             text: "Go West!".to_string(),
             time_condition: None,
             facing: Some(Direction::West),
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         let editor = EventEditorState::from_map_event(Position::new(2, 3), &event);
@@ -12866,6 +13043,8 @@ mod tests {
             text: "Hello".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         let editor = EventEditorState::from_map_event(Position::new(0, 0), &event);
@@ -13647,6 +13826,8 @@ mod tests {
             items: vec![],
             gold: 100,
             gems: 5,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         let editor = EventEditorState::from_map_event(Position::new(0, 0), &event);
@@ -14792,5 +14973,87 @@ mod tests {
             "visual height must be preserved across terrain type change"
         );
         assert!(tile.visual.tree_type.is_none(), "tree_type must be cleared");
+    }
+
+    #[test]
+    fn test_event_editor_state_treasure_mesh_id_and_dialogue_id_defaults() {
+        let state = EventEditorState::default();
+        assert!(state.treasure_mesh_id.is_empty());
+        assert!(state.treasure_dialogue_id.is_none());
+        assert!(state.treasure_dialogue_id_buf.is_empty());
+    }
+
+    #[test]
+    fn test_event_editor_state_to_treasure_with_mesh_and_dialogue() {
+        let editor = EventEditorState {
+            event_type: EventType::Treasure,
+            name: "Barred Passage".to_string(),
+            description: "Iron bar".to_string(),
+            treasure_mesh_id: "barred_passage".to_string(),
+            treasure_dialogue_id: Some(500),
+            ..Default::default()
+        };
+        let event = editor.to_map_event().unwrap();
+        match event {
+            antares::domain::world::MapEvent::Treasure {
+                name,
+                mesh_id,
+                dialogue_id,
+                ..
+            } => {
+                assert_eq!(name, "Barred Passage");
+                assert_eq!(mesh_id, Some("barred_passage".to_string()));
+                assert_eq!(dialogue_id, Some(500_u16));
+            }
+            _ => panic!("Expected MapEvent::Treasure"),
+        }
+    }
+
+    #[test]
+    fn test_event_editor_state_to_treasure_empty_mesh_gives_none() {
+        let editor = EventEditorState {
+            event_type: EventType::Treasure,
+            name: "Plain Chest".to_string(),
+            treasure_mesh_id: String::new(),
+            treasure_dialogue_id: None,
+            ..Default::default()
+        };
+        let event = editor.to_map_event().unwrap();
+        match event {
+            antares::domain::world::MapEvent::Treasure {
+                mesh_id,
+                dialogue_id,
+                ..
+            } => {
+                assert_eq!(mesh_id, None);
+                assert_eq!(dialogue_id, None);
+            }
+            _ => panic!("Expected MapEvent::Treasure"),
+        }
+    }
+
+    #[test]
+    fn test_event_editor_state_from_treasure_roundtrip() {
+        let event = antares::domain::world::MapEvent::Treasure {
+            name: "Chest".to_string(),
+            description: "A wooden chest".to_string(),
+            loot: vec![1, 2],
+            mesh_id: Some("treasure_chest".to_string()),
+            dialogue_id: Some(42_u16),
+        };
+        let pos = antares::domain::types::Position::new(3, 3);
+        let state = EventEditorState::from_map_event(pos, &event);
+        assert_eq!(state.event_type, EventType::Treasure);
+        assert_eq!(state.treasure_mesh_id, "treasure_chest");
+        assert_eq!(state.treasure_dialogue_id, Some(42));
+        assert_eq!(state.treasure_dialogue_id_buf, "42");
+    }
+
+    #[test]
+    fn test_maps_editor_state_default_has_empty_mesh_and_dialogue_caches() {
+        let state = MapsEditorState::default();
+        assert!(state.available_mesh_ids.is_empty());
+        assert!(state.available_dialogue_ids.is_empty());
+        assert!(state.last_campaign_dir.is_none());
     }
 }

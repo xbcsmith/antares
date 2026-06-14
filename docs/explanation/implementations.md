@@ -2,6 +2,197 @@
 
 ---
 
+## Phase 6 Map Editor — `mesh_id` and `dialogue_id` support for Treasure event (2026)
+
+**Goal:** Wire the `mesh_id` and `dialogue_id` fields that already exist on
+`MapEvent::Treasure` (and `MapEvent::Sign`, `MapEvent::Container`) into the
+Campaign Builder's map editor so authors can set them from the UI. Also add two
+new SDK helper functions (`browse_event_mesh_ids`, `browse_dialogue_ids`) for
+loading the autocomplete data lazily when the campaign directory changes.
+
+### What Changed
+
+**`antares/src/sdk/map_editor.rs`**
+
+- **`browse_event_mesh_ids(db: &ObjectMeshDatabase) -> Vec<String>`** — Returns
+  a sorted list of all registered mesh IDs from a standalone `ObjectMeshDatabase`.
+  Used to populate the mesh autocomplete in the Treasure event editor.
+
+- **`browse_dialogue_ids(db: &DialogueDatabase) -> Vec<(u16, String)>`** — Returns
+  `(id, title)` pairs sorted by ID from a standalone `DialogueDatabase`.
+  Used to populate the dialogue autocomplete in the Treasure event editor.
+
+**`antares/sdk/campaign_builder/src/map_editor.rs`**
+
+- **`EventEditorState` struct** — Added three new fields:
+  `treasure_mesh_id: String`, `treasure_dialogue_id: Option<u16>`,
+  `treasure_dialogue_id_buf: String`. Defaults to empty/None.
+
+- **`EventEditorState::to_map_event`** — Treasure arm now sets `mesh_id`
+  (None when empty string, Some otherwise) and `dialogue_id` from state.
+  Sign and Container arms pass `mesh_id: None, dialogue_id: None` to fix
+  pre-existing compilation errors from the domain upgrade.
+
+- **`EventEditorState::from_map_event`** — Treasure arm now reads `mesh_id`
+  and `dialogue_id` back into state (including `treasure_dialogue_id_buf` as
+  a plain numeric string).
+
+- **`MapsEditorState` struct** — Added three cache fields:
+  `available_mesh_ids: Vec<String>`, `available_dialogue_ids: Vec<(u16, String)>`,
+  `last_campaign_dir: Option<PathBuf>`. All default to empty/None.
+
+- **`MapsEditorState::show`** — Added an autocomplete cache-rebuild block at the
+  top that fires whenever `ctx.campaign_dir` changes, loading the mesh registry
+  and dialogue database from the new campaign directory.
+
+- **`show_event_editor`** — Updated signature to accept `available_mesh_ids` and
+  `available_dialogue_ids` slices. Treasure branch now renders a mesh-ID
+  autocomplete and a dialogue-ID autocomplete below the item list.
+
+- **`show_inspector_panel`** — Updated signature to forward the two cache slices
+  down to `show_event_editor`.
+
+- **`show_editor`** — Updated call site for `show_inspector_panel` to pass
+  `&self.available_mesh_ids` and `&self.available_dialogue_ids`.
+
+- **Test fixes** — All `MapEvent::Sign`, `MapEvent::Treasure`, and
+  `MapEvent::Container` construction expressions in tests updated to include
+  the new `mesh_id: None, dialogue_id: None` fields. Two `show_inspector_panel`
+  test call sites updated to pass `&[], &[]` for the new slice params.
+
+- **New tests** — Five new tests:
+  `test_event_editor_state_treasure_mesh_id_and_dialogue_id_defaults`,
+  `test_event_editor_state_to_treasure_with_mesh_and_dialogue`,
+  `test_event_editor_state_to_treasure_empty_mesh_gives_none`,
+  `test_event_editor_state_from_treasure_roundtrip`,
+  `test_maps_editor_state_default_has_empty_mesh_and_dialogue_caches`.
+
+### Quality Gates
+
+```text
+cargo fmt      → clean
+cargo check    → Finished 0 errors
+cargo clippy   → Finished 0 warnings
+cargo nextest  → 5294 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Phase 6.1 Foundation — Map Event Query & Mutation Helpers in `src/sdk/map_editor.rs` (2026)
+
+**Goal:** Add the `MapEditorError` error type and six new helper functions to
+`src/sdk/map_editor.rs` so the Campaign Builder's map-event panels have a
+strongly-typed, validated API for querying available mesh IDs / dialogue IDs
+and for placing, removing, or patching events on a `Map`.
+
+### What Changed
+
+**`src/sdk/map_editor.rs`**
+
+- **Imports** — Added `use crate::domain::dialogue::DialogueId;`,
+  `Position` to the domain types import, and `MapEvent` to the world import.
+
+- **`browse_dialogue_ids` updated** — Existing function now uses `filter_map`
+  and returns `Vec<(DialogueId, String)>` (same underlying type `u16`, but uses
+  the type alias). The old `unwrap_or_else` fallback was removed since
+  `all_dialogues()` can only return IDs that are present in the map.
+
+- **New `// ===== Map Event Placement =====` section** — Inserted between the
+  existing `object_mesh_tests` module and the Sprite Sheet Management section.
+  Contains:
+
+  - `MapEditorError` — `thiserror`-derived error enum with four variants:
+    `UnknownMesh(String)`, `UnknownDialogue(u16)`,
+    `OutOfBounds(Position)`, `PositionOccupied(Position)`.
+
+  - `suggest_event_mesh_ids(registry, partial)` — prefix-filtered sorted list
+    of mesh IDs from an `ObjectMeshDatabase`.
+
+  - `suggest_dialogue_ids(db, partial)` — prefix-filtered `(DialogueId, title)`
+    pairs matching either the dialogue name or its numeric ID string.
+
+  - `place_map_event(map, pos, event)` — validates bounds and occupancy, then
+    inserts the event; returns `Err(OutOfBounds)` or `Err(PositionOccupied)`.
+
+  - `remove_map_event(map, pos)` — thin wrapper around `Map::remove_event`.
+
+  - `set_event_mesh_id(map, pos, mesh_id, registry)` — patches the `mesh_id`
+    field on a `Treasure` event at `pos`; validates against `ObjectMeshDatabase`.
+
+  - `set_event_dialogue_id(map, pos, id, db)` — patches the `dialogue_id`
+    field on a `Treasure` event at `pos`; validates against `DialogueDatabase`.
+
+- **New `mod event_placement_tests`** — 16 unit tests covering all success and
+  failure paths, boundary conditions, and error display strings. Test data
+  references `data/test_campaign` only (Implementation Rule 5 compliant).
+
+### Quality Gates
+
+```text
+cargo fmt      → clean
+cargo check    → Finished 0 errors
+cargo clippy   → Finished 0 warnings
+cargo nextest  → 5294 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Phase 6 UI Helpers — `autocomplete_mesh_id_selector`, `parse_dialogue_id_from_buf`, `autocomplete_dialogue_selector` (2026)
+
+**Goal:** Add two new autocomplete selector functions and one pure helper to
+`sdk/campaign_builder/src/ui_helpers/autocomplete.rs` so campaign-builder panels
+can bind mesh IDs and dialogue IDs to their respective data sources with the
+same look-and-feel as the existing portrait/sprite-sheet/spell selectors.
+
+### What Changed
+
+**`sdk/campaign_builder/src/ui_helpers/autocomplete.rs`** — Three new `pub` items
+appended after `autocomplete_spell_selector`:
+
+- `autocomplete_mesh_id_selector(ui, id_salt, label, selected_mesh_id, available_mesh_ids)`
+  String-keyed selector backed by a slice of mesh ID strings.
+  Shows `"Mesh: <id>"` tooltip for known IDs and `"⚠ Unknown mesh ID '<id>'"` for
+  unknown ones. Skips the label widget when `label` is `""`.
+
+- `parse_dialogue_id_from_buf(buf) -> Option<u16>`
+  Pure parser that extracts a `u16` from either a bare numeric string (`"500"`) or
+  the `"500 — Barred Passage"` display format produced by
+  `autocomplete_dialogue_selector`. Splits on whitespace or U+2014 (em-dash) and
+  parses the first token.
+
+- `autocomplete_dialogue_selector(ui, id_salt, label, dialogue_id_buf, available_dialogues)`
+  Takes `&[(u16, String)]` pairs and presents candidates as `"<id> — <title>"`.
+  Accepts both a full display string and a bare numeric ID string as valid
+  input. Buffer stores the full display string; callers use
+  `parse_dialogue_id_from_buf` to extract the numeric ID.
+
+**`sdk/campaign_builder/src/ui_helpers/tests.rs`** — Five new unit tests for
+`parse_dialogue_id_from_buf` added after the existing
+`test_autocomplete_spell_selector_no_panic_on_empty` test:
+
+- `test_parse_dialogue_id_from_buf_plain_number`
+- `test_parse_dialogue_id_from_buf_formatted_string`
+- `test_parse_dialogue_id_from_buf_empty`
+- `test_parse_dialogue_id_from_buf_invalid`
+- `test_parse_dialogue_id_from_buf_zero`
+
+### Pattern Followed
+
+All three functions follow the `autocomplete_portrait_selector` pattern exactly:
+`make_autocomplete_id` → `load_autocomplete_buffer` → `AutocompleteInput::new` →
+tooltip → commit-on-change guard → Clear button → `store_autocomplete_buffer`.
+
+### Quality Gates
+
+```text
+cargo fmt      → clean
+cargo check    → Finished 0 errors
+cargo clippy   → Finished 0 warnings
+cargo nextest  → 5278 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Unified Interactive Objects — Phase 5: Campaign Data — Barred Passage (2026)
 
 **Goal:** Implement Phase 5 of the Unified Interactive Objects plan: convert the

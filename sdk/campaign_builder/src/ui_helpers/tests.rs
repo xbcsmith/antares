@@ -3143,3 +3143,39 @@ fn test_autocomplete_spell_selector_no_panic_on_empty() {
         );
     });
 }
+
+// =========================================================================
+// parse_dialogue_id_from_buf Tests
+// =========================================================================
+
+#[test]
+fn test_parse_dialogue_id_from_buf_plain_number() {
+    assert_eq!(parse_dialogue_id_from_buf("500"), Some(500_u16));
+}
+
+#[test]
+fn test_parse_dialogue_id_from_buf_formatted_string() {
+    assert_eq!(
+        parse_dialogue_id_from_buf("500 \u{2014} Barred Passage"),
+        Some(500_u16)
+    );
+}
+
+#[test]
+fn test_parse_dialogue_id_from_buf_empty() {
+    assert_eq!(parse_dialogue_id_from_buf(""), None);
+}
+
+#[test]
+fn test_parse_dialogue_id_from_buf_invalid() {
+    assert_eq!(parse_dialogue_id_from_buf("bad"), None);
+    assert_eq!(
+        parse_dialogue_id_from_buf("not_a_number \u{2014} Title"),
+        None
+    );
+}
+
+#[test]
+fn test_parse_dialogue_id_from_buf_zero() {
+    assert_eq!(parse_dialogue_id_from_buf("0"), Some(0_u16));
+}
