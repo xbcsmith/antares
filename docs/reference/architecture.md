@@ -105,13 +105,17 @@ src/
 │   ├── validation.rs            # `ValidationError` — unified domain validation error type
 │   ├── visual/
 │   └── world/
-│       └── landscape.rs         # `LandscapeDefinition`, placements, validation, mesh registry wrapper
+│       ├── landscape.rs         # `LandscapeDefinition`, placements, validation, mesh registry wrapper
+│       └── wind.rs              # `CampaignWindConfig`, `WindSystemKind` — per-campaign wind settings
 ├── game/                        # Bevy ECS integration (components/systems/resources)
 │   ├── mod.rs
 │   ├── components/
 │   ├── resources/
+│   │   └── wind_config.rs       # `WindConfig` Bevy resource wrapping `CampaignWindConfig`
 │   └── systems/                # combat, map, camera, menu, inventory_ui, inn_ui, sky, skill_training, etc.
-│       └── sky.rs              # SkyPlugin: updates ClearColor per frame from SkyConfig + TimeOfDay
+│       ├── sky.rs              # SkyPlugin: updates ClearColor per frame from SkyConfig + TimeOfDay
+│       ├── advanced_grass.rs   # Blade geometry, wind extension material, GPU instance batching
+│       └── grass_instancing.rs # GPU instancing pipeline: GrassInstancedPipeline, DrawGrassInstanced, GrassRenderMode
 ├── sdk/                         # Library SDK: loading, validation, packaging, templates
 │   ├── mod.rs
 │   ├── cache.rs
@@ -175,6 +179,8 @@ _Purpose_: Bevy ECS components and systems for rendering and interaction
 - **Components**: Bevy components for dialogue and game entities
 - **Systems**: Audio, camera, dialogue visualization, UI rendering
 - **Resources**: Bevy resources for managing game state in ECS world
+  - `WindConfig` — wraps the campaign's `CampaignWindConfig`; inserted at map
+    load time; drives grass wind shader parameters
 
 **SDK Layer** (`src/sdk/`)
 _Purpose_: Content creation, validation, and development tools
@@ -453,6 +459,35 @@ pub enum TreeType       { Oak, Pine, Dead, Palm, Willow, Birch, Shrub }
 pub enum RockVariant    { Smooth, Jagged, Layered, Crystal }
 pub enum WaterFlowDirection { Still, North, South, East, West }
 ```
+
+#### 4.2.2 Wind Configuration
+
+`CampaignWindConfig` is loaded from `data/wind.ron` in the active campaign
+directory.  A missing file silently defaults to `wind_system: None`.
+
+```rust
+/// Selects the grass wind animation algorithm.
+pub enum WindSystemKind {
+    None,    // stationary — no GPU work per frame
+    Sine,    // world-coherent sinusoidal sway
+    Perlin,  // spatially varying noise-driven gusts
+}
+
+/// Per-campaign wind configuration (domain::world::wind).
+pub struct CampaignWindConfig {
+    pub wind_system:    WindSystemKind,  // default: None
+    pub strength:       f32,             // default: 0.04  (world-unit sway amplitude)
+    pub frequency:      f32,             // default: 0.65  (cycles per second)
+    pub direction:      [f32; 2],        // default: [1.0, 0.0] (normalised XZ)
+    pub perlin_scale:   f32,             // default: 100.0 (Perlin only)
+    pub perlin_octaves: u32,             // default: 4     (Perlin only, 1–8)
+    pub perlin_seed:    u32,             // default: 0     (Perlin only)
+}
+```
+
+At the game layer, `WindConfig(CampaignWindConfig)` is a Bevy `Resource`
+inserted by the campaign loading system so rendering systems can access wind
+parameters without traversing `GameState`.
 
 **Inspector terrain-type editing**: the Campaign Builder Map Editor inspector exposes
 the tile `terrain` field as an editable dropdown (all nine `TerrainType` values).
@@ -4073,6 +4108,40 @@ The Antares architecture has evolved significantly from its initial design:
 - Reset Vegetation / Clear Terrain Properties / Reset to Defaults buttons all
   properly invalidate position caches, preventing stale-state UI glitches.
 
+**Phase 10: Vegetation Visual Improvement (Wind + GPU Instancing)**
+
+- `src/domain/world/wind.rs` — `CampaignWindConfig` (7 fields, all serde-defaulted),
+  `WindSystemKind` enum (`None` / `Sine` / `Perlin`), full RON round-trip tests.
+  Loaded from `data/wind.ron`; missing file silently defaults to `None`.
+- `src/game/resources/wind_config.rs` — `WindConfig(CampaignWindConfig)` Bevy
+  resource, inserted by the campaign loader so rendering systems access wind
+  parameters without coupling to `GameState`.
+- `src/sdk/database.rs` — `ContentDatabase.wind: CampaignWindConfig` field;
+  `load_campaign` reads `data/wind.ron` when present; absent file is not an error.
+- `assets/shaders/grass.wgsl` — `ExtendedMaterial` vertex shader for Phase-6 grass.
+  Wind bind group at `@group(2) @binding(100..102)` (avoids `StandardMaterial`'s
+  low-index bindings); `None` / `Sine` / `Perlin` paths; `textureSampleLevel` in
+  vertex stage; clip position recomputed after world-space displacement.
+- `GrassWindExtension` / `GrassMaterial` (`src/game/systems/advanced_grass.rs`) —
+  `ExtendedMaterial<StandardMaterial, GrassWindExtension>` type alias; migrated
+  across all grass spawn, cache, and batch sites.  `WindNoiseTexture` Bevy resource
+  holds the 512×512 Perlin noise image (or 1×1 white placeholder).
+- `assets/shaders/grass_instanced.wgsl` — Instanced grass vertex shader.  Vertex
+  buffer 0: per-vertex blade geometry (position, normal, UV, color).  Vertex buffer
+  1: per-instance `GrassInstance` struct at `@location(8-12)` (world position, wind
+  phase, surface normal, scale, Y-rotation).  Wind bind group at `@group(3)`.
+  Reproduces Sine/Perlin wind paths and the three-stop vertex-color gradient.
+- `src/game/systems/grass_instancing.rs` (new module) — full GPU instancing pipeline:
+  `GrassRenderMode` resource (`PerEntity` / `Instanced`, default `Instanced`),
+  `GrassInstanceGpu` (48-byte `repr(C)` bytemuck struct), `GrassInstancedPipeline`
+  (`SpecializedMeshPipeline` wrapping `MeshPipeline`), `DrawGrassInstanced` render
+  command chain, `GrassInstancingPlugin`.  Uses `BinnedRenderPhaseType::NonMesh` to
+  bypass GPU preprocessing.  `GrassRenderWorldAvailable` marker prevents
+  `SyncComponentPlugin` hook panic in MinimalPlugins test environments.
+- `bytemuck = { version = "1", features = ["derive"] }` added as direct dependency.
+- SDK `ContentDatabase.wind` field documents the per-campaign wind config alongside
+  the existing content fields.
+
 #### 13.2 Current Architecture Compliance
 
 **✅ Excellent Compliance Areas:**
@@ -4094,6 +4163,11 @@ The Antares architecture has evolved significantly from its initial design:
 - **Landscape / Vegetation**: `LandscapePlacement` on `Map`; `TileVisualMetadata`
   vegetation fields; mesh registry integration; Campaign Builder landscape editor and
   map inspector quick-place workflow; procedural tree/grass/rock generation from terrain type
+- **Wind System**: `domain::world::wind` module (`CampaignWindConfig`, `WindSystemKind`);
+  `WindConfig` Bevy resource; `ContentDatabase.wind` SDK field; `grass.wgsl`
+  ExtendedMaterial wind shader (Sine + Perlin); `grass_instanced.wgsl` instanced
+  pipeline shader; `GrassInstancingPlugin` GPU instancing pipeline reducing entity
+  count by ≥90% on grass-dense maps
 
 **🔄 Areas Requiring Updates:**
 

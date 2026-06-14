@@ -178,7 +178,9 @@ The `baked_basecolor.png` texture file in `whisper_new.ron` was likely exported 
 
 ## Creature Mesh Selector
 
-Campaing Builder --> Monster --> Edit --> Visual Asset hangs constantly when trying to change the creature mesh. It hangs when trying to scroll the window and it constantly hangs trying to select the mesh. It should work like the Character or NPC mesh selection wich is a text box with autocomplete.
+✅ COMPLETED - Campaing Builder --> Monster --> Edit --> Visual Asset hangs constantly when trying to change the creature mesh. It hangs when trying to scroll the window and it constantly hangs trying to select the mesh. It should work like the Character or NPC mesh selection wich is a text box with autocomplete.
+
+
 
 ## Game Engine Sky
 
@@ -186,41 +188,57 @@ The Sky is Grey in the game. We have no concept of weather or if we are in a bui
 
 Write a plan with a phased approach to add this support to the game engine and SDK. THINK HARD and follow the rules in @PLAN.md
 
-[Sky System Implementation Plan](./sky_system_implementation_plan.md)
+✅ COMPLETED - [Sky System Implementation Plan](./sky_system_implementation_plan.md)
 
 ## Landscape Category
 
 Status: completed. Landscape is now a first-class importer, SDK, map-editor, runtime, and campaign-data feature. Current campaign-facing assets live under `assets/meshes/landscape/`, landscape definitions live in `data/landscape.ron`, and landscape mesh registries live in `data/landscape_mesh_registry.ron`. See `docs/explanation/landscape_implementation_plan.md` for the historical plan and `docs/explanation/implementations.md` for implementation summaries.
 
-[landscape implementation plan](./landscape_implementation_plan.md)
+✅ COMPLETED - [landscape implementation plan](./landscape_implementation_plan.md)
 
 ## BUGS
 
 ### Game Bugs
 
-When leaving player inventory with ESC button the game menu pops up immediately. ESC in any inventory screen should just close the inventory.
+✅ COMPLETED - When leaving player inventory with ESC button the game menu pops up immediately. ESC in any inventory screen should just close the inventory.
 
 Party Inventory screen Mouse does not work on the Next Back or Party Overview buttons in the inventory screen.
 
-Party Overview only shows the character that opened the inventory. It should show the whole party.
+✅ COMPLETED - Party Overview only shows the character that opened the inventory. It should show the whole party.
 
-Recruitable Characters 3d models turn there back on the party when talking to them. There is no way to turn off auto rotate towards party in the SDK. For some reason the models seem to be oriented backwards causing the user to set which direction they face in the SDK. This causes the model to turn the other direction when facing the party and dialogue is engaged.
+✅ COMPLETED - Recruitable Characters 3d models turn there back on the party when talking to them. There is no way to turn off auto rotate towards party in the SDK. For some reason the models seem to be oriented backwards causing the user to set which direction they face in the SDK. This causes the model to turn the other direction when facing the party and dialogue is engaged.
 
 Sorcerer Spell point bar does not go down as spell points are used.
 
-Can not select a Rest option of (1) (2) or (3) because it opens the 1,2, or 3 character sheet. Remove triggering character sheet by number
+✅ COMPLETED - Can not select a Rest option of (1) (2) or (3) because it opens the 1,2, or 3 character sheet. Remove triggering character sheet by number when in the rest menu. The rest menu should be navigable by number but it should not trigger the character sheet.
 
-When playing tutorial campaign ./campaigns/tutorial The oak and pine trees in the middle of that map_1 are not rendering. See the screenshot ./screenshots/trees_map_1.png The forrest of multiple different types of trees in map_1 are not using the new tree models. They look weird as you can see in the screenshot ./screenshots/forrest_map_1.png None of the trees on map_2 are rendering. I am assuming something changed in the tree rendering code and it broke the trees in the tutorial campaign. We should fix the tree rendering code so that the trees in the tutorial campaign render correctly.
+✅ COMPLETED - When playing tutorial campaign ./campaigns/tutorial The oak and pine trees in the middle of that map_1 are not rendering. See the screenshot ./screenshots/trees_map_1.png The forrest of multiple different types of trees in map_1 are not using the new tree models. They look weird as you can see in the screenshot ./screenshots/forrest_map_1.png None of the trees on map_2 are rendering. I am assuming something changed in the tree rendering code and it broke the trees in the tutorial campaign. We should fix the tree rendering code so that the trees in the tutorial campaign render correctly.
 
-Hit A Trap. Everyone died. Mode is Gamever but I can keep moving around and the game is still responsive. I should not be able to move around when the mode is GameOver. The game should be frozen and I should only be able to click on the Game Over menu options.
+✅ COMPLETED - Hit A Trap. Everyone died. Mode is Gamever but I can keep moving around and the game is still responsive. I should not be able to move around when the mode is GameOver. The game should be frozen and I should only be able to click on the Game Over menu options.
 2026-06-11T20:14:50.026220Z  INFO antares::game::systems::input::global_toggles: Rest key pressed but mode is GameOver — ignoring
+
+✅ COMPLETED - Bug: Open a Chest. Select item and click take. Item modes to inventory. TAB back to chest Item reapears in the chest. It should be removed from the chest when taken. Once item is taken there is no way to exit the Chest. ESC does not work. The chest menu should be exited when pressing ESC.
+
+Treasure events have no way to associate a mesh with them be it procedural or imported. The Barred Passage in map_1.ron in the tutorial campaign is labeled a Treasure. We probably want to treat these more as interactive objects that can have a mesh and a trigger event. We should be able to place them on the map and then place a trigger event when the player interacts with them. For example, the barred passage could have a mesh of a door and when the player interacts with it, it could trigger a dialogue event that says "The door is locked." or "You need a key to open this door." We will need support in the Map editor for placing the mesh and creating the event that is triggered.
+
+Unify the way we handle interactive objects like chests, doors, and treasure. They should all be able to have a mesh and trigger events when interacted with. They should all follow the landscape pattern of import mesh, register mesh, place mesh, add event to same tile, things happen when characters interact with the [E] button.
+
+Write a plan with a phased approach to unify how we handle furniture, items, doors, and landscape. THINK HARD and follow the rules in @PLAN.md
+
+[Unify Object Placement and Events](./unified_objects_and_events.md)
+
+Recruitable Characters --> Meet at the Inn dialogue --> Mesh does not disapear from the map and character is still recruitable from mesh on map even if character is in the party already.
+
 
 ### SDK Bugs
 
-Campaign Builder --> Monster Editor --> Edit save button at the bottom of the editor does not always Save the monster when it returns to the list
+✅ COMPLETED - Campaign Builder --> Monster Editor --> Edit save button at the bottom of the editor does not always Save the monster when it returns to the list
 
-Campaign Builder --> Importer --> Items and Furniture do not have category drop down like Creatures. Importing Furnture does not update the furniture.ron
+✅ COMPLETED - Campaign Builder --> Importer --> Items and Furniture do not have category drop down like Creatures. Importing Furnture does not update the furniture.ron
 
-Campaign Builder --> Landscape Editor layout is broken. The left hand list is horizontal and it does not follow the patterns in @sdk/AGENTS.md for how to layout an editor. The list should be vertical and the editor should follow the same patterns as the other editors in the Campaign Builder.
+✅ COMPLETED - Campaign Builder --> Landscape Editor layout is broken. The left hand list is horizontal and it does not follow the patterns in @sdk/AGENTS.md for how to layout an editor. The list should be vertical and the editor should follow the same patterns as the other editors in the Campaign Builder.
 
-Campaign Builder --> Landscape Editor --> Delete does nothing. It should delete the landscape and update the landscape.ron file and the landscape_mesh_registry.ron file.
+✅ COMPLETED - Campaign Builder --> Landscape Editor --> Delete does nothing. It should delete the landscape and update the landscape.ron file and the landscape_mesh_registry.ron file.
+
+
+Maps have scroll bar even when they are small. They should fit the default SDK window size without a scroll bar. This is a regression.

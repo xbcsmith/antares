@@ -284,6 +284,13 @@ pub enum ValidationError {
         /// The duplicated lock identifier
         lock_id: String,
     },
+
+    /// Wind configuration has out-of-range field values.
+    #[error("Invalid wind configuration: {message}")]
+    WindConfigInvalid {
+        /// Description of the specific validation failure.
+        message: String,
+    },
 }
 
 impl ValidationError {
@@ -330,6 +337,8 @@ impl ValidationError {
             ValidationError::BalanceWarning { severity, .. } => *severity,
 
             ValidationError::TooManyStartingPartyMembers { .. } => Severity::Error,
+
+            ValidationError::WindConfigInvalid { .. } => Severity::Error,
         }
     }
 
@@ -460,6 +469,9 @@ impl<'a> Validator<'a> {
 
         // Validate item mesh descriptors
         errors.extend(self.validate_item_mesh_descriptors());
+
+        // Validate wind configuration ranges
+        errors.extend(self.validate_wind_config());
 
         Ok(errors)
     }
@@ -1562,6 +1574,63 @@ impl<'a> Validator<'a> {
         }
 
         Ok(errors)
+    }
+
+    /// Validates wind configuration field ranges.
+    ///
+    /// Rules:
+    /// - `strength ≥ 0.0`
+    /// - `frequency > 0.0`
+    /// - `direction` non-zero and all components finite
+    /// - `perlin_scale > 0.0`
+    /// - `1 ≤ perlin_octaves ≤ 8`
+    fn validate_wind_config(&self) -> Vec<ValidationError> {
+        use crate::domain::world::wind::WindSystemKind;
+        let cfg = &self.db.wind;
+        let mut errors = Vec::new();
+
+        if cfg.strength < 0.0 {
+            errors.push(ValidationError::WindConfigInvalid {
+                message: format!("strength must be ≥ 0.0, got {}", cfg.strength),
+            });
+        }
+
+        if cfg.frequency <= 0.0 {
+            errors.push(ValidationError::WindConfigInvalid {
+                message: format!("frequency must be > 0.0, got {}", cfg.frequency),
+            });
+        }
+
+        if !cfg.direction[0].is_finite() || !cfg.direction[1].is_finite() {
+            errors.push(ValidationError::WindConfigInvalid {
+                message: format!(
+                    "direction components must be finite, got [{}, {}]",
+                    cfg.direction[0], cfg.direction[1]
+                ),
+            });
+        } else if cfg.direction[0] == 0.0 && cfg.direction[1] == 0.0 {
+            errors.push(ValidationError::WindConfigInvalid {
+                message: "direction must be non-zero".to_string(),
+            });
+        }
+
+        if matches!(cfg.wind_system, WindSystemKind::Perlin) {
+            if cfg.perlin_scale <= 0.0 {
+                errors.push(ValidationError::WindConfigInvalid {
+                    message: format!("perlin_scale must be > 0.0, got {}", cfg.perlin_scale),
+                });
+            }
+            if !(1..=8).contains(&cfg.perlin_octaves) {
+                errors.push(ValidationError::WindConfigInvalid {
+                    message: format!(
+                        "perlin_octaves must be in [1, 8], got {}",
+                        cfg.perlin_octaves
+                    ),
+                });
+            }
+        }
+
+        errors
     }
 }
 

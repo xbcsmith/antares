@@ -2,6 +2,304 @@
 
 ---
 
+## Phase 8: Vegetation Documentation Updates (2026)
+
+**Goal:** Update existing reference documentation for the wind configuration,
+domain types, GPU instancing pipeline, and rendering behaviour introduced in
+Phases 5–7 of the Vegetation Visual Improvement Plan. Per AGENTS.md, only
+existing documents are updated — no new documentation files are created.
+
+### What Changed
+
+**`docs/reference/campaign_content_format.md`**
+- Added `data/wind.ron` to the campaign file structure listing.
+- Added `## wind.ron Schema` section before `## Validation` — includes: field
+  table (name, type, default, valid range), minimal Sine example, full Perlin
+  example, `WindSystemKind` reference table, missing-file behaviour, and
+  validation rules.  A campaign author can implement `wind.ron` from this section
+  alone.
+
+**`docs/reference/architecture.md`**
+- Module structure (§3.2): added `domain/world/wind.rs` (`CampaignWindConfig`,
+  `WindSystemKind`), `game/resources/wind_config.rs` (`WindConfig`),
+  `game/systems/advanced_grass.rs` (wind extension material, GPU batch), and
+  `game/systems/grass_instancing.rs` (instancing pipeline).
+- Game Layer description (§3.3): noted `WindConfig` Bevy resource.
+- Data structures (§4.2.2 Wind Configuration): new subsection with
+  `WindSystemKind` and `CampaignWindConfig` structs; relationship between domain
+  type and Bevy resource.
+- Architecture evolution (§13.1): added **Phase 10: Vegetation Visual Improvement
+  (Wind + GPU Instancing)** entry covering all seven new source files and the
+  bytemuck dependency.
+- Compliance (§13.2): added **Wind System** compliance bullet confirming full
+  stack from domain through render pipeline.
+
+**`docs/reference/sdk_api.md`**
+- Added `wind: CampaignWindConfig` to `ContentDatabase` fields table.
+- Added `path/data/wind.ron (optional)` to the `load_campaign` file list.
+- Added `#### Wind Configuration` subsection with field table, validation rules,
+  and a runnable usage example.
+
+**`CHANGELOG.md`**
+- Added four ADDED entries under `## [Unreleased]` for Phases 5, 6, 7, and 8 of
+  the Vegetation Visual Improvement Plan, using conventional-commit style
+  consistent with the existing changelog format.
+
+### Quality Gate Results
+
+Documentation-only changes — no Rust source modified.  The four quality gates
+(fmt, check, clippy, nextest) remain passing from Phase 7.
+
+---
+
+## Phase 7: GPU Instancing for Grass (2026)
+
+**Goal:** Connect the existing `GrassInstanceBatch` infrastructure to a real render
+pass so all grass clumps in a spatial chunk share a single indexed draw call,
+dramatically reducing entity count and CPU overhead on grass-dense maps.
+
+### What Changed
+
+**`Cargo.toml`**
+- Added `bytemuck = { version = "1", features = ["derive"] }` as a direct
+  dependency for `cast_slice` in the GPU buffer upload path.
+
+**`assets/shaders/grass_instanced.wgsl`** (new)
+- Instanced grass vertex shader with two vertex buffer inputs:
+  - Buffer 0 (`VertexStepMode::Vertex`): standard mesh attributes from Bevy's
+    `Vertex` struct — position, normal, UV, vertex color.
+  - Buffer 1 (`VertexStepMode::Instance`): `GrassInstance` struct at
+    `@location(8-12)` — world position, wind phase, surface normal, scale,
+    Y-axis rotation.
+- Reproduces the Phase-6 wind paths (`None` / `Sine` / `Perlin`) and the
+  three-stop vertex-color gradient from Phase-4.
+- Per-instance `i_phase` offset staggers the sine wave so adjacent clumps
+  don't sway in perfect synchrony.
+- Wind bind group at `@group(3)` (after Bevy's three standard MeshPipeline
+  groups at 0–2): `wind: GrassWindUniform`, `wind_noise`, `wind_sampler`.
+- `textureSampleLevel` used in the vertex stage (WGSL vertex stage cannot use
+  implicit-derivative `textureSample`).
+
+**`src/game/systems/grass_instancing.rs`** (new)
+- **`GrassRenderMode`** resource — `PerEntity` (Phase-6 path) vs. `Instanced`
+  (Phase-7, default).  Guards both the per-blade `Mesh3d` spawn and the
+  instanced batch spawn so the two paths never render simultaneously.
+- **`GrassRenderWorldAvailable`** marker resource — only inserted when
+  `RenderApp` is present. Prevents `build_grass_instance_batches_system` from
+  spawning `Mesh3d` entities (which trigger Bevy's render-world sync hook) in
+  unit-test environments that use `MinimalPlugins`.
+- **`GrassInstanceGpu`** (`repr(C)`, `bytemuck::Pod + Zeroable`, 48 bytes) —
+  per-instance GPU data matching the WGSL `GrassInstance` struct layout.
+- **`GrassInstanceBuffer`** render-world component — holds the uploaded GPU
+  vertex buffer and instance count.
+- **`GrassWindBindGroupResource`** render-world resource — holds the wind
+  uniform bind group for `@group(3)`.
+- **`GrassInstancedPipeline`** — `SpecializedMeshPipeline` wrapping
+  `MeshPipeline`; appends the instance vertex buffer layout and the wind bind
+  group layout to every specialized descriptor.
+- **`DrawGrassInstanced`** type alias for the render-command chain:
+  `SetItemPipeline → SetMeshViewBindGroup<0> →
+  SetMeshViewBindingArrayBindGroup<1> → SetMeshBindGroup<2> →
+  SetGrassWindBindGroup<3> → DrawGrassInstancedInner`.
+- Systems wired into `RenderApp`:
+  - `init_grass_instanced_pipeline` (`RenderStartup`) — creates the pipeline
+    and wind bind group layout.
+  - `prepare_grass_instance_buffers` (`PrepareResources`) — uploads
+    `GrassInstanceBatch.instances` via `bytemuck::cast_slice`.
+  - `prepare_grass_wind_bind_group` (`PrepareBindGroups`) — builds the wind
+    uniform buffer + noise texture bind group from extracted resources.
+  - `queue_grass_instanced` (`QueueMeshes`) — queues each `GrassInstanceBatch`
+    entity into `Opaque3d` using `BinnedRenderPhaseType::NonMesh`.
+- **`GrassInstancingPlugin`** — gates all render wiring (including
+  `ExtractComponentPlugin`) on `RenderApp` being present.  Without a render
+  world (test environments), only `GrassRenderMode` is registered.
+
+**`src/game/systems/advanced_grass.rs`** (modified)
+- `ExtractComponent` implemented for `GrassInstanceBatch` (in
+  `grass_instancing.rs`) so it is copied to the render world.
+- `spawn_grass_clump` gains a `render_mode: GrassRenderMode` parameter.
+  - `PerEntity`: per-clump entity gets `Mesh3d + MeshMaterial3d` (Phase-6 path).
+  - `Instanced` (default): per-clump entity spawns WITHOUT render components so
+    the standard material pipeline ignores it; instance data is gathered by
+    `build_grass_instance_batches_system`.
+- `spawn_grass_cached`, `spawn_grass_cached_with_exclusions`, and `spawn_grass`
+  gain a matching `render_mode` parameter threaded through to
+  `spawn_grass_clump`.
+- `build_grass_instance_batches_system` gains two additional system parameters:
+  - `render_mode: Option<Res<GrassRenderMode>>` — activates the instanced path
+    when `GrassRenderMode::Instanced` (replaces the `config.enabled` flag check).
+  - `render_world_available: Option<Res<GrassRenderWorldAvailable>>` — gates
+    `Mesh3d` + `NoFrustumCulling` spawning on render world presence.
+  - In instanced + render-world mode, each `GrassInstanceBatch` entity gets
+    `Mesh3d(clump_mesh)` (so Bevy allocates GPU vertex/index buffers) plus
+    `NoFrustumCulling` (culling happens at `GrassCluster` level).
+- **Chunk-level visibility** (Phase 7.4/7.6 deliverable): `build_grass_instance_batches_system`
+  now queries `Option<&Visibility>` on each `GrassCluster` and skips clusters
+  with `Visibility::Hidden`. This makes `grass_distance_culling_system` the
+  chunk-level culling mechanism for the instanced path — instances from culled
+  clusters are excluded from every frame's batch rebuild.  Covered by
+  `test_build_grass_instance_batches_skips_hidden_clusters`.
+- Imports `NoFrustumCulling` and `GrassRenderMode` from the new module.
+- All three in-module test spawn calls updated to pass
+  `GrassRenderMode::PerEntity` so existing assertions on `GrassBlade` and
+  `GrassClump` counts remain valid.
+
+**`src/game/systems/map.rs`** (modified)
+- `MapRenderingPlugin::build` adds `GrassInstancingPlugin` before
+  `MaterialPlugin::<GrassMaterial>`.
+- `spawn_map_system`, `spawn_map`, and `spawn_map_markers` gain a
+  `render_mode: GrassRenderMode` parameter threaded through to the single
+  `spawn_grass_cached_with_exclusions` call site.
+
+**`campaigns/tutorial/assets/shaders/`** (new directory)
+- `grass.wgsl` and `grass_instanced.wgsl` copied here so Bevy can resolve them.
+  The game binary sets `BEVY_ASSET_ROOT` to the active campaign directory with
+  `file_path: ""`, so every asset path is resolved relative to that root.
+  `"assets/shaders/grass.wgsl"` → `<campaign>/assets/shaders/grass.wgsl`,
+  matching the same convention as textures (`"assets/textures/…"`).
+  The original `assets/shaders/` copies at the repo root remain as the
+  authoritative source; campaign copies are deployed from there.
+
+**`GRASS_WIND_SHADER_PATH`** and **`GRASS_INSTANCED_SHADER_PATH`** updated from
+`"shaders/grass.wgsl"` / `"shaders/grass_instanced.wgsl"` to
+`"assets/shaders/grass.wgsl"` / `"assets/shaders/grass_instanced.wgsl"`.
+The original `"shaders/…"` paths resolved to `<campaign>/shaders/…` which did
+not exist, producing `Path not found` errors and no grass rendering.
+
+
+
+### Design Decisions
+
+| Decision | Rationale |
+|---|---|
+| `SpecializedMeshPipeline` (not `SpecializedRenderPipeline`) | Reuses `MeshPipeline::specialize(key, layout)` for the automatic mesh vertex buffer layout + view/mesh bind group setup. Avoids duplicating Bevy's attribute-location mapping. |
+| `BinnedRenderPhaseType::NonMesh` | Bypasses GPU preprocessing (indirect draw buffers). Our per-instance transforms live in vertex buffer 1, not in Bevy's mesh uniform buffer, so preprocessing would add overhead for no gain. |
+| `Opaque3d` phase | Grass is opaque/masked — no sorting needed. Binned phase allows multi-draw batching in future. |
+| Wind at `@group(3)` | `MeshPipeline::specialize` occupies bind group indices 0–2. Appending at index 3 avoids collision without forking the base pipeline. |
+| `GrassRenderWorldAvailable` marker | `ExtractComponentPlugin` adds `SyncComponentPlugin` which registers a component hook requiring `PendingSyncEntity`. Gating both on `RenderApp` presence prevents panics in MinimalPlugins test environments. |
+| Per-clump entities kept (no `Mesh3d`) | Preserves the existing `GrassCluster` distance-culling and LOD systems. In instanced mode the per-clump entities are invisible (no render components); their transforms feed `build_grass_instance_batches_system`. |
+
+### Quality Gate Results
+
+```
+cargo fmt         → no output (all files formatted)
+cargo check       → Finished with 0 errors
+cargo clippy      → Finished with 0 warnings
+cargo nextest run → 5222/5222 passed, 0 failed
+```
+cargo check       → Finished with 0 errors
+cargo clippy      → Finished with 0 warnings
+cargo nextest run → 5221/5221 passed, 0 failed
+```
+
+---
+
+## Phase 2: Cross-Pattern Leaf Volume (2026)
+
+**Goal:** Add a perpendicular second pass of leaf geometry inside `append_leaf_card`
+so the canopy appears volumetric from all camera angles, not just face-on.
+
+### What Changed
+
+**`src/game/systems/advanced_trees.rs`**
+
+- **`append_leaf_shape`** (new private helper) — dispatches to the per-species
+  leaf/frond stamping function (Oak, Birch, Willow, Palm, Shrub) for one plane.
+  Separates the species dispatch from the cross-pattern logic so both passes
+  can reuse the same code path without duplication.
+
+- **`append_leaf_card_cross`** (new helper) — stamps two perpendicular passes:
+  first with `side` as-is, then with `side2 = side.cross(up).normalize_or_zero()`.
+  `side.cross(up)` is used instead of `direction` to avoid the near-vertical
+  collapse that occurs when `up ≈ direction` (because `up = Y.lerp(direction,
+  0.35)` for near-vertical branches). `double_sided: true` (from Phase 1)
+  covers both winding orders.
+
+- **`append_leaf_card`** updated — dispatches Oak/Birch/Willow/Palm/Shrub
+  through `append_leaf_card_cross`; Pine keeps its existing single-pass path
+  (triangular needles read well from all angles; cross pass would increase
+  overdraw on dense conifer canopy without visual benefit).
+
+- **`LeafPreset.count` reduced 30–40%** for the five cross-pattern species to
+  compensate for the doubled polygon budget per card:
+
+  | Species | Old count | New count | Reduction |
+  |---------|-----------|-----------|-----------|
+  | Oak     | 5         | 3         | 40 %      |
+  | Birch   | 3         | 2         | 33 %      |
+  | Willow  | 6         | 4         | 33 %      |
+  | Palm    | 8         | 5         | 37.5 %    |
+  | Shrub   | 6         | 4         | 33 %      |
+  | Pine    | 4         | 4         | 0 % (unchanged) |
+
+- **6 new tests** added to the `#[cfg(test)]` module verifying: cross-pattern
+  doubles vertex count for Oak, Pine uses single pass, all five cross-pattern
+  species produce ≥ 2× vertices vs single pass, `side2` is perpendicular to
+  `side`, `LeafPreset.count` reductions are in [30 %, 40 %], Pine count is
+  unchanged.
+
+---
+
+## Phase 1: Foliage Detail Texturing + Lit Foliage (2026)
+
+**Goal:** Apply tiling leaf detail textures over existing geometric leaf
+silhouettes and switch foliage to lit shading, so each tree species shows
+realistic surface detail and light/shade variation.
+
+### What Changed
+
+**`src/bin/generate_foliage_textures.rs`** (new)
+Deterministic binary that generates six 512×512 RGBA8 tiling leaf detail
+textures. Uses a splitmix64 PRNG (inline, no `rand` crate) and writes to both
+`assets/textures/trees/` and `campaigns/tutorial/assets/textures/trees/`.
+Each species has a fixed seed (101–106), per-species stamp shape (5-lobe oak,
+needle pine, ovate birch, lanceolate willow, frond palm, round shrub), and
+neutral-luminance base colour so the `base_color` multiply tint system remains
+the species/variant colour mechanism. Self-validates output spec (512×512, 40–85%
+opaque coverage, 0.65–0.90 mean luminance) and exits non-zero on violation.
+
+**`Cargo.toml`** — added `[[bin]]` entry for `generate-foliage-textures`.
+
+**`src/game/systems/procedural_meshes.rs`**
+- Removed `#[cfg(test)]` from the six `TREE_FOLIAGE_TEXTURE_*` constants,
+  `TREE_FOLIAGE_ALPHA_CUTOFF`, and `foliage_texture_path()`.
+- `get_or_create_foliage_material`: now loads the species detail texture via
+  `super::creature_meshes::load_texture`, sets `base_color_texture: Some(…)`,
+  switches to `AlphaMode::Mask(TREE_FOLIAGE_ALPHA_CUTOFF)`, `unlit: false`,
+  and `perceptual_roughness: 0.9`. The species `base_color` multiply tint is
+  preserved (not forced to WHITE) so the variant-tint system keeps working.
+- `get_or_create_foliage_material_variant`: removed the force-reset of
+  `base_color_texture = None` and `alpha_mode = Opaque`; variants now inherit
+  the detail texture and mask mode from the base material.
+- Tests updated: assertions on `base_color_texture`, `alpha_mode`, and `unlit`
+  flipped to match the new lit/textured material.
+
+**`tests/foliage_texture_spec_test.rs`** (new)
+Integration tests that open the six committed PNGs and assert all output-spec
+properties: 512×512 dimensions, 40–85% opaque coverage, 0.65–0.90 mean
+luminance, edge-strip presence (confirming seamless wrap). Also asserts that
+the `assets/` and `campaigns/tutorial/` copies are byte-identical.
+
+### Per-Card UV Verification
+
+All leaf-card generators in `advanced_trees.rs` already span 0..1 in both U
+and V:
+- `append_quad`: `[0,0],[1,0],[1,1],[0,1]` ✓
+- `append_diamond`: `[0.5,0],[1,0.5],[0.5,1],[0,0.5]` ✓
+- `append_triangle`: `[0,0],[1,0],[0.5,1]` ✓
+
+No UV fixes were needed.
+
+### Bug Fixed During Implementation
+
+`draw_ellipse` originally used `semi_a` as the x-bound and `semi_b` as the
+y-bound for the pixel iteration loop. A rotated ellipse (e.g. a pine needle
+at 90°) extends to `semi_a` pixels in the *y* direction, so the loop was
+missing the body of every non-horizontal needle. Fixed by using
+`max(semi_a, semi_b)` as the bound in both directions.
+
+---
+
 ## Bug Fix: Intermittent Terrain Texture Failure at Startup (2026)
 
 **Goal:** Fix the intermittent startup bug where one terrain tile texture (most
@@ -1136,6 +1434,257 @@ cargo fmt     → clean (no output)
 cargo check   → Finished 0 errors
 cargo clippy  → Finished 0 warnings
 cargo nextest → 5095 passed, 8 skipped, 0 failed
+```
+
+---
+
+## Phase 3: Bark Normal Map + Lit Bark
+
+**Branch**: `pr-vegetation-updates`
+**Date**: 2026-06-12
+
+### Overview
+
+Switched bark materials from unlit to lit shading and added a Sobel-derived
+normal map so tree trunks show groove depth under the scene directional light.
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `src/bin/generate_normal_map.rs` | New binary — reads `bark.png`, applies 3×3 Sobel, writes `bark_normal.png` to both asset locations |
+| `assets/textures/trees/bark_normal.png` | Generated RGB normal map (9.2 KB) |
+| `campaigns/tutorial/assets/textures/trees/bark_normal.png` | Copied from assets |
+| `src/game/systems/procedural_meshes.rs` | Constant + material + test updates (see below) |
+| `Cargo.toml` | Added `[[bin]]` entry for `generate-normal-map` |
+
+### Key Decisions
+
+- **Sobel scale 4.0**: Moderate bumpiness; tunable via `SOBEL_SCALE` constant without regenerating from scratch.
+- **`flip_normal_map_y: false`**: DirectX convention; flip to `true` if grooves appear inverted in one axis.
+- **Clamp-to-edge sampling**: Avoids seam artefacts at bark texture borders; no wrapping.
+
+### Constant Added
+
+```rust
+const TREE_BARK_NORMAL_TEXTURE: &str = "assets/textures/trees/bark_normal.png";
+```
+
+### Material Changes (`get_or_create_bark_material` + variant fallback)
+
+- `unlit: true` → `unlit: false` in both `get_or_create_bark_material` and the inline fallback in `get_or_create_bark_material_variant`.
+- `normal_map_texture: Some(normal_handle)` and `flip_normal_map_y: false` added to both.
+- Normal handle loaded via `super::creature_meshes::load_texture`.
+
+### Tests Updated
+
+| Test | Change |
+|---|---|
+| `test_bark_material_uses_texture_and_is_lit_with_normal_map` | Renamed from `…is_unlit`; asserts `!material.unlit` and `normal_map_texture.is_some()` |
+| `test_bark_material_variant_cache_reuses_equivalent_tint_bucket_and_is_lit` | Renamed from `…is_unlit`; same assertion updates |
+
+### Quality Gates
+
+```text
+cargo fmt     → clean (no output)
+cargo check   → Finished 0 errors
+cargo clippy  → Finished 0 warnings
+cargo nextest → 5204 passed, 8 skipped, 0 failed
+```
+
+---
+
+## Phase 4: Cubic Bezier Grass Blades + Three-Color Gradient
+
+**Branch**: `pr-vegetation-updates`
+**Date**: 2026-06-12
+
+### Overview
+
+Upgraded grass blade geometry from quadratic to cubic Bezier (S-curve shape) and replaced the two-stop base/tip color gradient with a three-stop AO base / mid-green / tip highlight gradient.
+
+### Files Changed
+
+| File | Change |
+|---|---|
+| `src/game/systems/advanced_grass.rs` | All geometry, color, and struct changes (see below) |
+
+### GrassColorScheme: New Fields
+
+| Old field | New field | Default value |
+|---|---|---|
+| `base_color` | `ao_color` | `srgb(0.08, 0.12, 0.06)` — dark AO base |
+| _(new)_ | `mid_color` | `srgb(0.2, 0.5, 0.1)` — primary mid-blade green |
+| `tip_color` | `tip_color` | `srgb(0.72, 0.82, 0.45)` — lighter tip highlight |
+
+### Cubic Bezier Control Points
+
+| Point | Lateral (X) | Height (Y) |
+|---|---|---|
+| `p0` | `0` | `0` |
+| `p1` | `tilt * height * 0.25` | `height * 0.33` |
+| `p2` | `tilt * height * 0.4 + curve_amount * 0.5` | `height * 0.66` |
+| `p3` | `curve_amount` | `height` |
+
+Formula: `B(t) = (1-t)³p0 + 3(1-t)²t·p1 + 3(1-t)t²·p2 + t³p3`
+
+### Three-Stop Gradient
+
+- `t ∈ [0.0, 0.4]` → lerp `ao_color` → `mid_color`
+- `t ∈ [0.4, 1.0]` → lerp `mid_color` → `tip_color`
+
+### Sites Updated
+
+- `GrassColorScheme` struct definition and doc example
+- `sample_blade_color`: blends `mid_color` + `tip_color` (70/30)
+- `GrassColorScheme::default`: three new field values
+- `cached_material_color`: `ao_color` as zero-variation endpoint
+- `create_curved_grass_card_mesh`: cubic Bezier + `&[Color; 3]`
+- `create_grass_clump_mesh`: three-color derivation per card
+- `create_grass_blade_mesh` (test helper): `&[Color::WHITE; 3]`
+- `spawn_grass_cached_with_exclusions`: `ao_color`, `mid_color`, `tip_color` from tint
+- Doc comment: `GrassColorScheme.base_color` → `GrassColorScheme.mid_color`
+- 3 test construction sites updated
+
+### Quality Gates
+
+```text
+cargo fmt     → clean (no output)
+cargo check   → Finished 0 errors
+cargo clippy  → Finished 0 warnings
+cargo nextest → 5204 passed, 8 skipped, 0 failed
+```
+
+---
+
+## Phase 5: Per-Campaign Wind Configuration
+
+**Branch**: `pr-vegetation-updates`
+**Date**: 2026-06-12
+
+### Overview
+
+Added a `data/wind.ron` file to the campaign format so each campaign can configure its own grass-wind parameters. Introduced domain types (`WindSystemKind`, `CampaignWindConfig`), a Bevy resource (`WindConfig`), SDK loading and validation support, and sample data files for both the tutorial campaign and the test fixture.
+
+### New Files
+
+| File | Purpose |
+|---|---|
+| `src/domain/world/wind.rs` | `WindSystemKind` enum + `CampaignWindConfig` struct with serde defaults |
+| `src/game/resources/wind_config.rs` | `WindConfig(pub CampaignWindConfig)` Bevy `Resource` newtype |
+| `campaigns/tutorial/data/wind.ron` | Tutorial campaign uses `Sine` wind (strength 0.04, frequency 0.65) |
+| `data/test_campaign/data/wind.ron` | Test campaign uses `None` (exercises serde defaults) |
+
+### Modified Files
+
+| File | Change |
+|---|---|
+| `src/domain/world/mod.rs` | `pub mod wind;` + re-export `CampaignWindConfig`, `WindSystemKind` |
+| `src/domain/mod.rs` | Re-export wind types from domain root |
+| `src/domain/campaign_loader.rs` | `GameData.wind` field, `load_wind_config` method, call in `load_game_data` |
+| `src/game/resources/mod.rs` | `pub mod wind_config;` + `pub use wind_config::WindConfig;` |
+| `src/game/systems/campaign_loading.rs` | Insert `WindConfig` resource in all 4 Ok/Err branches |
+| `src/sdk/database.rs` | `DatabaseError::WindLoadError`, `ContentDatabase.wind` field, load in `load_campaign_with_skills_file` and `load_core` |
+| `src/sdk/validation.rs` | `ValidationError::WindConfigInvalid`, `validate_wind_config`, call in `validate_all` |
+| `src/sdk/error_formatter.rs` | `get_suggestions` arm for `WindConfigInvalid` |
+
+### WindSystemKind Variants
+
+| Variant | Description |
+|---|---|
+| `None` (default) | No wind animation |
+| `Sine` | Sinusoidal sway driven by `strength` and `frequency` |
+| `Perlin` | Spatially coherent noise; enables `perlin_scale`, `perlin_octaves`, `perlin_seed` |
+
+### CampaignWindConfig Fields and Defaults
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `wind_system` | `WindSystemKind` | `None` | Required only if sway is desired |
+| `strength` | `f32` | `0.04` | World-unit sway amplitude (>= 0.0) |
+| `frequency` | `f32` | `0.65` | Cycles per second (> 0.0) |
+| `direction` | `[f32; 2]` | `[1.0, 0.0]` | Normalised XZ; must be finite and non-zero |
+| `perlin_scale` | `f32` | `100.0` | Noise tiling scale (Perlin only, > 0.0) |
+| `perlin_octaves` | `u32` | `4` | Octave count (Perlin only, 1-8) |
+| `perlin_seed` | `u32` | `0` | RNG seed (Perlin only) |
+
+### Key Design Decisions
+
+- **Opt-in loading**: missing `data/wind.ron` silently returns `CampaignWindConfig::default()` (same pattern as `landscape` and `levels`).
+- **Newtype resource**: `WindConfig(pub CampaignWindConfig)` keeps the Bevy layer thin — no duplication of fields.
+- **SDK validation range checks**: five rules enforced at validation time, not load time, so missing fields with defaults never fail.
+- **`#[derive(Default)]` on WindConfig**: satisfies `clippy::derivable_impls` because `CampaignWindConfig` already implements `Default`.
+
+### Quality Gates
+
+```text
+cargo fmt     → clean (no output)
+cargo check   → Finished 0 errors
+cargo clippy  → Finished 0 warnings
+cargo nextest → 5212 passed, 8 skipped, 0 failed
+```
+
+---
+
+## Phase 6: WGSL Grass Wind Shader (Sine + Perlin)
+
+**Branch**: `pr-vegetation-updates`
+**Date**: 2026-06-13
+
+### Overview
+
+Implemented a custom WGSL vertex shader for grass blades that supports three wind animation modes: `None` (static), `Sine` (sinusoidal sway driven by global time), and `Perlin` (spatially coherent fBm noise). The shader uses `ExtendedMaterial<StandardMaterial, GrassWindExtension>` so the grass keeps full PBR lighting while adding per-blade sway.
+
+### New Files
+
+| File | Purpose |
+|---|---|
+| `assets/shaders/grass.wgsl` | WGSL vertex shader with None/Sine/Perlin wind paths; uses `@group(2) @binding(100..102)` for wind extension bindings |
+
+### Modified Files
+
+| File | Change |
+|---|---|
+| `Cargo.toml` | Added `noise = "0.9"` dependency for fBm Perlin noise texture generation |
+| `src/game/systems/advanced_grass.rs` | New types `GrassWindUniform`, `GrassWindExtension`, `GrassMaterial`, `WindNoiseTexture`; migrated all `Handle<StandardMaterial>` to `Handle<GrassMaterial>`; added `generate_wind_noise_texture` and `setup_wind_noise_texture_system` |
+| `src/game/systems/map.rs` | Registered `MaterialPlugin::<GrassMaterial>`, added `setup_wind_noise_texture_system` to Startup, updated `spawn_map` and `spawn_map_markers` to propagate `Option<ResMut<Assets<GrassMaterial>>>` |
+| `benches/grass_instancing.rs` | Updated to use `GrassMaterial` instead of `StandardMaterial` |
+
+### New Types (advanced_grass.rs)
+
+| Type | Description |
+|---|---|
+| `GrassWindUniform` | GPU-aligned uniform struct (`ShaderType`): strength, frequency, direction, wind_system, perlin_scale, `_pad` |
+| `GrassWindExtension` | `MaterialExtension` with `#[uniform(100)]` wind + `#[texture(101)]`/`#[sampler(102)]` noise |
+| `GrassMaterial` | Type alias for `ExtendedMaterial<StandardMaterial, GrassWindExtension>` |
+| `WindNoiseTexture` | Bevy resource wrapping `Handle<Image>` for the 512×512 fBm Perlin noise texture |
+
+### WGSL Binding Layout
+
+Bindings start at 100 to avoid collisions with `StandardMaterial`'s reserved groups:
+
+| Binding | Type | Purpose |
+|---|---|---|
+| `@group(2) @binding(100)` | `uniform GrassWindUniform` | Wind parameters |
+| `@group(2) @binding(101)` | `texture_2d<f32>` | Perlin noise texture |
+| `@group(2) @binding(102)` | `sampler` | Noise sampler |
+
+### Key Design Decisions
+
+- **`textureSampleLevel` not `textureSample`**: vertex shaders in WGSL require explicit LOD; used level 0.
+- **`bevy::shader::ShaderRef`** (not `bevy::render::render_resource::ShaderRef`): the type is in the `bevy_shader` crate.
+- **`Option<ResMut<Assets<GrassMaterial>>>`** in `spawn_map` / `spawn_map_markers`: makes the parameter optional so tests using `MapManagerPlugin` (without `MaterialPlugin::<GrassMaterial>`) don't fail resource validation; grass is silently skipped when the resource is absent.
+- **512×512 RGBA8 fBm noise texture**: generated at startup by `setup_wind_noise_texture_system`; falls back to a 1×1 white placeholder when `WindConfig` is absent or `wind_system` is not `Perlin`.
+- **`GrassAssetCache.set_wind()`**: clears cached materials so they are recreated with updated wind uniforms on map transition.
+- **`#[allow(clippy::too_many_arguments)]`** on `build_grass_chunks_system`: adding `Res<Assets<GrassMaterial>>` pushed arg count to 8.
+
+### Quality Gates
+
+```text
+cargo fmt     → clean (no output)
+cargo check   → Finished 0 errors
+cargo clippy  → Finished 0 warnings
+cargo nextest → 5212 passed, 8 skipped, 0 failed
 ```
 
 ---

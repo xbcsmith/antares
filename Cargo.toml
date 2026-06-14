@@ -35,6 +35,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ordered-float = "4.0"
 image = { version = "0.25", features = ["png"] }
+noise = "0.9"
+bytemuck = { version = "1", features = ["derive"] }
 
 [[bin]]
 name = "antares"
@@ -43,6 +45,14 @@ path = "src/bin/antares.rs"
 [[bin]]
 name = "antares-sdk"
 path = "src/bin/antares_sdk.rs"
+
+[[bin]]
+name = "generate-foliage-textures"
+path = "src/bin/generate_foliage_textures.rs"
+
+[[bin]]
+name = "generate-normal-map"
+path = "src/bin/generate_normal_map.rs"
 
 [dev-dependencies]
 tempfile = "3.23"

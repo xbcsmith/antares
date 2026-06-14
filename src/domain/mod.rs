@@ -109,3 +109,6 @@ pub use world::landscape::{
     LandscapeCategory, LandscapeDatabase, LandscapeDatabaseError, LandscapeDefinition,
     LandscapeFlags, LandscapeMeshDatabase, LandscapePlacement,
 };
+
+// Re-export wind configuration types
+pub use world::wind::{CampaignWindConfig, WindSystemKind};
