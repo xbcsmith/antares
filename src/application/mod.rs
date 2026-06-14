@@ -1872,7 +1872,7 @@ impl GameState {
                 }
             }
 
-            crate::domain::world::EventResult::Treasure { loot } => {
+            crate::domain::world::EventResult::Treasure { loot, .. } => {
                 // Distribute loot items across party members with inventory
                 // space.  Each item ID in the loot vec is an `ItemId` (u8).
                 for item_byte in &loot {
@@ -3005,6 +3005,8 @@ mod tests {
                 items: vec![item_a, item_b],
                 gold: 5,
                 gems: 2,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         let mut state = GameState::new();
@@ -5926,6 +5928,8 @@ mod tests {
                 name: "Chest".to_string(),
                 description: "A shiny chest".to_string(),
                 loot: vec![5, 10],
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         state.world = World::new();
@@ -5966,6 +5970,8 @@ mod tests {
                 name: "Chest".to_string(),
                 description: "".to_string(),
                 loot: vec![1],
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         state.world = World::new();

@@ -398,6 +398,8 @@ pub fn try_interact_locked_container_event(
                     items: vec![],
                     gold: 0,
                     gems: 0,
+                    mesh_id: None,
+                    dialogue_id: None,
                 },
             );
         }
@@ -409,6 +411,8 @@ pub fn try_interact_locked_container_event(
                 items: vec![],
                 gold: 0,
                 gems: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
             position: target,
         });
@@ -454,6 +458,8 @@ pub fn try_interact_locked_container_event(
                         items: vec![],
                         gold: 0,
                         gems: 0,
+                        mesh_id: None,
+                        dialogue_id: None,
                     },
                 );
             }
@@ -466,6 +472,8 @@ pub fn try_interact_locked_container_event(
                     items: vec![],
                     gold: 0,
                     gems: 0,
+                    mesh_id: None,
+                    dialogue_id: None,
                 },
                 position: target,
             });
@@ -1058,6 +1066,8 @@ mod tests {
                     lock_id: DOOR_LOCK_ID.to_string(),
                     key_item_id: Some(DOOR_KEY_ID),
                     initial_trap_chance: 0,
+                    mesh_id: None,
+                    dialogue_id: None,
                 },
             );
             if let Some(tile) = map.get_tile_mut(Position::new(5, 4)) {
@@ -1111,6 +1121,8 @@ mod tests {
                     lock_id: DOOR_LOCK_ID.to_string(),
                     key_item_id: Some(DOOR_KEY_ID),
                     initial_trap_chance: 0,
+                    mesh_id: None,
+                    dialogue_id: None,
                 },
             );
             map.lock_states

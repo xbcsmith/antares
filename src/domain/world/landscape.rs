@@ -1617,6 +1617,8 @@ mod tests {
                 text: "Read me".to_string(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         map.landscape_placements
@@ -1707,6 +1709,8 @@ mod tests {
                 text: "Read me".to_string(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         map.landscape_placements
@@ -1742,6 +1746,8 @@ mod tests {
                 text: "Read me".to_string(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 

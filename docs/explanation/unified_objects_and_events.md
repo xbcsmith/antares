@@ -132,10 +132,10 @@ single funnel.
 
 #### 1.5 Deliverables
 
-- [ ] `mesh_id` and `dialogue_id` fields added to `Treasure`, `Sign`, `Container`,
+- [x] `mesh_id` and `dialogue_id` fields added to `Treasure`, `Sign`, `Container`,
   `LockedContainer`, `LockedDoor` in `types.rs`
-- [ ] `EventResult` variants updated to surface the new fields
-- [ ] Round-trip serialization tests pass
+- [x] `EventResult` variants updated to surface the new fields
+- [x] Round-trip serialization tests pass
 
 #### 1.6 Success Criteria
 
@@ -216,7 +216,7 @@ update the [E]-dispatch for `Treasure`, `Sign`, `Container`, `LockedContainer`, 
   Door event, so the `TriggerEvent` handlers can locate and remove the originating event.
 - The dialogue must be able to trigger the original effect via a `DialogueAction::TriggerEvent`
   action (mechanism exists: `dialogue.rs:1010` `execute_action`, matched at `:1095`). Add new
-  `event_name` branches alongside the existing `"open_inn_party_management"` / 
+  `event_name` branches alongside the existing `"open_inn_party_management"` /
   `"recruit_character_to_party"` / `"recruit_character_to_inn"` branches:
   - `"collect_treasure"` — runs the existing loot-collection + event-removal logic currently inside
     `try_interact_adjacent_world_events` (`exploration_interact.rs:688`); extract it into a shared

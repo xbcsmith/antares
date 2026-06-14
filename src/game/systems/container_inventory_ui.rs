@@ -2112,6 +2112,8 @@ mod tests {
                 items: initial_items,
                 gold: 0,
                 gems: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         state.world.add_map(map);

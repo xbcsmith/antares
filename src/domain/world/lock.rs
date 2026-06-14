@@ -933,6 +933,8 @@ mod tests {
                 lock_id: "gate_a".to_string(),
                 key_item_id: None,
                 initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         map.add_event(
@@ -942,6 +944,8 @@ mod tests {
                 lock_id: "gate_b".to_string(),
                 key_item_id: Some(99),
                 initial_trap_chance: 20,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -979,6 +983,8 @@ mod tests {
                 lock_id: "open_door".to_string(),
                 key_item_id: None,
                 initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 

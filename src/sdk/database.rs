@@ -2195,6 +2195,8 @@ mod tests {
                 text: "Read me".to_string(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         map.landscape_placements
@@ -2248,6 +2250,8 @@ mod tests {
                 text: "Read me".to_string(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         let mut placement = LandscapePlacement::new(1, Position::new(1, 1));

@@ -1402,6 +1402,8 @@ mod interaction_tests {
                 text: "You found it!".to_string(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -2327,6 +2329,8 @@ mod locked_container_map_event_tests {
                     key_item_id,
                     items: vec![],
                     initial_trap_chance: 0,
+                    mesh_id: None,
+                    dialogue_id: None,
                 },
             );
             map.lock_states.insert(
@@ -2542,6 +2546,8 @@ mod locked_door_map_event_tests {
                     lock_id: LOCK_ID.to_string(),
                     key_item_id,
                     initial_trap_chance: 0,
+                    mesh_id: None,
+                    dialogue_id: None,
                 },
             );
             map.lock_states

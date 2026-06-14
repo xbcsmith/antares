@@ -4582,6 +4582,8 @@ mod tests {
                 text: "Facing South".to_string(),
                 time_condition: None,
                 facing: Some(Direction::South),
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -5855,6 +5857,8 @@ mod tests {
                 lock_id: "castle_gate".to_string(),
                 key_item_id: None,
                 initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         // Seed lock states so the spawn check sees is_locked = true.
@@ -5910,6 +5914,8 @@ mod tests {
                 lock_id: lock_id.clone(),
                 key_item_id: None,
                 initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         // Seed lock states so is_locked = true before the first frame.
