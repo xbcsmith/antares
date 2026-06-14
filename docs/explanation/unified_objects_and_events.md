@@ -182,10 +182,11 @@ paths are still resolved via the existing registry files until Phase 4 unifies t
 
 #### 2.5 Deliverables
 
-- [ ] `EventMeshMarker` component defined
-- [ ] `spawn_event_meshes` system implemented and wired into map load
-- [ ] `DespawnEventMesh` message and `despawn_event_mesh` handler implemented
-- [ ] Existing `RecruitableCharacter` mesh spawning refactored to use the shared path
+- [x] `EventMeshMarker` component defined
+- [x] `spawn_event_meshes` system implemented and wired into map load
+- [x] `DespawnEventMesh` message and `handle_despawn_event_mesh` handler implemented
+- [x] `cleanup_event_mesh_markers` passive cleanup wired into `MapManagerPlugin`
+- [ ] Existing `RecruitableCharacter` mesh spawning refactored to use the shared path (deferred to Phase 4 — recruitable path uses creature-specific components distinct from generic event meshes)
 
 #### 2.6 Success Criteria
 

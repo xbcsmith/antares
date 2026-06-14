@@ -255,6 +255,33 @@ pub struct DespawnEncounterVisual {
     pub position: types::Position,
 }
 
+/// Message requesting immediate despawn of the mesh visual spawned for a map event.
+///
+/// Emitted by any system that consumes or removes a map event that carried a
+/// `mesh_id` (e.g. collecting `Treasure`, unlocking a `LockedDoor` via dialogue).
+/// `cleanup_event_mesh_markers` serves as a passive fallback.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::map::DespawnEventMesh;
+/// use antares::domain::types::Position;
+///
+/// let msg = DespawnEventMesh {
+///     map_id: 1,
+///     position: Position::new(7, 3),
+/// };
+/// assert_eq!(msg.map_id, 1);
+/// assert_eq!(msg.position, Position::new(7, 3));
+/// ```
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct DespawnEventMesh {
+    /// Map ID containing the event mesh visual.
+    pub map_id: types::MapId,
+    /// Tile position of the event whose mesh should be removed.
+    pub position: types::Position,
+}
+
 /// Component tagging an entity as a visual marker for a map encounter.
 ///
 /// Despawned by `cleanup_encounter_visuals` when the backing `MapEvent::Encounter`
@@ -285,6 +312,30 @@ pub struct LockedDoorMarker {
     /// Matches `MapEvent::LockedDoor::lock_id` so it can be despawned
     /// after the door is unlocked.
     pub lock_id: String,
+}
+
+/// Component tagging a spawned mesh entity as the visual for a map event that carries a
+/// `mesh_id` (e.g. `MapEvent::Treasure`, `MapEvent::LockedDoor`).
+///
+/// Despawned by `handle_despawn_event_mesh` (immediate, message-driven) or
+/// `cleanup_event_mesh_markers` (passive per-frame safety net) when the backing
+/// event is consumed or removed.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::map::EventMeshMarker;
+/// use antares::domain::types::Position;
+///
+/// let marker = EventMeshMarker { map_id: 1, position: Position::new(5, 5) };
+/// assert_eq!(marker.map_id, 1);
+/// ```
+#[derive(bevy::prelude::Component, Debug, Clone, PartialEq, Eq)]
+pub struct EventMeshMarker {
+    /// Map ID this entity belongs to.
+    pub map_id: types::MapId,
+    /// Tile position of the originating map event.
+    pub position: types::Position,
 }
 
 /// Event trigger component - attached to entities that represent in-world event triggers
@@ -345,6 +396,7 @@ impl Plugin for MapManagerPlugin {
         app.add_message::<MapChangeEvent>()
             .add_message::<DespawnRecruitableVisual>()
             .add_message::<DespawnEncounterVisual>()
+            .add_message::<DespawnEventMesh>()
             // Register SetFacing message and proximity/facing systems
             .add_plugins(crate::game::systems::facing::FacingPlugin)
             // Seed lock_states for every map present at startup.
@@ -365,12 +417,14 @@ impl Plugin for MapManagerPlugin {
                         (
                             handle_despawn_recruitable_visual,
                             handle_despawn_encounter_visual,
+                            handle_despawn_event_mesh,
                         ),
                         ApplyDeferred,
                         (
                             cleanup_recruitable_visuals,
                             cleanup_encounter_visuals,
                             cleanup_locked_door_markers,
+                            cleanup_event_mesh_markers,
                         ),
                     )
                         .chain(),
@@ -505,6 +559,70 @@ fn cleanup_locked_door_markers(
             .get(marker.lock_id.as_str())
             .map(|ls| ls.is_locked)
             .unwrap_or(false);
+
+        if !should_keep {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+/// Handles explicit event-mesh despawn requests emitted when a map event is consumed.
+///
+/// Provides an immediate despawn path (same frame the event is consumed) so the
+/// mesh disappears without waiting for the passive `cleanup_event_mesh_markers`
+/// pass on the next frame.
+fn handle_despawn_event_mesh(
+    mut commands: Commands,
+    mut ev_reader: MessageReader<DespawnEventMesh>,
+    query: Query<(Entity, &EventMeshMarker)>,
+) {
+    for ev in ev_reader.read() {
+        for (entity, marker) in query.iter() {
+            if marker.map_id == ev.map_id && marker.position == ev.position {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+/// Passive cleanup: despawns `EventMeshMarker` entities whose backing map event
+/// no longer carries a `mesh_id` (or has been removed entirely).
+///
+/// Mirrors `cleanup_encounter_visuals`. Runs every frame as a safety net after
+/// the explicit `handle_despawn_event_mesh` handler.
+fn cleanup_event_mesh_markers(
+    mut commands: Commands,
+    global_state: Res<GlobalState>,
+    query: Query<(Entity, &EventMeshMarker)>,
+) {
+    let game_state = &global_state.0;
+    for (entity, marker) in query.iter() {
+        let Some(map) = game_state.world.get_map(marker.map_id) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+
+        let should_keep = matches!(
+            map.get_event(marker.position),
+            Some(
+                world::MapEvent::Treasure {
+                    mesh_id: Some(_),
+                    ..
+                } | world::MapEvent::Sign {
+                    mesh_id: Some(_),
+                    ..
+                } | world::MapEvent::Container {
+                    mesh_id: Some(_),
+                    ..
+                } | world::MapEvent::LockedDoor {
+                    mesh_id: Some(_),
+                    ..
+                } | world::MapEvent::LockedContainer {
+                    mesh_id: Some(_),
+                    ..
+                }
+            )
+        );
 
         if !should_keep {
             commands.entity(entity).despawn();
@@ -1119,6 +1237,110 @@ fn spawn_landscape_placements(
             placement,
             definition,
         );
+    }
+}
+
+/// Spawns mesh entities for all map events that carry a `mesh_id`.
+///
+/// Iterates `map.events` and, for each event whose `mesh_id` field is `Some`,
+/// attempts to resolve the ID in `landscape_meshes` by parsing it as a numeric
+/// [`LandscapeMeshId`](crate::domain::types::LandscapeMeshId).  When a matching
+/// definition is found the mesh is spawned via
+/// [`spawn_creature`](crate::game::systems::creature_spawning::spawn_creature);
+/// otherwise a placeholder cube is spawned so the tile has a visible marker.
+///
+/// **Phase 4 note:** this interim lookup will be replaced by an
+/// `object_mesh_registry.ron` string-keyed registry that covers all object types.
+/// The `EventMeshMarker` tagging and despawn wiring are already final.
+fn spawn_event_meshes(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    _asset_server: &AssetServer,
+    map: &world::Map,
+    landscape_meshes: &world::LandscapeMeshDatabase,
+) {
+    use crate::game::systems::creature_spawning::spawn_creature;
+
+    for (position, event) in map.events.iter() {
+        let mesh_id_str: &str = match event {
+            world::MapEvent::Treasure {
+                mesh_id: Some(id), ..
+            }
+            | world::MapEvent::Sign {
+                mesh_id: Some(id), ..
+            }
+            | world::MapEvent::Container {
+                mesh_id: Some(id), ..
+            }
+            | world::MapEvent::LockedDoor {
+                mesh_id: Some(id), ..
+            }
+            | world::MapEvent::LockedContainer {
+                mesh_id: Some(id), ..
+            } => id,
+            _ => continue,
+        };
+
+        let x = position.x as f32;
+        let y = position.y as f32;
+        let world_pos = bevy::math::Vec3::new(x + TILE_CENTER_OFFSET, 0.5, y + TILE_CENTER_OFFSET);
+
+        // Interim: try to resolve as a numeric landscape mesh ID.
+        // Phase 4 replaces this with an object_mesh_registry.ron string lookup.
+        let resolved = mesh_id_str
+            .parse::<types::LandscapeMeshId>()
+            .ok()
+            .and_then(|numeric_id| landscape_meshes.get_mesh(numeric_id));
+
+        let root = if let Some(creature_def) = resolved {
+            spawn_creature(
+                commands,
+                creature_def,
+                meshes,
+                materials,
+                world_pos,
+                None,
+                None,
+                None,
+            )
+        } else {
+            if !mesh_id_str.is_empty() {
+                warn!(
+                    mesh_id = mesh_id_str,
+                    x = position.x,
+                    y = position.y,
+                    "Event mesh_id not found in landscape registry — spawning placeholder"
+                );
+            }
+            let placeholder_mesh = meshes.add(bevy::math::primitives::Cuboid::new(0.4, 0.8, 0.4));
+            let placeholder_mat = materials.add(StandardMaterial {
+                base_color: bevy::prelude::Color::srgb(0.7, 0.3, 0.7),
+                perceptual_roughness: 0.7,
+                ..default()
+            });
+            commands
+                .spawn((
+                    Mesh3d(placeholder_mesh),
+                    MeshMaterial3d(placeholder_mat),
+                    bevy::prelude::Transform::from_translation(world_pos),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                    InheritedVisibility::default(),
+                    ViewVisibility::default(),
+                    Name::new(format!("EventMesh(placeholder): {}", mesh_id_str)),
+                ))
+                .id()
+        };
+
+        commands.entity(root).insert((
+            MapEntity(map.id),
+            TileCoord(*position),
+            EventMeshMarker {
+                map_id: map.id,
+                position: *position,
+            },
+        ));
     }
 }
 
@@ -1925,6 +2147,18 @@ fn spawn_map(
             &asset_server,
             map,
             &content.0.landscape,
+            &content.0.landscape_meshes,
+        );
+
+        // Spawn mesh visuals for any map event that carries a mesh_id field.
+        // These are tagged with EventMeshMarker so they can be despawned when
+        // the event is consumed (e.g. treasure looted, door unlocked).
+        spawn_event_meshes(
+            &mut commands,
+            meshes.as_mut(),
+            materials.as_mut(),
+            &asset_server,
+            map,
             &content.0.landscape_meshes,
         );
 
@@ -6266,6 +6500,187 @@ mod tests {
                 .iter()
                 .map(|(e, _)| (e.landscape_id, e.mesh_id))
                 .collect::<Vec<_>>()
+        );
+    }
+
+    // ===== Phase 2: EventMeshMarker spawn / despawn tests =====
+
+    /// P2-EM1: A Treasure event with mesh_id causes spawn_event_meshes to create an
+    /// entity tagged with EventMeshMarker at the correct map position.
+    #[test]
+    fn test_event_mesh_marker_spawned_for_treasure_with_mesh_id() {
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapRenderingPlugin);
+
+        let db = crate::sdk::database::ContentDatabase::new();
+        app.insert_resource(crate::application::resources::GameContent::new(db));
+
+        let map_id: crate::domain::types::MapId = 1;
+        let treasure_pos = Position::new(4, 6);
+
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            treasure_pos,
+            MapEvent::Treasure {
+                name: "Magic Chest".to_string(),
+                description: String::new(),
+                loot: vec![],
+                mesh_id: Some("test_mesh".to_string()),
+                dialogue_id: None,
+            },
+        );
+
+        let mut game_state = crate::application::GameState::new();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(map_id);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<(&EventMeshMarker, &TileCoord)>();
+        let results: Vec<_> = query.iter(&*world_ref).collect();
+        assert_eq!(
+            results.len(),
+            1,
+            "Expected exactly one EventMeshMarker entity for Treasure with mesh_id"
+        );
+        assert_eq!(results[0].0.map_id, map_id);
+        assert_eq!(results[0].1 .0, treasure_pos);
+    }
+
+    /// P2-EM2: An event without mesh_id must not produce an EventMeshMarker entity.
+    #[test]
+    fn test_event_mesh_marker_not_spawned_without_mesh_id() {
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapRenderingPlugin);
+
+        let db = crate::sdk::database::ContentDatabase::new();
+        app.insert_resource(crate::application::resources::GameContent::new(db));
+
+        let map_id: crate::domain::types::MapId = 1;
+        let pos = Position::new(2, 2);
+
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            pos,
+            MapEvent::Treasure {
+                name: "Plain Chest".to_string(),
+                description: String::new(),
+                loot: vec![],
+                mesh_id: None,
+                dialogue_id: None,
+            },
+        );
+
+        let mut game_state = crate::application::GameState::new();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(map_id);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<&EventMeshMarker>();
+        let count = query.iter(&*world_ref).count();
+        assert_eq!(
+            count, 0,
+            "No EventMeshMarker expected for event without mesh_id"
+        );
+    }
+
+    /// P2-EM3: cleanup_event_mesh_markers despawns the EventMeshMarker entity
+    /// once the backing map event no longer carries a mesh_id.
+    #[test]
+    fn test_event_mesh_marker_despawned_when_event_removed() {
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<bevy::prelude::Image>();
+        app.add_plugins(MapManagerPlugin);
+
+        let map_id: crate::domain::types::MapId = 1;
+        let pos = Position::new(3, 7);
+
+        let mut map = Map::new(map_id, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            pos,
+            MapEvent::Treasure {
+                name: "Chest".to_string(),
+                description: String::new(),
+                loot: vec![],
+                mesh_id: Some("chest_mesh".to_string()),
+                dialogue_id: None,
+            },
+        );
+
+        let mut game_state = crate::application::GameState::new();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(map_id);
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+        app.insert_resource(crate::application::resources::GameContent::new(
+            crate::sdk::database::ContentDatabase::new(),
+        ));
+        app.insert_resource(crate::game::resources::sprite_assets::SpriteAssets::default());
+        app.insert_resource(Assets::<Mesh>::default());
+        app.insert_resource(Assets::<StandardMaterial>::default());
+        app.insert_resource(crate::game::resources::GrassQualitySettings::default());
+
+        // Manually spawn an EventMeshMarker entity (simulates what spawn_map does).
+        let marker_entity = app
+            .world_mut()
+            .spawn((
+                EventMeshMarker {
+                    map_id,
+                    position: pos,
+                },
+                TileCoord(pos),
+                MapEntity(map_id),
+            ))
+            .id();
+
+        // First frame: event is present with mesh_id — entity must survive.
+        app.update();
+        assert!(
+            app.world().get_entity(marker_entity).is_ok(),
+            "Entity should survive while the event with mesh_id is present"
+        );
+
+        // Remove the event (simulates treasure being looted).
+        {
+            let mut gs = app
+                .world_mut()
+                .resource_mut::<crate::game::resources::GlobalState>();
+            let map = gs.0.world.get_map_mut(map_id).expect("map must exist");
+            map.remove_event(pos);
+        }
+
+        // Second frame: cleanup_event_mesh_markers must despawn the entity.
+        app.update();
+        assert!(
+            app.world().get_entity(marker_entity).is_err(),
+            "Entity should be despawned after the backing event is removed"
         );
     }
 }
