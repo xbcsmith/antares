@@ -8440,8 +8440,10 @@
             y: 12,
         ): Treasure(
             name: "Barred Passage",
-            description: "",
+            description: "A heavy iron bar blocks the passage.",
             loot: [],
+            mesh_id: Some("barred_passage"),
+            dialogue_id: Some(500),
         ),
         (
             x: 18,

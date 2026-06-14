@@ -2,6 +2,55 @@
 
 ---
 
+## Unified Interactive Objects — Phase 5: Campaign Data — Barred Passage (2026)
+
+**Goal:** Implement Phase 5 of the Unified Interactive Objects plan: convert the
+`Barred Passage` `Treasure` event at map tile `(17, 12)` from a plain event to a
+full interactive object with a `mesh_id`, `dialogue_id`, and registered mesh asset.
+
+### What Changed
+
+**`campaigns/tutorial/data/maps/map_1.ron`** — Updated `Treasure` at `(17, 12)`:
+added description, `mesh_id: Some("barred_passage")`, `dialogue_id: Some(500)`.
+
+**`campaigns/tutorial/data/object_mesh_registry.ron`** (new) — Tutorial campaign
+registry mapping `"barred_passage"` to `"assets/meshes/objects/barred_door.ron"`.
+
+**`campaigns/tutorial/assets/meshes/objects/barred_door.ron`** (new) — Iron gate
+`CreatureDefinition` (`id: 20001`): 3 vertical bars + 2 horizontal crossbars,
+iron grey `(0.35, 0.35, 0.40, 1.0)`, ~0.8 wide x 2.0 tall in world units.
+
+**`campaigns/tutorial/data/dialogues.ron`** — Added dialogue `id: 500`
+`"Barred Passage"`: root node text "The passage is barred shut...", one terminal
+choice "Leave it for now.", `repeatable: true`.
+
+**`data/test_campaign/data/maps/map_1.ron`** — Mirrored Barred Passage event at
+`(17, 12)` for integration tests (Implementation Rule 5).
+
+**`data/test_campaign/data/object_mesh_registry.ron`** — Added `"barred_passage"`
+alongside the existing landscape mesh entries.
+
+**`data/test_campaign/assets/meshes/objects/barred_door.ron`** (new) — Identical
+mesh definition used by integration tests to validate round-trip parsing.
+
+**`data/test_campaign/data/dialogues.ron`** — Added dialogue `id: 500` in
+test-campaign format (no `sdk_metadata`).
+
+**`tests/barred_passage_integration_test.rs`** (new) — Ten integration tests
+(P5-BP1 through P5-BP10) covering: event existence and fields, dialogue content,
+object mesh registry registration, and full-campaign parse validation.
+
+### Quality Gates
+
+```text
+cargo fmt      → clean
+cargo check    → Finished 0 errors
+cargo clippy   → Finished 0 warnings
+cargo nextest  → 5278 passed, 0 failed, 8 skipped
+```
+
+---
+
 ## Unified Interactive Objects — Phase 4: Mesh Registry Unification (2026)
 
 **Goal:** Implement Phase 4 of the Unified Interactive Objects plan — unify the
@@ -102,13 +151,13 @@ their campaign-relative `CreatureDefinition` asset files.
 
 ### Design Decisions
 
-| Decision | Rationale |
-| --- | --- |
-| String keys (`HashMap<String, …>`) | Allows human-readable names in map event `mesh_id` fields without breaking existing numeric campaigns — legacy IDs become `"11001"` etc. |
-| `or_insert_with` in merge | Primary `object_mesh_registry.ron` entries take precedence; legacy registries fill gaps without overwriting. |
-| `furniture_meshes` loaded locally in SDK | `ContentDatabase` did not previously expose a `furniture_meshes` field; loading locally for merge avoids adding a new public field and keeps the API surface small. |
-| `item_mesh_registry.ron` excluded | Item meshes follow a `DroppedItem` spawn path separate from interactive object rendering. |
-| `reason` field name in `AssetReadError` | `thiserror` treats a field named `source` as an error source, requiring `std::error::Error` on the type. The field is `String`, so renaming to `reason` avoids the compile error. |
+| Decision                                 | Rationale                                                                                                                                                                         |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| String keys (`HashMap<String, …>`)       | Allows human-readable names in map event `mesh_id` fields without breaking existing numeric campaigns — legacy IDs become `"11001"` etc.                                          |
+| `or_insert_with` in merge                | Primary `object_mesh_registry.ron` entries take precedence; legacy registries fill gaps without overwriting.                                                                      |
+| `furniture_meshes` loaded locally in SDK | `ContentDatabase` did not previously expose a `furniture_meshes` field; loading locally for merge avoids adding a new public field and keeps the API surface small.               |
+| `item_mesh_registry.ron` excluded        | Item meshes follow a `DroppedItem` spawn path separate from interactive object rendering.                                                                                         |
+| `reason` field name in `AssetReadError`  | `thiserror` treats a field named `source` as an error source, requiring `std::error::Error` on the type. The field is `String`, so renaming to `reason` avoids the compile error. |
 
 ### Quality Gate Results
 

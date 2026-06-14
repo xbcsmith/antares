@@ -1,0 +1,101 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+//
+// Barred door / gate mesh for event tile visuals.
+// Three vertical iron bars with two horizontal crossbars.
+// Scale is in world units; the gate spans ~0.8 wide and 2.0 tall.
+(
+    id: 20001,
+    name: "BarredDoor",
+    meshes: [
+        (
+            name: Some("bar_left"),
+            vertices: [(-0.36, 0.0, -0.04), (-0.28, 0.0, -0.04), (-0.28, 2.0, -0.04), (-0.36, 2.0, -0.04), (-0.36, 0.0, 0.04), (-0.28, 0.0, 0.04), (-0.28, 2.0, 0.04), (-0.36, 2.0, 0.04)],
+            indices: [0, 1, 2, 2, 3, 0, 1, 5, 6, 6, 2, 1, 7, 6, 5, 5, 4, 7, 4, 0, 3, 3, 7, 4, 4, 5, 1, 1, 0, 4, 3, 2, 6, 6, 7, 3],
+            normals: None,
+            uvs: None,
+            color: (0.35, 0.35, 0.40, 1.0),
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        (
+            name: Some("bar_center"),
+            vertices: [(-0.04, 0.0, -0.04), (0.04, 0.0, -0.04), (0.04, 2.0, -0.04), (-0.04, 2.0, -0.04), (-0.04, 0.0, 0.04), (0.04, 0.0, 0.04), (0.04, 2.0, 0.04), (-0.04, 2.0, 0.04)],
+            indices: [0, 1, 2, 2, 3, 0, 1, 5, 6, 6, 2, 1, 7, 6, 5, 5, 4, 7, 4, 0, 3, 3, 7, 4, 4, 5, 1, 1, 0, 4, 3, 2, 6, 6, 7, 3],
+            normals: None,
+            uvs: None,
+            color: (0.35, 0.35, 0.40, 1.0),
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        (
+            name: Some("bar_right"),
+            vertices: [(0.28, 0.0, -0.04), (0.36, 0.0, -0.04), (0.36, 2.0, -0.04), (0.28, 2.0, -0.04), (0.28, 0.0, 0.04), (0.36, 0.0, 0.04), (0.36, 2.0, 0.04), (0.28, 2.0, 0.04)],
+            indices: [0, 1, 2, 2, 3, 0, 1, 5, 6, 6, 2, 1, 7, 6, 5, 5, 4, 7, 4, 0, 3, 3, 7, 4, 4, 5, 1, 1, 0, 4, 3, 2, 6, 6, 7, 3],
+            normals: None,
+            uvs: None,
+            color: (0.35, 0.35, 0.40, 1.0),
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        (
+            name: Some("crossbar_low"),
+            vertices: [(-0.38, 0.46, -0.04), (0.38, 0.46, -0.04), (0.38, 0.54, -0.04), (-0.38, 0.54, -0.04), (-0.38, 0.46, 0.04), (0.38, 0.46, 0.04), (0.38, 0.54, 0.04), (-0.38, 0.54, 0.04)],
+            indices: [0, 1, 2, 2, 3, 0, 1, 5, 6, 6, 2, 1, 7, 6, 5, 5, 4, 7, 4, 0, 3, 3, 7, 4, 4, 5, 1, 1, 0, 4, 3, 2, 6, 6, 7, 3],
+            normals: None,
+            uvs: None,
+            color: (0.30, 0.30, 0.35, 1.0),
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+        (
+            name: Some("crossbar_high"),
+            vertices: [(-0.38, 1.46, -0.04), (0.38, 1.46, -0.04), (0.38, 1.54, -0.04), (-0.38, 1.54, -0.04), (-0.38, 1.46, 0.04), (0.38, 1.46, 0.04), (0.38, 1.54, 0.04), (-0.38, 1.54, 0.04)],
+            indices: [0, 1, 2, 2, 3, 0, 1, 5, 6, 6, 2, 1, 7, 6, 5, 5, 4, 7, 4, 0, 3, 3, 7, 4, 4, 5, 1, 1, 0, 4, 3, 2, 6, 6, 7, 3],
+            normals: None,
+            uvs: None,
+            color: (0.30, 0.30, 0.35, 1.0),
+            lod_levels: None,
+            lod_distances: None,
+            material: None,
+            texture_path: None,
+        ),
+    ],
+    mesh_transforms: [
+        (
+            translation: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+        ),
+        (
+            translation: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+        ),
+        (
+            translation: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+        ),
+        (
+            translation: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+        ),
+        (
+            translation: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+        ),
+    ],
+    scale: 1.0,
+    color_tint: None,
+)
