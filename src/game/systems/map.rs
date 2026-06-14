@@ -1111,7 +1111,7 @@ fn try_spawn_terrain_tree_as_landscape_mesh(
     tree_type: Option<world::TreeType>,
     anchor: vegetation_placement::VegetationAnchor,
     landscape: &world::LandscapeDatabase,
-    landscape_meshes: &world::LandscapeMeshDatabase,
+    object_meshes: &world::ObjectMeshDatabase,
 ) -> bool {
     let Some(definition) = find_landscape_definition_for_tree_type(tree_type, landscape) else {
         warn!(
@@ -1132,13 +1132,13 @@ fn try_spawn_terrain_tree_as_landscape_mesh(
         );
         return false;
     };
-    let Some(mesh_def) = landscape_meshes.get_mesh(mesh_id) else {
+    let Some(mesh_def) = object_meshes.lookup(&mesh_id.to_string()) else {
         warn!(
             x = position.x,
             y = position.y,
             ?tree_type,
             mesh_id,
-            "Mesh not found in landscape_meshes — falling back to procedural"
+            "Mesh not found in object mesh registry — falling back to procedural"
         );
         return false;
     };
@@ -1182,7 +1182,7 @@ fn spawn_landscape_placements(
     asset_server: &AssetServer,
     map: &world::Map,
     landscape: &world::LandscapeDatabase,
-    landscape_meshes: &world::LandscapeMeshDatabase,
+    object_meshes: &world::ObjectMeshDatabase,
 ) {
     for (placement_index, placement) in map.landscape_placements.iter().enumerate() {
         if !map.is_valid_position(placement.position) {
@@ -1206,7 +1206,7 @@ fn spawn_landscape_placements(
         };
 
         if let Some(mesh_id) = definition.mesh_id {
-            if let Some(mesh_def) = landscape_meshes.get_mesh(mesh_id) {
+            if let Some(mesh_def) = object_meshes.lookup(&mesh_id.to_string()) {
                 spawn_imported_landscape_mesh(
                     commands,
                     meshes,
@@ -1243,22 +1243,19 @@ fn spawn_landscape_placements(
 /// Spawns mesh entities for all map events that carry a `mesh_id`.
 ///
 /// Iterates `map.events` and, for each event whose `mesh_id` field is `Some`,
-/// attempts to resolve the ID in `landscape_meshes` by parsing it as a numeric
-/// [`LandscapeMeshId`](crate::domain::types::LandscapeMeshId).  When a matching
-/// definition is found the mesh is spawned via
+/// resolves the ID via the unified [`world::ObjectMeshDatabase`] (Phase 4).
+/// When a matching definition is found the mesh is spawned via
 /// [`spawn_creature`](crate::game::systems::creature_spawning::spawn_creature);
 /// otherwise a placeholder cube is spawned so the tile has a visible marker.
 ///
-/// **Phase 4 note:** this interim lookup will be replaced by an
-/// `object_mesh_registry.ron` string-keyed registry that covers all object types.
-/// The `EventMeshMarker` tagging and despawn wiring are already final.
+/// The `EventMeshMarker` tagging and despawn wiring are final.
 fn spawn_event_meshes(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     _asset_server: &AssetServer,
     map: &world::Map,
-    landscape_meshes: &world::LandscapeMeshDatabase,
+    object_meshes: &world::ObjectMeshDatabase,
 ) {
     use crate::game::systems::creature_spawning::spawn_creature;
 
@@ -1286,12 +1283,7 @@ fn spawn_event_meshes(
         let y = position.y as f32;
         let world_pos = bevy::math::Vec3::new(x + TILE_CENTER_OFFSET, 0.5, y + TILE_CENTER_OFFSET);
 
-        // Interim: try to resolve as a numeric landscape mesh ID.
-        // Phase 4 replaces this with an object_mesh_registry.ron string lookup.
-        let resolved = mesh_id_str
-            .parse::<types::LandscapeMeshId>()
-            .ok()
-            .and_then(|numeric_id| landscape_meshes.get_mesh(numeric_id));
+        let resolved = object_meshes.lookup(mesh_id_str);
 
         let root = if let Some(creature_def) = resolved {
             spawn_creature(
@@ -1310,7 +1302,7 @@ fn spawn_event_meshes(
                     mesh_id = mesh_id_str,
                     x = position.x,
                     y = position.y,
-                    "Event mesh_id not found in landscape registry — spawning placeholder"
+                    "Event mesh_id not found in object mesh registry — spawning placeholder"
                 );
             }
             let placeholder_mesh = meshes.add(bevy::math::primitives::Cuboid::new(0.4, 0.8, 0.4));
@@ -1815,7 +1807,7 @@ fn spawn_map(
                                                 Some(t),
                                                 shrub_anchor,
                                                 &content.0.landscape,
-                                                &content.0.landscape_meshes,
+                                                &content.0.object_meshes,
                                             );
                                             if !spawned {
                                                 let mut ctx = procedural_meshes::MeshSpawnContext {
@@ -1847,7 +1839,7 @@ fn spawn_map(
                                             Some(t),
                                             tree_anchor,
                                             &content.0.landscape,
-                                            &content.0.landscape_meshes,
+                                            &content.0.object_meshes,
                                         );
                                         if !spawned {
                                             let mut ctx = procedural_meshes::MeshSpawnContext {
@@ -1881,7 +1873,7 @@ fn spawn_map(
                                             None,
                                             tree_anchor,
                                             &content.0.landscape,
-                                            &content.0.landscape_meshes,
+                                            &content.0.object_meshes,
                                         );
                                         if !spawned {
                                             let mut ctx = procedural_meshes::MeshSpawnContext {
@@ -1924,7 +1916,7 @@ fn spawn_map(
                                         Some(world::TreeType::Shrub),
                                         shrub_anchor,
                                         &content.0.landscape,
-                                        &content.0.landscape_meshes,
+                                        &content.0.object_meshes,
                                     );
                                     if !spawned {
                                         let mut ctx = procedural_meshes::MeshSpawnContext {
@@ -2147,7 +2139,7 @@ fn spawn_map(
             &asset_server,
             map,
             &content.0.landscape,
-            &content.0.landscape_meshes,
+            &content.0.object_meshes,
         );
 
         // Spawn mesh visuals for any map event that carries a mesh_id field.
@@ -2159,7 +2151,7 @@ fn spawn_map(
             materials.as_mut(),
             &asset_server,
             map,
-            &content.0.landscape_meshes,
+            &content.0.object_meshes,
         );
 
         // Also spawn lightweight event trigger entities for any map events (so the

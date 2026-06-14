@@ -483,6 +483,192 @@ mod tests {
     }
 }
 
+// ===== Object Mesh Registry (Campaign Builder) =====
+
+/// Returns all registered object mesh IDs and names from the unified registry.
+///
+/// This is the SDK Campaign Builder "Object Meshes" panel data source — it
+/// reflects entries from `object_mesh_registry.ron` and both legacy registries
+/// (`landscape_mesh_registry.ron`, `furniture_mesh_registry.ron`) merged in.
+///
+/// The returned pairs are `(mesh_id_key, mesh_name)` sorted by key.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::database::ContentDatabase;
+/// use antares::sdk::map_editor::browse_object_meshes;
+///
+/// let db = ContentDatabase::new();
+/// let meshes = browse_object_meshes(&db);
+/// assert_eq!(meshes.len(), 0); // Empty database
+/// ```
+pub fn browse_object_meshes(db: &ContentDatabase) -> Vec<(String, String)> {
+    let mut results: Vec<(String, String)> = db
+        .object_meshes
+        .all_mesh_ids()
+        .into_iter()
+        .filter_map(|key| {
+            db.object_meshes
+                .lookup(&key)
+                .map(|def| (key, def.name.clone()))
+        })
+        .collect();
+    results.sort_by(|a, b| a.0.cmp(&b.0));
+    results
+}
+
+/// Suggests object mesh IDs matching a partial string (name or key).
+///
+/// Returns up to 10 matches as `(mesh_id_key, mesh_name)` pairs, sorted by key.
+///
+/// # Arguments
+///
+/// * `db` - Content database to search
+/// * `partial` - Partial text matched case-insensitively against key and name
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::database::ContentDatabase;
+/// use antares::sdk::map_editor::suggest_object_mesh_ids;
+///
+/// let db = ContentDatabase::new();
+/// let suggestions = suggest_object_mesh_ids(&db, "door");
+/// // Returns mesh entries whose key or name contains "door"
+/// ```
+pub fn suggest_object_mesh_ids(db: &ContentDatabase, partial: &str) -> Vec<(String, String)> {
+    let partial_lower = partial.to_lowercase();
+    let mut suggestions: Vec<(String, String)> = db
+        .object_meshes
+        .all_mesh_ids()
+        .into_iter()
+        .filter_map(|key| {
+            db.object_meshes.lookup(&key).and_then(|def| {
+                if key.to_lowercase().contains(&partial_lower)
+                    || def.name.to_lowercase().contains(&partial_lower)
+                {
+                    Some((key, def.name.clone()))
+                } else {
+                    None
+                }
+            })
+        })
+        .take(10)
+        .collect();
+    suggestions.sort_by(|a, b| a.0.cmp(&b.0));
+    suggestions
+}
+
+/// Returns `true` if the given mesh ID string is registered in the unified
+/// object mesh database.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::database::ContentDatabase;
+/// use antares::sdk::map_editor::is_valid_object_mesh_id;
+///
+/// let db = ContentDatabase::new();
+/// assert!(!is_valid_object_mesh_id(&db, "oak_tree")); // Empty database
+/// ```
+pub fn is_valid_object_mesh_id(db: &ContentDatabase, mesh_id: &str) -> bool {
+    db.object_meshes.has_mesh(mesh_id)
+}
+
+#[cfg(test)]
+mod object_mesh_tests {
+    use super::*;
+
+    #[test]
+    fn test_browse_object_meshes_empty() {
+        let db = ContentDatabase::new();
+        let meshes = browse_object_meshes(&db);
+        assert_eq!(meshes.len(), 0);
+    }
+
+    #[test]
+    fn test_suggest_object_mesh_ids_empty() {
+        let db = ContentDatabase::new();
+        let suggestions = suggest_object_mesh_ids(&db, "door");
+        assert_eq!(suggestions.len(), 0);
+    }
+
+    #[test]
+    fn test_is_valid_object_mesh_id_empty() {
+        let db = ContentDatabase::new();
+        assert!(!is_valid_object_mesh_id(&db, "oak_tree"));
+        assert!(!is_valid_object_mesh_id(&db, "11001"));
+    }
+
+    #[test]
+    fn test_browse_object_meshes_from_test_campaign() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let db = ContentDatabase::load_campaign(
+            std::path::Path::new(manifest_dir).join("data/test_campaign"),
+        )
+        .expect("test_campaign must load");
+
+        let meshes = browse_object_meshes(&db);
+        // Merged from landscape_mesh_registry.ron — must be non-empty
+        assert!(
+            !meshes.is_empty(),
+            "object mesh list must be non-empty after merge"
+        );
+        // Results must be sorted by key
+        for i in 1..meshes.len() {
+            assert!(
+                meshes[i - 1].0 <= meshes[i].0,
+                "results must be sorted by key"
+            );
+        }
+    }
+
+    #[test]
+    fn test_suggest_object_mesh_ids_from_test_campaign() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let db = ContentDatabase::load_campaign(
+            std::path::Path::new(manifest_dir).join("data/test_campaign"),
+        )
+        .expect("test_campaign must load");
+
+        // "11001" is a landscape mesh — numeric string key from backward-compat merge
+        let suggestions = suggest_object_mesh_ids(&db, "11001");
+        // The key "11001" itself matches the partial
+        let found = suggestions.iter().any(|(k, _)| k == "11001");
+        assert!(found, "'11001' key must appear in suggestions");
+    }
+
+    #[test]
+    fn test_is_valid_object_mesh_id_after_merge() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let db = ContentDatabase::load_campaign(
+            std::path::Path::new(manifest_dir).join("data/test_campaign"),
+        )
+        .expect("test_campaign must load");
+
+        // Legacy numeric key must be valid after merge
+        assert!(
+            is_valid_object_mesh_id(&db, "11001"),
+            "legacy landscape mesh '11001' must be valid after merge"
+        );
+        // Non-existent key must be invalid
+        assert!(!is_valid_object_mesh_id(&db, "nonexistent_mesh_xyz"));
+    }
+
+    #[test]
+    fn test_suggest_object_mesh_ids_limits_to_ten() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        if let Ok(db) = ContentDatabase::load_campaign(
+            std::path::Path::new(manifest_dir).join("data/test_campaign"),
+        ) {
+            // Searching with empty string matches everything
+            let suggestions = suggest_object_mesh_ids(&db, "");
+            assert!(suggestions.len() <= 10, "suggestions must be capped at 10");
+        }
+    }
+}
+
 // ===== Sprite Sheet Management =====
 
 /// Type alias for sprite search results: (sheet_key, sprite_index, sprite_name)

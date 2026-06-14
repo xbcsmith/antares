@@ -1,0 +1,21 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+//
+// Unified object mesh registry for the test campaign.
+//
+// Maps human-readable string keys to CreatureDefinition asset files.
+// Legacy registries (landscape_mesh_registry.ron, furniture_mesh_registry.ron)
+// are merged in at load time as numeric-ID string keys (e.g. "11001") so
+// existing campaigns continue to resolve without modification.
+//
+// item_mesh_registry.ron is intentionally excluded — item mesh lookup follows
+// a separate DroppedItem spawn path.
+ObjectMeshRegistry(
+    meshes: {
+        "oak_tree":  "assets/meshes/landscape/oak_tree_short.ron",
+        "pine_tree": "assets/meshes/landscape/pine_tree.ron",
+        "dead_tree": "assets/meshes/landscape/dead_tree.ron",
+        "palm_tree": "assets/meshes/landscape/palm_tree.ron",
+        "brush":     "assets/meshes/landscape/brush.ron",
+    }
+)

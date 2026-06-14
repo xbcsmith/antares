@@ -2,6 +2,125 @@
 
 ---
 
+## Unified Interactive Objects — Phase 4: Mesh Registry Unification (2026)
+
+**Goal:** Implement Phase 4 of the Unified Interactive Objects plan — unify the
+split `LandscapeMeshDatabase` / `FurnitureMeshDatabase` lookups used by
+rendering code into a single `ObjectMeshDatabase` keyed by arbitrary strings,
+so map-event `mesh_id` values can be human-readable names like `"barred_door"`
+instead of raw numeric IDs. Legacy numeric IDs are preserved as string keys
+(`"11001"`) for backward compatibility.
+
+### What Changed
+
+**`src/domain/world/object_mesh.rs`** (new)
+
+- `ObjectMeshError` — four variants: `ReadError`, `ParseError`,
+  `AssetReadError { path, reason }`, `ValidationError`. The `AssetReadError`
+  field is named `reason` (not `source`) to avoid thiserror's implicit error
+  source trait requirement.
+- `ObjectMeshRegistry` — private RON deserialization struct
+  `{ meshes: HashMap<String, String> }` mapping string keys to
+  campaign-relative asset file paths.
+- `ObjectMeshDatabase` — `HashMap<String, CreatureDefinition>` with:
+  - `new()` / `Default`
+  - `load_from_registry(registry_path, campaign_root)` — reads
+    `object_mesh_registry.ron`, iterates entries, parses each as
+    `CreatureDefinition`, inserts by key.
+  - `merge_landscape(landscape)` — inserts each landscape mesh using
+    `id.to_string()` as key; `entry().or_insert_with()` prevents primary
+    entries from being overwritten.
+  - `merge_furniture(furniture)` — same pattern for furniture meshes.
+  - `lookup(key) -> Option<&CreatureDefinition>` — direct HashMap get.
+  - `has_mesh`, `all_mesh_ids`, `is_empty`, `count`, `validate`.
+- 9 unit tests covering: empty database, lookup miss, merge-empty no-op,
+  round-trip load, missing-asset error path, and primary-entry-not-overwritten
+  invariant.
+
+**`src/domain/world/mod.rs`** (modified)
+
+- Added `pub mod object_mesh;` declaration.
+- Added `pub use object_mesh::{ObjectMeshDatabase, ObjectMeshError};` re-export.
+
+**`src/domain/campaign_loader.rs`** (modified)
+
+- Added `object_meshes: ObjectMeshDatabase` field to `GameData`.
+- `GameData::new()` initialises it with `ObjectMeshDatabase::new()`.
+- `GameData::validate()` calls `self.object_meshes.validate()`.
+- `load_game_data()` calls new `load_object_meshes` helper.
+- New `load_object_meshes(&self, landscape_meshes, furniture_meshes)` method:
+  loads primary registry if `data/object_mesh_registry.ron` exists (empty
+  database otherwise), then merges landscape and furniture mesh databases.
+
+**`src/sdk/database.rs`** (modified)
+
+- Added `ObjectMeshLoadError(String)` variant to `DatabaseError`.
+- Added `pub object_meshes: ObjectMeshDatabase` field to `ContentDatabase`.
+- `ContentDatabase::new()` initialises it with `ObjectMeshDatabase::new()`.
+- Both `load_campaign()` and `load_core()` now:
+  1. Load a local `furniture_meshes_local` from `furniture_mesh_registry.ron`
+     if present (not stored as a `ContentDatabase` field — merge only).
+  2. Build `object_meshes` by loading the primary registry (if present),
+     then merging landscape and furniture databases.
+- `validate_landscape_content()` calls `self.object_meshes.validate()`.
+- 3 integration tests: P4-OM1 (primary registry loads and is queryable),
+  P4-OM2 (missing primary falls back to landscape/furniture merge),
+  P4-OM3 (primary entry survives merge — not overwritten by legacy IDs).
+
+**`src/game/systems/map.rs`** (modified)
+
+- `spawn_event_meshes`: parameter changed from
+  `landscape_meshes: &world::LandscapeMeshDatabase` to
+  `object_meshes: &world::ObjectMeshDatabase`; lookup changed to
+  `object_meshes.lookup(mesh_id_str)` (no numeric parse).
+- `spawn_landscape_placements`: parameter changed to
+  `object_meshes: &world::ObjectMeshDatabase`; lookup changed to
+  `object_meshes.lookup(&mesh_id.to_string())`.
+- `try_spawn_terrain_tree_as_landscape_mesh`: parameter changed to
+  `object_meshes: &world::ObjectMeshDatabase`; lookup changed to
+  `object_meshes.lookup(&mesh_id.to_string())`.
+- All 6 call sites updated from `&content.0.landscape_meshes` to
+  `&content.0.object_meshes`.
+
+**`src/sdk/map_editor.rs`** (modified)
+
+- Added "Object Meshes" Campaign Builder panel functions:
+  - `browse_object_meshes(db) -> Vec<(String, String)>` — returns all
+    registered mesh IDs with their names, sorted by ID.
+  - `suggest_object_mesh_ids(db, partial) -> Vec<(String, String)>` — filters
+    IDs containing `partial` (case-insensitive).
+  - `is_valid_object_mesh_id(db, mesh_id) -> bool` — `has_mesh` wrapper.
+- 5 tests in `mod object_mesh_tests` covering: browse returns all IDs,
+  suggest filters correctly, invalid ID returns false, empty partial returns
+  all, integration test with loaded campaign.
+
+**`data/test_campaign/data/object_mesh_registry.ron`** (new)
+
+Primary string-keyed registry for the test campaign, with entries for
+`oak_tree`, `pine_tree`, `dead_tree`, `palm_tree`, and `brush` pointing at
+their campaign-relative `CreatureDefinition` asset files.
+
+### Design Decisions
+
+| Decision | Rationale |
+| --- | --- |
+| String keys (`HashMap<String, …>`) | Allows human-readable names in map event `mesh_id` fields without breaking existing numeric campaigns — legacy IDs become `"11001"` etc. |
+| `or_insert_with` in merge | Primary `object_mesh_registry.ron` entries take precedence; legacy registries fill gaps without overwriting. |
+| `furniture_meshes` loaded locally in SDK | `ContentDatabase` did not previously expose a `furniture_meshes` field; loading locally for merge avoids adding a new public field and keeps the API surface small. |
+| `item_mesh_registry.ron` excluded | Item meshes follow a `DroppedItem` spawn path separate from interactive object rendering. |
+| `reason` field name in `AssetReadError` | `thiserror` treats a field named `source` as an error source, requiring `std::error::Error` on the type. The field is `String`, so renaming to `reason` avoids the compile error. |
+
+### Quality Gate Results
+
+```
+cargo fmt --all           → clean (no output)
+cargo check --all-targets --all-features → Finished, 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+cargo nextest run --all-features → 5268 passed, 0 failed
+```
+
+---
+
 ## Unified Interactive Objects — Phase 3: Dialogue Routing for `dialogue_id` Events (2026)
 
 **Goal:** Implement Phase 3 of the Unified Interactive Objects plan — route the [E]

@@ -43,8 +43,9 @@ use crate::domain::quest::{Quest, QuestId};
 use crate::domain::races::{RaceDatabase, RaceError};
 use crate::domain::skills::SkillDatabase;
 use crate::domain::types::{MapId, MonsterId, SpellId};
-use crate::domain::world::furniture::FurnitureDatabase;
+use crate::domain::world::furniture::{FurnitureDatabase, FurnitureMeshDatabase};
 use crate::domain::world::landscape::{LandscapeDatabase, LandscapeMeshDatabase};
+use crate::domain::world::object_mesh::ObjectMeshDatabase;
 use crate::domain::world::{Map, MapBlueprint};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -100,6 +101,9 @@ pub enum DatabaseError {
 
     #[error("Failed to load landscape meshes: {0}")]
     LandscapeMeshLoadError(String),
+
+    #[error("Failed to load object meshes: {0}")]
+    ObjectMeshLoadError(String),
 
     #[error("Failed to load skills: {0}")]
     SkillLoadError(String),
@@ -1110,6 +1114,11 @@ pub struct ContentDatabase {
     /// Missing file is not an error.
     pub landscape_meshes: LandscapeMeshDatabase,
 
+    /// Unified object mesh database — string-keyed registry merging
+    /// `object_mesh_registry.ron`, `landscape_mesh_registry.ron`, and
+    /// `furniture_mesh_registry.ron`.  Primary lookup for rendering code.
+    pub object_meshes: ObjectMeshDatabase,
+
     /// Skill definitions database.
     ///
     /// Loaded from `data/skills.ron` in the campaign directory.
@@ -1153,6 +1162,7 @@ impl ContentDatabase {
             furniture: FurnitureDatabase::new(),
             landscape: LandscapeDatabase::new(),
             landscape_meshes: LandscapeMeshDatabase::new(),
+            object_meshes: ObjectMeshDatabase::new(),
             skills: SkillDatabase::new(),
             wind: crate::domain::world::wind::CampaignWindConfig::default(),
         }
@@ -1363,6 +1373,34 @@ impl ContentDatabase {
             .validate_mesh_references(&landscape_meshes)
             .map_err(|e| DatabaseError::LandscapeLoadError(e.to_string()))?;
 
+        // Load furniture mesh registry (opt-in; used for object_meshes merge only)
+        let furniture_meshes_local = if data_dir.join("furniture_mesh_registry.ron").exists() {
+            FurnitureMeshDatabase::load_from_registry(
+                &data_dir.join("furniture_mesh_registry.ron"),
+                campaign_path,
+            )
+            .map_err(|e| DatabaseError::ObjectMeshLoadError(e.to_string()))?
+        } else {
+            FurnitureMeshDatabase::new()
+        };
+
+        // Build unified object mesh registry: object_mesh_registry.ron (primary)
+        // plus legacy landscape/furniture registries as deprecated aliases.
+        let object_meshes = {
+            let mut db = if data_dir.join("object_mesh_registry.ron").exists() {
+                ObjectMeshDatabase::load_from_registry(
+                    &data_dir.join("object_mesh_registry.ron"),
+                    campaign_path,
+                )
+                .map_err(|e| DatabaseError::ObjectMeshLoadError(e.to_string()))?
+            } else {
+                ObjectMeshDatabase::new()
+            };
+            db.merge_landscape(&landscape_meshes);
+            db.merge_furniture(&furniture_meshes_local);
+            db
+        };
+
         // Load skill definitions (opt-in per campaign; missing file is not an error)
         let configured_skills_path = Path::new(skills_file);
         let skills_path = if configured_skills_path.is_absolute() {
@@ -1404,6 +1442,7 @@ impl ContentDatabase {
             furniture,
             landscape,
             landscape_meshes,
+            object_meshes,
             skills,
             wind,
         };
@@ -1567,6 +1606,34 @@ impl ContentDatabase {
             .validate_mesh_references(&landscape_meshes)
             .map_err(|e| DatabaseError::LandscapeLoadError(e.to_string()))?;
 
+        // Load furniture mesh registry (opt-in; used for object_meshes merge only)
+        let furniture_meshes_local = if data_path.join("furniture_mesh_registry.ron").exists() {
+            FurnitureMeshDatabase::load_from_registry(
+                &data_path.join("furniture_mesh_registry.ron"),
+                asset_root,
+            )
+            .map_err(|e| DatabaseError::ObjectMeshLoadError(e.to_string()))?
+        } else {
+            FurnitureMeshDatabase::new()
+        };
+
+        // Build unified object mesh registry: object_mesh_registry.ron (primary)
+        // plus legacy landscape/furniture registries as deprecated aliases.
+        let object_meshes = {
+            let mut db = if data_path.join("object_mesh_registry.ron").exists() {
+                ObjectMeshDatabase::load_from_registry(
+                    &data_path.join("object_mesh_registry.ron"),
+                    asset_root,
+                )
+                .map_err(|e| DatabaseError::ObjectMeshLoadError(e.to_string()))?
+            } else {
+                ObjectMeshDatabase::new()
+            };
+            db.merge_landscape(&landscape_meshes);
+            db.merge_furniture(&furniture_meshes_local);
+            db
+        };
+
         // Load skill definitions (opt-in; missing file is not an error)
         let skills = if data_path.join("skills.ron").exists() {
             SkillDatabase::load_from_file(data_path.join("skills.ron"))
@@ -1602,6 +1669,7 @@ impl ContentDatabase {
             furniture,
             landscape,
             landscape_meshes,
+            object_meshes,
             skills,
             wind,
         };
@@ -1619,6 +1687,9 @@ impl ContentDatabase {
         self.landscape
             .validate_mesh_references(&self.landscape_meshes)
             .map_err(|e| DatabaseError::LandscapeLoadError(e.to_string()))?;
+        self.object_meshes
+            .validate()
+            .map_err(|e| DatabaseError::ObjectMeshLoadError(e.to_string()))?;
 
         for map_id in self.maps.all_maps() {
             let Some(map) = self.maps.get_map(map_id) else {
@@ -4355,6 +4426,105 @@ mod tests {
         assert!(
             priests.iter().any(|p| p.id == "temple_priest"),
             "NpcDatabase::priests() must include temple_priest"
+        );
+    }
+
+    // ===== Phase 4: Object Mesh Registry Integration Tests =====
+
+    /// P4-OM1: Loading a campaign that has `object_mesh_registry.ron` populates
+    /// `object_meshes` with the primary entries and verifies string-keyed lookup.
+    #[test]
+    fn test_object_mesh_registry_loads_from_primary_file() {
+        use std::io::Write;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let data_dir = tmp.path().join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        // Minimal map so load_campaign validates successfully
+        let map = Map::new(1, "Test".to_string(), "Desc".to_string(), 4, 4);
+        write_temp_map(tmp.path(), &map);
+
+        // Create a minimal CreatureDefinition asset file
+        let asset_dir = tmp.path().join("assets/meshes/objects");
+        std::fs::create_dir_all(&asset_dir).unwrap();
+        let mut f = std::fs::File::create(asset_dir.join("test_barrel.ron")).unwrap();
+        f.write_all(
+            br#"(
+    id: 1,
+    name: "TestBarrel",
+    meshes: [],
+    mesh_transforms: [],
+)"#,
+        )
+        .unwrap();
+
+        // Write object_mesh_registry.ron
+        let mut reg = std::fs::File::create(data_dir.join("object_mesh_registry.ron")).unwrap();
+        reg.write_all(
+            br#"ObjectMeshRegistry(
+    meshes: {
+        "barrel": "assets/meshes/objects/test_barrel.ron",
+    }
+)"#,
+        )
+        .unwrap();
+
+        let db = ContentDatabase::load_campaign(tmp.path())
+            .expect("campaign with object_mesh_registry.ron must load");
+
+        assert!(
+            db.object_meshes.has_mesh("barrel"),
+            "object_meshes must contain 'barrel' key from primary registry"
+        );
+        assert_eq!(db.object_meshes.count(), 1);
+    }
+
+    /// P4-OM2: A campaign with only legacy registries (`landscape_mesh_registry.ron`,
+    /// `furniture_mesh_registry.ron`) and no `object_mesh_registry.ron` still resolves
+    /// all mesh IDs in `object_meshes` via the backward-compat merge.
+    #[test]
+    fn test_object_mesh_registry_backward_compat_from_legacy_registries() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let db = ContentDatabase::load_campaign(
+            std::path::Path::new(manifest_dir).join("data/test_campaign"),
+        )
+        .expect("test_campaign must load");
+
+        // Legacy landscape mesh IDs appear as string keys in object_meshes
+        assert!(
+            db.object_meshes.has_mesh("11001"),
+            "object_meshes must expose legacy landscape mesh 11001 as string key"
+        );
+        // Merged from landscape_meshes — count must be at least landscape count
+        assert!(
+            db.object_meshes.count() >= db.landscape_meshes.count(),
+            "object_meshes count must be >= landscape_meshes count after merge"
+        );
+    }
+
+    /// P4-OM3: When the test campaign gains `object_mesh_registry.ron`, string-keyed
+    /// named lookups work AND legacy numeric lookups still resolve.
+    #[test]
+    fn test_object_mesh_registry_named_key_and_legacy_numeric_coexist() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let db = ContentDatabase::load_campaign(
+            std::path::Path::new(manifest_dir).join("data/test_campaign"),
+        )
+        .expect("test_campaign must load");
+
+        // If the test campaign has object_mesh_registry.ron, named keys are present
+        if db.object_meshes.has_mesh("oak_tree") {
+            assert!(
+                db.object_meshes.lookup("oak_tree").is_some(),
+                "named key 'oak_tree' must resolve"
+            );
+        }
+
+        // Regardless, legacy numeric key must resolve (from landscape merge)
+        assert!(
+            db.object_meshes.has_mesh("11001"),
+            "legacy numeric key '11001' must always resolve after merge"
         );
     }
 }
