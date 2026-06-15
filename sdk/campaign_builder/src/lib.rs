@@ -1455,6 +1455,11 @@ impl eframe::App for CampaignBuilderApp {
                             self.ui_state.active_tab = EditorTab::Landscape;
                             ui.ctx().request_repaint();
                         }
+                        obj_importer_ui::ObjImporterUiSignal::ObjectMesh => {
+                            let importer_status = self.obj_importer_state.status_message.clone();
+                            self.ui_state.status_message = importer_status;
+                            ui.ctx().request_repaint();
+                        }
                     }
                 } else {
                     self.ui_state.status_message = self.obj_importer_state.status_message.clone();

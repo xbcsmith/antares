@@ -75,6 +75,11 @@ pub enum ExportType {
     Furniture,
     /// Export as a static landscape mesh asset.
     Landscape,
+    /// Export as an object mesh registered in `data/object_mesh_registry.ron`.
+    ///
+    /// Unlike other export types, the registry key is the mesh name (a string),
+    /// not a numeric ID. The asset is written to `assets/meshes/objects/`.
+    ObjectMesh,
 }
 
 /// Records how the importer's current mesh color was chosen.

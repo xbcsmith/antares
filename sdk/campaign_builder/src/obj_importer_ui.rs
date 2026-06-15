@@ -86,6 +86,8 @@ pub(crate) enum ObjImporterUiSignal {
     Furniture,
     /// A landscape mesh asset was exported.
     Landscape,
+    /// An object mesh asset was exported and the object mesh registry was updated.
+    ObjectMesh,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -454,6 +456,9 @@ fn render_export_category_control(
                 ui.ctx().request_repaint();
             }
         }
+        ExportType::ObjectMesh => {
+            // Object meshes use the name as the registry key — no category needed.
+        }
     }
 }
 
@@ -589,17 +594,29 @@ fn render_idle_mode(
                 {
                     ui.ctx().request_repaint();
                 }
+                if ui
+                    .radio_value(
+                        &mut state.export_type,
+                        ExportType::ObjectMesh,
+                        "Object Mesh",
+                    )
+                    .changed()
+                {
+                    ui.ctx().request_repaint();
+                }
             });
             ui.end_row();
 
-            ui.label("Category:");
-            render_export_category_control(
-                ui,
-                state,
-                campaign_dir.map(|p| p.as_path()),
-                "obj_importer_idle_export_category",
-            );
-            ui.end_row();
+            if state.export_type != ExportType::ObjectMesh {
+                ui.label("Category:");
+                render_export_category_control(
+                    ui,
+                    state,
+                    campaign_dir.map(|p| p.as_path()),
+                    "obj_importer_idle_export_category",
+                );
+                ui.end_row();
+            }
 
             ui.label("Scale:");
             if ui
@@ -745,73 +762,100 @@ fn render_loaded_mode(
                 {
                     ui.ctx().request_repaint();
                 }
-            });
-            ui.end_row();
-
-            ui.label("Category:");
-            render_export_category_control(
-                ui,
-                state,
-                campaign_dir.map(|p| p.as_path()),
-                "obj_importer_loaded_export_category",
-            );
-            ui.end_row();
-
-            ui.label("ID:");
-            ui.horizontal(|ui| {
-                match state.export_type {
-                    ExportType::Furniture => {
-                        if ui
-                            .add(egui::DragValue::new(&mut state.furniture_id).range(0..=u32::MAX))
-                            .changed()
-                        {
-                            ui.ctx().request_repaint();
-                        }
-                    }
-                    ExportType::Landscape => {
-                        if ui
-                            .add(
-                                egui::DragValue::new(&mut state.landscape_mesh_id)
-                                    .range(LANDSCAPE_MESH_ID_MIN..=u32::MAX),
-                            )
-                            .changed()
-                        {
-                            ui.ctx().request_repaint();
-                        }
-                    }
-                    ExportType::Creature | ExportType::Item => {
-                        if ui
-                            .add(egui::DragValue::new(&mut state.creature_id).range(0..=u32::MAX))
-                            .changed()
-                        {
-                            ui.ctx().request_repaint();
-                        }
-                    }
-                }
-                // For creature exports: show the expected ID range and warn when
-                // the current value falls outside it.
-                if state.export_type == ExportType::Creature {
-                    let cat = creature_category_from_str(&state.category);
-                    let r = cat.id_range();
-                    let range_str = if r.end == u32::MAX {
-                        format!("{}+", r.start)
-                    } else {
-                        format!("{}\u{2013}{}", r.start, r.end - 1)
-                    };
-                    ui.label(egui::RichText::new(format!("({})", range_str)).weak());
-                    if !r.contains(&state.creature_id) {
-                        ui.colored_label(
-                            egui::Color32::YELLOW,
-                            format!(
-                                "\u{26a0} {} is outside {} range",
-                                state.creature_id,
-                                cat.display_name()
-                            ),
-                        );
-                    }
+                if ui
+                    .radio_value(
+                        &mut state.export_type,
+                        ExportType::ObjectMesh,
+                        "Object Mesh",
+                    )
+                    .changed()
+                {
+                    ui.ctx().request_repaint();
                 }
             });
             ui.end_row();
+
+            if state.export_type != ExportType::ObjectMesh {
+                ui.label("Category:");
+                render_export_category_control(
+                    ui,
+                    state,
+                    campaign_dir.map(|p| p.as_path()),
+                    "obj_importer_loaded_export_category",
+                );
+                ui.end_row();
+
+                ui.label("ID:");
+                ui.horizontal(|ui| {
+                    match state.export_type {
+                        ExportType::Furniture => {
+                            if ui
+                                .add(
+                                    egui::DragValue::new(&mut state.furniture_id)
+                                        .range(0..=u32::MAX),
+                                )
+                                .changed()
+                            {
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                        ExportType::Landscape => {
+                            if ui
+                                .add(
+                                    egui::DragValue::new(&mut state.landscape_mesh_id)
+                                        .range(LANDSCAPE_MESH_ID_MIN..=u32::MAX),
+                                )
+                                .changed()
+                            {
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                        ExportType::Creature | ExportType::Item => {
+                            if ui
+                                .add(
+                                    egui::DragValue::new(&mut state.creature_id)
+                                        .range(0..=u32::MAX),
+                                )
+                                .changed()
+                            {
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                        ExportType::ObjectMesh => {}
+                    }
+                    // For creature exports: show the expected ID range and warn when
+                    // the current value falls outside it.
+                    if state.export_type == ExportType::Creature {
+                        let cat = creature_category_from_str(&state.category);
+                        let r = cat.id_range();
+                        let range_str = if r.end == u32::MAX {
+                            format!("{}+", r.start)
+                        } else {
+                            format!("{}\u{2013}{}", r.start, r.end - 1)
+                        };
+                        ui.label(egui::RichText::new(format!("({})", range_str)).weak());
+                        if !r.contains(&state.creature_id) {
+                            ui.colored_label(
+                                egui::Color32::YELLOW,
+                                format!(
+                                    "\u{26a0} {} is outside {} range",
+                                    state.creature_id,
+                                    cat.display_name()
+                                ),
+                            );
+                        }
+                    }
+                });
+                ui.end_row();
+            } else {
+                ui.label("Registry Key:");
+                ui.label(
+                    egui::RichText::new("The mesh name below is used as the registry key.")
+                        .weak()
+                        .italics(),
+                );
+                ui.end_row();
+            }
 
             ui.label("Name:");
             if ui.text_edit_singleline(&mut state.creature_name).changed() {
@@ -841,6 +885,7 @@ fn render_loaded_mode(
                     ExportType::Furniture => state.furniture_id,
                     ExportType::Landscape => state.landscape_mesh_id,
                     ExportType::Creature | ExportType::Item => state.creature_id,
+                    ExportType::ObjectMesh => 0,
                 },
                 &state.category,
             ));
@@ -948,6 +993,7 @@ fn render_loaded_mode(
                         ExportType::Item => ObjImporterUiSignal::Item,
                         ExportType::Furniture => ObjImporterUiSignal::Furniture,
                         ExportType::Landscape => ObjImporterUiSignal::Landscape,
+                        ExportType::ObjectMesh => ObjImporterUiSignal::ObjectMesh,
                     };
                     logger.info(category::FILE_IO, &outcome.status_message);
                     state.clear();
@@ -1783,7 +1829,7 @@ fn export_state_to_campaign_with_landscape_file(
     match state.export_type {
         ExportType::Furniture => creature.id = state.furniture_id,
         ExportType::Landscape => creature.id = state.landscape_mesh_id,
-        ExportType::Creature | ExportType::Item => {}
+        ExportType::Creature | ExportType::Item | ExportType::ObjectMesh => {}
     }
     let relative_path = preview_export_relative_path(
         state.export_type,
@@ -1843,6 +1889,14 @@ fn export_state_to_campaign_with_landscape_file(
                 &relative_path,
             )?;
             upsert_landscape_definition(campaign_dir, landscape_file, state, &creature)?;
+        }
+        ExportType::ObjectMesh => {
+            if let Some(parent) = absolute_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let contents = ron::ser::to_string_pretty(&creature, ron::ser::PrettyConfig::new())?;
+            fs::write(&absolute_path, contents)?;
+            upsert_object_mesh_registry_entry(campaign_dir, &creature.name, &relative_path)?;
         }
     }
 
@@ -1995,6 +2049,51 @@ fn upsert_landscape_definition(
     }
     defs.sort_by_key(|definition| definition.id);
     write_ron_vec(&landscape_path, &defs)
+}
+
+/// Updates `data/object_mesh_registry.ron`, inserting or replacing the entry for `mesh_key`.
+///
+/// The registry uses the `ObjectMeshRegistry(meshes: {...})` RON format with string keys.
+fn upsert_object_mesh_registry_entry(
+    campaign_dir: &Path,
+    mesh_key: &str,
+    relative_path: &str,
+) -> Result<(), ObjImporterExportError> {
+    use std::collections::BTreeMap;
+
+    let registry_path = campaign_dir.join("data/object_mesh_registry.ron");
+    let mut map: BTreeMap<String, String> = if registry_path.exists() {
+        let content = fs::read_to_string(&registry_path)?;
+        // Parse the ObjectMeshRegistry(meshes: {...}) RON struct.
+        // Use a local deserializable wrapper to avoid depending on the private domain type.
+        #[derive(serde::Deserialize)]
+        struct ObjectMeshRegistry {
+            meshes: BTreeMap<String, String>,
+        }
+        ron::from_str::<ObjectMeshRegistry>(&content)
+            .map(|r| r.meshes)
+            .unwrap_or_default()
+    } else {
+        BTreeMap::new()
+    };
+
+    map.insert(mesh_key.to_string(), relative_path.to_string());
+
+    if let Some(parent) = registry_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    // Serialize as ObjectMeshRegistry(meshes: { "key": "path", ... })
+    let mut lines = vec![
+        "ObjectMeshRegistry(".to_string(),
+        "    meshes: {".to_string(),
+    ];
+    for (key, path) in &map {
+        lines.push(format!("        {:?}: {:?},", key, path));
+    }
+    lines.push("    }".to_string());
+    lines.push(")".to_string());
+    fs::write(&registry_path, lines.join("\n") + "\n")?;
+    Ok(())
 }
 
 /// Describes how a mesh texture will be obtained during campaign export.
@@ -2399,6 +2498,7 @@ fn preview_export_relative_path(
                 )
             }
         }
+        ExportType::ObjectMesh => format!("assets/meshes/objects/{}.ron", file_stem),
     }
 }
 
@@ -2421,6 +2521,7 @@ fn sanitized_export_stem(name: &str, id: u32, export_type: ExportType) -> String
             ExportType::Item => format!("item_{}", id),
             ExportType::Furniture => format!("furniture_{}", id),
             ExportType::Landscape => format!("landscape_{}", id),
+            ExportType::ObjectMesh => "object_mesh".to_string(),
         }
     } else {
         sanitized
@@ -2455,6 +2556,7 @@ fn export_type_label(export_type: ExportType) -> &'static str {
         ExportType::Item => "item",
         ExportType::Furniture => "furniture",
         ExportType::Landscape => "landscape",
+        ExportType::ObjectMesh => "object mesh",
     }
 }
 
