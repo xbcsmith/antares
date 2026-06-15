@@ -13,10 +13,11 @@ This guide explains the concepts, patterns, and best practices for creating cont
 2. [Core Concepts](#core-concepts)
 3. [Campaign Architecture](#campaign-architecture)
 4. [Content Design Patterns](#content-design-patterns)
-5. [Advanced Techniques](#advanced-techniques)
-6. [Balancing Guidelines](#balancing-guidelines)
-7. [Performance Considerations](#performance-considerations)
-8. [Publishing Your Mod](#publishing-your-mod)
+5. [Interactive Objects — Meshes and Events](#interactive-objects--meshes-and-events)
+6. [Advanced Techniques](#advanced-techniques)
+7. [Balancing Guidelines](#balancing-guidelines)
+8. [Performance Considerations](#performance-considerations)
+9. [Publishing Your Mod](#publishing-your-mod)
 
 ---
 
@@ -427,6 +428,308 @@ events: [
     ),
 ]
 ```
+
+## Interactive Objects — Meshes and Events
+
+Every interactive tile event in Antares can carry two optional fields that unlock rich
+authoring possibilities:
+
+| Field         | Type             | Purpose                                                                                               |
+| ------------- | ---------------- | ----------------------------------------------------------------------------------------------------- |
+| `mesh_id`     | `Option<String>` | Renders a 3-D object on the event tile (door, chest, signpost, …)                                     |
+| `dialogue_id` | `Option<u16>`    | Plays a dialogue tree when the party presses **[E]** on the tile, before the primary game effect runs |
+
+Events that support both fields: `Treasure`, `Sign`, `Container`, `LockedDoor`, `LockedContainer`.
+
+---
+
+### The Unified Model
+
+Antares separates _what happens_ (the event type) from _how it looks_ (`mesh_id`) and
+_what the character says_ (`dialogue_id`). This means:
+
+- The same event logic works with **any** registered mesh.
+- A `Treasure` chest looks like a wooden crate, an ornate coffer, or a barred passage
+  depending on the `mesh_id` you supply — the loot logic is unchanged.
+- Supplying a `dialogue_id` inserts a conversation step _before_ the event fires. The
+  dialogue can then fire the primary effect via a `TriggerEvent` action at any node, giving
+  authors complete control over pacing.
+
+---
+
+### Event Type Reference
+
+| Event                  | `mesh_id` | `dialogue_id` | Key fields                           | TriggerEvent name                                         |
+| ---------------------- | --------- | ------------- | ------------------------------------ | --------------------------------------------------------- |
+| `Treasure`             | ✓         | ✓             | `loot: Vec<u8>`                      | `collect_treasure`                                        |
+| `Sign`                 | ✓         | ✓             | `text: String`                       | _(none needed)_                                           |
+| `Container`            | ✓         | ✓             | `id`, `items`, `gold`, `gems`        | `open_container`                                          |
+| `LockedDoor`           | ✓         | ✓             | `lock_id`, `key_item_id`             | `unlock_door`                                             |
+| `LockedContainer`      | ✓         | ✓             | `lock_id`, `key_item_id`, `items`    | `unlock_container`                                        |
+| `Encounter`            | —         | —             | `monster_group`, `combat_event_type` | _(combat auto-fires)_                                     |
+| `NpcDialogue`          | —         | via NPC       | `npc_id`                             | _(NPC dialogue auto-fires)_                               |
+| `RecruitableCharacter` | —         | ✓             | `character_id`                       | `recruit_character_to_party` / `recruit_character_to_inn` |
+| `EnterInn`             | —         | —             | `innkeeper_id`                       | `open_inn_party_management`                               |
+| `Teleport`             | —         | —             | `destination`, `map_id`              | _(auto-fires)_                                            |
+| `Trap`                 | —         | —             | `damage`, `effect`                   | _(auto-fires)_                                            |
+
+---
+
+### TriggerEvent Reference
+
+Use a `TriggerEvent` action inside any dialogue node or choice to fire game effects
+at the exact moment chosen by the author:
+
+| Event name                   | What it does                                                                          | Requires event_context? |
+| ---------------------------- | ------------------------------------------------------------------------------------- | ----------------------- |
+| `collect_treasure`           | Distributes loot from the triggering `Treasure` event to the party; despawns the mesh | Yes                     |
+| `open_container`             | Opens the `Container` event tile in container-inventory mode                          | Yes                     |
+| `unlock_door`                | Consumes the key item (if any) and removes the `LockedDoor` event; despawns the mesh  | Yes                     |
+| `unlock_container`           | Consumes the key item (if any) and opens the `LockedContainer` for looting            | Yes                     |
+| `open_inn_party_management`  | Opens the inn party management screen using the speaker NPC as the innkeeper          | No                      |
+| `recruit_character_to_party` | Adds the recruitable character to the active party                                    | No                      |
+| `recruit_character_to_inn`   | Sends the recruitable character to the nearest inn roster                             | No                      |
+
+> **Note**: `event_context` is set automatically when a dialogue is triggered by a map event
+> (Treasure, Container, LockedDoor, LockedContainer). You do not need to set it manually.
+
+---
+
+### Placement Workflow
+
+Follow these steps to add a visible, interactive object to your campaign:
+
+#### 1. Register the mesh in `object_mesh_registry.ron`
+
+Create or update `data/object_mesh_registry.ron` in your campaign directory:
+
+```ron
+ObjectMeshRegistry(
+    meshes: {
+        "iron_gate": "assets/meshes/objects/iron_gate.ron",
+        "treasure_chest_oak": "assets/meshes/objects/treasure_chest_oak.ron",
+    }
+)
+```
+
+Each value is a path **relative to the campaign root** pointing at a `CreatureDefinition`
+RON mesh asset. You can import the mesh using the Campaign Builder's **Importer** tab.
+
+#### 2. Place the event in the map RON
+
+Open `data/maps/your_map.ron` and add the event under `events:`:
+
+```ron
+events: {
+    (x: 17, y: 12): LockedDoor(
+        name: "Iron Gate",
+        lock_id: "iron_gate_17_12",
+        key_item_id: Some(42),
+        mesh_id: Some("iron_gate"),
+        dialogue_id: Some(601),
+    ),
+}
+```
+
+Alternatively, use the **Map Editor** in the Campaign Builder: select the tile, choose
+event type "LockedDoor", fill in the Mesh ID and Dialogue ID autocomplete fields, then
+click **Save Changes**.
+
+#### 3. Author the dialogue in `dialogues.ron`
+
+```ron
+[
+    (
+        id: 601,
+        name: "Iron Gate",
+        root_node: 0,
+        repeatable: false,
+        nodes: {
+            0: (
+                id: 0,
+                text: "A heavy iron gate bars your way.",
+                choices: [1, 2],
+            ),
+            1: (
+                id: 1,
+                text: "Try to open it.",
+                actions: [
+                    TriggerEvent(event_name: "unlock_door"),
+                ],
+                next_node: None,
+            ),
+            2: (
+                id: 2,
+                text: "Leave it for now.",
+                actions: [],
+                next_node: None,
+            ),
+        },
+    ),
+]
+```
+
+When the player chooses "Try to open it.", the `unlock_door` trigger fires: the engine
+checks the party inventory for the matching key item (`key_item_id: Some(42)`), consumes
+it, removes the gate event, and despawns the iron gate mesh.
+
+#### 4. Add the key item in `items.ron`
+
+```ron
+{
+    42: (
+        id: 42,
+        name: "Iron Gate Key",
+        item_type: Key(()),
+        value: 0,
+        weight: 1,
+        description: "A heavy iron key that fits the gate lock.",
+        disablements: Disablement(0),
+    ),
+}
+```
+
+---
+
+### Worked Example: Creating a Locked Gate
+
+This end-to-end example wires all four steps together.
+
+**Scenario**: The party must obtain an iron key from a dungeon guard and use it to
+open a gate blocking the exit corridor.
+
+**Step 1 — Mesh registration** (`data/object_mesh_registry.ron`):
+
+```ron
+ObjectMeshRegistry(
+    meshes: {
+        "iron_gate": "assets/meshes/objects/iron_gate.ron",
+    }
+)
+```
+
+**Step 2 — Map event** (`data/maps/dungeon_01.ron`):
+
+```ron
+events: {
+    // Guard drops a key when defeated (Treasure event)
+    (x: 8, y: 4): Treasure(
+        name: "Guard's Keyring",
+        description: "A ring of keys dropped by the guard.",
+        loot: [42],
+    ),
+    // Gate at the end of the corridor
+    (x: 15, y: 4): LockedDoor(
+        name: "Iron Gate",
+        lock_id: "exit_gate",
+        key_item_id: Some(42),
+        mesh_id: Some("iron_gate"),
+        dialogue_id: Some(601),
+    ),
+}
+```
+
+**Step 3 — Dialogue** (`data/dialogues.ron`):
+
+```ron
+[
+    (
+        id: 601,
+        name: "Iron Gate",
+        root_node: 0,
+        repeatable: false,
+        nodes: {
+            0: (
+                id: 0,
+                text: "The iron gate is locked tight.",
+                choices: [1, 2],
+            ),
+            1: (
+                id: 1,
+                text: "Use the iron key.",
+                actions: [TriggerEvent(event_name: "unlock_door")],
+                next_node: None,
+            ),
+            2: (
+                id: 2,
+                text: "Step back.",
+                actions: [],
+                next_node: None,
+            ),
+        },
+    ),
+]
+```
+
+**Step 4 — Key item** (`data/items.ron`):
+
+```ron
+{
+    42: (
+        id: 42,
+        name: "Iron Key",
+        item_type: Key(()),
+        value: 5,
+        weight: 1,
+        description: "A heavy iron key.",
+        disablements: Disablement(0),
+    ),
+}
+```
+
+**Result**: When the party steps on tile (15, 4), the dialogue fires. If the party
+has item 42, choosing "Use the iron key" calls `unlock_door`, which consumes the key,
+removes the `LockedDoor` event from the map, and despawns the iron gate mesh. The tile
+becomes passable and the party can continue.
+
+---
+
+### Treasure with Custom Dialogue
+
+Adding `dialogue_id` to a `Treasure` event allows the author to show flavour text or
+a choice before distributing loot:
+
+```ron
+(x: 10, y: 6): Treasure(
+    name: "Ancient Chest",
+    description: "An ornately carved wooden chest.",
+    loot: [15, 16, 17],
+    mesh_id: Some("treasure_chest_oak"),
+    dialogue_id: Some(602),
+),
+```
+
+Dialogue 602:
+
+```ron
+(
+    id: 602,
+    name: "Ancient Chest",
+    root_node: 0,
+    repeatable: false,
+    nodes: {
+        0: (
+            id: 0,
+            text: "You find an ornate wooden chest. Strange runes are carved into the lid.",
+            choices: [1, 2],
+        ),
+        1: (
+            id: 1,
+            text: "Open the chest.",
+            actions: [TriggerEvent(event_name: "collect_treasure")],
+            next_node: None,
+        ),
+        2: (
+            id: 2,
+            text: "Leave it — something feels wrong.",
+            actions: [],
+            next_node: None,
+        ),
+    },
+),
+```
+
+---
 
 ## Creating Innkeepers
 

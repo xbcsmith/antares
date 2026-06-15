@@ -2,6 +2,41 @@
 
 ---
 
+## Phase 7: Modding Guide — Interactive Objects (Meshes and Events) section (2026)
+
+**Goal:** Document the unified interactive object authoring model in the modding guide
+so that campaign creators understand how to wire `mesh_id` and `dialogue_id` into tile
+events, register meshes in `object_mesh_registry.ron`, and drive game effects via
+`TriggerEvent` dialogue actions.
+
+### What Changed
+
+**`docs/explanation/modding_guide.md`**
+
+- Added ToC entry 5 — _Interactive Objects — Meshes and Events_ (existing entries
+  5–8 renumbered to 6–9).
+- Inserted new top-level section `## Interactive Objects — Meshes and Events` between
+  `## Content Design Patterns` and `## Creating Innkeepers`.
+  - **The Unified Model** subsection: explains the separation of event logic, mesh
+    rendering, and dialogue authoring.
+  - **Event Type Reference** table: lists all event types with `mesh_id`/`dialogue_id`
+    support flags, key fields, and `TriggerEvent` names.
+  - **TriggerEvent Reference** table: documents every trigger-able event name, its
+    effect, and whether it requires `event_context`.
+  - **Placement Workflow** subsection: four numbered steps covering mesh registration
+    (`object_mesh_registry.ron`), map RON placement, dialogue authoring, and key-item
+    definition.
+  - **Worked Example: Creating a Locked Gate**: complete end-to-end example across all
+    four data files (`object_mesh_registry.ron`, map RON, `dialogues.ron`, `items.ron`).
+  - **Treasure with Custom Dialogue**: shorter example showing `mesh_id` + `dialogue_id`
+    on a `Treasure` event with flavour text before loot distribution.
+
+### Quality Gates
+
+Documentation-only change — no Rust source files modified. No `cargo` gates required.
+
+---
+
 ## Phase 6 Map Editor — `mesh_id` and `dialogue_id` support for Treasure event (2026)
 
 **Goal:** Wire the `mesh_id` and `dialogue_id` fields that already exist on
@@ -237,7 +272,7 @@ object mesh registry registration, and full-campaign parse validation.
 cargo fmt      → clean
 cargo check    → Finished 0 errors
 cargo clippy   → Finished 0 warnings
-cargo nextest  → 5278 passed, 0 failed, 8 skipped
+cargo nextest  → 5294 passed, 0 failed, 8 skipped
 ```
 
 ---

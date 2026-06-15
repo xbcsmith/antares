@@ -2002,9 +2002,31 @@ impl TimeCondition {
 
 // ===== MapEvent =====
 
+/// Events that can be placed on map tiles.
+///
 /// Events are triggered when the party moves to a tile containing an event,
-/// or when the party explicitly interacts with the environment. Each event type
-/// has specific properties and effects on gameplay.
+/// or when the party explicitly interacts with the environment (`[E]` key).
+///
+/// # Cross-Cutting Fields
+///
+/// Several event variants carry two optional fields that decouple visual
+/// presentation and narrative flow from the core game effect:
+///
+/// - **`mesh_id: Option<String>`** — references a 3-D mesh asset in the unified
+///   [`ObjectMeshDatabase`](crate::domain::world::object_mesh::ObjectMeshDatabase)
+///   so the event tile displays a visible prop (chest, door, signpost, …).
+///   The mesh is spawned by `spawn_event_meshes` and tagged with
+///   `EventMeshMarker`; it is automatically despawned when the event is consumed.
+///
+/// - **`dialogue_id: Option<u16>`** — when `Some(id)`, pressing `[E]` on the tile
+///   opens the specified [`DialogueTree`](crate::domain::dialogue::DialogueTree)
+///   *before* executing the event's primary effect. The dialogue is responsible for
+///   firing the effect via a [`TriggerEvent`](crate::domain::dialogue::DialogueAction)
+///   action at the appropriate node.
+///
+/// Variants that support both fields: [`Treasure`](MapEvent::Treasure),
+/// [`Sign`](MapEvent::Sign), [`Container`](MapEvent::Container),
+/// [`LockedDoor`](MapEvent::LockedDoor), [`LockedContainer`](MapEvent::LockedContainer).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MapEvent {
     /// Random monster encounter

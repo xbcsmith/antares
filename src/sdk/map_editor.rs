@@ -5,45 +5,100 @@
 //!
 //! This module provides helper functions for integrating the SDK content database
 //! with map editing tools, including smart ID suggestions, content browsing,
-//! validation, and sprite sheet management.
+//! event placement and mutation, map validation, and sprite sheet management.
+//!
+//! # Function Groups
+//!
+//! ## Content Browsing (`browse_*`)
+//!
+//! Returns the complete list of available entities from the content database as
+//! `(id, name)` pairs. Use these to populate autocomplete selectors or picker
+//! lists in the Campaign Builder UI.
+//!
+//! - [`browse_monsters`] — all monster `(id, name)` pairs
+//! - [`browse_items`] — all item `(id, name)` pairs
+//! - [`browse_spells`] — all spell `(id, name)` pairs
+//! - [`browse_maps`] — all map `(id, width, height)` triples
+//! - [`browse_object_meshes`] — all object mesh `(key, name)` pairs from the unified registry
+//! - [`browse_event_mesh_ids`] — sorted mesh IDs from a standalone [`ObjectMeshDatabase`](crate::domain::world::object_mesh::ObjectMeshDatabase)
+//! - [`browse_dialogue_ids`] — sorted `(id, title)` pairs from a standalone [`DialogueDatabase`](crate::sdk::database::DialogueDatabase)
+//!
+//! ## Smart Suggestions (`suggest_*`)
+//!
+//! Returns prefix-filtered candidate lists (case-insensitive) for use in
+//! autocomplete text fields. Results are capped to keep the UI responsive.
+//!
+//! - [`suggest_monster_ids`] / [`suggest_item_ids`] / [`suggest_spell_ids`] / [`suggest_map_ids`]
+//! - [`suggest_object_mesh_ids`] — matches key OR name
+//! - [`suggest_event_mesh_ids`] — matches key only (prefix)
+//! - [`suggest_dialogue_ids`] — matches title OR numeric ID string (prefix)
+//!
+//! ## Map Event Mutation (`place_*`, `remove_*`, `set_*`)
+//!
+//! Validated helpers for placing, removing, and patching events on a [`Map`].
+//! These enforce domain constraints (bounds check, no double-occupancy, registry
+//! membership) and return descriptive [`MapEditorError`] values on failure.
+//!
+//! - [`place_map_event`] — inserts an event, checking bounds and occupancy
+//! - [`remove_map_event`] — removes and returns an event (or `None`)
+//! - [`set_event_mesh_id`] — patches `mesh_id` on a `Treasure` event; validates against [`ObjectMeshDatabase`](crate::domain::world::object_mesh::ObjectMeshDatabase)
+//! - [`set_event_dialogue_id`] — patches `dialogue_id` on a `Treasure` event; validates against [`DialogueDatabase`](crate::sdk::database::DialogueDatabase)
+//!
+//! ## Validation
+//!
+//! - [`validate_map`] — cross-reference check against the content database
+//! - [`is_valid_monster_id`] / [`is_valid_item_id`] / [`is_valid_spell_id`] / [`is_valid_map_id`] / [`is_valid_object_mesh_id`]
+//!
+//! # Full Placement Workflow Example
+//!
+//! ```no_run
+//! use antares::sdk::database::{ContentDatabase, DialogueDatabase};
+//! use antares::sdk::map_editor::{
+//!     browse_event_mesh_ids, browse_dialogue_ids,
+//!     place_map_event, set_event_mesh_id, set_event_dialogue_id,
+//! };
+//! use antares::domain::world::{Map, MapEvent};
+//! use antares::domain::world::object_mesh::ObjectMeshDatabase;
+//! use antares::domain::types::Position;
+//! use std::path::Path;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // 1. Load the campaign content database.
+//! let campaign_path = Path::new("campaigns/my_campaign");
+//! let db = ContentDatabase::load_campaign(campaign_path)?;
+//! let mut map = db.maps.get_map(1).cloned().expect("map 1 must exist");
+//!
+//! // 2. Inspect available mesh IDs (for autocomplete or validation).
+//! let mesh_ids = browse_event_mesh_ids(&db.object_meshes);
+//! println!("Available meshes: {:?}", mesh_ids);
+//!
+//! // 3. Place a Treasure event at (5, 3).
+//! let pos = Position::new(5, 3);
+//! let event = MapEvent::Treasure {
+//!     name: "Iron Chest".to_string(),
+//!     description: "An iron-bound chest sits in the alcove.".to_string(),
+//!     loot: vec![10, 11],
+//!     mesh_id: None,
+//!     dialogue_id: None,
+//! };
+//! place_map_event(&mut map, pos, event)?;
+//!
+//! // 4. Attach a mesh and a dialogue.
+//! set_event_mesh_id(&mut map, pos, Some("treasure_chest_iron".to_string()), &db.object_meshes)?;
+//! set_event_dialogue_id(&mut map, pos, Some(500), &db.dialogues)?;
+//!
+//! // 5. Serialise the updated map back to RON.
+//! let ron_str = ron::to_string(&map)?;
+//! std::fs::write(campaign_path.join("data/maps/map_1.ron"), ron_str)?;
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! # Architecture Reference
 //!
 //! See `docs/explanation/sdk_and_campaign_architecture.md` for specifications.
-//!
-//! # Examples
-//!
-//! ```no_run
-//! use antares::sdk::database::ContentDatabase;
-//! use antares::sdk::map_editor::{browse_monsters, suggest_monster_ids, browse_sprite_sheets, get_sprites_for_sheet};
-//! use antares::domain::world::Map;
-//!
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let db = ContentDatabase::load_campaign("campaigns/my_campaign")?;
-//! let map = Map::new(0, "Test Map".to_string(), "Description".to_string(), 10, 10);
-//!
-//! // Browse available monsters
-//! let monsters = browse_monsters(&db);
-//! println!("Found {} monsters", monsters.len());
-//!
-//! // Get suggestions for monster IDs
-//! let suggestions = suggest_monster_ids(&db, "gob");
-//! for (id, name) in suggestions {
-//!     println!("  [{}] {}", id, name);
-//! }
-//!
-//! // Browse available sprite sheets
-//! let sheets = browse_sprite_sheets()?;
-//! println!("Found {} sprite sheets", sheets.len());
-//!
-//! // Get sprites in a sheet
-//! let sprites = get_sprites_for_sheet("npcs_town")?;
-//! for (index, name) in sprites {
-//!     println!("  [{}] {}", index, name);
-//! }
-//! # Ok(())
-//! # }
-//! ```
+//! See `docs/explanation/modding_guide.md#interactive-objects--meshes-and-events` for the
+//! author-facing placement guide.
 
 use crate::domain::dialogue::DialogueId;
 use crate::domain::types::{ItemId, MapId, MonsterId, Position, SpellId};

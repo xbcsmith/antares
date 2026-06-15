@@ -1019,12 +1019,39 @@ fn execute_recruit_to_inn(
 /// Execute a single `DialogueAction`.
 ///
 /// Supported actions:
-/// - `StartQuest` → calls into `QuestSystem::start_quest` if present
-/// - `GiveItems` → adds items to first party member's inventory
-/// - `TakeItems` → attempts to remove items from first party member (best-effort)
-/// - `GiveGold` / `TakeGold` → modifies party gold
-/// - `SetFlag` / `ChangeReputation` / `TriggerEvent` → not fully implemented
-/// - `GrantExperience` → grants XP to first party member
+///
+/// | Action | Behaviour |
+/// |--------|-----------|
+/// | `StartQuest { quest_id }` | Calls `QuestSystem::start_quest`; logs success or failure |
+/// | `CompleteQuestStage { quest_id, stage_number }` | Logs for visibility (full implementation in `QuestSystem`) |
+/// | `GiveItems { items }` | Adds items to the first party member's inventory |
+/// | `TakeItems { items }` | Removes items from the first party member (best-effort) |
+/// | `GiveGold { amount }` | Adds gold to shared party pool (saturating) |
+/// | `TakeGold { amount }` | Subtracts gold from shared party pool (saturating) |
+/// | `SetFlag { flag_name, value }` | Logs a warning — not yet persisted |
+/// | `ChangeReputation { faction, change }` | Logs a warning — not yet implemented |
+/// | `GrantExperience { amount }` | Adds XP to the first party member |
+/// | `RecruitToParty { character_id }` | Directly recruits the character to the active party |
+/// | `RecruitToInn { character_id, innkeeper_id }` | Routes the character to the specified inn |
+/// | `TriggerEvent { event_name }` | Fires a named game effect — see table below |
+///
+/// # `TriggerEvent` names
+///
+/// The `TriggerEvent` action accepts a string `event_name` that maps to a specific
+/// game effect. All event-context-dependent triggers require that the dialogue was
+/// opened by a map event (i.e. `DialogueState::event_context` is set):
+///
+/// | `event_name` | Effect | Needs event context |
+/// |---|---|---|
+/// | `"collect_treasure"` | Distributes loot from the triggering `MapEvent::Treasure` to the party; despawns the event mesh via `DespawnEventMesh` | Yes |
+/// | `"open_container"` | Opens the triggering `MapEvent::Container` in `GameMode::ContainerInventory` | Yes |
+/// | `"unlock_door"` | Consumes the key item (if `key_item_id` is `Some`) from the party inventory, unlocks the `LockedDoor`, removes the event, and despawns its mesh | Yes |
+/// | `"unlock_container"` | Consumes the key item (if `key_item_id` is `Some`), then opens the `LockedContainer` for looting | Yes |
+/// | `"open_inn_party_management"` | Opens `GameMode::InnManagement` for the speaker NPC's inn. Requires the dialogue to have a `speaker_npc_id` set | No |
+/// | `"recruit_character_to_party"` | Resolves the recruitable character from `DialogueState::recruitment_context` and adds them to the active party | No |
+/// | `"recruit_character_to_inn"` | Same as above but routes the character to the nearest inn roster instead of the active party | No |
+///
+/// Unknown `event_name` values are logged at `info!` level and have no other effect.
 #[allow(clippy::too_many_arguments)]
 fn execute_action(
     action: &DialogueAction,

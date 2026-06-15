@@ -1242,13 +1242,25 @@ fn spawn_landscape_placements(
 
 /// Spawns mesh entities for all map events that carry a `mesh_id`.
 ///
-/// Iterates `map.events` and, for each event whose `mesh_id` field is `Some`,
-/// resolves the ID via the unified [`world::ObjectMeshDatabase`] (Phase 4).
-/// When a matching definition is found the mesh is spawned via
-/// [`spawn_creature`](crate::game::systems::creature_spawning::spawn_creature);
-/// otherwise a placeholder cube is spawned so the tile has a visible marker.
+/// Iterates `map.events` and, for each event variant whose `mesh_id` field is `Some`
+/// (`Treasure`, `Sign`, `Container`, `LockedDoor`, `LockedContainer`), resolves the
+/// mesh key against the unified [`world::ObjectMeshDatabase`].
 ///
-/// The `EventMeshMarker` tagging and despawn wiring are final.
+/// - If a matching [`CreatureDefinition`](crate::domain::visual::CreatureDefinition)
+///   is found, the mesh is spawned via
+///   [`spawn_creature`](crate::game::systems::creature_spawning::spawn_creature) and
+///   tagged with [`EventMeshMarker`].
+/// - If the mesh key is not in the registry, a magenta placeholder cube is spawned
+///   instead (with a `warn!` log) so authors can identify unresolved references at
+///   runtime.
+///
+/// Every spawned entity (resolved or placeholder) is tagged with:
+/// - [`MapEntity`] — map ownership for cleanup on map unload
+/// - [`TileCoord`] — grid position for raycasting and inspector display
+/// - [`EventMeshMarker`] — enables event-driven despawn via `DespawnEventMesh`
+///   messages and passive cleanup via `cleanup_event_mesh_markers`
+///
+/// Called by `spawn_map` immediately after the tile grid is built.
 fn spawn_event_meshes(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
