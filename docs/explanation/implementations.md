@@ -2,6 +2,56 @@
 
 ---
 
+## Custom Fonts Phase 3 — Font-Aware Text Style Helper and UI Integration (2026)
+
+**Goal:** Thread `CampaignFontHandles` through the dialogue and menu UI systems so
+that all player-visible text respects the campaign's configured custom fonts at runtime.
+A `None` font falls back to the Bevy engine default, preserving existing behavior
+for campaigns that omit `fonts:` from `config.ron`.
+
+### What Changed
+
+**`src/game/systems/ui_helpers.rs`**
+
+- Added `pub fn text_style_with_font(font: Option<Handle<Font>>, font_size: f32, color: Color) -> (TextFont, TextColor)`.
+  When `font` is `Some(handle)`, builds `TextFont` with that handle; when `None`, matches
+  the existing `text_style` behavior (Bevy default font).
+- Added 2 tests: `test_text_style_with_font_none_font_size_correct` and
+  `test_text_style_with_font_none_color_correct`.
+
+**`src/game/systems/dialogue_visuals.rs`**
+
+- Added imports: `use crate::game::resources::CampaignFontHandles;` and
+  `use crate::game::systems::ui_helpers::text_style_with_font;`.
+- Updated `spawn_dialogue_bubble` to accept `font_handles: Option<Res<CampaignFontHandles>>`.
+- Extracts `dialogue_font: Option<Handle<Font>>` from the optional resource.
+- Replaced both `TextFont { font_size, ..default() } + TextColor(...)` pairs (speaker
+  and content text) with `text_style_with_font(dialogue_font[.clone()], ...)`.
+- Added 1 test: `test_spawn_dialogue_bubble_dialogue_font_extraction_none`.
+
+**`src/game/systems/menu.rs`**
+
+- Updated import: added `CampaignFontHandles` and `text_style_with_font`; removed now-unused `text_style`.
+- Updated `menu_setup` system: added `font_handles: Res<CampaignFontHandles>` parameter;
+  extracts `menu_font: Option<Handle<Font>>` and passes it to all three spawn helpers.
+- Updated `spawn_main_menu`, `spawn_save_load_menu`, and `spawn_settings_menu`:
+  each accepts `font: Option<Handle<Font>>` as a new final parameter.
+  All text-spawning sites (title, section headers, labels, buttons) converted from
+  inline `TextFont { ... } + TextColor(...)` to `text_style_with_font(font.clone(), ...)`.
+  Total: 2 sites in `spawn_main_menu`, 10 sites in `spawn_save_load_menu`, 19 sites
+  in `spawn_settings_menu`.
+- Added 1 test: `test_menu_font_extraction_from_default_handles`.
+
+### Quality Gates
+
+- `cargo fmt` → zero output
+- `cargo check --all-features` → zero errors
+- `cargo clippy --all-features -- -D warnings` → zero warnings
+- `cargo nextest run --all-features` → 5318/5318 passed (11 new tests added across
+  `ui_helpers.rs`, `dialogue_visuals.rs`, and `menu.rs`)
+
+---
+
 ## Custom Fonts Phase 2 — `CampaignFontHandles` Resource and Loading System (2026)
 
 **Goal:** Create the `CampaignFontHandles` Bevy resource and its loading system so

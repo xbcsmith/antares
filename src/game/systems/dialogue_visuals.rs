@@ -18,7 +18,9 @@ use thiserror::Error;
 
 use crate::application::GameMode;
 use crate::game::components::dialogue::*;
+use crate::game::resources::CampaignFontHandles;
 use crate::game::resources::GlobalState;
+use crate::game::systems::ui_helpers::text_style_with_font;
 
 /// Error type for dialogue visual system operations
 #[derive(Error, Debug)]
@@ -53,12 +55,17 @@ pub fn spawn_dialogue_bubble(
     mut commands: Commands,
     global_state: Res<GlobalState>,
     mut active_ui: ResMut<ActiveDialogueUI>,
+    font_handles: Option<Res<CampaignFontHandles>>,
 ) {
     // Only spawn if in Dialogue mode and no panel exists yet
     if let GameMode::Dialogue(dialogue_state) = &global_state.0.mode {
         if active_ui.bubble_entity.is_some() {
             return; // Panel already exists
         }
+
+        let dialogue_font: Option<Handle<Font>> = font_handles
+            .as_ref()
+            .and_then(|fh| fh.dialogue_font.clone());
 
         // Spawn the root panel container
         let panel_root = commands
@@ -86,22 +93,22 @@ pub fn spawn_dialogue_bubble(
                 // Speaker name text
                 parent.spawn((
                     Text::new(&dialogue_state.current_speaker),
-                    TextFont {
-                        font_size: DIALOGUE_SPEAKER_FONT_SIZE,
-                        ..default()
-                    },
-                    TextColor(DIALOGUE_CHOICE_COLOR), // Golden color for speaker name
+                    text_style_with_font(
+                        dialogue_font.clone(),
+                        DIALOGUE_SPEAKER_FONT_SIZE,
+                        DIALOGUE_CHOICE_COLOR,
+                    ),
                     DialogueSpeakerText,
                 ));
 
                 // Dialogue content text with typewriter animation
                 parent.spawn((
                     Text::new(""),
-                    TextFont {
-                        font_size: DIALOGUE_CONTENT_FONT_SIZE,
-                        ..default()
-                    },
-                    TextColor(DIALOGUE_TEXT_COLOR),
+                    text_style_with_font(
+                        dialogue_font,
+                        DIALOGUE_CONTENT_FONT_SIZE,
+                        DIALOGUE_TEXT_COLOR,
+                    ),
                     TypewriterText {
                         full_text: dialogue_state.current_text.clone(),
                         visible_chars: 0,
@@ -622,4 +629,14 @@ mod tests {
     // Removed test: `test_follow_speaker_system_is_noop` — follow/facing logic and billboard tests are no longer applicable after migration to screen-space UI.
 
     // Removed test: `test_billboard_system_is_noop` — billboard rotation tests are not applicable after moving dialogue UI to screen-space.
+
+    #[test]
+    fn test_spawn_dialogue_bubble_dialogue_font_extraction_none() {
+        // Verify that font extraction from None CampaignFontHandles yields None.
+        // This tests the logic: font_handles.as_ref().and_then(|fh| fh.dialogue_font.clone())
+        let font_handles: Option<&crate::game::resources::CampaignFontHandles> = None;
+        let dialogue_font: Option<bevy::asset::Handle<bevy::text::Font>> =
+            font_handles.and_then(|fh| fh.dialogue_font.clone());
+        assert!(dialogue_font.is_none());
+    }
 }

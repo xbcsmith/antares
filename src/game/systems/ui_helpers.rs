@@ -82,6 +82,50 @@ pub fn text_style(font_size: f32, color: Color) -> (TextFont, TextColor) {
     )
 }
 
+/// Creates a ([`TextFont`], [`TextColor`]) bundle pair, optionally applying a
+/// custom font handle.
+///
+/// When `font` is `Some`, the returned [`TextFont`] uses that specific font
+/// asset.  When `None`, the Bevy engine default font is used, matching the
+/// behavior of [`text_style`].
+///
+/// # Arguments
+///
+/// * `font`      — Custom font handle. `None` uses the Bevy engine default.
+/// * `font_size` — Font size in logical pixels.
+/// * `color`     — Text color.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use bevy::prelude::*;
+/// # use antares::game::systems::ui_helpers::text_style_with_font;
+/// # fn example(mut commands: Commands) {
+/// commands.spawn((
+///     Text::new("Hello"),
+///     text_style_with_font(None, 16.0, Color::WHITE),
+/// ));
+/// # }
+/// ```
+pub fn text_style_with_font(
+    font: Option<Handle<Font>>,
+    font_size: f32,
+    color: Color,
+) -> (TextFont, TextColor) {
+    let text_font = match font {
+        Some(handle) => TextFont {
+            font: handle,
+            font_size,
+            ..default()
+        },
+        None => TextFont {
+            font_size,
+            ..default()
+        },
+    };
+    (text_font, TextColor(color))
+}
+
 /// Creates a square RGBA8 image filled with transparent black pixels.
 ///
 /// The returned [`Image`] uses [`TextureFormat::Rgba8UnormSrgb`] and is
@@ -139,6 +183,18 @@ mod tests {
     fn test_text_style_returns_correct_color() {
         let (_font, color) = text_style(14.0, Color::WHITE);
         assert_eq!(color.0, Color::WHITE);
+    }
+
+    #[test]
+    fn test_text_style_with_font_none_font_size_correct() {
+        let (font, _color) = text_style_with_font(None, 20.0, Color::WHITE);
+        assert!((font.font_size - 20.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_text_style_with_font_none_color_correct() {
+        let (_font, color) = text_style_with_font(None, 16.0, Color::srgb(1.0, 0.0, 0.0));
+        assert_eq!(color.0, Color::srgb(1.0, 0.0, 0.0));
     }
 
     #[test]

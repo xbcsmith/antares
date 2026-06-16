@@ -20,10 +20,10 @@ use crate::application::menu::{MenuState, MenuType, SaveGameInfo};
 use crate::application::save_game::SaveGameManager;
 use crate::application::GameMode;
 use crate::game::components::menu::*;
-use crate::game::resources::GlobalState;
+use crate::game::resources::{CampaignFontHandles, GlobalState};
 use crate::game::systems::mouse_input;
 use crate::game::systems::ui::GameLog;
-use crate::game::systems::ui_helpers::{text_style, BODY_FONT_SIZE};
+use crate::game::systems::ui_helpers::{text_style_with_font, BODY_FONT_SIZE};
 
 /// Path to the Antares icon, relative to the Bevy asset root (campaign directory).
 /// Bevy resolves paths relative to `BEVY_ASSET_ROOT` (the campaign dir), so the
@@ -145,6 +145,7 @@ fn menu_setup(
     mut commands: Commands,
     global_state: Res<GlobalState>,
     asset_server: Res<AssetServer>,
+    font_handles: Res<CampaignFontHandles>,
     existing_menu: Query<Entity, With<MenuRoot>>,
     children_query: Query<&Children>,
 ) {
@@ -191,30 +192,37 @@ fn menu_setup(
         return;
     }
 
+    let menu_font: Option<Handle<Font>> = font_handles.game_menu_font.clone();
+
     match menu_state.current_submenu {
         MenuType::Main => {
             debug!(
                 "menu_setup: spawning Main menu (selected_index={})",
                 menu_state.selected_index
             );
-            spawn_main_menu(&mut commands, menu_state, &asset_server)
+            spawn_main_menu(&mut commands, menu_state, &asset_server, menu_font)
         }
         MenuType::SaveLoad => {
             debug!(
                 "menu_setup: spawning Save/Load menu (selected_index={})",
                 menu_state.selected_index
             );
-            spawn_save_load_menu(&mut commands, menu_state)
+            spawn_save_load_menu(&mut commands, menu_state, menu_font)
         }
         MenuType::Settings => {
             debug!("menu_setup: spawning Settings menu");
-            spawn_settings_menu(&mut commands, &global_state.0)
+            spawn_settings_menu(&mut commands, &global_state.0, menu_font)
         }
     }
 }
 
 /// Spawn the main menu UI
-fn spawn_main_menu(commands: &mut Commands, menu_state: &MenuState, asset_server: &AssetServer) {
+fn spawn_main_menu(
+    commands: &mut Commands,
+    menu_state: &MenuState,
+    asset_server: &AssetServer,
+    font: Option<Handle<Font>>,
+) {
     let icon_handle: Handle<Image> = asset_server.load(ANTARES_ICON_PATH);
     commands
         .spawn((
@@ -273,11 +281,11 @@ fn spawn_main_menu(commands: &mut Commands, menu_state: &MenuState, asset_server
                             // "Antares RPG" text
                             title_row.spawn((
                                 Text::new("Antares RPG"),
-                                TextFont {
-                                    font_size: TITLE_FONT_SIZE,
-                                    ..default()
-                                },
-                                TextColor(TITLE_TEXT_COLOR),
+                                text_style_with_font(
+                                    font.clone(),
+                                    TITLE_FONT_SIZE,
+                                    TITLE_TEXT_COLOR,
+                                ),
                             ));
                         });
 
@@ -342,11 +350,11 @@ fn spawn_main_menu(commands: &mut Commands, menu_state: &MenuState, asset_server
                                     .with_children(|text_wrapper| {
                                         text_wrapper.spawn((
                                             Text::new(btn_text.to_string()),
-                                            TextFont {
-                                                font_size: BUTTON_FONT_SIZE,
-                                                ..default()
-                                            },
-                                            TextColor(BUTTON_TEXT_COLOR),
+                                            text_style_with_font(
+                                                font.clone(),
+                                                BUTTON_FONT_SIZE,
+                                                BUTTON_TEXT_COLOR,
+                                            ),
                                         ));
                                     });
                             });
@@ -361,7 +369,11 @@ fn spawn_main_menu(commands: &mut Commands, menu_state: &MenuState, asset_server
 }
 
 /// Spawn the save/load menu UI with scrollable save list
-fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
+fn spawn_save_load_menu(
+    commands: &mut Commands,
+    menu_state: &MenuState,
+    font: Option<Handle<Font>>,
+) {
     commands
         .spawn((
             Node {
@@ -405,11 +417,7 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
                         .with_children(|title| {
                             title.spawn((
                                 Text::new("SAVE / LOAD GAME"),
-                                TextFont {
-                                    font_size: TITLE_FONT_SIZE,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style_with_font(font.clone(), TITLE_FONT_SIZE, Color::WHITE),
                             ));
                         });
 
@@ -434,11 +442,11 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
                                 .with_children(|text_wrapper| {
                                     text_wrapper.spawn((
                                         Text::new("No save files found"),
-                                        TextFont {
-                                            font_size: 18.0,
-                                            ..default()
-                                        },
-                                        TextColor(Color::srgb(0.7, 0.7, 0.7)),
+                                        text_style_with_font(
+                                            font.clone(),
+                                            18.0,
+                                            Color::srgb(0.7, 0.7, 0.7),
+                                        ),
                                     ));
                                 });
                             } else {
@@ -477,7 +485,11 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
                                                         "Save: {}",
                                                         save_info.filename
                                                     )),
-                                                    text_style(BODY_FONT_SIZE, Color::WHITE),
+                                                    text_style_with_font(
+                                                        font.clone(),
+                                                        BODY_FONT_SIZE,
+                                                        Color::WHITE,
+                                                    ),
                                                 ));
                                             },
                                         );
@@ -495,11 +507,11 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
                                                         "Date: {}",
                                                         save_info.timestamp
                                                     )),
-                                                    TextFont {
-                                                        font_size: 12.0,
-                                                        ..default()
-                                                    },
-                                                    TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                                                    text_style_with_font(
+                                                        font.clone(),
+                                                        12.0,
+                                                        Color::srgb(0.9, 0.9, 0.9),
+                                                    ),
                                                 ));
                                             },
                                         );
@@ -517,11 +529,11 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
                                                         "Party: {}",
                                                         save_info.character_names.join(", ")
                                                     )),
-                                                    TextFont {
-                                                        font_size: 12.0,
-                                                        ..default()
-                                                    },
-                                                    TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                                                    text_style_with_font(
+                                                        font.clone(),
+                                                        12.0,
+                                                        Color::srgb(0.9, 0.9, 0.9),
+                                                    ),
                                                 ));
                                             });
                                         }
@@ -539,11 +551,11 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
                                                         "Location: {}",
                                                         save_info.location
                                                     )),
-                                                    TextFont {
-                                                        font_size: 12.0,
-                                                        ..default()
-                                                    },
-                                                    TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                                                    text_style_with_font(
+                                                        font.clone(),
+                                                        12.0,
+                                                        Color::srgb(0.9, 0.9, 0.9),
+                                                    ),
                                                 ));
                                             },
                                         );
@@ -579,11 +591,7 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
                                 .with_children(|button_root| {
                                     button_root.spawn((
                                         Text::new("Save"),
-                                        TextFont {
-                                            font_size: 18.0,
-                                            ..default()
-                                        },
-                                        TextColor(BUTTON_TEXT_COLOR),
+                                        text_style_with_font(font.clone(), 18.0, BUTTON_TEXT_COLOR),
                                     ));
                                 });
 
@@ -604,11 +612,7 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
                                 .with_children(|button_root| {
                                     button_root.spawn((
                                         Text::new("Load"),
-                                        TextFont {
-                                            font_size: 18.0,
-                                            ..default()
-                                        },
-                                        TextColor(BUTTON_TEXT_COLOR),
+                                        text_style_with_font(font.clone(), 18.0, BUTTON_TEXT_COLOR),
                                     ));
                                 });
 
@@ -629,11 +633,7 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
                                 .with_children(|button_root| {
                                     button_root.spawn((
                                         Text::new("Delete"),
-                                        TextFont {
-                                            font_size: 18.0,
-                                            ..default()
-                                        },
-                                        TextColor(BUTTON_TEXT_COLOR),
+                                        text_style_with_font(font.clone(), 18.0, BUTTON_TEXT_COLOR),
                                     ));
                                 });
 
@@ -654,11 +654,7 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
                                 .with_children(|button_root| {
                                     button_root.spawn((
                                         Text::new("Back"),
-                                        TextFont {
-                                            font_size: 18.0,
-                                            ..default()
-                                        },
-                                        TextColor(BUTTON_TEXT_COLOR),
+                                        text_style_with_font(font.clone(), 18.0, BUTTON_TEXT_COLOR),
                                     ));
                                 });
                         });
@@ -673,7 +669,11 @@ fn spawn_save_load_menu(commands: &mut Commands, menu_state: &MenuState) {
 }
 
 /// Spawn the settings menu UI with audio sliders and graphics settings
-fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application::GameState) {
+fn spawn_settings_menu(
+    commands: &mut Commands,
+    game_state: &crate::application::GameState,
+    font: Option<Handle<Font>>,
+) {
     commands
         .spawn((
             Node {
@@ -718,11 +718,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|title| {
                             title.spawn((
                                 Text::new("SETTINGS"),
-                                TextFont {
-                                    font_size: TITLE_FONT_SIZE,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
+                                text_style_with_font(font.clone(), TITLE_FONT_SIZE, Color::WHITE),
                             ));
                         });
 
@@ -741,11 +737,11 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new("Audio Settings"),
-                                TextFont {
-                                    font_size: 20.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.8, 0.8, 0.5)),
+                                text_style_with_font(
+                                    font.clone(),
+                                    20.0,
+                                    Color::srgb(0.8, 0.8, 0.5),
+                                ),
                             ));
                         });
 
@@ -760,7 +756,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new(format!("Master Volume: {:.0}%", master_vol * 100.0)),
-                                text_style(BODY_FONT_SIZE, Color::WHITE),
+                                text_style_with_font(font.clone(), BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
                     panel
@@ -804,7 +800,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new(format!("Music Volume: {:.0}%", music_vol * 100.0)),
-                                text_style(BODY_FONT_SIZE, Color::WHITE),
+                                text_style_with_font(font.clone(), BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
                     panel
@@ -848,7 +844,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new(format!("SFX Volume: {:.0}%", sfx_vol * 100.0)),
-                                text_style(BODY_FONT_SIZE, Color::WHITE),
+                                text_style_with_font(font.clone(), BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
                     panel
@@ -892,7 +888,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new(format!("Ambient Volume: {:.0}%", ambient_vol * 100.0)),
-                                text_style(BODY_FONT_SIZE, Color::WHITE),
+                                text_style_with_font(font.clone(), BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
                     panel
@@ -940,11 +936,11 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new("Graphics Settings"),
-                                TextFont {
-                                    font_size: 20.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.8, 0.8, 0.5)),
+                                text_style_with_font(
+                                    font.clone(),
+                                    20.0,
+                                    Color::srgb(0.8, 0.8, 0.5),
+                                ),
                             ));
                         });
 
@@ -971,7 +967,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                     "Fullscreen: {}",
                                     if graphics.fullscreen { "ON" } else { "OFF" }
                                 )),
-                                text_style(BODY_FONT_SIZE, Color::WHITE),
+                                text_style_with_font(font.clone(), BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
 
@@ -1000,7 +996,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                         "OFF"
                                     }
                                 )),
-                                text_style(BODY_FONT_SIZE, Color::WHITE),
+                                text_style_with_font(font.clone(), BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
 
@@ -1025,7 +1021,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                     "VSync: {}",
                                     if graphics.vsync { "ON" } else { "OFF" }
                                 )),
-                                text_style(BODY_FONT_SIZE, Color::WHITE),
+                                text_style_with_font(font.clone(), BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
 
@@ -1047,7 +1043,7 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|button| {
                             button.spawn((
                                 Text::new(format!("Shadow Quality: {:?}", graphics.shadow_quality)),
-                                text_style(BODY_FONT_SIZE, Color::WHITE),
+                                text_style_with_font(font.clone(), BODY_FONT_SIZE, Color::WHITE),
                             ));
                         });
 
@@ -1066,11 +1062,11 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new("Controls"),
-                                TextFont {
-                                    font_size: 20.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.8, 0.8, 0.5)),
+                                text_style_with_font(
+                                    font.clone(),
+                                    20.0,
+                                    Color::srgb(0.8, 0.8, 0.5),
+                                ),
                             ));
                         });
 
@@ -1085,11 +1081,11 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new(format!("Move Forward: {:?}", controls.move_forward)),
-                                TextFont {
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                                text_style_with_font(
+                                    font.clone(),
+                                    14.0,
+                                    Color::srgb(0.8, 0.8, 0.8),
+                                ),
                             ));
                         });
 
@@ -1102,11 +1098,11 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                         .with_children(|text_wrapper| {
                             text_wrapper.spawn((
                                 Text::new(format!("Move Back: {:?}", controls.move_back)),
-                                TextFont {
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                                text_style_with_font(
+                                    font.clone(),
+                                    14.0,
+                                    Color::srgb(0.8, 0.8, 0.8),
+                                ),
                             ));
                         });
 
@@ -1122,11 +1118,11 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                     "Turn Left/Right: {:?}/{:?}",
                                     controls.turn_left, controls.turn_right
                                 )),
-                                TextFont {
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                                text_style_with_font(
+                                    font.clone(),
+                                    14.0,
+                                    Color::srgb(0.8, 0.8, 0.8),
+                                ),
                             ));
                         });
 
@@ -1142,11 +1138,11 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                     "Interact/Menu: {:?}/{:?}",
                                     controls.interact, controls.menu
                                 )),
-                                TextFont {
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.8, 0.8, 0.8)),
+                                text_style_with_font(
+                                    font.clone(),
+                                    14.0,
+                                    Color::srgb(0.8, 0.8, 0.8),
+                                ),
                             ));
                         });
 
@@ -1177,11 +1173,11 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                 .with_children(|button_root| {
                                     button_root.spawn((
                                         Text::new("Apply"),
-                                        TextFont {
-                                            font_size: BUTTON_FONT_SIZE,
-                                            ..default()
-                                        },
-                                        TextColor(BUTTON_TEXT_COLOR),
+                                        text_style_with_font(
+                                            font.clone(),
+                                            BUTTON_FONT_SIZE,
+                                            BUTTON_TEXT_COLOR,
+                                        ),
                                     ));
                                 });
 
@@ -1202,11 +1198,11 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                 .with_children(|button_root| {
                                     button_root.spawn((
                                         Text::new("Reset"),
-                                        TextFont {
-                                            font_size: BUTTON_FONT_SIZE,
-                                            ..default()
-                                        },
-                                        TextColor(BUTTON_TEXT_COLOR),
+                                        text_style_with_font(
+                                            font.clone(),
+                                            BUTTON_FONT_SIZE,
+                                            BUTTON_TEXT_COLOR,
+                                        ),
                                     ));
                                 });
 
@@ -1227,11 +1223,11 @@ fn spawn_settings_menu(commands: &mut Commands, game_state: &crate::application:
                                 .with_children(|button_root| {
                                     button_root.spawn((
                                         Text::new("Back"),
-                                        TextFont {
-                                            font_size: BUTTON_FONT_SIZE,
-                                            ..default()
-                                        },
-                                        TextColor(BUTTON_TEXT_COLOR),
+                                        text_style_with_font(
+                                            font.clone(),
+                                            BUTTON_FONT_SIZE,
+                                            BUTTON_TEXT_COLOR,
+                                        ),
                                     ));
                                 });
                         });
@@ -2524,5 +2520,14 @@ mod tests {
         load_game_operation(&mut gs2, &manager, &filename, None);
 
         assert!(matches!(gs2.0.mode, GameMode::Exploration));
+    }
+
+    #[test]
+    fn test_menu_font_extraction_from_default_handles() {
+        use crate::game::resources::CampaignFontHandles;
+        let handles = CampaignFontHandles::default();
+        let menu_font: Option<bevy::asset::Handle<bevy::text::Font>> =
+            handles.game_menu_font.clone();
+        assert!(menu_font.is_none());
     }
 }
