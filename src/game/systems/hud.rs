@@ -20,7 +20,7 @@ use crate::domain::character::{Condition, PARTY_MAX_SIZE};
 use crate::domain::conditions::ActiveCondition;
 use crate::domain::types::{Direction, Position};
 use crate::game::components::inventory::{CharacterEntity, PartyEntities};
-use crate::game::resources::GlobalState;
+use crate::game::resources::{CampaignFontHandles, GlobalState};
 use crate::game::systems::mouse_input;
 use crate::game::systems::ui_helpers::{
     create_blank_rgba_image, text_style, BODY_FONT_SIZE, LABEL_FONT_SIZE,
@@ -424,6 +424,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(PortraitAssets::default())
             .init_resource::<FullPortraitAssets>()
+            .init_resource::<CampaignFontHandles>()
             // PostStartup (not Startup): the mini-map/automap canvas images
             // must be allocated AFTER every Startup-issued asset load has
             // reserved its asset index. If a canvas allocation interleaves
@@ -462,6 +463,7 @@ impl Plugin for HudPlugin {
                 (
                     ensure_portraits_loaded,
                     ensure_full_portraits_loaded,
+                    ensure_campaign_fonts_loaded,
                     update_mini_map,
                     update_compass,
                     update_clock,
@@ -2167,6 +2169,76 @@ fn ensure_full_portraits_loaded(
     debug!(
         "ensure_full_portraits_loaded: loaded {} full portraits for campaign '{}'",
         full_portraits.handles_by_name.len(),
+        campaign.id
+    );
+}
+
+/// Ensures campaign font handles are loaded for the active campaign.
+///
+/// Reads `campaign.game_config.fonts` and loads each configured `.ttf` path via
+/// the `AssetServer`, storing `Handle<Font>` values in [`CampaignFontHandles`].
+/// Called every frame (guarded by `not_in_combat`), but exits immediately after
+/// the first successful load for each campaign.
+///
+/// # Behavior
+///
+/// * No campaign active → returns immediately.
+/// * `AssetServer` resource absent → logs `debug!` and returns (retries next frame).
+/// * Handles already loaded for this campaign → returns immediately.
+/// * Font field is `None` → leaves the handle as `None` (uses engine default).
+/// * Font path produces a default handle → logs `warn!` and leaves as `None`.
+fn ensure_campaign_fonts_loaded(
+    global_state: Res<GlobalState>,
+    asset_server: Option<Res<AssetServer>>,
+    mut font_handles: ResMut<CampaignFontHandles>,
+) {
+    let campaign = match &global_state.0.campaign {
+        Some(c) => c,
+        None => return,
+    };
+
+    let asset_server = match asset_server {
+        Some(a) => a,
+        None => {
+            debug!(
+                "ensure_campaign_fonts_loaded: no AssetServer available; skipping for campaign {}",
+                campaign.id
+            );
+            return;
+        }
+    };
+
+    if font_handles.loaded_for_campaign.as_deref() == Some(campaign.id.as_str()) {
+        return;
+    }
+
+    if let Some(rel_path) = &campaign.game_config.fonts.dialogue_font {
+        let handle: Handle<Font> = asset_server.load(rel_path.clone());
+        if handle == Handle::default() {
+            warn!(
+                "ensure_campaign_fonts_loaded: failed to load '{}' for campaign '{}'; using default font",
+                rel_path, campaign.id
+            );
+        } else {
+            font_handles.dialogue_font = Some(handle);
+        }
+    }
+
+    if let Some(rel_path) = &campaign.game_config.fonts.game_menu_font {
+        let handle: Handle<Font> = asset_server.load(rel_path.clone());
+        if handle == Handle::default() {
+            warn!(
+                "ensure_campaign_fonts_loaded: failed to load '{}' for campaign '{}'; using default font",
+                rel_path, campaign.id
+            );
+        } else {
+            font_handles.game_menu_font = Some(handle);
+        }
+    }
+
+    font_handles.loaded_for_campaign = Some(campaign.id.clone());
+    debug!(
+        "ensure_campaign_fonts_loaded: loaded fonts for campaign '{}'",
         campaign.id
     );
 }
@@ -5059,5 +5131,153 @@ mod full_portrait_tests {
         let results = scan_full_portraits_dir(tmp.path());
         assert_eq!(results.len(), 1, "only image files should be indexed");
         assert_eq!(results[0].0, "warrior");
+    }
+}
+
+// ===== Campaign Font Handle Tests =====
+
+#[cfg(test)]
+mod campaign_font_tests {
+    use super::*;
+    use crate::application::GameState;
+    use crate::sdk::campaign_loader::{Campaign, CampaignAssets, CampaignConfig, CampaignData};
+    use crate::sdk::game_config::{FontConfig, GameConfig};
+    use std::path::PathBuf;
+
+    fn make_test_campaign(fonts: FontConfig) -> Campaign {
+        Campaign {
+            id: "test_fonts".to_string(),
+            name: "Test Campaign".to_string(),
+            version: "1.0.0".to_string(),
+            author: "Test Author".to_string(),
+            description: "A test campaign".to_string(),
+            engine_version: env!("CARGO_PKG_VERSION").to_string(),
+            required_features: vec![],
+            config: CampaignConfig::default(),
+            data: CampaignData::default(),
+            assets: CampaignAssets::default(),
+            root_path: PathBuf::from("data/test_campaign"),
+            game_config: GameConfig {
+                fonts,
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn test_campaign_font_handles_default_both_none() {
+        let handles = CampaignFontHandles::default();
+        assert!(handles.dialogue_font.is_none());
+        assert!(handles.game_menu_font.is_none());
+    }
+
+    #[test]
+    fn test_campaign_font_handles_loaded_for_campaign_default_none() {
+        assert!(CampaignFontHandles::default().loaded_for_campaign.is_none());
+    }
+
+    #[test]
+    fn test_ensure_campaign_fonts_loaded_skips_when_no_campaign() {
+        let mut app = App::new();
+        // No AssetPlugin — system exits at step 1 (no campaign), never reaches step 2.
+        let state = GameState::new();
+        app.insert_resource(GlobalState(state));
+        app.insert_resource(CampaignFontHandles::default());
+        app.add_systems(Update, ensure_campaign_fonts_loaded);
+        app.update();
+
+        let handles = app.world().resource::<CampaignFontHandles>();
+        assert!(handles.loaded_for_campaign.is_none());
+        assert!(handles.dialogue_font.is_none());
+        assert!(handles.game_menu_font.is_none());
+    }
+
+    #[test]
+    fn test_ensure_campaign_fonts_loaded_skips_when_no_asset_server() {
+        let mut app = App::new();
+        // No AssetPlugin → no AssetServer resource → system returns at step 2.
+        let mut state = GameState::new();
+        state.campaign = Some(make_test_campaign(FontConfig::default()));
+        app.insert_resource(GlobalState(state));
+        app.insert_resource(CampaignFontHandles::default());
+        app.add_systems(Update, ensure_campaign_fonts_loaded);
+        app.update();
+
+        let handles = app.world().resource::<CampaignFontHandles>();
+        assert!(
+            handles.loaded_for_campaign.is_none(),
+            "early return at step 2 must not set loaded_for_campaign"
+        );
+        assert!(handles.dialogue_font.is_none());
+        assert!(handles.game_menu_font.is_none());
+    }
+
+    #[test]
+    fn test_ensure_campaign_fonts_loaded_skips_when_already_loaded() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        let mut state = GameState::new();
+        state.campaign = Some(make_test_campaign(FontConfig::default()));
+        app.insert_resource(GlobalState(state));
+        // Pre-set: loaded_for_campaign already matches campaign id.
+        app.insert_resource(CampaignFontHandles {
+            loaded_for_campaign: Some("test_fonts".to_string()),
+            ..Default::default()
+        });
+        app.add_systems(Update, ensure_campaign_fonts_loaded);
+        app.update();
+
+        let handles = app.world().resource::<CampaignFontHandles>();
+        assert_eq!(
+            handles.loaded_for_campaign.as_deref(),
+            Some("test_fonts"),
+            "loaded_for_campaign must remain unchanged when already loaded"
+        );
+        assert!(handles.dialogue_font.is_none());
+        assert!(handles.game_menu_font.is_none());
+    }
+
+    #[test]
+    fn test_ensure_campaign_fonts_loaded_none_config_leaves_handles_none() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        let mut state = GameState::new();
+        state.campaign = Some(make_test_campaign(FontConfig::default()));
+        app.insert_resource(GlobalState(state));
+        app.insert_resource(CampaignFontHandles::default());
+        app.add_systems(Update, ensure_campaign_fonts_loaded);
+        app.update();
+
+        let handles = app.world().resource::<CampaignFontHandles>();
+        assert!(
+            handles.dialogue_font.is_none(),
+            "None dialogue_font config must leave handle as None"
+        );
+        assert!(
+            handles.game_menu_font.is_none(),
+            "None game_menu_font config must leave handle as None"
+        );
+    }
+
+    #[test]
+    fn test_ensure_campaign_fonts_loaded_sets_loaded_for_campaign() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        let mut state = GameState::new();
+        state.campaign = Some(make_test_campaign(FontConfig::default()));
+        app.insert_resource(GlobalState(state));
+        app.insert_resource(CampaignFontHandles::default());
+        app.add_systems(Update, ensure_campaign_fonts_loaded);
+        app.update();
+
+        let handles = app.world().resource::<CampaignFontHandles>();
+        assert_eq!(
+            handles.loaded_for_campaign.as_deref(),
+            Some("test_fonts"),
+            "loaded_for_campaign must equal campaign id after system runs"
+        );
     }
 }

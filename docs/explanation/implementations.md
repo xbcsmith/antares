@@ -2,6 +2,46 @@
 
 ---
 
+## Custom Fonts Phase 2 — `CampaignFontHandles` Resource and Loading System (2026)
+
+**Goal:** Create the `CampaignFontHandles` Bevy resource and its loading system so
+that font handles are resolved from `campaign.game_config.fonts` at runtime.
+The resource is campaign-scoped: switching campaigns triggers a reload.
+
+### What Changed
+
+**`src/game/resources/font_handles.rs`** *(new file)*
+
+- Defines `CampaignFontHandles` resource with `dialogue_font: Option<Handle<Font>>`,
+  `game_menu_font: Option<Handle<Font>>`, and `loaded_for_campaign: Option<String>`.
+- Derives `Resource`, `Default`; all three fields default to `None`.
+- SPDX header as first two lines; full `///` doc comments on struct and fields.
+
+**`src/game/resources/mod.rs`**
+
+- Added `pub mod font_handles;` in alphabetical order.
+- Added `pub use font_handles::CampaignFontHandles;` to the re-export block.
+
+**`src/game/systems/hud.rs`**
+
+- Added `use crate::game::resources::{CampaignFontHandles, GlobalState};`.
+- Added `.init_resource::<CampaignFontHandles>()` in `HudPlugin::build`.
+- Added `ensure_campaign_fonts_loaded` to the `not_in_combat` `Update` set.
+- Implemented `fn ensure_campaign_fonts_loaded` after `ensure_full_portraits_loaded`:
+  follows the same early-return guard pattern (no campaign → no AssetServer →
+  already loaded → process fonts → set `loaded_for_campaign`).
+- Added `mod campaign_font_tests` with 7 tests covering defaults, each early-return
+  path, None-config behavior, and `loaded_for_campaign` assignment.
+
+### Quality Gates
+
+- `cargo fmt --all` → zero output
+- `cargo check --all-targets --all-features` → zero errors
+- `cargo clippy --all-targets --all-features -- -D warnings` → zero warnings
+- All 7 new `campaign_font_tests` pass
+
+---
+
 ## Custom Fonts Phase 1 — Config Schema and Data Model (2026)
 
 **Goal:** Add `FontConfig` struct and `fonts` field to `GameConfig` so campaign authors
