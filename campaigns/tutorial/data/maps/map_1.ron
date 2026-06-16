@@ -8228,22 +8228,20 @@
         (
             x: 3,
             y: 7,
-        ): Container(
-            id: "container_3007",
+        ): Furniture(
             name: "Chest",
-            description: "Locked Container",
-            items: [
-                (
-                    item_id: 2,
-                    charges: 0,
-                ),
-                (
-                    item_id: 3,
-                    charges: 0,
-                ),
-            ],
-            gold: 500,
-            gems: 10,
+            furniture_id: Some(13),
+            furniture_type: Chest,
+            rotation_y: Some(0.0),
+            scale: 1.0,
+            material: Wood,
+            flags: (
+                lit: false,
+                locked: false,
+                blocking: false,
+            ),
+            color_tint: None,
+            key_item_id: None,
         ),
         (
             x: 3,

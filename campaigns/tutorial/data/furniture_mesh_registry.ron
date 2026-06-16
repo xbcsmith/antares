@@ -1,0 +1,7 @@
+[
+    (
+        id: 10001,
+        name: "Ironbound Treasure Chest",
+        filepath: "assets/furniture/storage/ironbound_treasure_chest.ron",
+    ),
+]

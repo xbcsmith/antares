@@ -2,6 +2,48 @@
 
 ---
 
+## Custom Fonts Phase 1 — Config Schema and Data Model (2026)
+
+**Goal:** Add `FontConfig` struct and `fonts` field to `GameConfig` so campaign authors
+can declare optional `dialogue_font` and `game_menu_font` paths in `config.ron`.
+Existing configs that omit `fonts:` load and validate without error (`#[serde(default)]`).
+
+### What Changed
+
+**`src/sdk/game_config.rs`**
+
+- Added `FontConfig` struct with `dialogue_font: Option<String>` and
+  `game_menu_font: Option<String>` (both `#[serde(default)]`, derive `Default`).
+- Implemented `FontConfig::validate()`: checks each non-`None` field independently
+  for absolute paths, `..` traversal, missing `fonts/` prefix, and non-`.ttf` extension.
+- Added `#[serde(default)] pub fonts: FontConfig` field to `GameConfig`.
+- Updated `GameConfig::validate()` to call `self.fonts.validate()?`.
+- Updated `GameConfig` struct doctest to assert `config.fonts == FontConfig::default()`.
+- Added 13 tests in `mod tests` covering defaults, all four validation error cases,
+  three RON round-trips, and `GameConfig`-level propagation.
+
+**`campaigns/config.template.ron`**
+
+- Added commented `fonts: FontConfig(...)` example section after `game_log:` block
+  documenting path format and fallback behavior.
+
+**`data/test_campaign/config.ron`**
+
+- Added `fonts: FontConfig(),` after `leveling:` block.
+
+**`campaigns/tutorial/config.ron`**
+
+- Added `fonts: FontConfig(),` after `leveling:` block.
+
+### Quality Gates
+
+- `cargo fmt --all` → zero output
+- `cargo check --all-targets --all-features` → zero errors
+- `cargo clippy --all-targets --all-features -- -D warnings` → zero warnings
+- All 13 new `FontConfig` / `GameConfig` font tests pass
+
+---
+
 ## Phase 7: Modding Guide — Interactive Objects (Meshes and Events) section (2026)
 
 **Goal:** Document the unified interactive object authoring model in the modding guide

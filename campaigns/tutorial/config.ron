@@ -54,6 +54,7 @@ GameConfig(
         training_fee_base: 500,
         training_fee_multiplier: 1.0,
     ),
+    fonts: FontConfig(),
     time: TimeConfig(
         movement_step_seconds: 30,
         combat_turn_seconds: 10,

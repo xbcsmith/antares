@@ -2238,6 +2238,42 @@
         ),
     ),
     (
+        id: 500,
+        name: "Barred Passage",
+        root_node: 1,
+        nodes: {
+            1: (
+                id: 1,
+                text: "The passage is barred shut. You need to find a way to open it.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Leave it for now.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+        },
+        speaker_name: None,
+        repeatable: true,
+        associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
+    ),
+    (
         id: 999,
         name: "Default Innkeeper Greeting",
         root_node: 1,
@@ -2644,42 +2680,6 @@
         speaker_name: Some("Jyeshtha"),
         repeatable: false,
         associated_quest: Some(8),
-        sdk_metadata: (
-            managed_content: [],
-        ),
-    ),
-    (
-        id: 500,
-        name: "Barred Passage",
-        root_node: 1,
-        nodes: {
-            1: (
-                id: 1,
-                text: "The passage is barred shut. You need to find a way to open it.",
-                speaker_override: None,
-                choices: [
-                    (
-                        text: "Leave it for now.",
-                        target_node: None,
-                        conditions: [],
-                        actions: [],
-                        ends_dialogue: true,
-                        sdk_metadata: (
-                            managed_content: [],
-                        ),
-                    ),
-                ],
-                conditions: [],
-                actions: [],
-                is_terminal: false,
-                sdk_metadata: (
-                    managed_content: [],
-                ),
-            ),
-        },
-        speaker_name: None,
-        repeatable: true,
-        associated_quest: None,
         sdk_metadata: (
             managed_content: [],
         ),

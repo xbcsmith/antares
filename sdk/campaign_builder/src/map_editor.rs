@@ -4350,13 +4350,16 @@ pub struct MapsEditorState {
     /// Request to open the NPC editor for a given NPC ID (set when user clicks Edit NPC)
     pub requested_open_npc: Option<String>,
     /// Mesh IDs from the campaign's object mesh registry.
-    /// Rebuilt when `ctx.campaign_dir` changes. Never call the loader inside the render loop.
+    /// Rebuilt when `ctx.campaign_dir` changes or `mesh_cache_dirty` is set.
     pub available_mesh_ids: Vec<String>,
     /// Dialogue (id, title) pairs from the campaign dialogue database.
     /// Rebuilt when `ctx.campaign_dir` changes. Never call the loader inside the render loop.
     pub available_dialogue_ids: Vec<(u16, String)>,
     /// Last campaign directory seen, used to detect when caches need to be rebuilt.
     pub last_campaign_dir: Option<std::path::PathBuf>,
+    /// When `true`, the mesh ID cache will be rebuilt on the next render tick
+    /// regardless of whether the campaign directory changed.
+    pub mesh_cache_dirty: bool,
 }
 
 /// Minimum zoom level (25%)
@@ -4413,6 +4416,7 @@ impl Default for MapsEditorState {
             available_mesh_ids: Vec::new(),
             available_dialogue_ids: Vec::new(),
             last_campaign_dir: None,
+            mesh_cache_dirty: false,
         }
     }
 }
@@ -4447,6 +4451,10 @@ impl MapsEditorState {
     /// Create a new maps editor state
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn invalidate_mesh_cache(&mut self) {
+        self.mesh_cache_dirty = true;
     }
 
     /// Get the next available map ID
@@ -4514,7 +4522,7 @@ impl MapsEditorState {
             (Some(last), Some(current)) => last != current,
             (None, None) => false,
         };
-        if campaign_dir_changed {
+        if campaign_dir_changed || self.mesh_cache_dirty {
             if let Some(dir) = ctx.campaign_dir {
                 // Load object mesh IDs
                 let registry_path = dir.join("data/object_mesh_registry.ron");
@@ -4528,6 +4536,7 @@ impl MapsEditorState {
                 } else {
                     self.available_mesh_ids.clear();
                 }
+                self.mesh_cache_dirty = false;
                 // Load dialogue IDs
                 let dialogue_path = dir.join("data/dialogues.ron");
                 if let Ok(db) =
@@ -4542,6 +4551,7 @@ impl MapsEditorState {
             } else {
                 self.available_mesh_ids.clear();
                 self.available_dialogue_ids.clear();
+                self.mesh_cache_dirty = false;
                 self.last_campaign_dir = None;
             }
         }
@@ -8263,46 +8273,62 @@ impl MapsEditorState {
             let mut add_event = false;
             let mut replace_event = false;
             let mut remove_event_flag = false;
+            let mut cancel_event_edit = false;
             let mut event_to_add: Option<MapEvent> = None;
             // Capture the position immediately so we do not hold the borrow on the editor while applying.
             let event_pos = event_editor.position;
 
-            // If there's an existing event at this position, show Save / Remove controls.
+            // If there's an existing event at this position, show Save / Remove / Cancel controls.
             let existing_event = editor.map.get_event(event_pos).cloned();
             if existing_event.is_some() {
-                if ui.button("💾 Save Changes").clicked() {
-                    match event_editor.to_map_event() {
-                        Ok(event) => {
-                            event_to_add = Some(event);
-                            replace_event = true;
-                        }
-                        Err(err) => {
-                            ui.label(format!("Error: {}", err));
+                ui.horizontal(|ui| {
+                    if ui.button("💾 Save Changes").clicked() {
+                        match event_editor.to_map_event() {
+                            Ok(event) => {
+                                event_to_add = Some(event);
+                                replace_event = true;
+                            }
+                            Err(err) => {
+                                ui.label(format!("Error: {}", err));
+                            }
                         }
                     }
-                }
 
-                if ui.button("🗑 Remove Event").clicked() {
-                    remove_event_flag = true;
-                }
+                    if ui.button("🗑 Remove Event").clicked() {
+                        remove_event_flag = true;
+                    }
+
+                    if ui.button("❌ Cancel").clicked() {
+                        cancel_event_edit = true;
+                    }
+                });
             } else {
-                // No existing event -> offer Add
-                if ui.button("➕ Add Event").clicked() {
-                    match event_editor.to_map_event() {
-                        Ok(event) => {
-                            event_to_add = Some(event);
-                            add_event = true;
-                        }
-                        Err(err) => {
-                            ui.label(format!("Error: {}", err));
+                // No existing event -> offer Add or Cancel
+                ui.horizontal(|ui| {
+                    if ui.button("➕ Add Event").clicked() {
+                        match event_editor.to_map_event() {
+                            Ok(event) => {
+                                event_to_add = Some(event);
+                                add_event = true;
+                            }
+                            Err(err) => {
+                                ui.label(format!("Error: {}", err));
+                            }
                         }
                     }
-                }
+
+                    if ui.button("❌ Cancel").clicked() {
+                        cancel_event_edit = true;
+                    }
+                });
             }
 
             // Apply after borrow ends (mutating the map/editor)
             if remove_event_flag {
                 editor.remove_event(event_pos);
+                editor.event_editor = None;
+                editor.current_tool = EditorTool::Select;
+            } else if cancel_event_edit {
                 editor.event_editor = None;
                 editor.current_tool = EditorTool::Select;
             } else if replace_event {

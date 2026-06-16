@@ -122,7 +122,7 @@ pub enum ConfigError {
 /// # Examples
 ///
 /// ```
-/// use antares::sdk::game_config::GameConfig;
+/// use antares::sdk::game_config::{FontConfig, GameConfig};
 ///
 /// let config = GameConfig::default();
 /// assert_eq!(config.graphics.resolution, (1280, 720));
@@ -131,6 +131,7 @@ pub enum ConfigError {
 /// assert_eq!(config.game_log.max_entries, 200);
 /// assert_eq!(config.time.movement_step_seconds, 30);
 /// assert_eq!(config.leveling.base_xp, 1000);
+/// assert_eq!(config.fonts, FontConfig::default());
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct GameConfig {
@@ -161,6 +162,13 @@ pub struct GameConfig {
     /// Leveling and XP curve configuration
     #[serde(default)]
     pub leveling: LevelingConfig,
+
+    /// Custom font configuration for campaign-scoped font paths.
+    ///
+    /// Both fields default to `None`; omitting this section preserves the
+    /// default Bevy engine font for all UI elements.
+    #[serde(default)]
+    pub fonts: FontConfig,
 }
 
 impl GameConfig {
@@ -236,6 +244,7 @@ impl GameConfig {
         self.game_log.validate()?;
         self.time.validate()?;
         self.leveling.validate()?;
+        self.fonts.validate()?;
         Ok(())
     }
 }
@@ -1159,6 +1168,107 @@ impl LevelingConfig {
             return Err(ConfigError::ValidationError(
                 "leveling.training_fee_multiplier must be at least 0.01".to_string(),
             ));
+        }
+        Ok(())
+    }
+}
+
+/// Custom font configuration for campaign-scoped font overrides.
+///
+/// Both fields default to `None`, preserving the Bevy engine default font
+/// unless a campaign author explicitly supplies a path.
+///
+/// # Examples
+///
+/// ```
+/// use antares::sdk::game_config::FontConfig;
+///
+/// let cfg = FontConfig::default();
+/// assert!(cfg.dialogue_font.is_none());
+/// assert!(cfg.game_menu_font.is_none());
+/// assert!(cfg.validate().is_ok());
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct FontConfig {
+    /// Path to a `.ttf` font file for dialogue text, relative to the campaign root.
+    ///
+    /// Must start with `fonts/` and end with `.ttf`. Omit or set to `None` to
+    /// use the Bevy engine default font for dialogue UI.
+    #[serde(default)]
+    pub dialogue_font: Option<String>,
+
+    /// Path to a `.ttf` font file for game menu text, relative to the campaign root.
+    ///
+    /// Applies to all text in `spawn_main_menu`, `spawn_save_load_menu`, and
+    /// `spawn_settings_menu`. Omit or set to `None` to use the Bevy engine default.
+    #[serde(default)]
+    pub game_menu_font: Option<String>,
+}
+
+impl FontConfig {
+    /// Validate the font configuration.
+    ///
+    /// Each configured path is independently checked:
+    /// - `None` → always valid.
+    /// - Must be a relative path (must not start with `/` or contain `:\`).
+    /// - Must not contain `..` (no directory traversal).
+    /// - Must start with `fonts/`.
+    /// - Must end with `.ttf`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ConfigError::ValidationError` with a descriptive message when
+    /// any rule is violated.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::game_config::{ConfigError, FontConfig};
+    ///
+    /// // None fields always pass.
+    /// assert!(FontConfig::default().validate().is_ok());
+    ///
+    /// // Valid path passes.
+    /// let valid = FontConfig {
+    ///     dialogue_font: Some("fonts/my_font.ttf".to_string()),
+    ///     ..Default::default()
+    /// };
+    /// assert!(valid.validate().is_ok());
+    ///
+    /// // Wrong extension fails.
+    /// let bad = FontConfig {
+    ///     dialogue_font: Some("fonts/my_font.otf".to_string()),
+    ///     ..Default::default()
+    /// };
+    /// assert!(matches!(bad.validate(), Err(ConfigError::ValidationError(_))));
+    /// ```
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        for (field_name, opt_path) in [
+            ("fonts.dialogue_font", &self.dialogue_font),
+            ("fonts.game_menu_font", &self.game_menu_font),
+        ] {
+            if let Some(path) = opt_path {
+                if path.starts_with('/') || path.contains(":\\") {
+                    return Err(ConfigError::ValidationError(format!(
+                        "{field_name} must be a relative path (got {path:?})"
+                    )));
+                }
+                if path.contains("..") {
+                    return Err(ConfigError::ValidationError(format!(
+                        "{field_name} must not contain '..' (got {path:?})"
+                    )));
+                }
+                if !path.starts_with("fonts/") {
+                    return Err(ConfigError::ValidationError(format!(
+                        "{field_name} must start with 'fonts/' (got {path:?})"
+                    )));
+                }
+                if !path.ends_with(".ttf") {
+                    return Err(ConfigError::ValidationError(format!(
+                        "{field_name} must end with '.ttf' (got {path:?})"
+                    )));
+                }
+            }
         }
         Ok(())
     }
@@ -2377,5 +2487,181 @@ mod tests {
         let config: ControlsConfig = ron::from_str(ron_str).expect("deserialize");
         assert_eq!(config.character_select_1, vec!["1".to_string()]);
         assert_eq!(config.character_select_6, vec!["6".to_string()]);
+    }
+
+    // ── FontConfig tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_font_config_default_both_none() {
+        let cfg = FontConfig::default();
+        assert!(cfg.dialogue_font.is_none());
+        assert!(cfg.game_menu_font.is_none());
+    }
+
+    #[test]
+    fn test_font_config_validate_none_fields_ok() {
+        assert!(FontConfig::default().validate().is_ok());
+    }
+
+    #[test]
+    fn test_font_config_validate_valid_ttf_path_ok() {
+        let cfg = FontConfig {
+            dialogue_font: Some("fonts/foo.ttf".to_string()),
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_font_config_validate_invalid_extension_fails() {
+        let cfg = FontConfig {
+            dialogue_font: Some("fonts/foo.otf".to_string()),
+            ..Default::default()
+        };
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.to_string().contains(".ttf"),
+            "error must mention .ttf: {err}"
+        );
+    }
+
+    #[test]
+    fn test_font_config_validate_absolute_path_fails() {
+        let cfg = FontConfig {
+            dialogue_font: Some("/usr/share/fonts/foo.ttf".to_string()),
+            ..Default::default()
+        };
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("relative"),
+            "error must mention relative path: {err}"
+        );
+    }
+
+    #[test]
+    fn test_font_config_validate_traversal_path_fails() {
+        let cfg = FontConfig {
+            dialogue_font: Some("fonts/../secret.ttf".to_string()),
+            ..Default::default()
+        };
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.to_string().contains(".."),
+            "error must mention '..': {err}"
+        );
+    }
+
+    #[test]
+    fn test_font_config_validate_missing_fonts_prefix_fails() {
+        let cfg = FontConfig {
+            dialogue_font: Some("myfile.ttf".to_string()),
+            ..Default::default()
+        };
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("fonts/"),
+            "error must mention 'fonts/' prefix: {err}"
+        );
+    }
+
+    #[test]
+    fn test_font_config_ron_roundtrip_both_none() {
+        let original = FontConfig::default();
+        let ron_str = ron::to_string(&original).expect("serialize FontConfig");
+        let back: FontConfig = ron::from_str(&ron_str).expect("deserialize FontConfig");
+        assert_eq!(back, original);
+    }
+
+    #[test]
+    fn test_font_config_ron_roundtrip_dialogue_only() {
+        let original = FontConfig {
+            dialogue_font: Some("fonts/dialogue.ttf".to_string()),
+            game_menu_font: None,
+        };
+        let ron_str = ron::to_string(&original).expect("serialize FontConfig");
+        let back: FontConfig = ron::from_str(&ron_str).expect("deserialize FontConfig");
+        assert_eq!(back.dialogue_font, Some("fonts/dialogue.ttf".to_string()));
+        assert!(back.game_menu_font.is_none());
+    }
+
+    #[test]
+    fn test_font_config_ron_roundtrip_both_set() {
+        let original = FontConfig {
+            dialogue_font: Some("fonts/dialogue.ttf".to_string()),
+            game_menu_font: Some("fonts/menu.ttf".to_string()),
+        };
+        let ron_str = ron::to_string(&original).expect("serialize FontConfig");
+        let back: FontConfig = ron::from_str(&ron_str).expect("deserialize FontConfig");
+        assert_eq!(back, original);
+    }
+
+    #[test]
+    fn test_game_config_fonts_field_default() {
+        assert_eq!(GameConfig::default().fonts, FontConfig::default());
+    }
+
+    #[test]
+    fn test_game_config_fonts_defaults_when_missing_from_ron() {
+        // A minimal RON that omits the `fonts` block entirely.
+        let ron_str = r#"(
+            graphics: (
+                resolution: (1280, 720),
+                fullscreen: false,
+                vsync: true,
+                msaa_samples: 4,
+                shadow_quality: Medium,
+            ),
+            audio: (
+                master_volume: 0.8,
+                music_volume: 0.6,
+                sfx_volume: 1.0,
+                ambient_volume: 0.5,
+                enable_audio: true,
+            ),
+            controls: (
+                move_forward: ["W"],
+                move_back: ["S"],
+                turn_left: ["A"],
+                turn_right: ["D"],
+                interact: ["E"],
+                menu: ["Escape"],
+                inventory: ["I"],
+                rest: ["R"],
+                automap: ["M"],
+                spell_book: ["B"],
+                movement_cooldown: 0.2,
+            ),
+            camera: (
+                mode: FirstPerson,
+                eye_height: 0.6,
+                fov: 70.0,
+                near_clip: 0.1,
+                far_clip: 1000.0,
+                smooth_rotation: false,
+                rotation_speed: 180.0,
+                light_height: 5.0,
+                light_intensity: 2000000.0,
+                light_range: 60.0,
+                shadows_enabled: true,
+            ),
+        )"#;
+        let config: GameConfig =
+            ron::from_str(ron_str).expect("GameConfig without fonts must deserialize");
+        assert_eq!(
+            config.fonts,
+            FontConfig::default(),
+            "missing fonts block must produce defaults"
+        );
+    }
+
+    #[test]
+    fn test_game_config_validate_propagates_font_error() {
+        let mut cfg = GameConfig::default();
+        cfg.fonts.dialogue_font = Some("/absolute/path/font.ttf".to_string());
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("relative"),
+            "validate must propagate font error: {err}"
+        );
     }
 }
