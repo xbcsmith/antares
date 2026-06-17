@@ -299,7 +299,7 @@ GameConfig(
     //     // Path to a .ttf font file relative to the campaign root.
     //     // Must start with "fonts/" and end with ".ttf".
     //     // Omit or set to None to use the engine default font.
-    //     // Omitting a font field uses the Bevy engine default font.
+    //     // Omitting a font field (or setting it to None) uses the Bevy engine default font.
     //     dialogue_font: Some("fonts/my_dialogue_font.ttf"),
     //     game_menu_font: Some("fonts/my_menu_font.ttf"),
     // ),

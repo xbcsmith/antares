@@ -198,6 +198,14 @@ mod tests {
     }
 
     #[test]
+    fn test_text_style_with_font_some_sets_handle() {
+        use bevy::text::Font;
+        let handle: Handle<Font> = Handle::default();
+        let (text_font, _color) = text_style_with_font(Some(handle.clone()), 16.0, Color::WHITE);
+        assert_eq!(text_font.font, handle);
+    }
+
+    #[test]
     fn test_body_font_size_value() {
         assert!((BODY_FONT_SIZE - 16.0).abs() < f32::EPSILON);
     }

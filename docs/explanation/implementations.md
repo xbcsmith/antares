@@ -2,6 +2,95 @@
 
 ---
 
+## Custom Fonts — All Phases (Complete) (2026)
+
+**Goal:** Add campaign-scoped custom font support for dialogue UI and game menu UI. Campaign authors can declare optional `.ttf` font paths in `config.ron`; the engine loads them via `AssetServer` and applies them to all relevant `TextFont` spawns at runtime. Campaigns that omit font config render identically to the pre-implementation baseline (Bevy default font, no crash).
+
+### Summary of all changes
+
+| Phase | Key deliverables |
+|---|---|
+| **Phase 1** | `FontConfig` struct + `fonts` field on `GameConfig`; validation rules; RON round-trip; 13 tests |
+| **Phase 2** | `CampaignFontHandles` Bevy resource; `ensure_campaign_fonts_loaded` system registered in `HudPlugin`; 7 tests |
+| **Phase 3** | `text_style_with_font` helper; `spawn_dialogue_bubble`, `menu_setup`, and three spawn helpers updated to accept and apply font handles; 6 tests |
+| **Phase 4** | `ConfigEditorState` fonts section (fields + UI + buffer sync); `fonts/.gitkeep` directories; `docs/how-to/add_custom_fonts.md`; 7 tests |
+
+### Files changed (complete list)
+
+- `src/sdk/game_config.rs` — `FontConfig`, validation, `GameConfig.fonts`, 13 tests
+- `src/game/resources/font_handles.rs` *(new)* — `CampaignFontHandles` resource
+- `src/game/resources/mod.rs` — re-exports `CampaignFontHandles`
+- `src/game/systems/hud.rs` — `ensure_campaign_fonts_loaded` system + 7 tests
+- `src/game/systems/ui_helpers.rs` — `text_style_with_font` + 3 tests
+- `src/game/systems/dialogue_visuals.rs` — `spawn_dialogue_bubble` font integration + 2 tests
+- `src/game/systems/menu.rs` — `menu_setup` + three spawn helpers font integration + 2 tests
+- `sdk/campaign_builder/src/config_editor.rs` — fonts section in Config Editor + 7 tests
+- `campaigns/config.template.ron` — commented `fonts:` example section
+- `campaigns/tutorial/config.ron` — `fonts: FontConfig()`
+- `campaigns/tutorial/fonts/.gitkeep` *(new)*
+- `data/test_campaign/config.ron` — `fonts: FontConfig()`
+- `data/test_campaign/fonts/.gitkeep` *(new)*
+- `docs/how-to/add_custom_fonts.md` *(new)* — 8-section authoring guide
+
+### Quality Gates
+
+- `cargo fmt` → zero output (workspace + sdk/campaign_builder)
+- `cargo check --all-features` → zero errors
+- `cargo clippy --all-features -- -D warnings` → zero warnings
+- `cargo nextest run --all-features` (workspace) → 5320/5320 passed (30 new tests total)
+- `cargo nextest run` (sdk/campaign_builder) → 2587/2587 passed (7 new tests)
+
+---
+
+## Custom Fonts Phase 4 — SDK Authoring Support, Directory Structure, and Documentation (2026)
+
+**Goal:** Give campaign authors a complete authoring path: the Campaign Builder Config
+Editor now exposes a "Custom Fonts" section, the `fonts/` directory skeleton exists in
+both the tutorial campaign and test fixture, and a how-to guide documents the full
+workflow end-to-end.
+
+### What Changed
+
+**`sdk/campaign_builder/src/config_editor.rs`**
+
+- Added `fonts_expanded: bool`, `dialogue_font_buffer: String`,
+  `game_menu_font_buffer: String` fields to `ConfigEditorState` and `impl Default`.
+- Added `FontConfig` to the `use antares::sdk::game_config::…` import.
+- Added `fn show_fonts_section(&mut self, ui: &mut egui::Ui)`: collapsible "🔤 Custom
+  Fonts" section with two text-edit rows (Dialogue Font, Game Menu Font). Each row
+  shows inline red validation feedback via a temporary `FontConfig::validate()` call
+  when the buffer is non-empty. Expansion state stored in `fonts_expanded`;
+  `request_repaint()` called on toggle. Body wrapped in `push_id("fonts_section", …)`
+  for egui ID stability.
+- Called `self.show_fonts_section(ui)` from `show()` after `show_leveling_section`.
+- `update_edit_buffers`: added two lines that populate `dialogue_font_buffer` and
+  `game_menu_font_buffer` from `game_config.fonts.*` using `.unwrap_or_default()`.
+- `update_config_from_buffers`: added two blocks that write empty-string → `None`
+  or non-empty → `Some(…)` back into `game_config.fonts.*`.
+- Added 7 tests in `mod tests` (see §4.6 in `custom_fonts_implementation_plan.md`):
+  defaults check, populate-from-config (Some + None), set-from-buffer, empty-buffer →
+  None, round-trip, and save rejection of absolute font paths.
+
+**`campaigns/tutorial/fonts/.gitkeep`** *(new empty file)*
+
+**`data/test_campaign/fonts/.gitkeep`** *(new empty file)*
+
+**`docs/how-to/add_custom_fonts.md`** *(new file)*
+
+- All 8 required sections: Overview, Directory Layout, config.ron Format, Validation
+  Rules, Fallback Behavior, Authoring with Campaign Builder, Testing In-Game, and
+  Acceptance Checklist.
+
+### Quality Gates
+
+- `cargo fmt` → zero output (both workspace and `sdk/campaign_builder`)
+- `cargo check --all-features` → zero errors
+- `cargo clippy -- -D warnings` → zero warnings (both crates)
+- `cargo nextest run --all-features` (workspace) → 5318/5318 passed
+- `cargo nextest run` (sdk/campaign_builder) → 2587/2587 passed (7 new font tests)
+
+---
+
 ## Custom Fonts Phase 3 — Font-Aware Text Style Helper and UI Integration (2026)
 
 **Goal:** Thread `CampaignFontHandles` through the dialogue and menu UI systems so

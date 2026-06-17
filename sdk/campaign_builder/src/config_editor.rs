@@ -25,7 +25,7 @@
 
 use crate::ui_helpers::{EditorToolbar, ToolbarAction};
 use antares::game::resources::grass_quality_settings::GrassPerformanceLevel;
-use antares::sdk::game_config::{CameraMode, GameConfig, ShadowQuality};
+use antares::sdk::game_config::{CameraMode, FontConfig, GameConfig, ShadowQuality};
 
 #[cfg(test)]
 use antares::sdk::game_config::LevelingConfig;
@@ -114,6 +114,15 @@ pub struct ConfigEditorState {
 
     /// Edit buffer for training fee multiplier
     pub training_fee_multiplier_buffer: String,
+
+    /// Whether the fonts section is expanded
+    pub fonts_expanded: bool,
+
+    /// Edit buffer for the dialogue font path (relative, e.g. `fonts/my_font.ttf`)
+    pub dialogue_font_buffer: String,
+
+    /// Edit buffer for the game menu font path (relative, e.g. `fonts/my_font.ttf`)
+    pub game_menu_font_buffer: String,
 }
 
 impl Default for ConfigEditorState {
@@ -149,6 +158,9 @@ impl Default for ConfigEditorState {
             xp_multiplier_buffer: String::new(),
             training_fee_base_buffer: String::new(),
             training_fee_multiplier_buffer: String::new(),
+            fonts_expanded: false,
+            dialogue_font_buffer: String::new(),
+            game_menu_font_buffer: String::new(),
         }
     }
 }
@@ -311,6 +323,8 @@ impl ConfigEditorState {
                 self.show_camera_section(ui, unsaved_changes);
                 ui.add_space(5.0);
                 self.show_leveling_section(ui, unsaved_changes);
+                ui.add_space(5.0);
+                self.show_fonts_section(ui);
             });
     }
 
@@ -1059,6 +1073,59 @@ impl ConfigEditorState {
         self.leveling_expanded = section_open.openness > 0.0;
     }
 
+    /// Show the custom fonts configuration section
+    ///
+    /// Renders two text-edit fields for `dialogue_font` and `game_menu_font` paths.
+    /// Inline validation displays a red error below any field whose value fails
+    /// [`FontConfig::validate`].
+    fn show_fonts_section(&mut self, ui: &mut egui::Ui) {
+        let section_open = ui.collapsing("🔤 Custom Fonts", |ui| {
+            ui.push_id("fonts_section", |ui| {
+                ui.add_space(5.0);
+
+                // Row 1: Dialogue Font
+                ui.horizontal(|ui| {
+                    ui.label("Dialogue Font:");
+                    ui.text_edit_singleline(&mut self.dialogue_font_buffer);
+                });
+                if !self.dialogue_font_buffer.is_empty() {
+                    let test_config = FontConfig {
+                        dialogue_font: Some(self.dialogue_font_buffer.clone()),
+                        game_menu_font: None,
+                    };
+                    if let Err(e) = test_config.validate() {
+                        ui.label(egui::RichText::new(e.to_string()).color(egui::Color32::RED));
+                    }
+                }
+
+                ui.add_space(4.0);
+
+                // Row 2: Game Menu Font
+                ui.horizontal(|ui| {
+                    ui.label("Game Menu Font:");
+                    ui.text_edit_singleline(&mut self.game_menu_font_buffer);
+                });
+                if !self.game_menu_font_buffer.is_empty() {
+                    let test_config = FontConfig {
+                        dialogue_font: None,
+                        game_menu_font: Some(self.game_menu_font_buffer.clone()),
+                    };
+                    if let Err(e) = test_config.validate() {
+                        ui.label(egui::RichText::new(e.to_string()).color(egui::Color32::RED));
+                    }
+                }
+
+                ui.add_space(5.0);
+            });
+        });
+
+        let new_expanded = section_open.openness > 0.0;
+        if new_expanded != self.fonts_expanded {
+            self.fonts_expanded = new_expanded;
+            ui.ctx().request_repaint();
+        }
+    }
+
     /// Load configuration from a file
     ///
     /// # Arguments
@@ -1149,6 +1216,18 @@ impl ConfigEditorState {
             .leveling
             .training_fee_multiplier
             .to_string();
+        self.dialogue_font_buffer = self
+            .game_config
+            .fonts
+            .dialogue_font
+            .clone()
+            .unwrap_or_default();
+        self.game_menu_font_buffer = self
+            .game_config
+            .fonts
+            .game_menu_font
+            .clone()
+            .unwrap_or_default();
     }
 
     /// Update config from edit buffers
@@ -1184,6 +1263,16 @@ impl ConfigEditorState {
         if let Ok(v) = self.training_fee_multiplier_buffer.trim().parse::<f32>() {
             self.game_config.leveling.training_fee_multiplier = v.max(0.01);
         }
+        self.game_config.fonts.dialogue_font = if self.dialogue_font_buffer.is_empty() {
+            None
+        } else {
+            Some(self.dialogue_font_buffer.clone())
+        };
+        self.game_config.fonts.game_menu_font = if self.game_menu_font_buffer.is_empty() {
+            None
+        } else {
+            Some(self.game_menu_font_buffer.clone())
+        };
     }
 
     /// Handle key capture events from egui input
@@ -2065,6 +2154,76 @@ mod tests {
         assert_eq!(
             state.game_config.controls.character_sheet, original_keys,
             "character_sheet binding must survive buffer round-trip"
+        );
+    }
+
+    // ── Font buffer tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_config_editor_fonts_section_defaults() {
+        let state = ConfigEditorState::default();
+        assert!(!state.fonts_expanded);
+        assert_eq!(state.dialogue_font_buffer, "");
+        assert_eq!(state.game_menu_font_buffer, "");
+    }
+
+    #[test]
+    fn test_update_edit_buffers_populates_font_fields() {
+        let mut state = ConfigEditorState::new();
+        state.game_config.fonts.dialogue_font = Some("fonts/x.ttf".to_string());
+        state.update_edit_buffers();
+        assert_eq!(state.dialogue_font_buffer, "fonts/x.ttf");
+    }
+
+    #[test]
+    fn test_update_edit_buffers_populates_font_fields_none_values() {
+        let mut state = ConfigEditorState::new();
+        state.game_config.fonts.dialogue_font = None;
+        state.game_config.fonts.game_menu_font = None;
+        state.update_edit_buffers();
+        assert_eq!(state.dialogue_font_buffer, "");
+        assert_eq!(state.game_menu_font_buffer, "");
+    }
+
+    #[test]
+    fn test_update_config_from_buffers_sets_fonts() {
+        let mut state = ConfigEditorState::new();
+        state.dialogue_font_buffer = "fonts/x.ttf".to_string();
+        state.update_config_from_buffers();
+        assert_eq!(
+            state.game_config.fonts.dialogue_font,
+            Some("fonts/x.ttf".to_string())
+        );
+    }
+
+    #[test]
+    fn test_update_config_from_buffers_empty_font_buffer_sets_none() {
+        let mut state = ConfigEditorState::new();
+        state.game_config.fonts.dialogue_font = Some("fonts/old.ttf".to_string());
+        state.dialogue_font_buffer = String::new();
+        state.update_config_from_buffers();
+        assert_eq!(state.game_config.fonts.dialogue_font, None);
+    }
+
+    #[test]
+    fn test_config_editor_font_round_trip() {
+        let mut state = ConfigEditorState::new();
+        state.dialogue_font_buffer = "fonts/round_trip.ttf".to_string();
+        state.update_config_from_buffers();
+        state.update_edit_buffers();
+        assert_eq!(state.dialogue_font_buffer, "fonts/round_trip.ttf");
+    }
+
+    #[test]
+    fn test_config_editor_save_rejects_invalid_font_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut state = ConfigEditorState::new();
+        state.dialogue_font_buffer = "/usr/share/fonts/x.ttf".to_string();
+        state.update_config_from_buffers();
+        let result = state.save_config(Some(&tmp.path().to_path_buf()));
+        assert!(
+            matches!(result, Err(ConfigEditorError::ValidationFailed(_))),
+            "absolute font path must be rejected with ValidationFailed, got: {result:?}"
         );
     }
 }

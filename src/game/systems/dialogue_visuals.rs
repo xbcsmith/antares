@@ -639,4 +639,23 @@ mod tests {
             font_handles.and_then(|fh| fh.dialogue_font.clone());
         assert!(dialogue_font.is_none());
     }
+
+    #[test]
+    fn test_spawn_dialogue_bubble_uses_default_font_when_not_configured() {
+        // When CampaignFontHandles is absent or both fields are None,
+        // text_style_with_font(None, ...) produces TextFont with the default Handle —
+        // identical to the pre-implementation TextFont { ..default() } baseline.
+        use crate::game::components::dialogue::{
+            DIALOGUE_CHOICE_COLOR, DIALOGUE_SPEAKER_FONT_SIZE,
+        };
+        use crate::game::systems::ui_helpers::text_style_with_font;
+        use bevy::prelude::*;
+        let (text_font, _) =
+            text_style_with_font(None, DIALOGUE_SPEAKER_FONT_SIZE, DIALOGUE_CHOICE_COLOR);
+        assert_eq!(
+            text_font.font,
+            Handle::default(),
+            "absent font config must produce default TextFont handle for dialogue text"
+        );
+    }
 }

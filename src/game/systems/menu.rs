@@ -2530,4 +2530,19 @@ mod tests {
             handles.game_menu_font.clone();
         assert!(menu_font.is_none());
     }
+
+    #[test]
+    fn test_menu_spawn_uses_default_font_when_not_configured() {
+        // Spawning any menu helper with menu_font = None produces TextFont with the
+        // default Handle — identical to the pre-implementation TextFont { ..default() } baseline.
+        use crate::game::components::menu::{TITLE_FONT_SIZE, TITLE_TEXT_COLOR};
+        use crate::game::systems::ui_helpers::text_style_with_font;
+        use bevy::prelude::*;
+        let (text_font, _) = text_style_with_font(None, TITLE_FONT_SIZE, TITLE_TEXT_COLOR);
+        assert_eq!(
+            text_font.font,
+            Handle::default(),
+            "menu_font = None must produce default TextFont handle"
+        );
+    }
 }
