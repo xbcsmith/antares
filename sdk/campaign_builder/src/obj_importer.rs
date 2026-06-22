@@ -499,7 +499,7 @@ impl Default for ObjImporterState {
             landscape_mesh_id: LANDSCAPE_MESH_ID_MIN,
             creature_name: String::new(),
             category: String::new(),
-            scale: 0.01,
+            scale: 1.0,
             status_message: String::new(),
             custom_palette: CustomPalette::default(),
             active_mesh_index: None,

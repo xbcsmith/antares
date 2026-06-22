@@ -8654,14 +8654,6 @@
             scale: Some(1.3),
         ),
         (
-            landscape_id: 1,
-            position: (
-                x: 8,
-                y: 11,
-            ),
-            scale: Some(1.35),
-        ),
-        (
             landscape_id: 4,
             position: (
                 x: 15,
@@ -8682,6 +8674,14 @@
                 y: 11,
             ),
             scale: Some(1.3),
+        ),
+        (
+            landscape_id: 1,
+            position: (
+                x: 8,
+                y: 11,
+            ),
+            scale: Some(1.65),
         ),
     ],
     is_outdoor: true,

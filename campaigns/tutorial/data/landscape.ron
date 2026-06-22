@@ -1,21 +1,5 @@
 [
     (
-        id: 1,
-        name: "Short Oak Tree",
-        category: Tree,
-        default_scale: 1.0,
-        color_tint: None,
-        flags: (
-            blocking: false,
-        ),
-        icon: None,
-        tags: [
-            "imported",
-        ],
-        mesh_id: Some(11000),
-        description: Some("Short Grizzled Oak Tree"),
-    ),
-    (
         id: 2,
         name: "Pine Tree",
         category: Tree,
@@ -94,5 +78,21 @@
         ],
         mesh_id: Some(11005),
         description: Some("Imported landscape mesh \'Shrub\'"),
+    ),
+    (
+        id: 1,
+        name: "Willow Tree",
+        category: Tree,
+        default_scale: 1.0,
+        color_tint: None,
+        flags: (
+            blocking: false,
+        ),
+        icon: None,
+        tags: [
+            "imported",
+        ],
+        mesh_id: Some(11000),
+        description: Some("Imported landscape mesh \'Willow Tree\'"),
     ),
 ]

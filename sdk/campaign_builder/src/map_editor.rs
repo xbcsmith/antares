@@ -3858,13 +3858,14 @@ impl<'a> Widget for MapGridWidget<'a> {
         let map_width_px = self.state.map.width as f32 * self.tile_size;
         let map_height_px = self.state.map.height as f32 * self.tile_size;
 
-        // Obtain the UI available size so we can ensure the painter covers the full panel area
-        // and avoid the grid being cut off if the UI provides more space than the grid requires.
-        let avail = ui.available_size();
+        // Use clip_rect (the visible viewport) instead of available_size.
+        // Inside a ScrollArea, available_size() can exceed the actual viewport by a few px,
+        // causing spurious scroll bars even for small maps. clip_rect is always bounded to the
+        // true visible area, so content never overflows the scroll area viewport.
+        let avail = ui.clip_rect().size();
 
-        // The allocated painter size should be at least the map size but also at least
-        // the available UI size so the canvas won't be narrower/taller than the available
-        // area and nothing gets clipped in the layout.
+        // Allocated painter: at least map_size, at least viewport — ensures small maps fill the
+        // available canvas while large maps overflow the viewport (triggering the scroll bar).
         let width = map_width_px.max(avail.x).max(1.0);
         let height = map_height_px.max(avail.y).max(1.0);
 
@@ -4181,7 +4182,7 @@ impl<'a> Widget for MapPreviewWidget<'a> {
         let map_width_px = self.map.width as f32 * tile_size;
         let map_height_px = self.map.height as f32 * tile_size;
 
-        let avail = ui.available_size();
+        let avail = ui.clip_rect().size();
         let width = map_width_px.max(avail.x).max(1.0);
         let height = map_height_px.max(avail.y).max(1.0);
 
@@ -5150,13 +5151,17 @@ impl MapsEditorState {
                             // Re-acquire the editor reference via raw pointer to avoid simultaneous borrows
                             let editor_ref: &mut MapEditorState = unsafe { &mut *editor_ptr };
 
-                            // Compute draw_zoom using left_ui available size to ensure Fit uses the actual left column
-                            // Honor "Auto Fit" when it's enabled (editor_auto_fit_on_resize).
+                            // Compute draw_zoom using the column width and the pre-computed panel_height.
+                            // DO NOT use left_ui.available_size().y here — inside the outer
+                            // ScrollArea::vertical, the vertical axis is unbounded (∞), which makes
+                            // zoom_y = ∞ and fit_zoom = zoom_x only. That causes the map to overflow
+                            // vertically and show a scroll bar even for small maps.
                             let draw_zoom = if fit_requested
                                 || (self.zoom_level == DEFAULT_ZOOM)
                                 || editor_ref.auto_fit_on_resize
                             {
-                                let avail = left_ui.available_size();
+                                let avail =
+                                    egui::Vec2::new(left_ui.available_width(), panel_height);
                                 let map_width = editor_ref.map.width as f32 * BASE_TILE_SIZE;
                                 let map_height = editor_ref.map.height as f32 * BASE_TILE_SIZE;
 
