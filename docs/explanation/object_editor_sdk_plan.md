@@ -485,19 +485,29 @@ fixed, well-known path (matching how `furniture_mesh_registry.ron` and
 
 #### 3.5 Deliverables
 
-- [ ] `CampaignData::objects` field added
-- [ ] `EditorRegistry::objects_editor_state` field added (+ `Default` impl)
-- [ ] `load_objects`/`save_objects` added to `campaign_io.rs`, Rule 13
+- [x] `CampaignData::objects` field added
+- [x] `EditorRegistry::objects_editor_state` field added (+ `Default` impl)
+- [x] `load_objects`/`save_objects` added to `campaign_io.rs`, Rule 13
   compliant (`reset_for_new_campaign()` + `needs_initial_load`, not the
-  Landscape-style inline reset)
-- [ ] `EditorTab::Objects` variant + name + tab strip + dispatch arm added to
+  Landscape-style inline reset) — `needs_initial_load` is set to `false`
+  only on a genuinely successful load, matching `load_levels`'s own
+  precedent (missing-file and parse-error branches leave it untouched)
+- [x] `EditorTab::Objects` variant + name + tab strip + dispatch arm added to
   `lib.rs`
-- [ ] `load_objects()`/`save_objects()` wired into the same call sites as
-  `load_landscape()`/`save_landscape()`
-- [ ] `do_new_campaign`/`do_open_campaign` call
+- [x] `load_objects()`/`save_objects()` wired into the same call sites as
+  `load_landscape()`/`save_landscape()` (`do_new_campaign`, `do_open_campaign`,
+  the `do_save_campaign` save-all sweep, and the auto-load-on-startup sequence
+  in `lib.rs`'s `run()`)
+- [x] `do_new_campaign`/`do_open_campaign` call
   `objects_editor_state.reset_for_new_campaign()` in the correct order
   relative to `load_objects()`
-- [ ] Tests per § 3.4 pass
+- [x] Tests per § 3.4 pass (6 new tests in `campaign_io.rs`'s `mod tests`;
+  the literal "`do_open_campaign` ordering" test could not call
+  `do_open_campaign()` directly since it blocks on a native file-picker
+  dialog — it instead replicates `do_open_campaign`'s exact
+  reset/clear/load sequence against two distinct fixture campaign
+  directories in succession and asserts no key leaks from the first into
+  the second)
 
 #### 3.6 Success Criteria
 

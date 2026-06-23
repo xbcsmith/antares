@@ -11,6 +11,8 @@
 
 use super::*;
 
+use antares::domain::world::object_mesh::ObjectMeshRegistryFile;
+
 /// Errors produced by campaign I/O operations (save/write to the filesystem).
 #[derive(Debug, thiserror::Error)]
 pub enum CampaignIoError {
@@ -2109,6 +2111,145 @@ impl CampaignBuilderApp {
         }
     }
 
+    /// Load unified objects from the campaign object mesh registry.
+    ///
+    /// Reads `data/object_mesh_registry.ron` (a key → relative-path map) and
+    /// resolves each referenced path to a full `CreatureDefinition` asset.
+    /// Individual entries whose asset file is missing or fails to parse are
+    /// skipped (logged as a warning) rather than aborting the whole load —
+    /// one bad reference must not prevent the rest of the objects from
+    /// loading.
+    ///
+    /// Missing registry file is not an error — object support is opt-in per
+    /// campaign.
+    ///
+    /// Always ends by calling
+    /// [`reset_selection`](objects_editor::ObjectsEditorState::reset_selection)
+    /// on `objects_editor_state` so a rebuilt `Vec<ObjectEntry>` never leaves
+    /// a stale selection/edit index pointing at the wrong row.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use campaign_builder::CampaignBuilderApp;
+    ///
+    /// let mut app = CampaignBuilderApp::default();
+    /// app.load_objects();
+    /// ```
+    pub fn load_objects(&mut self) {
+        if let Some(dir) = &self.campaign_dir {
+            let registry_path = dir.join("data/object_mesh_registry.ron");
+            if registry_path.exists() {
+                match ObjectMeshRegistryFile::load(&registry_path) {
+                    Ok(registry) => {
+                        let mut entries = Vec::new();
+                        for (key, path) in registry.meshes {
+                            let asset_path = dir.join(&path);
+                            match fs::read_to_string(&asset_path) {
+                                Ok(contents) => {
+                                    match ron::from_str::<antares::domain::visual::CreatureDefinition>(
+                                        &contents,
+                                    ) {
+                                        Ok(definition) => {
+                                            entries.push(objects_editor::ObjectEntry {
+                                                key,
+                                                file_path: path,
+                                                definition,
+                                            });
+                                        }
+                                        Err(e) => {
+                                            self.logger.warn(
+                                                category::FILE_IO,
+                                                &format!("Skipping object '{}': {}", key, e),
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    self.logger.warn(
+                                        category::FILE_IO,
+                                        &format!("Skipping object '{}': {}", key, e),
+                                    );
+                                }
+                            }
+                        }
+                        self.campaign_data.objects = entries;
+                        self.logger.info(
+                            category::FILE_IO,
+                            &format!("Loaded {} object(s)", self.campaign_data.objects.len()),
+                        );
+                        // Clear the lazy-load flag so show() does not re-read
+                        // the file redundantly on the first tab render.
+                        self.editor_registry.objects_editor_state.needs_initial_load = false;
+                    }
+                    Err(e) => {
+                        self.logger.warn(
+                            category::FILE_IO,
+                            &format!("Failed to parse object mesh registry: {}", e),
+                        );
+                        self.campaign_data.objects.clear();
+                    }
+                }
+            } else {
+                self.campaign_data.objects.clear();
+                self.logger.debug(
+                    category::FILE_IO,
+                    &format!(
+                        "Object mesh registry not found (will auto-load if created later): {}",
+                        registry_path.display()
+                    ),
+                );
+            }
+        }
+        self.editor_registry.objects_editor_state.reset_selection();
+    }
+
+    /// Save unified objects to the campaign object mesh registry.
+    ///
+    /// Writes each [`objects_editor::ObjectEntry::definition`] back to its
+    /// `file_path`, then rewrites `data/object_mesh_registry.ron` wholesale
+    /// from the current `Vec<ObjectEntry>` keys/paths.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CampaignIoError::NoCampaignDir`] if no campaign directory is
+    /// set, or another [`CampaignIoError`] variant if an asset or the
+    /// registry file cannot be written.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use campaign_builder::CampaignBuilderApp;
+    ///
+    /// let mut app = CampaignBuilderApp::default();
+    /// app.save_objects()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn save_objects(&mut self) -> Result<(), CampaignIoError> {
+        let dir = self
+            .campaign_dir
+            .clone()
+            .ok_or(CampaignIoError::NoCampaignDir)?;
+
+        let mut registry = ObjectMeshRegistryFile::default();
+        for entry in &self.campaign_data.objects {
+            let full_path = dir.join(&entry.file_path);
+            write_ron_to_path(&full_path, &entry.definition, "object")?;
+            registry.upsert(&entry.key, &entry.file_path);
+        }
+
+        let registry_path = dir.join("data/object_mesh_registry.ron");
+        registry
+            .save(&registry_path)
+            .map_err(|e| CampaignIoError::WriteFileFailed(format!("object registry: {}", e)))?;
+
+        self.logger.info(
+            category::FILE_IO,
+            &format!("Saved {} object(s)", self.campaign_data.objects.len()),
+        );
+        Ok(())
+    }
+
     /// Save creatures to RON file
     pub fn save_creatures(&mut self) -> Result<(), CampaignIoError> {
         if let Some(ref dir) = self.campaign_dir {
@@ -2857,6 +2998,11 @@ impl CampaignBuilderApp {
         self.campaign_data.landscape_definitions.clear();
         self.editor_registry.landscape_editor_state = landscape_editor::LandscapeEditorState::new();
 
+        self.editor_registry
+            .objects_editor_state
+            .reset_for_new_campaign();
+        self.campaign_data.objects.clear();
+
         self.campaign_data.maps.clear();
         self.editor_registry.maps_editor_state = MapsEditorState::new();
 
@@ -2992,6 +3138,10 @@ impl CampaignBuilderApp {
 
         if let Err(e) = self.save_landscape() {
             save_warnings.push(format!("Landscape: {}", e));
+        }
+
+        if let Err(e) = self.save_objects() {
+            save_warnings.push(format!("Objects: {}", e));
         }
 
         if let Err(e) = self.save_quests() {
@@ -3228,6 +3378,13 @@ impl CampaignBuilderApp {
                         .reset_for_new_campaign();
                     self.campaign_data.levels.clear();
                     self.load_levels();
+
+                    // Reset and load unified objects.
+                    self.editor_registry
+                        .objects_editor_state
+                        .reset_for_new_campaign();
+                    self.campaign_data.objects.clear();
+                    self.load_objects();
 
                     // Scan asset references and mark loaded data files
                     if let Some(ref mut manager) = self.asset_manager {
@@ -3716,5 +3873,217 @@ mod tests {
             result.category == validation::ValidationCategory::DifficultyProgression
                 && result.message.contains("strictly increasing")
         }));
+    }
+
+    /// Writes a minimal `CreatureDefinition` RON asset file at `path`,
+    /// creating parent directories as needed.
+    fn write_test_object_asset(path: &std::path::Path, name: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        let def = antares::domain::visual::CreatureDefinition {
+            id: 1,
+            name: name.to_string(),
+            ..Default::default()
+        };
+        let contents = ron::ser::to_string_pretty(&def, ron::ser::PrettyConfig::new()).unwrap();
+        fs::write(path, contents).unwrap();
+    }
+
+    #[test]
+    fn test_load_objects_with_no_registry_file_leaves_objects_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = CampaignBuilderApp {
+            campaign_dir: Some(tmp.path().to_path_buf()),
+            ..Default::default()
+        };
+        app.ui_state.status_message = "before".to_string();
+
+        app.load_objects();
+
+        assert!(app.campaign_data.objects.is_empty());
+        assert_eq!(app.ui_state.status_message, "before");
+    }
+
+    #[test]
+    fn test_load_objects_skips_entry_with_missing_asset_file_but_loads_others() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        let good_asset_path = dir.join("assets/meshes/objects/good.ron");
+        write_test_object_asset(&good_asset_path, "GoodObject");
+
+        let mut registry = ObjectMeshRegistryFile::default();
+        registry.upsert("good_key", "assets/meshes/objects/good.ron");
+        registry.upsert("missing_key", "assets/meshes/objects/missing.ron");
+        let registry_path = dir.join("data/object_mesh_registry.ron");
+        fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
+        registry.save(&registry_path).unwrap();
+
+        let mut app = CampaignBuilderApp {
+            campaign_dir: Some(dir.to_path_buf()),
+            ..Default::default()
+        };
+
+        app.load_objects();
+
+        assert_eq!(app.campaign_data.objects.len(), 1);
+        assert_eq!(app.campaign_data.objects[0].key, "good_key");
+        assert_eq!(app.campaign_data.objects[0].definition.name, "GoodObject");
+    }
+
+    #[test]
+    fn test_save_objects_round_trips_through_registry_and_asset_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        let mut app = CampaignBuilderApp {
+            campaign_dir: Some(dir.to_path_buf()),
+            ..Default::default()
+        };
+        app.campaign_data.objects = vec![
+            objects_editor::ObjectEntry {
+                key: "alpha".to_string(),
+                file_path: "assets/meshes/objects/alpha.ron".to_string(),
+                definition: antares::domain::visual::CreatureDefinition {
+                    id: 1,
+                    name: "Alpha".to_string(),
+                    ..Default::default()
+                },
+            },
+            objects_editor::ObjectEntry {
+                key: "beta".to_string(),
+                file_path: "assets/meshes/objects/beta.ron".to_string(),
+                definition: antares::domain::visual::CreatureDefinition {
+                    id: 2,
+                    name: "Beta".to_string(),
+                    ..Default::default()
+                },
+            },
+        ];
+
+        let result = app.save_objects();
+        assert!(result.is_ok());
+
+        app.load_objects();
+
+        assert_eq!(app.campaign_data.objects.len(), 2);
+        let mut pairs: Vec<(String, String, String)> = app
+            .campaign_data
+            .objects
+            .iter()
+            .map(|e| {
+                (
+                    e.key.clone(),
+                    e.file_path.clone(),
+                    e.definition.name.clone(),
+                )
+            })
+            .collect();
+        pairs.sort();
+        assert_eq!(
+            pairs,
+            vec![
+                (
+                    "alpha".to_string(),
+                    "assets/meshes/objects/alpha.ron".to_string(),
+                    "Alpha".to_string()
+                ),
+                (
+                    "beta".to_string(),
+                    "assets/meshes/objects/beta.ron".to_string(),
+                    "Beta".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_do_new_campaign_clears_objects_and_resets_for_new_campaign() {
+        let mut app = CampaignBuilderApp::default();
+        app.campaign_data.objects = vec![objects_editor::ObjectEntry {
+            key: "stale".to_string(),
+            file_path: "assets/meshes/objects/stale.ron".to_string(),
+            definition: antares::domain::visual::CreatureDefinition::default(),
+        }];
+        app.editor_registry.objects_editor_state.needs_initial_load = false;
+
+        app.do_new_campaign();
+
+        assert!(app.campaign_data.objects.is_empty());
+        assert!(app.editor_registry.objects_editor_state.needs_initial_load);
+    }
+
+    #[test]
+    fn test_load_objects_success_sets_needs_initial_load_false() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        let asset_path = dir.join("assets/meshes/objects/good.ron");
+        write_test_object_asset(&asset_path, "GoodObject");
+
+        let mut registry = ObjectMeshRegistryFile::default();
+        registry.upsert("good_key", "assets/meshes/objects/good.ron");
+        let registry_path = dir.join("data/object_mesh_registry.ron");
+        fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
+        registry.save(&registry_path).unwrap();
+
+        let mut app = CampaignBuilderApp {
+            campaign_dir: Some(dir.to_path_buf()),
+            ..Default::default()
+        };
+        app.editor_registry.objects_editor_state.needs_initial_load = true;
+
+        app.load_objects();
+
+        assert!(!app.editor_registry.objects_editor_state.needs_initial_load);
+    }
+
+    #[test]
+    fn test_open_campaign_sequence_does_not_leak_objects_between_campaigns() {
+        let tmp_a = tempfile::tempdir().unwrap();
+        let dir_a = tmp_a.path();
+        let asset_a_path = dir_a.join("assets/meshes/objects/a.ron");
+        write_test_object_asset(&asset_a_path, "ObjectA");
+        let mut registry_a = ObjectMeshRegistryFile::default();
+        registry_a.upsert("a_key", "assets/meshes/objects/a.ron");
+        let registry_a_path = dir_a.join("data/object_mesh_registry.ron");
+        fs::create_dir_all(registry_a_path.parent().unwrap()).unwrap();
+        registry_a.save(&registry_a_path).unwrap();
+
+        let tmp_b = tempfile::tempdir().unwrap();
+        let dir_b = tmp_b.path();
+        let asset_b_path = dir_b.join("assets/meshes/objects/b.ron");
+        write_test_object_asset(&asset_b_path, "ObjectB");
+        let mut registry_b = ObjectMeshRegistryFile::default();
+        registry_b.upsert("b_key", "assets/meshes/objects/b.ron");
+        let registry_b_path = dir_b.join("data/object_mesh_registry.ron");
+        fs::create_dir_all(registry_b_path.parent().unwrap()).unwrap();
+        registry_b.save(&registry_b_path).unwrap();
+
+        let mut app = CampaignBuilderApp {
+            campaign_dir: Some(dir_a.to_path_buf()),
+            ..Default::default()
+        };
+
+        app.editor_registry
+            .objects_editor_state
+            .reset_for_new_campaign();
+        app.campaign_data.objects.clear();
+        app.load_objects();
+
+        assert_eq!(app.campaign_data.objects.len(), 1);
+        assert_eq!(app.campaign_data.objects[0].key, "a_key");
+
+        app.campaign_dir = Some(dir_b.to_path_buf());
+        app.editor_registry
+            .objects_editor_state
+            .reset_for_new_campaign();
+        app.campaign_data.objects.clear();
+        app.load_objects();
+
+        assert_eq!(app.campaign_data.objects.len(), 1);
+        assert_eq!(app.campaign_data.objects[0].key, "b_key");
+        assert!(!app.campaign_data.objects.iter().any(|e| e.key == "a_key"));
     }
 }

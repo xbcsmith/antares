@@ -291,6 +291,12 @@ pub fn run() -> Result<(), eframe::Error> {
                                 app.campaign_data.levels.clear();
                                 app.load_levels();
 
+                                app.editor_registry
+                                    .objects_editor_state
+                                    .reset_for_new_campaign();
+                                app.campaign_data.objects.clear();
+                                app.load_objects();
+
                                 app.sync_obj_importer_campaign_state();
 
                                 // Initialize AssetManager if we have a campaign directory
@@ -630,6 +636,7 @@ pub enum EditorTab {
     Creatures,
     Furniture,
     Landscape,
+    Objects,
     Importer,
     Maps,
     Quests,
@@ -659,6 +666,7 @@ impl EditorTab {
             EditorTab::Creatures => "Creatures",
             EditorTab::Furniture => "Furniture",
             EditorTab::Landscape => "Landscape",
+            EditorTab::Objects => "Objects",
             EditorTab::Importer => "Importer",
             EditorTab::Maps => "Maps",
             EditorTab::Quests => "Quests",
@@ -1110,6 +1118,7 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Creatures,
                     EditorTab::Furniture,
                     EditorTab::Landscape,
+                    EditorTab::Objects,
                     EditorTab::Importer,
                     EditorTab::Maps,
                     EditorTab::Quests,
@@ -1362,6 +1371,23 @@ impl eframe::App for CampaignBuilderApp {
                         .set_next_landscape_mesh_id(next_landscape_mesh_id);
                     self.ui_state.status_message =
                         "Opening OBJ Importer for landscape mesh work".to_string();
+                    ui.ctx().request_repaint();
+                }
+            }
+            EditorTab::Objects => {
+                self.editor_registry.objects_editor_state.show(
+                    ui,
+                    &mut self.campaign_data.objects,
+                    self.campaign_dir.as_deref(),
+                    &mut self.unsaved_changes,
+                );
+                if let Some(objects_editor::ObjectsEditorSignal::OpenInObjImporter) =
+                    self.editor_registry.objects_editor_state.requested_signal.take()
+                {
+                    self.ui_state.active_tab = EditorTab::Importer;
+                    self.obj_importer_state.export_type = obj_importer::ExportType::ObjectMesh;
+                    self.ui_state.status_message =
+                        "Opening OBJ Importer for object mesh work".to_string();
                     ui.ctx().request_repaint();
                 }
             }
