@@ -58,6 +58,7 @@ pub mod monsters_editor;
 pub mod npc_editor;
 pub mod obj_importer;
 pub mod obj_importer_ui;
+pub mod objects_editor;
 pub mod packager;
 pub mod preview_features;
 pub mod preview_renderer;

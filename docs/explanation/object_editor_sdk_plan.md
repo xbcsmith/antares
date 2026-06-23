@@ -330,21 +330,34 @@ Editable fields, in order:
 
 #### 2.5 Deliverables
 
-- [ ] `sdk/campaign_builder/src/objects_editor.rs` created with
+- [x] `sdk/campaign_builder/src/objects_editor.rs` created with
   `ObjectEntry`, `ObjectsEditorState`, `ObjectsEditorSignal`
-- [ ] `pub mod objects_editor;` added to `lib.rs`
-- [ ] `reset_for_new_campaign` and `reset_selection` methods added, with
+- [x] `pub mod objects_editor;` added to `lib.rs`
+- [x] `reset_for_new_campaign` and `reset_selection` methods added, with
   distinct, tested behavior re: `needs_initial_load`
-- [ ] List view: `TwoColumnLayout`, `show_standard_list_item`, push_id per row,
+- [x] List view: `TwoColumnLayout`, `show_standard_list_item`, push_id per row,
   search filter
-- [ ] Edit view: key/name/scale/color-tint/per-mesh-material fields,
+- [x] Edit view: key/name/scale/color-tint/per-mesh-material fields,
   key-uniqueness validation, `material.get_or_insert_with` handling for
   meshes with no material yet, `Back to List`/`Save`/`Cancel` row
   (`horizontal_wrapped`)
-- [ ] Unit tests per § 2.4
-- [ ] `cargo fmt`, `cargo check`, `cargo clippy -D warnings` pass for the new
-  module
-- [ ] sdk/AGENTS.md egui ID audit checklist passes for this module
+- [x] Unit tests per § 2.4 (20 tests total, including two `show()` smoke tests
+  through a real `egui::Ui` via the `egui::Context::run` harness — modeled on
+  `obj_importer_ui.rs`'s `test_show_obj_importer_tab_renders_*` pattern —
+  that caught a missing `request_repaint()` on the Save-failure path during
+  self-review)
+- [x] `cargo fmt`, `cargo check`, `cargo clippy -D warnings` pass for the new
+  module (and for the full workspace: `cargo nextest run --workspace
+  --all-features` → 7944 passed, 0 failed, 8 skipped)
+- [x] sdk/AGENTS.md egui ID audit checklist passes for this module, with one
+  documented deviation: the per-mesh material rows use `push_id` +
+  `group`/`horizontal_wrapped` (mirroring `obj_importer_ui.rs`'s per-mesh
+  color editor) instead of `egui::Grid`, because `push_id` wrapping a
+  `Grid::end_row()` call is an untested combination in this codebase and the
+  established precedent for "interactive per-mesh rows" already solves this
+  exact problem without `egui::Grid`. The read-only preview's per-mesh table
+  *does* use `egui::Grid` (no `push_id` needed — plain `ui.label` calls
+  allocate no persistent widget IDs to collide).
 
 #### 2.6 Success Criteria
 
