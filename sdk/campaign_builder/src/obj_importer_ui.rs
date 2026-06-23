@@ -48,6 +48,7 @@ use antares::domain::visual::item_mesh::ItemMeshCategory;
 use antares::domain::visual::{CreatureDefinition, CreatureReference, MeshTransform};
 use antares::domain::world::furniture::FurnitureDefinition;
 use antares::domain::world::landscape::{LandscapeCategory, LandscapeDefinition, LandscapeFlags};
+use antares::domain::world::object_mesh::{ObjectMeshError, ObjectMeshRegistryFile};
 use antares::domain::world::{FurnitureCategory, FurnitureFlags, FurnitureMaterial, FurnitureType};
 use eframe::egui;
 use std::collections::HashMap;
@@ -154,6 +155,9 @@ enum ObjImporterExportError {
 
     #[error("Failed to parse RON registry data: {0}")]
     RegistryParse(#[from] ron::error::SpannedError),
+
+    #[error("Object mesh registry error: {0}")]
+    ObjectMeshRegistry(#[from] ObjectMeshError),
 
     #[error("Texture for mesh '{mesh_name}' could not be resolved.")]
     MissingTexture { mesh_name: String },
@@ -2053,46 +2057,23 @@ fn upsert_landscape_definition(
 
 /// Updates `data/object_mesh_registry.ron`, inserting or replacing the entry for `mesh_key`.
 ///
-/// The registry uses the `ObjectMeshRegistry(meshes: {...})` RON format with string keys.
+/// Delegates to [`ObjectMeshRegistryFile`] for both parsing and serialization
+/// rather than hand-building RON text, so the registry stays in sync with the
+/// shape the domain layer (and the Objects editor, when it lands) expects.
 fn upsert_object_mesh_registry_entry(
     campaign_dir: &Path,
     mesh_key: &str,
     relative_path: &str,
 ) -> Result<(), ObjImporterExportError> {
-    use std::collections::BTreeMap;
-
     let registry_path = campaign_dir.join("data/object_mesh_registry.ron");
-    let mut map: BTreeMap<String, String> = if registry_path.exists() {
-        let content = fs::read_to_string(&registry_path)?;
-        // Parse the ObjectMeshRegistry(meshes: {...}) RON struct.
-        // Use a local deserializable wrapper to avoid depending on the private domain type.
-        #[derive(serde::Deserialize)]
-        struct ObjectMeshRegistry {
-            meshes: BTreeMap<String, String>,
-        }
-        ron::from_str::<ObjectMeshRegistry>(&content)
-            .map(|r| r.meshes)
-            .unwrap_or_default()
+    let mut registry = if registry_path.exists() {
+        ObjectMeshRegistryFile::load(&registry_path)?
     } else {
-        BTreeMap::new()
+        ObjectMeshRegistryFile::default()
     };
 
-    map.insert(mesh_key.to_string(), relative_path.to_string());
-
-    if let Some(parent) = registry_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    // Serialize as ObjectMeshRegistry(meshes: { "key": "path", ... })
-    let mut lines = vec![
-        "ObjectMeshRegistry(".to_string(),
-        "    meshes: {".to_string(),
-    ];
-    for (key, path) in &map {
-        lines.push(format!("        {:?}: {:?},", key, path));
-    }
-    lines.push("    }".to_string());
-    lines.push(")".to_string());
-    fs::write(&registry_path, lines.join("\n") + "\n")?;
+    registry.upsert(mesh_key, relative_path);
+    registry.save(&registry_path)?;
     Ok(())
 }
 
@@ -2602,6 +2583,7 @@ mod tests {
     use antares::domain::world::landscape::{
         LandscapeCategory, LandscapeDefinition, LandscapeFlags,
     };
+    use antares::domain::world::object_mesh::ObjectMeshRegistryFile;
     use antares::domain::world::FurnitureCategory;
     use eframe::egui;
     use std::fs;
@@ -3855,6 +3837,61 @@ mod tests {
         assert_eq!(
             registry[0].filepath,
             "assets/meshes/landscape/tree/updated_tree.ron"
+        );
+    }
+
+    #[test]
+    fn test_export_object_mesh_upserts_existing_registry_entry_by_key() {
+        let campaign_dir = tempdir().unwrap();
+        fs::create_dir_all(campaign_dir.path().join("data")).unwrap();
+
+        // Seed the registry with two entries: one we'll re-export (keyed by
+        // the exact creature name, since ObjectMesh registry keys are the
+        // raw name, not a numeric ID), and one that must survive untouched.
+        let mut existing_registry = ObjectMeshRegistryFile::default();
+        existing_registry.upsert("Old Chest", "assets/meshes/objects/old_chest_v1.ron");
+        existing_registry.upsert("Other Key", "assets/meshes/objects/other_key.ron");
+        existing_registry
+            .save(&campaign_dir.path().join("data/object_mesh_registry.ron"))
+            .unwrap();
+
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::ObjectMesh;
+        state.creature_name = "Old Chest".to_string();
+
+        export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+
+        let registry = ObjectMeshRegistryFile::load(
+            &campaign_dir.path().join("data/object_mesh_registry.ron"),
+        )
+        .unwrap();
+
+        // Re-exporting "Old Chest" must replace its path, not duplicate the
+        // entry, and must not disturb the unrelated "Other Key" entry.
+        assert_eq!(registry.meshes.len(), 2);
+        assert_eq!(
+            registry.meshes.get("Old Chest").map(String::as_str),
+            Some("assets/meshes/objects/old_chest.ron")
+        );
+        assert_eq!(
+            registry.meshes.get("Other Key").map(String::as_str),
+            Some("assets/meshes/objects/other_key.ron")
+        );
+
+        // Exporting the same key a second time must still replace in place,
+        // not append a duplicate.
+        export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+        let registry_after_second_export = ObjectMeshRegistryFile::load(
+            &campaign_dir.path().join("data/object_mesh_registry.ron"),
+        )
+        .unwrap();
+        assert_eq!(registry_after_second_export.meshes.len(), 2);
+        assert_eq!(
+            registry_after_second_export
+                .meshes
+                .get("Old Chest")
+                .map(String::as_str),
+            Some("assets/meshes/objects/old_chest.ron")
         );
     }
 

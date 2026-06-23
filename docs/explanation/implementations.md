@@ -2,6 +2,22 @@
 
 ---
 
+## Item Prompt Assets (2026)
+
+- Added [docs/explanation/items_prompts.md](docs/explanation/items_prompts.md) with reusable image-generation prompts for every item listed in [campaigns/tutorial/data/items.ron](campaigns/tutorial/data/items.ron).
+- Added [campaigns/tutorial/items_prompts.jsonl](campaigns/tutorial/items_prompts.jsonl) for batch use with image-generation pipelines.
+
+## Character Prompt Assets (2026)
+
+- Consolidated the character prompt content into [docs/explanation/characters_prompts.md](docs/explanation/characters_prompts.md) and added [campaigns/tutorial/characters_prompts.jsonl](campaigns/tutorial/characters_prompts.jsonl) for batch generation workflows.
+
+## Monster Prompt Assets (2026)
+
+- Expanded [docs/explanation/monster_prompts.md](docs/explanation/monster_prompts.md) to cover the monsters defined in [campaigns/tutorial/data/monsters.ron](campaigns/tutorial/data/monsters.ron) while preserving the stronger existing prompts for Ice Elemental, Basilisk, and Chimera.
+- Added [campaigns/tutorial/monster_prompts.jsonl](campaigns/tutorial/monster_prompts.jsonl) for batch generation workflows.
+
+---
+
 ## Custom Fonts — All Phases (Complete) (2026)
 
 **Goal:** Add campaign-scoped custom font support for dialogue UI and game menu UI. Campaign authors can declare optional `.ttf` font paths in `config.ron`; the engine loads them via `AssetServer` and applies them to all relevant `TextFont` spawns at runtime. Campaigns that omit font config render identically to the pre-implementation baseline (Bevy default font, no crash).

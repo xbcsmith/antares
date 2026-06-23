@@ -1,11 +1,33 @@
-# Character Portraits
+# Character portrait sprite sheet prompt assets
 
-Create a single image sprite sheet with 20 small fantasy character portraits arranged in a 5x4 grid, each exactly 64x64 pixels with 4 px between them, on a dark background. All are head-and-shoulders view only, no helmets or full head coverings, faces fully visible.
+These prompts are designed to generate a single sprite sheet of 20 fantasy character portraits for the tutorial campaign. The output is intended for a clean, game-ready portrait atlas that can later be cropped into individual icons or character cards.
 
-Cute stylized cartoon art style with bold black outlines, metallic shading, glowing accents, vibrant colors, and dramatic rim lighting, exactly matching the style of Soul Knight or classic mobile fantasy RPG icons.
+## Base style requirements
+
+For every prompt, use:
+- cute stylized cartoon art style
+- bold black outlines
+- metallic shading
+- glowing accents
+- vibrant colors
+- dramatic rim lighting
+- 5x4 portrait grid
+- each portrait exactly 64x64 pixels
+- 4 pixels of space between portraits
+- dark background
+- head-and-shoulders view only
+- no helmets or full head coverings
+- faces fully visible
+- no text, labels, or watermarks
+- clean professional game asset sprite sheet
+
+## Sprite sheet prompt
+
+Prompt: Create a single image sprite sheet with 20 small fantasy character portraits arranged in a 5x4 grid, each exactly 64x64 pixels with 4 pixels of space between them, on a dark background. All portraits should be head-and-shoulders view only, with no helmets or full head coverings, and faces fully visible. Use a cute stylized cartoon art style with bold black outlines, metallic shading, glowing accents, vibrant colors, and dramatic rim lighting, matching the feel of Soul Knight or classic mobile fantasy RPG icons. Keep the style highly consistent across all 20 portraits, with strong highlights on metal, hair, and magical effects, and make the sheet feel clean and professional for use as a game asset sprite sheet.
+
+### Portrait roster
 
 Row 1 (Female versions, left to right):
-
 1. Female Knight: confident expression, shoulder-length hair tied back, ornate plate armor pauldrons with gold trim, sword hilt over shoulder
 2. Female Sorcerer: mysterious smile, long flowing hair, wide-brimmed wizard hat tilted back, glowing crystal staff
 3. Female Rogue: sly grin, short tousled hair with headband, hooded leather cloak, crossed daggers
@@ -13,7 +35,6 @@ Row 1 (Female versions, left to right):
 5. Female Assassin: intense stare, sleek dark hair, deep hood with light shadow, glowing eyes, black scarf
 
 Row 2 (Female versions continued):
-
 6. Female Archer: focused expression, long ponytail, leather headband, bow and quiver over shoulder
 7. Female Cleric: serene kind expression, elegant hair with golden circlet, white-and-gold holy robes, radiant symbol
 8. Female Druid: calm nature expression, leafy vines in long hair, vine crown, wooden staff with leaves
@@ -21,7 +42,6 @@ Row 2 (Female versions continued):
 10. Female Warlock: sinister smirk, long dark hair with horns or demonic accessories, purple glowing eyes, shadowy cloak with fel energy tendrils
 
 Row 3 (Male versions, left to right):
-
 1. Male Knight: stern expression, short cropped hair, heavy plate armor shoulders, large sword visible
 2. Male Sorcerer: wise look, optional beard, pointed wizard hat, ornate staff with magical orb
 3. Male Rogue: cocky smirk, messy short hair, hooded cloak, twin blades at sides
@@ -29,11 +49,8 @@ Row 3 (Male versions, left to right):
 5. Male Assassin: cold menacing gaze, short dark hair, black hood and scarf, glowing dagger
 
 Row 4 (Male versions continued):
-
 6. Male Archer: determined focus, short hair or ponytail, ranger hood, large longbow over shoulder
 7. Male Cleric: pious expression, long hair or tonsure, holy circlet, glowing staff with cross
 8. Male Druid: wise tranquil look, beard with leaves, antler crown, gnarled wooden staff
 9. Male Paladin: noble resolute expression, short hair with radiant aura, golden-trimmed plate armor, holy shield or mace visible
 10. Male Warlock: brooding intense stare, short spiked hair with small horns, green or purple fel glow in eyes, dark robe with chaotic energy
-
-Highly consistent style and scale across all 20 portraits, pixel-art friendly detailing, strong highlights on metal, hair, and magical effects, no text or labels, at least 4 px of space between images so they can be cropped, clean professional game asset sprite sheet.

@@ -41,10 +41,10 @@
 //! assert!(db.lookup("oak_tree").is_none());
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::domain::visual::creature_database::CreatureDatabaseError;
@@ -84,6 +84,10 @@ pub enum ObjectMeshError {
     /// Validation of an underlying `CreatureDefinition` failed.
     #[error("Mesh asset validation failed: {0}")]
     ValidationError(String),
+
+    /// The registry file could not be written.
+    #[error("Failed to write object mesh registry: {0}")]
+    WriteError(String),
 }
 
 impl From<CreatureDatabaseError> for ObjectMeshError {
@@ -99,6 +103,195 @@ impl From<CreatureDatabaseError> for ObjectMeshError {
 #[derive(Debug, Deserialize)]
 struct ObjectMeshRegistry {
     meshes: HashMap<String, String>,
+}
+
+/// Editable, round-trippable representation of `object_mesh_registry.ron`.
+///
+/// This is the **write-capable** counterpart to [`ObjectMeshDatabase`].
+/// `ObjectMeshDatabase` is read-only and eagerly resolves every entry to a
+/// full [`CreatureDefinition`] for runtime lookups; it has no add, rename,
+/// remove, or save methods because it isn't meant for editing.
+/// `ObjectMeshRegistryFile` keeps the registry in its raw key → path form so
+/// the Campaign Builder SDK can add, rename, and remove entries and write
+/// the result back to disk without resolving (or even reading) every
+/// referenced asset on every edit.
+///
+/// `BTreeMap` (rather than `HashMap`) keeps serialized output key-sorted,
+/// matching the existing `sort_by_key` convention used by
+/// `upsert_mesh_registry_entry` for the numeric mesh registries in the
+/// Campaign Builder importer.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::world::object_mesh::ObjectMeshRegistryFile;
+///
+/// let mut registry = ObjectMeshRegistryFile::default();
+/// registry.upsert("barred_door", "assets/meshes/objects/barred_door.ron");
+/// assert_eq!(
+///     registry.meshes.get("barred_door").map(String::as_str),
+///     Some("assets/meshes/objects/barred_door.ron")
+/// );
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ObjectMeshRegistryFile {
+    /// Maps string mesh keys to campaign-relative `CreatureDefinition` RON paths.
+    pub meshes: BTreeMap<String, String>,
+}
+
+impl ObjectMeshRegistryFile {
+    /// Loads an `ObjectMeshRegistryFile` from a RON file at `path`.
+    ///
+    /// Unlike [`ObjectMeshDatabase::load_from_registry`], this does **not**
+    /// resolve referenced assets — it only parses the key → path map itself.
+    ///
+    /// This function does **not** check whether `path` exists before
+    /// reading. Callers (e.g. the Campaign Builder's `load_objects`, per
+    /// `sdk/AGENTS.md` Rule 13) own the `path.exists()` guard and decide what
+    /// an absent file means for their use case — that decision is kept out
+    /// of this domain type on purpose.
+    ///
+    /// Parsing goes through [`ron::Value`] rather than `ron::from_str::<Self>`
+    /// directly. RON's deserializer rejects a named struct whose on-disk
+    /// identifier doesn't exactly match the target Rust type's name
+    /// (`Error::ExpectedDifferentStructName`) — and every `object_mesh_registry.ron`
+    /// written before this type existed (including
+    /// `campaigns/tutorial/data/object_mesh_registry.ron`) is on disk as
+    /// `ObjectMeshRegistry(meshes: {...})`, not `ObjectMeshRegistryFile(...)`.
+    /// Going through the untyped `Value` representation first discards any
+    /// struct-name token entirely, so this loads both that legacy-named form
+    /// and the unnamed form `ObjectMeshRegistryFile::save` produces.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ObjectMeshError::ReadError`] if `path` cannot be read (this
+    /// includes a non-existent file), and [`ObjectMeshError::ParseError`] if
+    /// the contents are not valid RON or do not match the expected
+    /// `meshes: {...}` shape.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::object_mesh::ObjectMeshRegistryFile;
+    /// use std::path::Path;
+    ///
+    /// let result = ObjectMeshRegistryFile::load(Path::new("/nonexistent/path.ron"));
+    /// assert!(result.is_err());
+    /// ```
+    pub fn load(path: &Path) -> Result<Self, ObjectMeshError> {
+        let content =
+            std::fs::read_to_string(path).map_err(|e| ObjectMeshError::ReadError(e.to_string()))?;
+        let value: ron::Value =
+            ron::from_str(&content).map_err(|e| ObjectMeshError::ParseError(e.to_string()))?;
+        value
+            .into_rust()
+            .map_err(|e| ObjectMeshError::ParseError(e.to_string()))
+    }
+
+    /// Serializes this registry to RON and writes it to `path`.
+    ///
+    /// Creates any missing parent directories before writing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ObjectMeshError::WriteError`] if the parent directories
+    /// cannot be created, the data cannot be serialized, or the file cannot
+    /// be written.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::object_mesh::ObjectMeshRegistryFile;
+    ///
+    /// let mut registry = ObjectMeshRegistryFile::default();
+    /// registry.upsert("oak_tree", "assets/meshes/objects/oak_tree.ron");
+    /// let tmp = std::env::temp_dir().join("object_mesh_registry_file_doctest_save.ron");
+    /// registry.save(&tmp).unwrap();
+    /// assert!(tmp.exists());
+    /// std::fs::remove_file(&tmp).unwrap();
+    /// ```
+    pub fn save(&self, path: &Path) -> Result<(), ObjectMeshError> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| ObjectMeshError::WriteError(e.to_string()))?;
+        }
+        let content = ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::new())
+            .map_err(|e| ObjectMeshError::WriteError(e.to_string()))?;
+        std::fs::write(path, content).map_err(|e| ObjectMeshError::WriteError(e.to_string()))
+    }
+
+    /// Inserts a new entry, or replaces the path for an existing key.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::object_mesh::ObjectMeshRegistryFile;
+    ///
+    /// let mut registry = ObjectMeshRegistryFile::default();
+    /// registry.upsert("oak_tree", "assets/meshes/objects/oak_tree.ron");
+    /// registry.upsert("oak_tree", "assets/meshes/objects/oak_tree_v2.ron");
+    /// assert_eq!(registry.meshes.len(), 1);
+    /// assert_eq!(
+    ///     registry.meshes.get("oak_tree").map(String::as_str),
+    ///     Some("assets/meshes/objects/oak_tree_v2.ron")
+    /// );
+    /// ```
+    pub fn upsert(&mut self, key: &str, path: &str) {
+        self.meshes.insert(key.to_string(), path.to_string());
+    }
+
+    /// Renames an existing entry's key, keeping its path unchanged.
+    ///
+    /// Returns `true` if `old_key` existed and was renamed to `new_key`.
+    /// Returns `false`, leaving the map unchanged, if `old_key` does not
+    /// exist. Does not check whether `new_key` already exists — key
+    /// uniqueness is validated by the caller (the Objects editor, before
+    /// calling this) since only the caller knows the user-facing error
+    /// channel to surface a collision through.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::object_mesh::ObjectMeshRegistryFile;
+    ///
+    /// let mut registry = ObjectMeshRegistryFile::default();
+    /// registry.upsert("oak_tree", "assets/meshes/objects/oak_tree.ron");
+    /// assert!(registry.rename("oak_tree", "ancient_oak"));
+    /// assert!(!registry.meshes.contains_key("oak_tree"));
+    /// assert_eq!(
+    ///     registry.meshes.get("ancient_oak").map(String::as_str),
+    ///     Some("assets/meshes/objects/oak_tree.ron")
+    /// );
+    /// assert!(!registry.rename("missing_key", "whatever"));
+    /// ```
+    pub fn rename(&mut self, old_key: &str, new_key: &str) -> bool {
+        match self.meshes.remove(old_key) {
+            Some(path) => {
+                self.meshes.insert(new_key.to_string(), path);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Removes an entry by key, returning its path if it existed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::object_mesh::ObjectMeshRegistryFile;
+    ///
+    /// let mut registry = ObjectMeshRegistryFile::default();
+    /// registry.upsert("oak_tree", "assets/meshes/objects/oak_tree.ron");
+    /// assert_eq!(
+    ///     registry.remove("oak_tree"),
+    ///     Some("assets/meshes/objects/oak_tree.ron".to_string())
+    /// );
+    /// assert_eq!(registry.remove("oak_tree"), None);
+    /// ```
+    pub fn remove(&mut self, key: &str) -> Option<String> {
+        self.meshes.remove(key)
+    }
 }
 
 /// Unified, string-keyed mesh database for all interactive objects.
@@ -505,5 +698,150 @@ mod tests {
 
         let entry = db.lookup("11001").unwrap();
         assert_eq!(entry.name, "PrimaryEntry");
+    }
+
+    #[test]
+    fn test_object_mesh_registry_file_round_trip() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let registry_path = tmp.path().join("data/object_mesh_registry.ron");
+
+        let mut registry = ObjectMeshRegistryFile::default();
+        registry.upsert("barred_door", "assets/meshes/objects/barred_door.ron");
+        registry.upsert("oak_tree", "assets/meshes/objects/oak_tree.ron");
+        registry.save(&registry_path).unwrap();
+
+        let loaded = ObjectMeshRegistryFile::load(&registry_path).unwrap();
+        assert_eq!(loaded.meshes.len(), 2);
+        assert_eq!(
+            loaded.meshes.get("barred_door").map(String::as_str),
+            Some("assets/meshes/objects/barred_door.ron")
+        );
+        assert_eq!(
+            loaded.meshes.get("oak_tree").map(String::as_str),
+            Some("assets/meshes/objects/oak_tree.ron")
+        );
+    }
+
+    #[test]
+    fn test_object_mesh_registry_file_rename() {
+        let mut registry = ObjectMeshRegistryFile::default();
+        registry.upsert("oak_tree", "assets/meshes/objects/oak_tree.ron");
+
+        assert!(registry.rename("oak_tree", "ancient_oak"));
+        assert!(!registry.meshes.contains_key("oak_tree"));
+        assert_eq!(
+            registry.meshes.get("ancient_oak").map(String::as_str),
+            Some("assets/meshes/objects/oak_tree.ron")
+        );
+
+        let before_len = registry.meshes.len();
+        let before: BTreeMap<String, String> = registry.meshes.clone();
+        assert!(!registry.rename("definitely_missing", "whatever"));
+        assert_eq!(registry.meshes.len(), before_len);
+        assert_eq!(registry.meshes, before);
+    }
+
+    #[test]
+    fn test_object_mesh_registry_file_remove() {
+        let mut registry = ObjectMeshRegistryFile::default();
+        registry.upsert("oak_tree", "assets/meshes/objects/oak_tree.ron");
+
+        assert_eq!(
+            registry.remove("oak_tree"),
+            Some("assets/meshes/objects/oak_tree.ron".to_string())
+        );
+        assert_eq!(registry.remove("oak_tree"), None);
+        assert_eq!(registry.remove("never_existed"), None);
+    }
+
+    #[test]
+    fn test_object_mesh_registry_file_load_legacy_named_format() {
+        use std::io::Write;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let registry_path = tmp.path().join("object_mesh_registry.ron");
+        std::fs::File::create(&registry_path)
+            .unwrap()
+            .write_all(
+                br#"ObjectMeshRegistry(
+    meshes: {
+        "barred_passage": "assets/meshes/objects/barred_door.ron",
+    }
+)"#,
+            )
+            .unwrap();
+
+        let loaded = ObjectMeshRegistryFile::load(&registry_path).unwrap();
+        assert_eq!(
+            loaded.meshes.get("barred_passage").map(String::as_str),
+            Some("assets/meshes/objects/barred_door.ron")
+        );
+    }
+
+    #[test]
+    fn test_object_mesh_registry_file_load_real_tutorial_campaign_file() {
+        let real_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("campaigns/tutorial/data/object_mesh_registry.ron");
+
+        let loaded = ObjectMeshRegistryFile::load(&real_path).unwrap();
+        assert!(!loaded.meshes.is_empty());
+    }
+
+    #[test]
+    fn test_object_mesh_registry_file_interop_with_object_mesh_database() {
+        use std::io::Write;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        // Write a minimal CreatureDefinition asset file.
+        let asset_dir = tmp.path().join("assets/meshes/objects");
+        std::fs::create_dir_all(&asset_dir).unwrap();
+        let asset_path = asset_dir.join("test_chest.ron");
+        std::fs::File::create(&asset_path)
+            .unwrap()
+            .write_all(
+                br#"(
+    id: 1,
+    name: "TestChest",
+    meshes: [],
+    mesh_transforms: [],
+)"#,
+            )
+            .unwrap();
+
+        // Write the registry using the new write-capable type.
+        let registry_path = tmp.path().join("data/object_mesh_registry.ron");
+        let mut registry = ObjectMeshRegistryFile::default();
+        registry.upsert("test_chest", "assets/meshes/objects/test_chest.ron");
+        registry.save(&registry_path).unwrap();
+
+        // Load it back with the existing, untouched, read-only loader used by
+        // the game runtime.
+        let db = ObjectMeshDatabase::load_from_registry(&registry_path, tmp.path()).unwrap();
+        assert!(db.has_mesh("test_chest"));
+        let entry = db.lookup("test_chest").unwrap();
+        assert_eq!(entry.name, "TestChest");
+    }
+
+    #[test]
+    fn test_object_mesh_registry_file_load_nonexistent_path_errors() {
+        let result =
+            ObjectMeshRegistryFile::load(Path::new("/nonexistent/object_mesh_registry.ron"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_object_mesh_registry_file_load_garbage_contents_errors() {
+        use std::io::Write;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let registry_path = tmp.path().join("object_mesh_registry.ron");
+        std::fs::File::create(&registry_path)
+            .unwrap()
+            .write_all(b"not valid ron {{{")
+            .unwrap();
+
+        let result = ObjectMeshRegistryFile::load(&registry_path);
+        assert!(result.is_err());
     }
 }

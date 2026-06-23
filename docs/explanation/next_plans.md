@@ -227,6 +227,14 @@ Write a plan with a phased approach to unify how we handle furniture, items, doo
 
 Recruitable Characters --> Meet at the Inn dialogue --> Mesh does not disapear from the map and character is still recruitable from mesh on map even if character is in the party already.
 
+## Objects SDk
+
+Objects have no Editor Tab in the SDK. Add an editor tab for Objects that follows the same patterns we used for Items, Landscape, etc... We should be able to edit all aspects of an Object. Importing objects should update the list of Objects in the SDK immediately.
+
+Write a plan with a phased approach to add the feature to the SDK. THINK HARD and follow the rules in ./sdk/AGENTS.md and @PLAN.md
+
+[Object Editor SDK Plan](./object_editor_sdk_plan.md)
+
 ### SDK Bugs
 
 ✅ COMPLETED - Campaign Builder --> Monster Editor --> Edit save button at the bottom of the editor does not always Save the monster when it returns to the list
