@@ -632,10 +632,25 @@ geometry re-import goes back through the Importer).
 
 #### 5.3 Deliverables
 
-- [ ] `modding_guide.md` Objects section written
-- [ ] `objects_editor.rs` module doc comment
-- [ ] `ObjectMeshRegistryFile` doc comment explaining the split from
-  `ObjectMeshDatabase`
+- [x] `modding_guide.md` Objects section written — extended the existing
+  `## Interactive Objects — Meshes and Events` → `### Placement Workflow`
+  → step 1 (`#### 1. Register the mesh in object_mesh_registry.ron`) with a
+  new `#### Editing registry entries with the Objects tab` subsection
+  (lines 518-563), per the plan's "extend the existing section" option,
+  rather than adding a disconnected new top-level section
+- [x] `objects_editor.rs` module doc comment — already had a "Scope:"
+  paragraph from Phase 2 satisfying §5.2's first bullet; extended it with
+  two new paragraphs covering `sdk/AGENTS.md` rule compliance (Rules
+  1/2/5/7/9/10/12/13/15/16 cited by number, the Rule 14 Key-field exemption
+  explained, and Rules 3/4/6/8 explicitly noted as not applicable with the
+  reason) and how the module wires into `editor_state.rs`/`campaign_io.rs`/
+  `lib.rs`, satisfying the "without reading `lib.rs` first" success
+  criterion
+- [x] `ObjectMeshRegistryFile` doc comment explaining the split from
+  `ObjectMeshDatabase` — already written during Phase 1 and verified
+  sufficient as-is (cross-references `ObjectMeshDatabase` via intra-doc
+  link, explains the read-only/runtime vs. edit-shaped/SDK split, and
+  justifies the `BTreeMap` choice); no change needed
 
 #### 5.4 Success Criteria
 

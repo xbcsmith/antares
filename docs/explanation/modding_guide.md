@@ -515,6 +515,53 @@ ObjectMeshRegistry(
 Each value is a path **relative to the campaign root** pointing at a `CreatureDefinition`
 RON mesh asset. You can import the mesh using the Campaign Builder's **Importer** tab.
 
+#### Editing registry entries with the Objects tab
+
+Hand-editing `object_mesh_registry.ron` works fine, but the Campaign Builder also has a
+dedicated **Objects** tab that manages this same file for you. An "Object," in this tab, is
+exactly one entry in the registry above: a key (like `"iron_gate"`) paired with the path to
+its mesh asset. That key is the same string you type into an event's `mesh_id` field — so
+once an Object exists in the registry, it immediately shows up as an option wherever
+`mesh_id` is set, and any Object you create or rename here is reflected the next time you
+fill in that field in the Map Editor.
+
+**Creating an Object.** The actual mesh import still happens in the **Importer** tab: load
+your OBJ or GLB file as usual, and set its export type to **Object Mesh**. This writes the
+mesh asset to disk and adds (or updates) the corresponding entry in
+`object_mesh_registry.ron` automatically — you don't need to hand-edit the RON file
+afterward. As soon as the import finishes, the Campaign Builder switches you over to the
+Objects tab and refreshes its list, so your new entry is visible right away. If you're
+already on the Objects tab and want to start this process, click **📥 Import Object Mesh**;
+it simply jumps you to the Importer with the export type pre-set to Object Mesh — the import
+itself still happens there.
+
+**Editing an Object.** Select an entry in the Objects tab's list and click Edit (or use the
+row's context menu) to open its fields:
+
+- **Key** — the registry key itself, e.g. `"iron_gate"`. This is a free-text field, since
+  you're assigning an identifier rather than referencing one elsewhere — it's the one field
+  in this form without autocomplete validation. Renaming a key checks for collisions: if the
+  new name is already in use, the edit is rejected with an inline error and the original key
+  is kept.
+- **Name** — the object's display name.
+- **Scale** — a single uniform scale factor applied to the whole mesh.
+- **Color tint** — an optional RGBA tint you can toggle on or off; when first enabled it
+  defaults to opaque white.
+- **Per-mesh material** — for each mesh that makes up the object, you can adjust its base
+  color, metallic, roughness, and an optional emissive color. A **↻ Re-import in Importer**
+  button sits next to this section as a shortcut back into the Importer flow described above.
+
+Saving these changes writes the updated mesh asset and rewrites
+`object_mesh_registry.ron` immediately — there's no need to perform a separate "Save
+Campaign" step afterward.
+
+The Objects tab's edit form is intentionally limited to the properties above. It cannot
+change mesh geometry — vertices, indices, UVs, or normals — and it cannot add or remove
+meshes from an object. Any of that requires going back through the Importer: re-import a new
+OBJ/GLB, export it again as Object Mesh using the **same key**, and the existing registry
+entry (and its asset) will be overwritten. The **↻ Re-import in Importer** button is just a
+shortcut into that same flow.
+
 #### 2. Place the event in the map RON
 
 Open `data/maps/your_map.ron` and add the event under `events:`:

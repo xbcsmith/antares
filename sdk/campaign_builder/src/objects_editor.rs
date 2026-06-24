@@ -15,6 +15,39 @@
 //! on [`crate::item_mesh_editor`] for the fact that an [`ObjectEntry`] *is* a
 //! mesh asset directly (a [`CreatureDefinition`]), not a wrapper around one
 //! with a separate category/tags/flags layer.
+//!
+//! Rule compliance (`sdk/AGENTS.md`): the list-row loop and the per-mesh
+//! material loop in the edit form both wrap their bodies in `push_id` (Rule
+//! 1); every `ScrollArea` and `Grid` has a distinct `id_salt`/name (Rule 2,
+//! Rule 5); every state-changing click or toggle calls `request_repaint()`
+//! (Rule 7); the list/preview split uses [`crate::ui_helpers::TwoColumnLayout`]
+//! rather than a raw `SidePanel` (Rule 9); `show_list` pre-computes
+//! `filtered_rows` and `preview_snapshot` before calling `show_split` (Rule
+//! 10); button rows use `horizontal_wrapped` (Rule 12); `needs_initial_load`
+//! drives a lazy auto-load on first render, reset via
+//! [`reset_for_new_campaign`](ObjectsEditorState::reset_for_new_campaign) and
+//! [`reset_selection`](ObjectsEditorState::reset_selection) (Rule 13); the
+//! left-panel list uses `show_standard_list_item` with `MetadataBadge`
+//! instead of `selectable_label` (Rule 15); and the edit form ends with Back
+//! to List / Save / Cancel, in that order (Rule 16). The Key field is
+//! deliberately exempt from Rule 14's autocomplete-selector requirement: it
+//! is the primary identifier being assigned, not a reference to another
+//! registry. Rules 3, 4, 6, and 8 do not apply — this file uses no
+//! `ComboBox`, `CollapsingHeader`, or `egui::Window`, and registers no
+//! top-level panel of its own.
+//!
+//! Integration: [`ObjectsEditorState`] lives at
+//! `EditorRegistry::objects_editor_state` and the data it renders lives at
+//! `CampaignData::objects: Vec<ObjectEntry>` (both in `editor_state.rs`); this
+//! module never owns that `Vec` itself — [`ObjectsEditorState::show`] only
+//! ever receives `&mut Vec<ObjectEntry>` from the caller. Loading and saving
+//! `data/object_mesh_registry.ron` happens via `CampaignBuilderApp::load_objects`
+//! and `save_objects` in `campaign_io.rs`, wired into the same campaign
+//! new/open/save lifecycle as every other data type. `lib.rs`'s
+//! `EditorTab::Objects` arm is the sole caller of `show()`; when the OBJ
+//! Importer reports an `ObjectMesh` export, that same handler calls
+//! `load_objects()` again and switches to `EditorTab::Objects`, so a freshly
+//! imported mesh shows up here immediately, with no save-and-reopen cycle.
 
 use crate::ui_helpers::{
     show_standard_list_item, ItemAction, MetadataBadge, StandardListItemConfig, TwoColumnLayout,
