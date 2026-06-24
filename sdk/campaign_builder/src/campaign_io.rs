@@ -4086,4 +4086,87 @@ mod tests {
         assert_eq!(app.campaign_data.objects[0].key, "b_key");
         assert!(!app.campaign_data.objects.iter().any(|e| e.key == "a_key"));
     }
+
+    #[test]
+    fn test_object_mesh_import_refreshes_objects_list_without_reload() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        // Simulate "the importer just ran": write the asset file and
+        // upsert/save the registry pointer, exactly as the importer's
+        // export path does.
+        let asset_path = dir.join("assets/meshes/objects/new_chest.ron");
+        write_test_object_asset(&asset_path, "NewChest");
+
+        let mut registry = ObjectMeshRegistryFile::default();
+        registry.upsert("NewChest", "assets/meshes/objects/new_chest.ron");
+        let registry_path = dir.join("data/object_mesh_registry.ron");
+        fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
+        registry.save(&registry_path).unwrap();
+
+        let mut app = CampaignBuilderApp {
+            campaign_dir: Some(dir.to_path_buf()),
+            ..Default::default()
+        };
+
+        assert!(app.campaign_data.objects.is_empty());
+
+        app.load_objects();
+
+        assert_eq!(app.campaign_data.objects.len(), 1);
+        assert_eq!(app.campaign_data.objects[0].key, "NewChest");
+    }
+
+    #[test]
+    fn test_object_mesh_import_handler_switches_to_objects_tab() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        let asset_path = dir.join("assets/meshes/objects/new_chest.ron");
+        write_test_object_asset(&asset_path, "NewChest");
+
+        let mut registry = ObjectMeshRegistryFile::default();
+        registry.upsert("NewChest", "assets/meshes/objects/new_chest.ron");
+        let registry_path = dir.join("data/object_mesh_registry.ron");
+        fs::create_dir_all(registry_path.parent().unwrap()).unwrap();
+        registry.save(&registry_path).unwrap();
+
+        let mut app = CampaignBuilderApp {
+            campaign_dir: Some(dir.to_path_buf()),
+            ..Default::default()
+        };
+        app.ui_state.active_tab = EditorTab::Metadata;
+        assert_ne!(app.ui_state.active_tab, EditorTab::Objects);
+
+        // Inline replica of the `ObjImporterUiSignal::ObjectMesh` handler in
+        // `lib.rs`, minus the literal `ui.ctx().request_repaint()` call (no
+        // UI-independent observable effect to assert on).
+        let importer_status = app.obj_importer_state.status_message.clone();
+        app.editor_registry
+            .maps_editor_state
+            .invalidate_mesh_cache();
+        app.load_objects();
+        app.ui_state.status_message = importer_status;
+        app.ui_state.active_tab = EditorTab::Objects;
+
+        assert_eq!(app.ui_state.active_tab, EditorTab::Objects);
+    }
+
+    #[test]
+    fn test_object_mesh_import_handler_still_invalidates_mesh_cache() {
+        let mut app = CampaignBuilderApp::default();
+        assert!(!app.editor_registry.maps_editor_state.mesh_cache_dirty);
+
+        // Inline replica of the `ObjImporterUiSignal::ObjectMesh` handler in
+        // `lib.rs`, minus the literal `ui.ctx().request_repaint()` call.
+        let importer_status = app.obj_importer_state.status_message.clone();
+        app.editor_registry
+            .maps_editor_state
+            .invalidate_mesh_cache();
+        app.load_objects();
+        app.ui_state.status_message = importer_status;
+        app.ui_state.active_tab = EditorTab::Objects;
+
+        assert!(app.editor_registry.maps_editor_state.mesh_cache_dirty);
+    }
 }

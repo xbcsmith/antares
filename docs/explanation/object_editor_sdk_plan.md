@@ -582,13 +582,23 @@ None.
 
 #### 4.5 Deliverables
 
-- [ ] `self.load_objects()` call added to the `ObjectMesh` import signal
+- [x] `self.load_objects()` call added to the `ObjectMesh` import signal
   handler in `lib.rs`
-- [ ] `self.ui_state.active_tab = EditorTab::Objects` added to the same
+- [x] `self.ui_state.active_tab = EditorTab::Objects` added to the same
   handler, matching Furniture/Landscape
-- [ ] Test confirming immediate in-memory refresh after import
-- [ ] Test confirming the tab switch
-- [ ] Existing Map Editor mesh-cache invalidation behavior unchanged
+- [x] Test confirming immediate in-memory refresh after import
+  (`test_object_mesh_import_refreshes_objects_list_without_reload`)
+- [x] Test confirming the tab switch
+  (`test_object_mesh_import_handler_switches_to_objects_tab`) — the literal
+  match arm in `lib.rs` isn't independently callable from a unit test (it's
+  embedded in the `eframe::App::update` central-panel closure with no
+  exposed `egui::Ui`/`ctx` seam), so the test inline-replicates the handler's
+  exact `&mut self`-only sequence, omitting only the literal
+  `ui.ctx().request_repaint()` line — same approach Phase 3 used for the
+  dialog-gated `do_open_campaign()`.
+- [x] Existing Map Editor mesh-cache invalidation behavior unchanged
+  (`test_object_mesh_import_handler_still_invalidates_mesh_cache`, asserting
+  `maps_editor_state.mesh_cache_dirty` directly)
 
 #### 4.6 Success Criteria
 

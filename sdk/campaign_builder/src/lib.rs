@@ -1485,7 +1485,9 @@ impl eframe::App for CampaignBuilderApp {
                         obj_importer_ui::ObjImporterUiSignal::ObjectMesh => {
                             let importer_status = self.obj_importer_state.status_message.clone();
                             self.editor_registry.maps_editor_state.invalidate_mesh_cache();
+                            self.load_objects();
                             self.ui_state.status_message = importer_status;
+                            self.ui_state.active_tab = EditorTab::Objects;
                             ui.ctx().request_repaint();
                         }
                     }
