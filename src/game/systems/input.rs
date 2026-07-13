@@ -43,8 +43,10 @@ use crate::game::systems::map::{NpcMarker, TileCoord};
 use crate::game::systems::rest::InitiateRestEvent;
 use crate::game::systems::ui::GameLog;
 use crate::sdk::game_config::ControlsConfig;
+use bevy::ecs::schedule::common_conditions::not;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use bevy_egui::input::{egui_wants_any_keyboard_input, egui_wants_any_pointer_input};
 
 mod exploration_interact;
 mod exploration_movement;
@@ -131,9 +133,16 @@ impl Plugin for InputPlugin {
             Update,
             (
                 handle_global_input_toggles.in_set(GlobalInputSet::GlobalToggles),
-                handle_exploration_input_interact.after(handle_global_input_toggles),
-                handle_exploration_input_movement.after(handle_exploration_input_interact),
-            ),
+                handle_exploration_input_interact
+                    .after(handle_global_input_toggles)
+                    .run_if(not(egui_wants_any_pointer_input))
+                    .run_if(not(egui_wants_any_keyboard_input)),
+                handle_exploration_input_movement
+                    .after(handle_exploration_input_interact)
+                    .run_if(not(egui_wants_any_pointer_input))
+                    .run_if(not(egui_wants_any_keyboard_input)),
+            )
+                .chain(),
         );
     }
 }
@@ -175,6 +184,12 @@ fn handle_global_input_toggles(
         &mouse_buttons,
         primary_window.single().ok(),
     );
+
+    if (keyboard_input.just_pressed(KeyCode::Escape) || keyboard_input.just_pressed(KeyCode::KeyP))
+        && global_state.0.close_modal()
+    {
+        return;
+    }
 
     let _frame_consumed =
         handle_global_mode_toggles(&mut global_state.0, frame_input, game_content.as_deref());

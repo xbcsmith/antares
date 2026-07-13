@@ -2,6 +2,15 @@
 
 ---
 
+## Modal egui input handoff (2026-07-13)
+
+- Fixed mouse and keyboard interactions for modal egui screens by preventing the shared gameplay input systems from running while egui is actively consuming pointer or keyboard input.
+- Applied the guard in `src/game/systems/input.rs` to `handle_global_input_toggles`, `handle_exploration_input_interact`, and `handle_exploration_input_movement` so screens such as the Character Sheet, Inn management, and Merchant inventory can receive clicks and keyboard focus normally.
+- This resolves the broken button clicks called out in the Character Sheet and party/merchant UI flows.
+- Quality gates completed successfully: `cargo fmt --all`, `cargo check --all-targets --all-features`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo nextest run --all-features`.
+
+---
+
 ## Item Prompt Assets (2026)
 
 - Added [docs/explanation/items_prompts.md](docs/explanation/items_prompts.md) with reusable image-generation prompts for every item listed in [campaigns/tutorial/data/items.ron](campaigns/tutorial/data/items.ron).

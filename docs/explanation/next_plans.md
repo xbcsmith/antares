@@ -200,7 +200,7 @@ Status: completed. Landscape is now a first-class importer, SDK, map-editor, run
 
 ✅ COMPLETED - When leaving player inventory with ESC button the game menu pops up immediately. ESC in any inventory screen should just close the inventory.
 
-Party Inventory screen Mouse does not work on the Next Back or Party Overview buttons in the inventory screen.
+
 
 ✅ COMPLETED - Party Overview only shows the character that opened the inventory. It should show the whole party.
 
@@ -223,9 +223,18 @@ Unify the way we handle interactive objects like chests, doors, and treasure. Th
 
 Write a plan with a phased approach to unify how we handle furniture, items, doors, and landscape. THINK HARD and follow the rules in @PLAN.md
 
-[Unify Object Placement and Events](./unified_objects_and_events.md)
+✅ COMPLETED - [Unify Object Placement and Events](./unified_objects_and_events.md)
 
-Recruitable Characters --> Meet at the Inn dialogue --> Mesh does not disapear from the map and character is still recruitable from mesh on map even if character is in the party already.
+✅ COMPLETED - Recruitable Characters --> Meet at the Inn dialogue --> Mesh does not disapear from the map and character is still recruitable from mesh on map even if character is in the party already.
+
+### Character Sheet Imrpovements
+
+✅ COMPLETED - Character Sheet screen Mouse does not work on the Next Back or Party Overview buttons in the inventory screen.
+
+✅ COMPLETED - Character Sheet overview screen Mouse buttons for "Veiw" and "Single View" do not work.
+
+✅ COMPLETED - Charachet Sheet overview should have more information about each character. Currently only has Level, Race, Class, Hit POints. SHould also contain Sex, Age, Gold, Gems, Conditions, and Experience Points.
+
 
 ## Objects SDk
 
@@ -233,7 +242,7 @@ Objects have no Editor Tab in the SDK. Add an editor tab for Objects that follow
 
 Write a plan with a phased approach to add the feature to the SDK. THINK HARD and follow the rules in ./sdk/AGENTS.md and @PLAN.md
 
-[Object Editor SDK Plan](./object_editor_sdk_plan.md)
+✅ COMPLETED - [Object Editor SDK Plan](./object_editor_sdk_plan.md)
 
 ### SDK Bugs
 

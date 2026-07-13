@@ -80,7 +80,10 @@ const SKILL_TRAINABLE_COLOR: egui::Color32 = egui::Color32::from_rgb(100, 200, 2
 /// Maximum number of character summary cards per overview row.
 const PARTY_OVERVIEW_MAX_COLS: usize = 3;
 /// Minimum height for a character summary card in the party overview grid.
-const PARTY_OVERVIEW_CARD_MIN_H: f32 = 150.0;
+///
+/// Sized for name, class/level, race/sex/age, a separator, HP, XP,
+/// gold/gems, conditions, and the `View` button.
+const PARTY_OVERVIEW_CARD_MIN_H: f32 = 250.0;
 
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
@@ -341,23 +344,18 @@ fn render_single_view(
 
     // -- Header: title + navigation buttons only.
     // Keyboard hints are on a dedicated line below so they never compete with
-    // the buttons for horizontal space.  Mixing hints and buttons in the same
-    // right_to_left block caused the buttons' egui hit regions to be consumed
-    // by the hint labels on narrower windows, so mouse clicks never reached
-    // the `< Prev`, `Next >`, and `Party Overview` responses.
+    // the buttons for horizontal space.
+    //
+    // The button group is laid out *before* the title inside a single
+    // right-to-left `Ui`. A truncating `Label` sizes itself to the full
+    // `available_width()` at the moment it is placed -- if it were added
+    // first (as a sibling widget ahead of the button group), it would claim
+    // the entire row before the buttons got a chance to reserve their own
+    // space, squeezing the `< Prev`, `Next >`, and `Party Overview` hit
+    // regions down to near zero width so mouse clicks never reached them.
+    // Placing the buttons first lets them claim their natural size, and the
+    // title then truncates into whatever space is left.
     ui.horizontal(|ui| {
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(format!(
-                    "{} -- Level {} {} {}",
-                    character.name, character.level, character.race_id, character.class_id
-                ))
-                .color(TITLE_COLOR)
-                .size(16.0)
-                .strong(),
-            )
-            .truncate(),
-        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.small_button("Party Overview").clicked() {
                 if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
@@ -374,6 +372,18 @@ fn render_single_view(
                     cs.focus_prev(party_len);
                 }
             }
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!(
+                        "{} -- Level {} {} {}",
+                        character.name, character.level, character.race_id, character.class_id
+                    ))
+                    .color(TITLE_COLOR)
+                    .size(16.0)
+                    .strong(),
+                )
+                .truncate(),
+            );
         });
     });
 
@@ -963,7 +973,15 @@ fn render_party_overview_card(
                     egui::Label::new(format!("{} Lv {}", character.class_id, character.level))
                         .truncate(),
                 );
-                ui.add(egui::Label::new(character.race_id.to_string()).truncate());
+                ui.add(
+                    egui::Label::new(format!(
+                        "{} -- {}, Age {}",
+                        character.race_id,
+                        sex_display(character.sex),
+                        character.age
+                    ))
+                    .truncate(),
+                );
                 ui.separator();
 
                 ui.horizontal(|ui| {
@@ -973,6 +991,26 @@ fn render_party_overview_card(
                         format!("{} / {}", character.hp.current, character.hp.base),
                     );
                 });
+                ui.add(egui::Label::new(format!("XP: {}", character.experience)).truncate());
+                ui.add(
+                    egui::Label::new(format!(
+                        "Gold: {}  Gems: {}",
+                        character.gold, character.gems
+                    ))
+                    .truncate(),
+                );
+
+                let conditions = if character.active_conditions.is_empty() {
+                    "Conditions: None".to_string()
+                } else {
+                    let names: Vec<&str> = character
+                        .active_conditions
+                        .iter()
+                        .map(|c| c.condition_id.as_str())
+                        .collect();
+                    format!("Conditions: {}", names.join(", "))
+                };
+                ui.add(egui::Label::new(conditions).truncate());
 
                 ui.add_space(4.0);
                 ui.small_button("View").clicked()
@@ -989,22 +1027,26 @@ fn render_party_overview(ui: &mut egui::Ui, global_state: &mut GlobalState, part
         return;
     }
 
+    // Buttons are laid out before the title inside a single right-to-left
+    // `Ui` -- see the matching comment in `render_single_view` for why the
+    // order matters (a truncating title placed first can claim the row
+    // before the button gets a chance to reserve its own space).
     ui.horizontal(|ui| {
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new("Party Overview")
-                    .color(TITLE_COLOR)
-                    .size(16.0)
-                    .strong(),
-            )
-            .truncate(),
-        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.small_button("Single View").clicked() {
                 if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
                     cs.toggle_view();
                 }
             }
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new("Party Overview")
+                        .color(TITLE_COLOR)
+                        .size(16.0)
+                        .strong(),
+                )
+                .truncate(),
+            );
         });
     });
     ui.separator();
@@ -1229,6 +1271,51 @@ mod tests {
             4,
             "rendering overview must preserve the whole active party"
         );
+    }
+
+    /// The overview card must show sex, age, gold, gems, conditions, and XP
+    /// in addition to level/race/class/HP -- verifies the fields render
+    /// without panic for both an unconditioned and a conditioned character.
+    #[test]
+    fn test_render_party_overview_card_shows_extended_stats() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::conditions::{ActiveCondition, ConditionDuration};
+
+        let mut plain = Character::new(
+            "Aldric".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        plain.age = 27;
+        plain.gold = 42;
+        plain.gems = 7;
+        plain.experience = 1500;
+
+        let mut poisoned = Character::new(
+            "Mira".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        poisoned.active_conditions.push(ActiveCondition::new(
+            "poisoned".to_string(),
+            ConditionDuration::Rounds(3),
+        ));
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_party_overview_card(ui, &plain);
+                render_party_overview_card(ui, &poisoned);
+            });
+        });
+        // No panic across both an empty-conditions and a conditioned
+        // character = pass. (egui's headless test context does not expose
+        // rendered text for assertion, matching this file's existing
+        // "renders without panic" convention for smoke-testing layout.)
     }
 
     #[test]
