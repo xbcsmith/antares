@@ -954,7 +954,7 @@ fn render_party_overview_card(
 
     egui::Frame::default()
         .inner_margin(egui::Margin::same(8))
-        .stroke(egui::Stroke::new(1.0, egui::Color32::DARK_GRAY))
+        .stroke(egui::Stroke::new(1.0_f32, egui::Color32::DARK_GRAY))
         .show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             ui.vertical(|ui| {

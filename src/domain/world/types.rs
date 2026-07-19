@@ -3356,12 +3356,10 @@ impl Map {
                     lock_id,
                     initial_trap_chance,
                     ..
-                } => {
-                    if !self.lock_states.contains_key(lock_id) {
-                        let mut state = LockState::new(lock_id.clone());
-                        state.trap_chance = *initial_trap_chance;
-                        self.lock_states.insert(lock_id.clone(), state);
-                    }
+                } if !self.lock_states.contains_key(lock_id) => {
+                    let mut state = LockState::new(lock_id.clone());
+                    state.trap_chance = *initial_trap_chance;
+                    self.lock_states.insert(lock_id.clone(), state);
                 }
                 _ => {}
             }

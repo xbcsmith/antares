@@ -666,7 +666,7 @@ pub fn calculate_turn_order(combat: &CombatState) -> Vec<CombatantId> {
         }
         Handicap::Even => {
             // Normal initiative: sort by speed descending
-            order.sort_by(|a, b| b.1.cmp(&a.1));
+            order.sort_by_key(|k| std::cmp::Reverse(k.1));
         }
     }
 

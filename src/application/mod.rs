@@ -1754,10 +1754,36 @@ impl GameState {
             if let Some(encounter_group) =
                 crate::domain::world::random_encounter(&self.world, &mut rng)
             {
-                // Build combat state and initialize from the monster group
-                let mut cs = crate::domain::combat::engine::CombatState::new(
-                    crate::domain::combat::types::Handicap::Even,
-                );
+                // Determine handicap from encounter type: ambush gives monsters
+                // the initiative advantage for round 1.
+                let handicap = if encounter_group.combat_event_type.gives_monster_advantage() {
+                    crate::domain::combat::types::Handicap::MonsterAdvantage
+                } else {
+                    crate::domain::combat::types::Handicap::Even
+                };
+                let mut cs = crate::domain::combat::engine::CombatState::new(handicap);
+
+                // Copy campaign death-mode so apply_damage respects it.
+                cs.unconscious_before_death = self.campaign_config.unconscious_before_death;
+
+                // Suppress party actions during round 1 of an ambush.
+                cs.ambush_round_active = encounter_group.combat_event_type
+                    == crate::domain::combat::types::CombatEventType::Ambush;
+
+                // Apply boss-fight mechanics when the encounter type calls for it.
+                if encounter_group.combat_event_type.applies_boss_mechanics() {
+                    cs.monsters_advance = true;
+                    cs.monsters_regenerate = true;
+                    cs.can_bribe = false;
+                    cs.can_surrender = false;
+                }
+
+                // Add party members BEFORE monsters so that initialize_combat_from_group
+                // calls start_combat with all participants and computes a correct
+                // turn order for the full encounter.
+                for character in &self.party.members {
+                    cs.add_player(character.clone());
+                }
 
                 crate::domain::combat::engine::initialize_combat_from_group(
                     &mut cs,
@@ -1766,10 +1792,9 @@ impl GameState {
                 )
                 .map_err(MoveHandleError::CombatInit)?;
 
-                // Enter combat with prepared combat state
-                // store the type
+                // Enter combat with the fully-initialised state.
                 let _ = encounter_group.combat_event_type;
-                self.mode = GameMode::Combat(cs);
+                self.enter_combat_with_state(cs);
 
                 // Combat occurred instead of triggering a tile event; return early.
                 return Ok(());
@@ -1785,10 +1810,35 @@ impl GameState {
                 monster_group,
                 combat_event_type,
             } => {
-                // Build combat state and initialize from the monster group
-                let mut cs = crate::domain::combat::engine::CombatState::new(
-                    crate::domain::combat::types::Handicap::Even,
-                );
+                // Determine handicap from encounter type.
+                let handicap = if combat_event_type.gives_monster_advantage() {
+                    crate::domain::combat::types::Handicap::MonsterAdvantage
+                } else {
+                    crate::domain::combat::types::Handicap::Even
+                };
+                let mut cs = crate::domain::combat::engine::CombatState::new(handicap);
+
+                // Copy campaign death-mode so apply_damage respects it.
+                cs.unconscious_before_death = self.campaign_config.unconscious_before_death;
+
+                // Suppress party actions during round 1 of an ambush.
+                cs.ambush_round_active =
+                    combat_event_type == crate::domain::combat::types::CombatEventType::Ambush;
+
+                // Apply boss-fight mechanics when the encounter type calls for it.
+                if combat_event_type.applies_boss_mechanics() {
+                    cs.monsters_advance = true;
+                    cs.monsters_regenerate = true;
+                    cs.can_bribe = false;
+                    cs.can_surrender = false;
+                }
+
+                // Add party members BEFORE monsters so that initialize_combat_from_group
+                // calls start_combat with all participants and computes a correct
+                // turn order for the full encounter.
+                for character in &self.party.members {
+                    cs.add_player(character.clone());
+                }
 
                 crate::domain::combat::engine::initialize_combat_from_group(
                     &mut cs,
@@ -1797,11 +1847,9 @@ impl GameState {
                 )
                 .map_err(MoveHandleError::CombatInit)?;
 
-                // store the type
+                // Enter combat with the fully-initialised state.
                 let _ = combat_event_type;
-
-                // Enter combat with prepared combat state
-                self.mode = GameMode::Combat(cs);
+                self.enter_combat_with_state(cs);
             }
 
             crate::domain::world::EventResult::NpcDialogue { npc_id } => {

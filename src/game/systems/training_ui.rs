@@ -301,7 +301,7 @@ fn render_eligible_member_row(
             frame = frame
                 .fill(egui::Color32::from_rgba_premultiplied(0, 80, 40, 120))
                 .stroke(egui::Stroke::new(
-                    2.0,
+                    2.0_f32,
                     egui::Color32::from_rgb(80, 220, 120),
                 ));
         } else {

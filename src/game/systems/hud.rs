@@ -3714,6 +3714,90 @@ mod tests {
         }
     }
 
+    /// Regression test: SP bar fill width decreases in the HUD after
+    /// `sync_party_hp_during_combat` mirrors reduced SP from CombatResource
+    /// back into `party.members`.
+    ///
+    /// This end-to-end test combines CombatPlugin + HudPlugin to verify the
+    /// full data path: combat SP decrease → sync → HUD bar update.
+    ///
+    /// Before the fix (missing `.after(handle_spell_button_interaction)` /
+    /// `.after(combat_input_system)` ordering on `handle_cast_spell_action`),
+    /// the SP bar could remain at 100 % for an entire frame because the sync
+    /// read stale CombatResource data.  This test catches that regression.
+    #[test]
+    fn test_sp_bar_decreases_after_spell_cast_in_combat() {
+        use super::{GlobalState, HudPlugin, SpBarFill};
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, AttributePair16, Character, Sex};
+        use crate::domain::combat::engine::{CombatState, Combatant};
+        use crate::domain::combat::types::Handicap;
+        use crate::game::systems::combat::{CombatPlugin, CombatResource};
+        use bevy::prelude::*;
+
+        // Build a Sorcerer with 10 base SP and full current SP.
+        let mut state = GameState::new();
+        let mut mage = Character::new(
+            "Merlin".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        mage.hp = AttributePair16 {
+            base: 20,
+            current: 20,
+        };
+        mage.sp = AttributePair16 {
+            base: 10,
+            current: 10,
+        };
+        state.party.add_member(mage.clone()).unwrap();
+        state.enter_combat(); // GameMode::Combat
+
+        // Build CombatResource: the sorcerer has spent 4 SP (current = 6).
+        let mut cr = CombatResource::new();
+        let mut combat_mage = mage.clone();
+        combat_mage.sp.current = 6; // simulates casting a 4-SP spell
+        cr.state = CombatState::new(Handicap::Even);
+        cr.state
+            .participants
+            .push(Combatant::Player(Box::new(combat_mage)));
+        cr.player_orig_indices = vec![Some(0)];
+        crate::domain::combat::engine::start_combat(&mut cr.state);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<Assets<Image>>();
+        // Both plugins must be present: CombatPlugin provides the sync system,
+        // HudPlugin provides the bar rendering.
+        app.add_plugins(CombatPlugin);
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(state));
+        app.insert_resource(cr);
+
+        // PostStartup (setup_hud) runs on the first update.
+        app.update();
+        // Update runs sync_party_hp_during_combat and update_hud.
+        app.update();
+
+        let world = app.world_mut();
+        let mut q = world.query::<(&SpBarFill, &Node)>();
+        let mut found = false;
+        for (fill, node) in q.iter(world) {
+            if fill.party_index == 0 {
+                found = true;
+                // 6 / 10 = 60.0 %
+                assert!(
+                    matches!(node.width, Val::Percent(p) if (p - 60.0).abs() < 0.5),
+                    "SP bar fill should be ~60 %% (6/10) after spell cast; got {:?}",
+                    node.width
+                );
+            }
+        }
+        assert!(found, "SpBarFill for party slot 0 not found");
+    }
+
     #[test]
     fn test_update_portraits_skip_default_handle_shows_placeholder() {
         use super::{get_portrait_color, GlobalState, HudPlugin, PortraitAssets};

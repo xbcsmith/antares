@@ -2,6 +2,291 @@
 
 ---
 
+## Fix: Sorcerer SP bar, multi-monster turns, and keyboard spell cancel (2026-07-18)
+
+### Root cause
+
+Three related bugs shared the same root: `CombatResource` was never fully initialised from the authoritative `CombatState` stored in `global_state.mode` for encounters that don't emit `CombatStarted` (random movement encounters) and for the 1-frame window before `handle_combat_started` processes the message for E-key encounters.
+
+`sync_party_to_combat` (the fallback initialiser) was silently ignoring the `CombatState` in `global_state.mode` and instead adding **only** the party players from `party.members`, leaving the resource with zero monster participants.
+Consequences:
+
+1. **`setup_combat_ui`** read `combat_res.state.participants` at that point → spawned the enemy-card panel with **no cards** (no monsters visible).
+2. **No enemy cards** → no `Interaction` changes → `select_target` never received a click → `CastSpellAction` never emitted for `SingleMonster` spells (e.g. Energy Blast) → SP never consumed → Sorcerer SP bar never decreased.
+3. **Cleric** was unaffected because `First Aid` is `SingleCharacter` — it targets the party-member panel, which always populated correctly.
+4. **Multi-monster turn order** was broken for the same reason: no monsters in `combat_res.state.turn_order` so only one (or zero) monsters ever acted.
+5. **Keyboard spell cancel**: pressing Escape in monster target-selection (SingleMonster) or party-target selection (SingleCharacter) returned the player all the way to the action menu, making it feel like cancel was broken. The fix changed Escape in both panels to **reopen the spell panel** instead.
+
+### Changes — `src/game/systems/combat.rs`
+
+#### 1. `sync_party_to_combat` (rewritten)
+
+New signature: added `mut turn_state: ResMut<CombatTurnStateResource>`.
+
+| Old behaviour                                                                                      | New behaviour                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Read `cs` reference only to check mode (stored as `_cs`), then copied players from `party.members` | Checks `cs.participants` for existing players                                                                                                    |
+| Never copied monsters                                                                              | If `cs` already has players (all `start_encounter` paths): `combat_res.state = cs.clone()` — copies full state (players + monsters + turn order) |
+| Never set `turn_state`                                                                             | Sets `turn_state.0` from `ambush_round_active` / `turn_order.first()`, matching `handle_combat_started` logic                                    |
+| Never set `combat_event_type`                                                                      | Sets `combat_event_type = Ambush` when `ambush_round_active`                                                                                     |
+| Fallback always ran                                                                                | Fallback (add players from `party.members`) only runs when `cs.participants` has no players (test-only `enter_combat()` path)                    |
+
+#### 2. `setup_combat_ui` — guard added
+
+After the existing `if !existing_ui.is_empty() { return; }` guard, added:
+
+```rust
+let has_players = combat_res.state.participants.iter().any(|p| matches!(p, Combatant::Player(_)));
+if !has_players { return; }
+```
+
+This prevents the UI from being spawned with an empty participant list on the rare frame where combat mode is set but `sync_party_to_combat`/`handle_combat_started` have not yet run.
+
+#### 3. Keyboard Escape — reopen spell panel
+
+**Target-selection mode (SingleMonster)**: Escape now takes the caster from `spell_state.pending.data` (if any) and sets `spell_state.panel.caster = Some(caster)` to reopen the spell panel, instead of silently discarding the pending cast.
+
+**Party-target mode (SingleCharacter)**: Escape now takes the caster from `spell_state.party_target.pending_spell` and reopens the spell panel the same way.
+
+### New tests
+
+| Test                                                        | Purpose                                                                                                                                                                              |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `test_party_sync_to_combat_copies_full_state_with_monsters` | Verifies that when `global_state.mode.Combat(cs)` already has players, `sync_party_to_combat` copies the full state including monster participants and correct `player_orig_indices` |
+| `test_setup_combat_ui_deferred_until_players_present`       | Verifies that `setup_combat_ui` does not spawn with an uninitialised (empty) `combat_res.state`                                                                                      |
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors, 0 warnings (project code)
+- `cargo nextest run --all-features` — **5340 tests passed**, 0 failed, 8 skipped
+
+---
+
+## Fix egui float literal type ambiguity in SDK UI files (2026-07-18)
+
+**Problem**: Several `egui` UI files in `sdk/campaign_builder/src/` passed bare float literals (e.g. `2.0`, `1.0`, `3.0`) as the first argument to `egui::Stroke::new()`. Because `Stroke::new` accepts `impl Into<f32>` and `f64: !From<f32>`, the compiler would emit a future-error warning: _"falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied"_ with a hint to write `2.0_f32`.
+
+**Files changed** — all bare float literals in `Stroke::new(...)` calls replaced with explicit `_f32` suffixes:
+
+- `sdk/campaign_builder/src/map_editor.rs` — 6 occurrences (`1.0`, `2.0`, `3.0`)
+- `sdk/campaign_builder/src/preview_renderer.rs` — 8 occurrences (`1.0`, `2.0`)
+- `sdk/campaign_builder/src/animation_editor.rs` — 2 occurrences (`1.0`, `2.0`)
+- `sdk/campaign_builder/src/characters_editor.rs` — 1 occurrence (`1.0`)
+- `sdk/campaign_builder/src/npc_editor/portrait_picker.rs` — 1 occurrence (`1.0`)
+
+All `src/game/systems/` files were already correct. No game logic, data structures, or non-egui code was modified.
+
+**Validation**: `cargo fmt --all`, `cargo check --all-targets --all-features` (clean, 0 float-literal warnings), `cargo clippy` (0 new warnings in changed files; 11 pre-existing `sort_by_key`/`if`-collapse lints in unrelated SDK files remain), `cargo nextest run --all-features` (5338/5338 passed).
+
+---
+
+## Fix random encounter and multi-monster combat initialization (2026-07-18)
+
+### Bug 1: Random encounters didn't include party members in `CombatState`
+
+**Problem**: Both encounter blocks in `move_party_and_handle_events` (`src/application/mod.rs`) built a `CombatState` containing **only monsters**, ignoring party members. They also:
+
+- Used `Handicap::Even` unconditionally, ignoring the `CombatEventType` (no ambush/boss mechanics)
+- Did not set `unconscious_before_death` from `campaign_config`
+- Did not set `ambush_round_active`
+- Called `self.mode = GameMode::Combat(cs)` directly instead of `self.enter_combat_with_state(cs)`
+
+This meant `initialize_combat_from_group` → `start_combat` computed a turn order **without any players**, so the entire turn ordering, SP sync, and combat UI were broken for random encounters and tile-triggered encounters processed through the application layer.
+
+**Fix** (`src/application/mod.rs`): Both encounter blocks (random encounter, ~line 1757, and explicit `EventResult::Encounter`, ~line 1789) now:
+
+1. Derive handicap from `combat_event_type.gives_monster_advantage()`
+2. Set `cs.unconscious_before_death` from `self.campaign_config.unconscious_before_death`
+3. Set `cs.ambush_round_active` when `combat_event_type == Ambush`
+4. Apply boss mechanics (`monsters_advance`, `monsters_regenerate`, `can_bribe = false`, `can_surrender = false`) when `combat_event_type.applies_boss_mechanics()`
+5. Add all party members with `cs.add_player(character.clone())` **before** calling `initialize_combat_from_group` — so `start_combat` sees the full participant list and computes a correct turn order
+6. Call `self.enter_combat_with_state(cs)` instead of direct mode assignment
+
+### Bug 2: `calculate_turn_order` and multi-monster encounters
+
+**Analysis**: `Monster::is_alive()` returns `hp.current > 0 && !conditions.is_dead()` — there is no `Unconscious` condition for monsters (`MonsterCondition` has no `Unconscious` variant), so unconscious-monster filtering does not apply. `Monster::can_act()` correctly returns `false` for `Paralyzed`, `Webbed`, `Held`, and `Asleep`. `calculate_turn_order` uses the global participant index from `enumerate()` which is consistent with how `get_combatant(id)` resolves participants — all alive participants are correctly included.
+
+The "only first monster in attack order" symptom was a consequence of Bug 1: when `CombatResource.state` was populated via `sync_party_to_combat` (the fallback path), it received only players and no monsters, so no monsters appeared in the turn order at all.
+
+### Pre-existing clippy errors fixed
+
+14 pre-existing clippy warnings (unrelated to the bugs) were fixed to satisfy the mandatory `-D warnings` gate:
+
+| File                              | Lint                        | Fix                                                                                           |
+| --------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------- |
+| `src/domain/world/events.rs` (×4) | `unneeded_wildcard_pattern` | Removed redundant `time_condition: _` from patterns that already used `..`                    |
+| `src/domain/world/events.rs`      | `question_mark`             | Replaced `match … { Some(t) => t, None => return None }` with `map.encounter_table.as_ref()?` |
+| `src/domain/combat/engine.rs`     | `unnecessary_sort_by`       | `sort_by(…cmp…)` → `sort_by_key(\|k\| Reverse(k.1))`                                          |
+| `src/application/quests.rs`       | `collapsible_match`         | Inner `if map_id == mid` moved to match guard                                                 |
+| `src/domain/world/types.rs`       | `collapsible_match`         | Inner `if !lock_states.contains_key(…)` moved to match guard on OR pattern                    |
+| `src/game/systems/inn_ui.rs` (×2) | `collapsible_match`         | `Some(i) => { if cond { A } else { B } }` → `Some(i) if cond => A, _ => B`                    |
+| `src/sdk/cli/item_editor.rs` (×2) | `unnecessary_sort_by`       | `sort_by(\|a,b\| a.id.cmp(&b.id))` → `sort_by_key(\|a\| a.id)`                                |
+| `src/sdk/database.rs`             | `collapsible_match`         | Inner `if !maps.has_map(…)` moved to match guard                                              |
+| `src/sdk/quest_editor.rs`         | `collapsible_match`         | Inner `if *quest_id == quest.id` moved to match guard                                         |
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors, 0 warnings
+- `cargo nextest run --all-features` — 5338 tests passed, 0 failed
+
+---
+
+## `SingleCharacter` spell targeting — party-member selection panel (2026-07-18)
+
+**Problem**: In `apply_spell_selection` (`combat.rs`), the `SingleCharacter` arm always emitted a `CastSpellAction` with `target: caster`, so spells like _First Aid_ always healed the caster instead of a chosen party member.
+
+**Fix**: Replaced the self-cast shortcut with a party-member target selection flow, mirroring the existing `SingleMonster` flow.
+
+### What changed — `src/game/systems/combat.rs` only
+
+| Area                              | Change                                                                                                                                                                                                                                                |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| New components                    | `PartyTargetPanel`, `PartyTargetButton`, `PartyTargetCancelButton` marker components                                                                                                                                                                  |
+| New resource                      | `PartyTargetPanelState` — holds pending `(caster, spell_id)`, keyboard-cursor index, confirm flag, and participant-index list                                                                                                                         |
+| `SpellCombatState`                | Added `party_target: ResMut<PartyTargetPanelState>` field (keeps `combat_input_system` within Bevy's 16-parameter limit)                                                                                                                              |
+| `apply_spell_selection`           | `SingleCharacter` arm now sets `PartyTargetPanelState.pending_spell` instead of immediately casting                                                                                                                                                   |
+| `handle_spell_button_interaction` | Accepts new `party_target_state` param; passes it to both `apply_spell_selection` calls                                                                                                                                                               |
+| `combat_input_system`             | New keyboard branch between spell-panel and item-panel branches: `Esc`/`ArrowUp`/`ArrowDown`/`Tab`/`Enter` drive `spell_state.party_target`                                                                                                           |
+| New systems                       | `update_party_target_panel` (spawn/despawn), `update_party_target_highlight` (cursor color), `handle_party_target_button` (click + keyboard confirm), `cleanup_party_target_on_combat_exit`                                                           |
+| `CombatPlugin::build`             | Inserts `PartyTargetPanelState` resource; registers four new systems; adds `.after(handle_party_target_button)` to `handle_cast_spell_action` ordering                                                                                                |
+| Tests                             | `test_single_character_spell_opens_party_target_panel` — confirms `SpellPanelState` is closed and `PartyTargetPanelState.pending_spell` is populated; `test_party_target_confirm_casts_on_chosen_member` — confirms keyboard-confirm clears the state |
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — clean (0 errors)
+- `cargo clippy` — 14 pre-existing errors in other files only; 0 errors in `combat.rs`
+- `cargo nextest run` — 657 tests passed, 0 failed
+
+---
+
+## Fix `f32` float-literal fallback warnings across egui UI files (2026-07-17)
+
+**Problem**: 40 Rust compiler warnings (`float_literal_f32_fallback`) across eight UI files where bare float literals (`1.0`, `1.5`, `2.0`) were passed as the first argument of `egui::Stroke::new()`. The compiler was silently coercing `f64` → `f32`; this is being phased out and will become a hard error in a future Rust release.
+
+**Fix**: Added explicit `_f32` suffix to every such literal using a Perl slurp-mode regex over all eight affected files, then ran `cargo fmt --all` to restore clean formatting.
+
+**Files changed**:
+
+- `src/game/systems/character_sheet_ui.rs`
+- `src/game/systems/container_inventory_ui.rs`
+- `src/game/systems/inn_ui.rs`
+- `src/game/systems/inventory_ui.rs`
+- `src/game/systems/merchant_inventory_ui.rs`
+- `src/game/systems/skill_training_ui.rs`
+- `src/game/systems/temple_ui.rs`
+- `src/game/systems/training_ui.rs`
+
+**Validation**: `cargo check` — 0 errors, 0 float-fallback warnings; 817 tests passed.
+
+---
+
+## Spell Panel — Tab navigation and keyboard hint added (2026-07-17)
+
+**Feature**: Extended the combat spell selection panel with `Tab` as a forward-cycle key (identical to `ArrowDown`) and added a keyboard hint footer so users know the available keys without guessing.
+
+**Changes** (`src/game/systems/combat.rs`):
+
+1. **`combat_input_system`** (spell-panel keyboard branch): Changed the `ArrowDown` handler from a standalone `else if` to `else if kb.just_pressed(KeyCode::ArrowDown) || kb.just_pressed(KeyCode::Tab)` so both keys advance `focused_index`.
+
+2. **`update_spell_selection_panel`** (panel spawn): Added a keyboard hint footer node after the Cancel button:
+   `[↑↓/Tab] Navigate · [Enter] Cast · [Esc] Cancel`
+   in a small muted font so the hint is visible but unobtrusive.
+
+**Test added**:
+
+- `test_tab_cycles_forward_in_spell_panel` — verifies that pressing `Tab` advances `focused_index` from 0 → 1, and a second press wraps 1 → 0. Uses a pre-spawned `SpellSelectionPanel` entity to prevent `update_spell_selection_panel` from overwriting the manually-set `castable_spell_ids`.
+
+**Validation**: 655 spell/combat tests passed, no regressions.
+
+---
+
+## Keyboard Navigation for Spell Selection Panel (2026-07-17)
+
+**Feature**: Added full keyboard navigation (ArrowUp/ArrowDown/Enter/Escape) to the spell selection panel in combat, matching the existing item panel keyboard support.
+
+**Changes** (`src/game/systems/combat.rs`):
+
+1. **`SpellPanelState`**: Added three fields — `focused_index: usize` (keyboard cursor), `confirm_requested: bool` (set by Enter, consumed by handler), and `castable_spell_ids: Vec<SpellId>` (populated by `update_spell_selection_panel`).
+
+2. **`SpellButton`**: Added `is_castable: bool` field so the highlight system can restore the correct unfocused color after the focus cursor moves.
+
+3. **`update_spell_selection_panel`**: Changed `Res<SpellPanelState>` → `ResMut<SpellPanelState>`. After building `all_spell_ids`, now also computes `castable_spell_ids` (those passing `validate_spell_cast`) and stores them in the resource, clamping `focused_index` to the valid range. Each `SpellButton` now carries `is_castable`.
+
+4. **`update_spell_focus_highlight`** (new system): Runs after `update_spell_selection_panel` every frame. Sets the focused castable button to `ACTION_BUTTON_CONFIRMED_COLOR` and restores all others to their castable/disabled color. Registered in `CombatPlugin::build`.
+
+5. **`combat_input_system`**: Added a dedicated spell-panel keyboard branch (`} else if spell_state.panel.caster.is_some() {`) between target-selection and item-panel branches. Handles Escape (close panel), ArrowUp/Down (move focus, wrapping), and Enter (set `confirm_requested`). Removed the now-redundant `spell_state.panel.caster.is_some()` Escape guard from the action-menu else branch.
+
+6. **`handle_spell_button_interaction`**: Added keyboard-confirm path (checks `confirm_requested`, looks up focused spell, calls `apply_spell_selection`). Extracted shared spell-dispatch logic into the new `apply_spell_selection` helper function, used by both the keyboard and mouse paths.
+
+7. **`apply_spell_selection`** (new helper): Closes the panel, resets keyboard state, and dispatches the spell (immediate `CastSpellAction` for self/group/all targets; target-selection mode for `SingleMonster`).
+
+8. **`cleanup_spell_panel_on_combat_exit`**: Extended to also clear `focused_index`, `confirm_requested`, and `castable_spell_ids` on combat exit.
+
+**Test added**:
+
+- `test_keyboard_enter_confirms_spell_selection` — verifies that setting `confirm_requested = true` on a spell panel with a castable `Self_`-targeting spell closes the panel, clears `confirm_requested`, and does not enter target-selection mode.
+
+**Validation**: `cargo fmt --all`, `cargo check --all-targets --all-features`, `cargo nextest run --all-features -E "test(spell)"` — 362 passed; `cargo nextest run --all-features -E "test(combat)"` — 349 passed.
+
+---
+
+## Sorcerer SP Bar Not Decreasing — Root Cause: Mouse Target Selection Bypasses Spell Cast (2026-07-17)
+
+**Bug**: The Sorcerer's spell-point bar in the bottom HUD did not visually decrease when combat spells were cast. The Cleric's SP bar decreased correctly.
+
+**Investigation**: Cleric spells in the tutorial campaign (`AllCharacters`, `SingleCharacter`) emit `CastSpellAction` immediately when the spell button is clicked. The tutorial Sorcerer's only combat attack spell is "Energy Blast" (`id: 1027`, `target: SingleMonster`), which requires monster target selection before the cast fires. When a `SingleMonster` spell was selected from the spell panel, `PendingSpellCast.data` was populated and `TargetSelection` was entered — but when the player then **mouse-clicked an enemy card**, the `select_target` system always called `confirm_attack_target`, dispatching `AttackAction` and never `CastSpellAction`. SP was never consumed. The keyboard path (Enter key) correctly checked `spell_state.pending.data` first.
+
+**Root Cause**: `select_target` did not inspect `PendingSpellCast` or `PendingItemUse`; it always dispatched `AttackAction` regardless of what was pending, so mouse-based target confirmation for spells was silently broken.
+
+**Fix** (`src/game/systems/combat.rs`):
+
+1. Extended `select_target` to accept `ResMut<PendingSpellCast>`, `Option<MessageWriter<CastSpellAction>>`, and `ResMut<PendingItemUse>` parameters.
+2. When an enemy card is clicked and a spell is pending, `confirm_spell_target` is called instead of `confirm_attack_target`, writing `CastSpellAction` with the correct caster, spell ID, and target.
+3. When an enemy card is clicked and an item requiring target selection is pending, the confirmed target index is stored in `PendingItemUse.confirmed_target` (matching the keyboard path).
+4. Added `.after(select_target)` to `handle_cast_spell_action` scheduling so the spell action is processed in the same frame the mouse click fires.
+5. Added `#[allow(clippy::too_many_arguments)]` (consistent with other large system functions in the file).
+
+**Tests added**:
+
+- `test_mouse_click_enemy_card_with_pending_spell_emits_cast_action` — verifies that clicking an enemy card with `PendingSpellCast.data` set consumes the pending data and clears `TargetSelection` via the spell path.
+- `test_mouse_click_enemy_card_without_pending_spell_still_attacks` — regression guard ensuring the normal attack path is unaffected when no spell is pending.
+
+**Files changed**:
+
+- `src/game/systems/combat.rs` — `select_target` function body + signature; `CombatPlugin::build` scheduling
+
+**Validation**: `cargo fmt --all`, `cargo check --all-targets --all-features`, `cargo nextest run` — 348 combat tests passed, 0 failures.
+
+---
+
+## Sorcerer SP Bar Not Decreasing — Scheduling Ordering Fix (2026-07-17, superseded)
+
+**Note**: This earlier attempt correctly identified a related scheduling issue but did not address the actual root cause (see entry above).
+
+**Root Cause addressed by this fix**: Bevy 0.17's `MessageWriter`/`MessageReader` API uses a double-buffered queue. When `handle_cast_spell_action` was scheduled without an explicit ordering constraint relative to the systems that _write_ `CastSpellAction` messages (`combat_input_system` and `handle_spell_button_interaction`), Bevy could legally schedule the reader _before_ the writers in any given frame.
+
+**Fix**: Added explicit `.after()` ordering constraints to all combat action-handler systems:
+
+| Handler                       | Now runs after                                           |
+| ----------------------------- | -------------------------------------------------------- |
+| `handle_cast_spell_action`    | `combat_input_system`, `handle_spell_button_interaction` |
+| `handle_use_item_action`      | `combat_input_system`, `handle_item_button_interaction`  |
+| `handle_attack_action`        | `combat_input_system`, `select_target`                   |
+| `handle_ranged_attack_action` | `combat_input_system`, `select_target`                   |
+| `handle_defend_action`        | `combat_input_system`                                    |
+| `handle_flee_action`          | `combat_input_system`                                    |
+
+**Files changed**: `src/game/systems/combat.rs`, `src/game/systems/hud.rs`
+
+**Validation**: 808 tests passed.
+
+---
+
 ## Modal egui input handoff (2026-07-13)
 
 - Fixed mouse and keyboard interactions for modal egui screens by preventing the shared gameplay input systems from running while egui is actively consuming pointer or keyboard input.
@@ -33,17 +318,17 @@
 
 ### Summary of all changes
 
-| Phase | Key deliverables |
-|---|---|
-| **Phase 1** | `FontConfig` struct + `fonts` field on `GameConfig`; validation rules; RON round-trip; 13 tests |
-| **Phase 2** | `CampaignFontHandles` Bevy resource; `ensure_campaign_fonts_loaded` system registered in `HudPlugin`; 7 tests |
+| Phase       | Key deliverables                                                                                                                                |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase 1** | `FontConfig` struct + `fonts` field on `GameConfig`; validation rules; RON round-trip; 13 tests                                                 |
+| **Phase 2** | `CampaignFontHandles` Bevy resource; `ensure_campaign_fonts_loaded` system registered in `HudPlugin`; 7 tests                                   |
 | **Phase 3** | `text_style_with_font` helper; `spawn_dialogue_bubble`, `menu_setup`, and three spawn helpers updated to accept and apply font handles; 6 tests |
-| **Phase 4** | `ConfigEditorState` fonts section (fields + UI + buffer sync); `fonts/.gitkeep` directories; `docs/how-to/add_custom_fonts.md`; 7 tests |
+| **Phase 4** | `ConfigEditorState` fonts section (fields + UI + buffer sync); `fonts/.gitkeep` directories; `docs/how-to/add_custom_fonts.md`; 7 tests         |
 
 ### Files changed (complete list)
 
 - `src/sdk/game_config.rs` — `FontConfig`, validation, `GameConfig.fonts`, 13 tests
-- `src/game/resources/font_handles.rs` *(new)* — `CampaignFontHandles` resource
+- `src/game/resources/font_handles.rs` _(new)_ — `CampaignFontHandles` resource
 - `src/game/resources/mod.rs` — re-exports `CampaignFontHandles`
 - `src/game/systems/hud.rs` — `ensure_campaign_fonts_loaded` system + 7 tests
 - `src/game/systems/ui_helpers.rs` — `text_style_with_font` + 3 tests
@@ -52,10 +337,10 @@
 - `sdk/campaign_builder/src/config_editor.rs` — fonts section in Config Editor + 7 tests
 - `campaigns/config.template.ron` — commented `fonts:` example section
 - `campaigns/tutorial/config.ron` — `fonts: FontConfig()`
-- `campaigns/tutorial/fonts/.gitkeep` *(new)*
+- `campaigns/tutorial/fonts/.gitkeep` _(new)_
 - `data/test_campaign/config.ron` — `fonts: FontConfig()`
-- `data/test_campaign/fonts/.gitkeep` *(new)*
-- `docs/how-to/add_custom_fonts.md` *(new)* — 8-section authoring guide
+- `data/test_campaign/fonts/.gitkeep` _(new)_
+- `docs/how-to/add_custom_fonts.md` _(new)_ — 8-section authoring guide
 
 ### Quality Gates
 
@@ -96,11 +381,11 @@ workflow end-to-end.
   defaults check, populate-from-config (Some + None), set-from-buffer, empty-buffer →
   None, round-trip, and save rejection of absolute font paths.
 
-**`campaigns/tutorial/fonts/.gitkeep`** *(new empty file)*
+**`campaigns/tutorial/fonts/.gitkeep`** _(new empty file)_
 
-**`data/test_campaign/fonts/.gitkeep`** *(new empty file)*
+**`data/test_campaign/fonts/.gitkeep`** _(new empty file)_
 
-**`docs/how-to/add_custom_fonts.md`** *(new file)*
+**`docs/how-to/add_custom_fonts.md`** _(new file)_
 
 - All 8 required sections: Overview, Directory Layout, config.ron Format, Validation
   Rules, Fallback Behavior, Authoring with Campaign Builder, Testing In-Game, and
@@ -174,7 +459,7 @@ The resource is campaign-scoped: switching campaigns triggers a reload.
 
 ### What Changed
 
-**`src/game/resources/font_handles.rs`** *(new file)*
+**`src/game/resources/font_handles.rs`** _(new file)_
 
 - Defines `CampaignFontHandles` resource with `dialogue_font: Option<Handle<Font>>`,
   `game_menu_font: Option<Handle<Font>>`, and `loaded_for_campaign: Option<String>`.

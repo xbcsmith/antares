@@ -3974,7 +3974,7 @@ impl<'a> Widget for MapGridWidget<'a> {
                                 rect,
                                 0.0,
                                 // Make the grid color white for better visibility on dark themes
-                                Stroke::new(1.0, Color32::WHITE),
+                                Stroke::new(1.0_f32, Color32::WHITE),
                                 egui::StrokeKind::Outside,
                             );
                         }
@@ -3984,7 +3984,7 @@ impl<'a> Widget for MapGridWidget<'a> {
                             painter.rect_stroke(
                                 rect,
                                 0.0,
-                                Stroke::new(2.0, Color32::YELLOW),
+                                Stroke::new(2.0_f32, Color32::YELLOW),
                                 egui::StrokeKind::Outside,
                             );
                         }
@@ -3994,7 +3994,7 @@ impl<'a> Widget for MapGridWidget<'a> {
                             painter.rect_stroke(
                                 rect,
                                 0.0,
-                                Stroke::new(2.0, Color32::LIGHT_BLUE),
+                                Stroke::new(2.0_f32, Color32::LIGHT_BLUE),
                                 egui::StrokeKind::Outside,
                             );
                         }
@@ -4027,7 +4027,7 @@ impl<'a> Widget for MapGridWidget<'a> {
                                 painter.rect_stroke(
                                     rect,
                                     0.0,
-                                    Stroke::new(3.0, Color32::LIGHT_GREEN),
+                                    Stroke::new(3.0_f32, Color32::LIGHT_GREEN),
                                     egui::StrokeKind::Outside,
                                 );
 
@@ -4257,7 +4257,7 @@ impl<'a> Widget for MapPreviewWidget<'a> {
                         painter.rect_stroke(
                             rect,
                             0.0,
-                            Stroke::new(1.0, Color32::WHITE),
+                            Stroke::new(1.0_f32, Color32::WHITE),
                             egui::StrokeKind::Outside,
                         );
 
@@ -4266,7 +4266,7 @@ impl<'a> Widget for MapPreviewWidget<'a> {
                                 painter.rect_stroke(
                                     rect,
                                     0.0,
-                                    Stroke::new(2.0, Color32::YELLOW),
+                                    Stroke::new(2.0_f32, Color32::YELLOW),
                                     egui::StrokeKind::Outside,
                                 );
                             }

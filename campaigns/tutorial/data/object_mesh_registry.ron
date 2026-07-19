@@ -1,17 +1,5 @@
-// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
-// SPDX-License-Identifier: Apache-2.0
-//
-// Unified object mesh registry for the tutorial campaign.
-//
-// Maps human-readable string keys to CreatureDefinition asset files.
-// Legacy registries (landscape_mesh_registry.ron, furniture_mesh_registry.ron)
-// are merged in at load time as numeric-ID string keys (e.g. "11001") so
-// existing campaigns continue to resolve without modification.
-//
-// item_mesh_registry.ron is intentionally excluded — item mesh lookup follows
-// a separate DroppedItem spawn path.
-ObjectMeshRegistry(
+(
     meshes: {
         "barred_passage": "assets/meshes/objects/barred_door.ron",
-    }
+    },
 )

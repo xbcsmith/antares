@@ -346,7 +346,6 @@ pub fn trigger_event(
         MapEvent::Encounter {
             monster_group,
             combat_event_type,
-            time_condition: _,
             ..
         } => EventResult::Encounter {
             monster_group,
@@ -401,7 +400,6 @@ pub fn trigger_event(
             text,
             mesh_id,
             dialogue_id,
-            time_condition: _,
             ..
         } => {
             // Signs are repeatable - don't remove
@@ -412,22 +410,14 @@ pub fn trigger_event(
             }
         }
 
-        MapEvent::NpcDialogue {
-            npc_id,
-            time_condition: _,
-            ..
-        } => {
+        MapEvent::NpcDialogue { npc_id, .. } => {
             // NPC dialogues are repeatable - don't remove
             EventResult::NpcDialogue {
                 npc_id: npc_id.clone(),
             }
         }
 
-        MapEvent::RecruitableCharacter {
-            character_id,
-            time_condition: _,
-            ..
-        } => {
+        MapEvent::RecruitableCharacter { character_id, .. } => {
             // Recruitables are not consumed by merely standing on or triggering
             // their tile. The event must remain in the map so the visible mesh
             // stays present until a dialogue recruitment action succeeds. The
@@ -537,10 +527,7 @@ pub fn random_encounter<R: rand::Rng>(world: &World, rng: &mut R) -> Option<Enco
     }
 
     // Must have a configured encounter table
-    let table = match &map.encounter_table {
-        Some(t) => t,
-        None => return None,
-    };
+    let table = map.encounter_table.as_ref()?;
 
     // No groups or zero chance => no encounter
     if table.groups.is_empty() || table.encounter_rate <= 0.0 {

@@ -1910,13 +1910,13 @@ impl ContentDatabase {
                                 )));
                             }
                         }
-                        crate::domain::quest::QuestObjective::ReachLocation { map_id, .. } => {
-                            if !self.maps.has_map(map_id) {
-                                return Err(DatabaseError::ValidationError(format!(
-                                    "Quest '{}' references non-existent map {}",
-                                    quest.name, map_id
-                                )));
-                            }
+                        crate::domain::quest::QuestObjective::ReachLocation { map_id, .. }
+                            if !self.maps.has_map(map_id) =>
+                        {
+                            return Err(DatabaseError::ValidationError(format!(
+                                "Quest '{}' references non-existent map {}",
+                                quest.name, map_id
+                            )));
                         }
                         _ => {}
                     }
