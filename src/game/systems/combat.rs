@@ -321,6 +321,16 @@ pub const FEEDBACK_COLOR_MISS: Color = Color::srgb(0.8, 0.8, 0.8);
 /// Colour for status/condition floating text (yellow)
 pub const FEEDBACK_COLOR_STATUS: Color = Color::srgb(1.0, 0.8, 0.0);
 
+// ===== Condition Label Color Constants =====
+// Shared source of truth for condition-name tinting on combat cards
+// (enemy cards here; HUD party cards consume these in Phase 4).
+
+/// Colour for fatal condition labels ("Dead") — transparent red
+pub const CONDITION_FATAL_COLOR: Color = Color::srgba(0.85, 0.2, 0.2, 0.85);
+
+/// Colour for non-fatal condition labels (Paralyzed, Asleep, …) — transparent yellow
+pub const CONDITION_STATUS_COLOR: Color = Color::srgba(0.9, 0.85, 0.3, 0.85);
+
 // ===== Boss HP Bar Constants =====
 
 /// Width of the boss HP bar (wider and more prominent than standard enemy bars).
@@ -1828,7 +1838,11 @@ type EnemyHpTextQuery<'w, 's> = Query<
 type EnemyConditionTextQuery<'w, 's> = Query<
     'w,
     's,
-    (&'static EnemyConditionText, &'static mut Text),
+    (
+        &'static EnemyConditionText,
+        &'static mut Text,
+        &'static mut TextColor,
+    ),
     (
         Without<EnemyHpText>,
         Without<EnemyNameText>,
@@ -2079,7 +2093,7 @@ fn setup_combat_ui(
                                             font_size: 9.0,
                                             ..default()
                                         },
-                                        TextColor(Color::srgb(0.8, 0.8, 0.0)),
+                                        TextColor(CONDITION_STATUS_COLOR),
                                         EnemyConditionText {
                                             participant_index: idx,
                                         },
@@ -3580,24 +3594,20 @@ fn update_combat_ui(
         }
     }
 
-    // Update enemy condition text
-    for (condition_text, mut text) in enemy_condition_texts.iter_mut() {
+    // Update enemy condition text: the real condition name via Display
+    // ("" for Normal), tinted red for Dead and yellow for everything else.
+    for (condition_text, mut text, mut color) in enemy_condition_texts.iter_mut() {
         if let Some(Combatant::Monster(monster)) = combat_res
             .state
             .participants
             .get(condition_text.participant_index)
         {
-            // Get condition summary (simplified for now)
-            // MonsterCondition is an enum, not a bitflag, so check directly
-            let condition_str = if matches!(
-                monster.conditions,
-                crate::domain::combat::monster::MonsterCondition::Normal
-            ) {
-                String::new()
+            **text = monster.conditions.to_string();
+            *color = if monster.conditions.is_dead() {
+                TextColor(CONDITION_FATAL_COLOR)
             } else {
-                "Condition".to_string()
+                TextColor(CONDITION_STATUS_COLOR)
             };
-            **text = condition_str;
         }
     }
 
@@ -13562,6 +13572,121 @@ mod tests {
         } else {
             panic!("participant 1 must be the monster");
         }
+    }
+
+    /// Regression test for the placeholder condition label (bug 1): a monster
+    /// reduced to 0 HP must show "Dead" (in the fatal red tint) and "0/{base}"
+    /// HP on its enemy card, and a paralyzed monster must show "Paralyzed" (in
+    /// the status yellow tint) — never the literal word "Condition".
+    #[test]
+    fn test_dead_monster_card_shows_dead_condition() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let make_monster = |id: u8, name: &str| {
+            crate::domain::combat::monster::Monster::new(
+                id,
+                name.to_string(),
+                crate::domain::character::Stats::new(10, 5, 5, 10, 8, 10, 10),
+                30,
+                8,
+                vec![crate::domain::combat::types::Attack::physical(
+                    crate::domain::types::DiceRoll::new(1, 4, 0),
+                )],
+                crate::domain::combat::monster::LootTable::default(),
+            )
+        };
+
+        let mut dead_wolf = make_monster(70, "Dead Wolf");
+        dead_wolf.hp.current = 0;
+        dead_wolf.conditions = crate::domain::combat::monster::MonsterCondition::Dead;
+        let mut paralyzed_wolf = make_monster(71, "Stiff Wolf");
+        paralyzed_wolf.conditions = crate::domain::combat::monster::MonsterCondition::Paralyzed;
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.add_monster(dead_wolf);
+        cs.add_monster(paralyzed_wolf);
+        cs.turn_order = vec![
+            CombatantId::Player(0),
+            CombatantId::Monster(1),
+            CombatantId::Monster(2),
+        ];
+        cs.current_turn = 0;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), None, None];
+        }
+
+        // One frame spawns the UI (setup_combat_ui) and populates it
+        // (update_combat_ui).
+        app.update();
+
+        // Condition labels: real names with the correct tint per condition.
+        let mut found_dead = false;
+        let mut found_paralyzed = false;
+        let mut condition_query = app
+            .world_mut()
+            .query::<(&EnemyConditionText, &Text, &TextColor)>();
+        for (marker, text, color) in condition_query.iter(app.world()) {
+            let label = text.0.as_str();
+            assert_ne!(
+                label, "Condition",
+                "the placeholder string must never be rendered"
+            );
+            match marker.participant_index {
+                1 => {
+                    assert_eq!(label, "Dead", "dead monster must show 'Dead'");
+                    assert_eq!(
+                        color.0, CONDITION_FATAL_COLOR,
+                        "'Dead' must use the fatal (transparent red) tint"
+                    );
+                    found_dead = true;
+                }
+                2 => {
+                    assert_eq!(
+                        label, "Paralyzed",
+                        "paralyzed monster must show 'Paralyzed'"
+                    );
+                    assert_eq!(
+                        color.0, CONDITION_STATUS_COLOR,
+                        "non-fatal conditions must use the status (transparent yellow) tint"
+                    );
+                    found_paralyzed = true;
+                }
+                other => panic!("unexpected condition text for participant {}", other),
+            }
+        }
+        assert!(found_dead, "no condition text spawned for the dead monster");
+        assert!(
+            found_paralyzed,
+            "no condition text spawned for the paralyzed monster"
+        );
+
+        // HP label of the dead monster: 0/{base}.
+        let mut hp_query = app.world_mut().query::<(&EnemyHpText, &Text)>();
+        let dead_hp = hp_query
+            .iter(app.world())
+            .find(|(marker, _)| marker.participant_index == 1)
+            .map(|(_, text)| text.0.clone())
+            .expect("dead monster must have an HP text");
+        assert_eq!(dead_hp, "0/30", "dead monster HP text must be 0/{{base}}");
     }
 
     // ── Integration tests ─────────────────────────────────────────────────────

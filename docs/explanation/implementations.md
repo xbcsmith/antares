@@ -2,6 +2,48 @@
 
 ---
 
+## Combat Bug Fixes — Phase 3: Real Condition Names on Enemy Cards (Bug 1) (2026-07-19)
+
+### Root cause
+
+`update_combat_ui` (`src/game/systems/combat.rs`) rendered the literal
+placeholder string `"Condition"` (in opaque yellow) for **any** non-`Normal`
+`MonsterCondition`, so a dead monster's card read "Condition" instead of
+"Dead". `MonsterCondition` had no display/name method.
+
+### Changes
+
+| File | Change |
+| ---- | ------ |
+| `src/domain/combat/monster.rs` | `impl std::fmt::Display for MonsterCondition` with doctest: `Normal` → `""` (healthy monsters show no label), every other variant → its name (`"Paralyzed"`, `"Webbed"`, `"Held"`, `"Asleep"`, `"Mindless"`, `"Silenced"`, `"Blinded"`, `"Afraid"`, `"Dead"`). |
+| `src/game/systems/combat.rs` — constants | New shared condition-label tints (single source of truth, consumed by Phase 4): `CONDITION_FATAL_COLOR = Color::srgba(0.85, 0.2, 0.2, 0.85)` (transparent red) and `CONDITION_STATUS_COLOR = Color::srgba(0.9, 0.85, 0.3, 0.85)` (transparent yellow), placed with the `FEEDBACK_COLOR_*` cluster. |
+| `src/game/systems/combat.rs` — `EnemyConditionTextQuery` | Query now includes `&mut TextColor` so the tint can change per condition. |
+| `src/game/systems/combat.rs` — `update_combat_ui` | Placeholder replaced with `monster.conditions.to_string()`; `TextColor` set to `CONDITION_FATAL_COLOR` when `is_dead()`, else `CONDITION_STATUS_COLOR`. |
+| `src/game/systems/combat.rs` — `setup_combat_ui` | Condition-text spawn now uses `CONDITION_STATUS_COLOR` instead of the old opaque `Color::srgb(0.8, 0.8, 0.0)`. |
+
+Monsters have no unconscious state — `Monster::take_damage` goes straight to
+`MonsterCondition::Dead`; "Unconscious" applies only to player characters.
+The literal string `"Condition"` no longer appears anywhere in rendering code
+(verified by grep; the only remaining occurrences are the new test's negative
+assertion).
+
+### Tests Added
+
+| Test | What it verifies |
+| ---- | ---------------- |
+| `monster.rs::test_monster_condition_display_covers_all_variants` | The `Display` mapping for all 10 variants |
+| `MonsterCondition::fmt` doctest | `Normal` → `""`, `Paralyzed`, `Dead` labels |
+| `combat.rs::test_dead_monster_card_shows_dead_condition` | Integration: a 0-HP `Dead` monster's card shows `"Dead"` in `CONDITION_FATAL_COLOR` and HP text `"0/30"`; a `Paralyzed` monster shows `"Paralyzed"` in `CONDITION_STATUS_COLOR`; the placeholder string is never rendered |
+
+### Quality gates
+
+`cargo fmt` clean, `cargo clippy --all-targets --all-features -- -D warnings`
+clean, `cargo nextest run --all-features`: 5347 passed / 0 failed; targeted
+doctest run for the new impl: 2 passed (full doctest run excluded per project
+convention).
+
+---
+
 ## Combat Bug Fixes — Phase 2: Player Screen HP Reset (Bug 4) (2026-07-19)
 
 ### Root cause
