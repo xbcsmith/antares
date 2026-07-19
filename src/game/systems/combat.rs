@@ -233,8 +233,18 @@ pub const ACTION_BUTTON_CONFIRMED_COLOR: Color = Color::srgb(0.65, 0.55, 0.25);
 /// Color for action button disabled
 pub const ACTION_BUTTON_DISABLED_COLOR: Color = Color::srgb(0.2, 0.2, 0.2);
 
+/// Color for action button while the mouse cursor is pressing it (non-selected
+/// buttons only — a selected button keeps its hover/confirmed color even
+/// while pressed, per the "selected state wins" composition rule).
+pub const ACTION_BUTTON_PRESSED_COLOR: Color = Color::srgb(0.5, 0.5, 0.6);
+
 /// Color for enemy card highlight when in target selection mode
 pub const ENEMY_CARD_HIGHLIGHT_COLOR: Color = Color::srgba(0.35, 0.25, 0.25, 0.95);
+
+/// Default (idle) background color for an enemy combat card — used both at
+/// spawn and whenever the card is reset outside target-selection mode /
+/// condition tinting.
+pub const ENEMY_CARD_DEFAULT_COLOR: Color = Color::srgba(0.2, 0.15, 0.15, 0.9);
 
 /// Width of the persistent combat log bubble in the top-right corner.
 pub const COMBAT_LOG_BUBBLE_WIDTH: Val = Val::Px(360.0);
@@ -322,14 +332,10 @@ pub const FEEDBACK_COLOR_MISS: Color = Color::srgb(0.8, 0.8, 0.8);
 pub const FEEDBACK_COLOR_STATUS: Color = Color::srgb(1.0, 0.8, 0.0);
 
 // ===== Condition Label Color Constants =====
-// Shared source of truth for condition-name tinting on combat cards
-// (enemy cards here; HUD party cards consume these in Phase 4).
-
-/// Colour for fatal condition labels ("Dead") — transparent red
-pub const CONDITION_FATAL_COLOR: Color = Color::srgba(0.85, 0.2, 0.2, 0.85);
-
-/// Colour for non-fatal condition labels (Paralyzed, Asleep, …) — transparent yellow
-pub const CONDITION_STATUS_COLOR: Color = Color::srgba(0.9, 0.85, 0.3, 0.85);
+// The single source of truth for these now lives in `ui_helpers` so both
+// combat enemy cards (here) and HUD party cards (hud.rs) share one mapping;
+// re-exported here so existing call sites in this module are unaffected.
+pub use crate::game::systems::ui_helpers::{CONDITION_FATAL_COLOR, CONDITION_STATUS_COLOR};
 
 // ===== Boss HP Bar Constants =====
 
@@ -867,6 +873,12 @@ pub struct ActionMenuState {
     /// `Some(n)` when target-select mode is active (set to `Some(0)` on entry).
     /// `None` when not in target-select mode.
     pub active_target_index: Option<usize>,
+    /// The combatant occupying the turn slot as of the last frame
+    /// `update_combat_ui` ran. Used to detect when the acting party member
+    /// changes so `active_index` resets to Attack (index 0) even when the
+    /// menu never transitions to `Hidden` in between — e.g. two players
+    /// acting back-to-back with no intervening monster turn.
+    pub last_actor: Option<CombatantId>,
 }
 
 /// Tracks whether the spell selection panel is open and for which caster.
@@ -2026,7 +2038,7 @@ fn setup_combat_ui(
                                         row_gap: Val::Px(4.0),
                                         ..default()
                                     },
-                                    BackgroundColor(Color::srgba(0.2, 0.15, 0.15, 0.9)),
+                                    BackgroundColor(ENEMY_CARD_DEFAULT_COLOR),
                                     BorderRadius::all(Val::Px(4.0)),
                                     EnemyCard {
                                         participant_index: idx,
@@ -3652,9 +3664,19 @@ fn update_combat_ui(
         **text = turn_order_str;
     }
 
-    // Show/hide action menu based on turn state.
-    // When the menu becomes visible (player turn starts), reset the highlight to
-    // index 0 (Attack) so the default is always Attack on every menu open.
+    // Show/hide action menu based on turn state, and reset the highlight to
+    // Attack (index 0) both on the Hidden→Visible transition (the original
+    // trigger) AND whenever the acting party member changes even without a
+    // visibility transition — e.g. two players acting back-to-back with no
+    // intervening monster turn, where the menu stays Visible throughout.
+    let current_actor = combat_res
+        .state
+        .turn_order
+        .get(combat_res.state.current_turn)
+        .cloned();
+    let actor_changed = current_actor != action_menu_state.last_actor;
+    action_menu_state.last_actor = current_actor;
+
     if let Ok(mut visibility) = action_menu.single_mut() {
         let new_visibility = if matches!(turn_state.0, CombatTurnState::PlayerTurn) {
             Visibility::Visible
@@ -3662,8 +3684,11 @@ fn update_combat_ui(
             Visibility::Hidden
         };
 
-        // Reset highlight index whenever the menu transitions to visible.
-        if *visibility == Visibility::Hidden && new_visibility == Visibility::Visible {
+        let became_visible =
+            *visibility == Visibility::Hidden && new_visibility == Visibility::Visible;
+        if (became_visible || actor_changed)
+            && matches!(current_actor, Some(CombatantId::Player(_)))
+        {
             action_menu_state.active_index = 0;
             action_menu_state.confirmed = false;
         }
@@ -4330,7 +4355,7 @@ fn resolve_alive_monster_participant_index(
 fn update_action_highlight(
     action_menu_state: Res<ActionMenuState>,
     combat_res: Res<CombatResource>,
-    mut buttons: Query<(&ActionButton, &mut BackgroundColor)>,
+    mut buttons: Query<(&ActionButton, &Interaction, &mut BackgroundColor)>,
 ) {
     let order: &[ActionButtonType] = if combat_res.combat_event_type.highlights_magic_action() {
         &COMBAT_ACTION_ORDER_MAGIC
@@ -4338,20 +4363,28 @@ fn update_action_highlight(
         &COMBAT_ACTION_ORDER
     };
     let active_type = order[action_menu_state.active_index % order.len()];
-    for (btn, mut bg) in buttons.iter_mut() {
+    for (btn, interaction, mut bg) in buttons.iter_mut() {
         // The RangedAttack button is managed exclusively by update_combat_ui;
         // skip it here so we do not accidentally override its disabled color.
         if btn.button_type == ActionButtonType::RangedAttack {
             continue;
         }
         *bg = if btn.button_type == active_type {
+            // Selected state wins over mouse interaction: the keyboard-armed
+            // button always shows confirmed/hover gold regardless of the
+            // mouse cursor's position.
             if action_menu_state.confirmed {
                 BackgroundColor(ACTION_BUTTON_CONFIRMED_COLOR)
             } else {
                 BackgroundColor(ACTION_BUTTON_HOVER_COLOR)
             }
         } else {
-            BackgroundColor(ACTION_BUTTON_COLOR)
+            // Non-selected buttons: mouse hover/press modulates the idle color.
+            match interaction {
+                Interaction::Pressed => BackgroundColor(ACTION_BUTTON_PRESSED_COLOR),
+                Interaction::Hovered => BackgroundColor(ACTION_BUTTON_HOVER_COLOR),
+                Interaction::None => BackgroundColor(ACTION_BUTTON_COLOR),
+            }
         };
     }
 }
@@ -4367,14 +4400,43 @@ fn update_action_highlight(
 /// `ActionMenuState::active_target_index` for keyboard navigation.
 fn enter_target_selection(
     target_sel: Res<TargetSelection>,
+    combat_res: Res<CombatResource>,
     mut enemy_cards: Query<(&EnemyCard, &mut BackgroundColor)>,
 ) {
-    for (_card, mut bg) in enemy_cards.iter_mut() {
+    for (card, mut bg) in enemy_cards.iter_mut() {
         *bg = if target_sel.0.is_some() {
             BackgroundColor(ENEMY_CARD_HIGHLIGHT_COLOR)
         } else {
-            BackgroundColor(Color::srgba(0.2, 0.15, 0.15, 0.9))
+            // Outside target-selection, the idle background reflects the
+            // monster's condition (universal condition tinting, 4.2).
+            let tint = combat_res
+                .state
+                .participants
+                .get(card.participant_index)
+                .and_then(|p| match p {
+                    Combatant::Monster(monster) => Some(monster_condition_tint(monster.conditions)),
+                    Combatant::Player(_) => None,
+                })
+                .unwrap_or(crate::game::systems::ui_helpers::CardConditionTint::None);
+            BackgroundColor(tint.color().unwrap_or(ENEMY_CARD_DEFAULT_COLOR))
         };
+    }
+}
+
+/// Reduces a monster's `MonsterCondition` down to the shared
+/// [`CardConditionTint`](crate::game::systems::ui_helpers::CardConditionTint)
+/// category for enemy card background tinting. Monsters have no unconscious
+/// state — `Dead` is their only fatal condition — so every other non-`Normal`
+/// variant maps to the generic `Status` (transparent yellow) tint.
+fn monster_condition_tint(
+    condition: crate::domain::combat::monster::MonsterCondition,
+) -> crate::game::systems::ui_helpers::CardConditionTint {
+    use crate::domain::combat::monster::MonsterCondition;
+    use crate::game::systems::ui_helpers::CardConditionTint;
+    match condition {
+        MonsterCondition::Normal => CardConditionTint::None,
+        MonsterCondition::Dead => CardConditionTint::Fatal,
+        _ => CardConditionTint::Status,
     }
 }
 
@@ -9505,6 +9567,31 @@ mod tests {
         assert!(found_types.contains(&ActionButtonType::Flee));
     }
 
+    /// 4.6 color-constant sanity test: the action button palette states
+    /// (selected/confirmed, hover, pressed, idle, disabled) must be pairwise
+    /// distinct so every state produces a visibly different color.
+    #[test]
+    fn test_action_button_palette_states_are_pairwise_distinct() {
+        let colors = [
+            ("confirmed", ACTION_BUTTON_CONFIRMED_COLOR),
+            ("hover", ACTION_BUTTON_HOVER_COLOR),
+            ("pressed", ACTION_BUTTON_PRESSED_COLOR),
+            ("idle", ACTION_BUTTON_COLOR),
+            ("disabled", ACTION_BUTTON_DISABLED_COLOR),
+        ];
+        for i in 0..colors.len() {
+            for j in (i + 1)..colors.len() {
+                let (name_a, color_a) = colors[i];
+                let (name_b, color_b) = colors[j];
+                assert_ne!(
+                    color_a, color_b,
+                    "action button colors '{}' and '{}' must be distinct",
+                    name_a, name_b
+                );
+            }
+        }
+    }
+
     /// Verify enemy cards are created for monsters only
     #[test]
     fn test_enemy_cards_for_monsters_only() {
@@ -10768,6 +10855,7 @@ mod tests {
             active_index: 0,
             confirmed: false,
             active_target_index: Some(0),
+            ..Default::default()
         };
         let alive_count = cr
             .state
@@ -11340,6 +11428,78 @@ mod tests {
         assert_eq!(
             state.active_index, 0,
             "active_index must reset to 0 (Attack) when menu becomes visible"
+        );
+    }
+
+    /// 4.4: When two players act back-to-back (no intervening monster turn,
+    /// so the action menu never transitions to Hidden), `active_index` must
+    /// still reset to Attack (0) as soon as the acting party member changes.
+    #[test]
+    fn test_action_menu_resets_between_players_without_hiding() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let hero1 = Character::new(
+            "Hero One".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let hero2 = Character::new(
+            "Hero Two".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero1.clone());
+        cs.add_player(hero2.clone());
+        cs.turn_order = vec![CombatantId::Player(0), CombatantId::Player(1)];
+        cs.current_turn = 0;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(hero1).unwrap();
+        gs.party.add_member(hero2).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Player 1's turn: menu opens, resets to Attack (last_actor was None).
+        app.update();
+        assert_eq!(
+            app.world().resource::<ActionMenuState>().active_index,
+            0,
+            "menu must open on Attack for the first player"
+        );
+
+        // Simulate player 1 navigating to a different action (e.g. Defend).
+        app.world_mut()
+            .resource_mut::<ActionMenuState>()
+            .active_index = 1;
+
+        // Advance the turn to player 2 WITHOUT touching CombatTurnStateResource
+        // (it stays PlayerTurn throughout — the menu never hides).
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state.current_turn = 1;
+        }
+        app.update();
+
+        let state = app.world().resource::<ActionMenuState>();
+        assert_eq!(
+            state.active_index, 0,
+            "active_index must reset to 0 (Attack) when the acting party member \
+             changes, even though the menu never transitioned to Hidden"
         );
     }
 
@@ -13687,6 +13847,111 @@ mod tests {
             .map(|(_, text)| text.0.clone())
             .expect("dead monster must have an HP text");
         assert_eq!(dead_hp, "0/30", "dead monster HP text must be 0/{{base}}");
+    }
+
+    /// 4.2: universal condition tinting applies to enemy card *backgrounds*
+    /// (not just the condition label text): outside target-selection mode, a
+    /// dead monster's card is `CONDITION_FATAL_COLOR` and a paralyzed
+    /// monster's card is `CONDITION_STATUS_COLOR`, while a healthy monster
+    /// keeps `ENEMY_CARD_DEFAULT_COLOR`.
+    #[test]
+    fn test_enemy_card_background_reflects_condition_tint() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let make_monster = |id: u8, name: &str| {
+            crate::domain::combat::monster::Monster::new(
+                id,
+                name.to_string(),
+                crate::domain::character::Stats::new(10, 5, 5, 10, 8, 10, 10),
+                30,
+                8,
+                vec![crate::domain::combat::types::Attack::physical(
+                    crate::domain::types::DiceRoll::new(1, 4, 0),
+                )],
+                crate::domain::combat::monster::LootTable::default(),
+            )
+        };
+
+        let mut dead_wolf = make_monster(72, "Dead Wolf");
+        dead_wolf.hp.current = 0;
+        dead_wolf.conditions = crate::domain::combat::monster::MonsterCondition::Dead;
+        let mut paralyzed_wolf = make_monster(73, "Stiff Wolf");
+        paralyzed_wolf.conditions = crate::domain::combat::monster::MonsterCondition::Paralyzed;
+        let healthy_wolf = make_monster(74, "Fit Wolf");
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.add_monster(dead_wolf);
+        cs.add_monster(paralyzed_wolf);
+        cs.add_monster(healthy_wolf);
+        cs.turn_order = vec![
+            CombatantId::Player(0),
+            CombatantId::Monster(1),
+            CombatantId::Monster(2),
+            CombatantId::Monster(3),
+        ];
+        cs.current_turn = 0;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), None, None, None];
+        }
+
+        // First frame spawns the enemy cards (setup_combat_ui); a second
+        // frame is needed for `enter_target_selection` to see and tint the
+        // now-materialised card entities.
+        app.update();
+        app.update();
+
+        let mut card_query = app.world_mut().query::<(&EnemyCard, &BackgroundColor)>();
+        let mut checked = std::collections::HashSet::new();
+        for (card, bg) in card_query.iter(app.world()) {
+            match card.participant_index {
+                1 => {
+                    assert_eq!(
+                        bg.0, CONDITION_FATAL_COLOR,
+                        "dead monster's card background must be the fatal tint"
+                    );
+                    checked.insert(1);
+                }
+                2 => {
+                    assert_eq!(
+                        bg.0, CONDITION_STATUS_COLOR,
+                        "paralyzed monster's card background must be the status tint"
+                    );
+                    checked.insert(2);
+                }
+                3 => {
+                    assert_eq!(
+                        bg.0, ENEMY_CARD_DEFAULT_COLOR,
+                        "healthy monster's card background must stay the default"
+                    );
+                    checked.insert(3);
+                }
+                other => panic!("unexpected enemy card for participant {}", other),
+            }
+        }
+        assert_eq!(
+            checked.len(),
+            3,
+            "expected exactly 3 enemy cards to be checked"
+        );
     }
 
     // ── Integration tests ─────────────────────────────────────────────────────

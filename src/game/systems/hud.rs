@@ -17,13 +17,16 @@
 
 use crate::application::GameMode;
 use crate::domain::character::{Condition, PARTY_MAX_SIZE};
+use crate::domain::combat::types::CombatantId;
 use crate::domain::conditions::ActiveCondition;
 use crate::domain::types::{Direction, Position};
 use crate::game::components::inventory::{CharacterEntity, PartyEntities};
 use crate::game::resources::{CampaignFontHandles, GlobalState};
+use crate::game::systems::combat::{CombatResource, CombatTurnState, CombatTurnStateResource};
 use crate::game::systems::mouse_input;
 use crate::game::systems::ui_helpers::{
-    create_blank_rgba_image, text_style, BODY_FONT_SIZE, LABEL_FONT_SIZE,
+    create_blank_rgba_image, resolve_card_background, text_style, CardConditionTint,
+    BODY_FONT_SIZE, LABEL_FONT_SIZE,
 };
 use bevy::prelude::*;
 use bevy::render::render_resource::Extent3d;
@@ -122,6 +125,15 @@ pub const HP_DEAD_COLOR: Color = Color::srgb(0.31, 0.31, 0.31);
 pub const CONDITION_POISONED_COLOR: Color = Color::srgb(0.20, 0.71, 0.20);
 pub const CONDITION_PARALYZED_COLOR: Color = Color::srgb(0.39, 0.39, 0.78);
 pub const CONDITION_BUFFED_COLOR: Color = Color::srgb(0.78, 0.71, 0.39);
+
+/// Background color for the HUD card of the party member whose turn it
+/// currently is — transparent green. Wins over any condition tint per the
+/// universal precedence rule (active-turn > condition > default); see
+/// `docs/reference/condition_color_scheme.md`.
+pub const ACTIVE_TURN_CARD_COLOR: Color = Color::srgba(0.15, 0.45, 0.15, 0.7);
+
+/// Default (idle) background color for a party member's HUD card.
+pub const DEFAULT_CARD_COLOR: Color = Color::srgba(0.2, 0.2, 0.2, 0.7);
 
 // HP thresholds
 pub const HP_HEALTHY_THRESHOLD: f32 = 0.75;
@@ -583,7 +595,7 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                             row_gap: Val::Px(0.0),
                             ..default()
                         },
-                        BackgroundColor(Color::srgba(0.2, 0.2, 0.2, 0.7)),
+                        BackgroundColor(DEFAULT_CARD_COLOR),
                         BorderRadius::all(Val::Px(4.0)),
                         CharacterCard { party_index },
                     ))
@@ -900,11 +912,15 @@ fn handle_portrait_click_system(
 /// Updates HUD elements based on current party state
 ///
 /// This system runs every frame to sync UI with game state.
-/// Updates HP bars, HP overlay text color, condition text, SP bars, and character card visibility.
+/// Updates HP bars, HP overlay text color, condition text, SP bars, and
+/// character card visibility and background tint (active-turn highlight >
+/// condition tint > default, see [`resolve_card_background`]).
 ///
 /// # Arguments
 /// * `global_state` - Game state containing party data
-/// * `card_query` - Query for character card visibility
+/// * `combat_res` - Combat state, used to find the active-turn party member (absent outside combat)
+/// * `turn_state` - Current combat turn state, used to gate the active-turn highlight to `PlayerTurn` (absent outside combat)
+/// * `card_query` - Query for character card visibility and background tint
 /// * `hp_bar_query` - Query for HP bar fill entities
 /// * `hp_overlay_query` - Query for HP text overlay entities
 /// * `condition_text_query` - Query for condition text entities
@@ -914,7 +930,9 @@ fn handle_portrait_click_system(
 #[allow(clippy::too_many_arguments)]
 fn update_hud(
     global_state: Res<GlobalState>,
-    mut card_query: Query<(&CharacterCard, &mut Node), Without<HpBarFill>>,
+    combat_res: Option<Res<CombatResource>>,
+    turn_state: Option<Res<CombatTurnStateResource>>,
+    mut card_query: Query<(&CharacterCard, &mut Node, &mut BackgroundColor), Without<HpBarFill>>,
     mut hp_bar_query: Query<(&HpBarFill, &mut Node, &mut BackgroundColor)>,
     mut hp_overlay_query: HpOverlayQuery,
     mut condition_text_query: ConditionTextQuery,
@@ -924,12 +942,48 @@ fn update_hud(
 ) {
     let party = &global_state.0.party;
 
-    // Update card visibility - hide cards that don't have characters
-    for (card, mut node) in card_query.iter_mut() {
-        if party.members.get(card.party_index).is_some() {
-            node.display = Display::Flex;
-        } else {
-            node.display = Display::None;
+    // Which party member (if any) is the current combat actor this frame —
+    // drives the active-turn card highlight (4.1). Only meaningful during
+    // PlayerTurn; `Option<Res<_>>` so the HUD still renders correctly outside
+    // combat (both resources absent) or in tests without `CombatPlugin`.
+    let active_party_index =
+        combat_res
+            .as_deref()
+            .zip(turn_state.as_deref())
+            .and_then(|(combat_res, turn_state)| {
+                if !matches!(turn_state.0, CombatTurnState::PlayerTurn) {
+                    return None;
+                }
+                match combat_res
+                    .state
+                    .turn_order
+                    .get(combat_res.state.current_turn)
+                {
+                    Some(CombatantId::Player(pidx)) => {
+                        combat_res.player_orig_indices.get(*pidx).copied().flatten()
+                    }
+                    _ => None,
+                }
+            });
+
+    // Update card visibility and background tint. Precedence: active-turn
+    // highlight (4.1) > condition tint (4.2) > default background.
+    for (card, mut node, mut bg) in card_query.iter_mut() {
+        match party.members.get(card.party_index) {
+            Some(character) => {
+                node.display = Display::Flex;
+                let is_active = Some(card.party_index) == active_party_index;
+                let tint = condition_tint_category(&character.conditions);
+                *bg = BackgroundColor(resolve_card_background(
+                    is_active,
+                    ACTIVE_TURN_CARD_COLOR,
+                    tint,
+                    DEFAULT_CARD_COLOR,
+                ));
+            }
+            None => {
+                node.display = Display::None;
+            }
         }
     }
 
@@ -2773,6 +2827,50 @@ pub fn hp_text_overlay_color(hp_percent: f32) -> Color {
 /// let (text, color) = get_priority_condition(&conditions, &[]);
 /// assert!(text.contains("Dead"));
 /// ```
+/// Reduces a character's condition bitflags down to the shared
+/// [`CardConditionTint`] category used for HUD card background tinting
+/// (universal condition tinting, 4.2).
+///
+/// Mirrors the same precedence order as [`get_priority_condition`] (fatal >
+/// unconscious > poisoned/diseased > other status), but maps to one of the
+/// small set of background tint categories instead of a display label.
+/// Being merely "buffed" (only positive active conditions, no bad status
+/// flags) does not tint the card background — a temporary buff is not a
+/// warning state worth highlighting the same way a bad condition is.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::Condition;
+/// use antares::game::systems::hud::condition_tint_category;
+/// use antares::game::systems::ui_helpers::CardConditionTint;
+///
+/// let mut conditions = Condition::new();
+/// conditions.add(Condition::DEAD);
+/// assert_eq!(condition_tint_category(&conditions), CardConditionTint::Fatal);
+/// assert_eq!(
+///     condition_tint_category(&Condition::new()),
+///     CardConditionTint::None
+/// );
+/// ```
+pub fn condition_tint_category(conditions: &Condition) -> CardConditionTint {
+    if conditions.is_fatal() {
+        CardConditionTint::Fatal
+    } else if conditions.has(Condition::UNCONSCIOUS) {
+        CardConditionTint::Unconscious
+    } else if conditions.has(Condition::POISONED) || conditions.has(Condition::DISEASED) {
+        CardConditionTint::Poisoned
+    } else if conditions.has(Condition::PARALYZED)
+        || conditions.has(Condition::BLINDED)
+        || conditions.has(Condition::SILENCED)
+        || conditions.has(Condition::ASLEEP)
+    {
+        CardConditionTint::Status
+    } else {
+        CardConditionTint::None
+    }
+}
+
 pub fn get_priority_condition(
     conditions: &Condition,
     active_conditions: &[ActiveCondition],
@@ -3796,6 +3894,98 @@ mod tests {
             }
         }
         assert!(found, "SpBarFill for party slot 0 not found");
+    }
+
+    /// 4.1/4.6: during `PlayerTurn` the active party member's `CharacterCard`
+    /// background must equal `ACTIVE_TURN_CARD_COLOR`, other cards keep their
+    /// default background, and the highlight reverts once it becomes
+    /// `EnemyTurn`.
+    #[test]
+    fn test_active_turn_card_highlight_and_revert() {
+        use super::{
+            CharacterCard, GlobalState, HudPlugin, ACTIVE_TURN_CARD_COLOR, DEFAULT_CARD_COLOR,
+        };
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::combat::engine::{CombatState, Combatant};
+        use crate::domain::combat::types::{CombatantId, Handicap};
+        use crate::game::systems::combat::{CombatPlugin, CombatResource, CombatTurnStateResource};
+        use bevy::prelude::*;
+
+        let mut state = GameState::new();
+        let hero0 = Character::new(
+            "Hero Zero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let hero1 = Character::new(
+            "Hero One".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero0.clone()).unwrap();
+        state.party.add_member(hero1.clone()).unwrap();
+        state.enter_combat();
+
+        let mut cr = CombatResource::new();
+        cr.state = CombatState::new(Handicap::Even);
+        cr.state
+            .participants
+            .push(Combatant::Player(Box::new(hero0)));
+        cr.state
+            .participants
+            .push(Combatant::Player(Box::new(hero1)));
+        cr.state.turn_order = vec![CombatantId::Player(0), CombatantId::Player(1)];
+        cr.state.current_turn = 0;
+        cr.player_orig_indices = vec![Some(0), Some(1)];
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<Assets<Image>>();
+        app.add_plugins(CombatPlugin);
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(state));
+        app.insert_resource(cr);
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 =
+            crate::game::systems::combat::CombatTurnState::PlayerTurn;
+
+        app.update(); // PostStartup: setup_hud spawns cards.
+        app.update(); // Update: sync_party_hp_during_combat + update_hud.
+
+        let card_bg = |app: &mut App, idx: usize| -> Color {
+            let world = app.world_mut();
+            let mut q = world.query::<(&CharacterCard, &BackgroundColor)>();
+            q.iter(world)
+                .find(|(card, _)| card.party_index == idx)
+                .map(|(_, bg)| bg.0)
+                .unwrap_or_else(|| panic!("no CharacterCard found for party_index {}", idx))
+        };
+
+        assert_eq!(
+            card_bg(&mut app, 0),
+            ACTIVE_TURN_CARD_COLOR,
+            "party slot 0 (current actor) must show the active-turn highlight"
+        );
+        assert_eq!(
+            card_bg(&mut app, 1),
+            DEFAULT_CARD_COLOR,
+            "party slot 1 (not acting) must keep the default card background"
+        );
+
+        // Revert on EnemyTurn: no party member should be highlighted.
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 =
+            crate::game::systems::combat::CombatTurnState::EnemyTurn;
+        app.update();
+
+        assert_eq!(
+            card_bg(&mut app, 0),
+            DEFAULT_CARD_COLOR,
+            "active-turn highlight must revert once it becomes EnemyTurn"
+        );
     }
 
     #[test]

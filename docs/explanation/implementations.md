@@ -2,6 +2,118 @@
 
 ---
 
+## Combat Bug Fixes — Phase 4: Combat UX Polish (2026-07-19)
+
+Addresses `docs/explanation/next_plans.md` lines 212–214: it was hard to tell
+whose turn it was, the action menu did not reset to Attack between party
+members' turns, and the action buttons were near-identical greys with no
+mouse feedback.
+
+### Shared condition/turn-state color scheme (`src/game/systems/ui_helpers.rs`)
+
+New single source of truth, consumed by both `hud.rs` and `combat.rs`:
+
+- Constants (all alpha < 1.0 — translucent overlays only):
+  `CONDITION_FATAL_COLOR`, `CONDITION_STATUS_COLOR` (moved here from
+  `combat.rs`, which now `pub use`s them so existing call sites are
+  unaffected), plus two new ones: `CONDITION_POISON_TINT_COLOR` (transparent
+  green) and `CONDITION_UNCONSCIOUS_TINT_COLOR` (transparent grey).
+- `CardConditionTint` enum (`None`/`Fatal`/`Poisoned`/`Unconscious`/`Status`)
+  — the common category both a `Character`'s `Condition` bitflags and a
+  `Monster`'s `MonsterCondition` enum reduce down to before colour lookup.
+- `resolve_card_background(is_active_turn, active_turn_color, condition, default_color) -> Color`
+  — the one pure, Bevy-App-free function encoding the universal precedence
+  rule **active-turn > condition tint > default**, used by both HUD party
+  cards and combat enemy cards.
+
+### 4.1 — Active-turn HUD card highlight (`src/game/systems/hud.rs`)
+
+- New `ACTIVE_TURN_CARD_COLOR` (transparent green) and `DEFAULT_CARD_COLOR`
+  constants alongside the existing HUD color constants; the card spawn site
+  now uses `DEFAULT_CARD_COLOR` instead of an inline literal.
+- `update_hud` gained `Option<Res<CombatResource>>` and
+  `Option<Res<CombatTurnStateResource>>` params (absent outside combat / in
+  tests without `CombatPlugin` — no panic). It resolves
+  `combat_res.state.turn_order[current_turn]` → `CombatantId::Player(idx)` →
+  party slot via `player_orig_indices`, and calls `resolve_card_background`
+  per card. `update_hud` already ran `.after(sync_party_hp_during_combat)`,
+  so `CombatResource` is fresh every frame it runs.
+
+### 4.2 — Universal condition-based tinting
+
+- New `condition_tint_category(&Condition) -> CardConditionTint` in
+  `hud.rs`, co-located with `get_priority_condition`, mirroring the same
+  precedence (fatal > unconscious > poisoned/diseased > other status). Being
+  merely "buffed" (positive active conditions, no bad status) intentionally
+  maps to `None` — a buff isn't a warning state.
+- New `monster_condition_tint(MonsterCondition) -> CardConditionTint` in
+  `combat.rs`: `Dead` → `Fatal`, any other non-`Normal` variant → `Status`
+  (monsters have no poisoned/unconscious state).
+- `enter_target_selection` (`combat.rs`) now takes `Res<CombatResource>` and
+  applies the condition tint on its idle (non-target-selection) branch,
+  replacing the flat literal; new `ENEMY_CARD_DEFAULT_COLOR` constant
+  replaces the two duplicated `Color::srgba(0.2, 0.15, 0.15, 0.9)` literals
+  (spawn site + idle reset).
+
+### 4.3 — Reference document
+
+Added `docs/reference/condition_color_scheme.md`: the canonical
+condition→colour table, the transparency rule, the precedence order, and the
+constants' source locations, following the `stat_ranges.md` style with the
+project's SPDX copyright footer convention.
+
+### 4.4 — Action menu reset between party members' turns (`combat.rs`)
+
+- New `ActionMenuState::last_actor: Option<CombatantId>` field, tracking the
+  combatant in the current turn slot as of the last frame.
+- `update_combat_ui`'s menu-visibility block now resets
+  `active_index`/`confirmed` on **either** the original Hidden→Visible
+  transition **or** an actor change with no visibility transition (two
+  players acting back-to-back, menu stays Visible throughout) — both
+  conditions were needed; an actor-change-only version regressed the
+  existing Hidden→Visible test because a manufactured single-participant
+  test fixture never changes `current_actor` across the transition.
+
+### 4.5 — Action button colors and mouse feedback (`combat.rs`)
+
+- New `ACTION_BUTTON_PRESSED_COLOR` constant (distinct pressed shade); the
+  existing gold `ACTION_BUTTON_CONFIRMED_COLOR` (shared with
+  `update_spell_focus_highlight`) is reused as-is for the selected state.
+- `update_action_highlight`'s button query gained `&Interaction`. Composition
+  rule: the keyboard-selected button always shows confirmed/hover gold
+  regardless of mouse state ("selected state wins"); every other button now
+  shows `ACTION_BUTTON_PRESSED_COLOR`/`ACTION_BUTTON_HOVER_COLOR`/
+  `ACTION_BUTTON_COLOR` based on `Interaction::Pressed`/`Hovered`/`None`. The
+  pre-existing RangedAttack skip (owned exclusively by
+  `update_ranged_button_color`) is preserved.
+
+### Tests Added
+
+| Test | File | What it verifies |
+| ---- | ---- | ---- |
+| `test_resolve_card_background_active_turn_wins_over_condition` | ui_helpers.rs | Active turn beats every condition category |
+| `test_resolve_card_background_condition_wins_over_default` | ui_helpers.rs | Each condition tint beats the default |
+| `test_resolve_card_background_falls_back_to_default` | ui_helpers.rs | No active turn, no condition → default |
+| `test_condition_tint_colors_are_translucent` | ui_helpers.rs | All 4 condition constants have alpha < 1.0 |
+| `condition_tint_category` doctest | hud.rs | Fatal and None mappings |
+| `test_active_turn_card_highlight_and_revert` | hud.rs | Two-player combat: active card = `ACTIVE_TURN_CARD_COLOR`, other = default; reverts on `EnemyTurn` |
+| `test_action_menu_resets_between_players_without_hiding` | combat.rs | Two-player turn order, menu never hides; `active_index` still resets to 0 |
+| `test_action_button_palette_states_are_pairwise_distinct` | combat.rs | confirmed/hover/pressed/idle/disabled all pairwise distinct |
+| `test_enemy_card_background_reflects_condition_tint` | combat.rs | Dead/Paralyzed/healthy monster cards get fatal/status/default backgrounds outside target-selection |
+
+Existing `execute_monster_turn`, action-menu, target-selection, and HUD tests
+pass unchanged (133 combat.rs tests, 133 hud.rs tests, verified individually
+before the full suite run).
+
+### Quality gates
+
+`cargo fmt` clean, `cargo clippy --all-targets --all-features -- -D
+warnings` clean, `cargo nextest run --all-features`: 5355 passed / 0 failed;
+targeted doctests for the new/changed code: 8 passed (full doctest run
+excluded per project convention).
+
+---
+
 ## Combat Bug Fixes — Phase 3: Real Condition Names on Enemy Cards (Bug 1) (2026-07-19)
 
 ### Root cause
