@@ -6186,6 +6186,11 @@ fn execute_monster_turn(
                     CombatantId::Monster(_) => CombatTurnState::EnemyTurn,
                 };
             }
+            // Reset the latch so the delay timer re-arms for the next monster
+            // in this ambush round. The latch may still be `true` from a
+            // monster that acted earlier in the same round, and this early
+            // return bypasses the resets further down.
+            *was_enemy_turn = false;
             return;
         }
     }
@@ -6329,6 +6334,13 @@ fn execute_monster_turn(
             };
             emit_combat_feedback(Some(attacker), target, effect, &mut feedback_writer);
         }
+
+        // The monster's action is complete and the turn has advanced. Reset
+        // the latch so that if the next actor is also a monster, the delay
+        // timer re-arms on the next EnemyTurn frame instead of deadlocking on
+        // the finished one-shot timer (which never reports `just_finished()`
+        // again).
+        *was_enemy_turn = false;
     } else if !combat_res.state.turn_order.is_empty() {
         // The turn_order slot exists but is a Player, yet turn_state is EnemyTurn
         // — this is a stale/inconsistent state.  Correct it so the player regains
@@ -6343,6 +6355,9 @@ fn execute_monster_turn(
             combat_res.state.current_turn
         );
         turn_state.0 = CombatTurnState::PlayerTurn;
+        // Keep the latch consistent with the corrected state: we are no longer
+        // in a monster's turn, so the timer must re-arm fresh next EnemyTurn.
+        *was_enemy_turn = false;
     }
 }
 
@@ -13108,6 +13123,206 @@ mod tests {
             matches!(ts.0, CombatTurnState::PlayerTurn),
             "turn_state must be PlayerTurn after skipping incapacitated monster, got {:?}",
             ts.0
+        );
+    }
+
+    /// Regression test for the monster-turn deadlock (bugs 2 & 3): with the
+    /// `MonsterTurnTimer` resource PRESENT, two consecutive monster turns must
+    /// both execute. Before the fix, the `was_enemy_turn` latch was never
+    /// reset after a successful monster action, so the finished one-shot timer
+    /// never reported `just_finished()` again and the second monster's turn
+    /// deadlocked forever on EnemyTurn.
+    #[test]
+    fn test_two_monsters_act_consecutively_with_timer() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Replace the plugin's 1.2s timer with a zero-duration one so each
+        // armed timer finishes on its very next tick, keeping the test to a
+        // bounded number of frames while still exercising the arm/tick/reset
+        // latch logic (unlike removing the resource, which bypasses it).
+        app.insert_resource(MonsterTurnTimer(Timer::from_seconds(0.0, TimerMode::Once)));
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let make_wolf = |id: u8, name: &str| {
+            let mut wolf = crate::domain::combat::monster::Monster::new(
+                id,
+                name.to_string(),
+                crate::domain::character::Stats::new(10, 5, 5, 10, 8, 10, 10),
+                20,
+                8,
+                vec![crate::domain::combat::types::Attack::physical(
+                    crate::domain::types::DiceRoll::new(1, 2, 0),
+                )],
+                crate::domain::combat::monster::LootTable::default(),
+            );
+            wolf.ai_behavior = crate::domain::combat::monster::AiBehavior::Aggressive;
+            wolf
+        };
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.add_monster(make_wolf(90, "Wolf A"));
+        cs.add_monster(make_wolf(91, "Wolf B"));
+        // Both monsters ahead of the player so their turns are consecutive.
+        cs.turn_order = vec![
+            CombatantId::Monster(1),
+            CombatantId::Monster(2),
+            CombatantId::Player(0),
+        ];
+        cs.current_turn = 0;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), None, None];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::EnemyTurn;
+
+        // Each monster needs two frames (arm timer, then act); allow slack.
+        let mut reached_player_turn = false;
+        for _ in 0..10 {
+            app.update();
+            let ts = app.world().resource::<CombatTurnStateResource>();
+            if matches!(ts.0, CombatTurnState::PlayerTurn) {
+                reached_player_turn = true;
+                break;
+            }
+        }
+
+        assert!(
+            reached_player_turn,
+            "turn_state must return to PlayerTurn within 10 frames after both \
+             monsters act; the EnemyTurn latch deadlocked"
+        );
+
+        let cr = app.world().resource::<CombatResource>();
+        assert_eq!(
+            cr.state.current_turn, 2,
+            "current_turn must point at the player slot after both monster turns"
+        );
+        assert_eq!(cr.state.round, 1, "round must not have wrapped yet");
+        for idx in [1usize, 2usize] {
+            assert!(
+                !cr.state.participants[idx].can_act(),
+                "monster at participant index {} must have acted this round",
+                idx
+            );
+        }
+    }
+
+    /// Regression test for the ambush deadlock (bug 3): an ambush round with
+    /// two monsters and the `MonsterTurnTimer` resource PRESENT must complete
+    /// round 1 (surprised player slot auto-skipped, both monsters act) and
+    /// hand control to the player at the start of round 2 with
+    /// `ambush_round_active` cleared.
+    #[test]
+    fn test_ambush_two_monsters_complete_round_one() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+        app.insert_resource(MonsterTurnTimer(Timer::from_seconds(0.0, TimerMode::Once)));
+
+        let mut gs = GameState::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Fastest combatant: when `advance_round` recalculates the turn order
+        // for round 2 (handicap reset to Even, sorted by speed descending) the
+        // player must come first so round 2 opens on PlayerTurn.
+        hero.stats.speed.base = 50;
+        hero.stats.speed.current = 50;
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let make_goblin = |id: u8, name: &str| {
+            let mut goblin = crate::domain::combat::monster::Monster::new(
+                id,
+                name.to_string(),
+                crate::domain::character::Stats::new(8, 6, 6, 8, 5, 10, 6),
+                15,
+                5,
+                vec![crate::domain::combat::types::Attack::physical(
+                    crate::domain::types::DiceRoll::new(1, 2, 0),
+                )],
+                crate::domain::combat::monster::LootTable::default(),
+            );
+            goblin.ai_behavior = crate::domain::combat::monster::AiBehavior::Aggressive;
+            goblin
+        };
+
+        let mut cs = CombatState::new(Handicap::MonsterAdvantage);
+        cs.ambush_round_active = true;
+        cs.add_player(hero.clone());
+        cs.add_monster(make_goblin(92, "Goblin A"));
+        cs.add_monster(make_goblin(93, "Goblin B"));
+        // Surprised player first, then both monsters: exercises the
+        // player-skip path followed by consecutive monster turns.
+        cs.turn_order = vec![
+            CombatantId::Player(0),
+            CombatantId::Monster(1),
+            CombatantId::Monster(2),
+        ];
+        cs.current_turn = 0;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), None, None];
+            cr.combat_event_type = CombatEventType::Ambush;
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::EnemyTurn;
+
+        // Player skip = 1 frame, each monster = 2 frames; allow slack.
+        let mut round_two_player_turn = false;
+        for _ in 0..12 {
+            app.update();
+            let ts = app.world().resource::<CombatTurnStateResource>();
+            let cr = app.world().resource::<CombatResource>();
+            if cr.state.round == 2 && matches!(ts.0, CombatTurnState::PlayerTurn) {
+                round_two_player_turn = true;
+                break;
+            }
+        }
+
+        assert!(
+            round_two_player_turn,
+            "ambush round 1 must complete (player skipped, both monsters act) \
+             and round 2 must open on PlayerTurn within 12 frames"
+        );
+
+        let cr = app.world().resource::<CombatResource>();
+        assert!(
+            !cr.state.ambush_round_active,
+            "ambush_round_active must be cleared once round 2 begins"
+        );
+
+        // The surprised player slot must have logged the skip message.
+        let log = app.world().resource::<CombatLogState>();
+        assert!(
+            log.lines
+                .iter()
+                .any(|line| line.plain_text().to_lowercase().contains("surprised")),
+            "combat log must contain the 'surprised' skip message from round 1"
         );
     }
 

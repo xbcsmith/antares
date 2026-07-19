@@ -2,6 +2,58 @@
 
 ---
 
+## Combat Bug Fixes — Phase 1: Monster Turn Deadlock (Bugs 2 & 3) (2026-07-18)
+
+### Root cause
+
+`execute_monster_turn` (`src/game/systems/combat.rs`) paces monster actions
+with a one-shot `MonsterTurnTimer` armed by the `Local<bool>` latch
+`was_enemy_turn`: the first EnemyTurn frame for an able monster resets the
+timer and sets the latch; later frames tick the timer and act on
+`just_finished()`. After a monster **successfully acted**, the latch was never
+reset. Because a finished `TimerMode::Once` timer never reports
+`just_finished()` again, the next monster's turn skipped the arming branch,
+ticked a dead timer forever, and combat deadlocked on `EnemyTurn` (bug 2). In
+an ambush round every slot is a monster turn, so the deadlock always triggered
+after the first monster acted — with ESC dead and the log spamming
+`input blocked — not player turn` (bug 3).
+
+### Changes — `src/game/systems/combat.rs`, all in `execute_monster_turn`
+
+| Path | Change |
+| ---- | ------ |
+| Successful-action path | `*was_enemy_turn = false;` after the `perform_monster_turn_with_rng` outcome/feedback block, mirroring the existing reset in the incapacitated-skip path, so the timer re-arms for the next monster |
+| Ambush player-skip early return | `*was_enemy_turn = false;` before the `return`, so a monster → skipped-player → monster sequence in an ambush round re-arms the timer |
+| Stale-state correction branch (`else if !turn_order.is_empty()`) | `*was_enemy_turn = false;` when forcing `PlayerTurn`, keeping the latch consistent with the corrected state |
+
+The two early returns at the top of the system (not-in-combat-mode and
+not-EnemyTurn) already reset the latch and were left unchanged. The domain
+engine (`advance_turn` / `advance_round`) was correct and needed no changes.
+
+### Tests Added (2 integration tests in `combat::tests`)
+
+Both use `MinimalPlugins + CombatPlugin` and — unlike all prior tests — keep a
+`MonsterTurnTimer` **present** (zero-duration `Timer::from_seconds(0.0,
+TimerMode::Once)`), exercising the arm/tick/reset latch logic that previous
+tests bypassed by removing the resource. Both tests were verified to fail
+against the pre-fix code.
+
+| Test | What it verifies |
+| ---- | ---------------- |
+| `test_two_monsters_act_consecutively_with_timer` | Two monsters ahead of the player in the turn order both act and `turn_state` returns to `PlayerTurn` within 10 frames; both monsters report `can_act() == false`; round has not wrapped |
+| `test_ambush_two_monsters_complete_round_one` | Ambush (`CombatEventType::Ambush`) with a surprised player slot plus two monsters: round 1 completes, round 2 opens on `PlayerTurn` with `ambush_round_active == false`, and the "surprised" skip message is logged |
+
+Existing `execute_monster_turn` tests (timer removed or absent) pass
+unchanged.
+
+### Quality gates
+
+`cargo fmt` clean, `cargo check` clean, `cargo clippy --all-targets
+--all-features -- -D warnings` clean, `cargo nextest run --all-features`:
+5342 passed / 0 failed (full doctest run excluded per project convention).
+
+---
+
 ## Fix: Sorcerer SP bar, multi-monster turns, and keyboard spell cancel (2026-07-18)
 
 ### Root cause
