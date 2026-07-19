@@ -2,6 +2,63 @@
 
 ---
 
+## Combat Bug Fixes — Phase 2: Player Screen HP Reset (Bug 4) (2026-07-19)
+
+### Root cause
+
+Opening the Player Screen (`[p]` or a HUD portrait click) during combat sets
+`mode = GameMode::CharacterSheet(..)`. `sync_combat_to_party_on_exit`
+(`src/game/systems/combat.rs`) fired on *any* frame where the mode was not
+`Combat` with a non-empty participant mapping, so it treated the overlay as a
+combat exit: it copied data back and called `CombatResource::clear()`. On
+close, the resume mode restored the **stale `CombatState` snapshot** embedded
+in `GameMode::Combat(..)` at encounter start, and `sync_party_to_combat`
+re-cloned it into the emptied resource — resetting every participant's HP,
+round, and turn order to combat-start values.
+
+### Changes
+
+| File | Change |
+| ---- | ------ |
+| `src/game/systems/combat.rs` — `sync_combat_to_party_on_exit` | Early return while `combat_res.state.status == CombatStatus::InProgress`: the sync-and-clear now only runs once combat has genuinely resolved (`Victory`, `Defeat`, `Fled`). Doc comment updated. |
+| `src/game/systems/combat.rs` — `test_combat_sync_to_party` | Fixture now sets `CombatStatus::Victory` (it previously relied on the exit-sync firing for an `InProgress` state, which is exactly the bug-4 behaviour). |
+| `src/game/systems/menu.rs` — `load_game_operation`, `MenuButton::NewGame` | Both now take/clear the `CombatResource` (threaded as `Option<&mut CombatResource>` through `handle_button_press` from the mouse and keyboard menu systems), so a suspended `InProgress` combat can never leak into the next encounter after new-game or load-game. |
+
+### Exit-path audit (no further changes needed)
+
+- All 8 production `exit_combat()` call sites are gated on a terminal status:
+  4 post-action `check_combat_end` sites gated by `status == Fled`, flee sets
+  `Fled` immediately before, monster-action site gated by `Fled`, and the
+  victory/defeat handlers are only reachable via `CombatVictory`/`CombatDefeat`
+  messages emitted when status is `Victory`/`Defeat`.
+- No reachable in-combat path quits to the menu, starts a new game, or loads a
+  save: ESC/menu, inventory, and character-sheet toggles all explicitly ignore
+  `GameMode::Combat`, and `close_modal` has no `Combat` arm. The
+  new-game/load-game resets above are defence-in-depth for future paths.
+- `CombatStatus::Surrendered` exists but is never assigned in production; if a
+  surrender flow is added later it must route through a terminal exit.
+- Overlay round-trip needs no further work: with the gate,
+  `sync_party_to_combat`'s `existing_players > 0` guard preserves the live
+  resource and the stale snapshot is never re-copied.
+
+### Tests Added
+
+All three were verified to fail against the pre-fix code (gate removed).
+
+| Test | What it verifies |
+| ---- | ---------------- |
+| `combat.rs::test_sync_on_exit_noop_while_combat_suspended` | With mode `CharacterSheet` and status `InProgress`, the exit-sync neither clears `CombatResource` nor writes party HP |
+| `combat.rs::test_character_sheet_roundtrip_preserves_combat_state` | End-to-end: damage a player and a monster in the live resource, open the character sheet, pump frames, restore the resume mode, pump frames — participant HP, `round`, `current_turn`, `turn_order` all unchanged |
+| `menu.rs::test_load_game_clears_suspended_combat_resource` | `load_game_operation` clears a populated suspended `CombatResource` |
+
+### Quality gates
+
+`cargo fmt` clean, `cargo clippy --all-targets --all-features -- -D warnings`
+clean, `cargo nextest run --all-features`: 5345 passed / 0 failed (full
+doctest run excluded per project convention).
+
+---
+
 ## Combat Bug Fixes — Phase 1: Monster Turn Deadlock (Bugs 2 & 3) (2026-07-18)
 
 ### Root cause

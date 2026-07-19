@@ -21,6 +21,7 @@ use crate::application::save_game::SaveGameManager;
 use crate::application::GameMode;
 use crate::game::components::menu::*;
 use crate::game::resources::{CampaignFontHandles, GlobalState};
+use crate::game::systems::combat::CombatResource;
 use crate::game::systems::mouse_input;
 use crate::game::systems::ui::GameLog;
 use crate::game::systems::ui_helpers::{text_style_with_font, BODY_FONT_SIZE};
@@ -1345,6 +1346,7 @@ fn menu_button_interaction(
     mut global_state: ResMut<GlobalState>,
     save_manager: Res<SaveGameManager>,
     mut game_log: Option<ResMut<GameLog>>,
+    mut combat_res: Option<ResMut<CombatResource>>,
 ) {
     let mouse_just_pressed = mouse_input::mouse_just_pressed(mouse_buttons.as_deref());
 
@@ -1361,6 +1363,7 @@ fn menu_button_interaction(
                 &mut global_state,
                 &save_manager,
                 game_log.as_deref_mut(),
+                combat_res.as_deref_mut(),
             );
         }
     }
@@ -1375,6 +1378,7 @@ fn handle_button_press(
     global_state: &mut GlobalState,
     save_manager: &SaveGameManager,
     game_log: Option<&mut GameLog>,
+    combat_res: Option<&mut CombatResource>,
 ) {
     match button {
         MenuButton::Resume => {
@@ -1398,7 +1402,13 @@ fn handle_button_press(
                     debug!("Load Game pressed (in SaveLoad)");
                     if let Some(save_info) = menu_state.save_list.get(menu_state.selected_index) {
                         let filename = save_info.filename.clone();
-                        load_game_operation(global_state, save_manager, &filename, game_log);
+                        load_game_operation(
+                            global_state,
+                            save_manager,
+                            &filename,
+                            game_log,
+                            combat_res,
+                        );
                     } else {
                         warn!("Load pressed but no save selected");
                     }
@@ -1457,6 +1467,12 @@ fn handle_button_press(
                 match crate::application::GameState::new_game(campaign) {
                     Ok((new_state, _)) => {
                         global_state.0 = new_state;
+                        // Drop any suspended combat from the previous session so
+                        // stale InProgress state cannot leak into the next
+                        // encounter of the new game.
+                        if let Some(cr) = combat_res {
+                            cr.clear();
+                        }
                         debug!("Started new game from campaign");
                     }
                     Err(e) => {
@@ -1562,6 +1578,7 @@ fn load_game_operation(
     save_manager: &SaveGameManager,
     selected_filename: &str,
     game_log: Option<&mut GameLog>,
+    combat_res: Option<&mut CombatResource>,
 ) {
     match save_manager.load(selected_filename) {
         Ok(loaded_state) => {
@@ -1572,6 +1589,12 @@ fn load_game_operation(
 
             // Return to exploration mode
             global_state.0.mode = GameMode::Exploration;
+
+            // Drop any suspended combat from the previous session so stale
+            // InProgress state cannot leak into the loaded game's encounters.
+            if let Some(cr) = combat_res {
+                cr.clear();
+            }
 
             // Restore the live game log from the entries embedded in the save.
             if let Some(log) = game_log {
@@ -1789,6 +1812,7 @@ fn handle_menu_keyboard(
     mut global_state: ResMut<GlobalState>,
     save_manager: Res<SaveGameManager>,
     mut game_log: Option<ResMut<GameLog>>,
+    mut combat_res: Option<ResMut<CombatResource>>,
 ) {
     if !matches!(global_state.0.mode, GameMode::Menu(_)) {
         return;
@@ -1856,6 +1880,7 @@ fn handle_menu_keyboard(
                     &mut global_state,
                     &save_manager,
                     game_log.as_deref_mut(),
+                    combat_res.as_deref_mut(),
                 );
             }
             MenuType::SaveLoad => {
@@ -1866,6 +1891,7 @@ fn handle_menu_keyboard(
                         &mut global_state,
                         &save_manager,
                         game_log.as_deref_mut(),
+                        combat_res.as_deref_mut(),
                     );
                 }
             }
@@ -2144,7 +2170,7 @@ mod tests {
         gs.0.enter_menu();
 
         // Press Save (simulate button press)
-        handle_button_press(&MenuButton::SaveGame, &mut gs, &manager, None);
+        handle_button_press(&MenuButton::SaveGame, &mut gs, &manager, None, None);
 
         // Should be in Menu mode and SaveLoad submenu
         if let GameMode::Menu(ms) = &gs.0.mode {
@@ -2174,7 +2200,7 @@ mod tests {
         assert_eq!(manager.list_saves().unwrap().len(), 0);
 
         // Press Confirm (Save) in SaveLoad
-        handle_button_press(&MenuButton::Confirm, &mut gs, &manager, None);
+        handle_button_press(&MenuButton::Confirm, &mut gs, &manager, None, None);
 
         // After save, we should have at least one save file and menu returned to Main
         let saves = manager.list_saves().unwrap();
@@ -2215,10 +2241,42 @@ mod tests {
         }
 
         // Press Load
-        handle_button_press(&MenuButton::LoadGame, &mut gs, &manager, None);
+        handle_button_press(&MenuButton::LoadGame, &mut gs, &manager, None, None);
 
         // After a successful load the game mode should be Exploration
         assert!(matches!(gs.0.mode, GameMode::Exploration));
+    }
+
+    /// Loading a save must drop any suspended (still `InProgress`) combat so
+    /// stale state cannot leak into the loaded game's next encounter.
+    #[test]
+    fn test_load_game_clears_suspended_combat_resource() {
+        use tempfile::TempDir;
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        let saved_state = GameState::new();
+        manager.save("clears_combat", &saved_state).unwrap();
+
+        let mut gs = GlobalState(GameState::new());
+        gs.0.enter_menu();
+
+        // Simulate a combat left suspended from the previous session.
+        let mut cr = CombatResource::new();
+        cr.player_orig_indices = vec![Some(0)];
+        cr.state.round = 3;
+
+        load_game_operation(&mut gs, &manager, "clears_combat", None, Some(&mut cr));
+
+        assert!(matches!(gs.0.mode, GameMode::Exploration));
+        assert!(
+            cr.player_orig_indices.is_empty(),
+            "load must clear the suspended CombatResource mapping"
+        );
+        assert_eq!(
+            cr.state.round, 1,
+            "load must reset the suspended combat state to a fresh one"
+        );
     }
 
     #[test]
@@ -2436,7 +2494,7 @@ mod tests {
         let mut log = GameLog::new();
         assert!(log.entries().is_empty());
 
-        load_game_operation(&mut gs, &manager, "log_restore_test", Some(&mut log));
+        load_game_operation(&mut gs, &manager, "log_restore_test", Some(&mut log), None);
 
         // The live game log should now contain the restored entries.
         let entries = log.entries();
@@ -2480,7 +2538,7 @@ mod tests {
         let filename = saves[0].clone();
 
         let mut gs2 = GlobalState(GameState::new());
-        load_game_operation(&mut gs2, &manager, &filename, Some(&mut fresh_log));
+        load_game_operation(&mut gs2, &manager, &filename, Some(&mut fresh_log), None);
 
         // Verify all three entries are restored with correct categories and text.
         let entries = fresh_log.entries();
@@ -2517,7 +2575,7 @@ mod tests {
         let filename = saves[0].clone();
 
         let mut gs2 = GlobalState(GameState::new());
-        load_game_operation(&mut gs2, &manager, &filename, None);
+        load_game_operation(&mut gs2, &manager, &filename, None, None);
 
         assert!(matches!(gs2.0.mode, GameMode::Exploration));
     }

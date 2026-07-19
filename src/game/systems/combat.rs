@@ -1672,6 +1672,11 @@ pub(crate) fn sync_party_hp_during_combat(
 
 /// System: When combat has ended (global mode is not Combat) copy combat state
 /// data (HP, SP, conditions, stat currents) back into the party members.
+///
+/// Only fires once combat has genuinely resolved (`Victory`, `Defeat`, or
+/// `Fled`). While the status is still `InProgress` the party is merely
+/// suspended behind a UI overlay (character sheet, HUD portrait click) and the
+/// live combat state must be preserved untouched for when the overlay closes.
 fn sync_combat_to_party_on_exit(
     mut global_state: ResMut<GlobalState>,
     mut combat_res: ResMut<CombatResource>,
@@ -1683,6 +1688,14 @@ fn sync_combat_to_party_on_exit(
     }
 
     if combat_res.player_orig_indices.is_empty() {
+        return;
+    }
+
+    // Combat still InProgress means we are suspended behind an overlay, not
+    // done: syncing-and-clearing here would destroy live HP/round/turn state
+    // and the stale snapshot inside GameMode::Combat(..) would later be
+    // re-cloned over it by sync_party_to_combat (bug 4).
+    if combat_res.state.status == crate::domain::combat::types::CombatStatus::InProgress {
         return;
     }
 
@@ -8467,6 +8480,9 @@ mod tests {
         let mut cs = CombatState::new(Handicap::Even);
         hero.hp.modify(-7); // hero now has current HP lowered (mutating local hero)
         cs.add_player(hero.clone());
+        // Combat must have genuinely resolved for the exit-sync to fire; while
+        // InProgress the state is treated as suspended behind an overlay.
+        cs.status = crate::domain::combat::types::CombatStatus::Victory;
         // Build mapping: participant 0 -> party index 0
         let mut cr = CombatResource::new();
         cr.state = cs;
@@ -13324,6 +13340,228 @@ mod tests {
                 .any(|line| line.plain_text().to_lowercase().contains("surprised")),
             "combat log must contain the 'surprised' skip message from round 1"
         );
+    }
+
+    /// Regression test for the Player Screen HP reset (bug 4), unit-level:
+    /// while combat is suspended behind an overlay (mode is not `Combat`,
+    /// status still `InProgress`), `sync_combat_to_party_on_exit` must be a
+    /// no-op — no `CombatResource::clear()`, no writes to `party.members`.
+    #[test]
+    fn test_sync_on_exit_noop_while_combat_suspended() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let party_hp_before = hero.hp.current;
+
+        let wolf = crate::domain::combat::monster::Monster::new(
+            80,
+            "Wolf".to_string(),
+            crate::domain::character::Stats::new(10, 5, 5, 10, 8, 10, 10),
+            20,
+            8,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.add_monster(wolf);
+        cs.turn_order = vec![CombatantId::Monster(1), CombatantId::Player(0)];
+        cs.current_turn = 1;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        // Live combat state diverges from the party: the player has taken
+        // damage inside combat that has not (and must not) be written back yet.
+        let player_live_hp = party_hp_before.saturating_sub(5);
+        if let Combatant::Player(pc) = &mut cs.participants[0] {
+            pc.hp.current = player_live_hp;
+        }
+
+        // Suspended behind the character sheet: resume mode holds the combat
+        // snapshot, current mode is NOT Combat.
+        let mut gs = GameState::new();
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+        gs.enter_character_sheet();
+        assert!(
+            matches!(gs.mode, crate::application::GameMode::CharacterSheet(_)),
+            "pre-condition: mode must be CharacterSheet"
+        );
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), None];
+        }
+
+        app.update();
+        app.update();
+
+        // CombatResource must be untouched: not cleared, participants intact.
+        let cr = app.world().resource::<CombatResource>();
+        assert_eq!(
+            cr.player_orig_indices,
+            vec![Some(0), None],
+            "player_orig_indices must not be cleared while combat is suspended"
+        );
+        assert_eq!(
+            cr.state.participants.len(),
+            2,
+            "participants must not be cleared while combat is suspended"
+        );
+        if let Combatant::Player(pc) = &cr.state.participants[0] {
+            assert_eq!(
+                pc.hp.current, player_live_hp,
+                "live combat HP must be preserved while suspended"
+            );
+        } else {
+            panic!("participant 0 must be the player");
+        }
+
+        // The party must not have received the combat values yet.
+        let gs = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+        assert_eq!(
+            gs.0.party.members[0].hp.current, party_hp_before,
+            "party HP must not be written while combat is suspended"
+        );
+    }
+
+    /// Regression test for the Player Screen HP reset (bug 4), end-to-end:
+    /// opening the character sheet mid-combat and closing it (restoring the
+    /// resume mode, which holds the STALE combat-start snapshot) must leave
+    /// the live `CombatResource` — participant HP, round, current_turn,
+    /// turn_order — exactly as it was.
+    #[test]
+    fn test_character_sheet_roundtrip_preserves_combat_state() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let wolf = crate::domain::combat::monster::Monster::new(
+            81,
+            "Wolf".to_string(),
+            crate::domain::character::Stats::new(10, 5, 5, 10, 8, 10, 10),
+            20,
+            8,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+
+        // The snapshot stored inside GameMode::Combat(..) keeps combat-START
+        // values: full HP, round 1, turn 0. It is never updated during combat.
+        let mut snapshot = CombatState::new(Handicap::Even);
+        snapshot.add_player(hero.clone());
+        snapshot.add_monster(wolf);
+        snapshot.turn_order = vec![CombatantId::Monster(1), CombatantId::Player(0)];
+        snapshot.current_turn = 0;
+        snapshot.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        // The LIVE state has progressed: both a monster and the player took
+        // damage, the round advanced, and it is the player's turn (slot 1).
+        let mut live = snapshot.clone();
+        live.round = 2;
+        live.current_turn = 1;
+        let player_live_hp = hero.hp.current.saturating_sub(5);
+        if let Combatant::Player(pc) = &mut live.participants[0] {
+            pc.hp.current = player_live_hp;
+        }
+        let monster_live_hp = 12;
+        if let Combatant::Monster(mon) = &mut live.participants[1] {
+            mon.hp.current = monster_live_hp;
+        }
+        let live_turn_order = live.turn_order.clone();
+
+        let mut gs = GameState::new();
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat_with_state(snapshot);
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = live;
+            cr.player_orig_indices = vec![Some(0), None];
+        }
+
+        // A couple of live combat frames (player's turn — nothing acts).
+        app.update();
+        app.update();
+
+        // Open the Player Screen mid-combat ([p] / HUD portrait click).
+        app.world_mut()
+            .resource_mut::<crate::game::resources::GlobalState>()
+            .0
+            .enter_character_sheet();
+        app.update();
+        app.update();
+
+        // Close it: restore the resume mode exactly as character_sheet_ui does.
+        {
+            let mut gs = app
+                .world_mut()
+                .resource_mut::<crate::game::resources::GlobalState>();
+            let resume = match &gs.0.mode {
+                crate::application::GameMode::CharacterSheet(cs_state) => {
+                    cs_state.get_resume_mode()
+                }
+                other => panic!("expected CharacterSheet mode, got {:?}", other),
+            };
+            gs.0.mode = resume;
+        }
+        app.update();
+        app.update();
+
+        // The live combat state must have survived the round trip untouched.
+        let cr = app.world().resource::<CombatResource>();
+        assert_eq!(
+            cr.state.round, 2,
+            "round must survive the overlay round trip"
+        );
+        assert_eq!(
+            cr.state.current_turn, 1,
+            "current_turn must survive the overlay round trip"
+        );
+        assert_eq!(
+            cr.state.turn_order, live_turn_order,
+            "turn_order must survive the overlay round trip"
+        );
+        if let Combatant::Player(pc) = &cr.state.participants[0] {
+            assert_eq!(
+                pc.hp.current, player_live_hp,
+                "player combat HP must not reset to the combat-start snapshot"
+            );
+        } else {
+            panic!("participant 0 must be the player");
+        }
+        if let Combatant::Monster(mon) = &cr.state.participants[1] {
+            assert_eq!(
+                mon.hp.current, monster_live_hp,
+                "monster combat HP must not reset to the combat-start snapshot"
+            );
+        } else {
+            panic!("participant 1 must be the monster");
+        }
     }
 
     // ── Integration tests ─────────────────────────────────────────────────────
