@@ -2,6 +2,83 @@
 
 ---
 
+## Combat Improvements — Phase 1: Use Item on a Party Member (2026-07-19)
+
+First phase of `docs/explanation/combat_improvements_implementation_plan.md`.
+Beneficial consumables (heal, restore SP, cure, boosts, resurrect) now prompt
+for a party-member target via the shared party target panel instead of
+hardcoding `target = user` — the domain layer (`execute_item_use_by_slot`)
+always supported arbitrary player targets; only the UI path was missing.
+
+### Shared target-eligibility helper (`src/game/systems/ui_helpers.rs`)
+
+- New `TargetEligibility` enum (`Any`/`LivingOnly`/`DeadOnly`) with
+  `is_eligible(&Character)` driven by `Condition::is_dead()`.
+- New `consumable_target_eligibility(&ConsumableEffect)`:
+  `Resurrect` → `DeadOnly`; heal/restore/cure/boosts → `LivingOnly`;
+  pass-through effects (`IsFood`, `CastSpell`, `LearnSpell`) → `Any`.
+- Pure and Bevy-free; the ally-spell-targeting phase will add the
+  `SpellEffectType` equivalent on top of the same enum.
+
+### Party target panel generalization (`src/game/systems/combat.rs`)
+
+- New `PartyTargetAction` enum (`Spell { caster, spell_id }` /
+  `Item { user, inventory_index }`) replaces
+  `PartyTargetPanelState.pending_spell`; new state fields `eligible_flags`
+  (parallel to `participant_indices`) and `preferred_target` (participant to
+  focus initially — the item user's own row, so self-use stays one Enter
+  away).
+- `update_party_target_panel` computes per-row eligibility via
+  `party_target_eligibility` (items → consumable effect mapping; spells →
+  `Any` until the next phase), renders ineligible rows greyed
+  (`ACTION_BUTTON_DISABLED_COLOR`, dimmed text), spawns a "No valid target"
+  note when nothing is eligible, and resolves initial focus
+  (preferred-if-eligible → first eligible → 0).
+- `handle_party_target_button` matches on the pending action and emits
+  `CastSpellAction` or `UseItemAction` via the new `emit_party_target_action`
+  helper; ineligible rows ignore both mouse clicks and keyboard confirm.
+- Keyboard navigation (`combat_input_system`) skips ineligible rows through
+  the new pure `next_eligible_index` helper (wrap-around, stays put when no
+  other eligible row); Escape now reopens the panel the pending action came
+  from — spell panel for `Spell`, item panel for `Item`.
+- `dispatch_item_button` routes through the new `item_dispatch_route`
+  classifier: `spell_effect` items follow the referenced spell's target
+  (`SingleMonster` → monster targeting, `SingleCharacter` → party panel),
+  beneficial consumables → party panel, food/scroll pass-throughs → immediate
+  self-use (unchanged behavior).
+
+### Domain guard (`src/domain/items/consumable_usage.rs`)
+
+`apply_consumable_effect` now makes `HealHp` a no-op on a dead character
+(mirroring how `Resurrect` already no-ops on the living) — previously a dead
+character would gain HP while keeping the `DEAD` condition, silently wasting
+the consumable.
+
+### Tests Added
+
+| Test | File | What it verifies |
+| ---- | ---- | ---- |
+| `test_consumable_target_eligibility_mapping` | ui_helpers.rs | Every `ConsumableEffect` variant maps to the right eligibility |
+| `test_target_eligibility_is_eligible` | ui_helpers.rs | Living/dead × Any/LivingOnly/DeadOnly matrix |
+| `TargetEligibility::is_eligible` + `consumable_target_eligibility` doctests | ui_helpers.rs | Public API examples |
+| `test_next_eligible_index_skips_ineligible` | combat.rs | Wrap-around skip, sole-eligible cycle, no-eligible stays put |
+| `test_item_dispatch_route_classification` | combat.rs | Potion/resurrect → party, monster-wand → monster, healing-wand → party, food/unknown → self |
+| `test_item_panel_dispatches_use_item_action` (updated) | combat.rs | Healing potion opens the party panel with the user's row preferred |
+| `test_party_target_confirm_item_heals_ally` | combat.rs | Full flow: confirm ally row → ally healed, item consumed from user's inventory |
+| `test_resurrect_item_panel_dead_only_eligibility` | combat.rs | Panel marks living ineligible / dead eligible and focuses the dead row |
+| `test_heal_hp_on_dead_character_is_noop` | consumable_usage.rs | Healing cannot raise the dead; `DEAD` persists; zero healing reported |
+
+Existing spell party-target tests updated for the `PartyTargetAction` payload
+(`pending_spell` → `pending_action`).
+
+### Quality gates
+
+`cargo clippy --workspace --all-targets -- -D warnings` clean;
+`cargo test --workspace` green (full doctest run excluded per project
+convention).
+
+---
+
 ## Combat Bug Fixes — Phase 4: Combat UX Polish (2026-07-19)
 
 Addresses `docs/explanation/next_plans.md` lines 212–214: it was hard to tell

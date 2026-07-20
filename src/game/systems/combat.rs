@@ -638,6 +638,9 @@ pub struct PartyTargetButton {
     pub list_index: usize,
     /// Actual index in `CombatResource::state.participants`.
     pub participant_index: usize,
+    /// Whether this row is a valid target for the pending action. Ineligible
+    /// rows render greyed and ignore clicks/confirms.
+    pub eligible: bool,
 }
 
 /// Marker component for the Cancel button inside the party target panel.
@@ -919,15 +922,39 @@ pub struct PendingSpellCast {
     pub data: Option<(CombatantId, crate::domain::types::SpellId)>,
 }
 
-/// State for the party-member target selection flow during a `SingleCharacter` combat spell.
+/// The action awaiting a party-member target in the party target panel.
 ///
-/// Activated when `apply_spell_selection` processes a `SingleCharacter` spell.
-/// Cleared when the player selects a target, presses Escape, or combat ends.
+/// The panel is shared by two flows: casting a `SingleCharacter` spell on an
+/// ally and using a beneficial consumable (potion, cure, resurrect) on an
+/// ally. The variant determines which action message is emitted on confirm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PartyTargetAction {
+    /// A `SingleCharacter` spell waiting for its target; emits `CastSpellAction`.
+    Spell {
+        /// The combatant casting the spell.
+        caster: CombatantId,
+        /// The spell to cast once a target is confirmed.
+        spell_id: crate::domain::types::SpellId,
+    },
+    /// A beneficial item waiting for its target; emits `UseItemAction`.
+    Item {
+        /// The combatant using the item (whose inventory it comes from).
+        user: CombatantId,
+        /// Slot index in the user's inventory.
+        inventory_index: usize,
+    },
+}
+
+/// State for the party-member target selection flow during combat.
+///
+/// Activated when a `SingleCharacter` spell or a beneficial consumable is
+/// chosen. Cleared when the player selects a target, presses Escape, or
+/// combat ends.
 #[derive(Resource, Default)]
 pub struct PartyTargetPanelState {
-    /// The pending `(caster, spell_id)` waiting for a party-member target.
+    /// The action waiting for a party-member target.
     /// `None` means the panel is not open.
-    pub pending_spell: Option<(CombatantId, crate::domain::types::SpellId)>,
+    pub pending_action: Option<PartyTargetAction>,
     /// Keyboard-cursor position within `participant_indices`.
     pub focused_index: usize,
     /// Set by keyboard Enter; consumed by `handle_party_target_button`.
@@ -935,6 +962,14 @@ pub struct PartyTargetPanelState {
     /// Ordered list of participant indices (into `CombatResource::state.participants`)
     /// shown in the panel. Populated when the panel first opens.
     pub participant_indices: Vec<usize>,
+    /// Parallel to `participant_indices`: whether each row is a valid target
+    /// for the pending action (dead members are ineligible for heals, living
+    /// members for resurrection). Populated when the panel first opens.
+    pub eligible_flags: Vec<bool>,
+    /// Participant index whose row should receive initial keyboard focus when
+    /// the panel opens (e.g. the item user's own row). Falls back to the
+    /// first eligible row when `None` or ineligible.
+    pub preferred_target: Option<usize>,
 }
 
 /// Tracks whether the item selection panel is open and for which combatant.
@@ -2849,9 +2884,10 @@ fn apply_spell_selection(
         SpellTarget::SingleCharacter => {
             // Enter party-member target selection — `CastSpellAction` is emitted when
             // the player confirms a target in the party target panel.
-            party_target_state.pending_spell = Some((caster, spell_id));
+            party_target_state.pending_action = Some(PartyTargetAction::Spell { caster, spell_id });
             party_target_state.focused_index = 0;
             party_target_state.confirm_requested = false;
+            party_target_state.preferred_target = None;
         }
         SpellTarget::AllMonsters | SpellTarget::MonsterGroup | SpellTarget::SpecificMonsters => {
             // Use the first alive monster as target placeholder;
@@ -2903,50 +2939,107 @@ fn cleanup_spell_panel_on_combat_exit(
     }
 }
 
+/// Derives the target-eligibility rule for the panel's pending action.
+///
+/// - `Item`: from the item's consumable effect via
+///   [`crate::game::systems::ui_helpers::consumable_target_eligibility`]
+///   (resurrect → dead only, other beneficial effects → living only).
+/// - `Spell`: currently `Any` — spell-effect-driven eligibility lands with
+///   the ally-spell-targeting polish phase.
+fn party_target_eligibility(
+    action: &PartyTargetAction,
+    combat_res: &CombatResource,
+    content: &GameContent,
+) -> crate::game::systems::ui_helpers::TargetEligibility {
+    use crate::game::systems::ui_helpers::TargetEligibility;
+    match action {
+        PartyTargetAction::Spell { .. } => TargetEligibility::Any,
+        PartyTargetAction::Item {
+            user,
+            inventory_index,
+        } => {
+            let CombatantId::Player(user_idx) = user else {
+                return TargetEligibility::Any;
+            };
+            let Some(Combatant::Player(pc)) = combat_res.state.participants.get(*user_idx) else {
+                return TargetEligibility::Any;
+            };
+            pc.as_ref()
+                .inventory
+                .items
+                .get(*inventory_index)
+                .and_then(|slot| content.db().items.get_item(slot.item_id))
+                .and_then(|item| match &item.item_type {
+                    crate::domain::items::types::ItemType::Consumable(data) => Some(
+                        crate::game::systems::ui_helpers::consumable_target_eligibility(
+                            &data.effect,
+                        ),
+                    ),
+                    _ => None,
+                })
+                .unwrap_or(TargetEligibility::Any)
+        }
+    }
+}
+
 /// System: Spawn or despawn the party-member target selection panel.
 ///
-/// - When `pending_spell` is `None`, despawns any existing panel.
+/// - When `pending_action` is `None`, despawns any existing panel.
 /// - When a panel is already spawned, returns early (idempotent).
-/// - Otherwise, collects alive party participants, stores their indices in the
-///   resource, and spawns the panel with one button per participant.
+/// - Otherwise, collects party participants, computes per-row target
+///   eligibility for the pending action (ineligible rows render greyed and
+///   unselectable), stores both in the resource, and spawns the panel with
+///   one button per participant. Initial keyboard focus goes to the
+///   `preferred_target` row when eligible, otherwise the first eligible row.
 fn update_party_target_panel(
     mut commands: Commands,
     mut state: ResMut<PartyTargetPanelState>,
     combat_res: Res<CombatResource>,
+    content: Option<Res<GameContent>>,
     existing_panel: Query<Entity, With<PartyTargetPanel>>,
 ) {
     // ── Despawn if panel should be closed ────────────────────────────────────
-    if state.pending_spell.is_none() {
+    let Some(pending_action) = state.pending_action else {
         for e in existing_panel.iter() {
             commands.entity(e).despawn();
         }
         return;
-    }
+    };
 
     // ── Already open — nothing to do ────────────────────────────────────────
     if !existing_panel.is_empty() {
         return;
     }
 
-    // ── Collect party participant indices ────────────────────────────────────
-    let participant_indices: Vec<usize> = combat_res
-        .state
-        .participants
-        .iter()
-        .enumerate()
-        .filter_map(|(i, p)| {
-            if matches!(p, Combatant::Player(_)) {
-                Some(i)
-            } else {
-                None
-            }
-        })
-        .collect();
+    let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+    let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
+
+    // ── Collect party participant indices and per-row eligibility ────────────
+    let eligibility = party_target_eligibility(&pending_action, &combat_res, content_ref);
+    let mut participant_indices: Vec<usize> = Vec::new();
+    let mut eligible_flags: Vec<bool> = Vec::new();
+    for (i, p) in combat_res.state.participants.iter().enumerate() {
+        if let Combatant::Player(pc) = p {
+            participant_indices.push(i);
+            eligible_flags.push(eligibility.is_eligible(pc.as_ref()));
+        }
+    }
 
     state.participant_indices = participant_indices;
-    state.focused_index = state
-        .focused_index
-        .min(state.participant_indices.len().saturating_sub(1));
+    state.eligible_flags = eligible_flags;
+
+    // Initial focus: the preferred row when eligible, else the first eligible
+    // row, else 0 (cancel-only panel).
+    let preferred_list_index = state.preferred_target.and_then(|pidx| {
+        state
+            .participant_indices
+            .iter()
+            .position(|&i| i == pidx)
+            .filter(|&li| state.eligible_flags[li])
+    });
+    state.focused_index = preferred_list_index
+        .or_else(|| state.eligible_flags.iter().position(|&e| e))
+        .unwrap_or(0);
 
     // ── Spawn the panel ──────────────────────────────────────────────────────
     commands
@@ -2976,8 +3069,21 @@ fn update_party_target_panel(
                 TextColor(Color::srgb(0.9, 0.9, 1.0)),
             ));
 
+            // With no eligible target the panel is cancel-only; say so.
+            if !state.eligible_flags.iter().any(|&e| e) {
+                panel.spawn((
+                    Text::new("No valid target"),
+                    TextFont {
+                        font_size: 11.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.75, 0.55, 0.55)),
+                ));
+            }
+
             // One button per party participant
             for (list_index, &pidx) in state.participant_indices.clone().iter().enumerate() {
+                let eligible = state.eligible_flags.get(list_index).copied().unwrap_or(true);
                 let label = combat_res
                     .state
                     .participants
@@ -3007,11 +3113,16 @@ fn update_party_target_panel(
                             justify_content: JustifyContent::FlexStart,
                             ..default()
                         },
-                        BackgroundColor(ACTION_BUTTON_COLOR),
+                        BackgroundColor(if eligible {
+                            ACTION_BUTTON_COLOR
+                        } else {
+                            ACTION_BUTTON_DISABLED_COLOR
+                        }),
                         BorderRadius::all(Val::Px(4.0)),
                         PartyTargetButton {
                             list_index,
                             participant_index: pidx,
+                            eligible,
                         },
                     ))
                     .with_children(|btn| {
@@ -3021,7 +3132,11 @@ fn update_party_target_panel(
                                 font_size: 11.0,
                                 ..default()
                             },
-                            TextColor(Color::WHITE),
+                            TextColor(if eligible {
+                                Color::WHITE
+                            } else {
+                                Color::srgb(0.55, 0.55, 0.55)
+                            }),
                         ));
                     });
             }
@@ -3075,15 +3190,20 @@ fn update_party_target_panel(
 }
 
 /// System: Update party-member button highlight colors to reflect the keyboard cursor.
+///
+/// Ineligible rows keep the disabled color and never receive the focus
+/// highlight (keyboard navigation skips them).
 fn update_party_target_highlight(
     state: Res<PartyTargetPanelState>,
     mut buttons: Query<(&PartyTargetButton, &mut BackgroundColor)>,
 ) {
-    if state.pending_spell.is_none() {
+    if state.pending_action.is_none() {
         return;
     }
     for (btn, mut bg) in buttons.iter_mut() {
-        *bg = if btn.list_index == state.focused_index {
+        *bg = if !btn.eligible {
+            BackgroundColor(ACTION_BUTTON_DISABLED_COLOR)
+        } else if btn.list_index == state.focused_index {
             BackgroundColor(ACTION_BUTTON_CONFIRMED_COLOR)
         } else {
             BackgroundColor(ACTION_BUTTON_COLOR)
@@ -3091,23 +3211,82 @@ fn update_party_target_highlight(
     }
 }
 
+/// Returns the next keyboard-focus index in the party target panel, moving
+/// one step forward or backward (with wrap-around) and skipping ineligible
+/// rows. Returns `current` unchanged when no other eligible row exists.
+///
+/// Pure and Bevy-free so it is directly unit-testable.
+fn next_eligible_index(eligible: &[bool], current: usize, count: usize, forward: bool) -> usize {
+    if count == 0 {
+        return current;
+    }
+    let mut idx = current;
+    for _ in 0..count {
+        idx = if forward {
+            (idx + 1) % count
+        } else {
+            idx.checked_sub(1).unwrap_or(count - 1)
+        };
+        if eligible.get(idx).copied().unwrap_or(false) {
+            return idx;
+        }
+    }
+    current
+}
+
+/// Emits the action message for a confirmed party-member target: a
+/// `CastSpellAction` for the `Spell` variant, a `UseItemAction` for `Item`.
+fn emit_party_target_action(
+    action: PartyTargetAction,
+    target_pidx: usize,
+    cast_writer: &mut Option<MessageWriter<CastSpellAction>>,
+    use_item_writer: &mut Option<MessageWriter<UseItemAction>>,
+) {
+    match action {
+        PartyTargetAction::Spell { caster, spell_id } => {
+            if let Some(ref mut w) = cast_writer {
+                w.write(CastSpellAction {
+                    caster,
+                    spell_id,
+                    target: CombatantId::Player(target_pidx),
+                });
+            }
+        }
+        PartyTargetAction::Item {
+            user,
+            inventory_index,
+        } => {
+            if let Some(ref mut w) = use_item_writer {
+                w.write(UseItemAction {
+                    user,
+                    inventory_index,
+                    target: CombatantId::Player(target_pidx),
+                });
+            }
+        }
+    }
+}
+
 /// System: Handle clicks and keyboard-confirm for party-member target buttons.
 ///
-/// When a party member is confirmed (mouse click or keyboard Enter on the
-/// focused row), emits a `CastSpellAction` with that party member as the target
-/// and closes the panel by clearing `PartyTargetPanelState`.
+/// When an eligible party member is confirmed (mouse click or keyboard Enter
+/// on the focused row), emits the pending action's message (`CastSpellAction`
+/// or `UseItemAction`) with that party member as the target and closes the
+/// panel by clearing `PartyTargetPanelState`. Ineligible rows are ignored.
 fn handle_party_target_button(
     party_buttons: Query<(&Interaction, &PartyTargetButton), Changed<Interaction>>,
     cancel_buttons: Query<&Interaction, (Changed<Interaction>, With<PartyTargetCancelButton>)>,
     mut state: ResMut<PartyTargetPanelState>,
     mut cast_writer: Option<MessageWriter<CastSpellAction>>,
+    mut use_item_writer: Option<MessageWriter<UseItemAction>>,
 ) {
     // ── Cancel button ─────────────────────────────────────────────────────────
     for interaction in cancel_buttons.iter() {
         if *interaction == Interaction::Pressed {
-            state.pending_spell = None;
+            state.pending_action = None;
             state.focused_index = 0;
             state.confirm_requested = false;
+            state.preferred_target = None;
             return;
         }
     }
@@ -3116,17 +3295,15 @@ fn handle_party_target_button(
     if state.confirm_requested {
         state.confirm_requested = false;
         let focused = state.focused_index;
+        if !state.eligible_flags.get(focused).copied().unwrap_or(false) {
+            return;
+        }
         let indices = state.participant_indices.clone();
         if let Some(&pidx) = indices.get(focused) {
-            if let Some((caster, spell_id)) = state.pending_spell.take() {
+            if let Some(action) = state.pending_action.take() {
                 state.focused_index = 0;
-                if let Some(ref mut w) = cast_writer {
-                    w.write(CastSpellAction {
-                        caster,
-                        spell_id,
-                        target: CombatantId::Player(pidx),
-                    });
-                }
+                state.preferred_target = None;
+                emit_party_target_action(action, pidx, &mut cast_writer, &mut use_item_writer);
             }
         }
         return;
@@ -3134,19 +3311,19 @@ fn handle_party_target_button(
 
     // ── Mouse-click path ──────────────────────────────────────────────────────
     for (interaction, btn) in party_buttons.iter() {
-        if *interaction != Interaction::Pressed {
+        if *interaction != Interaction::Pressed || !btn.eligible {
             continue;
         }
-        if let Some((caster, spell_id)) = state.pending_spell.take() {
+        if let Some(action) = state.pending_action.take() {
             state.focused_index = 0;
             state.confirm_requested = false;
-            if let Some(ref mut w) = cast_writer {
-                w.write(CastSpellAction {
-                    caster,
-                    spell_id,
-                    target: CombatantId::Player(btn.participant_index),
-                });
-            }
+            state.preferred_target = None;
+            emit_party_target_action(
+                action,
+                btn.participant_index,
+                &mut cast_writer,
+                &mut use_item_writer,
+            );
         }
         break;
     }
@@ -3357,11 +3534,70 @@ fn update_item_selection_panel(
         });
 }
 
-/// Internal helper: given a chosen item button (from mouse or keyboard), decide
-/// whether to dispatch `UseItemAction` immediately (self-targeting consumables)
-/// or enter monster target-selection mode (offensive spell_effect items).
+/// Where a chosen item button routes next: monster target selection, party
+/// target selection, or an immediate self-targeted use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ItemDispatchRoute {
+    /// Offensive charged item — enter monster target-selection mode.
+    MonsterTarget,
+    /// Beneficial item — open the party target panel to pick an ally.
+    PartyTarget,
+    /// Everything else — dispatch immediately with the user as target.
+    SelfImmediate,
+}
+
+/// Decides how an item routes when chosen from the item panel.
 ///
-/// Closes the item panel in both cases.
+/// - Items with a `spell_effect` follow the referenced spell's target:
+///   `SingleMonster` → monster targeting, `SingleCharacter` → party
+///   targeting, anything else → immediate self-use (current behavior).
+/// - Beneficial consumables (heal, restore, cure, boosts, resurrect) →
+///   party targeting.
+/// - Remaining effects (food, `CastSpell`, `LearnSpell` scrolls) → immediate
+///   self-use.
+fn item_dispatch_route(
+    item_id: crate::domain::types::ItemId,
+    content: &GameContent,
+) -> ItemDispatchRoute {
+    use crate::domain::items::types::{ConsumableEffect, ItemType};
+    use crate::domain::magic::types::SpellTarget;
+
+    let Some(item) = content.db().items.get_item(item_id) else {
+        return ItemDispatchRoute::SelfImmediate;
+    };
+
+    if let Some(spell_id) = item.spell_effect {
+        return match content.db().spells.get_spell(spell_id).map(|s| s.target) {
+            Some(SpellTarget::SingleMonster) => ItemDispatchRoute::MonsterTarget,
+            Some(SpellTarget::SingleCharacter) => ItemDispatchRoute::PartyTarget,
+            _ => ItemDispatchRoute::SelfImmediate,
+        };
+    }
+
+    match &item.item_type {
+        ItemType::Consumable(data) => match data.effect {
+            ConsumableEffect::HealHp(_)
+            | ConsumableEffect::RestoreSp(_)
+            | ConsumableEffect::CureCondition(_)
+            | ConsumableEffect::BoostAttribute(_, _)
+            | ConsumableEffect::BoostResistance(_, _)
+            | ConsumableEffect::Resurrect(_) => ItemDispatchRoute::PartyTarget,
+            ConsumableEffect::IsFood(_)
+            | ConsumableEffect::CastSpell(_)
+            | ConsumableEffect::LearnSpell(_) => ItemDispatchRoute::SelfImmediate,
+        },
+        _ => ItemDispatchRoute::SelfImmediate,
+    }
+}
+
+/// Internal helper: given a chosen item button (from mouse or keyboard), decide
+/// whether to enter monster target-selection mode (offensive spell_effect
+/// items), open the party target panel (beneficial consumables — potion,
+/// cure, resurrect — and `SingleCharacter` spell-effect items), or dispatch
+/// `UseItemAction` immediately with the user as target (everything else).
+///
+/// Closes the item panel in all cases. When the party target panel opens, the
+/// user's own row receives initial focus so self-use stays one confirm away.
 #[allow(clippy::too_many_arguments)]
 fn dispatch_item_button(
     user: CombatantId,
@@ -3370,45 +3606,47 @@ fn dispatch_item_button(
     content: &GameContent,
     item_panel_state: &mut ItemPanelState,
     pending_item: &mut PendingItemUse,
+    party_target_state: &mut PartyTargetPanelState,
     target_sel: &mut TargetSelection,
     action_menu_state: &mut ActionMenuState,
     use_item_writer: &mut Option<MessageWriter<UseItemAction>>,
 ) {
-    // Determine whether the item requires monster target selection.
-    // Items with a `spell_effect` that targets a single monster need targeting;
-    // all consumable effects self-target.
-    let needs_monster_target = content
-        .db()
-        .items
-        .get_item(item_id)
-        .and_then(|item| item.spell_effect)
-        .and_then(|spell_id| content.db().spells.get_spell(spell_id))
-        .map(|spell| {
-            matches!(
-                spell.target,
-                crate::domain::magic::types::SpellTarget::SingleMonster
-            )
-        })
-        .unwrap_or(false);
+    let route = item_dispatch_route(item_id, content);
 
     // Close the item panel regardless of path.
     item_panel_state.user = None;
     item_panel_state.focused_index = 0;
     item_panel_state.confirm_requested = false;
 
-    if needs_monster_target {
-        // Enter target-selection mode — the UseItemAction is emitted on confirm.
-        pending_item.data = Some((user, inventory_index));
-        target_sel.0 = Some(user);
-        action_menu_state.active_target_index = Some(0);
-    } else {
-        // Self-targeting item — dispatch immediately with user as target.
-        if let Some(ref mut w) = use_item_writer {
-            w.write(UseItemAction {
+    match route {
+        ItemDispatchRoute::MonsterTarget => {
+            // Enter target-selection mode — the UseItemAction is emitted on confirm.
+            pending_item.data = Some((user, inventory_index));
+            target_sel.0 = Some(user);
+            action_menu_state.active_target_index = Some(0);
+        }
+        ItemDispatchRoute::PartyTarget => {
+            // Open the party target panel — the UseItemAction is emitted when
+            // the player confirms an eligible party member.
+            party_target_state.pending_action = Some(PartyTargetAction::Item {
                 user,
                 inventory_index,
-                target: user,
             });
+            party_target_state.focused_index = 0;
+            party_target_state.confirm_requested = false;
+            party_target_state.preferred_target = match user {
+                CombatantId::Player(idx) => Some(idx),
+                CombatantId::Monster(_) => None,
+            };
+        }
+        ItemDispatchRoute::SelfImmediate => {
+            if let Some(ref mut w) = use_item_writer {
+                w.write(UseItemAction {
+                    user,
+                    inventory_index,
+                    target: user,
+                });
+            }
         }
     }
 }
@@ -3419,11 +3657,13 @@ fn dispatch_item_button(
 /// and keyboard-confirm signals (`ItemPanelState::confirm_requested`).
 ///
 /// Clicking or keyboard-confirming an `ItemButton`:
-/// - Consumable self-target effects (`HealHp`, `RestoreSp`, `CureCondition`,
-///   `BoostAttribute`, `BoostResistance`, `Resurrect`, food): dispatches
+/// - Beneficial consumables (`HealHp`, `RestoreSp`, `CureCondition`,
+///   `BoostAttribute`, `BoostResistance`, `Resurrect`) and `SingleCharacter`
+///   spell-effect items: opens the party target panel to pick an ally.
+/// - Items with a `SingleMonster` `spell_effect` (offensive charged items /
+///   scrolls): enters monster target-selection mode via `PendingItemUse`.
+/// - Everything else (food, scrolls with other targets): dispatches
 ///   `UseItemAction` with `target = user` immediately.
-/// - Items with a `spell_effect` (offensive charged items / scrolls): enters
-///   monster target-selection mode via `PendingItemUse`.
 ///
 /// Clicking `ItemCancelButton` closes the panel without dispatching.
 #[allow(clippy::too_many_arguments)]
@@ -3432,6 +3672,7 @@ fn handle_item_button_interaction(
     cancel_buttons: Query<&Interaction, (Changed<Interaction>, With<ItemCancelButton>)>,
     mut item_panel_state: ResMut<ItemPanelState>,
     mut pending_item: ResMut<PendingItemUse>,
+    mut party_target_state: ResMut<PartyTargetPanelState>,
     mut target_sel: ResMut<TargetSelection>,
     mut action_menu_state: ResMut<ActionMenuState>,
     combat_res: Res<CombatResource>,
@@ -3499,6 +3740,7 @@ fn handle_item_button_interaction(
                     content_ref,
                     &mut item_panel_state,
                     &mut pending_item,
+                    &mut party_target_state,
                     &mut target_sel,
                     &mut action_menu_state,
                     &mut use_item_writer,
@@ -3521,6 +3763,7 @@ fn handle_item_button_interaction(
             content_ref,
             &mut item_panel_state,
             &mut pending_item,
+            &mut party_target_state,
             &mut target_sel,
             &mut action_menu_state,
             &mut use_item_writer,
@@ -4176,32 +4419,47 @@ fn combat_input_system(
                 // Signal handle_spell_button_interaction to fire the focused spell.
                 spell_state.panel.confirm_requested = true;
             }
-        } else if spell_state.party_target.pending_spell.is_some() {
+        } else if spell_state.party_target.pending_action.is_some() {
             // ---- Party-target-selection keyboard handling ----
             let target_count = spell_state.party_target.participant_indices.len();
             if kb.just_pressed(KeyCode::Escape) {
-                // Cancel party-target selection.  Reopen the spell panel so the
-                // player can choose a different spell, rather than going all the
-                // way back to the action menu.
-                if let Some((caster, _)) = spell_state.party_target.pending_spell.take() {
-                    spell_state.panel.caster = Some(caster);
-                    spell_state.panel.focused_index = 0;
-                    spell_state.panel.confirm_requested = false;
+                // Cancel party-target selection.  Reopen the panel the pending
+                // action came from (spell panel or item panel) so the player
+                // can pick something else, rather than going all the way back
+                // to the action menu.
+                match spell_state.party_target.pending_action.take() {
+                    Some(PartyTargetAction::Spell { caster, .. }) => {
+                        spell_state.panel.caster = Some(caster);
+                        spell_state.panel.focused_index = 0;
+                        spell_state.panel.confirm_requested = false;
+                    }
+                    Some(PartyTargetAction::Item { user, .. }) => {
+                        item_state.panel.user = Some(user);
+                        item_state.panel.focused_index = 0;
+                        item_state.panel.confirm_requested = false;
+                    }
+                    None => {}
                 }
                 spell_state.party_target.focused_index = 0;
                 spell_state.party_target.confirm_requested = false;
+                spell_state.party_target.preferred_target = None;
             } else if kb.just_pressed(KeyCode::ArrowUp) {
                 if target_count > 0 {
-                    spell_state.party_target.focused_index = spell_state
-                        .party_target
-                        .focused_index
-                        .checked_sub(1)
-                        .unwrap_or(target_count.saturating_sub(1));
+                    spell_state.party_target.focused_index = next_eligible_index(
+                        &spell_state.party_target.eligible_flags,
+                        spell_state.party_target.focused_index,
+                        target_count,
+                        false,
+                    );
                 }
             } else if kb.just_pressed(KeyCode::ArrowDown) || kb.just_pressed(KeyCode::Tab) {
                 if target_count > 0 {
-                    spell_state.party_target.focused_index =
-                        (spell_state.party_target.focused_index + 1) % target_count;
+                    spell_state.party_target.focused_index = next_eligible_index(
+                        &spell_state.party_target.eligible_flags,
+                        spell_state.party_target.focused_index,
+                        target_count,
+                        true,
+                    );
                 }
             } else if kb.just_pressed(KeyCode::Enter) && target_count > 0 {
                 spell_state.party_target.confirm_requested = true;
@@ -15600,7 +15858,15 @@ mod tests {
         };
         content.0.items.add_item(potion).unwrap();
         app.insert_resource(content);
-        app.insert_resource(GlobalState(GameState::new()));
+        // Combat mode, so cleanup_party_target_on_combat_exit leaves the
+        // party target panel state alone.
+        {
+            let mut gs = GameState::new();
+            gs.mode = crate::application::GameMode::Combat(
+                crate::domain::combat::engine::CombatState::new(Handicap::Even),
+            );
+            app.insert_resource(GlobalState(gs));
+        }
 
         // Set the item panel open for player 0
         {
@@ -15628,6 +15894,20 @@ mod tests {
             ips.user.is_none(),
             "item panel should be closed after selecting an item"
         );
+
+        // A beneficial consumable routes to the party target panel (ally
+        // targeting) instead of dispatching immediately, with the user's own
+        // row as the preferred initial focus.
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert_eq!(
+            pts.pending_action,
+            Some(PartyTargetAction::Item {
+                user: CombatantId::Player(0),
+                inventory_index: 0,
+            }),
+            "healing potion must open the party target panel"
+        );
+        assert_eq!(pts.preferred_target, Some(0));
     }
 
     /// Full integration: party member with a healing potion heals HP via
@@ -15710,6 +15990,382 @@ mod tests {
         } else {
             panic!("Hero not found in combat state after item use");
         }
+    }
+
+    /// `next_eligible_index` moves the focus one step (with wrap) while
+    /// skipping ineligible rows, and stays put when no other row is eligible.
+    #[test]
+    fn test_next_eligible_index_skips_ineligible() {
+        let eligible = [true, false, true, false];
+        // Forward from 0 skips index 1 and lands on 2.
+        assert_eq!(next_eligible_index(&eligible, 0, 4, true), 2);
+        // Forward from 2 wraps past 3 and lands on 0.
+        assert_eq!(next_eligible_index(&eligible, 2, 4, true), 0);
+        // Backward from 0 wraps past 3 and lands on 2.
+        assert_eq!(next_eligible_index(&eligible, 0, 4, false), 2);
+        // Sole eligible row: focus returns to itself (full cycle).
+        assert_eq!(next_eligible_index(&[false, true, false], 1, 3, true), 1);
+        // No eligible rows at all: focus does not move.
+        assert_eq!(next_eligible_index(&[false, false], 0, 2, true), 0);
+        // Empty list: focus does not move.
+        assert_eq!(next_eligible_index(&[], 0, 0, true), 0);
+    }
+
+    /// Item routing: beneficial consumables go to the party target panel,
+    /// `SingleMonster` spell-effect items to monster targeting,
+    /// `SingleCharacter` spell-effect items to the party panel, and food
+    /// stays an immediate self-use.
+    #[test]
+    fn test_item_dispatch_route_classification() {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+        let consumable =
+            |id: crate::domain::types::ItemId,
+             name: &str,
+             effect: ConsumableEffect,
+             spell_effect: Option<crate::domain::types::SpellId>| {
+                Item {
+                    id,
+                    name: name.to_string(),
+                    item_type: ItemType::Consumable(ConsumableData {
+                        effect,
+                        is_combat_usable: true,
+                        duration_minutes: None,
+                    }),
+                    base_cost: 1,
+                    sell_cost: 1,
+                    alignment_restriction: None,
+                    constant_bonus: None,
+                    temporary_bonus: None,
+                    spell_effect,
+                    max_charges: 0,
+                    is_cursed: false,
+                    icon_path: None,
+                    tags: vec![],
+                    mesh_descriptor_override: None,
+                    mesh_id: None,
+                }
+            };
+        db.items
+            .add_item(consumable(1, "Potion", ConsumableEffect::HealHp(10), None))
+            .unwrap();
+        db.items
+            .add_item(consumable(
+                2,
+                "Elixir",
+                ConsumableEffect::Resurrect(10),
+                None,
+            ))
+            .unwrap();
+        db.items
+            .add_item(consumable(3, "Ration", ConsumableEffect::IsFood(1), None))
+            .unwrap();
+        db.items
+            .add_item(consumable(
+                4,
+                "Attack Wand",
+                ConsumableEffect::CastSpell(0x0601),
+                Some(0x0601),
+            ))
+            .unwrap();
+        db.items
+            .add_item(consumable(
+                5,
+                "Healing Wand",
+                ConsumableEffect::CastSpell(0x0602),
+                Some(0x0602),
+            ))
+            .unwrap();
+        db.spells
+            .add_spell(Spell::new(
+                0x0601,
+                "Zap",
+                SpellSchool::Sorcerer,
+                1,
+                2,
+                0,
+                SpellContext::CombatOnly,
+                SpellTarget::SingleMonster,
+                "Zaps",
+                None,
+                0,
+                false,
+            ))
+            .unwrap();
+        db.spells
+            .add_spell(Spell::new(
+                0x0602,
+                "Mend",
+                SpellSchool::Cleric,
+                1,
+                2,
+                0,
+                SpellContext::Anytime,
+                SpellTarget::SingleCharacter,
+                "Mends",
+                None,
+                0,
+                false,
+            ))
+            .unwrap();
+        let content = GameContent::new(db);
+
+        assert_eq!(
+            item_dispatch_route(1, &content),
+            ItemDispatchRoute::PartyTarget
+        );
+        assert_eq!(
+            item_dispatch_route(2, &content),
+            ItemDispatchRoute::PartyTarget
+        );
+        assert_eq!(
+            item_dispatch_route(3, &content),
+            ItemDispatchRoute::SelfImmediate
+        );
+        assert_eq!(
+            item_dispatch_route(4, &content),
+            ItemDispatchRoute::MonsterTarget
+        );
+        assert_eq!(
+            item_dispatch_route(5, &content),
+            ItemDispatchRoute::PartyTarget
+        );
+        // Unknown item id falls back to immediate self-use.
+        assert_eq!(
+            item_dispatch_route(250, &content),
+            ItemDispatchRoute::SelfImmediate
+        );
+    }
+
+    /// Full ally-item flow: confirming another party member in the party
+    /// target panel heals that member and consumes the item from the *user's*
+    /// inventory.
+    #[test]
+    fn test_party_target_confirm_item_heals_ally() {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut content = GameContent::new(ContentDatabase::new());
+        content
+            .0
+            .items
+            .add_item(Item {
+                id: 77,
+                name: "Healing Potion".to_string(),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: ConsumableEffect::HealHp(20),
+                    is_combat_usable: true,
+                    duration_minutes: None,
+                }),
+                base_cost: 20,
+                sell_cost: 10,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+                mesh_id: None,
+            })
+            .unwrap();
+        app.insert_resource(content);
+
+        // User (index 0) carries the potion; the ally (index 1) is wounded.
+        let mut user = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        user.inventory.add_item(77, 1).unwrap();
+        let mut ally = Character::new(
+            "Bard".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ally.hp.base = 50;
+        ally.hp.current = 10;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(user.clone()).unwrap();
+        gs.party.add_member(ally.clone()).unwrap();
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(user);
+        cs.add_player(ally);
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Open the party target panel for the pending item and let one frame
+        // pass so the panel spawns and settles its focus, mirroring the real
+        // interaction sequence (confirm always happens on a later frame).
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            pts.pending_action = Some(PartyTargetAction::Item {
+                user: CombatantId::Player(0),
+                inventory_index: 0,
+            });
+            pts.preferred_target = Some(0);
+        }
+        app.update();
+
+        // Focus the ally row and confirm.
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            assert_eq!(pts.participant_indices, vec![0, 1]);
+            assert_eq!(pts.eligible_flags, vec![true, true]);
+            pts.focused_index = 1;
+            pts.confirm_requested = true;
+        }
+
+        // Two frames: one to emit the UseItemAction, one to process it.
+        app.update();
+        app.update();
+
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert!(
+            pts.pending_action.is_none(),
+            "party target panel must close after confirming the item target"
+        );
+
+        let cr = app.world().resource::<CombatResource>();
+        if let Some(Combatant::Player(pc)) = cr.state.get_combatant(&CombatantId::Player(1)) {
+            assert_eq!(
+                pc.hp.current, 30,
+                "ally must be healed by the potion (10 + 20)"
+            );
+        } else {
+            panic!("ally not found in combat state");
+        }
+        if let Some(Combatant::Player(pc)) = cr.state.get_combatant(&CombatantId::Player(0)) {
+            assert!(
+                pc.inventory.items.is_empty(),
+                "potion must be consumed from the user's inventory"
+            );
+        } else {
+            panic!("user not found in combat state");
+        }
+    }
+
+    /// A resurrect item's party target panel marks living members ineligible
+    /// and dead members eligible, and focuses the first eligible row.
+    #[test]
+    fn test_resurrect_item_panel_dead_only_eligibility() {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut content = GameContent::new(ContentDatabase::new());
+        content
+            .0
+            .items
+            .add_item(Item {
+                id: 88,
+                name: "Phoenix Elixir".to_string(),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: ConsumableEffect::Resurrect(10),
+                    is_combat_usable: true,
+                    duration_minutes: None,
+                }),
+                base_cost: 100,
+                sell_cost: 50,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+                mesh_id: None,
+            })
+            .unwrap();
+        app.insert_resource(content);
+
+        // User (living, index 0) carries the elixir; ally (index 1) is dead.
+        let mut user = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        user.inventory.add_item(88, 1).unwrap();
+        let mut dead_ally = Character::new(
+            "Bard".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        dead_ally.hp.current = 0;
+        dead_ally
+            .conditions
+            .add(crate::domain::character::Condition::DEAD);
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state.add_player(user);
+            cr.state.add_player(dead_ally);
+        }
+        // Combat mode, so cleanup_party_target_on_combat_exit leaves the
+        // party target panel state alone.
+        {
+            let mut gs = GameState::new();
+            gs.mode = crate::application::GameMode::Combat(
+                crate::domain::combat::engine::CombatState::new(Handicap::Even),
+            );
+            app.insert_resource(GlobalState(gs));
+        }
+
+        // Open the party target panel for the pending resurrect item, with
+        // the user's own (ineligible) row preferred.
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            pts.pending_action = Some(PartyTargetAction::Item {
+                user: CombatantId::Player(0),
+                inventory_index: 0,
+            });
+            pts.preferred_target = Some(0);
+        }
+
+        app.update();
+
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert_eq!(pts.participant_indices, vec![0, 1]);
+        assert_eq!(
+            pts.eligible_flags,
+            vec![false, true],
+            "living member must be ineligible for resurrect; dead member eligible"
+        );
+        assert_eq!(
+            pts.focused_index, 1,
+            "focus must fall back to the first eligible (dead) row"
+        );
     }
 
     /// Pressing Enter while the spell panel is open confirms the focused spell,
@@ -15975,13 +16631,11 @@ mod tests {
 
         // The party target panel should now be open.
         let pts = app.world().resource::<PartyTargetPanelState>();
-        assert!(
-            pts.pending_spell.is_some(),
-            "PartyTargetPanelState must be set after selecting a SingleCharacter spell"
-        );
-        let (pending_caster, pending_spell_id) = pts.pending_spell.unwrap();
-        assert_eq!(pending_caster, CombatantId::Player(0));
-        assert_eq!(pending_spell_id, SPELL_ID);
+        let Some(PartyTargetAction::Spell { caster, spell_id }) = pts.pending_action else {
+            panic!("PartyTargetPanelState must hold a pending Spell action after selecting a SingleCharacter spell");
+        };
+        assert_eq!(caster, CombatantId::Player(0));
+        assert_eq!(spell_id, SPELL_ID);
     }
 
     /// Confirming a party member in the party target panel must emit a CastSpellAction
@@ -16033,8 +16687,12 @@ mod tests {
         // two party members available, player has focused index 1 (the knight).
         {
             let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
-            pts.pending_spell = Some((CombatantId::Player(0), SPELL_ID));
+            pts.pending_action = Some(PartyTargetAction::Spell {
+                caster: CombatantId::Player(0),
+                spell_id: SPELL_ID,
+            });
             pts.participant_indices = vec![0, 1];
+            pts.eligible_flags = vec![true, true];
             pts.focused_index = 1;
             pts.confirm_requested = true;
         }
@@ -16044,7 +16702,7 @@ mod tests {
         // The party target panel should be closed after confirmation.
         let pts = app.world().resource::<PartyTargetPanelState>();
         assert!(
-            pts.pending_spell.is_none(),
+            pts.pending_action.is_none(),
             "PartyTargetPanelState must be cleared after target confirmation"
         );
     }

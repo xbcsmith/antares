@@ -240,6 +240,12 @@ pub fn apply_consumable_effect(
 
     match data.effect {
         ConsumableEffect::HealHp(amount) => {
+            // Healing cannot raise the dead — only a Resurrect effect can.
+            // Without this guard a dead character would gain HP while keeping
+            // the DEAD condition, silently wasting the consumable.
+            if character.conditions.is_dead() {
+                return result;
+            }
             let pre = character.hp.current as i32;
             character.hp.modify(amount as i32);
             // Clamp to base — over-healing is not allowed
@@ -522,6 +528,20 @@ mod tests {
         let result = apply_consumable_effect(&mut ch, &data);
         assert_eq!(ch.hp.current, 30, "full-health character should not change");
         assert_eq!(result.healing, 0, "no actual healing should be reported");
+    }
+
+    #[test]
+    fn test_heal_hp_on_dead_character_is_noop() {
+        let mut ch = make_character(30, 0, 0, 0);
+        ch.conditions.add(Condition::DEAD);
+        let data = make_consumable_data(ConsumableEffect::HealHp(20), None);
+        let result = apply_consumable_effect(&mut ch, &data);
+        assert_eq!(ch.hp.current, 0, "healing must not raise the dead");
+        assert!(
+            ch.conditions.is_dead(),
+            "DEAD condition must remain — only Resurrect can clear it"
+        );
+        assert_eq!(result.healing, 0, "no healing should be reported");
     }
 
     #[test]

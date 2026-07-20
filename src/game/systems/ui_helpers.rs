@@ -292,6 +292,99 @@ pub fn resolve_card_background(
     }
 }
 
+// ===== Party-Target Eligibility =====
+//
+// Single source of truth for "who may this beneficial action target?",
+// shared by the combat party-target panel for both item use (from
+// `ConsumableEffect`) and spell casting (from `SpellEffectType`). Pure and
+// free of Bevy ECS types so it is unit-testable without a world.
+
+/// Which party members a beneficial action (item or spell) may target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TargetEligibility {
+    /// Any party member is a valid target.
+    #[default]
+    Any,
+    /// Only living (non-dead) members — heals, cures, restores, boosts.
+    LivingOnly,
+    /// Only dead members — resurrection effects.
+    DeadOnly,
+}
+
+impl TargetEligibility {
+    /// Returns whether `character` is a valid target under this rule.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Alignment, Character, Condition, Sex};
+    /// use antares::game::systems::ui_helpers::TargetEligibility;
+    ///
+    /// let mut hero = Character::new(
+    ///     "Kira".to_string(),
+    ///     "human".to_string(),
+    ///     "knight".to_string(),
+    ///     Sex::Female,
+    ///     Alignment::Good,
+    /// );
+    /// assert!(TargetEligibility::LivingOnly.is_eligible(&hero));
+    /// assert!(!TargetEligibility::DeadOnly.is_eligible(&hero));
+    ///
+    /// hero.conditions.add(Condition::DEAD);
+    /// assert!(!TargetEligibility::LivingOnly.is_eligible(&hero));
+    /// assert!(TargetEligibility::DeadOnly.is_eligible(&hero));
+    /// assert!(TargetEligibility::Any.is_eligible(&hero));
+    /// ```
+    pub fn is_eligible(self, character: &crate::domain::character::Character) -> bool {
+        match self {
+            TargetEligibility::Any => true,
+            TargetEligibility::LivingOnly => !character.conditions.is_dead(),
+            TargetEligibility::DeadOnly => character.conditions.is_dead(),
+        }
+    }
+}
+
+/// Derives the party-target eligibility rule for a consumable effect.
+///
+/// `Resurrect` may only target dead members; every other beneficial effect
+/// (heal, restore, cure, boost) only living ones. Effects that never reach
+/// the party-target panel (`IsFood`, `CastSpell`, `LearnSpell`) return
+/// [`TargetEligibility::Any`].
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::items::types::ConsumableEffect;
+/// use antares::game::systems::ui_helpers::{
+///     consumable_target_eligibility, TargetEligibility,
+/// };
+///
+/// assert_eq!(
+///     consumable_target_eligibility(&ConsumableEffect::HealHp(20)),
+///     TargetEligibility::LivingOnly
+/// );
+/// assert_eq!(
+///     consumable_target_eligibility(&ConsumableEffect::Resurrect(10)),
+///     TargetEligibility::DeadOnly
+/// );
+/// ```
+pub fn consumable_target_eligibility(
+    effect: &crate::domain::items::types::ConsumableEffect,
+) -> TargetEligibility {
+    use crate::domain::items::types::ConsumableEffect;
+    match effect {
+        ConsumableEffect::Resurrect(_) => TargetEligibility::DeadOnly,
+        ConsumableEffect::HealHp(_)
+        | ConsumableEffect::RestoreSp(_)
+        | ConsumableEffect::CureCondition(_)
+        | ConsumableEffect::BoostAttribute(_, _)
+        | ConsumableEffect::BoostResistance(_, _) => TargetEligibility::LivingOnly,
+        ConsumableEffect::IsFood(_)
+        | ConsumableEffect::CastSpell(_)
+        | ConsumableEffect::LearnSpell(_) => TargetEligibility::Any,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,6 +484,73 @@ mod tests {
                 color
             );
         }
+    }
+
+    // ── Party-target eligibility ────────────────────────────────────────────
+
+    fn test_character() -> crate::domain::character::Character {
+        use crate::domain::character::{Alignment, Character, Sex};
+        Character::new(
+            "Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        )
+    }
+
+    /// Every beneficial non-resurrect consumable targets living members only;
+    /// resurrect targets dead members only; pass-through effects allow any.
+    #[test]
+    fn test_consumable_target_eligibility_mapping() {
+        use crate::domain::items::types::{AttributeType, ConsumableEffect, ResistanceType};
+        let cases = [
+            (ConsumableEffect::HealHp(20), TargetEligibility::LivingOnly),
+            (
+                ConsumableEffect::RestoreSp(10),
+                TargetEligibility::LivingOnly,
+            ),
+            (
+                ConsumableEffect::CureCondition(4),
+                TargetEligibility::LivingOnly,
+            ),
+            (
+                ConsumableEffect::BoostAttribute(AttributeType::Might, 2),
+                TargetEligibility::LivingOnly,
+            ),
+            (
+                ConsumableEffect::BoostResistance(ResistanceType::Fire, 10),
+                TargetEligibility::LivingOnly,
+            ),
+            (ConsumableEffect::Resurrect(10), TargetEligibility::DeadOnly),
+            (ConsumableEffect::IsFood(1), TargetEligibility::Any),
+            (ConsumableEffect::CastSpell(260), TargetEligibility::Any),
+            (ConsumableEffect::LearnSpell(260), TargetEligibility::Any),
+        ];
+        for (effect, expected) in cases {
+            assert_eq!(
+                consumable_target_eligibility(&effect),
+                expected,
+                "wrong eligibility for {:?}",
+                effect
+            );
+        }
+    }
+
+    /// A living character is eligible for `LivingOnly`/`Any` but not
+    /// `DeadOnly`; a dead character is the reverse.
+    #[test]
+    fn test_target_eligibility_is_eligible() {
+        use crate::domain::character::Condition;
+        let mut ch = test_character();
+        assert!(TargetEligibility::Any.is_eligible(&ch));
+        assert!(TargetEligibility::LivingOnly.is_eligible(&ch));
+        assert!(!TargetEligibility::DeadOnly.is_eligible(&ch));
+
+        ch.conditions.add(Condition::DEAD);
+        assert!(TargetEligibility::Any.is_eligible(&ch));
+        assert!(!TargetEligibility::LivingOnly.is_eligible(&ch));
+        assert!(TargetEligibility::DeadOnly.is_eligible(&ch));
     }
 
     #[test]
