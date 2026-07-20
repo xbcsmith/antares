@@ -1287,10 +1287,7 @@ impl ConfigEditorState {
         ui.input(|i| {
             for event in &i.events {
                 if let egui::Event::Key {
-                    key,
-                    pressed: true,
-                    modifiers: _,
-                    ..
+                    key, pressed: true, ..
                 } = event
                 {
                     // Escape cancels capture without binding
