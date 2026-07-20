@@ -385,6 +385,54 @@ pub fn consumable_target_eligibility(
     }
 }
 
+/// Derives the party-target eligibility rule for a spell's effect type.
+///
+/// `Resurrection` may only target dead members; healing, cures, and buffs
+/// only living ones. A `Composite` is `DeadOnly` when any part resurrects
+/// (the revive must land first), otherwise `LivingOnly`. Effect types that
+/// normally never reach the party-target panel (`Damage`, `Debuff`,
+/// `Utility`, `DispelMagic`) return [`TargetEligibility::Any`].
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::magic::types::SpellEffectType;
+/// use antares::domain::types::DiceRoll;
+/// use antares::game::systems::ui_helpers::{spell_target_eligibility, TargetEligibility};
+///
+/// let heal = SpellEffectType::Healing { amount: DiceRoll::new(0, 0, 8) };
+/// assert_eq!(spell_target_eligibility(&heal), TargetEligibility::LivingOnly);
+/// assert_eq!(
+///     spell_target_eligibility(&SpellEffectType::Resurrection),
+///     TargetEligibility::DeadOnly
+/// );
+/// ```
+pub fn spell_target_eligibility(
+    effect: &crate::domain::magic::types::SpellEffectType,
+) -> TargetEligibility {
+    use crate::domain::magic::types::SpellEffectType;
+    match effect {
+        SpellEffectType::Resurrection => TargetEligibility::DeadOnly,
+        SpellEffectType::Healing { .. }
+        | SpellEffectType::CureCondition { .. }
+        | SpellEffectType::Buff { .. } => TargetEligibility::LivingOnly,
+        SpellEffectType::Composite(parts) => {
+            if parts
+                .iter()
+                .any(|p| matches!(p, SpellEffectType::Resurrection))
+            {
+                TargetEligibility::DeadOnly
+            } else {
+                TargetEligibility::LivingOnly
+            }
+        }
+        SpellEffectType::Damage
+        | SpellEffectType::Debuff
+        | SpellEffectType::Utility { .. }
+        | SpellEffectType::DispelMagic => TargetEligibility::Any,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -530,6 +578,56 @@ mod tests {
         for (effect, expected) in cases {
             assert_eq!(
                 consumable_target_eligibility(&effect),
+                expected,
+                "wrong eligibility for {:?}",
+                effect
+            );
+        }
+    }
+
+    /// Healing/cure/buff spells target living members only; resurrection
+    /// (including inside a composite) targets dead members only; offensive
+    /// and utility effects allow any target.
+    #[test]
+    fn test_spell_target_eligibility_mapping() {
+        use crate::domain::magic::types::{BuffField, SpellEffectType, UtilityType};
+        use crate::domain::types::DiceRoll;
+        let heal = SpellEffectType::Healing {
+            amount: DiceRoll::new(0, 0, 8),
+        };
+        let cure = SpellEffectType::CureCondition {
+            condition_id: "asleep".to_string(),
+        };
+        let buff = SpellEffectType::Buff {
+            buff_field: BuffField::Bless,
+            duration: 10,
+        };
+        let cases = [
+            (heal.clone(), TargetEligibility::LivingOnly),
+            (cure, TargetEligibility::LivingOnly),
+            (buff, TargetEligibility::LivingOnly),
+            (SpellEffectType::Resurrection, TargetEligibility::DeadOnly),
+            (
+                SpellEffectType::Composite(vec![SpellEffectType::Resurrection, heal.clone()]),
+                TargetEligibility::DeadOnly,
+            ),
+            (
+                SpellEffectType::Composite(vec![heal]),
+                TargetEligibility::LivingOnly,
+            ),
+            (SpellEffectType::Damage, TargetEligibility::Any),
+            (SpellEffectType::Debuff, TargetEligibility::Any),
+            (
+                SpellEffectType::Utility {
+                    utility_type: UtilityType::Information,
+                },
+                TargetEligibility::Any,
+            ),
+            (SpellEffectType::DispelMagic, TargetEligibility::Any),
+        ];
+        for (effect, expected) in cases {
+            assert_eq!(
+                spell_target_eligibility(&effect),
                 expected,
                 "wrong eligibility for {:?}",
                 effect

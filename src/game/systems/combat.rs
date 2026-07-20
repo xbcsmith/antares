@@ -2944,8 +2944,9 @@ fn cleanup_spell_panel_on_combat_exit(
 /// - `Item`: from the item's consumable effect via
 ///   [`crate::game::systems::ui_helpers::consumable_target_eligibility`]
 ///   (resurrect → dead only, other beneficial effects → living only).
-/// - `Spell`: currently `Any` — spell-effect-driven eligibility lands with
-///   the ally-spell-targeting polish phase.
+/// - `Spell`: from the spell's effective effect type via
+///   [`crate::game::systems::ui_helpers::spell_target_eligibility`]
+///   (resurrection → dead only, heal/cure/buff → living only).
 fn party_target_eligibility(
     action: &PartyTargetAction,
     combat_res: &CombatResource,
@@ -2953,7 +2954,16 @@ fn party_target_eligibility(
 ) -> crate::game::systems::ui_helpers::TargetEligibility {
     use crate::game::systems::ui_helpers::TargetEligibility;
     match action {
-        PartyTargetAction::Spell { .. } => TargetEligibility::Any,
+        PartyTargetAction::Spell { spell_id, .. } => content
+            .db()
+            .spells
+            .get_spell(*spell_id)
+            .map(|spell| {
+                crate::game::systems::ui_helpers::spell_target_eligibility(
+                    &spell.effective_effect_type(),
+                )
+            })
+            .unwrap_or(TargetEligibility::Any),
         PartyTargetAction::Item {
             user,
             inventory_index,
@@ -16366,6 +16376,212 @@ mod tests {
             pts.focused_index, 1,
             "focus must fall back to the first eligible (dead) row"
         );
+    }
+
+    /// Builds a two-member combat app (living cleric caster at participant 0,
+    /// second member at participant 1) with the given spell registered, and
+    /// opens the party target panel for that pending spell.
+    ///
+    /// `second_member_dead` controls whether participant 1 is dead.
+    fn setup_spell_party_target_app(
+        spell: crate::domain::magic::types::Spell,
+        second_member_dead: bool,
+    ) -> App {
+        use crate::sdk::database::ContentDatabase;
+
+        let spell_id = spell.id;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut db = ContentDatabase::new();
+        db.spells.add_spell(spell).unwrap();
+        app.insert_resource(GameContent::new(db));
+
+        let mut caster = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        caster.sp = crate::domain::character::AttributePair16 {
+            base: 20,
+            current: 20,
+        };
+        caster.spells.cleric_spells[0].push(spell_id);
+        let mut ally = Character::new(
+            "Bard".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ally.hp.base = 50;
+        ally.hp.current = 10;
+        if second_member_dead {
+            ally.hp.current = 0;
+            ally.conditions
+                .add(crate::domain::character::Condition::DEAD);
+        }
+
+        let mut gs = GameState::new();
+        gs.party.add_member(caster.clone()).unwrap();
+        gs.party.add_member(ally.clone()).unwrap();
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(caster);
+        cs.add_player(ally);
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            pts.pending_action = Some(PartyTargetAction::Spell {
+                caster: CombatantId::Player(0),
+                spell_id,
+            });
+        }
+        app
+    }
+
+    /// Returns a First-Aid-like healing spell (`SingleCharacter`, heals a
+    /// flat 8, explicit `Healing` effect type — matching the data fix that
+    /// tags all heal spells explicitly).
+    fn first_aid_like_spell(
+        id: crate::domain::types::SpellId,
+    ) -> crate::domain::magic::types::Spell {
+        use crate::domain::magic::types::{
+            Spell, SpellContext, SpellEffectType, SpellSchool, SpellTarget,
+        };
+        let mut spell = Spell::new(
+            id,
+            "First Aid",
+            SpellSchool::Cleric,
+            1,
+            2,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Heals 8 hit points",
+            None,
+            0,
+            false,
+        );
+        spell.effect_type = Some(SpellEffectType::Healing {
+            amount: crate::domain::types::DiceRoll::new(0, 0, 8),
+        });
+        spell
+    }
+
+    /// A healing spell's party target panel marks dead members ineligible
+    /// (healing cannot raise the dead).
+    #[test]
+    fn test_heal_spell_panel_living_only_eligibility() {
+        let app = {
+            let mut app = setup_spell_party_target_app(first_aid_like_spell(0x0104), true);
+            app.update();
+            app
+        };
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert_eq!(pts.participant_indices, vec![0, 1]);
+        assert_eq!(
+            pts.eligible_flags,
+            vec![true, false],
+            "dead member must be ineligible for a healing spell"
+        );
+        assert_eq!(pts.focused_index, 0);
+    }
+
+    /// A resurrection spell's party target panel marks living members
+    /// ineligible and focuses the dead member.
+    #[test]
+    fn test_resurrection_spell_panel_dead_only_eligibility() {
+        use crate::domain::magic::types::{
+            Spell, SpellContext, SpellEffectType, SpellSchool, SpellTarget,
+        };
+        let mut spell = Spell::new(
+            2051,
+            "Raise Dead",
+            SpellSchool::Cleric,
+            5,
+            30,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Resurrects a dead character with 5 hit points",
+            None,
+            0,
+            false,
+        );
+        spell.resurrect_hp = Some(5);
+        spell.effect_type = Some(SpellEffectType::Resurrection);
+
+        let app = {
+            let mut app = setup_spell_party_target_app(spell, true);
+            app.update();
+            app
+        };
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert_eq!(
+            pts.eligible_flags,
+            vec![false, true],
+            "living member must be ineligible for resurrection; dead member eligible"
+        );
+        assert_eq!(
+            pts.focused_index, 1,
+            "focus must land on the dead member's row"
+        );
+    }
+
+    /// Full ally-heal flow (next_plans.md:216): confirming another party
+    /// member in the party target panel for a First-Aid-like spell heals that
+    /// member and spends the caster's SP.
+    #[test]
+    fn test_party_target_confirm_spell_heals_ally() {
+        let mut app = setup_spell_party_target_app(first_aid_like_spell(0x0104), false);
+        // Frame 1: panel spawns and settles focus/eligibility.
+        app.update();
+
+        // Focus the wounded ally's row and confirm.
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            assert_eq!(pts.eligible_flags, vec![true, true]);
+            pts.focused_index = 1;
+            pts.confirm_requested = true;
+        }
+        // Two frames: one to emit the CastSpellAction, one to process it.
+        app.update();
+        app.update();
+
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert!(
+            pts.pending_action.is_none(),
+            "party target panel must close after confirming the spell target"
+        );
+
+        let cr = app.world().resource::<CombatResource>();
+        if let Some(Combatant::Player(pc)) = cr.state.get_combatant(&CombatantId::Player(1)) {
+            assert_eq!(pc.hp.current, 18, "ally must be healed for 8 (10 + 8)");
+        } else {
+            panic!("ally not found in combat state");
+        }
+        if let Some(Combatant::Player(pc)) = cr.state.get_combatant(&CombatantId::Player(0)) {
+            assert!(
+                pc.sp.current < 20,
+                "caster SP must be spent (got {})",
+                pc.sp.current
+            );
+        } else {
+            panic!("caster not found in combat state");
+        }
     }
 
     /// Pressing Enter while the spell panel is open confirms the focused spell,
