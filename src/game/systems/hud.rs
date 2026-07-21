@@ -22,7 +22,10 @@ use crate::domain::conditions::ActiveCondition;
 use crate::domain::types::{Direction, Position};
 use crate::game::components::inventory::{CharacterEntity, PartyEntities};
 use crate::game::resources::{CampaignFontHandles, GlobalState};
-use crate::game::systems::combat::{CombatResource, CombatTurnState, CombatTurnStateResource};
+use crate::game::systems::combat::{
+    CombatResource, CombatTurnState, CombatTurnStateResource, GroupTargetPending, GroupTargetSide,
+    ENEMY_CARD_HIGHLIGHT_COLOR,
+};
 use crate::game::systems::mouse_input;
 use crate::game::systems::ui_helpers::{
     create_blank_rgba_image, resolve_card_background, text_style, CardConditionTint,
@@ -913,13 +916,15 @@ fn handle_portrait_click_system(
 ///
 /// This system runs every frame to sync UI with game state.
 /// Updates HP bars, HP overlay text color, condition text, SP bars, and
-/// character card visibility and background tint (active-turn highlight >
-/// condition tint > default, see [`resolve_card_background`]).
+/// character card visibility and background tint (group-target highlight >
+/// active-turn highlight > condition tint > default, see
+/// [`resolve_card_background`]).
 ///
 /// # Arguments
 /// * `global_state` - Game state containing party data
 /// * `combat_res` - Combat state, used to find the active-turn party member (absent outside combat)
 /// * `turn_state` - Current combat turn state, used to gate the active-turn highlight to `PlayerTurn` (absent outside combat)
+/// * `group_target` - Pending group-spell target selection; when it holds `GroupTargetSide::Characters`, every living party member's card is highlighted with `ENEMY_CARD_HIGHLIGHT_COLOR`, taking precedence over the active-turn/condition tint (absent outside combat, since only `CombatPlugin` inserts it)
 /// * `card_query` - Query for character card visibility and background tint
 /// * `hp_bar_query` - Query for HP bar fill entities
 /// * `hp_overlay_query` - Query for HP text overlay entities
@@ -932,6 +937,7 @@ fn update_hud(
     global_state: Res<GlobalState>,
     combat_res: Option<Res<CombatResource>>,
     turn_state: Option<Res<CombatTurnStateResource>>,
+    group_target: Option<Res<GroupTargetPending>>,
     mut card_query: Query<(&CharacterCard, &mut Node, &mut BackgroundColor), Without<HpBarFill>>,
     mut hp_bar_query: Query<(&HpBarFill, &mut Node, &mut BackgroundColor)>,
     mut hp_overlay_query: HpOverlayQuery,
@@ -966,20 +972,34 @@ fn update_hud(
                 }
             });
 
-    // Update card visibility and background tint. Precedence: active-turn
-    // highlight (4.1) > condition tint (4.2) > default background.
+    // Whether a group-spell target selection targeting party members
+    // (`GroupTargetSide::Characters`) is currently pending (Phase 3,
+    // "Group-Spell Target Clarity"). Mirrors `enter_target_selection`'s
+    // handling of `GroupTargetSide::Monsters` for enemy cards.
+    let group_characters_pending = group_target
+        .as_deref()
+        .is_some_and(|gt| matches!(gt.data, Some((_, _, GroupTargetSide::Characters))));
+
+    // Update card visibility and background tint. Precedence: group-target
+    // highlight (Phase 3) > active-turn highlight (4.1) > condition tint
+    // (4.2) > default background.
     for (card, mut node, mut bg) in card_query.iter_mut() {
         match party.members.get(card.party_index) {
             Some(character) => {
                 node.display = Display::Flex;
-                let is_active = Some(card.party_index) == active_party_index;
-                let tint = condition_tint_category(&character.conditions);
-                *bg = BackgroundColor(resolve_card_background(
-                    is_active,
-                    ACTIVE_TURN_CARD_COLOR,
-                    tint,
-                    DEFAULT_CARD_COLOR,
-                ));
+                let is_living = !character.conditions.is_dead();
+                *bg = if group_characters_pending && is_living {
+                    BackgroundColor(ENEMY_CARD_HIGHLIGHT_COLOR)
+                } else {
+                    let is_active = Some(card.party_index) == active_party_index;
+                    let tint = condition_tint_category(&character.conditions);
+                    BackgroundColor(resolve_card_background(
+                        is_active,
+                        ACTIVE_TURN_CARD_COLOR,
+                        tint,
+                        DEFAULT_CARD_COLOR,
+                    ))
+                };
             }
             None => {
                 node.display = Display::None;
@@ -3985,6 +4005,114 @@ mod tests {
             card_bg(&mut app, 0),
             DEFAULT_CARD_COLOR,
             "active-turn highlight must revert once it becomes EnemyTurn"
+        );
+    }
+
+    /// Verifies the Phase 3 "Group-Spell Target Clarity" highlight: while
+    /// `GroupTargetPending.data` holds `GroupTargetSide::Characters`, every
+    /// living party member's `CharacterCard` shows
+    /// `ENEMY_CARD_HIGHLIGHT_COLOR`, taking precedence over the active-turn
+    /// highlight. Clearing `GroupTargetPending.data` reverts the cards to
+    /// their normal active-turn/default precedence.
+    #[test]
+    fn test_group_target_characters_card_highlight_and_revert() {
+        use super::{
+            CharacterCard, GlobalState, HudPlugin, ACTIVE_TURN_CARD_COLOR, DEFAULT_CARD_COLOR,
+        };
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::combat::engine::{CombatState, Combatant};
+        use crate::domain::combat::types::{CombatantId, Handicap};
+        use crate::game::systems::combat::{
+            CombatPlugin, CombatResource, CombatTurnStateResource, GroupTargetPending,
+            GroupTargetSide, ENEMY_CARD_HIGHLIGHT_COLOR,
+        };
+        use bevy::prelude::*;
+
+        let mut state = GameState::new();
+        let hero0 = Character::new(
+            "Hero Zero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let hero1 = Character::new(
+            "Hero One".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero0.clone()).unwrap();
+        state.party.add_member(hero1.clone()).unwrap();
+        state.enter_combat();
+
+        let mut cr = CombatResource::new();
+        cr.state = CombatState::new(Handicap::Even);
+        cr.state
+            .participants
+            .push(Combatant::Player(Box::new(hero0)));
+        cr.state
+            .participants
+            .push(Combatant::Player(Box::new(hero1)));
+        cr.state.turn_order = vec![CombatantId::Player(0), CombatantId::Player(1)];
+        cr.state.current_turn = 0;
+        cr.player_orig_indices = vec![Some(0), Some(1)];
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<Assets<Image>>();
+        app.add_plugins(CombatPlugin);
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(state));
+        app.insert_resource(cr);
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 =
+            crate::game::systems::combat::CombatTurnState::PlayerTurn;
+
+        app.update(); // PostStartup: setup_hud spawns cards.
+        app.update(); // Update: sync_party_hp_during_combat + update_hud.
+
+        let card_bg = |app: &mut App, idx: usize| -> Color {
+            let world = app.world_mut();
+            let mut q = world.query::<(&CharacterCard, &BackgroundColor)>();
+            q.iter(world)
+                .find(|(card, _)| card.party_index == idx)
+                .map(|(_, bg)| bg.0)
+                .unwrap_or_else(|| panic!("no CharacterCard found for party_index {}", idx))
+        };
+
+        // Pending a group spell targeting all characters (e.g. a party-wide
+        // heal) should highlight both living party members, overriding the
+        // active-turn highlight on slot 0.
+        app.world_mut().resource_mut::<GroupTargetPending>().data =
+            Some((CombatantId::Player(0), 1, GroupTargetSide::Characters));
+        app.update();
+
+        assert_eq!(
+            card_bg(&mut app, 0),
+            ENEMY_CARD_HIGHLIGHT_COLOR,
+            "party slot 0 must show the group-target highlight, overriding active-turn"
+        );
+        assert_eq!(
+            card_bg(&mut app, 1),
+            ENEMY_CARD_HIGHLIGHT_COLOR,
+            "party slot 1 must show the group-target highlight"
+        );
+
+        // Clearing the pending group target reverts to normal precedence.
+        app.world_mut().resource_mut::<GroupTargetPending>().data = None;
+        app.update();
+
+        assert_eq!(
+            card_bg(&mut app, 0),
+            ACTIVE_TURN_CARD_COLOR,
+            "party slot 0 (current actor) must revert to the active-turn highlight"
+        );
+        assert_eq!(
+            card_bg(&mut app, 1),
+            DEFAULT_CARD_COLOR,
+            "party slot 1 (not acting) must revert to the default card background"
         );
     }
 

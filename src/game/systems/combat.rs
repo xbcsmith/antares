@@ -647,6 +647,16 @@ pub struct PartyTargetButton {
 #[derive(Component, Debug, Clone, Copy)]
 pub struct PartyTargetCancelButton;
 
+/// Marker component for the group-spell confirm prompt panel.
+///
+/// Spawned when an `AllMonsters`/`MonsterGroup`/`SpecificMonsters`/
+/// `AllCharacters` spell is chosen, while [`GroupTargetPending`] holds data.
+/// Displays the spell name and an Enter/Esc hint line; carries no buttons —
+/// confirmation is keyboard-only, matching the `SingleMonster` target-select
+/// flow it is modeled on.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct GroupTargetPrompt;
+
 /// Marker component for the item selection panel UI
 ///
 /// Spawned when the player requests to use an item for a specific caster.
@@ -972,6 +982,37 @@ pub struct PartyTargetPanelState {
     pub preferred_target: Option<usize>,
 }
 
+/// Which side's cards are highlighted while a group-target spell is pending.
+///
+/// Determines both the highlight query (`EnemyCard` vs. `CharacterCard`) and
+/// the placeholder `CombatantId` written into `CastSpellAction` on confirm —
+/// the domain layer applies the spell to every member of that side
+/// regardless of which specific target is named.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupTargetSide {
+    /// `AllMonsters` / `MonsterGroup` / `SpecificMonsters` — every living
+    /// monster is affected; highlights `EnemyCard`s.
+    Monsters,
+    /// `AllCharacters` — every living party member is affected; highlights
+    /// `CharacterCard`s in the HUD.
+    Characters,
+}
+
+/// Tracks a group-target spell (`AllMonsters`/`MonsterGroup`/
+/// `SpecificMonsters`/`AllCharacters`) chosen from the spell panel but not
+/// yet cast.
+///
+/// Populated by `apply_spell_selection` instead of immediately emitting
+/// `CastSpellAction`, so the player can see exactly who will be affected
+/// (via the group highlight) before committing. `combat_input_system`
+/// consumes this on `Enter` (cast) or `Escape` (cancel, reopen spell panel).
+#[derive(Resource, Default)]
+pub struct GroupTargetPending {
+    /// `(caster, spell_id, side)` once a group-target spell is chosen,
+    /// `None` otherwise.
+    pub data: Option<(CombatantId, crate::domain::types::SpellId, GroupTargetSide)>,
+}
+
 /// Tracks whether the item selection panel is open and for which combatant.
 ///
 /// Set to `Some(actor)` when the player selects the Item action.
@@ -1028,6 +1069,8 @@ pub struct SpellCombatState<'w> {
     pub pending: ResMut<'w, PendingSpellCast>,
     /// State for party-member target selection when a `SingleCharacter` spell is chosen.
     pub party_target: ResMut<'w, PartyTargetPanelState>,
+    /// Tracks a pending group-target spell awaiting Enter/Escape confirmation.
+    pub group_target: ResMut<'w, GroupTargetPending>,
 }
 
 /// Bundled `SystemParam` for item-panel state in `combat_input_system`.
@@ -1186,6 +1229,7 @@ impl Plugin for CombatPlugin {
             .insert_resource(SpellPanelState::default())
             .insert_resource(PendingSpellCast::default())
             .insert_resource(PartyTargetPanelState::default())
+            .insert_resource(GroupTargetPending::default())
             .insert_resource(ItemPanelState::default())
             .insert_resource(PendingItemUse::default())
             // Monster-turn delay: start finished so the very first EnemyTurn
@@ -1354,6 +1398,13 @@ impl Plugin for CombatPlugin {
                 handle_party_target_button.after(update_party_target_panel),
             )
             .add_systems(Update, cleanup_party_target_on_combat_exit)
+            .add_systems(
+                Update,
+                update_group_target_prompt
+                    .after(handle_spell_button_interaction)
+                    .after(combat_input_system),
+            )
+            .add_systems(Update, cleanup_group_target_on_combat_exit)
             .add_systems(
                 Update,
                 update_item_selection_panel.after(combat_input_system),
@@ -2730,8 +2781,11 @@ fn update_spell_focus_highlight(
 /// and keyboard-confirm signals (`SpellPanelState::confirm_requested`).
 ///
 /// - Clicking or keyboard-confirming a castable `SpellButton` either:
-///   - Directly emits `CastSpellAction` (for self/group/all-monster target spells)
+///   - Directly emits `CastSpellAction` (for `Self_` target spells)
 ///   - Enters monster target selection mode (for `SingleMonster` spells)
+///   - Enters party-member target selection (for `SingleCharacter` spells)
+///   - Enters group-target confirm mode (for `AllMonsters`/`MonsterGroup`/
+///     `SpecificMonsters`/`AllCharacters` spells)
 /// - Clicking `SpellCancelButton` closes the panel.
 #[allow(clippy::too_many_arguments)]
 fn handle_spell_button_interaction(
@@ -2745,6 +2799,7 @@ fn handle_spell_button_interaction(
     content: Option<Res<GameContent>>,
     mut cast_writer: Option<MessageWriter<CastSpellAction>>,
     mut party_target_state: ResMut<PartyTargetPanelState>,
+    mut group_target_state: ResMut<GroupTargetPending>,
 ) {
     // ── Cancel button ─────────────────────────────────────────────────────────────
     for interaction in cancel_buttons.iter() {
@@ -2778,9 +2833,9 @@ fn handle_spell_button_interaction(
                     &mut pending_spell,
                     &mut target_sel,
                     &mut action_menu_state,
-                    &combat_res,
                     &mut cast_writer,
                     &mut party_target_state,
+                    &mut group_target_state,
                 );
             }
         }
@@ -2830,9 +2885,9 @@ fn handle_spell_button_interaction(
             &mut pending_spell,
             &mut target_sel,
             &mut action_menu_state,
-            &combat_res,
             &mut cast_writer,
             &mut party_target_state,
+            &mut group_target_state,
         );
 
         break; // Process only one button click per frame
@@ -2840,8 +2895,10 @@ fn handle_spell_button_interaction(
 }
 
 /// Internal helper: given a chosen spell (from mouse or keyboard), decide
-/// whether to enter monster target-selection mode (`SingleMonster`) or
-/// dispatch a `CastSpellAction` directly.
+/// whether to enter monster target-selection mode (`SingleMonster`), party
+/// target selection (`SingleCharacter`), group-target confirm mode
+/// (`AllMonsters`/`MonsterGroup`/`SpecificMonsters`/`AllCharacters`), or
+/// dispatch a `CastSpellAction` directly (`Self_`).
 ///
 /// Closes the spell panel regardless of the targeting path chosen.
 #[allow(clippy::too_many_arguments)]
@@ -2853,9 +2910,9 @@ fn apply_spell_selection(
     pending_spell: &mut PendingSpellCast,
     target_sel: &mut TargetSelection,
     action_menu_state: &mut ActionMenuState,
-    combat_res: &CombatResource,
     cast_writer: &mut Option<MessageWriter<CastSpellAction>>,
     party_target_state: &mut PartyTargetPanelState,
+    group_target_state: &mut GroupTargetPending,
 ) {
     use crate::domain::magic::types::SpellTarget;
 
@@ -2890,8 +2947,37 @@ fn apply_spell_selection(
             party_target_state.preferred_target = None;
         }
         SpellTarget::AllMonsters | SpellTarget::MonsterGroup | SpellTarget::SpecificMonsters => {
-            // Use the first alive monster as target placeholder;
-            // the domain layer will apply damage to all monsters.
+            // Enter group-target confirm mode — every living monster is
+            // highlighted; the actual CastSpellAction (with its first-alive
+            // placeholder target) is emitted when the player confirms.
+            group_target_state.data = Some((caster, spell_id, GroupTargetSide::Monsters));
+        }
+        SpellTarget::AllCharacters => {
+            // Enter group-target confirm mode — every living party member is
+            // highlighted; the actual CastSpellAction (with the caster as
+            // placeholder target) is emitted when the player confirms.
+            group_target_state.data = Some((caster, spell_id, GroupTargetSide::Characters));
+        }
+    }
+}
+
+/// Write a `CastSpellAction` for a confirmed group-target spell and clear the
+/// pending state.
+///
+/// `target` is a placeholder — the domain layer applies the spell's effect to
+/// every living member of the affected side regardless of which specific
+/// `CombatantId` is named (see `GroupTargetSide`). Called from
+/// `combat_input_system` when `Enter` is pressed while `GroupTargetPending`
+/// holds data.
+fn confirm_group_spell_target(
+    caster: CombatantId,
+    spell_id: crate::domain::types::SpellId,
+    side: GroupTargetSide,
+    combat_res: &CombatResource,
+    cast_writer: &mut Option<MessageWriter<CastSpellAction>>,
+) {
+    let target = match side {
+        GroupTargetSide::Monsters => {
             let first_monster_idx = combat_res
                 .state
                 .participants
@@ -2900,24 +2986,16 @@ fn apply_spell_selection(
                 .find(|(_, p)| matches!(p, Combatant::Monster(m) if m.hp.current > 0))
                 .map(|(i, _)| i)
                 .unwrap_or(0);
-            if let Some(ref mut w) = cast_writer {
-                w.write(CastSpellAction {
-                    caster,
-                    spell_id,
-                    target: CombatantId::Monster(first_monster_idx),
-                });
-            }
+            CombatantId::Monster(first_monster_idx)
         }
-        SpellTarget::AllCharacters => {
-            // Target the caster as placeholder; domain layer heals all.
-            if let Some(ref mut w) = cast_writer {
-                w.write(CastSpellAction {
-                    caster,
-                    spell_id,
-                    target: caster,
-                });
-            }
-        }
+        GroupTargetSide::Characters => caster,
+    };
+    if let Some(ref mut w) = cast_writer {
+        w.write(CastSpellAction {
+            caster,
+            spell_id,
+            target,
+        });
     }
 }
 
@@ -3346,6 +3424,107 @@ fn cleanup_party_target_on_combat_exit(
 ) {
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
         *state = PartyTargetPanelState::default();
+    }
+}
+
+/// System: Spawn or despawn the group-spell confirm prompt based on
+/// `GroupTargetPending`.
+///
+/// - When `group_target.data` is `None`, despawns any existing prompt.
+/// - When a prompt is already open, does nothing (idempotent).
+/// - Otherwise, spawns a small text-only panel (no buttons — confirmation is
+///   keyboard-only, matching the `SingleMonster` target-select flow) naming
+///   the spell and showing the Enter/Esc hint line. The card highlight itself
+///   is applied separately by `enter_target_selection` (monsters) and
+///   `update_hud` (party members).
+fn update_group_target_prompt(
+    mut commands: Commands,
+    group_target: Res<GroupTargetPending>,
+    content: Option<Res<GameContent>>,
+    existing_prompt: Query<Entity, With<GroupTargetPrompt>>,
+) {
+    // ── Despawn if the prompt should be closed ───────────────────────────────
+    let Some((_, spell_id, side)) = group_target.data else {
+        for entity in existing_prompt.iter() {
+            commands.entity(entity).despawn();
+        }
+        return;
+    };
+
+    // ── Already open — nothing to do ────────────────────────────────────────
+    if !existing_prompt.is_empty() {
+        return;
+    }
+
+    let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+    let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
+    let spell_name = content_ref
+        .db()
+        .spells
+        .get_spell(spell_id)
+        .map(|s| s.name.clone())
+        .unwrap_or_else(|| "Spell".to_string());
+
+    let (targets_desc, hint) = match side {
+        GroupTargetSide::Monsters => (
+            "all enemies",
+            "[Enter] Cast on all enemies \u{00b7} [Esc] Cancel",
+        ),
+        GroupTargetSide::Characters => (
+            "all allies",
+            "[Enter] Cast on all allies \u{00b7} [Esc] Cancel",
+        ),
+    };
+
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: SPELL_PANEL_LEFT,
+                top: SPELL_PANEL_TOP,
+                width: Val::Px(260.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(10.0)),
+                row_gap: Val::Px(4.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.08, 0.08, 0.16, 0.97)),
+            BorderRadius::all(Val::Px(8.0)),
+            GroupTargetPrompt,
+        ))
+        .with_children(|panel| {
+            panel.spawn((
+                Text::new(format!("{spell_name} — targets {targets_desc}")),
+                TextFont {
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.9, 0.9, 1.0)),
+            ));
+            panel.spawn((
+                Text::new(hint),
+                TextFont {
+                    font_size: 11.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.55, 0.55, 0.75)),
+            ));
+        });
+}
+
+/// System: Clean up group-target-pending state and despawn its prompt when
+/// combat ends.
+fn cleanup_group_target_on_combat_exit(
+    global_state: Res<GlobalState>,
+    mut group_target: ResMut<GroupTargetPending>,
+    mut commands: Commands,
+    existing_prompt: Query<Entity, With<GroupTargetPrompt>>,
+) {
+    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        group_target.data = None;
+        for entity in existing_prompt.iter() {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -4215,6 +4394,13 @@ fn confirm_spell_target(
 /// - `Escape`: clears `TargetSelection.0 = None` and resets
 ///   `active_target_index = None`, cancelling the attack selection.
 ///
+/// # Keyboard Controls (group-spell confirm — when `GroupTargetPending.data.is_some()`)
+///
+/// - `Enter`: confirms the pending group spell via `confirm_group_spell_target`,
+///   writing `CastSpellAction` with a placeholder target the domain layer
+///   expands to every living member of the affected side.
+/// - `Escape`: cancels and reopens the spell panel for the same caster.
+///
 /// # Mouse Controls
 ///
 /// - `Interaction::Pressed` on an `ActionButton`: dispatches that action.
@@ -4428,6 +4614,28 @@ fn combat_input_system(
             } else if kb.just_pressed(KeyCode::Enter) && spell_count > 0 {
                 // Signal handle_spell_button_interaction to fire the focused spell.
                 spell_state.panel.confirm_requested = true;
+            }
+        } else if spell_state.group_target.data.is_some() {
+            // ---- Group-spell confirm keyboard handling ----
+            // Enter: cast the pending group spell (placeholder target; the
+            // domain layer applies it to every living member of the side).
+            // Escape: cancel and reopen the spell panel for this caster.
+            if kb.just_pressed(KeyCode::Escape) {
+                if let Some((caster, _, _)) = spell_state.group_target.data.take() {
+                    spell_state.panel.caster = Some(caster);
+                    spell_state.panel.focused_index = 0;
+                    spell_state.panel.confirm_requested = false;
+                }
+            } else if kb.just_pressed(KeyCode::Enter) {
+                if let Some((caster, spell_id, side)) = spell_state.group_target.data.take() {
+                    confirm_group_spell_target(
+                        caster,
+                        spell_id,
+                        side,
+                        &combat_res,
+                        &mut cast_writer,
+                    );
+                }
             }
         } else if spell_state.party_target.pending_action.is_some() {
             // ---- Party-target-selection keyboard handling ----
@@ -4660,19 +4868,29 @@ fn update_action_highlight(
 /// Highlight ALL enemy UI cards when target selection is active (general).
 ///
 /// Sets every `EnemyCard` to `ENEMY_CARD_HIGHLIGHT_COLOR` while
-/// `TargetSelection.0` is `Some`, and restores the default dark-red tint when
-/// target selection is inactive.
+/// `TargetSelection.0` is `Some` (all cards, including dead ones — matching
+/// prior behavior), and while a `GroupTargetPending` spell with
+/// `GroupTargetSide::Monsters` is pending (living monsters only, since the
+/// domain layer only applies group-spell effects to living combatants).
+/// Restores the default condition-tinted background otherwise.
 ///
 /// `update_target_highlight` runs *after* this system and adds an additional
 /// brighter highlight (`TURN_INDICATOR_COLOR`) on top of the card at
 /// `ActionMenuState::active_target_index` for keyboard navigation.
 fn enter_target_selection(
     target_sel: Res<TargetSelection>,
+    group_target: Res<GroupTargetPending>,
     combat_res: Res<CombatResource>,
     mut enemy_cards: Query<(&EnemyCard, &mut BackgroundColor)>,
 ) {
+    let group_monsters_pending =
+        matches!(group_target.data, Some((_, _, GroupTargetSide::Monsters)));
     for (card, mut bg) in enemy_cards.iter_mut() {
-        *bg = if target_sel.0.is_some() {
+        let is_living_monster = matches!(
+            combat_res.state.participants.get(card.participant_index),
+            Some(Combatant::Monster(m)) if m.hp.current > 0
+        );
+        *bg = if target_sel.0.is_some() || (group_monsters_pending && is_living_monster) {
             BackgroundColor(ENEMY_CARD_HIGHLIGHT_COLOR)
         } else {
             // Outside target-selection, the idle background reflects the
@@ -17266,6 +17484,451 @@ mod tests {
         assert!(
             pts.pending_action.is_none(),
             "PartyTargetPanelState must be cleared after target confirmation"
+        );
+    }
+
+    /// Phase 3 (3.4): selecting a `MonsterGroup` spell must not cast
+    /// immediately — it must enter `GroupTargetPending` (side = `Monsters`)
+    /// and highlight every *living* `EnemyCard` with
+    /// `ENEMY_CARD_HIGHLIGHT_COLOR`, leaving a dead monster's card
+    /// unhighlighted.
+    #[test]
+    fn test_group_monster_spell_selection_enters_pending_and_highlights_living_cards() {
+        use crate::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+        use crate::domain::types::DiceRoll;
+
+        const SPELL_ID: crate::domain::types::SpellId = 0x0201;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mage = Character::new(
+            "Merlin".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(mage.clone());
+
+        let make_goblin = |id: crate::domain::types::MonsterId, name: &str| {
+            crate::domain::combat::monster::Monster::new(
+                id,
+                name.to_string(),
+                crate::domain::character::Stats::new(8, 8, 8, 10, 10, 10, 8),
+                10,
+                8,
+                vec![crate::domain::combat::types::Attack::physical(
+                    DiceRoll::new(1, 4, 0),
+                )],
+                crate::domain::combat::monster::LootTable::default(),
+            )
+        };
+        cs.add_monster(make_goblin(1, "Goblin")); // participant index 1, alive
+        let mut fallen = make_goblin(2, "Fallen Goblin");
+        fallen.hp.current = 0;
+        cs.add_monster(fallen); // participant index 2, dead
+
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(mage.clone()).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let fireball = Spell::new(
+            SPELL_ID,
+            "Fireball",
+            SpellSchool::Sorcerer,
+            3,
+            5,
+            0,
+            SpellContext::CombatOnly,
+            SpellTarget::MonsterGroup,
+            "Deals 3d6 fire damage to multiple enemies",
+            Some(DiceRoll::new(3, 6, 0)),
+            0,
+            true,
+        );
+        db.spells.add_spell(fireball).unwrap();
+        app.insert_resource(GameContent::new(db));
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Pre-spawn a dummy SpellSelectionPanel entity so update_spell_selection_panel
+        // hits its "already open" guard and does NOT overwrite the
+        // castable_spell_ids set below (mirrors test_tab_cycles_forward_in_spell_panel).
+        app.world_mut().spawn(SpellSelectionPanel {
+            caster: CombatantId::Player(0),
+        });
+
+        // Pre-spawn EnemyCard entities the way setup_combat_ui would, so the
+        // highlight systems have something to color.
+        let alive_card = app
+            .world_mut()
+            .spawn((
+                EnemyCard {
+                    participant_index: 1,
+                },
+                BackgroundColor(ENEMY_CARD_DEFAULT_COLOR),
+            ))
+            .id();
+        let dead_card = app
+            .world_mut()
+            .spawn((
+                EnemyCard {
+                    participant_index: 2,
+                },
+                BackgroundColor(ENEMY_CARD_DEFAULT_COLOR),
+            ))
+            .id();
+
+        // Simulate: spell panel open with Fireball focused, keyboard-confirmed.
+        {
+            let mut sps = app.world_mut().resource_mut::<SpellPanelState>();
+            sps.caster = Some(CombatantId::Player(0));
+            sps.focused_index = 0;
+            sps.castable_spell_ids = vec![SPELL_ID];
+            sps.confirm_requested = true;
+        }
+
+        app.update();
+
+        // Spell panel must close without casting immediately.
+        let sps = app.world().resource::<SpellPanelState>();
+        assert!(
+            sps.caster.is_none(),
+            "Spell panel should close after selecting a group-target spell"
+        );
+
+        // GroupTargetPending must hold the caster/spell/side.
+        {
+            let gtp = app.world().resource::<GroupTargetPending>();
+            let Some((caster, spell_id, side)) = gtp.data else {
+                panic!(
+                    "GroupTargetPending must hold pending data after selecting a MonsterGroup spell"
+                );
+            };
+            assert_eq!(caster, CombatantId::Player(0));
+            assert_eq!(spell_id, SPELL_ID);
+            assert_eq!(side, GroupTargetSide::Monsters);
+        }
+
+        // No CastSpellAction should fire before the player confirms.
+        {
+            let messages = app.world().resource::<Messages<CastSpellAction>>();
+            let mut cursor = messages.get_cursor();
+            assert!(
+                cursor.read(messages).next().is_none(),
+                "CastSpellAction must not fire before Enter confirms the group target"
+            );
+        }
+
+        // Settle frame: highlight systems observe the now-populated resource
+        // regardless of intra-frame system ordering ambiguity.
+        app.update();
+
+        let card_bg =
+            |app: &App, e: Entity| -> Color { app.world().get::<BackgroundColor>(e).unwrap().0 };
+        assert_eq!(
+            card_bg(&app, alive_card),
+            ENEMY_CARD_HIGHLIGHT_COLOR,
+            "the living monster's card must show the group-target highlight"
+        );
+        assert_ne!(
+            card_bg(&app, dead_card),
+            ENEMY_CARD_HIGHLIGHT_COLOR,
+            "the dead monster's card must not be highlighted for a pending group spell"
+        );
+    }
+
+    /// Phase 3 (3.4): `Enter` while `GroupTargetPending` holds a `Monsters`-side
+    /// spell must emit `CastSpellAction` with the first-alive-monster
+    /// placeholder target and clear the pending state.
+    #[test]
+    fn test_group_monster_spell_enter_confirms_cast_and_clears_pending() {
+        const SPELL_ID: crate::domain::types::SpellId = 0x0202;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mage = Character::new(
+            "Merlin".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(mage.clone());
+        let goblin = crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(8, 8, 8, 10, 10, 10, 8),
+            10,
+            8,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        cs.add_monster(goblin); // participant index 1
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(mage.clone()).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Pre-populate GroupTargetPending as if a MonsterGroup spell had
+        // already been selected from the panel.
+        {
+            let mut gtp = app.world_mut().resource_mut::<GroupTargetPending>();
+            gtp.data = Some((CombatantId::Player(0), SPELL_ID, GroupTargetSide::Monsters));
+        }
+
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Enter);
+        }
+        app.update();
+
+        let gtp = app.world().resource::<GroupTargetPending>();
+        assert!(
+            gtp.data.is_none(),
+            "GroupTargetPending must be cleared after Enter confirms the cast"
+        );
+
+        let messages = app.world().resource::<Messages<CastSpellAction>>();
+        let mut cursor = messages.get_cursor();
+        let emitted: Vec<_> = cursor.read(messages).collect();
+        assert!(
+            emitted.iter().any(|m| m.caster == CombatantId::Player(0)
+                && m.spell_id == SPELL_ID
+                && m.target == CombatantId::Monster(1)),
+            "Enter must emit CastSpellAction targeting the first alive monster as placeholder; got: {:?}",
+            emitted
+                .iter()
+                .map(|m| (m.caster, m.spell_id, m.target))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// Phase 3 (3.4): `Escape` while `GroupTargetPending` holds data must
+    /// cancel without emitting `CastSpellAction` (no SP loss) and reopen the
+    /// spell panel for the same caster.
+    #[test]
+    fn test_group_spell_escape_cancels_without_cast_and_reopens_spell_panel() {
+        const SPELL_ID: crate::domain::types::SpellId = 0x0203;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut mage = Character::new(
+            "Merlin".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        mage.sp.current = 10;
+        mage.sp.base = 10;
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(mage.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(mage.clone()).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        {
+            let mut gtp = app.world_mut().resource_mut::<GroupTargetPending>();
+            gtp.data = Some((CombatantId::Player(0), SPELL_ID, GroupTargetSide::Monsters));
+        }
+
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Escape);
+        }
+        app.update();
+
+        let gtp = app.world().resource::<GroupTargetPending>();
+        assert!(gtp.data.is_none(), "Escape must clear GroupTargetPending");
+
+        let sps = app.world().resource::<SpellPanelState>();
+        assert_eq!(
+            sps.caster,
+            Some(CombatantId::Player(0)),
+            "Escape must reopen the spell panel for the same caster"
+        );
+
+        let messages = app.world().resource::<Messages<CastSpellAction>>();
+        let mut cursor = messages.get_cursor();
+        assert!(
+            cursor.read(messages).next().is_none(),
+            "Escape must not emit CastSpellAction"
+        );
+
+        let cr = app.world().resource::<CombatResource>();
+        match cr.state.participants.first() {
+            Some(Combatant::Player(pc)) => {
+                assert_eq!(pc.sp.current, 10, "Cancelling must not spend SP");
+            }
+            other => panic!("expected a player participant at index 0, got {:?}", other),
+        }
+    }
+
+    /// Phase 3 (3.4): selecting an `AllCharacters` spell must enter
+    /// `GroupTargetPending` with `GroupTargetSide::Characters`, and confirming
+    /// with `Enter` must emit `CastSpellAction` with the caster as the
+    /// placeholder target (the domain layer applies the spell to every living
+    /// party member regardless of the named target).
+    #[test]
+    fn test_all_characters_spell_selection_and_confirm() {
+        use crate::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+        use crate::domain::types::DiceRoll;
+
+        const SPELL_ID: crate::domain::types::SpellId = 0x0204;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let cleric = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        let knight = Character::new(
+            "Bard".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(cleric.clone());
+        cs.add_player(knight.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(cleric.clone()).unwrap();
+        gs.party.add_member(knight.clone()).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let mass_heal = Spell::new(
+            SPELL_ID,
+            "Heal All",
+            SpellSchool::Cleric,
+            3,
+            6,
+            0,
+            SpellContext::CombatOnly,
+            SpellTarget::AllCharacters,
+            "Heals the whole party",
+            Some(DiceRoll::new(2, 8, 0)),
+            0,
+            false,
+        );
+        db.spells.add_spell(mass_heal).unwrap();
+        app.insert_resource(GameContent::new(db));
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Pre-spawn a dummy SpellSelectionPanel entity so update_spell_selection_panel
+        // hits its "already open" guard and does NOT overwrite the
+        // castable_spell_ids set below (mirrors test_tab_cycles_forward_in_spell_panel).
+        app.world_mut().spawn(SpellSelectionPanel {
+            caster: CombatantId::Player(0),
+        });
+
+        {
+            let mut sps = app.world_mut().resource_mut::<SpellPanelState>();
+            sps.caster = Some(CombatantId::Player(0));
+            sps.focused_index = 0;
+            sps.castable_spell_ids = vec![SPELL_ID];
+            sps.confirm_requested = true;
+        }
+
+        app.update();
+
+        {
+            let gtp = app.world().resource::<GroupTargetPending>();
+            let Some((caster, spell_id, side)) = gtp.data else {
+                panic!("GroupTargetPending must hold pending data after selecting an AllCharacters spell");
+            };
+            assert_eq!(caster, CombatantId::Player(0));
+            assert_eq!(spell_id, SPELL_ID);
+            assert_eq!(side, GroupTargetSide::Characters);
+        }
+
+        // Confirm with Enter.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Enter);
+        }
+        app.update();
+
+        let gtp = app.world().resource::<GroupTargetPending>();
+        assert!(
+            gtp.data.is_none(),
+            "GroupTargetPending must be cleared after Enter confirms"
+        );
+
+        let messages = app.world().resource::<Messages<CastSpellAction>>();
+        let mut cursor = messages.get_cursor();
+        let emitted: Vec<_> = cursor.read(messages).collect();
+        assert!(
+            emitted.iter().any(|m| m.caster == CombatantId::Player(0)
+                && m.spell_id == SPELL_ID
+                && m.target == CombatantId::Player(0)),
+            "Enter must emit CastSpellAction with the caster as placeholder target; got: {:?}",
+            emitted
+                .iter()
+                .map(|m| (m.caster, m.spell_id, m.target))
+                .collect::<Vec<_>>()
         );
     }
 

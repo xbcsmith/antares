@@ -142,6 +142,71 @@ convention).
 
 ---
 
+## Combat Improvements — Phase 3: Group-Spell Target Clarity (2026-07-21)
+
+Third phase of `docs/explanation/combat_improvements_implementation_plan.md`.
+Group-target spells (`AllMonsters`/`MonsterGroup`/`SpecificMonsters`/
+`AllCharacters`) previously cast immediately on selection, silently picking a
+placeholder target with no visual indication that every living combatant on
+the affected side would be hit. This phase adds a confirm step, consistent
+with the existing single-target select→confirm flow, with no new animation
+infrastructure. Domain behavior is unchanged — confirming still emits the
+same placeholder-target `CastSpellAction` the domain layer already expanded
+to the whole side.
+
+### New pending state (`src/game/systems/combat.rs`)
+
+- `GroupTargetSide` enum (`Monsters` / `Characters`) and `GroupTargetPending`
+  resource (`Option<(CombatantId, SpellId, GroupTargetSide)>`), bundled into
+  the existing `SpellCombatState` `SystemParam` alongside the spell panel and
+  party-target state.
+- `apply_spell_selection`'s `AllMonsters`/`MonsterGroup`/`SpecificMonsters`
+  and `AllCharacters` arms now populate `GroupTargetPending` instead of
+  writing `CastSpellAction` directly; the placeholder-target lookup (first
+  alive monster, or the caster for `AllCharacters`) moved into a new
+  `confirm_group_spell_target` helper called on confirm.
+- `combat_input_system` gained a new keyboard branch (mutually exclusive with
+  the spell panel / party target panel / item panel branches): `Enter` calls
+  `confirm_group_spell_target` and clears the pending state; `Escape` clears
+  it and reopens the spell panel for the same caster.
+
+### Highlighting (`combat.rs` + `src/game/systems/hud.rs`)
+
+- `enter_target_selection` (enemy cards) now also highlights every *living*
+  `EnemyCard` with the existing `ENEMY_CARD_HIGHLIGHT_COLOR` while a
+  `Monsters`-side group spell is pending — dead monsters are left at their
+  normal condition tint since the domain layer only affects living
+  combatants.
+- `update_hud`'s `CharacterCard` background precedence gained a new top tier:
+  while a `Characters`-side group spell is pending, every living party
+  member's card shows the same `ENEMY_CARD_HIGHLIGHT_COLOR`, overriding the
+  active-turn/condition-tint precedence from Phase 4 of the bug-fix round
+  (dead members keep their normal tint).
+- New `GroupTargetPrompt` marker component and `update_group_target_prompt`
+  spawn/despawn system: a small text-only panel (no buttons — confirmation is
+  keyboard-only, matching the `SingleMonster` target-select flow) naming the
+  spell and showing an `[Enter] Cast on all enemies/allies · [Esc] Cancel`
+  hint line. `cleanup_group_target_on_combat_exit` clears the resource and
+  despawns the prompt when combat ends.
+
+### Tests Added (`src/game/systems/combat.rs`, `src/game/systems/hud.rs`)
+
+| Test | What it verifies |
+| ---- | ---- |
+| `test_group_monster_spell_selection_enters_pending_and_highlights_living_cards` | Selecting a `MonsterGroup` spell closes the panel, populates `GroupTargetPending` (no cast yet), and highlights only the living monster's `EnemyCard` |
+| `test_group_monster_spell_enter_confirms_cast_and_clears_pending` | `Enter` emits `CastSpellAction` targeting the first alive monster and clears the pending state |
+| `test_group_spell_escape_cancels_without_cast_and_reopens_spell_panel` | `Escape` clears the pending state, reopens the spell panel for the same caster, emits no `CastSpellAction`, and spends no SP |
+| `test_all_characters_spell_selection_and_confirm` | Selecting an `AllCharacters` spell sets `GroupTargetSide::Characters`; confirming emits `CastSpellAction` with the caster as placeholder target |
+| `test_group_target_characters_card_highlight_and_revert` (hud.rs) | Living `CharacterCard`s highlight during `Characters`-side pending and revert to active-turn/default precedence once cleared |
+
+### Quality gates
+
+`cargo clippy --workspace --all-targets -- -D warnings` clean;
+`cargo test --workspace` green (full doctest run excluded per project
+convention).
+
+---
+
 ## Combat Bug Fixes — Phase 4: Combat UX Polish (2026-07-19)
 
 Addresses `docs/explanation/next_plans.md` lines 212–214: it was hard to tell
