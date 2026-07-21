@@ -2,6 +2,16 @@
 
 ---
 
+## Doctest compatibility update (2026-07-20)
+
+Updated the three affected doctest examples to include the optional `mesh_id` and
+`dialogue_id` fields required by the current `MapEvent::Sign` and
+`MapEvent::Container` variants. This keeps the documentation examples aligned with
+`MapEvent`'s current constructor shape and prevents the `missing fields` doctest
+failures reported for the world-event and container-inventory examples.
+
+---
+
 ## Combat Improvements — Phase 1: Use Item on a Party Member (2026-07-19)
 
 First phase of `docs/explanation/combat_improvements_implementation_plan.md`.
@@ -70,6 +80,59 @@ the consumable.
 
 Existing spell party-target tests updated for the `PartyTargetAction` payload
 (`pending_spell` → `pending_action`).
+
+### Quality gates
+
+`cargo clippy --workspace --all-targets -- -D warnings` clean;
+`cargo test --workspace` green (full doctest run excluded per project
+convention).
+
+---
+
+## Combat Improvements — Phase 2: Ally Spell Targeting Polish (2026-07-20)
+
+Second phase of `docs/explanation/combat_improvements_implementation_plan.md`
+(`next_plans.md:216`). The eligibility-filtering infrastructure for the party
+target panel (grey ineligible rows, keyboard skip, mouse ignore, "No valid
+target" fallback) had already been generalized to cover spells in Phase 1's
+`party_target_eligibility`/`spell_target_eligibility`; this phase closed the
+remaining gaps: an end-to-end resurrection test, and integration coverage
+(rather than only pure-function unit tests) for the ineligible-row keyboard
+skip and mouse-ignore behavior.
+
+### Tests Added (`src/game/systems/combat.rs`)
+
+| Test | What it verifies |
+| ---- | ---- |
+| `test_party_target_confirm_spell_resurrects_dead_ally` | Confirming a dead ally for a Raise-Dead-like `Resurrection` spell clears `DEAD`, restores `resurrect_hp`, and spends the caster's SP — the full domain effect, not just panel eligibility |
+| `test_party_target_mouse_click_ineligible_row_ignored` | Clicking the real panel-spawned button for an ineligible (dead) row does not close the panel or consume the item |
+| `test_party_target_keyboard_skips_ineligible_row` | Pressing the down-navigation key through the real `combat_input_system` wiring skips a dead-member row and lands on the next eligible one |
+
+### Bug fixes surfaced by making these tests deterministic
+
+Two pre-existing issues in the Phase 1 test harness (`setup_spell_party_target_app`)
+were masked because its tests were never run enough times back-to-back to
+notice:
+
+- **Zero-monster false Victory**: `perform_cast_action_with_rng` calls
+  `combat_state.check_combat_end()` unconditionally after every spell cast.
+  With no monsters in the test's `CombatState`, `alive_monster_count() == 0`
+  flips the status to `Victory` immediately, and `handle_combat_victory`
+  clears the participants out from under the test's post-cast assertions a
+  couple of frames later. Fixed by adding a living placeholder monster (not in
+  `turn_order`, so it never gets a turn) to the shared test-setup helper.
+- **~50% flaky spell fizzle**: the default `Character::new` personality stat
+  (10) gives clerics a nonzero `calculate_fizzle_chance` roll on every cast in
+  `execute_spell_cast_by_id`, so casts in these tests silently no-op' about
+  half the time. Fixed by setting the test caster's personality to 35 (the
+  value the domain layer's own fizzle tests already use to guarantee a 0%
+  chance).
+
+### Docs checkoffs
+
+`docs/explanation/next_plans.md:214` (HUD condition-color tinting) and `:216`
+(cleric First Aid / condition-removal spells targeting other characters) are
+now marked ✅ COMPLETED.
 
 ### Quality gates
 

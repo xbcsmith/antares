@@ -16409,6 +16409,10 @@ mod tests {
             base: 20,
             current: 20,
         };
+        // Personality >= 35 keeps the cleric's spell-fizzle chance at 0%
+        // (`calculate_fizzle_chance`), so the cast in these tests is
+        // deterministic rather than ~50% flaky at the default stat of 10.
+        caster.stats.personality = crate::domain::character::AttributePair::new(35);
         caster.spells.cleric_spells[0].push(spell_id);
         let mut ally = Character::new(
             "Bard".to_string(),
@@ -16431,6 +16435,21 @@ mod tests {
         let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
         cs.add_player(caster);
         cs.add_player(ally);
+        // A living monster keeps `check_combat_end` (called unconditionally
+        // after a spell cast) from flipping combat to `Victory` and having
+        // `handle_combat_victory` clear the participants out from under the
+        // assertions below — combat always has at least one enemy in practice.
+        cs.add_monster(crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(8, 8, 8, 8, 8, 8, 8),
+            10,
+            5,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        ));
         cs.turn_order = vec![CombatantId::Player(0)];
         cs.current_turn = 0;
         gs.enter_combat_with_state(cs.clone());
@@ -16438,7 +16457,7 @@ mod tests {
         {
             let mut cr = app.world_mut().resource_mut::<CombatResource>();
             cr.state = cs;
-            cr.player_orig_indices = vec![Some(0), Some(1)];
+            cr.player_orig_indices = vec![Some(0), Some(1), None];
         }
         app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
 
@@ -16582,6 +16601,333 @@ mod tests {
         } else {
             panic!("caster not found in combat state");
         }
+    }
+
+    /// Full ally-resurrect flow (next_plans.md:216): confirming a dead party
+    /// member in the party target panel for a Raise-Dead-like Resurrection
+    /// spell revives that member (clears DEAD, restores `resurrect_hp`) and
+    /// spends the caster's SP.
+    #[test]
+    fn test_party_target_confirm_spell_resurrects_dead_ally() {
+        use crate::domain::magic::types::{
+            Spell, SpellContext, SpellEffectType, SpellSchool, SpellTarget,
+        };
+
+        let mut spell = Spell::new(
+            2051,
+            "Raise Dead",
+            SpellSchool::Cleric,
+            5,
+            10,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Resurrects a dead character with 5 hit points",
+            None,
+            0,
+            false,
+        );
+        spell.resurrect_hp = Some(5);
+        spell.effect_type = Some(SpellEffectType::Resurrection);
+
+        let mut app = setup_spell_party_target_app(spell, true);
+        // A level-5 spell requires caster level 9 (Spell::required_level).
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            if let Some(Combatant::Player(pc)) = cr.state.participants.get_mut(0) {
+                pc.level = 9;
+            }
+        }
+        // Frame 1: panel spawns and settles focus/eligibility.
+        app.update();
+
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            assert_eq!(
+                pts.eligible_flags,
+                vec![false, true],
+                "only the dead ally must be eligible for a resurrection spell"
+            );
+            pts.focused_index = 1;
+            pts.confirm_requested = true;
+        }
+        // Two frames: one to emit the CastSpellAction, one to process it.
+        app.update();
+        app.update();
+
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert!(
+            pts.pending_action.is_none(),
+            "party target panel must close after confirming the resurrection target"
+        );
+
+        let cr = app.world().resource::<CombatResource>();
+        if let Some(Combatant::Player(pc)) = cr.state.get_combatant(&CombatantId::Player(1)) {
+            assert!(
+                !pc.conditions.is_dead(),
+                "ally must no longer be dead after the resurrection spell"
+            );
+            assert_eq!(
+                pc.hp.current, 5,
+                "ally must be revived to the spell's resurrect_hp"
+            );
+        } else {
+            panic!("ally not found in combat state");
+        }
+        if let Some(Combatant::Player(pc)) = cr.state.get_combatant(&CombatantId::Player(0)) {
+            assert!(
+                pc.sp.current < 20,
+                "caster SP must be spent (got {})",
+                pc.sp.current
+            );
+        } else {
+            panic!("caster not found in combat state");
+        }
+    }
+
+    /// Clicking an ineligible party-target row (e.g. a living member for a
+    /// resurrect action) must be ignored: the panel stays open, no
+    /// `UseItemAction`/`CastSpellAction` is emitted, and the item stays in
+    /// the user's inventory.
+    #[test]
+    fn test_party_target_mouse_click_ineligible_row_ignored() {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut content = GameContent::new(ContentDatabase::new());
+        content
+            .0
+            .items
+            .add_item(Item {
+                id: 77,
+                name: "Healing Potion".to_string(),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: ConsumableEffect::HealHp(20),
+                    is_combat_usable: true,
+                    duration_minutes: None,
+                }),
+                base_cost: 20,
+                sell_cost: 10,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+                mesh_id: None,
+            })
+            .unwrap();
+        app.insert_resource(content);
+
+        let mut user = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        user.inventory.add_item(77, 1).unwrap();
+        // A dead ally is ineligible for a HealHp (LivingOnly) item.
+        let mut dead_ally = Character::new(
+            "Ghost".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        dead_ally.hp.base = 50;
+        dead_ally.hp.current = 0;
+        dead_ally
+            .conditions
+            .add(crate::domain::character::Condition::DEAD);
+
+        let mut gs = GameState::new();
+        gs.party.add_member(user.clone()).unwrap();
+        gs.party.add_member(dead_ally.clone()).unwrap();
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(user);
+        cs.add_player(dead_ally);
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            pts.pending_action = Some(PartyTargetAction::Item {
+                user: CombatantId::Player(0),
+                inventory_index: 0,
+            });
+        }
+        // Panel spawns; the dead ally's row renders ineligible (grey).
+        app.update();
+
+        // Find the real, panel-spawned button for the ineligible row and
+        // simulate a mouse click on it.
+        let ineligible_entity = {
+            let mut query = app.world_mut().query::<(Entity, &PartyTargetButton)>();
+            query
+                .iter(app.world())
+                .find(|(_, btn)| !btn.eligible)
+                .map(|(e, _)| e)
+        }
+        .expect("an ineligible button must be spawned for the dead ally row");
+        app.world_mut()
+            .entity_mut(ineligible_entity)
+            .insert(Interaction::Pressed);
+
+        app.update();
+
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert!(
+            pts.pending_action.is_some(),
+            "clicking an ineligible row must not close the party target panel"
+        );
+
+        let cr = app.world().resource::<CombatResource>();
+        if let Some(Combatant::Player(pc)) = cr.state.get_combatant(&CombatantId::Player(0)) {
+            assert!(
+                !pc.inventory.items.is_empty(),
+                "the item must not be consumed when clicking an ineligible row"
+            );
+        } else {
+            panic!("user not found in combat state");
+        }
+    }
+
+    /// Pressing the down-navigation key while the party target panel is open
+    /// must skip over an ineligible row and land on the next eligible one —
+    /// exercising the real `combat_input_system` wiring (not just the pure
+    /// `next_eligible_index` helper).
+    #[test]
+    fn test_party_target_keyboard_skips_ineligible_row() {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut content = GameContent::new(ContentDatabase::new());
+        content
+            .0
+            .items
+            .add_item(Item {
+                id: 77,
+                name: "Healing Potion".to_string(),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: ConsumableEffect::HealHp(20),
+                    is_combat_usable: true,
+                    duration_minutes: None,
+                }),
+                base_cost: 20,
+                sell_cost: 10,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+                mesh_id: None,
+            })
+            .unwrap();
+        app.insert_resource(content);
+
+        let mut caster = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        caster.inventory.add_item(77, 1).unwrap();
+        // The middle party member is dead, hence ineligible for a HealHp item.
+        let mut dead_ally = Character::new(
+            "Ghost".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        dead_ally.hp.base = 50;
+        dead_ally.hp.current = 0;
+        dead_ally
+            .conditions
+            .add(crate::domain::character::Condition::DEAD);
+        let mut living_ally = Character::new(
+            "Bard".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        living_ally.hp.base = 50;
+        living_ally.hp.current = 20;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(caster.clone()).unwrap();
+        gs.party.add_member(dead_ally.clone()).unwrap();
+        gs.party.add_member(living_ally.clone()).unwrap();
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(caster);
+        cs.add_player(dead_ally);
+        cs.add_player(living_ally);
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1), Some(2)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            pts.pending_action = Some(PartyTargetAction::Item {
+                user: CombatantId::Player(0),
+                inventory_index: 0,
+            });
+        }
+        app.update();
+
+        {
+            let pts = app.world().resource::<PartyTargetPanelState>();
+            assert_eq!(pts.eligible_flags, vec![true, false, true]);
+            assert_eq!(
+                pts.focused_index, 0,
+                "focus starts on the first eligible row"
+            );
+        }
+
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::ArrowDown);
+        }
+        app.update();
+
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert_eq!(
+            pts.focused_index, 2,
+            "keyboard navigation must skip the ineligible (dead) row and land on the next eligible one"
+        );
     }
 
     /// Pressing Enter while the spell panel is open confirms the focused spell,

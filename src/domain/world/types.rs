@@ -3143,6 +3143,8 @@ impl Map {
     ///     text: "Hello!".to_string(),
     ///     time_condition: None,
     ///     facing: None,
+    ///     mesh_id: None,
+    ///     dialogue_id: None,
     /// };
     /// map.add_event(pos, event);
     ///

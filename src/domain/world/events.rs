@@ -258,6 +258,8 @@ pub enum EventError {
 ///     text: "Welcome to the dungeon!".to_string(),
 ///     time_condition: None,
 ///     facing: None,
+///     mesh_id: None,
+///     dialogue_id: None,
 /// });
 ///
 /// world.add_map(map);

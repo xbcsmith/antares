@@ -821,6 +821,8 @@ enum CharacterStashPanelResult {
 ///         items: vec![InventorySlot { item_id: 1, charges: 0 }],
 ///         gold: 0,
 ///         gems: 0,
+///         mesh_id: None,
+///         dialogue_id: None,
 ///     },
 /// );
 /// state.world.add_map(map);

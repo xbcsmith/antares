@@ -123,7 +123,7 @@ no-ops on the living. Audit `execute_item_use_by_slot` for the same.
   `cargo test --workspace` pass (full doctest run excluded per project
   convention).
 
-### Phase 2: Ally Spell Targeting Polish (next_plans.md:216)
+### Phase 2: Ally Spell Targeting Polish
 
 #### 2.1 Verify end-to-end
 

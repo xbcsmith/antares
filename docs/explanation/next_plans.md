@@ -211,9 +211,9 @@ Status: completed. Landscape is now a first-class importer, SDK, map-editor, run
 
 During combat the hud should highlight the character attacking. Right now it is very hard to tell whose turn it is. Maybe a nice transparent green HUD card behind the portrait. After a player finishes a turn the actions menu should reset to Attack for the next character. The action buttons should change color when selected. Currently they are barely off a shade of grey and do not highlight at all when clicked with the mouse. The active button should be some color from the color scheme we are using for the Spell Panel.
 
-We should have the HUD card change colors based on conditions for the characters.
+✅ COMPLETED - We should have the HUD card change colors based on conditions for the characters.
 
-Cleric spell first aid can not target a different character. Spells that remove conditions or replenish health should be able to be cast on other characters.
+✅ COMPLETED - Cleric spell first aid can not target a different character. Spells that remove conditions or replenish health should be able to be cast on other characters.
 
 ✅ COMPLETED - If the party triggers combat by stepping on the same tile as the monsters the combat controls do not work. You can not attack or tab through types of actions. ESC doesn't work to exit. Basically the game becomes locked.
 
