@@ -21,11 +21,17 @@ saturated/opaque for legibility).
 A card's background colour is resolved in this fixed order, evaluated
 top-to-bottom — the first rule that applies wins:
 
-1. **Active-turn highlight** — the card belongs to the combatant whose turn
+1. **Group-target highlight** — a group spell (`AllMonsters`/`MonsterGroup`/
+   `SpecificMonsters`/`AllCharacters`) is pending confirmation
+   (`GroupTargetPending`), and the card belongs to a living combatant on the
+   affected side. Applies to combat enemy cards and HUD party cards alike;
+   uses `ENEMY_CARD_HIGHLIGHT_COLOR`, the same slot as single-target
+   selection highlighting.
+2. **Active-turn highlight** — the card belongs to the combatant whose turn
    it currently is (HUD party cards only; see
    [Active-Turn Highlight](#active-turn-highlight) below).
-2. **Condition tint** — the card's owner has a non-`Normal` condition.
-3. **Default background** — neither of the above applies.
+3. **Condition tint** — the card's owner has a non-`Normal` condition.
+4. **Default background** — none of the above applies.
 
 This is encoded once as a pure function,
 [`resolve_card_background`](#source-location), so every card kind (HUD party

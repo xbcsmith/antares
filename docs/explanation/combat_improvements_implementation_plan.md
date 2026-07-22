@@ -105,11 +105,11 @@ no-ops on the living. Audit `execute_item_use_by_slot` for the same.
 
 #### 1.6 Deliverables
 
-- [ ] `PartyTargetAction` enum replacing `pending_spell`
-- [ ] Consumables routed through the party target panel
-- [ ] Shared `TargetEligibility` helper
-- [ ] `HealHp`-on-dead domain guard
-- [ ] Unit + integration tests listed in 1.5
+- [x] `PartyTargetAction` enum replacing `pending_spell`
+- [x] Consumables routed through the party target panel
+- [x] Shared `TargetEligibility` helper
+- [x] `HealHp`-on-dead domain guard
+- [x] Unit + integration tests listed in 1.5
 
 #### 1.7 Success Criteria
 
@@ -153,10 +153,10 @@ tinting covers `next_plans.md:214` and mark it ✅ COMPLETED.
 
 #### 2.5 Deliverables
 
-- [ ] First Aid / Raise Dead end-to-end integration tests
-- [ ] Eligibility filtering (grey rows, keyboard skip, mouse ignore,
+- [x] First Aid / Raise Dead end-to-end integration tests
+- [x] Eligibility filtering (grey rows, keyboard skip, mouse ignore,
       no-valid-target row)
-- [ ] next_plans.md checkoffs (216, 214)
+- [x] next_plans.md checkoffs (216, 214)
 
 #### 2.6 Success Criteria
 
@@ -201,10 +201,10 @@ active-turn/condition tint precedence from
 
 #### 3.5 Deliverables
 
-- [ ] `GroupTargetPending` confirm step for group spells
-- [ ] All-affected-cards highlight (monsters and party)
-- [ ] Prompt line with Enter/Esc handling
-- [ ] Integration tests listed in 3.4
+- [x] `GroupTargetPending` confirm step for group spells
+- [x] All-affected-cards highlight (monsters and party)
+- [x] Prompt line with Enter/Esc handling
+- [x] Integration tests listed in 3.4
 
 #### 3.6 Success Criteria
 
@@ -245,10 +245,10 @@ action; the restore-SP consumable path already works). Mirror in
 
 #### 4.5 Deliverables
 
-- [ ] Floating damage/heal/miss numbers over monster and HUD cards
-- [ ] Inspect info strip on the focused monster card
-- [ ] Magic Potion combat-usable data change
-- [ ] Tests listed in 4.4
+- [x] Floating damage/heal/miss numbers over monster and HUD cards
+- [x] Inspect info strip on the focused monster card
+- [x] Magic Potion combat-usable data change
+- [x] Tests listed in 4.4
 
 #### 4.6 Success Criteria
 
@@ -283,9 +283,9 @@ Mark `next_plans.md:232` ✅ COMPLETED.
 
 #### 5.5 Deliverables
 
-- [ ] Same-line font-size audit of combat/HUD text
-- [ ] Shared `UI_FONT_SIZE_*` constants; literals replaced
-- [ ] next_plans.md:232 checkoff
+- [x] Same-line font-size audit of combat/HUD text
+- [x] Shared `UI_FONT_SIZE_*` constants; literals replaced
+- [x] next_plans.md:232 checkoff
 
 #### 5.6 Success Criteria
 
