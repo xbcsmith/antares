@@ -47,6 +47,39 @@ pub const BODY_FONT_SIZE: f32 = 16.0;
 /// labels, and the game-log header.
 pub const LABEL_FONT_SIZE: f32 = 14.0;
 
+// ===== Font-Size Tiers (combat/HUD text hierarchy) =====
+//
+// A second family of shared sizes, below `LABEL_FONT_SIZE`/`BODY_FONT_SIZE`,
+// covering the compact tiers used inside combat cards and modal panels
+// (spell/item/party-target selection). Introduced to close out
+// `docs/explanation/next_plans.md`'s "Fonts are using different sizes on the
+// same line" report: several sibling text nodes on the same card/row were
+// using ad-hoc literals that had silently drifted apart from one another.
+// See `docs/explanation/combat_improvements_implementation_plan.md` Phase 5.
+
+/// Hint / keyboard-footer text size (9.5 px) — the smallest tier, used for
+/// the "[Enter] confirm — [Esc] cancel"-style footer line at the bottom of
+/// modal selection panels (spell, party-target).
+pub const UI_FONT_SIZE_XS: f32 = 9.5;
+
+/// Compact numeric/status readout size (10 px) — HP numbers, condition
+/// labels, and the enemy inspect strip on combat cards, so a card's stat
+/// block reads as one consistent size instead of each line picking its own.
+pub const UI_FONT_SIZE_SM: f32 = 10.0;
+
+/// Interactive row / button label size (11 px) — spell, item, and
+/// party-target panel row buttons, their Cancel buttons, and empty-state
+/// messages shown in place of an empty row list.
+pub const UI_FONT_SIZE_MD: f32 = 11.0;
+
+/// Modal panel / section title size (13 px) — the header line of the spell,
+/// item, party-target, and group-target-confirm panels.
+pub const UI_FONT_SIZE_LG: f32 = 13.0;
+
+/// High-emphasis size (18 px) — floating combat damage/heal numbers at full
+/// impact and the defeat-screen headline.
+pub const UI_FONT_SIZE_XL: f32 = 18.0;
+
 /// Creates a ([`TextFont`], [`TextColor`]) bundle pair with the given size and
 /// color.
 ///
@@ -673,6 +706,31 @@ mod tests {
     #[test]
     fn test_label_font_size_value() {
         assert!((LABEL_FONT_SIZE - 14.0).abs() < f32::EPSILON);
+    }
+
+    /// Every `UI_FONT_SIZE_*` tier must be distinct and strictly ordered
+    /// XS < SM < MD < LG, and `LABEL_FONT_SIZE`/`BODY_FONT_SIZE` must sit
+    /// above `UI_FONT_SIZE_LG` in the same increasing sequence — otherwise
+    /// the tiers don't form a coherent hierarchy and callers can't reason
+    /// about "smaller than" / "bigger than" between them.
+    #[test]
+    fn test_font_size_tiers_are_distinct_and_ordered() {
+        let tiers = [
+            UI_FONT_SIZE_XS,
+            UI_FONT_SIZE_SM,
+            UI_FONT_SIZE_MD,
+            UI_FONT_SIZE_LG,
+            LABEL_FONT_SIZE,
+            BODY_FONT_SIZE,
+            UI_FONT_SIZE_XL,
+        ];
+        for window in tiers.windows(2) {
+            let [a, b] = window else { unreachable!() };
+            assert!(
+                a < b,
+                "font-size tiers must be strictly increasing: {a} is not < {b}"
+            );
+        }
     }
 
     #[test]

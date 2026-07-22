@@ -257,7 +257,7 @@ action; the restore-SP consumable path already works). Mirror in
   by potion mid-combat.
 - `cargo clippy` and `cargo test --workspace` pass.
 
-### Phase 5: Font-Size Consistency (next_plans.md:232)
+### Phase 5: Font-Size Consistency
 
 #### 5.1 Audit
 

@@ -289,6 +289,85 @@ convention).
 
 ---
 
+## Combat Improvements — Phase 5: Font-Size Consistency (2026-07-22)
+
+Fifth and final phase of
+`docs/explanation/combat_improvements_implementation_plan.md`
+(`next_plans.md:232`, "Fonts are using different sizes on the same line").
+Two parallel audit passes over `src/game/systems/combat.rs` and
+`src/game/systems/hud.rs` (every `TextFont { font_size }` / `text_style(...)`
+site in both files) found the known-suspect bug the plan named — HUD/combat
+card HP, condition, and inspect-strip text disagreeing with each other on the
+same card — plus a scattering of ad-hoc numeric literals with no shared name
+at all.
+
+### Real mismatches fixed (value changes, not just renames)
+
+- `hud::SpBarTextOverlay`: 8px → 10px, matching `HpTextOverlay`/`ConditionText`
+  (both already 10px) so the HP/SP/condition stat block on a party card reads
+  as one size instead of the SP number looking smaller than its siblings.
+  Verified safe against clipping: `SP_BAR_HEIGHT` is only 8px, but Bevy's
+  `Node` overflow defaults to `Visible` on both axes (no `Overflow::clip()`
+  anywhere on that bar), matching how the enemy-card HP bar already relies on
+  visible overflow for its floating-damage numbers.
+- `combat::EnemyConditionText` and `combat::EnemyInspectStrip`: 9px → 10px,
+  matching `EnemyHpText` (already 10px) — the same bug as the HUD one, one
+  card over.
+- `combat::BossHpBarText`: 11px → 10px, matching the regular enemy card's HP
+  text tier (the boss card's own name label already matched the enemy
+  card's name tier at 14px; only its HP text had drifted).
+- Empty-state panel messages ("No spells known.", "No usable items."): 12px →
+  11px, matching the row buttons they stand in for when a list is empty.
+
+### Shared constants (`src/game/systems/ui_helpers.rs`)
+
+Five new tiers below the existing `LABEL_FONT_SIZE`(14)/`BODY_FONT_SIZE`(16):
+`UI_FONT_SIZE_XS`(9.5, panel keyboard-hint footers), `UI_FONT_SIZE_SM`(10,
+compact numeric/status readouts — HP/condition/inspect text on both card
+kinds, monster hover-bar text), `UI_FONT_SIZE_MD`(11, interactive panel
+row/button labels and empty-state messages), `UI_FONT_SIZE_LG`(13, modal
+panel/section titles), `UI_FONT_SIZE_XL`(18, floating damage/heal numbers at
+full impact and the defeat-screen headline). Two more sites got small
+file-local constants following the existing `COMPASS_FONT_SIZE`/
+`CLOCK_FONT_SIZE` (hud.rs) precedent for single-purpose values:
+`hud::AUTOMAP_LEGEND_TITLE_FONT_SIZE`(22) and, in combat.rs,
+`COMBAT_LOG_LINE_FONT_SIZE`(13) plus `FEEDBACK_FONT_SIZE_MUTED`(15) for the
+floating-feedback text's secondary tier. Every `font_size:` literal in both
+files now resolves to a named constant — none are bare numbers.
+The "Combat Log" bubble header (was a bare 15px) now also uses
+`LABEL_FONT_SIZE`, matching the unrelated "Game Log" toggle header elsewhere
+in the UI (`ui.rs`) that already used it.
+
+### Docs checkoff
+
+`docs/explanation/next_plans.md:232` marked ✅ COMPLETED.
+
+### Tests Added (`src/game/systems/ui_helpers.rs`)
+
+| Test | What it verifies |
+| ---- | ---- |
+| `test_font_size_tiers_are_distinct_and_ordered` | `UI_FONT_SIZE_XS/SM/MD/LG`, `LABEL_FONT_SIZE`, `BODY_FONT_SIZE`, `UI_FONT_SIZE_XL` form one strictly increasing sequence with no two tiers equal |
+
+### Manual/visual verification
+
+Not performed by the agent: the game is a native windowed Bevy application
+(Metal backend) with no headless/screenshot mode, and this sandbox's shell
+has no attached display/screen-recording access (`screencapture` fails with
+"could not create image from display" even though the binary itself launches
+and creates a real window). The binary was confirmed to build and run
+(`cargo build --bin antares` succeeds, the process starts, loads the tutorial
+campaign, and creates its window per the log) — only the pixel-level
+side-by-side comparison across cards/panels was left for a human to eyeball,
+per the plan's own "Manual run (tutorial campaign)" step.
+
+### Quality gates
+
+`cargo clippy --workspace --all-targets -- -D warnings` clean;
+`cargo nextest run --workspace` green, 8003 passed / 8 skipped (full doctest
+run excluded per project convention).
+
+---
+
 ## Combat Bug Fixes — Phase 4: Combat UX Polish (2026-07-19)
 
 Addresses `docs/explanation/next_plans.md` lines 212–214: it was hard to tell

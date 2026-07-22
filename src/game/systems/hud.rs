@@ -29,7 +29,7 @@ use crate::game::systems::combat::{
 use crate::game::systems::mouse_input;
 use crate::game::systems::ui_helpers::{
     create_blank_rgba_image, resolve_card_background, text_style, CardConditionTint,
-    BODY_FONT_SIZE, LABEL_FONT_SIZE,
+    BODY_FONT_SIZE, LABEL_FONT_SIZE, UI_FONT_SIZE_SM,
 };
 use bevy::prelude::*;
 use bevy::render::render_resource::Extent3d;
@@ -219,6 +219,9 @@ pub const AUTOMAP_VISITED_DOOR: [u8; 4] = [180, 140, 80, 255];
 pub const AUTOMAP_VISITED_WATER: [u8; 4] = [60, 80, 160, 255];
 pub const AUTOMAP_VISITED_FOREST: [u8; 4] = [50, 120, 50, 255];
 pub const AUTOMAP_PLAYER: [u8; 4] = [255, 255, 255, 255];
+/// Font size of the automap legend panel's "Automap" title, above its
+/// `LABEL_FONT_SIZE`-sized entry rows.
+pub const AUTOMAP_LEGEND_TITLE_FONT_SIZE: f32 = 22.0;
 
 // Clock display constants
 /// Font size used for both time and day lines in the clock widget
@@ -662,7 +665,7 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                                 ZIndex(1),
                                 Text::new(""),
                                 TextFont {
-                                    font_size: 10.0,
+                                    font_size: UI_FONT_SIZE_SM,
                                     ..default()
                                 },
                                 TextColor(HP_TEXT_HEALTHY_COLOR),
@@ -707,7 +710,10 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                                 ZIndex(1),
                                 Text::new(""),
                                 TextFont {
-                                    font_size: 8.0,
+                                    // Matches HpTextOverlay/ConditionText (UI_FONT_SIZE_SM) so the
+                                    // HP/SP/condition stat block reads as one consistent size
+                                    // instead of the SP number looking smaller than its siblings.
+                                    font_size: UI_FONT_SIZE_SM,
                                     ..default()
                                 },
                                 TextColor(SP_TEXT_COLOR),
@@ -719,7 +725,7 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                         card.spawn((
                             Text::new(""),
                             TextFont {
-                                font_size: 10.0,
+                                font_size: UI_FONT_SIZE_SM,
                                 ..default()
                             },
                             TextColor(Color::WHITE),
@@ -1454,7 +1460,7 @@ fn setup_automap(mut commands: Commands, automap_image: Res<AutomapImage>) {
                 legend.spawn((
                     Text::new("Automap"),
                     TextFont {
-                        font_size: 22.0,
+                        font_size: AUTOMAP_LEGEND_TITLE_FONT_SIZE,
                         ..default()
                     },
                     TextColor(Color::WHITE),

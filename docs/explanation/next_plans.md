@@ -229,7 +229,7 @@ During an ambush attack of 2 monsters or more the first monster makes a attack o
 
 Going to the player screen [p] or mouse click on character HUD portrait in combat resets combat participants hit points (monster and character) when closing the Player Screen [p] and returning to combat.
 
-Fonts are using different sizes on the same line.
+✅ COMPLETED - Fonts are using different sizes on the same line.
 
 ✅ COMPLETED - Can not select a Rest option of (1) (2) or (3) because it opens the 1,2, or 3 character sheet. Remove triggering character sheet by number when in the rest menu. The rest menu should be navigable by number but it should not trigger the character sheet.
 

@@ -73,7 +73,10 @@ use crate::game::systems::combat_visual::{
     hide_indicator_during_animation, spawn_turn_indicator, update_turn_indicator,
 };
 use crate::game::systems::map::EncounterVisualMarker;
-use crate::game::systems::ui_helpers::{text_style, BODY_FONT_SIZE, LABEL_FONT_SIZE};
+use crate::game::systems::ui_helpers::{
+    text_style, BODY_FONT_SIZE, LABEL_FONT_SIZE, UI_FONT_SIZE_LG, UI_FONT_SIZE_MD, UI_FONT_SIZE_SM,
+    UI_FONT_SIZE_XL, UI_FONT_SIZE_XS,
+};
 
 /// Message emitted when combat has started.
 ///
@@ -330,6 +333,15 @@ pub const FEEDBACK_COLOR_MISS: Color = Color::srgb(0.8, 0.8, 0.8);
 
 /// Colour for status/condition floating text (yellow)
 pub const FEEDBACK_COLOR_STATUS: Color = Color::srgb(1.0, 0.8, 0.0);
+
+/// Font size for individual combat-log line segments (body text under the
+/// "Combat Log" bubble header, which uses `LABEL_FONT_SIZE`).
+pub const COMBAT_LOG_LINE_FONT_SIZE: f32 = 13.0;
+
+/// Font size for the muted tier of floating combat-feedback text (misses,
+/// status labels, fizzles, non-damaging spell casts, Defend) — smaller than
+/// `UI_FONT_SIZE_XL`, used for damage/heal/spell-heal numbers.
+pub const FEEDBACK_FONT_SIZE_MUTED: f32 = 15.0;
 
 // ===== Condition Label Color Constants =====
 // The single source of truth for these now lives in `ui_helpers` so both
@@ -2199,7 +2211,7 @@ fn setup_combat_ui(
                                             monster.hp.current, monster.hp.base
                                         )),
                                         TextFont {
-                                            font_size: 10.0,
+                                            font_size: UI_FONT_SIZE_SM,
                                             ..default()
                                         },
                                         TextColor(Color::WHITE),
@@ -2208,11 +2220,12 @@ fn setup_combat_ui(
                                         },
                                     ));
 
-                                    // Condition text
+                                    // Condition text — matches EnemyHpText/EnemyInspectStrip
+                                    // (UI_FONT_SIZE_SM) so the card's stat block reads as one size.
                                     card.spawn((
                                         Text::new(""),
                                         TextFont {
-                                            font_size: 9.0,
+                                            font_size: UI_FONT_SIZE_SM,
                                             ..default()
                                         },
                                         TextColor(CONDITION_STATUS_COLOR),
@@ -2226,7 +2239,7 @@ fn setup_combat_ui(
                                     card.spawn((
                                         Text::new(""),
                                         TextFont {
-                                            font_size: 9.0,
+                                            font_size: UI_FONT_SIZE_SM,
                                             ..default()
                                         },
                                         TextColor(Color::srgb(0.75, 0.85, 1.0)),
@@ -2270,11 +2283,11 @@ fn setup_combat_ui(
                                 },
                             ))
                             .with_children(|boss_panel| {
-                                // Boss name label
+                                // Boss name label — same tier as EnemyNameText (LABEL_FONT_SIZE).
                                 boss_panel.spawn((
                                     Text::new(format!("⚔ {} ⚔", monster.name)),
                                     TextFont {
-                                        font_size: 14.0,
+                                        font_size: LABEL_FONT_SIZE,
                                         ..default()
                                     },
                                     TextColor(Color::srgb(1.0, 0.8, 0.2)),
@@ -2305,14 +2318,14 @@ fn setup_combat_ui(
                                         ));
                                     });
 
-                                // Boss HP text
+                                // Boss HP text — matches EnemyHpText's UI_FONT_SIZE_SM tier.
                                 boss_panel.spawn((
                                     Text::new(format!(
                                         "{}/{}",
                                         monster.hp.current, monster.hp.base
                                     )),
                                     TextFont {
-                                        font_size: 11.0,
+                                        font_size: UI_FONT_SIZE_SM,
                                         ..default()
                                     },
                                     TextColor(Color::srgb(1.0, 0.9, 0.9)),
@@ -2470,8 +2483,10 @@ fn setup_combat_ui(
                 .with_children(|bubble| {
                     bubble.spawn((
                         Text::new("Combat Log"),
+                        // Matches the exploration-mode "Game Log" header (ui.rs) so both
+                        // log headers share one size instead of drifting apart (was 15.0).
                         TextFont {
-                            font_size: 15.0,
+                            font_size: LABEL_FONT_SIZE,
                             ..default()
                         },
                         TextColor(Color::srgb(0.92, 0.96, 1.0)),
@@ -2632,7 +2647,7 @@ fn update_spell_selection_panel(
             panel.spawn((
                 Text::new(format!("{} — Select Spell", character.name)),
                 TextFont {
-                    font_size: 13.0,
+                    font_size: UI_FONT_SIZE_LG,
                     ..default()
                 },
                 TextColor(Color::srgb(0.9, 0.9, 1.0)),
@@ -2642,7 +2657,7 @@ fn update_spell_selection_panel(
                 panel.spawn((
                     Text::new("No spells known."),
                     TextFont {
-                        font_size: 12.0,
+                        font_size: UI_FONT_SIZE_MD,
                         ..default()
                     },
                     TextColor(Color::srgb(0.6, 0.6, 0.6)),
@@ -2664,7 +2679,7 @@ fn update_spell_selection_panel(
                     panel.spawn((
                         Text::new(format!("─── Level {} ───", level)),
                         TextFont {
-                            font_size: 10.0,
+                            font_size: UI_FONT_SIZE_SM,
                             ..default()
                         },
                         TextColor(Color::srgb(0.55, 0.55, 0.85)),
@@ -2727,7 +2742,7 @@ fn update_spell_selection_panel(
                                 btn.spawn((
                                     Text::new(label),
                                     TextFont {
-                                        font_size: 11.0,
+                                        font_size: UI_FONT_SIZE_MD,
                                         ..default()
                                     },
                                     TextColor(text_color),
@@ -2759,7 +2774,7 @@ fn update_spell_selection_panel(
                     btn.spawn((
                         Text::new("Cancel"),
                         TextFont {
-                            font_size: 11.0,
+                            font_size: UI_FONT_SIZE_MD,
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -2772,7 +2787,7 @@ fn update_spell_selection_panel(
                     "[\u{2191}\u{2193}/Tab] Navigate \u{00b7} [Enter] Cast \u{00b7} [Esc] Cancel",
                 ),
                 TextFont {
-                    font_size: 9.5,
+                    font_size: UI_FONT_SIZE_XS,
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.55, 0.75)),
@@ -3190,7 +3205,7 @@ fn update_party_target_panel(
             panel.spawn((
                 Text::new("Select Target"),
                 TextFont {
-                    font_size: 13.0,
+                    font_size: UI_FONT_SIZE_LG,
                     ..default()
                 },
                 TextColor(Color::srgb(0.9, 0.9, 1.0)),
@@ -3201,7 +3216,7 @@ fn update_party_target_panel(
                 panel.spawn((
                     Text::new("No valid target"),
                     TextFont {
-                        font_size: 11.0,
+                        font_size: UI_FONT_SIZE_MD,
                         ..default()
                     },
                     TextColor(Color::srgb(0.75, 0.55, 0.55)),
@@ -3256,7 +3271,7 @@ fn update_party_target_panel(
                         btn.spawn((
                             Text::new(label),
                             TextFont {
-                                font_size: 11.0,
+                                font_size: UI_FONT_SIZE_MD,
                                 ..default()
                             },
                             TextColor(if eligible {
@@ -3290,7 +3305,7 @@ fn update_party_target_panel(
                     btn.spawn((
                         Text::new("Cancel"),
                         TextFont {
-                            font_size: 11.0,
+                            font_size: UI_FONT_SIZE_MD,
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -3301,7 +3316,7 @@ fn update_party_target_panel(
             panel.spawn((
                 Text::new("[\u{2191}\u{2193}/Tab] Navigate \u{00b7} [Enter] Confirm \u{00b7} [Esc] Cancel"),
                 TextFont {
-                    font_size: 9.5,
+                    font_size: UI_FONT_SIZE_XS,
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.55, 0.75)),
@@ -3535,7 +3550,7 @@ fn update_group_target_prompt(
             panel.spawn((
                 Text::new(format!("{spell_name} — targets {targets_desc}")),
                 TextFont {
-                    font_size: 13.0,
+                    font_size: UI_FONT_SIZE_LG,
                     ..default()
                 },
                 TextColor(Color::srgb(0.9, 0.9, 1.0)),
@@ -3543,7 +3558,7 @@ fn update_group_target_prompt(
             panel.spawn((
                 Text::new(hint),
                 TextFont {
-                    font_size: 11.0,
+                    font_size: UI_FONT_SIZE_MD,
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.55, 0.75)),
@@ -3676,7 +3691,7 @@ fn update_item_selection_panel(
             panel.spawn((
                 Text::new(format!("{} — Select Item", character.name)),
                 TextFont {
-                    font_size: 13.0,
+                    font_size: UI_FONT_SIZE_LG,
                     ..default()
                 },
                 TextColor(Color::srgb(0.9, 1.0, 0.9)),
@@ -3686,7 +3701,7 @@ fn update_item_selection_panel(
                 panel.spawn((
                     Text::new("No usable items."),
                     TextFont {
-                        font_size: 12.0,
+                        font_size: UI_FONT_SIZE_MD,
                         ..default()
                     },
                     TextColor(Color::srgb(0.6, 0.6, 0.6)),
@@ -3722,7 +3737,7 @@ fn update_item_selection_panel(
                             btn.spawn((
                                 Text::new(label),
                                 TextFont {
-                                    font_size: 11.0,
+                                    font_size: UI_FONT_SIZE_MD,
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -3753,7 +3768,7 @@ fn update_item_selection_panel(
                     btn.spawn((
                         Text::new("✖ Cancel"),
                         TextFont {
-                            font_size: 11.0,
+                            font_size: UI_FONT_SIZE_MD,
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -7479,7 +7494,7 @@ fn handle_combat_defeat(
                 parent.spawn((
                     Text::new("Defeat! You have been defeated."),
                     TextFont {
-                        font_size: 18.0,
+                        font_size: UI_FONT_SIZE_XL,
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -7999,7 +8014,7 @@ fn update_combat_log_bubble_text(
                         row.spawn((
                             Text::new(segment.text),
                             TextFont {
-                                font_size: 13.0,
+                                font_size: COMBAT_LOG_LINE_FONT_SIZE,
                                 ..default()
                             },
                             TextColor(segment.color),
@@ -8311,17 +8326,17 @@ fn spawn_combat_feedback(
         };
 
         let font_size = match &event.effect {
-            CombatFeedbackEffect::Damage(_) | CombatFeedbackEffect::Heal(_) => 18.0,
+            CombatFeedbackEffect::Damage(_) | CombatFeedbackEffect::Heal(_) => UI_FONT_SIZE_XL,
             CombatFeedbackEffect::SpellCast { damage, .. } => {
                 if *damage > 0 {
-                    18.0
+                    UI_FONT_SIZE_XL
                 } else {
-                    15.0
+                    FEEDBACK_FONT_SIZE_MUTED
                 }
             }
-            CombatFeedbackEffect::SpellHeal { .. } => 18.0,
-            CombatFeedbackEffect::Defend => 15.0,
-            _ => 15.0,
+            CombatFeedbackEffect::SpellHeal { .. } => UI_FONT_SIZE_XL,
+            CombatFeedbackEffect::Defend => FEEDBACK_FONT_SIZE_MUTED,
+            _ => FEEDBACK_FONT_SIZE_MUTED,
         };
 
         match event.target {
@@ -8553,7 +8568,7 @@ fn spawn_monster_hp_hover_bars(
                             header.spawn((
                                 Text::new(mon.name.clone()),
                                 TextFont {
-                                    font_size: 10.0,
+                                    font_size: UI_FONT_SIZE_SM,
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -8565,7 +8580,7 @@ fn spawn_monster_hp_hover_bars(
                             header.spawn((
                                 Text::new(format!("{}/{}", mon.hp.base, mon.hp.current)),
                                 TextFont {
-                                    font_size: 10.0,
+                                    font_size: UI_FONT_SIZE_SM,
                                     ..default()
                                 },
                                 TextColor(Color::srgb(0.86, 0.92, 0.98)),
