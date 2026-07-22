@@ -207,6 +207,88 @@ convention).
 
 ---
 
+## Combat Improvements — Phase 4: Classic QoL Extras (2026-07-22)
+
+Fourth phase of `docs/explanation/combat_improvements_implementation_plan.md`.
+Exploration found the floating-damage-number pipeline
+(`CombatFeedbackEvent` → `spawn_combat_feedback` → `FloatingDamage`/
+`DamageText` → cleanup) already existed from the bug-fix round, wired into
+every attack/spell/item resolution path with the exact red/green/grey/yellow
+colours the plan called for. This phase closed the three real gaps: numbers
+didn't rise or fade (hard despawn only), player-target numbers all spawned at
+one fixed screen position regardless of which ally was hit, the inspect-enemy
+strip didn't exist at all, and the Magic Potion data fix from 4.3 turned out
+to be already applied in two of the three item files.
+
+### Floating numbers: rise, fade, and per-character anchoring (`src/game/systems/combat.rs`)
+
+- `FloatingDamage` gained a `total: f32` field alongside `remaining` so
+  progress (`remaining / total`) can drive a fade independent of the fixed
+  1.2s lifetime.
+- `cleanup_floating_damage` renamed to `update_floating_damage`: each frame it
+  now also increments the node's `bottom: Val::Px` offset by
+  `FLOATING_DAMAGE_RISE_PX_PER_SEC` (24px/s) and fades the child
+  `DamageText`'s `TextColor` alpha linearly to 0 as `remaining` approaches
+  zero, before despawning at zero.
+- `spawn_combat_feedback`'s `CombatantId::Player(idx)` branch previously
+  discarded `idx` and always spawned at a fixed `bottom: 80px, left: 16px`
+  HUD position. It now resolves `idx` to a party slot via
+  `CombatResource::player_orig_indices` and anchors the node as a child of
+  that party member's own `hud::HpBarBackground` — mirroring the monster-side
+  anchor to `EnemyHpBarBackground` — so two allies healed in the same round
+  show separate numbers over their own cards. Falls back to the old fixed
+  position if the mapping or HUD card isn't available (e.g. minimal test
+  harnesses).
+- `hud::HpBarBackground` gained a `party_index: usize` field (previously a
+  unit marker with no index) plus `overflow: Overflow::visible()` on its Node,
+  matching `EnemyHpBarBackground`'s existing shape — required so
+  `spawn_combat_feedback` can look up "the HP bar for party slot N."
+
+### Inspect enemy (`src/game/systems/combat.rs`)
+
+- New `EnemyInspectStrip { participant_index }` marker component and a text
+  child spawned on every `EnemyCard` (`Visibility::Hidden` by default), sitting
+  alongside the existing (always-visible) `EnemyConditionText`.
+- New pure `format_special_attack_summary(&[Attack]) -> String`: collects the
+  distinct `SpecialEffect` variants across a monster's `attacks` in
+  first-seen order (no duplicates), joined with ", ", or `"None"` if no
+  attack carries one. Unit-testable without Bevy.
+- New `update_enemy_inspect_strip` system, registered alongside
+  `update_target_highlight` (same `.after(enter_target_selection)` /
+  `.after(combat_input_system)` ordering): keys off the identical
+  `TargetSelection` + `ActionMenuState::active_target_index` guard, so no new
+  input mode was needed. Shows `"AC {ac.current} · Special: {summary}"` on the
+  Tab-focused card only; every other card's strip is hidden.
+
+### Magic Potion combat-usable (`data/items.ron`, `data/test_campaign/data/items.ron`, `campaigns/tutorial/data/items.ron`)
+
+Item 51 "Magic Potion" (`RestoreSp(10)`) had `is_combat_usable: false` in all
+three files at the start of this phase's investigation, though `data/items.ron`
+and `data/test_campaign/data/items.ron` were found already flipped to `true`
+by the time implementation began (likely from earlier ad-hoc data work).
+`campaigns/tutorial/data/items.ron` — the file the plan's own manual
+verification step actually exercises ("drink a Magic Potion in combat" in the
+tutorial campaign) — still had `false` and was the one substantive fix in
+this section.
+
+### Tests Added (`src/game/systems/combat.rs`, `src/domain/items/database.rs`)
+
+| Test | What it verifies |
+| ---- | ---- |
+| `test_update_floating_damage_rises_fades_and_despawns` | Using `TimeUpdateStrategy::ManualDuration` for a deterministic per-frame delta: node rises by rise-speed × elapsed time, `TextColor` alpha reaches ~0.5 at the lifetime midpoint, and the node despawns once `remaining` hits zero |
+| `test_spawn_combat_feedback_anchors_to_correct_party_member_hud_card` | A deliberately non-identity `player_orig_indices` mapping proves the floating number lands on the correct party slot's `HpBarBackground`, not the participant index or a shared spot |
+| `test_enemy_inspect_strip_shows_ac_and_conditions_on_focused_card` | Tab-focused card's strip becomes visible and shows `"AC {n}"` + special-attack summary; unfocused card's strip stays hidden; focus moving to a second card flips visibility and content accordingly |
+| `format_special_attack_summary` doctest | Public API example: mixed attack list → summary string; empty list → `"None"` |
+| `test_magic_potion_is_combat_usable` | Loads `data/items.ron`, asserts item 51 is `RestoreSp(10)` and `is_combat_usable == true` |
+
+### Quality gates
+
+`cargo clippy --workspace --all-targets -- -D warnings` clean;
+`cargo test --workspace` green (full doctest run excluded per project
+convention).
+
+---
+
 ## Combat Bug Fixes — Phase 4: Combat UX Polish (2026-07-19)
 
 Addresses `docs/explanation/next_plans.md` lines 212–214: it was hard to tell

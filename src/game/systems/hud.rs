@@ -263,7 +263,9 @@ pub struct CharacterCard {
 
 /// Marker component for HP bar background
 #[derive(Component)]
-pub struct HpBarBackground;
+pub struct HpBarBackground {
+    pub party_index: usize,
+}
 
 /// Marker component for HP bar fill (the colored portion)
 #[derive(Component)]
@@ -625,10 +627,11 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                                 width: Val::Percent(100.0),
                                 height: HP_BAR_HEIGHT,
                                 position_type: PositionType::Relative,
+                                overflow: Overflow::visible(),
                                 ..default()
                             },
                             BackgroundColor(Color::srgba(0.3, 0.3, 0.3, 1.0)),
-                            HpBarBackground,
+                            HpBarBackground { party_index },
                         ))
                         .with_children(|bar| {
                             // HP bar fill (the colored part)

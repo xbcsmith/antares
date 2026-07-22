@@ -525,6 +525,15 @@ pub struct EnemyConditionText {
     pub participant_index: usize,
 }
 
+/// Marker component for the "inspect enemy" info strip (AC + special-attack
+/// summary) shown on a monster card only while it is Tab-focused during
+/// target selection. Hidden the rest of the time.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct EnemyInspectStrip {
+    /// Index in combat participants
+    pub participant_index: usize,
+}
+
 // ===== Boss HP Bar Components =====
 
 /// Marker component for the Boss HP bar panel root.
@@ -694,12 +703,21 @@ pub struct VictorySummaryRoot;
 #[derive(Component, Debug, Clone, Copy)]
 pub struct DefeatSummaryRoot;
 
-/// Marker component for floating damage numbers (spawned on hits)
+/// Marker component for floating damage numbers (spawned on hits).
+///
+/// `update_floating_damage` ticks `remaining` down each frame, rises the node
+/// upward, and fades the child [`DamageText`]'s alpha toward zero as
+/// `remaining` approaches zero, then despawns it.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct FloatingDamage {
     /// Remaining lifetime for the damage number in seconds
     pub remaining: f32,
+    /// Total lifetime the number was spawned with, used to compute fade/rise progress
+    pub total: f32,
 }
+
+/// Upward rise speed for floating damage/heal numbers, in pixels per second.
+const FLOATING_DAMAGE_RISE_PX_PER_SEC: f32 = 24.0;
 
 /// Marker component for floating damage text node
 #[derive(Component, Debug, Clone, Copy)]
@@ -1268,6 +1286,12 @@ impl Plugin for CombatPlugin {
                     .after(enter_target_selection)
                     .after(combat_input_system),
             )
+            .add_systems(
+                Update,
+                update_enemy_inspect_strip
+                    .after(enter_target_selection)
+                    .after(combat_input_system),
+            )
             .add_systems(Update, select_target)
             // Action handlers must run after the input systems that write their
             // messages so the SP/HP changes are visible in the HUD on the same
@@ -1421,7 +1445,7 @@ impl Plugin for CombatPlugin {
                     .after(update_combat_ui)
                     .after(update_action_highlight),
             )
-            .add_systems(Update, cleanup_floating_damage)
+            .add_systems(Update, update_floating_damage)
             // Monster AI — must run AFTER update_combat_ui so the UI
             // always reflects the current EnemyTurn state (and hides the action
             // menu) before the monster acts and potentially advances the turn.
@@ -2193,6 +2217,21 @@ fn setup_combat_ui(
                                         },
                                         TextColor(CONDITION_STATUS_COLOR),
                                         EnemyConditionText {
+                                            participant_index: idx,
+                                        },
+                                    ));
+
+                                    // Inspect strip (AC + special-attack summary) —
+                                    // hidden until this card is Tab-focused.
+                                    card.spawn((
+                                        Text::new(""),
+                                        TextFont {
+                                            font_size: 9.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::srgb(0.75, 0.85, 1.0)),
+                                        Visibility::Hidden,
+                                        EnemyInspectStrip {
                                             participant_index: idx,
                                         },
                                     ));
@@ -4956,6 +4995,98 @@ fn update_target_highlight(
     for (card, mut bg) in enemy_cards.iter_mut() {
         if Some(card.participant_index) == highlighted_participant {
             *bg = BackgroundColor(TURN_INDICATOR_COLOR);
+        }
+    }
+}
+
+/// Summarizes a monster's special-attack effects for the inspect strip.
+///
+/// Collects the distinct [`SpecialEffect`] variants across `attacks` (in
+/// first-seen order, no duplicates) and joins their labels with ", ".
+/// Returns `"None"` when no attack carries a special effect.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::combat::types::{Attack, AttackType, SpecialEffect};
+/// use antares::domain::types::DiceRoll;
+/// use antares::game::systems::combat::format_special_attack_summary;
+///
+/// let bite = Attack::new(DiceRoll::new(1, 4, 0), AttackType::Physical, Some(SpecialEffect::Poison));
+/// let claw = Attack::new(DiceRoll::new(1, 3, 0), AttackType::Physical, None);
+/// assert_eq!(format_special_attack_summary(&[bite, claw]), "Poison");
+/// assert_eq!(format_special_attack_summary(&[]), "None");
+/// ```
+pub fn format_special_attack_summary(attacks: &[crate::domain::combat::types::Attack]) -> String {
+    use crate::domain::combat::types::SpecialEffect;
+
+    let mut labels: Vec<&'static str> = Vec::new();
+    for attack in attacks {
+        if let Some(effect) = &attack.special_effect {
+            let label = match effect {
+                SpecialEffect::Poison => "Poison",
+                SpecialEffect::Disease => "Disease",
+                SpecialEffect::Paralysis => "Paralysis",
+                SpecialEffect::Sleep => "Sleep",
+                SpecialEffect::Drain => "Drain",
+                SpecialEffect::Stone => "Stone",
+                SpecialEffect::Death => "Death",
+            };
+            if !labels.contains(&label) {
+                labels.push(label);
+            }
+        }
+    }
+
+    if labels.is_empty() {
+        "None".to_string()
+    } else {
+        labels.join(", ")
+    }
+}
+
+/// System: show an inspect strip (AC, current condition, and special-attack
+/// summary) on the Tab-focused monster card during target selection (4.2).
+///
+/// Keys off the same `active_target_index` focus [`update_target_highlight`]
+/// uses — no new input mode. The strip is hidden on every card except the
+/// currently focused one, which is populated from the live `Monster` data
+/// (AC reflects any `active_conditions` debuffs/buffs via `ac.current`; the
+/// condition segment is omitted entirely for `MonsterCondition::Normal`,
+/// mirroring the always-visible `EnemyConditionText`'s empty-string convention).
+fn update_enemy_inspect_strip(
+    target_sel: Res<TargetSelection>,
+    action_menu_state: Res<ActionMenuState>,
+    combat_res: Res<CombatResource>,
+    mut strips: Query<(&EnemyInspectStrip, &mut Visibility, &mut Text)>,
+) {
+    let focused_participant = target_sel.0.and_then(|_| {
+        action_menu_state
+            .active_target_index
+            .and_then(|kbd_target| {
+                resolve_alive_monster_participant_index(&combat_res.state.participants, kbd_target)
+            })
+    });
+
+    for (strip, mut visibility, mut text) in strips.iter_mut() {
+        if Some(strip.participant_index) == focused_participant {
+            if let Some(Combatant::Monster(monster)) =
+                combat_res.state.participants.get(strip.participant_index)
+            {
+                let mut parts = vec![format!("AC {}", monster.ac.current)];
+                let condition = monster.conditions.to_string();
+                if !condition.is_empty() {
+                    parts.push(condition);
+                }
+                parts.push(format!(
+                    "Special: {}",
+                    format_special_attack_summary(&monster.attacks)
+                ));
+                **text = parts.join(" · ");
+            }
+            *visibility = Visibility::Visible;
+        } else {
+            *visibility = Visibility::Hidden;
         }
     }
 }
@@ -8138,8 +8269,12 @@ fn reset_combat_log_on_exit(
 /// [`EnemyHpBarBackground`] node (not the whole card) so it sits in the
 /// lower-right corner of the HP bar area without affecting the card's flex
 /// layout.  The background node has `overflow: visible` so the text is never
-/// clipped.  For player targets it is spawned at an absolute position (HUD
-/// bottom area) because the player HUD layout differs per game.
+/// clipped.  For player targets it is spawned as a child of the matching
+/// [`crate::game::systems::hud::HpBarBackground`] (resolved via
+/// `CombatResource::player_orig_indices`) so the number appears over the
+/// affected party member's own HUD card rather than a single shared spot;
+/// falls back to a fixed HUD-area position if the mapping or card isn't
+/// available yet.
 ///
 /// Colour is chosen from the visual feedback constants:
 /// - Red   (`FEEDBACK_COLOR_DAMAGE`) — `Damage(_)`
@@ -8150,6 +8285,8 @@ fn spawn_combat_feedback(
     mut reader: MessageReader<CombatFeedbackEvent>,
     mut commands: Commands,
     hp_bar_backgrounds: Query<(Entity, &EnemyHpBarBackground)>,
+    hud_bar_backgrounds: Query<(Entity, &crate::game::systems::hud::HpBarBackground)>,
+    combat_res: Res<CombatResource>,
 ) {
     for event in reader.read() {
         let (text, color) = match &event.effect {
@@ -8209,7 +8346,10 @@ fn spawn_combat_feedback(
                                     right: Val::Px(4.0),
                                     ..default()
                                 },
-                                FloatingDamage { remaining: 1.2 },
+                                FloatingDamage {
+                                    remaining: 1.2,
+                                    total: 1.2,
+                                },
                             ))
                             .with_children(|p| {
                                 p.spawn((
@@ -8233,7 +8373,10 @@ fn spawn_combat_feedback(
                                 height: Val::Auto,
                                 ..default()
                             },
-                            FloatingDamage { remaining: 1.2 },
+                            FloatingDamage {
+                                remaining: 1.2,
+                                total: 1.2,
+                            },
                         ))
                         .with_children(|p| {
                             p.spawn((
@@ -8248,31 +8391,78 @@ fn spawn_combat_feedback(
                         });
                 }
             }
-            CombatantId::Player(_) => {
-                // Player targets: spawn at bottom-left of screen (HUD area)
-                commands
-                    .spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            width: Val::Auto,
-                            height: Val::Auto,
-                            bottom: Val::Px(80.0),
-                            left: Val::Px(16.0),
-                            ..default()
-                        },
-                        FloatingDamage { remaining: 1.2 },
-                    ))
-                    .with_children(|p| {
-                        p.spawn((
-                            Text::new(text),
-                            TextFont {
-                                font_size,
+            CombatantId::Player(idx) => {
+                // Resolve the participant index to the party slot's HUD card
+                // so the number appears over the affected member, not a
+                // shared fixed spot.
+                let party_index = combat_res.player_orig_indices.get(idx).copied().flatten();
+                let hud_bar_entity = party_index.and_then(|pidx| {
+                    hud_bar_backgrounds
+                        .iter()
+                        .find(|(_, bg)| bg.party_index == pidx)
+                        .map(|(e, _)| e)
+                });
+
+                if let Some(bar) = hud_bar_entity {
+                    commands.entity(bar).with_children(|parent| {
+                        parent
+                            .spawn((
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    width: Val::Auto,
+                                    height: Val::Auto,
+                                    bottom: Val::Px(0.0),
+                                    right: Val::Px(4.0),
+                                    ..default()
+                                },
+                                FloatingDamage {
+                                    remaining: 1.2,
+                                    total: 1.2,
+                                },
+                            ))
+                            .with_children(|p| {
+                                p.spawn((
+                                    Text::new(text),
+                                    TextFont {
+                                        font_size,
+                                        ..default()
+                                    },
+                                    TextColor(color),
+                                    DamageText,
+                                ));
+                            });
+                    });
+                } else {
+                    // Fallback: fixed HUD-area position if the card isn't
+                    // spawned yet or the mapping is unavailable (e.g. tests
+                    // running without the HUD plugin).
+                    commands
+                        .spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                width: Val::Auto,
+                                height: Val::Auto,
+                                bottom: Val::Px(80.0),
+                                left: Val::Px(16.0),
                                 ..default()
                             },
-                            TextColor(color),
-                            DamageText,
-                        ));
-                    });
+                            FloatingDamage {
+                                remaining: 1.2,
+                                total: 1.2,
+                            },
+                        ))
+                        .with_children(|p| {
+                            p.spawn((
+                                Text::new(text),
+                                TextFont {
+                                    font_size,
+                                    ..default()
+                                },
+                                TextColor(color),
+                                DamageText,
+                            ));
+                        });
+                }
             }
         }
     }
@@ -8539,17 +8729,38 @@ fn cleanup_monster_hp_hover_bars(
     }
 }
 
-/// Cleanup system for floating damage UI nodes. Decrements remaining lifetime
-/// and despawns the node when time is up.
-fn cleanup_floating_damage(
+/// Animates and despawns floating damage/heal/miss numbers.
+///
+/// Each frame: decrements `FloatingDamage::remaining`, rises the node upward
+/// at [`FLOATING_DAMAGE_RISE_PX_PER_SEC`] via its `bottom` offset, and fades
+/// the child [`DamageText`]'s alpha linearly from 1.0 to 0.0 as `remaining`
+/// approaches zero. Despawns the node once its lifetime is up.
+fn update_floating_damage(
     mut commands: Commands,
     time: Res<Time>,
-    mut query: Query<(Entity, &mut FloatingDamage)>,
+    mut query: Query<(Entity, &mut FloatingDamage, &mut Node, Option<&Children>)>,
+    mut text_colors: Query<&mut TextColor, With<DamageText>>,
 ) {
-    for (entity, mut fd) in query.iter_mut() {
-        fd.remaining -= time.delta_secs();
+    let dt = time.delta_secs();
+    for (entity, mut fd, mut node, children) in query.iter_mut() {
+        fd.remaining -= dt;
+
         if fd.remaining <= 0.0 {
             commands.entity(entity).despawn();
+            continue;
+        }
+
+        if let Val::Px(bottom) = node.bottom {
+            node.bottom = Val::Px(bottom + FLOATING_DAMAGE_RISE_PX_PER_SEC * dt);
+        }
+
+        let alpha = (fd.remaining / fd.total).clamp(0.0, 1.0);
+        if let Some(children) = children {
+            for child in children.iter() {
+                if let Ok(mut color) = text_colors.get_mut(child) {
+                    color.0.set_alpha(alpha);
+                }
+            }
         }
     }
 }
@@ -12806,6 +13017,279 @@ mod tests {
             );
         }
         // System ran without panic — that's the core assertion.
+    }
+
+    /// 4.1/4.4: `update_floating_damage` rises the node and fades the child
+    /// `DamageText`'s alpha as `remaining` counts down, then despawns the
+    /// node once its lifetime is spent. Uses `TimeUpdateStrategy::ManualDuration`
+    /// so the per-frame `Time` delta is deterministic instead of real wall-clock time.
+    #[test]
+    fn test_update_floating_damage_rises_fades_and_despawns() {
+        use bevy::time::TimeUpdateStrategy;
+        use std::time::Duration;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+            600,
+        )));
+        // Time<Virtual>'s default max_delta (0.25s) would otherwise clamp our
+        // deliberately larger manual per-frame duration.
+        app.world_mut()
+            .resource_mut::<Time<bevy::time::Virtual>>()
+            .set_max_delta(Duration::from_secs(10));
+        app.add_systems(Update, update_floating_damage);
+
+        let entity = app
+            .world_mut()
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: Val::Px(0.0),
+                    ..default()
+                },
+                FloatingDamage {
+                    remaining: 1.2,
+                    total: 1.2,
+                },
+            ))
+            .with_children(|p| {
+                p.spawn((Text::new("-5"), TextColor(Color::WHITE), DamageText));
+            })
+            .id();
+
+        // Bevy's very first frame reports a zero `Time` delta (it establishes
+        // the baseline instant); consume that frame before measuring elapsed time.
+        app.update();
+
+        // First real tick: 0.6s of a 1.2s lifetime elapsed — still alive, risen, half faded.
+        app.update();
+
+        assert!(
+            app.world().get_entity(entity).is_ok(),
+            "node must still exist halfway through its lifetime"
+        );
+
+        let remaining = app.world().get::<FloatingDamage>(entity).unwrap().remaining;
+        assert!(
+            (remaining - 0.6).abs() < 0.001,
+            "remaining should count down by the elapsed delta, got {remaining}"
+        );
+
+        let bottom = app.world().get::<Node>(entity).unwrap().bottom;
+        assert_eq!(
+            bottom,
+            Val::Px(24.0 * 0.6),
+            "node must rise by rise-speed * elapsed time"
+        );
+
+        let child = app.world().get::<Children>(entity).unwrap()[0];
+        let alpha = app.world().get::<TextColor>(child).unwrap().0.alpha();
+        assert!(
+            (alpha - 0.5).abs() < 0.01,
+            "alpha should be halfway faded (remaining/total = 0.5), got {alpha}"
+        );
+
+        // Second tick: another 0.6s elapses, lifetime is spent — node despawns.
+        app.update();
+
+        assert!(
+            app.world().get_entity(entity).is_err(),
+            "node must be despawned once remaining reaches zero"
+        );
+    }
+
+    /// 4.1: A `CombatFeedbackEvent` targeting `CombatantId::Player(idx)` must
+    /// anchor its `FloatingDamage` node to *that* party member's own HUD
+    /// `HpBarBackground` (resolved through `player_orig_indices`), not a
+    /// fixed shared screen position — otherwise two allies healed in the same
+    /// round would show numbers stacked in one spot with no way to tell them apart.
+    #[test]
+    fn test_spawn_combat_feedback_anchors_to_correct_party_member_hud_card() {
+        use crate::game::systems::hud::HpBarBackground;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        app.insert_resource(crate::game::resources::GlobalState(GameState::new()));
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            // Participant 0 -> party slot 1, participant 1 -> party slot 0,
+            // deliberately not identity-mapped so the test would fail if the
+            // system anchored by participant index instead of party_index.
+            cr.player_orig_indices = vec![Some(1), Some(0)];
+        }
+
+        // Pre-spawn HUD HP bar backgrounds for both party slots, the way
+        // `setup_hud` would.
+        let slot0_bar = app
+            .world_mut()
+            .spawn(HpBarBackground { party_index: 0 })
+            .id();
+        let slot1_bar = app
+            .world_mut()
+            .spawn(HpBarBackground { party_index: 1 })
+            .id();
+
+        app.world_mut().write_message(CombatFeedbackEvent {
+            source: None,
+            target: CombatantId::Player(0),
+            effect: CombatFeedbackEffect::Heal(7),
+        });
+
+        app.update();
+
+        let floating_children_of = |app: &App, parent: Entity| -> usize {
+            app.world()
+                .get::<Children>(parent)
+                .map(|children| {
+                    children
+                        .iter()
+                        .filter(|c| app.world().get::<FloatingDamage>(*c).is_some())
+                        .count()
+                })
+                .unwrap_or(0)
+        };
+
+        assert_eq!(
+            floating_children_of(&app, slot1_bar),
+            1,
+            "participant 0 maps to party slot 1 — the floating number must appear there"
+        );
+        assert_eq!(
+            floating_children_of(&app, slot0_bar),
+            0,
+            "the floating number must not appear on the unaffected party member's card"
+        );
+    }
+
+    /// 4.2/4.4: `update_enemy_inspect_strip` shows AC + special-attack summary
+    /// on the Tab-focused monster card only, and hides it on every other card.
+    #[test]
+    fn test_enemy_inspect_strip_shows_ac_and_conditions_on_focused_card() {
+        use crate::domain::combat::monster::{AiBehavior, LootTable, Monster};
+        use crate::domain::combat::types::{Attack, AttackType, SpecialEffect};
+        use crate::domain::types::DiceRoll;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<TargetSelection>();
+        app.init_resource::<ActionMenuState>();
+        app.init_resource::<CombatResource>();
+        app.add_systems(Update, update_enemy_inspect_strip);
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            let mut goblin = Monster::new(
+                1,
+                "Goblin".to_string(),
+                crate::domain::character::Stats::new(8, 6, 6, 8, 8, 8, 6),
+                20,
+                15, // AC 15
+                vec![Attack::new(
+                    DiceRoll::new(1, 4, 0),
+                    AttackType::Physical,
+                    Some(SpecialEffect::Poison),
+                )],
+                LootTable::default(),
+            );
+            goblin.ai_behavior = AiBehavior::Random;
+            cr.state
+                .participants
+                .push(Combatant::Monster(Box::new(goblin)));
+
+            let orc = Monster::new(
+                2,
+                "Orc".to_string(),
+                crate::domain::character::Stats::new(10, 6, 6, 8, 8, 8, 6),
+                25,
+                10,
+                vec![],
+                LootTable::default(),
+            );
+            cr.state
+                .participants
+                .push(Combatant::Monster(Box::new(orc)));
+        }
+
+        // Enter target-select mode focused on the first (goblin) card.
+        app.world_mut().resource_mut::<TargetSelection>().0 = Some(CombatantId::Player(0));
+        app.world_mut()
+            .resource_mut::<ActionMenuState>()
+            .active_target_index = Some(0);
+
+        let focused_strip = app
+            .world_mut()
+            .spawn((
+                Text::new(""),
+                Visibility::Hidden,
+                EnemyInspectStrip {
+                    participant_index: 0,
+                },
+            ))
+            .id();
+        let unfocused_strip = app
+            .world_mut()
+            .spawn((
+                Text::new(""),
+                Visibility::Hidden,
+                EnemyInspectStrip {
+                    participant_index: 1,
+                },
+            ))
+            .id();
+
+        app.update();
+
+        let visibility_of =
+            |app: &App, e: Entity| -> Visibility { *app.world().get::<Visibility>(e).unwrap() };
+        let text_of =
+            |app: &App, e: Entity| -> String { app.world().get::<Text>(e).unwrap().0.clone() };
+
+        assert_eq!(
+            visibility_of(&app, focused_strip),
+            Visibility::Visible,
+            "the focused monster's inspect strip must become visible"
+        );
+        assert_eq!(
+            visibility_of(&app, unfocused_strip),
+            Visibility::Hidden,
+            "an unfocused monster's inspect strip must stay hidden"
+        );
+
+        let focused_text = text_of(&app, focused_strip);
+        assert!(
+            focused_text.contains("AC 15"),
+            "strip must show the focused monster's AC, got {focused_text:?}"
+        );
+        assert!(
+            focused_text.contains("Poison"),
+            "strip must summarize the focused monster's special attacks, got {focused_text:?}"
+        );
+
+        // Tab to the second (orc) card — the strip must follow the focus.
+        app.world_mut()
+            .resource_mut::<ActionMenuState>()
+            .active_target_index = Some(1);
+        app.update();
+
+        assert_eq!(
+            visibility_of(&app, focused_strip),
+            Visibility::Hidden,
+            "the previously focused card must hide once focus moves away"
+        );
+        assert_eq!(
+            visibility_of(&app, unfocused_strip),
+            Visibility::Visible,
+            "the newly focused card must become visible"
+        );
+        let orc_text = text_of(&app, unfocused_strip);
+        assert!(
+            orc_text.contains("AC 10") && orc_text.contains("None"),
+            "orc has no special attacks, got {orc_text:?}"
+        );
     }
 
     /// T3-4: After `AttackAction` is written and the system runs, the
