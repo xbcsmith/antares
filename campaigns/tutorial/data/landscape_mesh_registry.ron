@@ -1,8 +1,8 @@
 [
     (
         id: 11000,
-        name: "Short Oak Tree",
-        filepath: "assets/meshes/landscape/tree/short_oak_tree.ron",
+        name: "Willow Tree",
+        filepath: "assets/meshes/landscape/tree/willow_tree.ron",
     ),
     (
         id: 11001,

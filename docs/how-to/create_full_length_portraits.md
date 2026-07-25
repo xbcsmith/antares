@@ -159,7 +159,7 @@ no cropping of feet or head. Vertical orientation, 3:5 aspect ratio.
 ### Tutorial campaign — per-character prompts
 
 These correspond to the characters defined in
-`docs/explanation/character_generation_prompt.md`.
+`docs/explanation/characters_prompts.md`.
 
 #### Kira (Human Knight) — `kira.png`
 

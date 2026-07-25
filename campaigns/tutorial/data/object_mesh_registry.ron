@@ -1,0 +1,5 @@
+(
+    meshes: {
+        "barred_passage": "assets/meshes/objects/barred_door.ron",
+    },
+)

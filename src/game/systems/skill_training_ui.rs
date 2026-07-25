@@ -467,7 +467,7 @@ fn render_member_column(
             };
             let frame = egui::Frame::group(ui.style())
                 .fill(row_fill)
-                .stroke(egui::Stroke::new(1.0, stroke_color));
+                .stroke(egui::Stroke::new(1.0_f32, stroke_color));
 
             let response = frame
                 .show(ui, |ui| {
@@ -562,7 +562,7 @@ fn render_skill_column(
             };
             let frame = egui::Frame::group(ui.style())
                 .fill(row_fill)
-                .stroke(egui::Stroke::new(1.0, stroke_color));
+                .stroke(egui::Stroke::new(1.0_f32, stroke_color));
 
             let response = frame
                 .show(ui, |ui| {

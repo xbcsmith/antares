@@ -2,6 +2,1676 @@
 
 ---
 
+## Doctest compatibility update (2026-07-20)
+
+Updated the three affected doctest examples to include the optional `mesh_id` and
+`dialogue_id` fields required by the current `MapEvent::Sign` and
+`MapEvent::Container` variants. This keeps the documentation examples aligned with
+`MapEvent`'s current constructor shape and prevents the `missing fields` doctest
+failures reported for the world-event and container-inventory examples.
+
+---
+
+## Combat Improvements — Phase 1: Use Item on a Party Member (2026-07-19)
+
+First phase of `docs/explanation/combat_improvements_implementation_plan.md`.
+Beneficial consumables (heal, restore SP, cure, boosts, resurrect) now prompt
+for a party-member target via the shared party target panel instead of
+hardcoding `target = user` — the domain layer (`execute_item_use_by_slot`)
+always supported arbitrary player targets; only the UI path was missing.
+
+### Shared target-eligibility helper (`src/game/systems/ui_helpers.rs`)
+
+- New `TargetEligibility` enum (`Any`/`LivingOnly`/`DeadOnly`) with
+  `is_eligible(&Character)` driven by `Condition::is_dead()`.
+- New `consumable_target_eligibility(&ConsumableEffect)`:
+  `Resurrect` → `DeadOnly`; heal/restore/cure/boosts → `LivingOnly`;
+  pass-through effects (`IsFood`, `CastSpell`, `LearnSpell`) → `Any`.
+- Pure and Bevy-free; the ally-spell-targeting phase will add the
+  `SpellEffectType` equivalent on top of the same enum.
+
+### Party target panel generalization (`src/game/systems/combat.rs`)
+
+- New `PartyTargetAction` enum (`Spell { caster, spell_id }` /
+  `Item { user, inventory_index }`) replaces
+  `PartyTargetPanelState.pending_spell`; new state fields `eligible_flags`
+  (parallel to `participant_indices`) and `preferred_target` (participant to
+  focus initially — the item user's own row, so self-use stays one Enter
+  away).
+- `update_party_target_panel` computes per-row eligibility via
+  `party_target_eligibility` (items → consumable effect mapping; spells →
+  `Any` until the next phase), renders ineligible rows greyed
+  (`ACTION_BUTTON_DISABLED_COLOR`, dimmed text), spawns a "No valid target"
+  note when nothing is eligible, and resolves initial focus
+  (preferred-if-eligible → first eligible → 0).
+- `handle_party_target_button` matches on the pending action and emits
+  `CastSpellAction` or `UseItemAction` via the new `emit_party_target_action`
+  helper; ineligible rows ignore both mouse clicks and keyboard confirm.
+- Keyboard navigation (`combat_input_system`) skips ineligible rows through
+  the new pure `next_eligible_index` helper (wrap-around, stays put when no
+  other eligible row); Escape now reopens the panel the pending action came
+  from — spell panel for `Spell`, item panel for `Item`.
+- `dispatch_item_button` routes through the new `item_dispatch_route`
+  classifier: `spell_effect` items follow the referenced spell's target
+  (`SingleMonster` → monster targeting, `SingleCharacter` → party panel),
+  beneficial consumables → party panel, food/scroll pass-throughs → immediate
+  self-use (unchanged behavior).
+
+### Domain guard (`src/domain/items/consumable_usage.rs`)
+
+`apply_consumable_effect` now makes `HealHp` a no-op on a dead character
+(mirroring how `Resurrect` already no-ops on the living) — previously a dead
+character would gain HP while keeping the `DEAD` condition, silently wasting
+the consumable.
+
+### Tests Added
+
+| Test | File | What it verifies |
+| ---- | ---- | ---- |
+| `test_consumable_target_eligibility_mapping` | ui_helpers.rs | Every `ConsumableEffect` variant maps to the right eligibility |
+| `test_target_eligibility_is_eligible` | ui_helpers.rs | Living/dead × Any/LivingOnly/DeadOnly matrix |
+| `TargetEligibility::is_eligible` + `consumable_target_eligibility` doctests | ui_helpers.rs | Public API examples |
+| `test_next_eligible_index_skips_ineligible` | combat.rs | Wrap-around skip, sole-eligible cycle, no-eligible stays put |
+| `test_item_dispatch_route_classification` | combat.rs | Potion/resurrect → party, monster-wand → monster, healing-wand → party, food/unknown → self |
+| `test_item_panel_dispatches_use_item_action` (updated) | combat.rs | Healing potion opens the party panel with the user's row preferred |
+| `test_party_target_confirm_item_heals_ally` | combat.rs | Full flow: confirm ally row → ally healed, item consumed from user's inventory |
+| `test_resurrect_item_panel_dead_only_eligibility` | combat.rs | Panel marks living ineligible / dead eligible and focuses the dead row |
+| `test_heal_hp_on_dead_character_is_noop` | consumable_usage.rs | Healing cannot raise the dead; `DEAD` persists; zero healing reported |
+
+Existing spell party-target tests updated for the `PartyTargetAction` payload
+(`pending_spell` → `pending_action`).
+
+### Quality gates
+
+`cargo clippy --workspace --all-targets -- -D warnings` clean;
+`cargo test --workspace` green (full doctest run excluded per project
+convention).
+
+---
+
+## Combat Improvements — Phase 2: Ally Spell Targeting Polish (2026-07-20)
+
+Second phase of `docs/explanation/combat_improvements_implementation_plan.md`
+(`next_plans.md:216`). The eligibility-filtering infrastructure for the party
+target panel (grey ineligible rows, keyboard skip, mouse ignore, "No valid
+target" fallback) had already been generalized to cover spells in Phase 1's
+`party_target_eligibility`/`spell_target_eligibility`; this phase closed the
+remaining gaps: an end-to-end resurrection test, and integration coverage
+(rather than only pure-function unit tests) for the ineligible-row keyboard
+skip and mouse-ignore behavior.
+
+### Tests Added (`src/game/systems/combat.rs`)
+
+| Test | What it verifies |
+| ---- | ---- |
+| `test_party_target_confirm_spell_resurrects_dead_ally` | Confirming a dead ally for a Raise-Dead-like `Resurrection` spell clears `DEAD`, restores `resurrect_hp`, and spends the caster's SP — the full domain effect, not just panel eligibility |
+| `test_party_target_mouse_click_ineligible_row_ignored` | Clicking the real panel-spawned button for an ineligible (dead) row does not close the panel or consume the item |
+| `test_party_target_keyboard_skips_ineligible_row` | Pressing the down-navigation key through the real `combat_input_system` wiring skips a dead-member row and lands on the next eligible one |
+
+### Bug fixes surfaced by making these tests deterministic
+
+Two pre-existing issues in the Phase 1 test harness (`setup_spell_party_target_app`)
+were masked because its tests were never run enough times back-to-back to
+notice:
+
+- **Zero-monster false Victory**: `perform_cast_action_with_rng` calls
+  `combat_state.check_combat_end()` unconditionally after every spell cast.
+  With no monsters in the test's `CombatState`, `alive_monster_count() == 0`
+  flips the status to `Victory` immediately, and `handle_combat_victory`
+  clears the participants out from under the test's post-cast assertions a
+  couple of frames later. Fixed by adding a living placeholder monster (not in
+  `turn_order`, so it never gets a turn) to the shared test-setup helper.
+- **~50% flaky spell fizzle**: the default `Character::new` personality stat
+  (10) gives clerics a nonzero `calculate_fizzle_chance` roll on every cast in
+  `execute_spell_cast_by_id`, so casts in these tests silently no-op' about
+  half the time. Fixed by setting the test caster's personality to 35 (the
+  value the domain layer's own fizzle tests already use to guarantee a 0%
+  chance).
+
+### Docs checkoffs
+
+`docs/explanation/next_plans.md:214` (HUD condition-color tinting) and `:216`
+(cleric First Aid / condition-removal spells targeting other characters) are
+now marked ✅ COMPLETED.
+
+### Quality gates
+
+`cargo clippy --workspace --all-targets -- -D warnings` clean;
+`cargo test --workspace` green (full doctest run excluded per project
+convention).
+
+---
+
+## Combat Improvements — Phase 3: Group-Spell Target Clarity (2026-07-21)
+
+Third phase of `docs/explanation/combat_improvements_implementation_plan.md`.
+Group-target spells (`AllMonsters`/`MonsterGroup`/`SpecificMonsters`/
+`AllCharacters`) previously cast immediately on selection, silently picking a
+placeholder target with no visual indication that every living combatant on
+the affected side would be hit. This phase adds a confirm step, consistent
+with the existing single-target select→confirm flow, with no new animation
+infrastructure. Domain behavior is unchanged — confirming still emits the
+same placeholder-target `CastSpellAction` the domain layer already expanded
+to the whole side.
+
+### New pending state (`src/game/systems/combat.rs`)
+
+- `GroupTargetSide` enum (`Monsters` / `Characters`) and `GroupTargetPending`
+  resource (`Option<(CombatantId, SpellId, GroupTargetSide)>`), bundled into
+  the existing `SpellCombatState` `SystemParam` alongside the spell panel and
+  party-target state.
+- `apply_spell_selection`'s `AllMonsters`/`MonsterGroup`/`SpecificMonsters`
+  and `AllCharacters` arms now populate `GroupTargetPending` instead of
+  writing `CastSpellAction` directly; the placeholder-target lookup (first
+  alive monster, or the caster for `AllCharacters`) moved into a new
+  `confirm_group_spell_target` helper called on confirm.
+- `combat_input_system` gained a new keyboard branch (mutually exclusive with
+  the spell panel / party target panel / item panel branches): `Enter` calls
+  `confirm_group_spell_target` and clears the pending state; `Escape` clears
+  it and reopens the spell panel for the same caster.
+
+### Highlighting (`combat.rs` + `src/game/systems/hud.rs`)
+
+- `enter_target_selection` (enemy cards) now also highlights every *living*
+  `EnemyCard` with the existing `ENEMY_CARD_HIGHLIGHT_COLOR` while a
+  `Monsters`-side group spell is pending — dead monsters are left at their
+  normal condition tint since the domain layer only affects living
+  combatants.
+- `update_hud`'s `CharacterCard` background precedence gained a new top tier:
+  while a `Characters`-side group spell is pending, every living party
+  member's card shows the same `ENEMY_CARD_HIGHLIGHT_COLOR`, overriding the
+  active-turn/condition-tint precedence from Phase 4 of the bug-fix round
+  (dead members keep their normal tint).
+- New `GroupTargetPrompt` marker component and `update_group_target_prompt`
+  spawn/despawn system: a small text-only panel (no buttons — confirmation is
+  keyboard-only, matching the `SingleMonster` target-select flow) naming the
+  spell and showing an `[Enter] Cast on all enemies/allies · [Esc] Cancel`
+  hint line. `cleanup_group_target_on_combat_exit` clears the resource and
+  despawns the prompt when combat ends.
+
+### Tests Added (`src/game/systems/combat.rs`, `src/game/systems/hud.rs`)
+
+| Test | What it verifies |
+| ---- | ---- |
+| `test_group_monster_spell_selection_enters_pending_and_highlights_living_cards` | Selecting a `MonsterGroup` spell closes the panel, populates `GroupTargetPending` (no cast yet), and highlights only the living monster's `EnemyCard` |
+| `test_group_monster_spell_enter_confirms_cast_and_clears_pending` | `Enter` emits `CastSpellAction` targeting the first alive monster and clears the pending state |
+| `test_group_spell_escape_cancels_without_cast_and_reopens_spell_panel` | `Escape` clears the pending state, reopens the spell panel for the same caster, emits no `CastSpellAction`, and spends no SP |
+| `test_all_characters_spell_selection_and_confirm` | Selecting an `AllCharacters` spell sets `GroupTargetSide::Characters`; confirming emits `CastSpellAction` with the caster as placeholder target |
+| `test_group_target_characters_card_highlight_and_revert` (hud.rs) | Living `CharacterCard`s highlight during `Characters`-side pending and revert to active-turn/default precedence once cleared |
+
+### Quality gates
+
+`cargo clippy --workspace --all-targets -- -D warnings` clean;
+`cargo test --workspace` green (full doctest run excluded per project
+convention).
+
+---
+
+## Combat Improvements — Phase 4: Classic QoL Extras (2026-07-22)
+
+Fourth phase of `docs/explanation/combat_improvements_implementation_plan.md`.
+Exploration found the floating-damage-number pipeline
+(`CombatFeedbackEvent` → `spawn_combat_feedback` → `FloatingDamage`/
+`DamageText` → cleanup) already existed from the bug-fix round, wired into
+every attack/spell/item resolution path with the exact red/green/grey/yellow
+colours the plan called for. This phase closed the three real gaps: numbers
+didn't rise or fade (hard despawn only), player-target numbers all spawned at
+one fixed screen position regardless of which ally was hit, the inspect-enemy
+strip didn't exist at all, and the Magic Potion data fix from 4.3 turned out
+to be already applied in two of the three item files.
+
+### Floating numbers: rise, fade, and per-character anchoring (`src/game/systems/combat.rs`)
+
+- `FloatingDamage` gained a `total: f32` field alongside `remaining` so
+  progress (`remaining / total`) can drive a fade independent of the fixed
+  1.2s lifetime.
+- `cleanup_floating_damage` renamed to `update_floating_damage`: each frame it
+  now also increments the node's `bottom: Val::Px` offset by
+  `FLOATING_DAMAGE_RISE_PX_PER_SEC` (24px/s) and fades the child
+  `DamageText`'s `TextColor` alpha linearly to 0 as `remaining` approaches
+  zero, before despawning at zero.
+- `spawn_combat_feedback`'s `CombatantId::Player(idx)` branch previously
+  discarded `idx` and always spawned at a fixed `bottom: 80px, left: 16px`
+  HUD position. It now resolves `idx` to a party slot via
+  `CombatResource::player_orig_indices` and anchors the node as a child of
+  that party member's own `hud::HpBarBackground` — mirroring the monster-side
+  anchor to `EnemyHpBarBackground` — so two allies healed in the same round
+  show separate numbers over their own cards. Falls back to the old fixed
+  position if the mapping or HUD card isn't available (e.g. minimal test
+  harnesses).
+- `hud::HpBarBackground` gained a `party_index: usize` field (previously a
+  unit marker with no index) plus `overflow: Overflow::visible()` on its Node,
+  matching `EnemyHpBarBackground`'s existing shape — required so
+  `spawn_combat_feedback` can look up "the HP bar for party slot N."
+
+### Inspect enemy (`src/game/systems/combat.rs`)
+
+- New `EnemyInspectStrip { participant_index }` marker component and a text
+  child spawned on every `EnemyCard` (`Visibility::Hidden` by default), sitting
+  alongside the existing (always-visible) `EnemyConditionText`.
+- New pure `format_special_attack_summary(&[Attack]) -> String`: collects the
+  distinct `SpecialEffect` variants across a monster's `attacks` in
+  first-seen order (no duplicates), joined with ", ", or `"None"` if no
+  attack carries one. Unit-testable without Bevy.
+- New `update_enemy_inspect_strip` system, registered alongside
+  `update_target_highlight` (same `.after(enter_target_selection)` /
+  `.after(combat_input_system)` ordering): keys off the identical
+  `TargetSelection` + `ActionMenuState::active_target_index` guard, so no new
+  input mode was needed. Shows `"AC {ac.current} · Special: {summary}"` on the
+  Tab-focused card only; every other card's strip is hidden.
+
+### Magic Potion combat-usable (`data/items.ron`, `data/test_campaign/data/items.ron`, `campaigns/tutorial/data/items.ron`)
+
+Item 51 "Magic Potion" (`RestoreSp(10)`) had `is_combat_usable: false` in all
+three files at the start of this phase's investigation, though `data/items.ron`
+and `data/test_campaign/data/items.ron` were found already flipped to `true`
+by the time implementation began (likely from earlier ad-hoc data work).
+`campaigns/tutorial/data/items.ron` — the file the plan's own manual
+verification step actually exercises ("drink a Magic Potion in combat" in the
+tutorial campaign) — still had `false` and was the one substantive fix in
+this section.
+
+### Tests Added (`src/game/systems/combat.rs`, `src/domain/items/database.rs`)
+
+| Test | What it verifies |
+| ---- | ---- |
+| `test_update_floating_damage_rises_fades_and_despawns` | Using `TimeUpdateStrategy::ManualDuration` for a deterministic per-frame delta: node rises by rise-speed × elapsed time, `TextColor` alpha reaches ~0.5 at the lifetime midpoint, and the node despawns once `remaining` hits zero |
+| `test_spawn_combat_feedback_anchors_to_correct_party_member_hud_card` | A deliberately non-identity `player_orig_indices` mapping proves the floating number lands on the correct party slot's `HpBarBackground`, not the participant index or a shared spot |
+| `test_enemy_inspect_strip_shows_ac_and_conditions_on_focused_card` | Tab-focused card's strip becomes visible and shows `"AC {n}"` + special-attack summary; unfocused card's strip stays hidden; focus moving to a second card flips visibility and content accordingly |
+| `format_special_attack_summary` doctest | Public API example: mixed attack list → summary string; empty list → `"None"` |
+| `test_magic_potion_is_combat_usable` | Loads `data/items.ron`, asserts item 51 is `RestoreSp(10)` and `is_combat_usable == true` |
+
+### Quality gates
+
+`cargo clippy --workspace --all-targets -- -D warnings` clean;
+`cargo test --workspace` green (full doctest run excluded per project
+convention).
+
+---
+
+## Combat Improvements — Phase 5: Font-Size Consistency (2026-07-22)
+
+Fifth and final phase of
+`docs/explanation/combat_improvements_implementation_plan.md`
+(`next_plans.md:232`, "Fonts are using different sizes on the same line").
+Two parallel audit passes over `src/game/systems/combat.rs` and
+`src/game/systems/hud.rs` (every `TextFont { font_size }` / `text_style(...)`
+site in both files) found the known-suspect bug the plan named — HUD/combat
+card HP, condition, and inspect-strip text disagreeing with each other on the
+same card — plus a scattering of ad-hoc numeric literals with no shared name
+at all.
+
+### Real mismatches fixed (value changes, not just renames)
+
+- `hud::SpBarTextOverlay`: 8px → 10px, matching `HpTextOverlay`/`ConditionText`
+  (both already 10px) so the HP/SP/condition stat block on a party card reads
+  as one size instead of the SP number looking smaller than its siblings.
+  Verified safe against clipping: `SP_BAR_HEIGHT` is only 8px, but Bevy's
+  `Node` overflow defaults to `Visible` on both axes (no `Overflow::clip()`
+  anywhere on that bar), matching how the enemy-card HP bar already relies on
+  visible overflow for its floating-damage numbers.
+- `combat::EnemyConditionText` and `combat::EnemyInspectStrip`: 9px → 10px,
+  matching `EnemyHpText` (already 10px) — the same bug as the HUD one, one
+  card over.
+- `combat::BossHpBarText`: 11px → 10px, matching the regular enemy card's HP
+  text tier (the boss card's own name label already matched the enemy
+  card's name tier at 14px; only its HP text had drifted).
+- Empty-state panel messages ("No spells known.", "No usable items."): 12px →
+  11px, matching the row buttons they stand in for when a list is empty.
+
+### Shared constants (`src/game/systems/ui_helpers.rs`)
+
+Five new tiers below the existing `LABEL_FONT_SIZE`(14)/`BODY_FONT_SIZE`(16):
+`UI_FONT_SIZE_XS`(9.5, panel keyboard-hint footers), `UI_FONT_SIZE_SM`(10,
+compact numeric/status readouts — HP/condition/inspect text on both card
+kinds, monster hover-bar text), `UI_FONT_SIZE_MD`(11, interactive panel
+row/button labels and empty-state messages), `UI_FONT_SIZE_LG`(13, modal
+panel/section titles), `UI_FONT_SIZE_XL`(18, floating damage/heal numbers at
+full impact and the defeat-screen headline). Two more sites got small
+file-local constants following the existing `COMPASS_FONT_SIZE`/
+`CLOCK_FONT_SIZE` (hud.rs) precedent for single-purpose values:
+`hud::AUTOMAP_LEGEND_TITLE_FONT_SIZE`(22) and, in combat.rs,
+`COMBAT_LOG_LINE_FONT_SIZE`(13) plus `FEEDBACK_FONT_SIZE_MUTED`(15) for the
+floating-feedback text's secondary tier. Every `font_size:` literal in both
+files now resolves to a named constant — none are bare numbers.
+The "Combat Log" bubble header (was a bare 15px) now also uses
+`LABEL_FONT_SIZE`, matching the unrelated "Game Log" toggle header elsewhere
+in the UI (`ui.rs`) that already used it.
+
+### Docs checkoff
+
+`docs/explanation/next_plans.md:232` marked ✅ COMPLETED.
+
+### Tests Added (`src/game/systems/ui_helpers.rs`)
+
+| Test | What it verifies |
+| ---- | ---- |
+| `test_font_size_tiers_are_distinct_and_ordered` | `UI_FONT_SIZE_XS/SM/MD/LG`, `LABEL_FONT_SIZE`, `BODY_FONT_SIZE`, `UI_FONT_SIZE_XL` form one strictly increasing sequence with no two tiers equal |
+
+### Manual/visual verification
+
+Not performed by the agent: the game is a native windowed Bevy application
+(Metal backend) with no headless/screenshot mode, and this sandbox's shell
+has no attached display/screen-recording access (`screencapture` fails with
+"could not create image from display" even though the binary itself launches
+and creates a real window). The binary was confirmed to build and run
+(`cargo build --bin antares` succeeds, the process starts, loads the tutorial
+campaign, and creates its window per the log) — only the pixel-level
+side-by-side comparison across cards/panels was left for a human to eyeball,
+per the plan's own "Manual run (tutorial campaign)" step.
+
+### Quality gates
+
+`cargo clippy --workspace --all-targets -- -D warnings` clean;
+`cargo nextest run --workspace` green, 8003 passed / 8 skipped (full doctest
+run excluded per project convention).
+
+---
+
+## Combat Bug Fixes — Phase 4: Combat UX Polish (2026-07-19)
+
+Addresses `docs/explanation/next_plans.md` lines 212–214: it was hard to tell
+whose turn it was, the action menu did not reset to Attack between party
+members' turns, and the action buttons were near-identical greys with no
+mouse feedback.
+
+### Shared condition/turn-state color scheme (`src/game/systems/ui_helpers.rs`)
+
+New single source of truth, consumed by both `hud.rs` and `combat.rs`:
+
+- Constants (all alpha < 1.0 — translucent overlays only):
+  `CONDITION_FATAL_COLOR`, `CONDITION_STATUS_COLOR` (moved here from
+  `combat.rs`, which now `pub use`s them so existing call sites are
+  unaffected), plus two new ones: `CONDITION_POISON_TINT_COLOR` (transparent
+  green) and `CONDITION_UNCONSCIOUS_TINT_COLOR` (transparent grey).
+- `CardConditionTint` enum (`None`/`Fatal`/`Poisoned`/`Unconscious`/`Status`)
+  — the common category both a `Character`'s `Condition` bitflags and a
+  `Monster`'s `MonsterCondition` enum reduce down to before colour lookup.
+- `resolve_card_background(is_active_turn, active_turn_color, condition, default_color) -> Color`
+  — the one pure, Bevy-App-free function encoding the universal precedence
+  rule **active-turn > condition tint > default**, used by both HUD party
+  cards and combat enemy cards.
+
+### 4.1 — Active-turn HUD card highlight (`src/game/systems/hud.rs`)
+
+- New `ACTIVE_TURN_CARD_COLOR` (transparent green) and `DEFAULT_CARD_COLOR`
+  constants alongside the existing HUD color constants; the card spawn site
+  now uses `DEFAULT_CARD_COLOR` instead of an inline literal.
+- `update_hud` gained `Option<Res<CombatResource>>` and
+  `Option<Res<CombatTurnStateResource>>` params (absent outside combat / in
+  tests without `CombatPlugin` — no panic). It resolves
+  `combat_res.state.turn_order[current_turn]` → `CombatantId::Player(idx)` →
+  party slot via `player_orig_indices`, and calls `resolve_card_background`
+  per card. `update_hud` already ran `.after(sync_party_hp_during_combat)`,
+  so `CombatResource` is fresh every frame it runs.
+
+### 4.2 — Universal condition-based tinting
+
+- New `condition_tint_category(&Condition) -> CardConditionTint` in
+  `hud.rs`, co-located with `get_priority_condition`, mirroring the same
+  precedence (fatal > unconscious > poisoned/diseased > other status). Being
+  merely "buffed" (positive active conditions, no bad status) intentionally
+  maps to `None` — a buff isn't a warning state.
+- New `monster_condition_tint(MonsterCondition) -> CardConditionTint` in
+  `combat.rs`: `Dead` → `Fatal`, any other non-`Normal` variant → `Status`
+  (monsters have no poisoned/unconscious state).
+- `enter_target_selection` (`combat.rs`) now takes `Res<CombatResource>` and
+  applies the condition tint on its idle (non-target-selection) branch,
+  replacing the flat literal; new `ENEMY_CARD_DEFAULT_COLOR` constant
+  replaces the two duplicated `Color::srgba(0.2, 0.15, 0.15, 0.9)` literals
+  (spawn site + idle reset).
+
+### 4.3 — Reference document
+
+Added `docs/reference/condition_color_scheme.md`: the canonical
+condition→colour table, the transparency rule, the precedence order, and the
+constants' source locations, following the `stat_ranges.md` style with the
+project's SPDX copyright footer convention.
+
+### 4.4 — Action menu reset between party members' turns (`combat.rs`)
+
+- New `ActionMenuState::last_actor: Option<CombatantId>` field, tracking the
+  combatant in the current turn slot as of the last frame.
+- `update_combat_ui`'s menu-visibility block now resets
+  `active_index`/`confirmed` on **either** the original Hidden→Visible
+  transition **or** an actor change with no visibility transition (two
+  players acting back-to-back, menu stays Visible throughout) — both
+  conditions were needed; an actor-change-only version regressed the
+  existing Hidden→Visible test because a manufactured single-participant
+  test fixture never changes `current_actor` across the transition.
+
+### 4.5 — Action button colors and mouse feedback (`combat.rs`)
+
+- New `ACTION_BUTTON_PRESSED_COLOR` constant (distinct pressed shade); the
+  existing gold `ACTION_BUTTON_CONFIRMED_COLOR` (shared with
+  `update_spell_focus_highlight`) is reused as-is for the selected state.
+- `update_action_highlight`'s button query gained `&Interaction`. Composition
+  rule: the keyboard-selected button always shows confirmed/hover gold
+  regardless of mouse state ("selected state wins"); every other button now
+  shows `ACTION_BUTTON_PRESSED_COLOR`/`ACTION_BUTTON_HOVER_COLOR`/
+  `ACTION_BUTTON_COLOR` based on `Interaction::Pressed`/`Hovered`/`None`. The
+  pre-existing RangedAttack skip (owned exclusively by
+  `update_ranged_button_color`) is preserved.
+
+### Tests Added
+
+| Test | File | What it verifies |
+| ---- | ---- | ---- |
+| `test_resolve_card_background_active_turn_wins_over_condition` | ui_helpers.rs | Active turn beats every condition category |
+| `test_resolve_card_background_condition_wins_over_default` | ui_helpers.rs | Each condition tint beats the default |
+| `test_resolve_card_background_falls_back_to_default` | ui_helpers.rs | No active turn, no condition → default |
+| `test_condition_tint_colors_are_translucent` | ui_helpers.rs | All 4 condition constants have alpha < 1.0 |
+| `condition_tint_category` doctest | hud.rs | Fatal and None mappings |
+| `test_active_turn_card_highlight_and_revert` | hud.rs | Two-player combat: active card = `ACTIVE_TURN_CARD_COLOR`, other = default; reverts on `EnemyTurn` |
+| `test_action_menu_resets_between_players_without_hiding` | combat.rs | Two-player turn order, menu never hides; `active_index` still resets to 0 |
+| `test_action_button_palette_states_are_pairwise_distinct` | combat.rs | confirmed/hover/pressed/idle/disabled all pairwise distinct |
+| `test_enemy_card_background_reflects_condition_tint` | combat.rs | Dead/Paralyzed/healthy monster cards get fatal/status/default backgrounds outside target-selection |
+
+Existing `execute_monster_turn`, action-menu, target-selection, and HUD tests
+pass unchanged (133 combat.rs tests, 133 hud.rs tests, verified individually
+before the full suite run).
+
+### Quality gates
+
+`cargo fmt` clean, `cargo clippy --all-targets --all-features -- -D
+warnings` clean, `cargo nextest run --all-features`: 5355 passed / 0 failed;
+targeted doctests for the new/changed code: 8 passed (full doctest run
+excluded per project convention).
+
+---
+
+## Combat Bug Fixes — Phase 3: Real Condition Names on Enemy Cards (Bug 1) (2026-07-19)
+
+### Root cause
+
+`update_combat_ui` (`src/game/systems/combat.rs`) rendered the literal
+placeholder string `"Condition"` (in opaque yellow) for **any** non-`Normal`
+`MonsterCondition`, so a dead monster's card read "Condition" instead of
+"Dead". `MonsterCondition` had no display/name method.
+
+### Changes
+
+| File | Change |
+| ---- | ------ |
+| `src/domain/combat/monster.rs` | `impl std::fmt::Display for MonsterCondition` with doctest: `Normal` → `""` (healthy monsters show no label), every other variant → its name (`"Paralyzed"`, `"Webbed"`, `"Held"`, `"Asleep"`, `"Mindless"`, `"Silenced"`, `"Blinded"`, `"Afraid"`, `"Dead"`). |
+| `src/game/systems/combat.rs` — constants | New shared condition-label tints (single source of truth, consumed by Phase 4): `CONDITION_FATAL_COLOR = Color::srgba(0.85, 0.2, 0.2, 0.85)` (transparent red) and `CONDITION_STATUS_COLOR = Color::srgba(0.9, 0.85, 0.3, 0.85)` (transparent yellow), placed with the `FEEDBACK_COLOR_*` cluster. |
+| `src/game/systems/combat.rs` — `EnemyConditionTextQuery` | Query now includes `&mut TextColor` so the tint can change per condition. |
+| `src/game/systems/combat.rs` — `update_combat_ui` | Placeholder replaced with `monster.conditions.to_string()`; `TextColor` set to `CONDITION_FATAL_COLOR` when `is_dead()`, else `CONDITION_STATUS_COLOR`. |
+| `src/game/systems/combat.rs` — `setup_combat_ui` | Condition-text spawn now uses `CONDITION_STATUS_COLOR` instead of the old opaque `Color::srgb(0.8, 0.8, 0.0)`. |
+
+Monsters have no unconscious state — `Monster::take_damage` goes straight to
+`MonsterCondition::Dead`; "Unconscious" applies only to player characters.
+The literal string `"Condition"` no longer appears anywhere in rendering code
+(verified by grep; the only remaining occurrences are the new test's negative
+assertion).
+
+### Tests Added
+
+| Test | What it verifies |
+| ---- | ---------------- |
+| `monster.rs::test_monster_condition_display_covers_all_variants` | The `Display` mapping for all 10 variants |
+| `MonsterCondition::fmt` doctest | `Normal` → `""`, `Paralyzed`, `Dead` labels |
+| `combat.rs::test_dead_monster_card_shows_dead_condition` | Integration: a 0-HP `Dead` monster's card shows `"Dead"` in `CONDITION_FATAL_COLOR` and HP text `"0/30"`; a `Paralyzed` monster shows `"Paralyzed"` in `CONDITION_STATUS_COLOR`; the placeholder string is never rendered |
+
+### Quality gates
+
+`cargo fmt` clean, `cargo clippy --all-targets --all-features -- -D warnings`
+clean, `cargo nextest run --all-features`: 5347 passed / 0 failed; targeted
+doctest run for the new impl: 2 passed (full doctest run excluded per project
+convention).
+
+---
+
+## Combat Bug Fixes — Phase 2: Player Screen HP Reset (Bug 4) (2026-07-19)
+
+### Root cause
+
+Opening the Player Screen (`[p]` or a HUD portrait click) during combat sets
+`mode = GameMode::CharacterSheet(..)`. `sync_combat_to_party_on_exit`
+(`src/game/systems/combat.rs`) fired on *any* frame where the mode was not
+`Combat` with a non-empty participant mapping, so it treated the overlay as a
+combat exit: it copied data back and called `CombatResource::clear()`. On
+close, the resume mode restored the **stale `CombatState` snapshot** embedded
+in `GameMode::Combat(..)` at encounter start, and `sync_party_to_combat`
+re-cloned it into the emptied resource — resetting every participant's HP,
+round, and turn order to combat-start values.
+
+### Changes
+
+| File | Change |
+| ---- | ------ |
+| `src/game/systems/combat.rs` — `sync_combat_to_party_on_exit` | Early return while `combat_res.state.status == CombatStatus::InProgress`: the sync-and-clear now only runs once combat has genuinely resolved (`Victory`, `Defeat`, `Fled`). Doc comment updated. |
+| `src/game/systems/combat.rs` — `test_combat_sync_to_party` | Fixture now sets `CombatStatus::Victory` (it previously relied on the exit-sync firing for an `InProgress` state, which is exactly the bug-4 behaviour). |
+| `src/game/systems/menu.rs` — `load_game_operation`, `MenuButton::NewGame` | Both now take/clear the `CombatResource` (threaded as `Option<&mut CombatResource>` through `handle_button_press` from the mouse and keyboard menu systems), so a suspended `InProgress` combat can never leak into the next encounter after new-game or load-game. |
+
+### Exit-path audit (no further changes needed)
+
+- All 8 production `exit_combat()` call sites are gated on a terminal status:
+  4 post-action `check_combat_end` sites gated by `status == Fled`, flee sets
+  `Fled` immediately before, monster-action site gated by `Fled`, and the
+  victory/defeat handlers are only reachable via `CombatVictory`/`CombatDefeat`
+  messages emitted when status is `Victory`/`Defeat`.
+- No reachable in-combat path quits to the menu, starts a new game, or loads a
+  save: ESC/menu, inventory, and character-sheet toggles all explicitly ignore
+  `GameMode::Combat`, and `close_modal` has no `Combat` arm. The
+  new-game/load-game resets above are defence-in-depth for future paths.
+- `CombatStatus::Surrendered` exists but is never assigned in production; if a
+  surrender flow is added later it must route through a terminal exit.
+- Overlay round-trip needs no further work: with the gate,
+  `sync_party_to_combat`'s `existing_players > 0` guard preserves the live
+  resource and the stale snapshot is never re-copied.
+
+### Tests Added
+
+All three were verified to fail against the pre-fix code (gate removed).
+
+| Test | What it verifies |
+| ---- | ---------------- |
+| `combat.rs::test_sync_on_exit_noop_while_combat_suspended` | With mode `CharacterSheet` and status `InProgress`, the exit-sync neither clears `CombatResource` nor writes party HP |
+| `combat.rs::test_character_sheet_roundtrip_preserves_combat_state` | End-to-end: damage a player and a monster in the live resource, open the character sheet, pump frames, restore the resume mode, pump frames — participant HP, `round`, `current_turn`, `turn_order` all unchanged |
+| `menu.rs::test_load_game_clears_suspended_combat_resource` | `load_game_operation` clears a populated suspended `CombatResource` |
+
+### Quality gates
+
+`cargo fmt` clean, `cargo clippy --all-targets --all-features -- -D warnings`
+clean, `cargo nextest run --all-features`: 5345 passed / 0 failed (full
+doctest run excluded per project convention).
+
+---
+
+## Combat Bug Fixes — Phase 1: Monster Turn Deadlock (Bugs 2 & 3) (2026-07-18)
+
+### Root cause
+
+`execute_monster_turn` (`src/game/systems/combat.rs`) paces monster actions
+with a one-shot `MonsterTurnTimer` armed by the `Local<bool>` latch
+`was_enemy_turn`: the first EnemyTurn frame for an able monster resets the
+timer and sets the latch; later frames tick the timer and act on
+`just_finished()`. After a monster **successfully acted**, the latch was never
+reset. Because a finished `TimerMode::Once` timer never reports
+`just_finished()` again, the next monster's turn skipped the arming branch,
+ticked a dead timer forever, and combat deadlocked on `EnemyTurn` (bug 2). In
+an ambush round every slot is a monster turn, so the deadlock always triggered
+after the first monster acted — with ESC dead and the log spamming
+`input blocked — not player turn` (bug 3).
+
+### Changes — `src/game/systems/combat.rs`, all in `execute_monster_turn`
+
+| Path | Change |
+| ---- | ------ |
+| Successful-action path | `*was_enemy_turn = false;` after the `perform_monster_turn_with_rng` outcome/feedback block, mirroring the existing reset in the incapacitated-skip path, so the timer re-arms for the next monster |
+| Ambush player-skip early return | `*was_enemy_turn = false;` before the `return`, so a monster → skipped-player → monster sequence in an ambush round re-arms the timer |
+| Stale-state correction branch (`else if !turn_order.is_empty()`) | `*was_enemy_turn = false;` when forcing `PlayerTurn`, keeping the latch consistent with the corrected state |
+
+The two early returns at the top of the system (not-in-combat-mode and
+not-EnemyTurn) already reset the latch and were left unchanged. The domain
+engine (`advance_turn` / `advance_round`) was correct and needed no changes.
+
+### Tests Added (2 integration tests in `combat::tests`)
+
+Both use `MinimalPlugins + CombatPlugin` and — unlike all prior tests — keep a
+`MonsterTurnTimer` **present** (zero-duration `Timer::from_seconds(0.0,
+TimerMode::Once)`), exercising the arm/tick/reset latch logic that previous
+tests bypassed by removing the resource. Both tests were verified to fail
+against the pre-fix code.
+
+| Test | What it verifies |
+| ---- | ---------------- |
+| `test_two_monsters_act_consecutively_with_timer` | Two monsters ahead of the player in the turn order both act and `turn_state` returns to `PlayerTurn` within 10 frames; both monsters report `can_act() == false`; round has not wrapped |
+| `test_ambush_two_monsters_complete_round_one` | Ambush (`CombatEventType::Ambush`) with a surprised player slot plus two monsters: round 1 completes, round 2 opens on `PlayerTurn` with `ambush_round_active == false`, and the "surprised" skip message is logged |
+
+Existing `execute_monster_turn` tests (timer removed or absent) pass
+unchanged.
+
+### Quality gates
+
+`cargo fmt` clean, `cargo check` clean, `cargo clippy --all-targets
+--all-features -- -D warnings` clean, `cargo nextest run --all-features`:
+5342 passed / 0 failed (full doctest run excluded per project convention).
+
+---
+
+## Fix: Sorcerer SP bar, multi-monster turns, and keyboard spell cancel (2026-07-18)
+
+### Root cause
+
+Three related bugs shared the same root: `CombatResource` was never fully initialised from the authoritative `CombatState` stored in `global_state.mode` for encounters that don't emit `CombatStarted` (random movement encounters) and for the 1-frame window before `handle_combat_started` processes the message for E-key encounters.
+
+`sync_party_to_combat` (the fallback initialiser) was silently ignoring the `CombatState` in `global_state.mode` and instead adding **only** the party players from `party.members`, leaving the resource with zero monster participants.
+Consequences:
+
+1. **`setup_combat_ui`** read `combat_res.state.participants` at that point → spawned the enemy-card panel with **no cards** (no monsters visible).
+2. **No enemy cards** → no `Interaction` changes → `select_target` never received a click → `CastSpellAction` never emitted for `SingleMonster` spells (e.g. Energy Blast) → SP never consumed → Sorcerer SP bar never decreased.
+3. **Cleric** was unaffected because `First Aid` is `SingleCharacter` — it targets the party-member panel, which always populated correctly.
+4. **Multi-monster turn order** was broken for the same reason: no monsters in `combat_res.state.turn_order` so only one (or zero) monsters ever acted.
+5. **Keyboard spell cancel**: pressing Escape in monster target-selection (SingleMonster) or party-target selection (SingleCharacter) returned the player all the way to the action menu, making it feel like cancel was broken. The fix changed Escape in both panels to **reopen the spell panel** instead.
+
+### Changes — `src/game/systems/combat.rs`
+
+#### 1. `sync_party_to_combat` (rewritten)
+
+New signature: added `mut turn_state: ResMut<CombatTurnStateResource>`.
+
+| Old behaviour                                                                                      | New behaviour                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Read `cs` reference only to check mode (stored as `_cs`), then copied players from `party.members` | Checks `cs.participants` for existing players                                                                                                    |
+| Never copied monsters                                                                              | If `cs` already has players (all `start_encounter` paths): `combat_res.state = cs.clone()` — copies full state (players + monsters + turn order) |
+| Never set `turn_state`                                                                             | Sets `turn_state.0` from `ambush_round_active` / `turn_order.first()`, matching `handle_combat_started` logic                                    |
+| Never set `combat_event_type`                                                                      | Sets `combat_event_type = Ambush` when `ambush_round_active`                                                                                     |
+| Fallback always ran                                                                                | Fallback (add players from `party.members`) only runs when `cs.participants` has no players (test-only `enter_combat()` path)                    |
+
+#### 2. `setup_combat_ui` — guard added
+
+After the existing `if !existing_ui.is_empty() { return; }` guard, added:
+
+```rust
+let has_players = combat_res.state.participants.iter().any(|p| matches!(p, Combatant::Player(_)));
+if !has_players { return; }
+```
+
+This prevents the UI from being spawned with an empty participant list on the rare frame where combat mode is set but `sync_party_to_combat`/`handle_combat_started` have not yet run.
+
+#### 3. Keyboard Escape — reopen spell panel
+
+**Target-selection mode (SingleMonster)**: Escape now takes the caster from `spell_state.pending.data` (if any) and sets `spell_state.panel.caster = Some(caster)` to reopen the spell panel, instead of silently discarding the pending cast.
+
+**Party-target mode (SingleCharacter)**: Escape now takes the caster from `spell_state.party_target.pending_spell` and reopens the spell panel the same way.
+
+### New tests
+
+| Test                                                        | Purpose                                                                                                                                                                              |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `test_party_sync_to_combat_copies_full_state_with_monsters` | Verifies that when `global_state.mode.Combat(cs)` already has players, `sync_party_to_combat` copies the full state including monster participants and correct `player_orig_indices` |
+| `test_setup_combat_ui_deferred_until_players_present`       | Verifies that `setup_combat_ui` does not spawn with an uninitialised (empty) `combat_res.state`                                                                                      |
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors, 0 warnings (project code)
+- `cargo nextest run --all-features` — **5340 tests passed**, 0 failed, 8 skipped
+
+---
+
+## Fix egui float literal type ambiguity in SDK UI files (2026-07-18)
+
+**Problem**: Several `egui` UI files in `sdk/campaign_builder/src/` passed bare float literals (e.g. `2.0`, `1.0`, `3.0`) as the first argument to `egui::Stroke::new()`. Because `Stroke::new` accepts `impl Into<f32>` and `f64: !From<f32>`, the compiler would emit a future-error warning: _"falling back to `f32` as the trait bound `f32: From<f64>` is not satisfied"_ with a hint to write `2.0_f32`.
+
+**Files changed** — all bare float literals in `Stroke::new(...)` calls replaced with explicit `_f32` suffixes:
+
+- `sdk/campaign_builder/src/map_editor.rs` — 6 occurrences (`1.0`, `2.0`, `3.0`)
+- `sdk/campaign_builder/src/preview_renderer.rs` — 8 occurrences (`1.0`, `2.0`)
+- `sdk/campaign_builder/src/animation_editor.rs` — 2 occurrences (`1.0`, `2.0`)
+- `sdk/campaign_builder/src/characters_editor.rs` — 1 occurrence (`1.0`)
+- `sdk/campaign_builder/src/npc_editor/portrait_picker.rs` — 1 occurrence (`1.0`)
+
+All `src/game/systems/` files were already correct. No game logic, data structures, or non-egui code was modified.
+
+**Validation**: `cargo fmt --all`, `cargo check --all-targets --all-features` (clean, 0 float-literal warnings), `cargo clippy` (0 new warnings in changed files; 11 pre-existing `sort_by_key`/`if`-collapse lints in unrelated SDK files remain), `cargo nextest run --all-features` (5338/5338 passed).
+
+---
+
+## Fix random encounter and multi-monster combat initialization (2026-07-18)
+
+### Bug 1: Random encounters didn't include party members in `CombatState`
+
+**Problem**: Both encounter blocks in `move_party_and_handle_events` (`src/application/mod.rs`) built a `CombatState` containing **only monsters**, ignoring party members. They also:
+
+- Used `Handicap::Even` unconditionally, ignoring the `CombatEventType` (no ambush/boss mechanics)
+- Did not set `unconscious_before_death` from `campaign_config`
+- Did not set `ambush_round_active`
+- Called `self.mode = GameMode::Combat(cs)` directly instead of `self.enter_combat_with_state(cs)`
+
+This meant `initialize_combat_from_group` → `start_combat` computed a turn order **without any players**, so the entire turn ordering, SP sync, and combat UI were broken for random encounters and tile-triggered encounters processed through the application layer.
+
+**Fix** (`src/application/mod.rs`): Both encounter blocks (random encounter, ~line 1757, and explicit `EventResult::Encounter`, ~line 1789) now:
+
+1. Derive handicap from `combat_event_type.gives_monster_advantage()`
+2. Set `cs.unconscious_before_death` from `self.campaign_config.unconscious_before_death`
+3. Set `cs.ambush_round_active` when `combat_event_type == Ambush`
+4. Apply boss mechanics (`monsters_advance`, `monsters_regenerate`, `can_bribe = false`, `can_surrender = false`) when `combat_event_type.applies_boss_mechanics()`
+5. Add all party members with `cs.add_player(character.clone())` **before** calling `initialize_combat_from_group` — so `start_combat` sees the full participant list and computes a correct turn order
+6. Call `self.enter_combat_with_state(cs)` instead of direct mode assignment
+
+### Bug 2: `calculate_turn_order` and multi-monster encounters
+
+**Analysis**: `Monster::is_alive()` returns `hp.current > 0 && !conditions.is_dead()` — there is no `Unconscious` condition for monsters (`MonsterCondition` has no `Unconscious` variant), so unconscious-monster filtering does not apply. `Monster::can_act()` correctly returns `false` for `Paralyzed`, `Webbed`, `Held`, and `Asleep`. `calculate_turn_order` uses the global participant index from `enumerate()` which is consistent with how `get_combatant(id)` resolves participants — all alive participants are correctly included.
+
+The "only first monster in attack order" symptom was a consequence of Bug 1: when `CombatResource.state` was populated via `sync_party_to_combat` (the fallback path), it received only players and no monsters, so no monsters appeared in the turn order at all.
+
+### Pre-existing clippy errors fixed
+
+14 pre-existing clippy warnings (unrelated to the bugs) were fixed to satisfy the mandatory `-D warnings` gate:
+
+| File                              | Lint                        | Fix                                                                                           |
+| --------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------- |
+| `src/domain/world/events.rs` (×4) | `unneeded_wildcard_pattern` | Removed redundant `time_condition: _` from patterns that already used `..`                    |
+| `src/domain/world/events.rs`      | `question_mark`             | Replaced `match … { Some(t) => t, None => return None }` with `map.encounter_table.as_ref()?` |
+| `src/domain/combat/engine.rs`     | `unnecessary_sort_by`       | `sort_by(…cmp…)` → `sort_by_key(\|k\| Reverse(k.1))`                                          |
+| `src/application/quests.rs`       | `collapsible_match`         | Inner `if map_id == mid` moved to match guard                                                 |
+| `src/domain/world/types.rs`       | `collapsible_match`         | Inner `if !lock_states.contains_key(…)` moved to match guard on OR pattern                    |
+| `src/game/systems/inn_ui.rs` (×2) | `collapsible_match`         | `Some(i) => { if cond { A } else { B } }` → `Some(i) if cond => A, _ => B`                    |
+| `src/sdk/cli/item_editor.rs` (×2) | `unnecessary_sort_by`       | `sort_by(\|a,b\| a.id.cmp(&b.id))` → `sort_by_key(\|a\| a.id)`                                |
+| `src/sdk/database.rs`             | `collapsible_match`         | Inner `if !maps.has_map(…)` moved to match guard                                              |
+| `src/sdk/quest_editor.rs`         | `collapsible_match`         | Inner `if *quest_id == quest.id` moved to match guard                                         |
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors, 0 warnings
+- `cargo nextest run --all-features` — 5338 tests passed, 0 failed
+
+---
+
+## `SingleCharacter` spell targeting — party-member selection panel (2026-07-18)
+
+**Problem**: In `apply_spell_selection` (`combat.rs`), the `SingleCharacter` arm always emitted a `CastSpellAction` with `target: caster`, so spells like _First Aid_ always healed the caster instead of a chosen party member.
+
+**Fix**: Replaced the self-cast shortcut with a party-member target selection flow, mirroring the existing `SingleMonster` flow.
+
+### What changed — `src/game/systems/combat.rs` only
+
+| Area                              | Change                                                                                                                                                                                                                                                |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| New components                    | `PartyTargetPanel`, `PartyTargetButton`, `PartyTargetCancelButton` marker components                                                                                                                                                                  |
+| New resource                      | `PartyTargetPanelState` — holds pending `(caster, spell_id)`, keyboard-cursor index, confirm flag, and participant-index list                                                                                                                         |
+| `SpellCombatState`                | Added `party_target: ResMut<PartyTargetPanelState>` field (keeps `combat_input_system` within Bevy's 16-parameter limit)                                                                                                                              |
+| `apply_spell_selection`           | `SingleCharacter` arm now sets `PartyTargetPanelState.pending_spell` instead of immediately casting                                                                                                                                                   |
+| `handle_spell_button_interaction` | Accepts new `party_target_state` param; passes it to both `apply_spell_selection` calls                                                                                                                                                               |
+| `combat_input_system`             | New keyboard branch between spell-panel and item-panel branches: `Esc`/`ArrowUp`/`ArrowDown`/`Tab`/`Enter` drive `spell_state.party_target`                                                                                                           |
+| New systems                       | `update_party_target_panel` (spawn/despawn), `update_party_target_highlight` (cursor color), `handle_party_target_button` (click + keyboard confirm), `cleanup_party_target_on_combat_exit`                                                           |
+| `CombatPlugin::build`             | Inserts `PartyTargetPanelState` resource; registers four new systems; adds `.after(handle_party_target_button)` to `handle_cast_spell_action` ordering                                                                                                |
+| Tests                             | `test_single_character_spell_opens_party_target_panel` — confirms `SpellPanelState` is closed and `PartyTargetPanelState.pending_spell` is populated; `test_party_target_confirm_casts_on_chosen_member` — confirms keyboard-confirm clears the state |
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — clean (0 errors)
+- `cargo clippy` — 14 pre-existing errors in other files only; 0 errors in `combat.rs`
+- `cargo nextest run` — 657 tests passed, 0 failed
+
+---
+
+## Fix `f32` float-literal fallback warnings across egui UI files (2026-07-17)
+
+**Problem**: 40 Rust compiler warnings (`float_literal_f32_fallback`) across eight UI files where bare float literals (`1.0`, `1.5`, `2.0`) were passed as the first argument of `egui::Stroke::new()`. The compiler was silently coercing `f64` → `f32`; this is being phased out and will become a hard error in a future Rust release.
+
+**Fix**: Added explicit `_f32` suffix to every such literal using a Perl slurp-mode regex over all eight affected files, then ran `cargo fmt --all` to restore clean formatting.
+
+**Files changed**:
+
+- `src/game/systems/character_sheet_ui.rs`
+- `src/game/systems/container_inventory_ui.rs`
+- `src/game/systems/inn_ui.rs`
+- `src/game/systems/inventory_ui.rs`
+- `src/game/systems/merchant_inventory_ui.rs`
+- `src/game/systems/skill_training_ui.rs`
+- `src/game/systems/temple_ui.rs`
+- `src/game/systems/training_ui.rs`
+
+**Validation**: `cargo check` — 0 errors, 0 float-fallback warnings; 817 tests passed.
+
+---
+
+## Spell Panel — Tab navigation and keyboard hint added (2026-07-17)
+
+**Feature**: Extended the combat spell selection panel with `Tab` as a forward-cycle key (identical to `ArrowDown`) and added a keyboard hint footer so users know the available keys without guessing.
+
+**Changes** (`src/game/systems/combat.rs`):
+
+1. **`combat_input_system`** (spell-panel keyboard branch): Changed the `ArrowDown` handler from a standalone `else if` to `else if kb.just_pressed(KeyCode::ArrowDown) || kb.just_pressed(KeyCode::Tab)` so both keys advance `focused_index`.
+
+2. **`update_spell_selection_panel`** (panel spawn): Added a keyboard hint footer node after the Cancel button:
+   `[↑↓/Tab] Navigate · [Enter] Cast · [Esc] Cancel`
+   in a small muted font so the hint is visible but unobtrusive.
+
+**Test added**:
+
+- `test_tab_cycles_forward_in_spell_panel` — verifies that pressing `Tab` advances `focused_index` from 0 → 1, and a second press wraps 1 → 0. Uses a pre-spawned `SpellSelectionPanel` entity to prevent `update_spell_selection_panel` from overwriting the manually-set `castable_spell_ids`.
+
+**Validation**: 655 spell/combat tests passed, no regressions.
+
+---
+
+## Keyboard Navigation for Spell Selection Panel (2026-07-17)
+
+**Feature**: Added full keyboard navigation (ArrowUp/ArrowDown/Enter/Escape) to the spell selection panel in combat, matching the existing item panel keyboard support.
+
+**Changes** (`src/game/systems/combat.rs`):
+
+1. **`SpellPanelState`**: Added three fields — `focused_index: usize` (keyboard cursor), `confirm_requested: bool` (set by Enter, consumed by handler), and `castable_spell_ids: Vec<SpellId>` (populated by `update_spell_selection_panel`).
+
+2. **`SpellButton`**: Added `is_castable: bool` field so the highlight system can restore the correct unfocused color after the focus cursor moves.
+
+3. **`update_spell_selection_panel`**: Changed `Res<SpellPanelState>` → `ResMut<SpellPanelState>`. After building `all_spell_ids`, now also computes `castable_spell_ids` (those passing `validate_spell_cast`) and stores them in the resource, clamping `focused_index` to the valid range. Each `SpellButton` now carries `is_castable`.
+
+4. **`update_spell_focus_highlight`** (new system): Runs after `update_spell_selection_panel` every frame. Sets the focused castable button to `ACTION_BUTTON_CONFIRMED_COLOR` and restores all others to their castable/disabled color. Registered in `CombatPlugin::build`.
+
+5. **`combat_input_system`**: Added a dedicated spell-panel keyboard branch (`} else if spell_state.panel.caster.is_some() {`) between target-selection and item-panel branches. Handles Escape (close panel), ArrowUp/Down (move focus, wrapping), and Enter (set `confirm_requested`). Removed the now-redundant `spell_state.panel.caster.is_some()` Escape guard from the action-menu else branch.
+
+6. **`handle_spell_button_interaction`**: Added keyboard-confirm path (checks `confirm_requested`, looks up focused spell, calls `apply_spell_selection`). Extracted shared spell-dispatch logic into the new `apply_spell_selection` helper function, used by both the keyboard and mouse paths.
+
+7. **`apply_spell_selection`** (new helper): Closes the panel, resets keyboard state, and dispatches the spell (immediate `CastSpellAction` for self/group/all targets; target-selection mode for `SingleMonster`).
+
+8. **`cleanup_spell_panel_on_combat_exit`**: Extended to also clear `focused_index`, `confirm_requested`, and `castable_spell_ids` on combat exit.
+
+**Test added**:
+
+- `test_keyboard_enter_confirms_spell_selection` — verifies that setting `confirm_requested = true` on a spell panel with a castable `Self_`-targeting spell closes the panel, clears `confirm_requested`, and does not enter target-selection mode.
+
+**Validation**: `cargo fmt --all`, `cargo check --all-targets --all-features`, `cargo nextest run --all-features -E "test(spell)"` — 362 passed; `cargo nextest run --all-features -E "test(combat)"` — 349 passed.
+
+---
+
+## Sorcerer SP Bar Not Decreasing — Root Cause: Mouse Target Selection Bypasses Spell Cast (2026-07-17)
+
+**Bug**: The Sorcerer's spell-point bar in the bottom HUD did not visually decrease when combat spells were cast. The Cleric's SP bar decreased correctly.
+
+**Investigation**: Cleric spells in the tutorial campaign (`AllCharacters`, `SingleCharacter`) emit `CastSpellAction` immediately when the spell button is clicked. The tutorial Sorcerer's only combat attack spell is "Energy Blast" (`id: 1027`, `target: SingleMonster`), which requires monster target selection before the cast fires. When a `SingleMonster` spell was selected from the spell panel, `PendingSpellCast.data` was populated and `TargetSelection` was entered — but when the player then **mouse-clicked an enemy card**, the `select_target` system always called `confirm_attack_target`, dispatching `AttackAction` and never `CastSpellAction`. SP was never consumed. The keyboard path (Enter key) correctly checked `spell_state.pending.data` first.
+
+**Root Cause**: `select_target` did not inspect `PendingSpellCast` or `PendingItemUse`; it always dispatched `AttackAction` regardless of what was pending, so mouse-based target confirmation for spells was silently broken.
+
+**Fix** (`src/game/systems/combat.rs`):
+
+1. Extended `select_target` to accept `ResMut<PendingSpellCast>`, `Option<MessageWriter<CastSpellAction>>`, and `ResMut<PendingItemUse>` parameters.
+2. When an enemy card is clicked and a spell is pending, `confirm_spell_target` is called instead of `confirm_attack_target`, writing `CastSpellAction` with the correct caster, spell ID, and target.
+3. When an enemy card is clicked and an item requiring target selection is pending, the confirmed target index is stored in `PendingItemUse.confirmed_target` (matching the keyboard path).
+4. Added `.after(select_target)` to `handle_cast_spell_action` scheduling so the spell action is processed in the same frame the mouse click fires.
+5. Added `#[allow(clippy::too_many_arguments)]` (consistent with other large system functions in the file).
+
+**Tests added**:
+
+- `test_mouse_click_enemy_card_with_pending_spell_emits_cast_action` — verifies that clicking an enemy card with `PendingSpellCast.data` set consumes the pending data and clears `TargetSelection` via the spell path.
+- `test_mouse_click_enemy_card_without_pending_spell_still_attacks` — regression guard ensuring the normal attack path is unaffected when no spell is pending.
+
+**Files changed**:
+
+- `src/game/systems/combat.rs` — `select_target` function body + signature; `CombatPlugin::build` scheduling
+
+**Validation**: `cargo fmt --all`, `cargo check --all-targets --all-features`, `cargo nextest run` — 348 combat tests passed, 0 failures.
+
+---
+
+## Sorcerer SP Bar Not Decreasing — Scheduling Ordering Fix (2026-07-17, superseded)
+
+**Note**: This earlier attempt correctly identified a related scheduling issue but did not address the actual root cause (see entry above).
+
+**Root Cause addressed by this fix**: Bevy 0.17's `MessageWriter`/`MessageReader` API uses a double-buffered queue. When `handle_cast_spell_action` was scheduled without an explicit ordering constraint relative to the systems that _write_ `CastSpellAction` messages (`combat_input_system` and `handle_spell_button_interaction`), Bevy could legally schedule the reader _before_ the writers in any given frame.
+
+**Fix**: Added explicit `.after()` ordering constraints to all combat action-handler systems:
+
+| Handler                       | Now runs after                                           |
+| ----------------------------- | -------------------------------------------------------- |
+| `handle_cast_spell_action`    | `combat_input_system`, `handle_spell_button_interaction` |
+| `handle_use_item_action`      | `combat_input_system`, `handle_item_button_interaction`  |
+| `handle_attack_action`        | `combat_input_system`, `select_target`                   |
+| `handle_ranged_attack_action` | `combat_input_system`, `select_target`                   |
+| `handle_defend_action`        | `combat_input_system`                                    |
+| `handle_flee_action`          | `combat_input_system`                                    |
+
+**Files changed**: `src/game/systems/combat.rs`, `src/game/systems/hud.rs`
+
+**Validation**: 808 tests passed.
+
+---
+
+## Modal egui input handoff (2026-07-13)
+
+- Fixed mouse and keyboard interactions for modal egui screens by preventing the shared gameplay input systems from running while egui is actively consuming pointer or keyboard input.
+- Applied the guard in `src/game/systems/input.rs` to `handle_global_input_toggles`, `handle_exploration_input_interact`, and `handle_exploration_input_movement` so screens such as the Character Sheet, Inn management, and Merchant inventory can receive clicks and keyboard focus normally.
+- This resolves the broken button clicks called out in the Character Sheet and party/merchant UI flows.
+- Quality gates completed successfully: `cargo fmt --all`, `cargo check --all-targets --all-features`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo nextest run --all-features`.
+
+---
+
+## Item Prompt Assets (2026)
+
+- Added [docs/explanation/items_prompts.md](docs/explanation/items_prompts.md) with reusable image-generation prompts for every item listed in [campaigns/tutorial/data/items.ron](campaigns/tutorial/data/items.ron).
+- Added [campaigns/tutorial/items_prompts.jsonl](campaigns/tutorial/items_prompts.jsonl) for batch use with image-generation pipelines.
+
+## Character Prompt Assets (2026)
+
+- Consolidated the character prompt content into [docs/explanation/characters_prompts.md](docs/explanation/characters_prompts.md) and added [campaigns/tutorial/characters_prompts.jsonl](campaigns/tutorial/characters_prompts.jsonl) for batch generation workflows.
+
+## Monster Prompt Assets (2026)
+
+- Expanded [docs/explanation/monster_prompts.md](docs/explanation/monster_prompts.md) to cover the monsters defined in [campaigns/tutorial/data/monsters.ron](campaigns/tutorial/data/monsters.ron) while preserving the stronger existing prompts for Ice Elemental, Basilisk, and Chimera.
+- Added [campaigns/tutorial/monster_prompts.jsonl](campaigns/tutorial/monster_prompts.jsonl) for batch generation workflows.
+
+---
+
+## Custom Fonts — All Phases (Complete) (2026)
+
+**Goal:** Add campaign-scoped custom font support for dialogue UI and game menu UI. Campaign authors can declare optional `.ttf` font paths in `config.ron`; the engine loads them via `AssetServer` and applies them to all relevant `TextFont` spawns at runtime. Campaigns that omit font config render identically to the pre-implementation baseline (Bevy default font, no crash).
+
+### Summary of all changes
+
+| Phase       | Key deliverables                                                                                                                                |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Phase 1** | `FontConfig` struct + `fonts` field on `GameConfig`; validation rules; RON round-trip; 13 tests                                                 |
+| **Phase 2** | `CampaignFontHandles` Bevy resource; `ensure_campaign_fonts_loaded` system registered in `HudPlugin`; 7 tests                                   |
+| **Phase 3** | `text_style_with_font` helper; `spawn_dialogue_bubble`, `menu_setup`, and three spawn helpers updated to accept and apply font handles; 6 tests |
+| **Phase 4** | `ConfigEditorState` fonts section (fields + UI + buffer sync); `fonts/.gitkeep` directories; `docs/how-to/add_custom_fonts.md`; 7 tests         |
+
+### Files changed (complete list)
+
+- `src/sdk/game_config.rs` — `FontConfig`, validation, `GameConfig.fonts`, 13 tests
+- `src/game/resources/font_handles.rs` _(new)_ — `CampaignFontHandles` resource
+- `src/game/resources/mod.rs` — re-exports `CampaignFontHandles`
+- `src/game/systems/hud.rs` — `ensure_campaign_fonts_loaded` system + 7 tests
+- `src/game/systems/ui_helpers.rs` — `text_style_with_font` + 3 tests
+- `src/game/systems/dialogue_visuals.rs` — `spawn_dialogue_bubble` font integration + 2 tests
+- `src/game/systems/menu.rs` — `menu_setup` + three spawn helpers font integration + 2 tests
+- `sdk/campaign_builder/src/config_editor.rs` — fonts section in Config Editor + 7 tests
+- `campaigns/config.template.ron` — commented `fonts:` example section
+- `campaigns/tutorial/config.ron` — `fonts: FontConfig()`
+- `campaigns/tutorial/fonts/.gitkeep` _(new)_
+- `data/test_campaign/config.ron` — `fonts: FontConfig()`
+- `data/test_campaign/fonts/.gitkeep` _(new)_
+- `docs/how-to/add_custom_fonts.md` _(new)_ — 8-section authoring guide
+
+### Quality Gates
+
+- `cargo fmt` → zero output (workspace + sdk/campaign_builder)
+- `cargo check --all-features` → zero errors
+- `cargo clippy --all-features -- -D warnings` → zero warnings
+- `cargo nextest run --all-features` (workspace) → 5320/5320 passed (30 new tests total)
+- `cargo nextest run` (sdk/campaign_builder) → 2587/2587 passed (7 new tests)
+
+---
+
+## Custom Fonts Phase 4 — SDK Authoring Support, Directory Structure, and Documentation (2026)
+
+**Goal:** Give campaign authors a complete authoring path: the Campaign Builder Config
+Editor now exposes a "Custom Fonts" section, the `fonts/` directory skeleton exists in
+both the tutorial campaign and test fixture, and a how-to guide documents the full
+workflow end-to-end.
+
+### What Changed
+
+**`sdk/campaign_builder/src/config_editor.rs`**
+
+- Added `fonts_expanded: bool`, `dialogue_font_buffer: String`,
+  `game_menu_font_buffer: String` fields to `ConfigEditorState` and `impl Default`.
+- Added `FontConfig` to the `use antares::sdk::game_config::…` import.
+- Added `fn show_fonts_section(&mut self, ui: &mut egui::Ui)`: collapsible "🔤 Custom
+  Fonts" section with two text-edit rows (Dialogue Font, Game Menu Font). Each row
+  shows inline red validation feedback via a temporary `FontConfig::validate()` call
+  when the buffer is non-empty. Expansion state stored in `fonts_expanded`;
+  `request_repaint()` called on toggle. Body wrapped in `push_id("fonts_section", …)`
+  for egui ID stability.
+- Called `self.show_fonts_section(ui)` from `show()` after `show_leveling_section`.
+- `update_edit_buffers`: added two lines that populate `dialogue_font_buffer` and
+  `game_menu_font_buffer` from `game_config.fonts.*` using `.unwrap_or_default()`.
+- `update_config_from_buffers`: added two blocks that write empty-string → `None`
+  or non-empty → `Some(…)` back into `game_config.fonts.*`.
+- Added 7 tests in `mod tests` (see §4.6 in `custom_fonts_implementation_plan.md`):
+  defaults check, populate-from-config (Some + None), set-from-buffer, empty-buffer →
+  None, round-trip, and save rejection of absolute font paths.
+
+**`campaigns/tutorial/fonts/.gitkeep`** _(new empty file)_
+
+**`data/test_campaign/fonts/.gitkeep`** _(new empty file)_
+
+**`docs/how-to/add_custom_fonts.md`** _(new file)_
+
+- All 8 required sections: Overview, Directory Layout, config.ron Format, Validation
+  Rules, Fallback Behavior, Authoring with Campaign Builder, Testing In-Game, and
+  Acceptance Checklist.
+
+### Quality Gates
+
+- `cargo fmt` → zero output (both workspace and `sdk/campaign_builder`)
+- `cargo check --all-features` → zero errors
+- `cargo clippy -- -D warnings` → zero warnings (both crates)
+- `cargo nextest run --all-features` (workspace) → 5318/5318 passed
+- `cargo nextest run` (sdk/campaign_builder) → 2587/2587 passed (7 new font tests)
+
+---
+
+## Custom Fonts Phase 3 — Font-Aware Text Style Helper and UI Integration (2026)
+
+**Goal:** Thread `CampaignFontHandles` through the dialogue and menu UI systems so
+that all player-visible text respects the campaign's configured custom fonts at runtime.
+A `None` font falls back to the Bevy engine default, preserving existing behavior
+for campaigns that omit `fonts:` from `config.ron`.
+
+### What Changed
+
+**`src/game/systems/ui_helpers.rs`**
+
+- Added `pub fn text_style_with_font(font: Option<Handle<Font>>, font_size: f32, color: Color) -> (TextFont, TextColor)`.
+  When `font` is `Some(handle)`, builds `TextFont` with that handle; when `None`, matches
+  the existing `text_style` behavior (Bevy default font).
+- Added 2 tests: `test_text_style_with_font_none_font_size_correct` and
+  `test_text_style_with_font_none_color_correct`.
+
+**`src/game/systems/dialogue_visuals.rs`**
+
+- Added imports: `use crate::game::resources::CampaignFontHandles;` and
+  `use crate::game::systems::ui_helpers::text_style_with_font;`.
+- Updated `spawn_dialogue_bubble` to accept `font_handles: Option<Res<CampaignFontHandles>>`.
+- Extracts `dialogue_font: Option<Handle<Font>>` from the optional resource.
+- Replaced both `TextFont { font_size, ..default() } + TextColor(...)` pairs (speaker
+  and content text) with `text_style_with_font(dialogue_font[.clone()], ...)`.
+- Added 1 test: `test_spawn_dialogue_bubble_dialogue_font_extraction_none`.
+
+**`src/game/systems/menu.rs`**
+
+- Updated import: added `CampaignFontHandles` and `text_style_with_font`; removed now-unused `text_style`.
+- Updated `menu_setup` system: added `font_handles: Res<CampaignFontHandles>` parameter;
+  extracts `menu_font: Option<Handle<Font>>` and passes it to all three spawn helpers.
+- Updated `spawn_main_menu`, `spawn_save_load_menu`, and `spawn_settings_menu`:
+  each accepts `font: Option<Handle<Font>>` as a new final parameter.
+  All text-spawning sites (title, section headers, labels, buttons) converted from
+  inline `TextFont { ... } + TextColor(...)` to `text_style_with_font(font.clone(), ...)`.
+  Total: 2 sites in `spawn_main_menu`, 10 sites in `spawn_save_load_menu`, 19 sites
+  in `spawn_settings_menu`.
+- Added 1 test: `test_menu_font_extraction_from_default_handles`.
+
+### Quality Gates
+
+- `cargo fmt` → zero output
+- `cargo check --all-features` → zero errors
+- `cargo clippy --all-features -- -D warnings` → zero warnings
+- `cargo nextest run --all-features` → 5318/5318 passed (11 new tests added across
+  `ui_helpers.rs`, `dialogue_visuals.rs`, and `menu.rs`)
+
+---
+
+## Custom Fonts Phase 2 — `CampaignFontHandles` Resource and Loading System (2026)
+
+**Goal:** Create the `CampaignFontHandles` Bevy resource and its loading system so
+that font handles are resolved from `campaign.game_config.fonts` at runtime.
+The resource is campaign-scoped: switching campaigns triggers a reload.
+
+### What Changed
+
+**`src/game/resources/font_handles.rs`** _(new file)_
+
+- Defines `CampaignFontHandles` resource with `dialogue_font: Option<Handle<Font>>`,
+  `game_menu_font: Option<Handle<Font>>`, and `loaded_for_campaign: Option<String>`.
+- Derives `Resource`, `Default`; all three fields default to `None`.
+- SPDX header as first two lines; full `///` doc comments on struct and fields.
+
+**`src/game/resources/mod.rs`**
+
+- Added `pub mod font_handles;` in alphabetical order.
+- Added `pub use font_handles::CampaignFontHandles;` to the re-export block.
+
+**`src/game/systems/hud.rs`**
+
+- Added `use crate::game::resources::{CampaignFontHandles, GlobalState};`.
+- Added `.init_resource::<CampaignFontHandles>()` in `HudPlugin::build`.
+- Added `ensure_campaign_fonts_loaded` to the `not_in_combat` `Update` set.
+- Implemented `fn ensure_campaign_fonts_loaded` after `ensure_full_portraits_loaded`:
+  follows the same early-return guard pattern (no campaign → no AssetServer →
+  already loaded → process fonts → set `loaded_for_campaign`).
+- Added `mod campaign_font_tests` with 7 tests covering defaults, each early-return
+  path, None-config behavior, and `loaded_for_campaign` assignment.
+
+### Quality Gates
+
+- `cargo fmt --all` → zero output
+- `cargo check --all-targets --all-features` → zero errors
+- `cargo clippy --all-targets --all-features -- -D warnings` → zero warnings
+- All 7 new `campaign_font_tests` pass
+
+---
+
+## Custom Fonts Phase 1 — Config Schema and Data Model (2026)
+
+**Goal:** Add `FontConfig` struct and `fonts` field to `GameConfig` so campaign authors
+can declare optional `dialogue_font` and `game_menu_font` paths in `config.ron`.
+Existing configs that omit `fonts:` load and validate without error (`#[serde(default)]`).
+
+### What Changed
+
+**`src/sdk/game_config.rs`**
+
+- Added `FontConfig` struct with `dialogue_font: Option<String>` and
+  `game_menu_font: Option<String>` (both `#[serde(default)]`, derive `Default`).
+- Implemented `FontConfig::validate()`: checks each non-`None` field independently
+  for absolute paths, `..` traversal, missing `fonts/` prefix, and non-`.ttf` extension.
+- Added `#[serde(default)] pub fonts: FontConfig` field to `GameConfig`.
+- Updated `GameConfig::validate()` to call `self.fonts.validate()?`.
+- Updated `GameConfig` struct doctest to assert `config.fonts == FontConfig::default()`.
+- Added 13 tests in `mod tests` covering defaults, all four validation error cases,
+  three RON round-trips, and `GameConfig`-level propagation.
+
+**`campaigns/config.template.ron`**
+
+- Added commented `fonts: FontConfig(...)` example section after `game_log:` block
+  documenting path format and fallback behavior.
+
+**`data/test_campaign/config.ron`**
+
+- Added `fonts: FontConfig(),` after `leveling:` block.
+
+**`campaigns/tutorial/config.ron`**
+
+- Added `fonts: FontConfig(),` after `leveling:` block.
+
+### Quality Gates
+
+- `cargo fmt --all` → zero output
+- `cargo check --all-targets --all-features` → zero errors
+- `cargo clippy --all-targets --all-features -- -D warnings` → zero warnings
+- All 13 new `FontConfig` / `GameConfig` font tests pass
+
+---
+
+## Phase 7: Modding Guide — Interactive Objects (Meshes and Events) section (2026)
+
+**Goal:** Document the unified interactive object authoring model in the modding guide
+so that campaign creators understand how to wire `mesh_id` and `dialogue_id` into tile
+events, register meshes in `object_mesh_registry.ron`, and drive game effects via
+`TriggerEvent` dialogue actions.
+
+### What Changed
+
+**`docs/explanation/modding_guide.md`**
+
+- Added ToC entry 5 — _Interactive Objects — Meshes and Events_ (existing entries
+  5–8 renumbered to 6–9).
+- Inserted new top-level section `## Interactive Objects — Meshes and Events` between
+  `## Content Design Patterns` and `## Creating Innkeepers`.
+  - **The Unified Model** subsection: explains the separation of event logic, mesh
+    rendering, and dialogue authoring.
+  - **Event Type Reference** table: lists all event types with `mesh_id`/`dialogue_id`
+    support flags, key fields, and `TriggerEvent` names.
+  - **TriggerEvent Reference** table: documents every trigger-able event name, its
+    effect, and whether it requires `event_context`.
+  - **Placement Workflow** subsection: four numbered steps covering mesh registration
+    (`object_mesh_registry.ron`), map RON placement, dialogue authoring, and key-item
+    definition.
+  - **Worked Example: Creating a Locked Gate**: complete end-to-end example across all
+    four data files (`object_mesh_registry.ron`, map RON, `dialogues.ron`, `items.ron`).
+  - **Treasure with Custom Dialogue**: shorter example showing `mesh_id` + `dialogue_id`
+    on a `Treasure` event with flavour text before loot distribution.
+
+### Quality Gates
+
+Documentation-only change — no Rust source files modified. No `cargo` gates required.
+
+---
+
+## Phase 6 Map Editor — `mesh_id` and `dialogue_id` support for Treasure event (2026)
+
+**Goal:** Wire the `mesh_id` and `dialogue_id` fields that already exist on
+`MapEvent::Treasure` (and `MapEvent::Sign`, `MapEvent::Container`) into the
+Campaign Builder's map editor so authors can set them from the UI. Also add two
+new SDK helper functions (`browse_event_mesh_ids`, `browse_dialogue_ids`) for
+loading the autocomplete data lazily when the campaign directory changes.
+
+### What Changed
+
+**`antares/src/sdk/map_editor.rs`**
+
+- **`browse_event_mesh_ids(db: &ObjectMeshDatabase) -> Vec<String>`** — Returns
+  a sorted list of all registered mesh IDs from a standalone `ObjectMeshDatabase`.
+  Used to populate the mesh autocomplete in the Treasure event editor.
+
+- **`browse_dialogue_ids(db: &DialogueDatabase) -> Vec<(u16, String)>`** — Returns
+  `(id, title)` pairs sorted by ID from a standalone `DialogueDatabase`.
+  Used to populate the dialogue autocomplete in the Treasure event editor.
+
+**`antares/sdk/campaign_builder/src/map_editor.rs`**
+
+- **`EventEditorState` struct** — Added three new fields:
+  `treasure_mesh_id: String`, `treasure_dialogue_id: Option<u16>`,
+  `treasure_dialogue_id_buf: String`. Defaults to empty/None.
+
+- **`EventEditorState::to_map_event`** — Treasure arm now sets `mesh_id`
+  (None when empty string, Some otherwise) and `dialogue_id` from state.
+  Sign and Container arms pass `mesh_id: None, dialogue_id: None` to fix
+  pre-existing compilation errors from the domain upgrade.
+
+- **`EventEditorState::from_map_event`** — Treasure arm now reads `mesh_id`
+  and `dialogue_id` back into state (including `treasure_dialogue_id_buf` as
+  a plain numeric string).
+
+- **`MapsEditorState` struct** — Added three cache fields:
+  `available_mesh_ids: Vec<String>`, `available_dialogue_ids: Vec<(u16, String)>`,
+  `last_campaign_dir: Option<PathBuf>`. All default to empty/None.
+
+- **`MapsEditorState::show`** — Added an autocomplete cache-rebuild block at the
+  top that fires whenever `ctx.campaign_dir` changes, loading the mesh registry
+  and dialogue database from the new campaign directory.
+
+- **`show_event_editor`** — Updated signature to accept `available_mesh_ids` and
+  `available_dialogue_ids` slices. Treasure branch now renders a mesh-ID
+  autocomplete and a dialogue-ID autocomplete below the item list.
+
+- **`show_inspector_panel`** — Updated signature to forward the two cache slices
+  down to `show_event_editor`.
+
+- **`show_editor`** — Updated call site for `show_inspector_panel` to pass
+  `&self.available_mesh_ids` and `&self.available_dialogue_ids`.
+
+- **Test fixes** — All `MapEvent::Sign`, `MapEvent::Treasure`, and
+  `MapEvent::Container` construction expressions in tests updated to include
+  the new `mesh_id: None, dialogue_id: None` fields. Two `show_inspector_panel`
+  test call sites updated to pass `&[], &[]` for the new slice params.
+
+- **New tests** — Five new tests:
+  `test_event_editor_state_treasure_mesh_id_and_dialogue_id_defaults`,
+  `test_event_editor_state_to_treasure_with_mesh_and_dialogue`,
+  `test_event_editor_state_to_treasure_empty_mesh_gives_none`,
+  `test_event_editor_state_from_treasure_roundtrip`,
+  `test_maps_editor_state_default_has_empty_mesh_and_dialogue_caches`.
+
+### Quality Gates
+
+```text
+cargo fmt      → clean
+cargo check    → Finished 0 errors
+cargo clippy   → Finished 0 warnings
+cargo nextest  → 5294 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Phase 6.1 Foundation — Map Event Query & Mutation Helpers in `src/sdk/map_editor.rs` (2026)
+
+**Goal:** Add the `MapEditorError` error type and six new helper functions to
+`src/sdk/map_editor.rs` so the Campaign Builder's map-event panels have a
+strongly-typed, validated API for querying available mesh IDs / dialogue IDs
+and for placing, removing, or patching events on a `Map`.
+
+### What Changed
+
+**`src/sdk/map_editor.rs`**
+
+- **Imports** — Added `use crate::domain::dialogue::DialogueId;`,
+  `Position` to the domain types import, and `MapEvent` to the world import.
+
+- **`browse_dialogue_ids` updated** — Existing function now uses `filter_map`
+  and returns `Vec<(DialogueId, String)>` (same underlying type `u16`, but uses
+  the type alias). The old `unwrap_or_else` fallback was removed since
+  `all_dialogues()` can only return IDs that are present in the map.
+
+- **New `// ===== Map Event Placement =====` section** — Inserted between the
+  existing `object_mesh_tests` module and the Sprite Sheet Management section.
+  Contains:
+
+  - `MapEditorError` — `thiserror`-derived error enum with four variants:
+    `UnknownMesh(String)`, `UnknownDialogue(u16)`,
+    `OutOfBounds(Position)`, `PositionOccupied(Position)`.
+
+  - `suggest_event_mesh_ids(registry, partial)` — prefix-filtered sorted list
+    of mesh IDs from an `ObjectMeshDatabase`.
+
+  - `suggest_dialogue_ids(db, partial)` — prefix-filtered `(DialogueId, title)`
+    pairs matching either the dialogue name or its numeric ID string.
+
+  - `place_map_event(map, pos, event)` — validates bounds and occupancy, then
+    inserts the event; returns `Err(OutOfBounds)` or `Err(PositionOccupied)`.
+
+  - `remove_map_event(map, pos)` — thin wrapper around `Map::remove_event`.
+
+  - `set_event_mesh_id(map, pos, mesh_id, registry)` — patches the `mesh_id`
+    field on a `Treasure` event at `pos`; validates against `ObjectMeshDatabase`.
+
+  - `set_event_dialogue_id(map, pos, id, db)` — patches the `dialogue_id`
+    field on a `Treasure` event at `pos`; validates against `DialogueDatabase`.
+
+- **New `mod event_placement_tests`** — 16 unit tests covering all success and
+  failure paths, boundary conditions, and error display strings. Test data
+  references `data/test_campaign` only (Implementation Rule 5 compliant).
+
+### Quality Gates
+
+```text
+cargo fmt      → clean
+cargo check    → Finished 0 errors
+cargo clippy   → Finished 0 warnings
+cargo nextest  → 5294 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Phase 6 UI Helpers — `autocomplete_mesh_id_selector`, `parse_dialogue_id_from_buf`, `autocomplete_dialogue_selector` (2026)
+
+**Goal:** Add two new autocomplete selector functions and one pure helper to
+`sdk/campaign_builder/src/ui_helpers/autocomplete.rs` so campaign-builder panels
+can bind mesh IDs and dialogue IDs to their respective data sources with the
+same look-and-feel as the existing portrait/sprite-sheet/spell selectors.
+
+### What Changed
+
+**`sdk/campaign_builder/src/ui_helpers/autocomplete.rs`** — Three new `pub` items
+appended after `autocomplete_spell_selector`:
+
+- `autocomplete_mesh_id_selector(ui, id_salt, label, selected_mesh_id, available_mesh_ids)`
+  String-keyed selector backed by a slice of mesh ID strings.
+  Shows `"Mesh: <id>"` tooltip for known IDs and `"⚠ Unknown mesh ID '<id>'"` for
+  unknown ones. Skips the label widget when `label` is `""`.
+
+- `parse_dialogue_id_from_buf(buf) -> Option<u16>`
+  Pure parser that extracts a `u16` from either a bare numeric string (`"500"`) or
+  the `"500 — Barred Passage"` display format produced by
+  `autocomplete_dialogue_selector`. Splits on whitespace or U+2014 (em-dash) and
+  parses the first token.
+
+- `autocomplete_dialogue_selector(ui, id_salt, label, dialogue_id_buf, available_dialogues)`
+  Takes `&[(u16, String)]` pairs and presents candidates as `"<id> — <title>"`.
+  Accepts both a full display string and a bare numeric ID string as valid
+  input. Buffer stores the full display string; callers use
+  `parse_dialogue_id_from_buf` to extract the numeric ID.
+
+**`sdk/campaign_builder/src/ui_helpers/tests.rs`** — Five new unit tests for
+`parse_dialogue_id_from_buf` added after the existing
+`test_autocomplete_spell_selector_no_panic_on_empty` test:
+
+- `test_parse_dialogue_id_from_buf_plain_number`
+- `test_parse_dialogue_id_from_buf_formatted_string`
+- `test_parse_dialogue_id_from_buf_empty`
+- `test_parse_dialogue_id_from_buf_invalid`
+- `test_parse_dialogue_id_from_buf_zero`
+
+### Pattern Followed
+
+All three functions follow the `autocomplete_portrait_selector` pattern exactly:
+`make_autocomplete_id` → `load_autocomplete_buffer` → `AutocompleteInput::new` →
+tooltip → commit-on-change guard → Clear button → `store_autocomplete_buffer`.
+
+### Quality Gates
+
+```text
+cargo fmt      → clean
+cargo check    → Finished 0 errors
+cargo clippy   → Finished 0 warnings
+cargo nextest  → 5278 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Unified Interactive Objects — Phase 5: Campaign Data — Barred Passage (2026)
+
+**Goal:** Implement Phase 5 of the Unified Interactive Objects plan: convert the
+`Barred Passage` `Treasure` event at map tile `(17, 12)` from a plain event to a
+full interactive object with a `mesh_id`, `dialogue_id`, and registered mesh asset.
+
+### What Changed
+
+**`campaigns/tutorial/data/maps/map_1.ron`** — Updated `Treasure` at `(17, 12)`:
+added description, `mesh_id: Some("barred_passage")`, `dialogue_id: Some(500)`.
+
+**`campaigns/tutorial/data/object_mesh_registry.ron`** (new) — Tutorial campaign
+registry mapping `"barred_passage"` to `"assets/meshes/objects/barred_door.ron"`.
+
+**`campaigns/tutorial/assets/meshes/objects/barred_door.ron`** (new) — Iron gate
+`CreatureDefinition` (`id: 20001`): 3 vertical bars + 2 horizontal crossbars,
+iron grey `(0.35, 0.35, 0.40, 1.0)`, ~0.8 wide x 2.0 tall in world units.
+
+**`campaigns/tutorial/data/dialogues.ron`** — Added dialogue `id: 500`
+`"Barred Passage"`: root node text "The passage is barred shut...", one terminal
+choice "Leave it for now.", `repeatable: true`.
+
+**`data/test_campaign/data/maps/map_1.ron`** — Mirrored Barred Passage event at
+`(17, 12)` for integration tests (Implementation Rule 5).
+
+**`data/test_campaign/data/object_mesh_registry.ron`** — Added `"barred_passage"`
+alongside the existing landscape mesh entries.
+
+**`data/test_campaign/assets/meshes/objects/barred_door.ron`** (new) — Identical
+mesh definition used by integration tests to validate round-trip parsing.
+
+**`data/test_campaign/data/dialogues.ron`** — Added dialogue `id: 500` in
+test-campaign format (no `sdk_metadata`).
+
+**`tests/barred_passage_integration_test.rs`** (new) — Ten integration tests
+(P5-BP1 through P5-BP10) covering: event existence and fields, dialogue content,
+object mesh registry registration, and full-campaign parse validation.
+
+### Quality Gates
+
+```text
+cargo fmt      → clean
+cargo check    → Finished 0 errors
+cargo clippy   → Finished 0 warnings
+cargo nextest  → 5294 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Unified Interactive Objects — Phase 4: Mesh Registry Unification (2026)
+
+**Goal:** Implement Phase 4 of the Unified Interactive Objects plan — unify the
+split `LandscapeMeshDatabase` / `FurnitureMeshDatabase` lookups used by
+rendering code into a single `ObjectMeshDatabase` keyed by arbitrary strings,
+so map-event `mesh_id` values can be human-readable names like `"barred_door"`
+instead of raw numeric IDs. Legacy numeric IDs are preserved as string keys
+(`"11001"`) for backward compatibility.
+
+### What Changed
+
+**`src/domain/world/object_mesh.rs`** (new)
+
+- `ObjectMeshError` — four variants: `ReadError`, `ParseError`,
+  `AssetReadError { path, reason }`, `ValidationError`. The `AssetReadError`
+  field is named `reason` (not `source`) to avoid thiserror's implicit error
+  source trait requirement.
+- `ObjectMeshRegistry` — private RON deserialization struct
+  `{ meshes: HashMap<String, String> }` mapping string keys to
+  campaign-relative asset file paths.
+- `ObjectMeshDatabase` — `HashMap<String, CreatureDefinition>` with:
+  - `new()` / `Default`
+  - `load_from_registry(registry_path, campaign_root)` — reads
+    `object_mesh_registry.ron`, iterates entries, parses each as
+    `CreatureDefinition`, inserts by key.
+  - `merge_landscape(landscape)` — inserts each landscape mesh using
+    `id.to_string()` as key; `entry().or_insert_with()` prevents primary
+    entries from being overwritten.
+  - `merge_furniture(furniture)` — same pattern for furniture meshes.
+  - `lookup(key) -> Option<&CreatureDefinition>` — direct HashMap get.
+  - `has_mesh`, `all_mesh_ids`, `is_empty`, `count`, `validate`.
+- 9 unit tests covering: empty database, lookup miss, merge-empty no-op,
+  round-trip load, missing-asset error path, and primary-entry-not-overwritten
+  invariant.
+
+**`src/domain/world/mod.rs`** (modified)
+
+- Added `pub mod object_mesh;` declaration.
+- Added `pub use object_mesh::{ObjectMeshDatabase, ObjectMeshError};` re-export.
+
+**`src/domain/campaign_loader.rs`** (modified)
+
+- Added `object_meshes: ObjectMeshDatabase` field to `GameData`.
+- `GameData::new()` initialises it with `ObjectMeshDatabase::new()`.
+- `GameData::validate()` calls `self.object_meshes.validate()`.
+- `load_game_data()` calls new `load_object_meshes` helper.
+- New `load_object_meshes(&self, landscape_meshes, furniture_meshes)` method:
+  loads primary registry if `data/object_mesh_registry.ron` exists (empty
+  database otherwise), then merges landscape and furniture mesh databases.
+
+**`src/sdk/database.rs`** (modified)
+
+- Added `ObjectMeshLoadError(String)` variant to `DatabaseError`.
+- Added `pub object_meshes: ObjectMeshDatabase` field to `ContentDatabase`.
+- `ContentDatabase::new()` initialises it with `ObjectMeshDatabase::new()`.
+- Both `load_campaign()` and `load_core()` now:
+  1. Load a local `furniture_meshes_local` from `furniture_mesh_registry.ron`
+     if present (not stored as a `ContentDatabase` field — merge only).
+  2. Build `object_meshes` by loading the primary registry (if present),
+     then merging landscape and furniture databases.
+- `validate_landscape_content()` calls `self.object_meshes.validate()`.
+- 3 integration tests: P4-OM1 (primary registry loads and is queryable),
+  P4-OM2 (missing primary falls back to landscape/furniture merge),
+  P4-OM3 (primary entry survives merge — not overwritten by legacy IDs).
+
+**`src/game/systems/map.rs`** (modified)
+
+- `spawn_event_meshes`: parameter changed from
+  `landscape_meshes: &world::LandscapeMeshDatabase` to
+  `object_meshes: &world::ObjectMeshDatabase`; lookup changed to
+  `object_meshes.lookup(mesh_id_str)` (no numeric parse).
+- `spawn_landscape_placements`: parameter changed to
+  `object_meshes: &world::ObjectMeshDatabase`; lookup changed to
+  `object_meshes.lookup(&mesh_id.to_string())`.
+- `try_spawn_terrain_tree_as_landscape_mesh`: parameter changed to
+  `object_meshes: &world::ObjectMeshDatabase`; lookup changed to
+  `object_meshes.lookup(&mesh_id.to_string())`.
+- All 6 call sites updated from `&content.0.landscape_meshes` to
+  `&content.0.object_meshes`.
+
+**`src/sdk/map_editor.rs`** (modified)
+
+- Added "Object Meshes" Campaign Builder panel functions:
+  - `browse_object_meshes(db) -> Vec<(String, String)>` — returns all
+    registered mesh IDs with their names, sorted by ID.
+  - `suggest_object_mesh_ids(db, partial) -> Vec<(String, String)>` — filters
+    IDs containing `partial` (case-insensitive).
+  - `is_valid_object_mesh_id(db, mesh_id) -> bool` — `has_mesh` wrapper.
+- 5 tests in `mod object_mesh_tests` covering: browse returns all IDs,
+  suggest filters correctly, invalid ID returns false, empty partial returns
+  all, integration test with loaded campaign.
+
+**`data/test_campaign/data/object_mesh_registry.ron`** (new)
+
+Primary string-keyed registry for the test campaign, with entries for
+`oak_tree`, `pine_tree`, `dead_tree`, `palm_tree`, and `brush` pointing at
+their campaign-relative `CreatureDefinition` asset files.
+
+### Design Decisions
+
+| Decision                                 | Rationale                                                                                                                                                                         |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| String keys (`HashMap<String, …>`)       | Allows human-readable names in map event `mesh_id` fields without breaking existing numeric campaigns — legacy IDs become `"11001"` etc.                                          |
+| `or_insert_with` in merge                | Primary `object_mesh_registry.ron` entries take precedence; legacy registries fill gaps without overwriting.                                                                      |
+| `furniture_meshes` loaded locally in SDK | `ContentDatabase` did not previously expose a `furniture_meshes` field; loading locally for merge avoids adding a new public field and keeps the API surface small.               |
+| `item_mesh_registry.ron` excluded        | Item meshes follow a `DroppedItem` spawn path separate from interactive object rendering.                                                                                         |
+| `reason` field name in `AssetReadError`  | `thiserror` treats a field named `source` as an error source, requiring `std::error::Error` on the type. The field is `String`, so renaming to `reason` avoids the compile error. |
+
+### Quality Gate Results
+
+```
+cargo fmt --all           → clean (no output)
+cargo check --all-targets --all-features → Finished, 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+cargo nextest run --all-features → 5268 passed, 0 failed
+```
+
+---
+
+## Unified Interactive Objects — Phase 3: Dialogue Routing for `dialogue_id` Events (2026)
+
+**Goal:** Implement Phase 3 of the Unified Interactive Objects plan — route the [E]
+interaction for `Treasure`, `Sign`, `Container`, `LockedContainer`, and `LockedDoor`
+events through a dialogue tree when the event carries `dialogue_id: Some(id)`, instead
+of immediately executing their default effect.
+
+### What Changed
+
+**`src/application/dialogue.rs`**
+
+- Added `EventInteractionContext` struct with `event_position: Position` and `map_id:
+MapId` — a generalized context for world-event interaction dialogues, deliberately
+  separate from the existing `RecruitmentContext`.
+- Added `event_context: Option<EventInteractionContext>` field to `DialogueState`.
+- Updated `start()`, `start_simple()` to initialise `event_context: None`.
+- Updated `end()` to clear `event_context`.
+- Added 3 new tests: default/start/end behaviour of `event_context`.
+
+**`src/application/mod.rs`**
+
+- Added `pub fn collect_treasure_at_position(map_id, position) -> Option<Vec<(usize, ItemId)>>`
+  to `GameState` — distributes loot items to party members and removes the event (shared
+  logic used by both `handle_events` and `TriggerEvent("collect_treasure")`).
+
+**`src/game/systems/dialogue.rs`**
+
+- Added `PendingEventInteractionContext` resource (parallel to `PendingRecruitmentContext`);
+  registered in `DialoguePlugin`.
+- Updated `handle_start_dialogue` to consume `PendingEventInteractionContext` and set
+  `event_context` on the new `DialogueState`, and to accept a `DespawnEventMesh` message
+  writer parameter.
+- Updated `handle_select_choice` to accept and pass a `DespawnEventMesh` writer.
+- Extended `execute_action` with a `despawn_event_mesh` parameter and four new
+  `TriggerEvent` branches:
+  - `"collect_treasure"` — calls `collect_treasure_at_position`, logs item distribution,
+    emits `DespawnEventMesh`, returns to exploration.
+  - `"open_container"` — reads `Container` event at `event_context.event_position`,
+    calls `enter_container_inventory`.
+  - `"unlock_door"` — checks party for key, unlocks and opens tile, emits
+    `DespawnEventMesh`, returns to exploration. Logs failure if no key.
+  - `"unlock_container"` — same as unlock_door but for `LockedContainer`; on success
+    calls `enter_container_inventory` so the party can take items.
+- Added 2 unit tests: `collect_treasure` distributes loot and removes event;
+  `collect_treasure` is a no-op when `event_context` is absent.
+
+**`src/game/systems/input/exploration_interact.rs`**
+
+- Added `open_dialogue_for_event(game_state, dialogue_id, event_position, writer,
+pending_ctx)` — sets `PendingEventInteractionContext` and writes `StartDialogue`.
+- Updated `try_interact_locked_door_event` and `try_interact_locked_container_event`
+  to extract `dialogue_id` and call `open_dialogue_for_event` when it is `Some`.
+- Updated `try_interact_adjacent_world_events` to:
+  - Add `dialogue_id` routing for `Container` (current + adjacent tiles).
+  - Add `Treasure` handling for both current and adjacent tiles with `dialogue_id`
+    routing.
+  - Add `Sign` `dialogue_id` routing in the adjacent-tile loop.
+- Updated `handle_exploration_interact` to pass the new `start_dialogue_writer` and
+  `pending_event_context` params to all updated sub-functions.
+- Added test `test_try_interact_adjacent_world_events_treasure_with_dialogue_id_opens_dialogue`
+  verifying the Treasure→dialogue routing and that no `MapEventTriggered` is sent and
+  the event is not removed.
+- Added test `test_open_dialogue_for_event_sets_pending_context`.
+
+**`src/game/systems/input.rs`**
+
+- Updated `handle_exploration_input_interact` to include `StartDialogue` writer and
+  `PendingEventInteractionContext` as Bevy system params and pass them to
+  `handle_exploration_interact`.
+
+**`src/game/systems/events.rs`**
+
+- Updated `check_for_events` to skip auto-triggering `MapEvent::Treasure` events that
+  carry `dialogue_id: Some(_)` (they require explicit [E] interaction).
+
+### Quality Gate Results
+
+```
+cargo fmt --all           → clean (no output)
+cargo check --all-targets --all-features → Finished, 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+cargo nextest run --all-features → 5249 passed, 0 failed
+```
+
+---
+
+## Unified Interactive Objects — Phase 3: `collect_treasure_at_position` (2026)
+
+**Goal:** Add `GameState::collect_treasure_at_position` to `src/application/mod.rs` as
+part of Phase 3 of the Unified Interactive Objects plan. This method provides a direct,
+testable API for collecting treasure from a map tile without going through the full
+`move_party_and_handle_events` path.
+
+### What Changed
+
+**`src/application/mod.rs`**
+
+- Added `pub fn collect_treasure_at_position(&mut self, map_id: MapId, position: Position) -> Option<Vec<(usize, ItemId)>>` to the `impl GameState` block, placed between `enter_container_inventory` and `return_to_exploration`.
+- The method:
+  1. Snapshots the `loot: Vec<u8>` from a `MapEvent::Treasure` at the given position (using `world.get_map` + `get_event`), returning `None` for any non-Treasure event or missing position.
+  2. Iterates over loot bytes and places each item into the first party member with inventory space via `Inventory::add_item`; items that cannot be placed are silently dropped.
+  3. Removes the event from the map via `world.get_map_mut` + `map.remove_event` (one-time collection semantics).
+  4. Returns `Some(distributed)` — a `Vec<(usize, ItemId)>` of `(character_index, item_id)` pairs for items successfully placed.
+- `ItemId = u8` so no cast is needed; `item_id` is assigned with an explicit type annotation to stay clippy-clean under `-D warnings`.
+
+### Quality Gate Results
+
+```
+cargo fmt --all           → clean (no output)
+cargo check --all-targets --all-features → Finished, 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → Finished, 0 warnings
+cargo nextest run --all-features → 5245 passed, 0 failed
+```
+
+---
+
 ## Phase 8: Vegetation Documentation Updates (2026)
 
 **Goal:** Update existing reference documentation for the wind configuration,
@@ -12,14 +1682,16 @@ existing documents are updated — no new documentation files are created.
 ### What Changed
 
 **`docs/reference/campaign_content_format.md`**
+
 - Added `data/wind.ron` to the campaign file structure listing.
 - Added `## wind.ron Schema` section before `## Validation` — includes: field
   table (name, type, default, valid range), minimal Sine example, full Perlin
   example, `WindSystemKind` reference table, missing-file behaviour, and
-  validation rules.  A campaign author can implement `wind.ron` from this section
+  validation rules. A campaign author can implement `wind.ron` from this section
   alone.
 
 **`docs/reference/architecture.md`**
+
 - Module structure (§3.2): added `domain/world/wind.rs` (`CampaignWindConfig`,
   `WindSystemKind`), `game/resources/wind_config.rs` (`WindConfig`),
   `game/systems/advanced_grass.rs` (wind extension material, GPU batch), and
@@ -35,19 +1707,21 @@ existing documents are updated — no new documentation files are created.
   stack from domain through render pipeline.
 
 **`docs/reference/sdk_api.md`**
+
 - Added `wind: CampaignWindConfig` to `ContentDatabase` fields table.
 - Added `path/data/wind.ron (optional)` to the `load_campaign` file list.
 - Added `#### Wind Configuration` subsection with field table, validation rules,
   and a runnable usage example.
 
 **`CHANGELOG.md`**
+
 - Added four ADDED entries under `## [Unreleased]` for Phases 5, 6, 7, and 8 of
   the Vegetation Visual Improvement Plan, using conventional-commit style
   consistent with the existing changelog format.
 
 ### Quality Gate Results
 
-Documentation-only changes — no Rust source modified.  The four quality gates
+Documentation-only changes — no Rust source modified. The four quality gates
 (fmt, check, clippy, nextest) remain passing from Phase 7.
 
 ---
@@ -61,10 +1735,12 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
 ### What Changed
 
 **`Cargo.toml`**
+
 - Added `bytemuck = { version = "1", features = ["derive"] }` as a direct
   dependency for `cast_slice` in the GPU buffer upload path.
 
 **`assets/shaders/grass_instanced.wgsl`** (new)
+
 - Instanced grass vertex shader with two vertex buffer inputs:
   - Buffer 0 (`VertexStepMode::Vertex`): standard mesh attributes from Bevy's
     `Vertex` struct — position, normal, UV, vertex color.
@@ -81,8 +1757,9 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
   implicit-derivative `textureSample`).
 
 **`src/game/systems/grass_instancing.rs`** (new)
+
 - **`GrassRenderMode`** resource — `PerEntity` (Phase-6 path) vs. `Instanced`
-  (Phase-7, default).  Guards both the per-blade `Mesh3d` spawn and the
+  (Phase-7, default). Guards both the per-blade `Mesh3d` spawn and the
   instanced batch spawn so the two paths never render simultaneously.
 - **`GrassRenderWorldAvailable`** marker resource — only inserted when
   `RenderApp` is present. Prevents `build_grass_instance_batches_system` from
@@ -99,8 +1776,8 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
   group layout to every specialized descriptor.
 - **`DrawGrassInstanced`** type alias for the render-command chain:
   `SetItemPipeline → SetMeshViewBindGroup<0> →
-  SetMeshViewBindingArrayBindGroup<1> → SetMeshBindGroup<2> →
-  SetGrassWindBindGroup<3> → DrawGrassInstancedInner`.
+SetMeshViewBindingArrayBindGroup<1> → SetMeshBindGroup<2> →
+SetGrassWindBindGroup<3> → DrawGrassInstancedInner`.
 - Systems wired into `RenderApp`:
   - `init_grass_instanced_pipeline` (`RenderStartup`) — creates the pipeline
     and wind bind group layout.
@@ -111,10 +1788,11 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
   - `queue_grass_instanced` (`QueueMeshes`) — queues each `GrassInstanceBatch`
     entity into `Opaque3d` using `BinnedRenderPhaseType::NonMesh`.
 - **`GrassInstancingPlugin`** — gates all render wiring (including
-  `ExtractComponentPlugin`) on `RenderApp` being present.  Without a render
+  `ExtractComponentPlugin`) on `RenderApp` being present. Without a render
   world (test environments), only `GrassRenderMode` is registered.
 
 **`src/game/systems/advanced_grass.rs`** (modified)
+
 - `ExtractComponent` implemented for `GrassInstanceBatch` (in
   `grass_instancing.rs`) so it is copied to the render world.
 - `spawn_grass_clump` gains a `render_mode: GrassRenderMode` parameter.
@@ -137,7 +1815,7 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
   now queries `Option<&Visibility>` on each `GrassCluster` and skips clusters
   with `Visibility::Hidden`. This makes `grass_distance_culling_system` the
   chunk-level culling mechanism for the instanced path — instances from culled
-  clusters are excluded from every frame's batch rebuild.  Covered by
+  clusters are excluded from every frame's batch rebuild. Covered by
   `test_build_grass_instance_batches_skips_hidden_clusters`.
 - Imports `NoFrustumCulling` and `GrassRenderMode` from the new module.
 - All three in-module test spawn calls updated to pass
@@ -145,6 +1823,7 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
   `GrassClump` counts remain valid.
 
 **`src/game/systems/map.rs`** (modified)
+
 - `MapRenderingPlugin::build` adds `GrassInstancingPlugin` before
   `MaterialPlugin::<GrassMaterial>`.
 - `spawn_map_system`, `spawn_map`, and `spawn_map_markers` gain a
@@ -152,6 +1831,7 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
   `spawn_grass_cached_with_exclusions` call site.
 
 **`campaigns/tutorial/assets/shaders/`** (new directory)
+
 - `grass.wgsl` and `grass_instanced.wgsl` copied here so Bevy can resolve them.
   The game binary sets `BEVY_ASSET_ROOT` to the active campaign directory with
   `file_path: ""`, so every asset path is resolved relative to that root.
@@ -166,18 +1846,16 @@ dramatically reducing entity count and CPU overhead on grass-dense maps.
 The original `"shaders/…"` paths resolved to `<campaign>/shaders/…` which did
 not exist, producing `Path not found` errors and no grass rendering.
 
-
-
 ### Design Decisions
 
-| Decision | Rationale |
-|---|---|
-| `SpecializedMeshPipeline` (not `SpecializedRenderPipeline`) | Reuses `MeshPipeline::specialize(key, layout)` for the automatic mesh vertex buffer layout + view/mesh bind group setup. Avoids duplicating Bevy's attribute-location mapping. |
-| `BinnedRenderPhaseType::NonMesh` | Bypasses GPU preprocessing (indirect draw buffers). Our per-instance transforms live in vertex buffer 1, not in Bevy's mesh uniform buffer, so preprocessing would add overhead for no gain. |
-| `Opaque3d` phase | Grass is opaque/masked — no sorting needed. Binned phase allows multi-draw batching in future. |
-| Wind at `@group(3)` | `MeshPipeline::specialize` occupies bind group indices 0–2. Appending at index 3 avoids collision without forking the base pipeline. |
-| `GrassRenderWorldAvailable` marker | `ExtractComponentPlugin` adds `SyncComponentPlugin` which registers a component hook requiring `PendingSyncEntity`. Gating both on `RenderApp` presence prevents panics in MinimalPlugins test environments. |
-| Per-clump entities kept (no `Mesh3d`) | Preserves the existing `GrassCluster` distance-culling and LOD systems. In instanced mode the per-clump entities are invisible (no render components); their transforms feed `build_grass_instance_batches_system`. |
+| Decision                                                    | Rationale                                                                                                                                                                                                           |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SpecializedMeshPipeline` (not `SpecializedRenderPipeline`) | Reuses `MeshPipeline::specialize(key, layout)` for the automatic mesh vertex buffer layout + view/mesh bind group setup. Avoids duplicating Bevy's attribute-location mapping.                                      |
+| `BinnedRenderPhaseType::NonMesh`                            | Bypasses GPU preprocessing (indirect draw buffers). Our per-instance transforms live in vertex buffer 1, not in Bevy's mesh uniform buffer, so preprocessing would add overhead for no gain.                        |
+| `Opaque3d` phase                                            | Grass is opaque/masked — no sorting needed. Binned phase allows multi-draw batching in future.                                                                                                                      |
+| Wind at `@group(3)`                                         | `MeshPipeline::specialize` occupies bind group indices 0–2. Appending at index 3 avoids collision without forking the base pipeline.                                                                                |
+| `GrassRenderWorldAvailable` marker                          | `ExtractComponentPlugin` adds `SyncComponentPlugin` which registers a component hook requiring `PendingSyncEntity`. Gating both on `RenderApp` presence prevents panics in MinimalPlugins test environments.        |
+| Per-clump entities kept (no `Mesh3d`)                       | Preserves the existing `GrassCluster` distance-culling and LOD systems. In instanced mode the per-clump entities are invisible (no render components); their transforms feed `build_grass_instance_batches_system`. |
 
 ### Quality Gate Results
 
@@ -187,10 +1865,12 @@ cargo check       → Finished with 0 errors
 cargo clippy      → Finished with 0 warnings
 cargo nextest run → 5222/5222 passed, 0 failed
 ```
-cargo check       → Finished with 0 errors
-cargo clippy      → Finished with 0 warnings
+
+cargo check → Finished with 0 errors
+cargo clippy → Finished with 0 warnings
 cargo nextest run → 5221/5221 passed, 0 failed
-```
+
+````
 
 ---
 
@@ -1265,7 +2945,7 @@ cargo check   → 0 errors
 cargo clippy  → 0 warnings
 cargo nextest (antares)          → 5101 passed, 8 skipped, 0 failed
 cargo nextest (campaign_builder) → 2493 passed, 0 skipped, 0 failed
-```
+````
 
 ---
 
@@ -1450,13 +3130,13 @@ normal map so tree trunks show groove depth under the scene directional light.
 
 ### Files Changed
 
-| File | Change |
-|---|---|
-| `src/bin/generate_normal_map.rs` | New binary — reads `bark.png`, applies 3×3 Sobel, writes `bark_normal.png` to both asset locations |
-| `assets/textures/trees/bark_normal.png` | Generated RGB normal map (9.2 KB) |
-| `campaigns/tutorial/assets/textures/trees/bark_normal.png` | Copied from assets |
-| `src/game/systems/procedural_meshes.rs` | Constant + material + test updates (see below) |
-| `Cargo.toml` | Added `[[bin]]` entry for `generate-normal-map` |
+| File                                                       | Change                                                                                             |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `src/bin/generate_normal_map.rs`                           | New binary — reads `bark.png`, applies 3×3 Sobel, writes `bark_normal.png` to both asset locations |
+| `assets/textures/trees/bark_normal.png`                    | Generated RGB normal map (9.2 KB)                                                                  |
+| `campaigns/tutorial/assets/textures/trees/bark_normal.png` | Copied from assets                                                                                 |
+| `src/game/systems/procedural_meshes.rs`                    | Constant + material + test updates (see below)                                                     |
+| `Cargo.toml`                                               | Added `[[bin]]` entry for `generate-normal-map`                                                    |
 
 ### Key Decisions
 
@@ -1478,10 +3158,10 @@ const TREE_BARK_NORMAL_TEXTURE: &str = "assets/textures/trees/bark_normal.png";
 
 ### Tests Updated
 
-| Test | Change |
-|---|---|
-| `test_bark_material_uses_texture_and_is_lit_with_normal_map` | Renamed from `…is_unlit`; asserts `!material.unlit` and `normal_map_texture.is_some()` |
-| `test_bark_material_variant_cache_reuses_equivalent_tint_bucket_and_is_lit` | Renamed from `…is_unlit`; same assertion updates |
+| Test                                                                        | Change                                                                                 |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `test_bark_material_uses_texture_and_is_lit_with_normal_map`                | Renamed from `…is_unlit`; asserts `!material.unlit` and `normal_map_texture.is_some()` |
+| `test_bark_material_variant_cache_reuses_equivalent_tint_bucket_and_is_lit` | Renamed from `…is_unlit`; same assertion updates                                       |
 
 ### Quality Gates
 
@@ -1505,26 +3185,26 @@ Upgraded grass blade geometry from quadratic to cubic Bezier (S-curve shape) and
 
 ### Files Changed
 
-| File | Change |
-|---|---|
+| File                                 | Change                                              |
+| ------------------------------------ | --------------------------------------------------- |
 | `src/game/systems/advanced_grass.rs` | All geometry, color, and struct changes (see below) |
 
 ### GrassColorScheme: New Fields
 
-| Old field | New field | Default value |
-|---|---|---|
-| `base_color` | `ao_color` | `srgb(0.08, 0.12, 0.06)` — dark AO base |
-| _(new)_ | `mid_color` | `srgb(0.2, 0.5, 0.1)` — primary mid-blade green |
-| `tip_color` | `tip_color` | `srgb(0.72, 0.82, 0.45)` — lighter tip highlight |
+| Old field    | New field   | Default value                                    |
+| ------------ | ----------- | ------------------------------------------------ |
+| `base_color` | `ao_color`  | `srgb(0.08, 0.12, 0.06)` — dark AO base          |
+| _(new)_      | `mid_color` | `srgb(0.2, 0.5, 0.1)` — primary mid-blade green  |
+| `tip_color`  | `tip_color` | `srgb(0.72, 0.82, 0.45)` — lighter tip highlight |
 
 ### Cubic Bezier Control Points
 
-| Point | Lateral (X) | Height (Y) |
-|---|---|---|
-| `p0` | `0` | `0` |
-| `p1` | `tilt * height * 0.25` | `height * 0.33` |
-| `p2` | `tilt * height * 0.4 + curve_amount * 0.5` | `height * 0.66` |
-| `p3` | `curve_amount` | `height` |
+| Point | Lateral (X)                                | Height (Y)      |
+| ----- | ------------------------------------------ | --------------- |
+| `p0`  | `0`                                        | `0`             |
+| `p1`  | `tilt * height * 0.25`                     | `height * 0.33` |
+| `p2`  | `tilt * height * 0.4 + curve_amount * 0.5` | `height * 0.66` |
+| `p3`  | `curve_amount`                             | `height`        |
 
 Formula: `B(t) = (1-t)³p0 + 3(1-t)²t·p1 + 3(1-t)t²·p2 + t³p3`
 
@@ -1568,45 +3248,45 @@ Added a `data/wind.ron` file to the campaign format so each campaign can configu
 
 ### New Files
 
-| File | Purpose |
-|---|---|
-| `src/domain/world/wind.rs` | `WindSystemKind` enum + `CampaignWindConfig` struct with serde defaults |
-| `src/game/resources/wind_config.rs` | `WindConfig(pub CampaignWindConfig)` Bevy `Resource` newtype |
-| `campaigns/tutorial/data/wind.ron` | Tutorial campaign uses `Sine` wind (strength 0.04, frequency 0.65) |
-| `data/test_campaign/data/wind.ron` | Test campaign uses `None` (exercises serde defaults) |
+| File                                | Purpose                                                                 |
+| ----------------------------------- | ----------------------------------------------------------------------- |
+| `src/domain/world/wind.rs`          | `WindSystemKind` enum + `CampaignWindConfig` struct with serde defaults |
+| `src/game/resources/wind_config.rs` | `WindConfig(pub CampaignWindConfig)` Bevy `Resource` newtype            |
+| `campaigns/tutorial/data/wind.ron`  | Tutorial campaign uses `Sine` wind (strength 0.04, frequency 0.65)      |
+| `data/test_campaign/data/wind.ron`  | Test campaign uses `None` (exercises serde defaults)                    |
 
 ### Modified Files
 
-| File | Change |
-|---|---|
-| `src/domain/world/mod.rs` | `pub mod wind;` + re-export `CampaignWindConfig`, `WindSystemKind` |
-| `src/domain/mod.rs` | Re-export wind types from domain root |
-| `src/domain/campaign_loader.rs` | `GameData.wind` field, `load_wind_config` method, call in `load_game_data` |
-| `src/game/resources/mod.rs` | `pub mod wind_config;` + `pub use wind_config::WindConfig;` |
-| `src/game/systems/campaign_loading.rs` | Insert `WindConfig` resource in all 4 Ok/Err branches |
-| `src/sdk/database.rs` | `DatabaseError::WindLoadError`, `ContentDatabase.wind` field, load in `load_campaign_with_skills_file` and `load_core` |
-| `src/sdk/validation.rs` | `ValidationError::WindConfigInvalid`, `validate_wind_config`, call in `validate_all` |
-| `src/sdk/error_formatter.rs` | `get_suggestions` arm for `WindConfigInvalid` |
+| File                                   | Change                                                                                                                 |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `src/domain/world/mod.rs`              | `pub mod wind;` + re-export `CampaignWindConfig`, `WindSystemKind`                                                     |
+| `src/domain/mod.rs`                    | Re-export wind types from domain root                                                                                  |
+| `src/domain/campaign_loader.rs`        | `GameData.wind` field, `load_wind_config` method, call in `load_game_data`                                             |
+| `src/game/resources/mod.rs`            | `pub mod wind_config;` + `pub use wind_config::WindConfig;`                                                            |
+| `src/game/systems/campaign_loading.rs` | Insert `WindConfig` resource in all 4 Ok/Err branches                                                                  |
+| `src/sdk/database.rs`                  | `DatabaseError::WindLoadError`, `ContentDatabase.wind` field, load in `load_campaign_with_skills_file` and `load_core` |
+| `src/sdk/validation.rs`                | `ValidationError::WindConfigInvalid`, `validate_wind_config`, call in `validate_all`                                   |
+| `src/sdk/error_formatter.rs`           | `get_suggestions` arm for `WindConfigInvalid`                                                                          |
 
 ### WindSystemKind Variants
 
-| Variant | Description |
-|---|---|
-| `None` (default) | No wind animation |
-| `Sine` | Sinusoidal sway driven by `strength` and `frequency` |
-| `Perlin` | Spatially coherent noise; enables `perlin_scale`, `perlin_octaves`, `perlin_seed` |
+| Variant          | Description                                                                       |
+| ---------------- | --------------------------------------------------------------------------------- |
+| `None` (default) | No wind animation                                                                 |
+| `Sine`           | Sinusoidal sway driven by `strength` and `frequency`                              |
+| `Perlin`         | Spatially coherent noise; enables `perlin_scale`, `perlin_octaves`, `perlin_seed` |
 
 ### CampaignWindConfig Fields and Defaults
 
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `wind_system` | `WindSystemKind` | `None` | Required only if sway is desired |
-| `strength` | `f32` | `0.04` | World-unit sway amplitude (>= 0.0) |
-| `frequency` | `f32` | `0.65` | Cycles per second (> 0.0) |
-| `direction` | `[f32; 2]` | `[1.0, 0.0]` | Normalised XZ; must be finite and non-zero |
-| `perlin_scale` | `f32` | `100.0` | Noise tiling scale (Perlin only, > 0.0) |
-| `perlin_octaves` | `u32` | `4` | Octave count (Perlin only, 1-8) |
-| `perlin_seed` | `u32` | `0` | RNG seed (Perlin only) |
+| Field            | Type             | Default      | Notes                                      |
+| ---------------- | ---------------- | ------------ | ------------------------------------------ |
+| `wind_system`    | `WindSystemKind` | `None`       | Required only if sway is desired           |
+| `strength`       | `f32`            | `0.04`       | World-unit sway amplitude (>= 0.0)         |
+| `frequency`      | `f32`            | `0.65`       | Cycles per second (> 0.0)                  |
+| `direction`      | `[f32; 2]`       | `[1.0, 0.0]` | Normalised XZ; must be finite and non-zero |
+| `perlin_scale`   | `f32`            | `100.0`      | Noise tiling scale (Perlin only, > 0.0)    |
+| `perlin_octaves` | `u32`            | `4`          | Octave count (Perlin only, 1-8)            |
+| `perlin_seed`    | `u32`            | `0`          | RNG seed (Perlin only)                     |
 
 ### Key Design Decisions
 
@@ -1637,37 +3317,37 @@ Implemented a custom WGSL vertex shader for grass blades that supports three win
 
 ### New Files
 
-| File | Purpose |
-|---|---|
+| File                        | Purpose                                                                                                              |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `assets/shaders/grass.wgsl` | WGSL vertex shader with None/Sine/Perlin wind paths; uses `@group(2) @binding(100..102)` for wind extension bindings |
 
 ### Modified Files
 
-| File | Change |
-|---|---|
-| `Cargo.toml` | Added `noise = "0.9"` dependency for fBm Perlin noise texture generation |
+| File                                 | Change                                                                                                                                                                                                                                 |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Cargo.toml`                         | Added `noise = "0.9"` dependency for fBm Perlin noise texture generation                                                                                                                                                               |
 | `src/game/systems/advanced_grass.rs` | New types `GrassWindUniform`, `GrassWindExtension`, `GrassMaterial`, `WindNoiseTexture`; migrated all `Handle<StandardMaterial>` to `Handle<GrassMaterial>`; added `generate_wind_noise_texture` and `setup_wind_noise_texture_system` |
-| `src/game/systems/map.rs` | Registered `MaterialPlugin::<GrassMaterial>`, added `setup_wind_noise_texture_system` to Startup, updated `spawn_map` and `spawn_map_markers` to propagate `Option<ResMut<Assets<GrassMaterial>>>` |
-| `benches/grass_instancing.rs` | Updated to use `GrassMaterial` instead of `StandardMaterial` |
+| `src/game/systems/map.rs`            | Registered `MaterialPlugin::<GrassMaterial>`, added `setup_wind_noise_texture_system` to Startup, updated `spawn_map` and `spawn_map_markers` to propagate `Option<ResMut<Assets<GrassMaterial>>>`                                     |
+| `benches/grass_instancing.rs`        | Updated to use `GrassMaterial` instead of `StandardMaterial`                                                                                                                                                                           |
 
 ### New Types (advanced_grass.rs)
 
-| Type | Description |
-|---|---|
-| `GrassWindUniform` | GPU-aligned uniform struct (`ShaderType`): strength, frequency, direction, wind_system, perlin_scale, `_pad` |
-| `GrassWindExtension` | `MaterialExtension` with `#[uniform(100)]` wind + `#[texture(101)]`/`#[sampler(102)]` noise |
-| `GrassMaterial` | Type alias for `ExtendedMaterial<StandardMaterial, GrassWindExtension>` |
-| `WindNoiseTexture` | Bevy resource wrapping `Handle<Image>` for the 512×512 fBm Perlin noise texture |
+| Type                 | Description                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `GrassWindUniform`   | GPU-aligned uniform struct (`ShaderType`): strength, frequency, direction, wind_system, perlin_scale, `_pad` |
+| `GrassWindExtension` | `MaterialExtension` with `#[uniform(100)]` wind + `#[texture(101)]`/`#[sampler(102)]` noise                  |
+| `GrassMaterial`      | Type alias for `ExtendedMaterial<StandardMaterial, GrassWindExtension>`                                      |
+| `WindNoiseTexture`   | Bevy resource wrapping `Handle<Image>` for the 512×512 fBm Perlin noise texture                              |
 
 ### WGSL Binding Layout
 
 Bindings start at 100 to avoid collisions with `StandardMaterial`'s reserved groups:
 
-| Binding | Type | Purpose |
-|---|---|---|
-| `@group(2) @binding(100)` | `uniform GrassWindUniform` | Wind parameters |
-| `@group(2) @binding(101)` | `texture_2d<f32>` | Perlin noise texture |
-| `@group(2) @binding(102)` | `sampler` | Noise sampler |
+| Binding                   | Type                       | Purpose              |
+| ------------------------- | -------------------------- | -------------------- |
+| `@group(2) @binding(100)` | `uniform GrassWindUniform` | Wind parameters      |
+| `@group(2) @binding(101)` | `texture_2d<f32>`          | Perlin noise texture |
+| `@group(2) @binding(102)` | `sampler`                  | Noise sampler        |
 
 ### Key Design Decisions
 

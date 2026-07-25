@@ -15,6 +15,7 @@
         applied_conditions: [
             "awake",
         ],
+        effect_type: Some(CureCondition(condition_id: "asleep")),
     ),
     (
         id: 258,
@@ -64,6 +65,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        effect_type: Some(Healing(amount: (count: 0, sides: 0, bonus: 8))),
     ),
     (
         id: 261,
@@ -94,6 +96,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        effect_type: Some(Healing(amount: (count: 0, sides: 0, bonus: 15))),
     ),
     (
         id: 263,
@@ -124,6 +127,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        effect_type: Some(Healing(amount: (count: 0, sides: 0, bonus: 25))),
     ),
     (
         id: 514,
@@ -254,6 +258,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        effect_type: Some(CureCondition(condition_id: "blinded")),
     ),
     (
         id: 771,
@@ -269,6 +274,7 @@
         duration: 0,
         saving_throw: false,
         applied_conditions: [],
+        effect_type: Some(CureCondition(condition_id: "paralyzed")),
     ),
     (
         id: 772,
@@ -346,6 +352,7 @@
         applied_conditions: [
             "awake",
         ],
+        effect_type: Some(CureCondition(condition_id: "asleep")),
     ),
     (
         id: 1026,

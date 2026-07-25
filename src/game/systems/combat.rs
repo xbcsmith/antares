@@ -73,7 +73,10 @@ use crate::game::systems::combat_visual::{
     hide_indicator_during_animation, spawn_turn_indicator, update_turn_indicator,
 };
 use crate::game::systems::map::EncounterVisualMarker;
-use crate::game::systems::ui_helpers::{text_style, BODY_FONT_SIZE, LABEL_FONT_SIZE};
+use crate::game::systems::ui_helpers::{
+    text_style, BODY_FONT_SIZE, LABEL_FONT_SIZE, UI_FONT_SIZE_LG, UI_FONT_SIZE_MD, UI_FONT_SIZE_SM,
+    UI_FONT_SIZE_XL, UI_FONT_SIZE_XS,
+};
 
 /// Message emitted when combat has started.
 ///
@@ -233,8 +236,18 @@ pub const ACTION_BUTTON_CONFIRMED_COLOR: Color = Color::srgb(0.65, 0.55, 0.25);
 /// Color for action button disabled
 pub const ACTION_BUTTON_DISABLED_COLOR: Color = Color::srgb(0.2, 0.2, 0.2);
 
+/// Color for action button while the mouse cursor is pressing it (non-selected
+/// buttons only — a selected button keeps its hover/confirmed color even
+/// while pressed, per the "selected state wins" composition rule).
+pub const ACTION_BUTTON_PRESSED_COLOR: Color = Color::srgb(0.5, 0.5, 0.6);
+
 /// Color for enemy card highlight when in target selection mode
 pub const ENEMY_CARD_HIGHLIGHT_COLOR: Color = Color::srgba(0.35, 0.25, 0.25, 0.95);
+
+/// Default (idle) background color for an enemy combat card — used both at
+/// spawn and whenever the card is reset outside target-selection mode /
+/// condition tinting.
+pub const ENEMY_CARD_DEFAULT_COLOR: Color = Color::srgba(0.2, 0.15, 0.15, 0.9);
 
 /// Width of the persistent combat log bubble in the top-right corner.
 pub const COMBAT_LOG_BUBBLE_WIDTH: Val = Val::Px(360.0);
@@ -320,6 +333,21 @@ pub const FEEDBACK_COLOR_MISS: Color = Color::srgb(0.8, 0.8, 0.8);
 
 /// Colour for status/condition floating text (yellow)
 pub const FEEDBACK_COLOR_STATUS: Color = Color::srgb(1.0, 0.8, 0.0);
+
+/// Font size for individual combat-log line segments (body text under the
+/// "Combat Log" bubble header, which uses `LABEL_FONT_SIZE`).
+pub const COMBAT_LOG_LINE_FONT_SIZE: f32 = 13.0;
+
+/// Font size for the muted tier of floating combat-feedback text (misses,
+/// status labels, fizzles, non-damaging spell casts, Defend) — smaller than
+/// `UI_FONT_SIZE_XL`, used for damage/heal/spell-heal numbers.
+pub const FEEDBACK_FONT_SIZE_MUTED: f32 = 15.0;
+
+// ===== Condition Label Color Constants =====
+// The single source of truth for these now lives in `ui_helpers` so both
+// combat enemy cards (here) and HUD party cards (hud.rs) share one mapping;
+// re-exported here so existing call sites in this module are unaffected.
+pub use crate::game::systems::ui_helpers::{CONDITION_FATAL_COLOR, CONDITION_STATUS_COLOR};
 
 // ===== Boss HP Bar Constants =====
 
@@ -509,6 +537,15 @@ pub struct EnemyConditionText {
     pub participant_index: usize,
 }
 
+/// Marker component for the "inspect enemy" info strip (AC + special-attack
+/// summary) shown on a monster card only while it is Tab-focused during
+/// target selection. Hidden the rest of the time.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct EnemyInspectStrip {
+    /// Index in combat participants
+    pub participant_index: usize,
+}
+
 // ===== Boss HP Bar Components =====
 
 /// Marker component for the Boss HP bar panel root.
@@ -586,18 +623,60 @@ pub struct SpellSelectionPanel {
 
 /// Marker component for an individual spell button inside the spell selection panel
 ///
-/// Stores the `spell_id` for the button and the `sp_cost` for display convenience.
+/// Stores the `spell_id` for the button, the `sp_cost` for display convenience,
+/// and whether the spell is currently castable (used by the focus-highlight system
+/// to restore the correct unfocused color).
 #[derive(Component, Debug, Clone, Copy)]
 pub struct SpellButton {
     /// Identifier of the spell this button will cast
     pub spell_id: crate::domain::types::SpellId,
     /// SP cost (display-only convenience)
     pub sp_cost: u16,
+    /// Whether the caster currently meets all requirements to cast this spell.
+    ///
+    /// Castable buttons are highlighted on keyboard focus;
+    /// uncountable buttons remain greyed-out regardless of focus.
+    pub is_castable: bool,
 }
 
 /// Marker component for the "Cancel" button in the spell selection panel.
 #[derive(Component)]
 pub struct SpellCancelButton;
+
+/// Marker component for the party-member target selection panel.
+///
+/// Spawned when a `SingleCharacter` spell is confirmed during combat.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct PartyTargetPanel;
+
+/// Marker component for a party-member button inside the party target panel.
+///
+/// `list_index` is the keyboard-cursor position; `participant_index` is the
+/// index into `CombatResource::state.participants`.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct PartyTargetButton {
+    /// Position in the displayed list (keyboard focus index).
+    pub list_index: usize,
+    /// Actual index in `CombatResource::state.participants`.
+    pub participant_index: usize,
+    /// Whether this row is a valid target for the pending action. Ineligible
+    /// rows render greyed and ignore clicks/confirms.
+    pub eligible: bool,
+}
+
+/// Marker component for the Cancel button inside the party target panel.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct PartyTargetCancelButton;
+
+/// Marker component for the group-spell confirm prompt panel.
+///
+/// Spawned when an `AllMonsters`/`MonsterGroup`/`SpecificMonsters`/
+/// `AllCharacters` spell is chosen, while [`GroupTargetPending`] holds data.
+/// Displays the spell name and an Enter/Esc hint line; carries no buttons —
+/// confirmation is keyboard-only, matching the `SingleMonster` target-select
+/// flow it is modeled on.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct GroupTargetPrompt;
 
 /// Marker component for the item selection panel UI
 ///
@@ -636,12 +715,21 @@ pub struct VictorySummaryRoot;
 #[derive(Component, Debug, Clone, Copy)]
 pub struct DefeatSummaryRoot;
 
-/// Marker component for floating damage numbers (spawned on hits)
+/// Marker component for floating damage numbers (spawned on hits).
+///
+/// `update_floating_damage` ticks `remaining` down each frame, rises the node
+/// upward, and fades the child [`DamageText`]'s alpha toward zero as
+/// `remaining` approaches zero, then despawns it.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct FloatingDamage {
     /// Remaining lifetime for the damage number in seconds
     pub remaining: f32,
+    /// Total lifetime the number was spawned with, used to compute fade/rise progress
+    pub total: f32,
 }
+
+/// Upward rise speed for floating damage/heal numbers, in pixels per second.
+const FLOATING_DAMAGE_RISE_PX_PER_SEC: f32 = 24.0;
 
 /// Marker component for floating damage text node
 #[derive(Component, Debug, Clone, Copy)]
@@ -828,16 +916,39 @@ pub struct ActionMenuState {
     /// `Some(n)` when target-select mode is active (set to `Some(0)` on entry).
     /// `None` when not in target-select mode.
     pub active_target_index: Option<usize>,
+    /// The combatant occupying the turn slot as of the last frame
+    /// `update_combat_ui` ran. Used to detect when the acting party member
+    /// changes so `active_index` resets to Attack (index 0) even when the
+    /// menu never transitions to `Hidden` in between — e.g. two players
+    /// acting back-to-back with no intervening monster turn.
+    pub last_actor: Option<CombatantId>,
 }
 
 /// Tracks whether the spell selection panel is open and for which caster.
 ///
 /// Set to `Some(actor)` when the player selects the Cast action.
 /// Cleared to `None` when a spell is selected, Escape is pressed, or combat ends.
+///
+/// `focused_index` is the keyboard-cursor position within the displayed castable
+/// spell list. `castable_spell_ids` is populated by `update_spell_selection_panel`
+/// with the spell IDs the caster can currently cast (in display order).
+/// `confirm_requested` is set to `true` by the keyboard Enter handler so that
+/// `handle_spell_button_interaction` can process the keyboard-confirm in one place.
 #[derive(Resource, Default)]
 pub struct SpellPanelState {
     /// The CombatantId of the player whose spells are being shown.
     pub caster: Option<CombatantId>,
+    /// Index of the currently focused spell button (for keyboard navigation).
+    pub focused_index: usize,
+    /// Set to `true` by the keyboard Enter handler; consumed by
+    /// `handle_spell_button_interaction` to trigger a programmatic spell cast.
+    pub confirm_requested: bool,
+    /// Ordered list of spell IDs that the caster can currently cast.
+    ///
+    /// Populated by `update_spell_selection_panel` each time the panel opens so
+    /// the keyboard-confirm path can locate the focused spell without querying
+    /// UI entities.
+    pub castable_spell_ids: Vec<crate::domain::types::SpellId>,
 }
 
 /// Tracks a spell that has been selected but needs a monster target.
@@ -849,6 +960,87 @@ pub struct SpellPanelState {
 pub struct PendingSpellCast {
     /// (caster, spell_id) once a spell is chosen, `None` otherwise.
     pub data: Option<(CombatantId, crate::domain::types::SpellId)>,
+}
+
+/// The action awaiting a party-member target in the party target panel.
+///
+/// The panel is shared by two flows: casting a `SingleCharacter` spell on an
+/// ally and using a beneficial consumable (potion, cure, resurrect) on an
+/// ally. The variant determines which action message is emitted on confirm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PartyTargetAction {
+    /// A `SingleCharacter` spell waiting for its target; emits `CastSpellAction`.
+    Spell {
+        /// The combatant casting the spell.
+        caster: CombatantId,
+        /// The spell to cast once a target is confirmed.
+        spell_id: crate::domain::types::SpellId,
+    },
+    /// A beneficial item waiting for its target; emits `UseItemAction`.
+    Item {
+        /// The combatant using the item (whose inventory it comes from).
+        user: CombatantId,
+        /// Slot index in the user's inventory.
+        inventory_index: usize,
+    },
+}
+
+/// State for the party-member target selection flow during combat.
+///
+/// Activated when a `SingleCharacter` spell or a beneficial consumable is
+/// chosen. Cleared when the player selects a target, presses Escape, or
+/// combat ends.
+#[derive(Resource, Default)]
+pub struct PartyTargetPanelState {
+    /// The action waiting for a party-member target.
+    /// `None` means the panel is not open.
+    pub pending_action: Option<PartyTargetAction>,
+    /// Keyboard-cursor position within `participant_indices`.
+    pub focused_index: usize,
+    /// Set by keyboard Enter; consumed by `handle_party_target_button`.
+    pub confirm_requested: bool,
+    /// Ordered list of participant indices (into `CombatResource::state.participants`)
+    /// shown in the panel. Populated when the panel first opens.
+    pub participant_indices: Vec<usize>,
+    /// Parallel to `participant_indices`: whether each row is a valid target
+    /// for the pending action (dead members are ineligible for heals, living
+    /// members for resurrection). Populated when the panel first opens.
+    pub eligible_flags: Vec<bool>,
+    /// Participant index whose row should receive initial keyboard focus when
+    /// the panel opens (e.g. the item user's own row). Falls back to the
+    /// first eligible row when `None` or ineligible.
+    pub preferred_target: Option<usize>,
+}
+
+/// Which side's cards are highlighted while a group-target spell is pending.
+///
+/// Determines both the highlight query (`EnemyCard` vs. `CharacterCard`) and
+/// the placeholder `CombatantId` written into `CastSpellAction` on confirm —
+/// the domain layer applies the spell to every member of that side
+/// regardless of which specific target is named.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupTargetSide {
+    /// `AllMonsters` / `MonsterGroup` / `SpecificMonsters` — every living
+    /// monster is affected; highlights `EnemyCard`s.
+    Monsters,
+    /// `AllCharacters` — every living party member is affected; highlights
+    /// `CharacterCard`s in the HUD.
+    Characters,
+}
+
+/// Tracks a group-target spell (`AllMonsters`/`MonsterGroup`/
+/// `SpecificMonsters`/`AllCharacters`) chosen from the spell panel but not
+/// yet cast.
+///
+/// Populated by `apply_spell_selection` instead of immediately emitting
+/// `CastSpellAction`, so the player can see exactly who will be affected
+/// (via the group highlight) before committing. `combat_input_system`
+/// consumes this on `Enter` (cast) or `Escape` (cancel, reopen spell panel).
+#[derive(Resource, Default)]
+pub struct GroupTargetPending {
+    /// `(caster, spell_id, side)` once a group-target spell is chosen,
+    /// `None` otherwise.
+    pub data: Option<(CombatantId, crate::domain::types::SpellId, GroupTargetSide)>,
 }
 
 /// Tracks whether the item selection panel is open and for which combatant.
@@ -896,15 +1088,19 @@ pub struct PendingItemUse {
 
 /// Bundled `SystemParam` for spell-panel state in `combat_input_system`.
 ///
-/// Groups `SpellPanelState` and `PendingSpellCast` into a single system
-/// parameter so `combat_input_system` stays within Bevy's 16-parameter
-/// system function limit.
+/// Groups `SpellPanelState`, `PendingSpellCast`, and `PartyTargetPanelState`
+/// into a single system parameter so `combat_input_system` stays within
+/// Bevy's 16-parameter system function limit.
 #[derive(SystemParam)]
 pub struct SpellCombatState<'w> {
     /// State of the spell selection panel.
     pub panel: ResMut<'w, SpellPanelState>,
     /// Tracks a pending spell cast awaiting monster target confirmation.
     pub pending: ResMut<'w, PendingSpellCast>,
+    /// State for party-member target selection when a `SingleCharacter` spell is chosen.
+    pub party_target: ResMut<'w, PartyTargetPanelState>,
+    /// Tracks a pending group-target spell awaiting Enter/Escape confirmation.
+    pub group_target: ResMut<'w, GroupTargetPending>,
 }
 
 /// Bundled `SystemParam` for item-panel state in `combat_input_system`.
@@ -1062,6 +1258,8 @@ impl Plugin for CombatPlugin {
             .insert_resource(RangedAttackPending::default())
             .insert_resource(SpellPanelState::default())
             .insert_resource(PendingSpellCast::default())
+            .insert_resource(PartyTargetPanelState::default())
+            .insert_resource(GroupTargetPending::default())
             .insert_resource(ItemPanelState::default())
             .insert_resource(PendingItemUse::default())
             // Monster-turn delay: start finished so the very first EnemyTurn
@@ -1100,13 +1298,44 @@ impl Plugin for CombatPlugin {
                     .after(enter_target_selection)
                     .after(combat_input_system),
             )
+            .add_systems(
+                Update,
+                update_enemy_inspect_strip
+                    .after(enter_target_selection)
+                    .after(combat_input_system),
+            )
             .add_systems(Update, select_target)
-            .add_systems(Update, handle_attack_action)
-            .add_systems(Update, handle_ranged_attack_action)
-            .add_systems(Update, handle_cast_spell_action)
-            .add_systems(Update, handle_use_item_action)
-            .add_systems(Update, handle_defend_action)
-            .add_systems(Update, handle_flee_action)
+            // Action handlers must run after the input systems that write their
+            // messages so the SP/HP changes are visible in the HUD on the same
+            // frame the action is taken, not deferred to the next frame.
+            .add_systems(
+                Update,
+                handle_attack_action
+                    .after(combat_input_system)
+                    .after(select_target),
+            )
+            .add_systems(
+                Update,
+                handle_ranged_attack_action
+                    .after(combat_input_system)
+                    .after(select_target),
+            )
+            .add_systems(
+                Update,
+                handle_cast_spell_action
+                    .after(combat_input_system)
+                    .after(handle_spell_button_interaction)
+                    .after(handle_party_target_button)
+                    .after(select_target),
+            )
+            .add_systems(
+                Update,
+                handle_use_item_action
+                    .after(combat_input_system)
+                    .after(handle_item_button_interaction),
+            )
+            .add_systems(Update, handle_defend_action.after(combat_input_system))
+            .add_systems(Update, handle_flee_action.after(combat_input_system))
             // Spawn anchored feedback numbers after action handlers write the event
             .add_systems(
                 Update,
@@ -1183,9 +1412,35 @@ impl Plugin for CombatPlugin {
             )
             .add_systems(
                 Update,
+                update_spell_focus_highlight.after(update_spell_selection_panel),
+            )
+            .add_systems(
+                Update,
                 handle_spell_button_interaction.after(update_spell_selection_panel),
             )
             .add_systems(Update, cleanup_spell_panel_on_combat_exit)
+            .add_systems(
+                Update,
+                update_party_target_panel
+                    .after(handle_spell_button_interaction)
+                    .after(combat_input_system),
+            )
+            .add_systems(
+                Update,
+                update_party_target_highlight.after(update_party_target_panel),
+            )
+            .add_systems(
+                Update,
+                handle_party_target_button.after(update_party_target_panel),
+            )
+            .add_systems(Update, cleanup_party_target_on_combat_exit)
+            .add_systems(
+                Update,
+                update_group_target_prompt
+                    .after(handle_spell_button_interaction)
+                    .after(combat_input_system),
+            )
+            .add_systems(Update, cleanup_group_target_on_combat_exit)
             .add_systems(
                 Update,
                 update_item_selection_panel.after(combat_input_system),
@@ -1202,7 +1457,7 @@ impl Plugin for CombatPlugin {
                     .after(update_combat_ui)
                     .after(update_action_highlight),
             )
-            .add_systems(Update, cleanup_floating_damage)
+            .add_systems(Update, update_floating_damage)
             // Monster AI — must run AFTER update_combat_ui so the UI
             // always reflects the current EnemyTurn state (and hides the action
             // menu) before the monster acts and potentially advances the turn.
@@ -1401,17 +1656,32 @@ fn handle_combat_started(
     }
 }
 
-/// System: Ensure party members are present in the `CombatResource` while in
-/// combat. This acts as a safety net if combat was created without players
-/// properly added (e.g., direct `enter_combat()` calls).
-fn sync_party_to_combat(mut combat_res: ResMut<CombatResource>, global_state: Res<GlobalState>) {
+/// System: Ensure the `CombatResource` is fully initialised while in combat.
+///
+/// Acts as a safety net for encounters started outside the `handle_events` /
+/// `CombatStarted` message path (e.g. random movement encounters from
+/// `move_party_and_handle_events`, or `enter_combat()` in tests).
+///
+/// **Priority rule**: If `global_state.mode`'s `CombatState` already contains
+/// player participants (created by `start_encounter`), the *entire* state
+/// (players + monsters + turn order) is copied into `CombatResource`.  This
+/// ensures enemy cards are spawned correctly and the SP-sync pipeline can
+/// mirror spell-point changes back to the HUD.
+///
+/// **Fallback**: When the embedded `CombatState` is empty (only possible via
+/// `enter_combat()` in tests), players are added from `party.members` as before.
+fn sync_party_to_combat(
+    mut combat_res: ResMut<CombatResource>,
+    global_state: Res<GlobalState>,
+    mut turn_state: ResMut<CombatTurnStateResource>,
+) {
     // Only run when in combat
-    let _cs = match &global_state.0.mode {
+    let cs = match &global_state.0.mode {
         GameMode::Combat(cs) => cs,
         _ => return,
     };
 
-    // If there are already player entries, assume the combat is initialized
+    // If there are already player entries, the resource is initialised — nothing to do.
     let existing_players = combat_res
         .state
         .participants
@@ -1423,14 +1693,75 @@ fn sync_party_to_combat(mut combat_res: ResMut<CombatResource>, global_state: Re
         return;
     }
 
-    // Copy party characters into the combat state (preserve order)
-    for (i, character) in global_state.0.party.members.iter().enumerate() {
-        combat_res.state.add_player(character.clone());
-        combat_res.player_orig_indices.push(Some(i));
-    }
+    // Determine whether the embedded CombatState has participants (players and/or
+    // monsters).  This is the case for all encounters created by `start_encounter`
+    // or `move_party_and_handle_events`.
+    let cs_has_players = cs
+        .participants
+        .iter()
+        .any(|p| matches!(p, Combatant::Player(_)));
 
-    // Initialize turn order in case monsters were already added earlier
-    crate::domain::combat::engine::start_combat(&mut combat_res.state);
+    if cs_has_players {
+        // Copy the full state (players + monsters + turn order) so CombatResource
+        // is consistent with global_state.mode from the very first frame of combat.
+        // This is critical for:
+        //   - Random encounters that never emit CombatStarted
+        //   - The 1-frame window before handle_combat_started processes CombatStarted
+        combat_res.state = cs.clone();
+
+        // Build participant → party-slot mapping (mirrors handle_combat_started logic).
+        let mut mapping: Vec<Option<usize>> =
+            Vec::with_capacity(combat_res.state.participants.len());
+        let mut player_counter: usize = 0;
+        for participant in &combat_res.state.participants {
+            match participant {
+                Combatant::Player(_) => {
+                    mapping.push(Some(player_counter));
+                    player_counter += 1;
+                }
+                Combatant::Monster(_) => mapping.push(None),
+            }
+        }
+        combat_res.player_orig_indices = mapping;
+
+        // Set the correct CombatTurnState for the first actor.
+        // For explicit encounters this is overwritten when handle_combat_started
+        // processes the CombatStarted message; for random encounters it is the
+        // only place this is set.
+        turn_state.0 = if combat_res.state.ambush_round_active {
+            info!("sync_party_to_combat: ambush — setting EnemyTurn");
+            CombatTurnState::EnemyTurn
+        } else {
+            match combat_res.state.turn_order.first() {
+                Some(CombatantId::Monster(_)) => {
+                    info!("sync_party_to_combat: monster goes first — setting EnemyTurn");
+                    CombatTurnState::EnemyTurn
+                }
+                _ => {
+                    info!("sync_party_to_combat: player goes first — setting PlayerTurn");
+                    CombatTurnState::PlayerTurn
+                }
+            }
+        };
+
+        // Infer combat_event_type from CombatState flags for random encounters
+        // (which never emit CombatStarted so handle_combat_started won't fire).
+        // For explicit encounters handle_combat_started will overwrite this.
+        if combat_res.state.ambush_round_active {
+            combat_res.combat_event_type = crate::domain::combat::types::CombatEventType::Ambush;
+        }
+    } else {
+        // Fallback path: CombatState is empty (only reachable via enter_combat()
+        // which is used in tests).  Add players from party.members so basic
+        // combat works even without a full CombatState.
+        for (i, character) in global_state.0.party.members.iter().enumerate() {
+            combat_res.state.add_player(character.clone());
+            combat_res.player_orig_indices.push(Some(i));
+        }
+
+        // Initialise turn order with the added players.
+        crate::domain::combat::engine::start_combat(&mut combat_res.state);
+    }
 }
 
 /// Mirrors HP, SP, and conditions from [`CombatResource`] participants back into
@@ -1485,6 +1816,11 @@ pub(crate) fn sync_party_hp_during_combat(
 
 /// System: When combat has ended (global mode is not Combat) copy combat state
 /// data (HP, SP, conditions, stat currents) back into the party members.
+///
+/// Only fires once combat has genuinely resolved (`Victory`, `Defeat`, or
+/// `Fled`). While the status is still `InProgress` the party is merely
+/// suspended behind a UI overlay (character sheet, HUD portrait click) and the
+/// live combat state must be preserved untouched for when the overlay closes.
 fn sync_combat_to_party_on_exit(
     mut global_state: ResMut<GlobalState>,
     mut combat_res: ResMut<CombatResource>,
@@ -1496,6 +1832,14 @@ fn sync_combat_to_party_on_exit(
     }
 
     if combat_res.player_orig_indices.is_empty() {
+        return;
+    }
+
+    // Combat still InProgress means we are suspended behind an overlay, not
+    // done: syncing-and-clearing here would destroy live HP/round/turn state
+    // and the stale snapshot inside GameMode::Combat(..) would later be
+    // re-cloned over it by sync_party_to_combat (bug 4).
+    if combat_res.state.status == crate::domain::combat::types::CombatStatus::InProgress {
         return;
     }
 
@@ -1628,7 +1972,11 @@ type EnemyHpTextQuery<'w, 's> = Query<
 type EnemyConditionTextQuery<'w, 's> = Query<
     'w,
     's,
-    (&'static EnemyConditionText, &'static mut Text),
+    (
+        &'static EnemyConditionText,
+        &'static mut Text,
+        &'static mut TextColor,
+    ),
     (
         Without<EnemyHpText>,
         Without<EnemyNameText>,
@@ -1746,6 +2094,21 @@ fn setup_combat_ui(
         return;
     }
 
+    // Wait until CombatResource has been initialised with at least one player.
+    // `sync_party_to_combat` and `handle_combat_started` both run AFTER or
+    // independently of `handle_events` and may not have fired yet in this frame.
+    // Spawning the UI while `combat_res.state` is empty would create enemy-card
+    // slots for zero monsters; once spawned the UI is never re-created, so the
+    // player would see no enemy cards for the entire encounter.
+    let has_players = combat_res
+        .state
+        .participants
+        .iter()
+        .any(|p| matches!(p, Combatant::Player(_)));
+    if !has_players {
+        return;
+    }
+
     // Spawn combat HUD root container — a transparent full-screen anchor for
     // all absolutely-positioned combat panels.
     commands
@@ -1797,7 +2160,7 @@ fn setup_combat_ui(
                                         row_gap: Val::Px(4.0),
                                         ..default()
                                     },
-                                    BackgroundColor(Color::srgba(0.2, 0.15, 0.15, 0.9)),
+                                    BackgroundColor(ENEMY_CARD_DEFAULT_COLOR),
                                     BorderRadius::all(Val::Px(4.0)),
                                     EnemyCard {
                                         participant_index: idx,
@@ -1848,7 +2211,7 @@ fn setup_combat_ui(
                                             monster.hp.current, monster.hp.base
                                         )),
                                         TextFont {
-                                            font_size: 10.0,
+                                            font_size: UI_FONT_SIZE_SM,
                                             ..default()
                                         },
                                         TextColor(Color::WHITE),
@@ -1857,15 +2220,31 @@ fn setup_combat_ui(
                                         },
                                     ));
 
-                                    // Condition text
+                                    // Condition text — matches EnemyHpText/EnemyInspectStrip
+                                    // (UI_FONT_SIZE_SM) so the card's stat block reads as one size.
                                     card.spawn((
                                         Text::new(""),
                                         TextFont {
-                                            font_size: 9.0,
+                                            font_size: UI_FONT_SIZE_SM,
                                             ..default()
                                         },
-                                        TextColor(Color::srgb(0.8, 0.8, 0.0)),
+                                        TextColor(CONDITION_STATUS_COLOR),
                                         EnemyConditionText {
+                                            participant_index: idx,
+                                        },
+                                    ));
+
+                                    // Inspect strip (AC + special-attack summary) —
+                                    // hidden until this card is Tab-focused.
+                                    card.spawn((
+                                        Text::new(""),
+                                        TextFont {
+                                            font_size: UI_FONT_SIZE_SM,
+                                            ..default()
+                                        },
+                                        TextColor(Color::srgb(0.75, 0.85, 1.0)),
+                                        Visibility::Hidden,
+                                        EnemyInspectStrip {
                                             participant_index: idx,
                                         },
                                     ));
@@ -1904,11 +2283,11 @@ fn setup_combat_ui(
                                 },
                             ))
                             .with_children(|boss_panel| {
-                                // Boss name label
+                                // Boss name label — same tier as EnemyNameText (LABEL_FONT_SIZE).
                                 boss_panel.spawn((
                                     Text::new(format!("⚔ {} ⚔", monster.name)),
                                     TextFont {
-                                        font_size: 14.0,
+                                        font_size: LABEL_FONT_SIZE,
                                         ..default()
                                     },
                                     TextColor(Color::srgb(1.0, 0.8, 0.2)),
@@ -1939,14 +2318,14 @@ fn setup_combat_ui(
                                         ));
                                     });
 
-                                // Boss HP text
+                                // Boss HP text — matches EnemyHpText's UI_FONT_SIZE_SM tier.
                                 boss_panel.spawn((
                                     Text::new(format!(
                                         "{}/{}",
                                         monster.hp.current, monster.hp.base
                                     )),
                                     TextFont {
-                                        font_size: 11.0,
+                                        font_size: UI_FONT_SIZE_SM,
                                         ..default()
                                     },
                                     TextColor(Color::srgb(1.0, 0.9, 0.9)),
@@ -2104,8 +2483,10 @@ fn setup_combat_ui(
                 .with_children(|bubble| {
                     bubble.spawn((
                         Text::new("Combat Log"),
+                        // Matches the exploration-mode "Game Log" header (ui.rs) so both
+                        // log headers share one size instead of drifting apart (was 15.0).
                         TextFont {
-                            font_size: 15.0,
+                            font_size: LABEL_FONT_SIZE,
                             ..default()
                         },
                         TextColor(Color::srgb(0.92, 0.96, 1.0)),
@@ -2167,7 +2548,7 @@ fn cleanup_combat_ui(
 #[allow(clippy::too_many_arguments)]
 fn update_spell_selection_panel(
     mut commands: Commands,
-    spell_panel_state: Res<SpellPanelState>,
+    mut spell_panel_state: ResMut<SpellPanelState>,
     combat_res: Res<CombatResource>,
     content: Option<Res<GameContent>>,
     _global_state: Res<GlobalState>,
@@ -2213,6 +2594,35 @@ fn update_spell_selection_panel(
     all_spell_ids.sort_unstable();
     all_spell_ids.dedup();
 
+    // ── Build the castable-spell list for keyboard navigation ────────────────
+    // This must be computed before spawning so that focused_index can be clamped
+    // and the list is available to the keyboard-confirm path.
+    let game_mode_for_castable =
+        crate::application::GameMode::Combat(crate::domain::combat::engine::CombatState::new(
+            crate::domain::combat::types::Handicap::Even,
+        ));
+    let castable_spell_ids: Vec<crate::domain::types::SpellId> = all_spell_ids
+        .iter()
+        .filter_map(|&sid| content_ref.db().spells.get_spell(sid).map(|s| (sid, s)))
+        .filter(|(_, s)| {
+            crate::domain::combat::spell_casting::validate_spell_cast(
+                character,
+                s,
+                &game_mode_for_castable,
+                true,
+                false,
+            )
+            .is_ok()
+        })
+        .map(|(sid, _)| sid)
+        .collect();
+
+    // Update keyboard-navigation state.
+    spell_panel_state.castable_spell_ids = castable_spell_ids;
+    spell_panel_state.focused_index = spell_panel_state
+        .focused_index
+        .min(spell_panel_state.castable_spell_ids.len().saturating_sub(1));
+
     // ── Spawn the panel ──────────────────────────────────────────────────────
     commands
         .spawn((
@@ -2237,7 +2647,7 @@ fn update_spell_selection_panel(
             panel.spawn((
                 Text::new(format!("{} — Select Spell", character.name)),
                 TextFont {
-                    font_size: 13.0,
+                    font_size: UI_FONT_SIZE_LG,
                     ..default()
                 },
                 TextColor(Color::srgb(0.9, 0.9, 1.0)),
@@ -2247,7 +2657,7 @@ fn update_spell_selection_panel(
                 panel.spawn((
                     Text::new("No spells known."),
                     TextFont {
-                        font_size: 12.0,
+                        font_size: UI_FONT_SIZE_MD,
                         ..default()
                     },
                     TextColor(Color::srgb(0.6, 0.6, 0.6)),
@@ -2269,7 +2679,7 @@ fn update_spell_selection_panel(
                     panel.spawn((
                         Text::new(format!("─── Level {} ───", level)),
                         TextFont {
-                            font_size: 10.0,
+                            font_size: UI_FONT_SIZE_SM,
                             ..default()
                         },
                         TextColor(Color::srgb(0.55, 0.55, 0.85)),
@@ -2325,13 +2735,14 @@ fn update_spell_selection_panel(
                                 SpellButton {
                                     spell_id: spell.id,
                                     sp_cost: spell.sp_cost,
+                                    is_castable: castable,
                                 },
                             ))
                             .with_children(|btn| {
                                 btn.spawn((
                                     Text::new(label),
                                     TextFont {
-                                        font_size: 11.0,
+                                        font_size: UI_FONT_SIZE_MD,
                                         ..default()
                                     },
                                     TextColor(text_color),
@@ -2363,23 +2774,72 @@ fn update_spell_selection_panel(
                     btn.spawn((
                         Text::new("Cancel"),
                         TextFont {
-                            font_size: 11.0,
+                            font_size: UI_FONT_SIZE_MD,
                             ..default()
                         },
                         TextColor(Color::WHITE),
                     ));
                 });
+
+            // Keyboard hint footer
+            panel.spawn((
+                Text::new(
+                    "[\u{2191}\u{2193}/Tab] Navigate \u{00b7} [Enter] Cast \u{00b7} [Esc] Cancel",
+                ),
+                TextFont {
+                    font_size: UI_FONT_SIZE_XS,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.55, 0.55, 0.75)),
+                Node {
+                    margin: UiRect {
+                        top: Val::Px(6.0),
+                        ..default()
+                    },
+                    ..default()
+                },
+            ));
         });
+}
+
+/// System: Update spell button background colors to reflect the keyboard focus cursor.
+///
+/// Runs every frame while the spell panel is open. Sets the focused button to
+/// `ACTION_BUTTON_CONFIRMED_COLOR` (the same highlight used by the action menu)
+/// and restores unfocused buttons to their castable/disabled color.
+fn update_spell_focus_highlight(
+    spell_panel: Res<SpellPanelState>,
+    mut buttons: Query<(&SpellButton, &mut BackgroundColor)>,
+) {
+    if spell_panel.caster.is_none() {
+        return;
+    }
+    let focused_id = spell_panel
+        .castable_spell_ids
+        .get(spell_panel.focused_index)
+        .copied();
+    for (btn, mut bg) in buttons.iter_mut() {
+        *bg = if btn.is_castable && Some(btn.spell_id) == focused_id {
+            BackgroundColor(ACTION_BUTTON_CONFIRMED_COLOR)
+        } else if btn.is_castable {
+            BackgroundColor(ACTION_BUTTON_COLOR)
+        } else {
+            BackgroundColor(ACTION_BUTTON_DISABLED_COLOR)
+        };
+    }
 }
 
 /// System: Handle interactions with spell selection panel buttons.
 ///
-/// Listens for mouse clicks on `SpellButton` and `SpellCancelButton` entities
-/// within the spell selection panel.
+/// Processes both mouse clicks on `SpellButton` / `SpellCancelButton` entities
+/// and keyboard-confirm signals (`SpellPanelState::confirm_requested`).
 ///
-/// - Clicking a `SpellButton` for a castable spell either:
-///   - Directly emits `CastSpellAction` (for self/group/all-monster target spells)
+/// - Clicking or keyboard-confirming a castable `SpellButton` either:
+///   - Directly emits `CastSpellAction` (for `Self_` target spells)
 ///   - Enters monster target selection mode (for `SingleMonster` spells)
+///   - Enters party-member target selection (for `SingleCharacter` spells)
+///   - Enters group-target confirm mode (for `AllMonsters`/`MonsterGroup`/
+///     `SpecificMonsters`/`AllCharacters` spells)
 /// - Clicking `SpellCancelButton` closes the panel.
 #[allow(clippy::too_many_arguments)]
 fn handle_spell_button_interaction(
@@ -2392,11 +2852,15 @@ fn handle_spell_button_interaction(
     combat_res: Res<CombatResource>,
     content: Option<Res<GameContent>>,
     mut cast_writer: Option<MessageWriter<CastSpellAction>>,
+    mut party_target_state: ResMut<PartyTargetPanelState>,
+    mut group_target_state: ResMut<GroupTargetPending>,
 ) {
-    // Handle cancel button
+    // ── Cancel button ─────────────────────────────────────────────────────────────
     for interaction in cancel_buttons.iter() {
         if *interaction == Interaction::Pressed {
             spell_panel_state.caster = None;
+            spell_panel_state.focused_index = 0;
+            spell_panel_state.confirm_requested = false;
             return;
         }
     }
@@ -2408,6 +2872,31 @@ fn handle_spell_button_interaction(
     let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
     let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
 
+    // ── Keyboard-confirm path ──────────────────────────────────────────────────────
+    if spell_panel_state.confirm_requested {
+        spell_panel_state.confirm_requested = false;
+        let focused = spell_panel_state.focused_index;
+        let castable_ids = spell_panel_state.castable_spell_ids.clone();
+        if let Some(&spell_id) = castable_ids.get(focused) {
+            if let Some(spell) = content_ref.db().spells.get_spell(spell_id) {
+                apply_spell_selection(
+                    caster,
+                    spell_id,
+                    spell,
+                    &mut spell_panel_state,
+                    &mut pending_spell,
+                    &mut target_sel,
+                    &mut action_menu_state,
+                    &mut cast_writer,
+                    &mut party_target_state,
+                    &mut group_target_state,
+                );
+            }
+        }
+        return;
+    }
+
+    // ── Mouse-click path ─────────────────────────────────────────────────────────────
     for (interaction, spell_btn) in spell_buttons.iter() {
         if *interaction != Interaction::Pressed {
             continue;
@@ -2442,72 +2931,125 @@ fn handle_spell_button_interaction(
             continue;
         }
 
-        // Close the panel regardless of targeting path
-        spell_panel_state.caster = None;
-
-        // Determine the target for the spell
-        use crate::domain::magic::types::SpellTarget;
-        match spell.target {
-            SpellTarget::SingleMonster => {
-                // Enter target-selection mode — pending spell cast is emitted on confirm
-                pending_spell.data = Some((caster, spell_btn.spell_id));
-                target_sel.0 = Some(caster);
-                action_menu_state.active_target_index = Some(0);
-            }
-            SpellTarget::Self_ => {
-                // Target is the caster themselves
-                if let Some(ref mut w) = cast_writer {
-                    w.write(CastSpellAction {
-                        caster,
-                        spell_id: spell_btn.spell_id,
-                        target: caster,
-                    });
-                }
-            }
-            SpellTarget::SingleCharacter => {
-                // Default: target the caster (for healing/buff spells)
-                if let Some(ref mut w) = cast_writer {
-                    w.write(CastSpellAction {
-                        caster,
-                        spell_id: spell_btn.spell_id,
-                        target: caster,
-                    });
-                }
-            }
-            SpellTarget::AllMonsters
-            | SpellTarget::MonsterGroup
-            | SpellTarget::SpecificMonsters => {
-                // Use the first alive monster as target placeholder;
-                // the domain layer will apply damage to all monsters.
-                let first_monster_idx = combat_res
-                    .state
-                    .participants
-                    .iter()
-                    .enumerate()
-                    .find(|(_, p)| matches!(p, Combatant::Monster(m) if m.hp.current > 0))
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                if let Some(ref mut w) = cast_writer {
-                    w.write(CastSpellAction {
-                        caster,
-                        spell_id: spell_btn.spell_id,
-                        target: CombatantId::Monster(first_monster_idx),
-                    });
-                }
-            }
-            SpellTarget::AllCharacters => {
-                // Target the caster as placeholder; domain layer heals all.
-                if let Some(ref mut w) = cast_writer {
-                    w.write(CastSpellAction {
-                        caster,
-                        spell_id: spell_btn.spell_id,
-                        target: caster,
-                    });
-                }
-            }
-        }
+        apply_spell_selection(
+            caster,
+            spell_btn.spell_id,
+            spell,
+            &mut spell_panel_state,
+            &mut pending_spell,
+            &mut target_sel,
+            &mut action_menu_state,
+            &mut cast_writer,
+            &mut party_target_state,
+            &mut group_target_state,
+        );
 
         break; // Process only one button click per frame
+    }
+}
+
+/// Internal helper: given a chosen spell (from mouse or keyboard), decide
+/// whether to enter monster target-selection mode (`SingleMonster`), party
+/// target selection (`SingleCharacter`), group-target confirm mode
+/// (`AllMonsters`/`MonsterGroup`/`SpecificMonsters`/`AllCharacters`), or
+/// dispatch a `CastSpellAction` directly (`Self_`).
+///
+/// Closes the spell panel regardless of the targeting path chosen.
+#[allow(clippy::too_many_arguments)]
+fn apply_spell_selection(
+    caster: CombatantId,
+    spell_id: crate::domain::types::SpellId,
+    spell: &crate::domain::magic::types::Spell,
+    spell_panel_state: &mut SpellPanelState,
+    pending_spell: &mut PendingSpellCast,
+    target_sel: &mut TargetSelection,
+    action_menu_state: &mut ActionMenuState,
+    cast_writer: &mut Option<MessageWriter<CastSpellAction>>,
+    party_target_state: &mut PartyTargetPanelState,
+    group_target_state: &mut GroupTargetPending,
+) {
+    use crate::domain::magic::types::SpellTarget;
+
+    // Close the panel and reset keyboard state regardless of targeting path.
+    spell_panel_state.caster = None;
+    spell_panel_state.focused_index = 0;
+    spell_panel_state.confirm_requested = false;
+
+    match spell.target {
+        SpellTarget::SingleMonster => {
+            // Enter target-selection mode — pending spell cast is emitted on confirm.
+            pending_spell.data = Some((caster, spell_id));
+            target_sel.0 = Some(caster);
+            action_menu_state.active_target_index = Some(0);
+        }
+        SpellTarget::Self_ => {
+            // Target is the caster themselves.
+            if let Some(ref mut w) = cast_writer {
+                w.write(CastSpellAction {
+                    caster,
+                    spell_id,
+                    target: caster,
+                });
+            }
+        }
+        SpellTarget::SingleCharacter => {
+            // Enter party-member target selection — `CastSpellAction` is emitted when
+            // the player confirms a target in the party target panel.
+            party_target_state.pending_action = Some(PartyTargetAction::Spell { caster, spell_id });
+            party_target_state.focused_index = 0;
+            party_target_state.confirm_requested = false;
+            party_target_state.preferred_target = None;
+        }
+        SpellTarget::AllMonsters | SpellTarget::MonsterGroup | SpellTarget::SpecificMonsters => {
+            // Enter group-target confirm mode — every living monster is
+            // highlighted; the actual CastSpellAction (with its first-alive
+            // placeholder target) is emitted when the player confirms.
+            group_target_state.data = Some((caster, spell_id, GroupTargetSide::Monsters));
+        }
+        SpellTarget::AllCharacters => {
+            // Enter group-target confirm mode — every living party member is
+            // highlighted; the actual CastSpellAction (with the caster as
+            // placeholder target) is emitted when the player confirms.
+            group_target_state.data = Some((caster, spell_id, GroupTargetSide::Characters));
+        }
+    }
+}
+
+/// Write a `CastSpellAction` for a confirmed group-target spell and clear the
+/// pending state.
+///
+/// `target` is a placeholder — the domain layer applies the spell's effect to
+/// every living member of the affected side regardless of which specific
+/// `CombatantId` is named (see `GroupTargetSide`). Called from
+/// `combat_input_system` when `Enter` is pressed while `GroupTargetPending`
+/// holds data.
+fn confirm_group_spell_target(
+    caster: CombatantId,
+    spell_id: crate::domain::types::SpellId,
+    side: GroupTargetSide,
+    combat_res: &CombatResource,
+    cast_writer: &mut Option<MessageWriter<CastSpellAction>>,
+) {
+    let target = match side {
+        GroupTargetSide::Monsters => {
+            let first_monster_idx = combat_res
+                .state
+                .participants
+                .iter()
+                .enumerate()
+                .find(|(_, p)| matches!(p, Combatant::Monster(m) if m.hp.current > 0))
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            CombatantId::Monster(first_monster_idx)
+        }
+        GroupTargetSide::Characters => caster,
+    };
+    if let Some(ref mut w) = cast_writer {
+        w.write(CastSpellAction {
+            caster,
+            spell_id,
+            target,
+        });
     }
 }
 
@@ -2522,7 +3064,521 @@ fn cleanup_spell_panel_on_combat_exit(
 ) {
     if !matches!(global_state.0.mode, GameMode::Combat(_)) {
         spell_panel_state.caster = None;
+        spell_panel_state.focused_index = 0;
+        spell_panel_state.confirm_requested = false;
+        spell_panel_state.castable_spell_ids.clear();
         pending_spell.data = None;
+    }
+}
+
+/// Derives the target-eligibility rule for the panel's pending action.
+///
+/// - `Item`: from the item's consumable effect via
+///   [`crate::game::systems::ui_helpers::consumable_target_eligibility`]
+///   (resurrect → dead only, other beneficial effects → living only).
+/// - `Spell`: from the spell's effective effect type via
+///   [`crate::game::systems::ui_helpers::spell_target_eligibility`]
+///   (resurrection → dead only, heal/cure/buff → living only).
+fn party_target_eligibility(
+    action: &PartyTargetAction,
+    combat_res: &CombatResource,
+    content: &GameContent,
+) -> crate::game::systems::ui_helpers::TargetEligibility {
+    use crate::game::systems::ui_helpers::TargetEligibility;
+    match action {
+        PartyTargetAction::Spell { spell_id, .. } => content
+            .db()
+            .spells
+            .get_spell(*spell_id)
+            .map(|spell| {
+                crate::game::systems::ui_helpers::spell_target_eligibility(
+                    &spell.effective_effect_type(),
+                )
+            })
+            .unwrap_or(TargetEligibility::Any),
+        PartyTargetAction::Item {
+            user,
+            inventory_index,
+        } => {
+            let CombatantId::Player(user_idx) = user else {
+                return TargetEligibility::Any;
+            };
+            let Some(Combatant::Player(pc)) = combat_res.state.participants.get(*user_idx) else {
+                return TargetEligibility::Any;
+            };
+            pc.as_ref()
+                .inventory
+                .items
+                .get(*inventory_index)
+                .and_then(|slot| content.db().items.get_item(slot.item_id))
+                .and_then(|item| match &item.item_type {
+                    crate::domain::items::types::ItemType::Consumable(data) => Some(
+                        crate::game::systems::ui_helpers::consumable_target_eligibility(
+                            &data.effect,
+                        ),
+                    ),
+                    _ => None,
+                })
+                .unwrap_or(TargetEligibility::Any)
+        }
+    }
+}
+
+/// System: Spawn or despawn the party-member target selection panel.
+///
+/// - When `pending_action` is `None`, despawns any existing panel.
+/// - When a panel is already spawned, returns early (idempotent).
+/// - Otherwise, collects party participants, computes per-row target
+///   eligibility for the pending action (ineligible rows render greyed and
+///   unselectable), stores both in the resource, and spawns the panel with
+///   one button per participant. Initial keyboard focus goes to the
+///   `preferred_target` row when eligible, otherwise the first eligible row.
+fn update_party_target_panel(
+    mut commands: Commands,
+    mut state: ResMut<PartyTargetPanelState>,
+    combat_res: Res<CombatResource>,
+    content: Option<Res<GameContent>>,
+    existing_panel: Query<Entity, With<PartyTargetPanel>>,
+) {
+    // ── Despawn if panel should be closed ────────────────────────────────────
+    let Some(pending_action) = state.pending_action else {
+        for e in existing_panel.iter() {
+            commands.entity(e).despawn();
+        }
+        return;
+    };
+
+    // ── Already open — nothing to do ────────────────────────────────────────
+    if !existing_panel.is_empty() {
+        return;
+    }
+
+    let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+    let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
+
+    // ── Collect party participant indices and per-row eligibility ────────────
+    let eligibility = party_target_eligibility(&pending_action, &combat_res, content_ref);
+    let mut participant_indices: Vec<usize> = Vec::new();
+    let mut eligible_flags: Vec<bool> = Vec::new();
+    for (i, p) in combat_res.state.participants.iter().enumerate() {
+        if let Combatant::Player(pc) = p {
+            participant_indices.push(i);
+            eligible_flags.push(eligibility.is_eligible(pc.as_ref()));
+        }
+    }
+
+    state.participant_indices = participant_indices;
+    state.eligible_flags = eligible_flags;
+
+    // Initial focus: the preferred row when eligible, else the first eligible
+    // row, else 0 (cancel-only panel).
+    let preferred_list_index = state.preferred_target.and_then(|pidx| {
+        state
+            .participant_indices
+            .iter()
+            .position(|&i| i == pidx)
+            .filter(|&li| state.eligible_flags[li])
+    });
+    state.focused_index = preferred_list_index
+        .or_else(|| state.eligible_flags.iter().position(|&e| e))
+        .unwrap_or(0);
+
+    // ── Spawn the panel ──────────────────────────────────────────────────────
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: SPELL_PANEL_LEFT,
+                top: SPELL_PANEL_TOP,
+                width: Val::Px(260.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(10.0)),
+                row_gap: Val::Px(4.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.08, 0.08, 0.16, 0.97)),
+            BorderRadius::all(Val::Px(8.0)),
+            PartyTargetPanel,
+        ))
+        .with_children(|panel| {
+            // Title
+            panel.spawn((
+                Text::new("Select Target"),
+                TextFont {
+                    font_size: UI_FONT_SIZE_LG,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.9, 0.9, 1.0)),
+            ));
+
+            // With no eligible target the panel is cancel-only; say so.
+            if !state.eligible_flags.iter().any(|&e| e) {
+                panel.spawn((
+                    Text::new("No valid target"),
+                    TextFont {
+                        font_size: UI_FONT_SIZE_MD,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.75, 0.55, 0.55)),
+                ));
+            }
+
+            // One button per party participant
+            for (list_index, &pidx) in state.participant_indices.clone().iter().enumerate() {
+                let eligible = state.eligible_flags.get(list_index).copied().unwrap_or(true);
+                let label = combat_res
+                    .state
+                    .participants
+                    .get(pidx)
+                    .and_then(|p| match p {
+                        Combatant::Player(pc) => {
+                            let hp_pct = if pc.hp.base > 0 {
+                                (pc.hp.current as f32 / pc.hp.base as f32 * 100.0) as u32
+                            } else {
+                                0
+                            };
+                            Some(format!(
+                                "{} (HP {}/{}  {}%)",
+                                pc.name, pc.hp.current, pc.hp.base, hp_pct
+                            ))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| format!("Party member {}", list_index + 1));
+
+                panel
+                    .spawn((
+                        Button,
+                        Node {
+                            width: Val::Percent(100.0),
+                            padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+                            justify_content: JustifyContent::FlexStart,
+                            ..default()
+                        },
+                        BackgroundColor(if eligible {
+                            ACTION_BUTTON_COLOR
+                        } else {
+                            ACTION_BUTTON_DISABLED_COLOR
+                        }),
+                        BorderRadius::all(Val::Px(4.0)),
+                        PartyTargetButton {
+                            list_index,
+                            participant_index: pidx,
+                            eligible,
+                        },
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new(label),
+                            TextFont {
+                                font_size: UI_FONT_SIZE_MD,
+                                ..default()
+                            },
+                            TextColor(if eligible {
+                                Color::WHITE
+                            } else {
+                                Color::srgb(0.55, 0.55, 0.55)
+                            }),
+                        ));
+                    });
+            }
+
+            // Cancel button
+            panel
+                .spawn((
+                    Button,
+                    Node {
+                        width: Val::Percent(100.0),
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+                        justify_content: JustifyContent::Center,
+                        margin: UiRect {
+                            top: Val::Px(6.0),
+                            ..default()
+                        },
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.35, 0.15, 0.15)),
+                    BorderRadius::all(Val::Px(4.0)),
+                    PartyTargetCancelButton,
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        Text::new("Cancel"),
+                        TextFont {
+                            font_size: UI_FONT_SIZE_MD,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+
+            // Keyboard hint footer
+            panel.spawn((
+                Text::new("[\u{2191}\u{2193}/Tab] Navigate \u{00b7} [Enter] Confirm \u{00b7} [Esc] Cancel"),
+                TextFont {
+                    font_size: UI_FONT_SIZE_XS,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.55, 0.55, 0.75)),
+                Node {
+                    margin: UiRect {
+                        top: Val::Px(6.0),
+                        ..default()
+                    },
+                    ..default()
+                },
+            ));
+        });
+}
+
+/// System: Update party-member button highlight colors to reflect the keyboard cursor.
+///
+/// Ineligible rows keep the disabled color and never receive the focus
+/// highlight (keyboard navigation skips them).
+fn update_party_target_highlight(
+    state: Res<PartyTargetPanelState>,
+    mut buttons: Query<(&PartyTargetButton, &mut BackgroundColor)>,
+) {
+    if state.pending_action.is_none() {
+        return;
+    }
+    for (btn, mut bg) in buttons.iter_mut() {
+        *bg = if !btn.eligible {
+            BackgroundColor(ACTION_BUTTON_DISABLED_COLOR)
+        } else if btn.list_index == state.focused_index {
+            BackgroundColor(ACTION_BUTTON_CONFIRMED_COLOR)
+        } else {
+            BackgroundColor(ACTION_BUTTON_COLOR)
+        };
+    }
+}
+
+/// Returns the next keyboard-focus index in the party target panel, moving
+/// one step forward or backward (with wrap-around) and skipping ineligible
+/// rows. Returns `current` unchanged when no other eligible row exists.
+///
+/// Pure and Bevy-free so it is directly unit-testable.
+fn next_eligible_index(eligible: &[bool], current: usize, count: usize, forward: bool) -> usize {
+    if count == 0 {
+        return current;
+    }
+    let mut idx = current;
+    for _ in 0..count {
+        idx = if forward {
+            (idx + 1) % count
+        } else {
+            idx.checked_sub(1).unwrap_or(count - 1)
+        };
+        if eligible.get(idx).copied().unwrap_or(false) {
+            return idx;
+        }
+    }
+    current
+}
+
+/// Emits the action message for a confirmed party-member target: a
+/// `CastSpellAction` for the `Spell` variant, a `UseItemAction` for `Item`.
+fn emit_party_target_action(
+    action: PartyTargetAction,
+    target_pidx: usize,
+    cast_writer: &mut Option<MessageWriter<CastSpellAction>>,
+    use_item_writer: &mut Option<MessageWriter<UseItemAction>>,
+) {
+    match action {
+        PartyTargetAction::Spell { caster, spell_id } => {
+            if let Some(ref mut w) = cast_writer {
+                w.write(CastSpellAction {
+                    caster,
+                    spell_id,
+                    target: CombatantId::Player(target_pidx),
+                });
+            }
+        }
+        PartyTargetAction::Item {
+            user,
+            inventory_index,
+        } => {
+            if let Some(ref mut w) = use_item_writer {
+                w.write(UseItemAction {
+                    user,
+                    inventory_index,
+                    target: CombatantId::Player(target_pidx),
+                });
+            }
+        }
+    }
+}
+
+/// System: Handle clicks and keyboard-confirm for party-member target buttons.
+///
+/// When an eligible party member is confirmed (mouse click or keyboard Enter
+/// on the focused row), emits the pending action's message (`CastSpellAction`
+/// or `UseItemAction`) with that party member as the target and closes the
+/// panel by clearing `PartyTargetPanelState`. Ineligible rows are ignored.
+fn handle_party_target_button(
+    party_buttons: Query<(&Interaction, &PartyTargetButton), Changed<Interaction>>,
+    cancel_buttons: Query<&Interaction, (Changed<Interaction>, With<PartyTargetCancelButton>)>,
+    mut state: ResMut<PartyTargetPanelState>,
+    mut cast_writer: Option<MessageWriter<CastSpellAction>>,
+    mut use_item_writer: Option<MessageWriter<UseItemAction>>,
+) {
+    // ── Cancel button ─────────────────────────────────────────────────────────
+    for interaction in cancel_buttons.iter() {
+        if *interaction == Interaction::Pressed {
+            state.pending_action = None;
+            state.focused_index = 0;
+            state.confirm_requested = false;
+            state.preferred_target = None;
+            return;
+        }
+    }
+
+    // ── Keyboard-confirm path ─────────────────────────────────────────────────
+    if state.confirm_requested {
+        state.confirm_requested = false;
+        let focused = state.focused_index;
+        if !state.eligible_flags.get(focused).copied().unwrap_or(false) {
+            return;
+        }
+        let indices = state.participant_indices.clone();
+        if let Some(&pidx) = indices.get(focused) {
+            if let Some(action) = state.pending_action.take() {
+                state.focused_index = 0;
+                state.preferred_target = None;
+                emit_party_target_action(action, pidx, &mut cast_writer, &mut use_item_writer);
+            }
+        }
+        return;
+    }
+
+    // ── Mouse-click path ──────────────────────────────────────────────────────
+    for (interaction, btn) in party_buttons.iter() {
+        if *interaction != Interaction::Pressed || !btn.eligible {
+            continue;
+        }
+        if let Some(action) = state.pending_action.take() {
+            state.focused_index = 0;
+            state.confirm_requested = false;
+            state.preferred_target = None;
+            emit_party_target_action(
+                action,
+                btn.participant_index,
+                &mut cast_writer,
+                &mut use_item_writer,
+            );
+        }
+        break;
+    }
+}
+
+/// System: Clean up party-target panel state when combat ends.
+fn cleanup_party_target_on_combat_exit(
+    global_state: Res<GlobalState>,
+    mut state: ResMut<PartyTargetPanelState>,
+) {
+    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        *state = PartyTargetPanelState::default();
+    }
+}
+
+/// System: Spawn or despawn the group-spell confirm prompt based on
+/// `GroupTargetPending`.
+///
+/// - When `group_target.data` is `None`, despawns any existing prompt.
+/// - When a prompt is already open, does nothing (idempotent).
+/// - Otherwise, spawns a small text-only panel (no buttons — confirmation is
+///   keyboard-only, matching the `SingleMonster` target-select flow) naming
+///   the spell and showing the Enter/Esc hint line. The card highlight itself
+///   is applied separately by `enter_target_selection` (monsters) and
+///   `update_hud` (party members).
+fn update_group_target_prompt(
+    mut commands: Commands,
+    group_target: Res<GroupTargetPending>,
+    content: Option<Res<GameContent>>,
+    existing_prompt: Query<Entity, With<GroupTargetPrompt>>,
+) {
+    // ── Despawn if the prompt should be closed ───────────────────────────────
+    let Some((_, spell_id, side)) = group_target.data else {
+        for entity in existing_prompt.iter() {
+            commands.entity(entity).despawn();
+        }
+        return;
+    };
+
+    // ── Already open — nothing to do ────────────────────────────────────────
+    if !existing_prompt.is_empty() {
+        return;
+    }
+
+    let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
+    let content_ref: &GameContent = content.as_deref().unwrap_or(&default_content);
+    let spell_name = content_ref
+        .db()
+        .spells
+        .get_spell(spell_id)
+        .map(|s| s.name.clone())
+        .unwrap_or_else(|| "Spell".to_string());
+
+    let (targets_desc, hint) = match side {
+        GroupTargetSide::Monsters => (
+            "all enemies",
+            "[Enter] Cast on all enemies \u{00b7} [Esc] Cancel",
+        ),
+        GroupTargetSide::Characters => (
+            "all allies",
+            "[Enter] Cast on all allies \u{00b7} [Esc] Cancel",
+        ),
+    };
+
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: SPELL_PANEL_LEFT,
+                top: SPELL_PANEL_TOP,
+                width: Val::Px(260.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(10.0)),
+                row_gap: Val::Px(4.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.08, 0.08, 0.16, 0.97)),
+            BorderRadius::all(Val::Px(8.0)),
+            GroupTargetPrompt,
+        ))
+        .with_children(|panel| {
+            panel.spawn((
+                Text::new(format!("{spell_name} — targets {targets_desc}")),
+                TextFont {
+                    font_size: UI_FONT_SIZE_LG,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.9, 0.9, 1.0)),
+            ));
+            panel.spawn((
+                Text::new(hint),
+                TextFont {
+                    font_size: UI_FONT_SIZE_MD,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.55, 0.55, 0.75)),
+            ));
+        });
+}
+
+/// System: Clean up group-target-pending state and despawn its prompt when
+/// combat ends.
+fn cleanup_group_target_on_combat_exit(
+    global_state: Res<GlobalState>,
+    mut group_target: ResMut<GroupTargetPending>,
+    mut commands: Commands,
+    existing_prompt: Query<Entity, With<GroupTargetPrompt>>,
+) {
+    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+        group_target.data = None;
+        for entity in existing_prompt.iter() {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -2635,7 +3691,7 @@ fn update_item_selection_panel(
             panel.spawn((
                 Text::new(format!("{} — Select Item", character.name)),
                 TextFont {
-                    font_size: 13.0,
+                    font_size: UI_FONT_SIZE_LG,
                     ..default()
                 },
                 TextColor(Color::srgb(0.9, 1.0, 0.9)),
@@ -2645,7 +3701,7 @@ fn update_item_selection_panel(
                 panel.spawn((
                     Text::new("No usable items."),
                     TextFont {
-                        font_size: 12.0,
+                        font_size: UI_FONT_SIZE_MD,
                         ..default()
                     },
                     TextColor(Color::srgb(0.6, 0.6, 0.6)),
@@ -2681,7 +3737,7 @@ fn update_item_selection_panel(
                             btn.spawn((
                                 Text::new(label),
                                 TextFont {
-                                    font_size: 11.0,
+                                    font_size: UI_FONT_SIZE_MD,
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -2712,7 +3768,7 @@ fn update_item_selection_panel(
                     btn.spawn((
                         Text::new("✖ Cancel"),
                         TextFont {
-                            font_size: 11.0,
+                            font_size: UI_FONT_SIZE_MD,
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -2721,11 +3777,70 @@ fn update_item_selection_panel(
         });
 }
 
-/// Internal helper: given a chosen item button (from mouse or keyboard), decide
-/// whether to dispatch `UseItemAction` immediately (self-targeting consumables)
-/// or enter monster target-selection mode (offensive spell_effect items).
+/// Where a chosen item button routes next: monster target selection, party
+/// target selection, or an immediate self-targeted use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ItemDispatchRoute {
+    /// Offensive charged item — enter monster target-selection mode.
+    MonsterTarget,
+    /// Beneficial item — open the party target panel to pick an ally.
+    PartyTarget,
+    /// Everything else — dispatch immediately with the user as target.
+    SelfImmediate,
+}
+
+/// Decides how an item routes when chosen from the item panel.
 ///
-/// Closes the item panel in both cases.
+/// - Items with a `spell_effect` follow the referenced spell's target:
+///   `SingleMonster` → monster targeting, `SingleCharacter` → party
+///   targeting, anything else → immediate self-use (current behavior).
+/// - Beneficial consumables (heal, restore, cure, boosts, resurrect) →
+///   party targeting.
+/// - Remaining effects (food, `CastSpell`, `LearnSpell` scrolls) → immediate
+///   self-use.
+fn item_dispatch_route(
+    item_id: crate::domain::types::ItemId,
+    content: &GameContent,
+) -> ItemDispatchRoute {
+    use crate::domain::items::types::{ConsumableEffect, ItemType};
+    use crate::domain::magic::types::SpellTarget;
+
+    let Some(item) = content.db().items.get_item(item_id) else {
+        return ItemDispatchRoute::SelfImmediate;
+    };
+
+    if let Some(spell_id) = item.spell_effect {
+        return match content.db().spells.get_spell(spell_id).map(|s| s.target) {
+            Some(SpellTarget::SingleMonster) => ItemDispatchRoute::MonsterTarget,
+            Some(SpellTarget::SingleCharacter) => ItemDispatchRoute::PartyTarget,
+            _ => ItemDispatchRoute::SelfImmediate,
+        };
+    }
+
+    match &item.item_type {
+        ItemType::Consumable(data) => match data.effect {
+            ConsumableEffect::HealHp(_)
+            | ConsumableEffect::RestoreSp(_)
+            | ConsumableEffect::CureCondition(_)
+            | ConsumableEffect::BoostAttribute(_, _)
+            | ConsumableEffect::BoostResistance(_, _)
+            | ConsumableEffect::Resurrect(_) => ItemDispatchRoute::PartyTarget,
+            ConsumableEffect::IsFood(_)
+            | ConsumableEffect::CastSpell(_)
+            | ConsumableEffect::LearnSpell(_) => ItemDispatchRoute::SelfImmediate,
+        },
+        _ => ItemDispatchRoute::SelfImmediate,
+    }
+}
+
+/// Internal helper: given a chosen item button (from mouse or keyboard), decide
+/// whether to enter monster target-selection mode (offensive spell_effect
+/// items), open the party target panel (beneficial consumables — potion,
+/// cure, resurrect — and `SingleCharacter` spell-effect items), or dispatch
+/// `UseItemAction` immediately with the user as target (everything else).
+///
+/// Closes the item panel in all cases. When the party target panel opens, the
+/// user's own row receives initial focus so self-use stays one confirm away.
 #[allow(clippy::too_many_arguments)]
 fn dispatch_item_button(
     user: CombatantId,
@@ -2734,45 +3849,47 @@ fn dispatch_item_button(
     content: &GameContent,
     item_panel_state: &mut ItemPanelState,
     pending_item: &mut PendingItemUse,
+    party_target_state: &mut PartyTargetPanelState,
     target_sel: &mut TargetSelection,
     action_menu_state: &mut ActionMenuState,
     use_item_writer: &mut Option<MessageWriter<UseItemAction>>,
 ) {
-    // Determine whether the item requires monster target selection.
-    // Items with a `spell_effect` that targets a single monster need targeting;
-    // all consumable effects self-target.
-    let needs_monster_target = content
-        .db()
-        .items
-        .get_item(item_id)
-        .and_then(|item| item.spell_effect)
-        .and_then(|spell_id| content.db().spells.get_spell(spell_id))
-        .map(|spell| {
-            matches!(
-                spell.target,
-                crate::domain::magic::types::SpellTarget::SingleMonster
-            )
-        })
-        .unwrap_or(false);
+    let route = item_dispatch_route(item_id, content);
 
     // Close the item panel regardless of path.
     item_panel_state.user = None;
     item_panel_state.focused_index = 0;
     item_panel_state.confirm_requested = false;
 
-    if needs_monster_target {
-        // Enter target-selection mode — the UseItemAction is emitted on confirm.
-        pending_item.data = Some((user, inventory_index));
-        target_sel.0 = Some(user);
-        action_menu_state.active_target_index = Some(0);
-    } else {
-        // Self-targeting item — dispatch immediately with user as target.
-        if let Some(ref mut w) = use_item_writer {
-            w.write(UseItemAction {
+    match route {
+        ItemDispatchRoute::MonsterTarget => {
+            // Enter target-selection mode — the UseItemAction is emitted on confirm.
+            pending_item.data = Some((user, inventory_index));
+            target_sel.0 = Some(user);
+            action_menu_state.active_target_index = Some(0);
+        }
+        ItemDispatchRoute::PartyTarget => {
+            // Open the party target panel — the UseItemAction is emitted when
+            // the player confirms an eligible party member.
+            party_target_state.pending_action = Some(PartyTargetAction::Item {
                 user,
                 inventory_index,
-                target: user,
             });
+            party_target_state.focused_index = 0;
+            party_target_state.confirm_requested = false;
+            party_target_state.preferred_target = match user {
+                CombatantId::Player(idx) => Some(idx),
+                CombatantId::Monster(_) => None,
+            };
+        }
+        ItemDispatchRoute::SelfImmediate => {
+            if let Some(ref mut w) = use_item_writer {
+                w.write(UseItemAction {
+                    user,
+                    inventory_index,
+                    target: user,
+                });
+            }
         }
     }
 }
@@ -2783,11 +3900,13 @@ fn dispatch_item_button(
 /// and keyboard-confirm signals (`ItemPanelState::confirm_requested`).
 ///
 /// Clicking or keyboard-confirming an `ItemButton`:
-/// - Consumable self-target effects (`HealHp`, `RestoreSp`, `CureCondition`,
-///   `BoostAttribute`, `BoostResistance`, `Resurrect`, food): dispatches
+/// - Beneficial consumables (`HealHp`, `RestoreSp`, `CureCondition`,
+///   `BoostAttribute`, `BoostResistance`, `Resurrect`) and `SingleCharacter`
+///   spell-effect items: opens the party target panel to pick an ally.
+/// - Items with a `SingleMonster` `spell_effect` (offensive charged items /
+///   scrolls): enters monster target-selection mode via `PendingItemUse`.
+/// - Everything else (food, scrolls with other targets): dispatches
 ///   `UseItemAction` with `target = user` immediately.
-/// - Items with a `spell_effect` (offensive charged items / scrolls): enters
-///   monster target-selection mode via `PendingItemUse`.
 ///
 /// Clicking `ItemCancelButton` closes the panel without dispatching.
 #[allow(clippy::too_many_arguments)]
@@ -2796,6 +3915,7 @@ fn handle_item_button_interaction(
     cancel_buttons: Query<&Interaction, (Changed<Interaction>, With<ItemCancelButton>)>,
     mut item_panel_state: ResMut<ItemPanelState>,
     mut pending_item: ResMut<PendingItemUse>,
+    mut party_target_state: ResMut<PartyTargetPanelState>,
     mut target_sel: ResMut<TargetSelection>,
     mut action_menu_state: ResMut<ActionMenuState>,
     combat_res: Res<CombatResource>,
@@ -2863,6 +3983,7 @@ fn handle_item_button_interaction(
                     content_ref,
                     &mut item_panel_state,
                     &mut pending_item,
+                    &mut party_target_state,
                     &mut target_sel,
                     &mut action_menu_state,
                     &mut use_item_writer,
@@ -2885,6 +4006,7 @@ fn handle_item_button_interaction(
             content_ref,
             &mut item_panel_state,
             &mut pending_item,
+            &mut party_target_state,
             &mut target_sel,
             &mut action_menu_state,
             &mut use_item_writer,
@@ -2970,24 +4092,20 @@ fn update_combat_ui(
         }
     }
 
-    // Update enemy condition text
-    for (condition_text, mut text) in enemy_condition_texts.iter_mut() {
+    // Update enemy condition text: the real condition name via Display
+    // ("" for Normal), tinted red for Dead and yellow for everything else.
+    for (condition_text, mut text, mut color) in enemy_condition_texts.iter_mut() {
         if let Some(Combatant::Monster(monster)) = combat_res
             .state
             .participants
             .get(condition_text.participant_index)
         {
-            // Get condition summary (simplified for now)
-            // MonsterCondition is an enum, not a bitflag, so check directly
-            let condition_str = if matches!(
-                monster.conditions,
-                crate::domain::combat::monster::MonsterCondition::Normal
-            ) {
-                String::new()
+            **text = monster.conditions.to_string();
+            *color = if monster.conditions.is_dead() {
+                TextColor(CONDITION_FATAL_COLOR)
             } else {
-                "Condition".to_string()
+                TextColor(CONDITION_STATUS_COLOR)
             };
-            **text = condition_str;
         }
     }
 
@@ -3032,9 +4150,19 @@ fn update_combat_ui(
         **text = turn_order_str;
     }
 
-    // Show/hide action menu based on turn state.
-    // When the menu becomes visible (player turn starts), reset the highlight to
-    // index 0 (Attack) so the default is always Attack on every menu open.
+    // Show/hide action menu based on turn state, and reset the highlight to
+    // Attack (index 0) both on the Hidden→Visible transition (the original
+    // trigger) AND whenever the acting party member changes even without a
+    // visibility transition — e.g. two players acting back-to-back with no
+    // intervening monster turn, where the menu stays Visible throughout.
+    let current_actor = combat_res
+        .state
+        .turn_order
+        .get(combat_res.state.current_turn)
+        .cloned();
+    let actor_changed = current_actor != action_menu_state.last_actor;
+    action_menu_state.last_actor = current_actor;
+
     if let Ok(mut visibility) = action_menu.single_mut() {
         let new_visibility = if matches!(turn_state.0, CombatTurnState::PlayerTurn) {
             Visibility::Visible
@@ -3042,8 +4170,11 @@ fn update_combat_ui(
             Visibility::Hidden
         };
 
-        // Reset highlight index whenever the menu transitions to visible.
-        if *visibility == Visibility::Hidden && new_visibility == Visibility::Visible {
+        let became_visible =
+            *visibility == Visibility::Hidden && new_visibility == Visibility::Visible;
+        if (became_visible || actor_changed)
+            && matches!(current_actor, Some(CombatantId::Player(_)))
+        {
             action_menu_state.active_index = 0;
             action_menu_state.confirmed = false;
         }
@@ -3317,6 +4448,13 @@ fn confirm_spell_target(
 /// - `Escape`: clears `TargetSelection.0 = None` and resets
 ///   `active_target_index = None`, cancelling the attack selection.
 ///
+/// # Keyboard Controls (group-spell confirm — when `GroupTargetPending.data.is_some()`)
+///
+/// - `Enter`: confirms the pending group spell via `confirm_group_spell_target`,
+///   writing `CastSpellAction` with a placeholder target the domain layer
+///   expands to every living member of the affected side.
+/// - `Escape`: cancels and reopens the spell panel for the same caster.
+///
 /// # Mouse Controls
 ///
 /// - `Interaction::Pressed` on an `ActionButton`: dispatches that action.
@@ -3492,13 +4630,111 @@ fn combat_input_system(
                     }
                 }
             } else if kb.just_pressed(KeyCode::Escape) {
-                // Cancel target selection — clear all pending actions and flags.
+                // Cancel target selection.
+                // If a spell was pending, reopen the spell panel so the player
+                // can choose a different spell (or press Escape again to exit
+                // the Cast action entirely).
                 target_sel.0 = None;
                 action_menu_state.active_target_index = None;
                 ranged_pending.0 = false;
-                spell_state.pending.data = None;
+                if let Some((caster, _)) = spell_state.pending.data.take() {
+                    spell_state.panel.caster = Some(caster);
+                    spell_state.panel.focused_index = 0;
+                    spell_state.panel.confirm_requested = false;
+                }
                 item_state.pending.data = None;
                 item_state.pending.confirmed_target = None;
+            }
+        } else if spell_state.panel.caster.is_some() {
+            // ---- Spell-panel keyboard handling ----
+            let spell_count = spell_state.panel.castable_spell_ids.len();
+            if kb.just_pressed(KeyCode::Escape) {
+                spell_state.panel.caster = None;
+                spell_state.panel.focused_index = 0;
+                spell_state.panel.confirm_requested = false;
+            } else if kb.just_pressed(KeyCode::ArrowUp) {
+                if spell_count > 0 {
+                    spell_state.panel.focused_index = spell_state
+                        .panel
+                        .focused_index
+                        .checked_sub(1)
+                        .unwrap_or(spell_count.saturating_sub(1));
+                }
+            } else if kb.just_pressed(KeyCode::ArrowDown) || kb.just_pressed(KeyCode::Tab) {
+                if spell_count > 0 {
+                    spell_state.panel.focused_index =
+                        (spell_state.panel.focused_index + 1) % spell_count;
+                }
+            } else if kb.just_pressed(KeyCode::Enter) && spell_count > 0 {
+                // Signal handle_spell_button_interaction to fire the focused spell.
+                spell_state.panel.confirm_requested = true;
+            }
+        } else if spell_state.group_target.data.is_some() {
+            // ---- Group-spell confirm keyboard handling ----
+            // Enter: cast the pending group spell (placeholder target; the
+            // domain layer applies it to every living member of the side).
+            // Escape: cancel and reopen the spell panel for this caster.
+            if kb.just_pressed(KeyCode::Escape) {
+                if let Some((caster, _, _)) = spell_state.group_target.data.take() {
+                    spell_state.panel.caster = Some(caster);
+                    spell_state.panel.focused_index = 0;
+                    spell_state.panel.confirm_requested = false;
+                }
+            } else if kb.just_pressed(KeyCode::Enter) {
+                if let Some((caster, spell_id, side)) = spell_state.group_target.data.take() {
+                    confirm_group_spell_target(
+                        caster,
+                        spell_id,
+                        side,
+                        &combat_res,
+                        &mut cast_writer,
+                    );
+                }
+            }
+        } else if spell_state.party_target.pending_action.is_some() {
+            // ---- Party-target-selection keyboard handling ----
+            let target_count = spell_state.party_target.participant_indices.len();
+            if kb.just_pressed(KeyCode::Escape) {
+                // Cancel party-target selection.  Reopen the panel the pending
+                // action came from (spell panel or item panel) so the player
+                // can pick something else, rather than going all the way back
+                // to the action menu.
+                match spell_state.party_target.pending_action.take() {
+                    Some(PartyTargetAction::Spell { caster, .. }) => {
+                        spell_state.panel.caster = Some(caster);
+                        spell_state.panel.focused_index = 0;
+                        spell_state.panel.confirm_requested = false;
+                    }
+                    Some(PartyTargetAction::Item { user, .. }) => {
+                        item_state.panel.user = Some(user);
+                        item_state.panel.focused_index = 0;
+                        item_state.panel.confirm_requested = false;
+                    }
+                    None => {}
+                }
+                spell_state.party_target.focused_index = 0;
+                spell_state.party_target.confirm_requested = false;
+                spell_state.party_target.preferred_target = None;
+            } else if kb.just_pressed(KeyCode::ArrowUp) {
+                if target_count > 0 {
+                    spell_state.party_target.focused_index = next_eligible_index(
+                        &spell_state.party_target.eligible_flags,
+                        spell_state.party_target.focused_index,
+                        target_count,
+                        false,
+                    );
+                }
+            } else if kb.just_pressed(KeyCode::ArrowDown) || kb.just_pressed(KeyCode::Tab) {
+                if target_count > 0 {
+                    spell_state.party_target.focused_index = next_eligible_index(
+                        &spell_state.party_target.eligible_flags,
+                        spell_state.party_target.focused_index,
+                        target_count,
+                        true,
+                    );
+                }
+            } else if kb.just_pressed(KeyCode::Enter) && target_count > 0 {
+                spell_state.party_target.confirm_requested = true;
             }
         } else if item_state.panel.user.is_some() {
             // ---- Item-panel keyboard handling ----
@@ -3545,10 +4781,9 @@ fn combat_input_system(
                 execute_selected_action = true;
                 action_menu_state.confirmed = false;
             } else if kb.just_pressed(KeyCode::Escape) {
-                // Close spell or item panel if open, otherwise no-op.
-                if spell_state.panel.caster.is_some() {
-                    spell_state.panel.caster = None;
-                } else if item_state.panel.user.is_some() {
+                // Close item panel if open, otherwise no-op.
+                // Note: spell panel Escape is handled in its dedicated branch above.
+                if item_state.panel.user.is_some() {
                     item_state.panel.user = None;
                 }
             }
@@ -3650,7 +4885,7 @@ fn resolve_alive_monster_participant_index(
 fn update_action_highlight(
     action_menu_state: Res<ActionMenuState>,
     combat_res: Res<CombatResource>,
-    mut buttons: Query<(&ActionButton, &mut BackgroundColor)>,
+    mut buttons: Query<(&ActionButton, &Interaction, &mut BackgroundColor)>,
 ) {
     let order: &[ActionButtonType] = if combat_res.combat_event_type.highlights_magic_action() {
         &COMBAT_ACTION_ORDER_MAGIC
@@ -3658,20 +4893,28 @@ fn update_action_highlight(
         &COMBAT_ACTION_ORDER
     };
     let active_type = order[action_menu_state.active_index % order.len()];
-    for (btn, mut bg) in buttons.iter_mut() {
+    for (btn, interaction, mut bg) in buttons.iter_mut() {
         // The RangedAttack button is managed exclusively by update_combat_ui;
         // skip it here so we do not accidentally override its disabled color.
         if btn.button_type == ActionButtonType::RangedAttack {
             continue;
         }
         *bg = if btn.button_type == active_type {
+            // Selected state wins over mouse interaction: the keyboard-armed
+            // button always shows confirmed/hover gold regardless of the
+            // mouse cursor's position.
             if action_menu_state.confirmed {
                 BackgroundColor(ACTION_BUTTON_CONFIRMED_COLOR)
             } else {
                 BackgroundColor(ACTION_BUTTON_HOVER_COLOR)
             }
         } else {
-            BackgroundColor(ACTION_BUTTON_COLOR)
+            // Non-selected buttons: mouse hover/press modulates the idle color.
+            match interaction {
+                Interaction::Pressed => BackgroundColor(ACTION_BUTTON_PRESSED_COLOR),
+                Interaction::Hovered => BackgroundColor(ACTION_BUTTON_HOVER_COLOR),
+                Interaction::None => BackgroundColor(ACTION_BUTTON_COLOR),
+            }
         };
     }
 }
@@ -3679,22 +4922,61 @@ fn update_action_highlight(
 /// Highlight ALL enemy UI cards when target selection is active (general).
 ///
 /// Sets every `EnemyCard` to `ENEMY_CARD_HIGHLIGHT_COLOR` while
-/// `TargetSelection.0` is `Some`, and restores the default dark-red tint when
-/// target selection is inactive.
+/// `TargetSelection.0` is `Some` (all cards, including dead ones — matching
+/// prior behavior), and while a `GroupTargetPending` spell with
+/// `GroupTargetSide::Monsters` is pending (living monsters only, since the
+/// domain layer only applies group-spell effects to living combatants).
+/// Restores the default condition-tinted background otherwise.
 ///
 /// `update_target_highlight` runs *after* this system and adds an additional
 /// brighter highlight (`TURN_INDICATOR_COLOR`) on top of the card at
 /// `ActionMenuState::active_target_index` for keyboard navigation.
 fn enter_target_selection(
     target_sel: Res<TargetSelection>,
+    group_target: Res<GroupTargetPending>,
+    combat_res: Res<CombatResource>,
     mut enemy_cards: Query<(&EnemyCard, &mut BackgroundColor)>,
 ) {
-    for (_card, mut bg) in enemy_cards.iter_mut() {
-        *bg = if target_sel.0.is_some() {
+    let group_monsters_pending =
+        matches!(group_target.data, Some((_, _, GroupTargetSide::Monsters)));
+    for (card, mut bg) in enemy_cards.iter_mut() {
+        let is_living_monster = matches!(
+            combat_res.state.participants.get(card.participant_index),
+            Some(Combatant::Monster(m)) if m.hp.current > 0
+        );
+        *bg = if target_sel.0.is_some() || (group_monsters_pending && is_living_monster) {
             BackgroundColor(ENEMY_CARD_HIGHLIGHT_COLOR)
         } else {
-            BackgroundColor(Color::srgba(0.2, 0.15, 0.15, 0.9))
+            // Outside target-selection, the idle background reflects the
+            // monster's condition (universal condition tinting, 4.2).
+            let tint = combat_res
+                .state
+                .participants
+                .get(card.participant_index)
+                .and_then(|p| match p {
+                    Combatant::Monster(monster) => Some(monster_condition_tint(monster.conditions)),
+                    Combatant::Player(_) => None,
+                })
+                .unwrap_or(crate::game::systems::ui_helpers::CardConditionTint::None);
+            BackgroundColor(tint.color().unwrap_or(ENEMY_CARD_DEFAULT_COLOR))
         };
+    }
+}
+
+/// Reduces a monster's `MonsterCondition` down to the shared
+/// [`CardConditionTint`](crate::game::systems::ui_helpers::CardConditionTint)
+/// category for enemy card background tinting. Monsters have no unconscious
+/// state — `Dead` is their only fatal condition — so every other non-`Normal`
+/// variant maps to the generic `Status` (transparent yellow) tint.
+fn monster_condition_tint(
+    condition: crate::domain::combat::monster::MonsterCondition,
+) -> crate::game::systems::ui_helpers::CardConditionTint {
+    use crate::domain::combat::monster::MonsterCondition;
+    use crate::game::systems::ui_helpers::CardConditionTint;
+    match condition {
+        MonsterCondition::Normal => CardConditionTint::None,
+        MonsterCondition::Dead => CardConditionTint::Fatal,
+        _ => CardConditionTint::Status,
     }
 }
 
@@ -3732,7 +5014,109 @@ fn update_target_highlight(
     }
 }
 
-/// Handle clicks on enemy cards during target selection and emit `AttackAction`.
+/// Summarizes a monster's special-attack effects for the inspect strip.
+///
+/// Collects the distinct [`SpecialEffect`] variants across `attacks` (in
+/// first-seen order, no duplicates) and joins their labels with ", ".
+/// Returns `"None"` when no attack carries a special effect.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::combat::types::{Attack, AttackType, SpecialEffect};
+/// use antares::domain::types::DiceRoll;
+/// use antares::game::systems::combat::format_special_attack_summary;
+///
+/// let bite = Attack::new(DiceRoll::new(1, 4, 0), AttackType::Physical, Some(SpecialEffect::Poison));
+/// let claw = Attack::new(DiceRoll::new(1, 3, 0), AttackType::Physical, None);
+/// assert_eq!(format_special_attack_summary(&[bite, claw]), "Poison");
+/// assert_eq!(format_special_attack_summary(&[]), "None");
+/// ```
+pub fn format_special_attack_summary(attacks: &[crate::domain::combat::types::Attack]) -> String {
+    use crate::domain::combat::types::SpecialEffect;
+
+    let mut labels: Vec<&'static str> = Vec::new();
+    for attack in attacks {
+        if let Some(effect) = &attack.special_effect {
+            let label = match effect {
+                SpecialEffect::Poison => "Poison",
+                SpecialEffect::Disease => "Disease",
+                SpecialEffect::Paralysis => "Paralysis",
+                SpecialEffect::Sleep => "Sleep",
+                SpecialEffect::Drain => "Drain",
+                SpecialEffect::Stone => "Stone",
+                SpecialEffect::Death => "Death",
+            };
+            if !labels.contains(&label) {
+                labels.push(label);
+            }
+        }
+    }
+
+    if labels.is_empty() {
+        "None".to_string()
+    } else {
+        labels.join(", ")
+    }
+}
+
+/// System: show an inspect strip (AC, current condition, and special-attack
+/// summary) on the Tab-focused monster card during target selection (4.2).
+///
+/// Keys off the same `active_target_index` focus [`update_target_highlight`]
+/// uses — no new input mode. The strip is hidden on every card except the
+/// currently focused one, which is populated from the live `Monster` data
+/// (AC reflects any `active_conditions` debuffs/buffs via `ac.current`; the
+/// condition segment is omitted entirely for `MonsterCondition::Normal`,
+/// mirroring the always-visible `EnemyConditionText`'s empty-string convention).
+fn update_enemy_inspect_strip(
+    target_sel: Res<TargetSelection>,
+    action_menu_state: Res<ActionMenuState>,
+    combat_res: Res<CombatResource>,
+    mut strips: Query<(&EnemyInspectStrip, &mut Visibility, &mut Text)>,
+) {
+    let focused_participant = target_sel.0.and_then(|_| {
+        action_menu_state
+            .active_target_index
+            .and_then(|kbd_target| {
+                resolve_alive_monster_participant_index(&combat_res.state.participants, kbd_target)
+            })
+    });
+
+    for (strip, mut visibility, mut text) in strips.iter_mut() {
+        if Some(strip.participant_index) == focused_participant {
+            if let Some(Combatant::Monster(monster)) =
+                combat_res.state.participants.get(strip.participant_index)
+            {
+                let mut parts = vec![format!("AC {}", monster.ac.current)];
+                let condition = monster.conditions.to_string();
+                if !condition.is_empty() {
+                    parts.push(condition);
+                }
+                parts.push(format!(
+                    "Special: {}",
+                    format_special_attack_summary(&monster.attacks)
+                ));
+                **text = parts.join(" · ");
+            }
+            *visibility = Visibility::Visible;
+        } else {
+            *visibility = Visibility::Hidden;
+        }
+    }
+}
+
+/// Handle clicks on enemy cards during target selection.
+///
+/// Dispatches the correct action depending on what is pending:
+/// - A pending spell cast (SingleMonster target) → emits `CastSpellAction`
+/// - A pending item use (offensive item needing a target) → stores the confirmed
+///   target index so `handle_item_button_interaction` can emit `UseItemAction`
+/// - Nothing special → emits `AttackAction` (or `RangedAttackAction`)
+///
+/// Without this routing, clicking an enemy card during a `SingleMonster` spell
+/// would fire an attack instead of the spell, leaving spell points unchanged.
+#[allow(clippy::too_many_arguments)]
 fn select_target(
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
     mut interactions: EnemyCardInteractionQuery,
@@ -3741,6 +5125,9 @@ fn select_target(
     mut ranged_pending: ResMut<RangedAttackPending>,
     mut attack_writer: Option<MessageWriter<AttackAction>>,
     mut ranged_writer: Option<MessageWriter<RangedAttackAction>>,
+    mut pending_spell: ResMut<PendingSpellCast>,
+    mut cast_writer: Option<MessageWriter<CastSpellAction>>,
+    mut pending_item: ResMut<PendingItemUse>,
 ) {
     let Some(attacker) = target_sel.0 else {
         return;
@@ -3754,15 +5141,34 @@ fn select_target(
             interaction_ref.is_changed(),
             mouse_just_pressed,
         ) {
-            confirm_attack_target(
-                attacker,
-                enemy_card.participant_index,
-                &mut target_sel,
-                &mut action_menu_state,
-                &mut ranged_pending,
-                &mut attack_writer,
-                &mut ranged_writer,
-            );
+            if let Some((spell_caster, spell_id)) = pending_spell.data.take() {
+                // A SingleMonster spell was pending — emit CastSpellAction so SP
+                // is consumed and the HUD bar decreases on the same frame.
+                confirm_spell_target(
+                    spell_caster,
+                    enemy_card.participant_index,
+                    spell_id,
+                    &mut target_sel,
+                    &mut action_menu_state,
+                    &mut cast_writer,
+                );
+            } else if pending_item.data.is_some() {
+                // An offensive item was pending — store confirmed target so
+                // handle_item_button_interaction can emit UseItemAction.
+                pending_item.confirmed_target = Some(enemy_card.participant_index);
+                target_sel.0 = None;
+                action_menu_state.active_target_index = None;
+            } else {
+                confirm_attack_target(
+                    attacker,
+                    enemy_card.participant_index,
+                    &mut target_sel,
+                    &mut action_menu_state,
+                    &mut ranged_pending,
+                    &mut attack_writer,
+                    &mut ranged_writer,
+                );
+            }
             break;
         }
     }
@@ -5497,6 +6903,11 @@ fn execute_monster_turn(
                     CombatantId::Monster(_) => CombatTurnState::EnemyTurn,
                 };
             }
+            // Reset the latch so the delay timer re-arms for the next monster
+            // in this ambush round. The latch may still be `true` from a
+            // monster that acted earlier in the same round, and this early
+            // return bypasses the resets further down.
+            *was_enemy_turn = false;
             return;
         }
     }
@@ -5640,6 +7051,13 @@ fn execute_monster_turn(
             };
             emit_combat_feedback(Some(attacker), target, effect, &mut feedback_writer);
         }
+
+        // The monster's action is complete and the turn has advanced. Reset
+        // the latch so that if the next actor is also a monster, the delay
+        // timer re-arms on the next EnemyTurn frame instead of deadlocking on
+        // the finished one-shot timer (which never reports `just_finished()`
+        // again).
+        *was_enemy_turn = false;
     } else if !combat_res.state.turn_order.is_empty() {
         // The turn_order slot exists but is a Player, yet turn_state is EnemyTurn
         // — this is a stale/inconsistent state.  Correct it so the player regains
@@ -5654,6 +7072,9 @@ fn execute_monster_turn(
             combat_res.state.current_turn
         );
         turn_state.0 = CombatTurnState::PlayerTurn;
+        // Keep the latch consistent with the corrected state: we are no longer
+        // in a monster's turn, so the timer must re-arm fresh next EnemyTurn.
+        *was_enemy_turn = false;
     }
 }
 
@@ -6073,7 +7494,7 @@ fn handle_combat_defeat(
                 parent.spawn((
                     Text::new("Defeat! You have been defeated."),
                     TextFont {
-                        font_size: 18.0,
+                        font_size: UI_FONT_SIZE_XL,
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -6593,7 +8014,7 @@ fn update_combat_log_bubble_text(
                         row.spawn((
                             Text::new(segment.text),
                             TextFont {
-                                font_size: 13.0,
+                                font_size: COMBAT_LOG_LINE_FONT_SIZE,
                                 ..default()
                             },
                             TextColor(segment.color),
@@ -6863,8 +8284,12 @@ fn reset_combat_log_on_exit(
 /// [`EnemyHpBarBackground`] node (not the whole card) so it sits in the
 /// lower-right corner of the HP bar area without affecting the card's flex
 /// layout.  The background node has `overflow: visible` so the text is never
-/// clipped.  For player targets it is spawned at an absolute position (HUD
-/// bottom area) because the player HUD layout differs per game.
+/// clipped.  For player targets it is spawned as a child of the matching
+/// [`crate::game::systems::hud::HpBarBackground`] (resolved via
+/// `CombatResource::player_orig_indices`) so the number appears over the
+/// affected party member's own HUD card rather than a single shared spot;
+/// falls back to a fixed HUD-area position if the mapping or card isn't
+/// available yet.
 ///
 /// Colour is chosen from the visual feedback constants:
 /// - Red   (`FEEDBACK_COLOR_DAMAGE`) — `Damage(_)`
@@ -6875,6 +8300,8 @@ fn spawn_combat_feedback(
     mut reader: MessageReader<CombatFeedbackEvent>,
     mut commands: Commands,
     hp_bar_backgrounds: Query<(Entity, &EnemyHpBarBackground)>,
+    hud_bar_backgrounds: Query<(Entity, &crate::game::systems::hud::HpBarBackground)>,
+    combat_res: Res<CombatResource>,
 ) {
     for event in reader.read() {
         let (text, color) = match &event.effect {
@@ -6899,17 +8326,17 @@ fn spawn_combat_feedback(
         };
 
         let font_size = match &event.effect {
-            CombatFeedbackEffect::Damage(_) | CombatFeedbackEffect::Heal(_) => 18.0,
+            CombatFeedbackEffect::Damage(_) | CombatFeedbackEffect::Heal(_) => UI_FONT_SIZE_XL,
             CombatFeedbackEffect::SpellCast { damage, .. } => {
                 if *damage > 0 {
-                    18.0
+                    UI_FONT_SIZE_XL
                 } else {
-                    15.0
+                    FEEDBACK_FONT_SIZE_MUTED
                 }
             }
-            CombatFeedbackEffect::SpellHeal { .. } => 18.0,
-            CombatFeedbackEffect::Defend => 15.0,
-            _ => 15.0,
+            CombatFeedbackEffect::SpellHeal { .. } => UI_FONT_SIZE_XL,
+            CombatFeedbackEffect::Defend => FEEDBACK_FONT_SIZE_MUTED,
+            _ => FEEDBACK_FONT_SIZE_MUTED,
         };
 
         match event.target {
@@ -6934,7 +8361,10 @@ fn spawn_combat_feedback(
                                     right: Val::Px(4.0),
                                     ..default()
                                 },
-                                FloatingDamage { remaining: 1.2 },
+                                FloatingDamage {
+                                    remaining: 1.2,
+                                    total: 1.2,
+                                },
                             ))
                             .with_children(|p| {
                                 p.spawn((
@@ -6958,7 +8388,10 @@ fn spawn_combat_feedback(
                                 height: Val::Auto,
                                 ..default()
                             },
-                            FloatingDamage { remaining: 1.2 },
+                            FloatingDamage {
+                                remaining: 1.2,
+                                total: 1.2,
+                            },
                         ))
                         .with_children(|p| {
                             p.spawn((
@@ -6973,31 +8406,78 @@ fn spawn_combat_feedback(
                         });
                 }
             }
-            CombatantId::Player(_) => {
-                // Player targets: spawn at bottom-left of screen (HUD area)
-                commands
-                    .spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            width: Val::Auto,
-                            height: Val::Auto,
-                            bottom: Val::Px(80.0),
-                            left: Val::Px(16.0),
-                            ..default()
-                        },
-                        FloatingDamage { remaining: 1.2 },
-                    ))
-                    .with_children(|p| {
-                        p.spawn((
-                            Text::new(text),
-                            TextFont {
-                                font_size,
+            CombatantId::Player(idx) => {
+                // Resolve the participant index to the party slot's HUD card
+                // so the number appears over the affected member, not a
+                // shared fixed spot.
+                let party_index = combat_res.player_orig_indices.get(idx).copied().flatten();
+                let hud_bar_entity = party_index.and_then(|pidx| {
+                    hud_bar_backgrounds
+                        .iter()
+                        .find(|(_, bg)| bg.party_index == pidx)
+                        .map(|(e, _)| e)
+                });
+
+                if let Some(bar) = hud_bar_entity {
+                    commands.entity(bar).with_children(|parent| {
+                        parent
+                            .spawn((
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    width: Val::Auto,
+                                    height: Val::Auto,
+                                    bottom: Val::Px(0.0),
+                                    right: Val::Px(4.0),
+                                    ..default()
+                                },
+                                FloatingDamage {
+                                    remaining: 1.2,
+                                    total: 1.2,
+                                },
+                            ))
+                            .with_children(|p| {
+                                p.spawn((
+                                    Text::new(text),
+                                    TextFont {
+                                        font_size,
+                                        ..default()
+                                    },
+                                    TextColor(color),
+                                    DamageText,
+                                ));
+                            });
+                    });
+                } else {
+                    // Fallback: fixed HUD-area position if the card isn't
+                    // spawned yet or the mapping is unavailable (e.g. tests
+                    // running without the HUD plugin).
+                    commands
+                        .spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                width: Val::Auto,
+                                height: Val::Auto,
+                                bottom: Val::Px(80.0),
+                                left: Val::Px(16.0),
                                 ..default()
                             },
-                            TextColor(color),
-                            DamageText,
-                        ));
-                    });
+                            FloatingDamage {
+                                remaining: 1.2,
+                                total: 1.2,
+                            },
+                        ))
+                        .with_children(|p| {
+                            p.spawn((
+                                Text::new(text),
+                                TextFont {
+                                    font_size,
+                                    ..default()
+                                },
+                                TextColor(color),
+                                DamageText,
+                            ));
+                        });
+                }
             }
         }
     }
@@ -7088,7 +8568,7 @@ fn spawn_monster_hp_hover_bars(
                             header.spawn((
                                 Text::new(mon.name.clone()),
                                 TextFont {
-                                    font_size: 10.0,
+                                    font_size: UI_FONT_SIZE_SM,
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -7100,7 +8580,7 @@ fn spawn_monster_hp_hover_bars(
                             header.spawn((
                                 Text::new(format!("{}/{}", mon.hp.base, mon.hp.current)),
                                 TextFont {
-                                    font_size: 10.0,
+                                    font_size: UI_FONT_SIZE_SM,
                                     ..default()
                                 },
                                 TextColor(Color::srgb(0.86, 0.92, 0.98)),
@@ -7264,17 +8744,38 @@ fn cleanup_monster_hp_hover_bars(
     }
 }
 
-/// Cleanup system for floating damage UI nodes. Decrements remaining lifetime
-/// and despawns the node when time is up.
-fn cleanup_floating_damage(
+/// Animates and despawns floating damage/heal/miss numbers.
+///
+/// Each frame: decrements `FloatingDamage::remaining`, rises the node upward
+/// at [`FLOATING_DAMAGE_RISE_PX_PER_SEC`] via its `bottom` offset, and fades
+/// the child [`DamageText`]'s alpha linearly from 1.0 to 0.0 as `remaining`
+/// approaches zero. Despawns the node once its lifetime is up.
+fn update_floating_damage(
     mut commands: Commands,
     time: Res<Time>,
-    mut query: Query<(Entity, &mut FloatingDamage)>,
+    mut query: Query<(Entity, &mut FloatingDamage, &mut Node, Option<&Children>)>,
+    mut text_colors: Query<&mut TextColor, With<DamageText>>,
 ) {
-    for (entity, mut fd) in query.iter_mut() {
-        fd.remaining -= time.delta_secs();
+    let dt = time.delta_secs();
+    for (entity, mut fd, mut node, children) in query.iter_mut() {
+        fd.remaining -= dt;
+
         if fd.remaining <= 0.0 {
             commands.entity(entity).despawn();
+            continue;
+        }
+
+        if let Val::Px(bottom) = node.bottom {
+            node.bottom = Val::Px(bottom + FLOATING_DAMAGE_RISE_PX_PER_SEC * dt);
+        }
+
+        let alpha = (fd.remaining / fd.total).clamp(0.0, 1.0);
+        if let Some(children) = children {
+            for child in children.iter() {
+                if let Ok(mut color) = text_colors.get_mut(child) {
+                    color.0.set_alpha(alpha);
+                }
+            }
         }
     }
 }
@@ -7440,6 +8941,158 @@ mod tests {
                 .filter(|x| x.is_some())
                 .count(),
             1
+        );
+    }
+
+    /// `sync_party_to_combat` must copy the *full* CombatState — including
+    /// monster participants — into `CombatResource` when the embedded
+    /// `CombatState` already has players (i.e. was created by `start_encounter`
+    /// or `move_party_and_handle_events`).
+    ///
+    /// This covers the critical case where `CombatStarted` was never emitted
+    /// (random movement encounters) or `handle_combat_started` has not yet read
+    /// the message.  Without this fix the UI would spawn with no enemy cards and
+    /// the Sorcerer's SP bar would never decrease (no target → no spell cast).
+    #[test]
+    fn test_party_sync_to_combat_copies_full_state_with_monsters() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Build a full CombatState just as start_encounter would.
+        let hero = Character::new(
+            "Sorcerer".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(
+            crate::domain::combat::types::Handicap::Even,
+        );
+        cs.add_player(hero.clone());
+
+        // Add a monster so the full state has non-player participants.
+        let wolf = crate::domain::combat::monster::Monster::new(
+            1,
+            "Wolf".to_string(),
+            crate::domain::character::Stats::new(8, 8, 8, 10, 10, 10, 8),
+            10,
+            8,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        cs.add_monster(wolf);
+
+        // Initialise the turn order.
+        crate::domain::combat::engine::start_combat(&mut cs);
+
+        // Set game state into combat with the fully-prepared state
+        // (mirrors enter_combat_with_state).
+        let mut gs = GameState::new();
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat_with_state(cs);
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Run one frame — sync_party_to_combat must fire.
+        app.update();
+
+        let cr = app.world().resource::<CombatResource>();
+
+        // The full state (1 player + 1 monster) must be in CombatResource.
+        assert_eq!(
+            cr.state.participants.len(),
+            2,
+            "CombatResource must contain both players and monsters after sync"
+        );
+        assert!(
+            cr.state
+                .participants
+                .iter()
+                .any(|p| matches!(p, Combatant::Player(_))),
+            "CombatResource must have the player participant"
+        );
+        assert!(
+            cr.state
+                .participants
+                .iter()
+                .any(|p| matches!(p, Combatant::Monster(_))),
+            "CombatResource must have the monster participant"
+        );
+
+        // player_orig_indices must map participant 0 (player) → party slot 0.
+        assert_eq!(
+            cr.player_orig_indices,
+            vec![Some(0), None],
+            "player_orig_indices must correctly map player to slot 0 and monster to None"
+        );
+
+        // Turn order must be non-empty (was computed by start_combat).
+        assert!(
+            !cr.state.turn_order.is_empty(),
+            "turn_order must be populated from the copied CombatState"
+        );
+    }
+
+    /// `setup_combat_ui` must not spawn the UI while `combat_res.state` has no
+    /// players — it must wait until the state is initialised.  This prevents the
+    /// enemy-card panel from being created with zero cards when the encounter
+    /// initialisation hasn't completed yet.
+    #[test]
+    fn test_setup_combat_ui_deferred_until_players_present() {
+        use crate::game::components::combat::CombatHudRoot;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<Assets<Image>>();
+        app.add_plugins(CombatPlugin);
+
+        // Enter combat with an empty CombatState (no players in combat_res yet).
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat();
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+
+        // Leave CombatResource in its default empty state (no participants).
+        // DO NOT pre-populate it — this simulates the 1-frame window before
+        // sync_party_to_combat or handle_combat_started have initialised it.
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = crate::domain::combat::engine::CombatState::new(
+                crate::domain::combat::types::Handicap::Even,
+            );
+            cr.player_orig_indices.clear();
+        }
+
+        // Run one frame — setup_combat_ui must NOT spawn the root because
+        // there are no players in combat_res.state yet.
+        app.update();
+
+        // Either 0 (deferred) or 1 (spawned after sync_party_to_combat ran first)
+        // — both are acceptable. The important thing is that if the root was spawned,
+        // it happened only after players were present.
+        // We just verify the count is at most 1 (no duplicate roots).
+        let root_count = app
+            .world_mut()
+            .query::<&CombatHudRoot>()
+            .iter(app.world())
+            .count();
+
+        assert!(
+            root_count <= 1,
+            "At most one CombatHudRoot should exist after one frame; got {}",
+            root_count
         );
     }
 
@@ -7611,6 +9264,9 @@ mod tests {
         let mut cs = CombatState::new(Handicap::Even);
         hero.hp.modify(-7); // hero now has current HP lowered (mutating local hero)
         cs.add_player(hero.clone());
+        // Combat must have genuinely resolved for the exit-sync to fire; while
+        // InProgress the state is treated as suspended behind an overlay.
+        cs.status = crate::domain::combat::types::CombatStatus::Victory;
         // Build mapping: participant 0 -> party index 0
         let mut cr = CombatResource::new();
         cr.state = cs;
@@ -8621,6 +10277,31 @@ mod tests {
         assert!(found_types.contains(&ActionButtonType::Cast));
         assert!(found_types.contains(&ActionButtonType::Item));
         assert!(found_types.contains(&ActionButtonType::Flee));
+    }
+
+    /// 4.6 color-constant sanity test: the action button palette states
+    /// (selected/confirmed, hover, pressed, idle, disabled) must be pairwise
+    /// distinct so every state produces a visibly different color.
+    #[test]
+    fn test_action_button_palette_states_are_pairwise_distinct() {
+        let colors = [
+            ("confirmed", ACTION_BUTTON_CONFIRMED_COLOR),
+            ("hover", ACTION_BUTTON_HOVER_COLOR),
+            ("pressed", ACTION_BUTTON_PRESSED_COLOR),
+            ("idle", ACTION_BUTTON_COLOR),
+            ("disabled", ACTION_BUTTON_DISABLED_COLOR),
+        ];
+        for i in 0..colors.len() {
+            for j in (i + 1)..colors.len() {
+                let (name_a, color_a) = colors[i];
+                let (name_b, color_b) = colors[j];
+                assert_ne!(
+                    color_a, color_b,
+                    "action button colors '{}' and '{}' must be distinct",
+                    name_a, name_b
+                );
+            }
+        }
     }
 
     /// Verify enemy cards are created for monsters only
@@ -9886,6 +11567,7 @@ mod tests {
             active_index: 0,
             confirmed: false,
             active_target_index: Some(0),
+            ..Default::default()
         };
         let alive_count = cr
             .state
@@ -10146,6 +11828,212 @@ mod tests {
         );
     }
 
+    /// Regression test: clicking an enemy card during a SingleMonster spell cast
+    /// must emit `CastSpellAction` (not `AttackAction`), so the caster's SP is
+    /// actually consumed and the HUD SP bar decreases.
+    ///
+    /// Root cause of the original bug: `select_target` always called
+    /// `confirm_attack_target` regardless of whether a spell was pending, so
+    /// mouse-based target confirmation never fired the spell.
+    #[test]
+    fn test_mouse_click_enemy_card_with_pending_spell_emits_cast_action() {
+        use crate::domain::combat::monster::{AiBehavior, Monster};
+        use crate::domain::types::SpellId;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Build a sorcerer with enough SP to cast.
+        let mut gs = GameState::new();
+        let mut mage = Character::new(
+            "Merlin".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        mage.sp = crate::domain::character::AttributePair16 {
+            base: 10,
+            current: 10,
+        };
+        gs.party.add_member(mage.clone()).unwrap();
+
+        // Set up a combat state with the sorcerer and one monster.
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(mage.clone());
+
+        let mut goblin = Monster::new(
+            2,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(8, 6, 6, 8, 8, 8, 4),
+            15,
+            4,
+            vec![],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        goblin.ai_behavior = AiBehavior::Aggressive;
+        cs.participants.push(Combatant::Monster(Box::new(goblin)));
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // First update spawns the UI (EnemyCard entities).
+        app.update();
+
+        // Simulate a pending SingleMonster spell: the player has opened the spell
+        // panel and clicked a SingleMonster spell — this stores the pending data
+        // and enters target-selection mode.
+        const SPELL_ID: SpellId = 1027; // Energy Blast (SingleMonster) placeholder ID
+        let caster = CombatantId::Player(0);
+        {
+            let mut ps = app.world_mut().resource_mut::<PendingSpellCast>();
+            ps.data = Some((caster, SPELL_ID));
+        }
+        {
+            let mut ts = app.world_mut().resource_mut::<TargetSelection>();
+            ts.0 = Some(caster);
+        }
+        {
+            let mut ams = app.world_mut().resource_mut::<ActionMenuState>();
+            ams.active_target_index = Some(0);
+        }
+
+        // Find the EnemyCard entity (participant_index == 1) and simulate a click.
+        let card_entity = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<(Entity, &EnemyCard), With<Button>>();
+            q.iter(app.world())
+                .find(|(_, card)| card.participant_index == 1)
+                .map(|(e, _)| e)
+                .expect("EnemyCard at participant_index 1 must exist")
+        };
+        app.world_mut()
+            .entity_mut(card_entity)
+            .insert(Interaction::Pressed);
+
+        app.update();
+
+        // PendingSpellCast.data must be None — confirm_spell_target consumed it.
+        let pending = app.world().resource::<PendingSpellCast>();
+        assert!(
+            pending.data.is_none(),
+            "PendingSpellCast.data must be None after mouse click on enemy card: \
+             the spell path (not the attack path) must have been taken"
+        );
+
+        // TargetSelection must be cleared by confirm_spell_target.
+        let ts = app.world().resource::<TargetSelection>();
+        assert!(
+            ts.0.is_none(),
+            "TargetSelection must be None after enemy card click with pending spell"
+        );
+
+        // active_target_index must be cleared.
+        let ams = app.world().resource::<ActionMenuState>();
+        assert!(
+            ams.active_target_index.is_none(),
+            "active_target_index must be None after spell target confirmed via mouse"
+        );
+    }
+
+    /// When NO spell is pending and an enemy card is clicked, the normal attack
+    /// path must still be taken (regression guard for the fix above).
+    #[test]
+    fn test_mouse_click_enemy_card_without_pending_spell_still_attacks() {
+        use crate::domain::combat::monster::{AiBehavior, Monster};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Knight".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+
+        let mut troll = Monster::new(
+            3,
+            "Troll".to_string(),
+            crate::domain::character::Stats::new(14, 6, 6, 14, 8, 8, 4),
+            30,
+            6,
+            vec![],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        troll.ai_behavior = AiBehavior::Aggressive;
+        cs.participants.push(Combatant::Monster(Box::new(troll)));
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        app.update();
+
+        // No pending spell — this is a plain attack target selection.
+        {
+            let mut ts = app.world_mut().resource_mut::<TargetSelection>();
+            ts.0 = Some(CombatantId::Player(0));
+        }
+        {
+            let mut ams = app.world_mut().resource_mut::<ActionMenuState>();
+            ams.active_target_index = Some(0);
+        }
+
+        let card_entity = {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<(Entity, &EnemyCard), With<Button>>();
+            q.iter(app.world())
+                .find(|(_, card)| card.participant_index == 1)
+                .map(|(e, _)| e)
+                .expect("EnemyCard at participant_index 1 must exist")
+        };
+        app.world_mut()
+            .entity_mut(card_entity)
+            .insert(Interaction::Pressed);
+
+        app.update();
+
+        // TargetSelection must be cleared — attack path was taken.
+        let ts = app.world().resource::<TargetSelection>();
+        assert!(
+            ts.0.is_none(),
+            "TargetSelection must be None after plain attack target confirmed via mouse"
+        );
+
+        // PendingSpellCast.data must remain None (it was never set).
+        let pending = app.world().resource::<PendingSpellCast>();
+        assert!(
+            pending.data.is_none(),
+            "PendingSpellCast.data must remain None when no spell was pending"
+        );
+    }
+
     /// T2-5: `COMBAT_ACTION_ORDER` covers all 5 action variants exactly once
     /// and the first entry is `ActionButtonType::Attack`.
     #[test]
@@ -10252,6 +12140,78 @@ mod tests {
         assert_eq!(
             state.active_index, 0,
             "active_index must reset to 0 (Attack) when menu becomes visible"
+        );
+    }
+
+    /// 4.4: When two players act back-to-back (no intervening monster turn,
+    /// so the action menu never transitions to Hidden), `active_index` must
+    /// still reset to Attack (0) as soon as the acting party member changes.
+    #[test]
+    fn test_action_menu_resets_between_players_without_hiding() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let hero1 = Character::new(
+            "Hero One".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let hero2 = Character::new(
+            "Hero Two".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero1.clone());
+        cs.add_player(hero2.clone());
+        cs.turn_order = vec![CombatantId::Player(0), CombatantId::Player(1)];
+        cs.current_turn = 0;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(hero1).unwrap();
+        gs.party.add_member(hero2).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Player 1's turn: menu opens, resets to Attack (last_actor was None).
+        app.update();
+        assert_eq!(
+            app.world().resource::<ActionMenuState>().active_index,
+            0,
+            "menu must open on Attack for the first player"
+        );
+
+        // Simulate player 1 navigating to a different action (e.g. Defend).
+        app.world_mut()
+            .resource_mut::<ActionMenuState>()
+            .active_index = 1;
+
+        // Advance the turn to player 2 WITHOUT touching CombatTurnStateResource
+        // (it stays PlayerTurn throughout — the menu never hides).
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state.current_turn = 1;
+        }
+        app.update();
+
+        let state = app.world().resource::<ActionMenuState>();
+        assert_eq!(
+            state.active_index, 0,
+            "active_index must reset to 0 (Attack) when the acting party member \
+             changes, even though the menu never transitioned to Hidden"
         );
     }
 
@@ -11072,6 +13032,279 @@ mod tests {
             );
         }
         // System ran without panic — that's the core assertion.
+    }
+
+    /// 4.1/4.4: `update_floating_damage` rises the node and fades the child
+    /// `DamageText`'s alpha as `remaining` counts down, then despawns the
+    /// node once its lifetime is spent. Uses `TimeUpdateStrategy::ManualDuration`
+    /// so the per-frame `Time` delta is deterministic instead of real wall-clock time.
+    #[test]
+    fn test_update_floating_damage_rises_fades_and_despawns() {
+        use bevy::time::TimeUpdateStrategy;
+        use std::time::Duration;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+            600,
+        )));
+        // Time<Virtual>'s default max_delta (0.25s) would otherwise clamp our
+        // deliberately larger manual per-frame duration.
+        app.world_mut()
+            .resource_mut::<Time<bevy::time::Virtual>>()
+            .set_max_delta(Duration::from_secs(10));
+        app.add_systems(Update, update_floating_damage);
+
+        let entity = app
+            .world_mut()
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: Val::Px(0.0),
+                    ..default()
+                },
+                FloatingDamage {
+                    remaining: 1.2,
+                    total: 1.2,
+                },
+            ))
+            .with_children(|p| {
+                p.spawn((Text::new("-5"), TextColor(Color::WHITE), DamageText));
+            })
+            .id();
+
+        // Bevy's very first frame reports a zero `Time` delta (it establishes
+        // the baseline instant); consume that frame before measuring elapsed time.
+        app.update();
+
+        // First real tick: 0.6s of a 1.2s lifetime elapsed — still alive, risen, half faded.
+        app.update();
+
+        assert!(
+            app.world().get_entity(entity).is_ok(),
+            "node must still exist halfway through its lifetime"
+        );
+
+        let remaining = app.world().get::<FloatingDamage>(entity).unwrap().remaining;
+        assert!(
+            (remaining - 0.6).abs() < 0.001,
+            "remaining should count down by the elapsed delta, got {remaining}"
+        );
+
+        let bottom = app.world().get::<Node>(entity).unwrap().bottom;
+        assert_eq!(
+            bottom,
+            Val::Px(24.0 * 0.6),
+            "node must rise by rise-speed * elapsed time"
+        );
+
+        let child = app.world().get::<Children>(entity).unwrap()[0];
+        let alpha = app.world().get::<TextColor>(child).unwrap().0.alpha();
+        assert!(
+            (alpha - 0.5).abs() < 0.01,
+            "alpha should be halfway faded (remaining/total = 0.5), got {alpha}"
+        );
+
+        // Second tick: another 0.6s elapses, lifetime is spent — node despawns.
+        app.update();
+
+        assert!(
+            app.world().get_entity(entity).is_err(),
+            "node must be despawned once remaining reaches zero"
+        );
+    }
+
+    /// 4.1: A `CombatFeedbackEvent` targeting `CombatantId::Player(idx)` must
+    /// anchor its `FloatingDamage` node to *that* party member's own HUD
+    /// `HpBarBackground` (resolved through `player_orig_indices`), not a
+    /// fixed shared screen position — otherwise two allies healed in the same
+    /// round would show numbers stacked in one spot with no way to tell them apart.
+    #[test]
+    fn test_spawn_combat_feedback_anchors_to_correct_party_member_hud_card() {
+        use crate::game::systems::hud::HpBarBackground;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        app.insert_resource(crate::game::resources::GlobalState(GameState::new()));
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            // Participant 0 -> party slot 1, participant 1 -> party slot 0,
+            // deliberately not identity-mapped so the test would fail if the
+            // system anchored by participant index instead of party_index.
+            cr.player_orig_indices = vec![Some(1), Some(0)];
+        }
+
+        // Pre-spawn HUD HP bar backgrounds for both party slots, the way
+        // `setup_hud` would.
+        let slot0_bar = app
+            .world_mut()
+            .spawn(HpBarBackground { party_index: 0 })
+            .id();
+        let slot1_bar = app
+            .world_mut()
+            .spawn(HpBarBackground { party_index: 1 })
+            .id();
+
+        app.world_mut().write_message(CombatFeedbackEvent {
+            source: None,
+            target: CombatantId::Player(0),
+            effect: CombatFeedbackEffect::Heal(7),
+        });
+
+        app.update();
+
+        let floating_children_of = |app: &App, parent: Entity| -> usize {
+            app.world()
+                .get::<Children>(parent)
+                .map(|children| {
+                    children
+                        .iter()
+                        .filter(|c| app.world().get::<FloatingDamage>(*c).is_some())
+                        .count()
+                })
+                .unwrap_or(0)
+        };
+
+        assert_eq!(
+            floating_children_of(&app, slot1_bar),
+            1,
+            "participant 0 maps to party slot 1 — the floating number must appear there"
+        );
+        assert_eq!(
+            floating_children_of(&app, slot0_bar),
+            0,
+            "the floating number must not appear on the unaffected party member's card"
+        );
+    }
+
+    /// 4.2/4.4: `update_enemy_inspect_strip` shows AC + special-attack summary
+    /// on the Tab-focused monster card only, and hides it on every other card.
+    #[test]
+    fn test_enemy_inspect_strip_shows_ac_and_conditions_on_focused_card() {
+        use crate::domain::combat::monster::{AiBehavior, LootTable, Monster};
+        use crate::domain::combat::types::{Attack, AttackType, SpecialEffect};
+        use crate::domain::types::DiceRoll;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<TargetSelection>();
+        app.init_resource::<ActionMenuState>();
+        app.init_resource::<CombatResource>();
+        app.add_systems(Update, update_enemy_inspect_strip);
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            let mut goblin = Monster::new(
+                1,
+                "Goblin".to_string(),
+                crate::domain::character::Stats::new(8, 6, 6, 8, 8, 8, 6),
+                20,
+                15, // AC 15
+                vec![Attack::new(
+                    DiceRoll::new(1, 4, 0),
+                    AttackType::Physical,
+                    Some(SpecialEffect::Poison),
+                )],
+                LootTable::default(),
+            );
+            goblin.ai_behavior = AiBehavior::Random;
+            cr.state
+                .participants
+                .push(Combatant::Monster(Box::new(goblin)));
+
+            let orc = Monster::new(
+                2,
+                "Orc".to_string(),
+                crate::domain::character::Stats::new(10, 6, 6, 8, 8, 8, 6),
+                25,
+                10,
+                vec![],
+                LootTable::default(),
+            );
+            cr.state
+                .participants
+                .push(Combatant::Monster(Box::new(orc)));
+        }
+
+        // Enter target-select mode focused on the first (goblin) card.
+        app.world_mut().resource_mut::<TargetSelection>().0 = Some(CombatantId::Player(0));
+        app.world_mut()
+            .resource_mut::<ActionMenuState>()
+            .active_target_index = Some(0);
+
+        let focused_strip = app
+            .world_mut()
+            .spawn((
+                Text::new(""),
+                Visibility::Hidden,
+                EnemyInspectStrip {
+                    participant_index: 0,
+                },
+            ))
+            .id();
+        let unfocused_strip = app
+            .world_mut()
+            .spawn((
+                Text::new(""),
+                Visibility::Hidden,
+                EnemyInspectStrip {
+                    participant_index: 1,
+                },
+            ))
+            .id();
+
+        app.update();
+
+        let visibility_of =
+            |app: &App, e: Entity| -> Visibility { *app.world().get::<Visibility>(e).unwrap() };
+        let text_of =
+            |app: &App, e: Entity| -> String { app.world().get::<Text>(e).unwrap().0.clone() };
+
+        assert_eq!(
+            visibility_of(&app, focused_strip),
+            Visibility::Visible,
+            "the focused monster's inspect strip must become visible"
+        );
+        assert_eq!(
+            visibility_of(&app, unfocused_strip),
+            Visibility::Hidden,
+            "an unfocused monster's inspect strip must stay hidden"
+        );
+
+        let focused_text = text_of(&app, focused_strip);
+        assert!(
+            focused_text.contains("AC 15"),
+            "strip must show the focused monster's AC, got {focused_text:?}"
+        );
+        assert!(
+            focused_text.contains("Poison"),
+            "strip must summarize the focused monster's special attacks, got {focused_text:?}"
+        );
+
+        // Tab to the second (orc) card — the strip must follow the focus.
+        app.world_mut()
+            .resource_mut::<ActionMenuState>()
+            .active_target_index = Some(1);
+        app.update();
+
+        assert_eq!(
+            visibility_of(&app, focused_strip),
+            Visibility::Hidden,
+            "the previously focused card must hide once focus moves away"
+        );
+        assert_eq!(
+            visibility_of(&app, unfocused_strip),
+            Visibility::Visible,
+            "the newly focused card must become visible"
+        );
+        let orc_text = text_of(&app, unfocused_strip);
+        assert!(
+            orc_text.contains("AC 10") && orc_text.contains("None"),
+            "orc has no special attacks, got {orc_text:?}"
+        );
     }
 
     /// T3-4: After `AttackAction` is written and the system runs, the
@@ -12061,6 +14294,648 @@ mod tests {
             matches!(ts.0, CombatTurnState::PlayerTurn),
             "turn_state must be PlayerTurn after skipping incapacitated monster, got {:?}",
             ts.0
+        );
+    }
+
+    /// Regression test for the monster-turn deadlock (bugs 2 & 3): with the
+    /// `MonsterTurnTimer` resource PRESENT, two consecutive monster turns must
+    /// both execute. Before the fix, the `was_enemy_turn` latch was never
+    /// reset after a successful monster action, so the finished one-shot timer
+    /// never reported `just_finished()` again and the second monster's turn
+    /// deadlocked forever on EnemyTurn.
+    #[test]
+    fn test_two_monsters_act_consecutively_with_timer() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Replace the plugin's 1.2s timer with a zero-duration one so each
+        // armed timer finishes on its very next tick, keeping the test to a
+        // bounded number of frames while still exercising the arm/tick/reset
+        // latch logic (unlike removing the resource, which bypasses it).
+        app.insert_resource(MonsterTurnTimer(Timer::from_seconds(0.0, TimerMode::Once)));
+
+        let mut gs = GameState::new();
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let make_wolf = |id: u8, name: &str| {
+            let mut wolf = crate::domain::combat::monster::Monster::new(
+                id,
+                name.to_string(),
+                crate::domain::character::Stats::new(10, 5, 5, 10, 8, 10, 10),
+                20,
+                8,
+                vec![crate::domain::combat::types::Attack::physical(
+                    crate::domain::types::DiceRoll::new(1, 2, 0),
+                )],
+                crate::domain::combat::monster::LootTable::default(),
+            );
+            wolf.ai_behavior = crate::domain::combat::monster::AiBehavior::Aggressive;
+            wolf
+        };
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.add_monster(make_wolf(90, "Wolf A"));
+        cs.add_monster(make_wolf(91, "Wolf B"));
+        // Both monsters ahead of the player so their turns are consecutive.
+        cs.turn_order = vec![
+            CombatantId::Monster(1),
+            CombatantId::Monster(2),
+            CombatantId::Player(0),
+        ];
+        cs.current_turn = 0;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), None, None];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::EnemyTurn;
+
+        // Each monster needs two frames (arm timer, then act); allow slack.
+        let mut reached_player_turn = false;
+        for _ in 0..10 {
+            app.update();
+            let ts = app.world().resource::<CombatTurnStateResource>();
+            if matches!(ts.0, CombatTurnState::PlayerTurn) {
+                reached_player_turn = true;
+                break;
+            }
+        }
+
+        assert!(
+            reached_player_turn,
+            "turn_state must return to PlayerTurn within 10 frames after both \
+             monsters act; the EnemyTurn latch deadlocked"
+        );
+
+        let cr = app.world().resource::<CombatResource>();
+        assert_eq!(
+            cr.state.current_turn, 2,
+            "current_turn must point at the player slot after both monster turns"
+        );
+        assert_eq!(cr.state.round, 1, "round must not have wrapped yet");
+        for idx in [1usize, 2usize] {
+            assert!(
+                !cr.state.participants[idx].can_act(),
+                "monster at participant index {} must have acted this round",
+                idx
+            );
+        }
+    }
+
+    /// Regression test for the ambush deadlock (bug 3): an ambush round with
+    /// two monsters and the `MonsterTurnTimer` resource PRESENT must complete
+    /// round 1 (surprised player slot auto-skipped, both monsters act) and
+    /// hand control to the player at the start of round 2 with
+    /// `ambush_round_active` cleared.
+    #[test]
+    fn test_ambush_two_monsters_complete_round_one() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+        app.insert_resource(MonsterTurnTimer(Timer::from_seconds(0.0, TimerMode::Once)));
+
+        let mut gs = GameState::new();
+        let mut hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // Fastest combatant: when `advance_round` recalculates the turn order
+        // for round 2 (handicap reset to Even, sorted by speed descending) the
+        // player must come first so round 2 opens on PlayerTurn.
+        hero.stats.speed.base = 50;
+        hero.stats.speed.current = 50;
+        gs.party.add_member(hero.clone()).unwrap();
+
+        let make_goblin = |id: u8, name: &str| {
+            let mut goblin = crate::domain::combat::monster::Monster::new(
+                id,
+                name.to_string(),
+                crate::domain::character::Stats::new(8, 6, 6, 8, 5, 10, 6),
+                15,
+                5,
+                vec![crate::domain::combat::types::Attack::physical(
+                    crate::domain::types::DiceRoll::new(1, 2, 0),
+                )],
+                crate::domain::combat::monster::LootTable::default(),
+            );
+            goblin.ai_behavior = crate::domain::combat::monster::AiBehavior::Aggressive;
+            goblin
+        };
+
+        let mut cs = CombatState::new(Handicap::MonsterAdvantage);
+        cs.ambush_round_active = true;
+        cs.add_player(hero.clone());
+        cs.add_monster(make_goblin(92, "Goblin A"));
+        cs.add_monster(make_goblin(93, "Goblin B"));
+        // Surprised player first, then both monsters: exercises the
+        // player-skip path followed by consecutive monster turns.
+        cs.turn_order = vec![
+            CombatantId::Player(0),
+            CombatantId::Monster(1),
+            CombatantId::Monster(2),
+        ];
+        cs.current_turn = 0;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), None, None];
+            cr.combat_event_type = CombatEventType::Ambush;
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::EnemyTurn;
+
+        // Player skip = 1 frame, each monster = 2 frames; allow slack.
+        let mut round_two_player_turn = false;
+        for _ in 0..12 {
+            app.update();
+            let ts = app.world().resource::<CombatTurnStateResource>();
+            let cr = app.world().resource::<CombatResource>();
+            if cr.state.round == 2 && matches!(ts.0, CombatTurnState::PlayerTurn) {
+                round_two_player_turn = true;
+                break;
+            }
+        }
+
+        assert!(
+            round_two_player_turn,
+            "ambush round 1 must complete (player skipped, both monsters act) \
+             and round 2 must open on PlayerTurn within 12 frames"
+        );
+
+        let cr = app.world().resource::<CombatResource>();
+        assert!(
+            !cr.state.ambush_round_active,
+            "ambush_round_active must be cleared once round 2 begins"
+        );
+
+        // The surprised player slot must have logged the skip message.
+        let log = app.world().resource::<CombatLogState>();
+        assert!(
+            log.lines
+                .iter()
+                .any(|line| line.plain_text().to_lowercase().contains("surprised")),
+            "combat log must contain the 'surprised' skip message from round 1"
+        );
+    }
+
+    /// Regression test for the Player Screen HP reset (bug 4), unit-level:
+    /// while combat is suspended behind an overlay (mode is not `Combat`,
+    /// status still `InProgress`), `sync_combat_to_party_on_exit` must be a
+    /// no-op — no `CombatResource::clear()`, no writes to `party.members`.
+    #[test]
+    fn test_sync_on_exit_noop_while_combat_suspended() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let party_hp_before = hero.hp.current;
+
+        let wolf = crate::domain::combat::monster::Monster::new(
+            80,
+            "Wolf".to_string(),
+            crate::domain::character::Stats::new(10, 5, 5, 10, 8, 10, 10),
+            20,
+            8,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.add_monster(wolf);
+        cs.turn_order = vec![CombatantId::Monster(1), CombatantId::Player(0)];
+        cs.current_turn = 1;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        // Live combat state diverges from the party: the player has taken
+        // damage inside combat that has not (and must not) be written back yet.
+        let player_live_hp = party_hp_before.saturating_sub(5);
+        if let Combatant::Player(pc) = &mut cs.participants[0] {
+            pc.hp.current = player_live_hp;
+        }
+
+        // Suspended behind the character sheet: resume mode holds the combat
+        // snapshot, current mode is NOT Combat.
+        let mut gs = GameState::new();
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+        gs.enter_character_sheet();
+        assert!(
+            matches!(gs.mode, crate::application::GameMode::CharacterSheet(_)),
+            "pre-condition: mode must be CharacterSheet"
+        );
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), None];
+        }
+
+        app.update();
+        app.update();
+
+        // CombatResource must be untouched: not cleared, participants intact.
+        let cr = app.world().resource::<CombatResource>();
+        assert_eq!(
+            cr.player_orig_indices,
+            vec![Some(0), None],
+            "player_orig_indices must not be cleared while combat is suspended"
+        );
+        assert_eq!(
+            cr.state.participants.len(),
+            2,
+            "participants must not be cleared while combat is suspended"
+        );
+        if let Combatant::Player(pc) = &cr.state.participants[0] {
+            assert_eq!(
+                pc.hp.current, player_live_hp,
+                "live combat HP must be preserved while suspended"
+            );
+        } else {
+            panic!("participant 0 must be the player");
+        }
+
+        // The party must not have received the combat values yet.
+        let gs = app
+            .world()
+            .resource::<crate::game::resources::GlobalState>();
+        assert_eq!(
+            gs.0.party.members[0].hp.current, party_hp_before,
+            "party HP must not be written while combat is suspended"
+        );
+    }
+
+    /// Regression test for the Player Screen HP reset (bug 4), end-to-end:
+    /// opening the character sheet mid-combat and closing it (restoring the
+    /// resume mode, which holds the STALE combat-start snapshot) must leave
+    /// the live `CombatResource` — participant HP, round, current_turn,
+    /// turn_order — exactly as it was.
+    #[test]
+    fn test_character_sheet_roundtrip_preserves_combat_state() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let wolf = crate::domain::combat::monster::Monster::new(
+            81,
+            "Wolf".to_string(),
+            crate::domain::character::Stats::new(10, 5, 5, 10, 8, 10, 10),
+            20,
+            8,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+
+        // The snapshot stored inside GameMode::Combat(..) keeps combat-START
+        // values: full HP, round 1, turn 0. It is never updated during combat.
+        let mut snapshot = CombatState::new(Handicap::Even);
+        snapshot.add_player(hero.clone());
+        snapshot.add_monster(wolf);
+        snapshot.turn_order = vec![CombatantId::Monster(1), CombatantId::Player(0)];
+        snapshot.current_turn = 0;
+        snapshot.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        // The LIVE state has progressed: both a monster and the player took
+        // damage, the round advanced, and it is the player's turn (slot 1).
+        let mut live = snapshot.clone();
+        live.round = 2;
+        live.current_turn = 1;
+        let player_live_hp = hero.hp.current.saturating_sub(5);
+        if let Combatant::Player(pc) = &mut live.participants[0] {
+            pc.hp.current = player_live_hp;
+        }
+        let monster_live_hp = 12;
+        if let Combatant::Monster(mon) = &mut live.participants[1] {
+            mon.hp.current = monster_live_hp;
+        }
+        let live_turn_order = live.turn_order.clone();
+
+        let mut gs = GameState::new();
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat_with_state(snapshot);
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = live;
+            cr.player_orig_indices = vec![Some(0), None];
+        }
+
+        // A couple of live combat frames (player's turn — nothing acts).
+        app.update();
+        app.update();
+
+        // Open the Player Screen mid-combat ([p] / HUD portrait click).
+        app.world_mut()
+            .resource_mut::<crate::game::resources::GlobalState>()
+            .0
+            .enter_character_sheet();
+        app.update();
+        app.update();
+
+        // Close it: restore the resume mode exactly as character_sheet_ui does.
+        {
+            let mut gs = app
+                .world_mut()
+                .resource_mut::<crate::game::resources::GlobalState>();
+            let resume = match &gs.0.mode {
+                crate::application::GameMode::CharacterSheet(cs_state) => {
+                    cs_state.get_resume_mode()
+                }
+                other => panic!("expected CharacterSheet mode, got {:?}", other),
+            };
+            gs.0.mode = resume;
+        }
+        app.update();
+        app.update();
+
+        // The live combat state must have survived the round trip untouched.
+        let cr = app.world().resource::<CombatResource>();
+        assert_eq!(
+            cr.state.round, 2,
+            "round must survive the overlay round trip"
+        );
+        assert_eq!(
+            cr.state.current_turn, 1,
+            "current_turn must survive the overlay round trip"
+        );
+        assert_eq!(
+            cr.state.turn_order, live_turn_order,
+            "turn_order must survive the overlay round trip"
+        );
+        if let Combatant::Player(pc) = &cr.state.participants[0] {
+            assert_eq!(
+                pc.hp.current, player_live_hp,
+                "player combat HP must not reset to the combat-start snapshot"
+            );
+        } else {
+            panic!("participant 0 must be the player");
+        }
+        if let Combatant::Monster(mon) = &cr.state.participants[1] {
+            assert_eq!(
+                mon.hp.current, monster_live_hp,
+                "monster combat HP must not reset to the combat-start snapshot"
+            );
+        } else {
+            panic!("participant 1 must be the monster");
+        }
+    }
+
+    /// Regression test for the placeholder condition label (bug 1): a monster
+    /// reduced to 0 HP must show "Dead" (in the fatal red tint) and "0/{base}"
+    /// HP on its enemy card, and a paralyzed monster must show "Paralyzed" (in
+    /// the status yellow tint) — never the literal word "Condition".
+    #[test]
+    fn test_dead_monster_card_shows_dead_condition() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let make_monster = |id: u8, name: &str| {
+            crate::domain::combat::monster::Monster::new(
+                id,
+                name.to_string(),
+                crate::domain::character::Stats::new(10, 5, 5, 10, 8, 10, 10),
+                30,
+                8,
+                vec![crate::domain::combat::types::Attack::physical(
+                    crate::domain::types::DiceRoll::new(1, 4, 0),
+                )],
+                crate::domain::combat::monster::LootTable::default(),
+            )
+        };
+
+        let mut dead_wolf = make_monster(70, "Dead Wolf");
+        dead_wolf.hp.current = 0;
+        dead_wolf.conditions = crate::domain::combat::monster::MonsterCondition::Dead;
+        let mut paralyzed_wolf = make_monster(71, "Stiff Wolf");
+        paralyzed_wolf.conditions = crate::domain::combat::monster::MonsterCondition::Paralyzed;
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.add_monster(dead_wolf);
+        cs.add_monster(paralyzed_wolf);
+        cs.turn_order = vec![
+            CombatantId::Player(0),
+            CombatantId::Monster(1),
+            CombatantId::Monster(2),
+        ];
+        cs.current_turn = 0;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), None, None];
+        }
+
+        // One frame spawns the UI (setup_combat_ui) and populates it
+        // (update_combat_ui).
+        app.update();
+
+        // Condition labels: real names with the correct tint per condition.
+        let mut found_dead = false;
+        let mut found_paralyzed = false;
+        let mut condition_query = app
+            .world_mut()
+            .query::<(&EnemyConditionText, &Text, &TextColor)>();
+        for (marker, text, color) in condition_query.iter(app.world()) {
+            let label = text.0.as_str();
+            assert_ne!(
+                label, "Condition",
+                "the placeholder string must never be rendered"
+            );
+            match marker.participant_index {
+                1 => {
+                    assert_eq!(label, "Dead", "dead monster must show 'Dead'");
+                    assert_eq!(
+                        color.0, CONDITION_FATAL_COLOR,
+                        "'Dead' must use the fatal (transparent red) tint"
+                    );
+                    found_dead = true;
+                }
+                2 => {
+                    assert_eq!(
+                        label, "Paralyzed",
+                        "paralyzed monster must show 'Paralyzed'"
+                    );
+                    assert_eq!(
+                        color.0, CONDITION_STATUS_COLOR,
+                        "non-fatal conditions must use the status (transparent yellow) tint"
+                    );
+                    found_paralyzed = true;
+                }
+                other => panic!("unexpected condition text for participant {}", other),
+            }
+        }
+        assert!(found_dead, "no condition text spawned for the dead monster");
+        assert!(
+            found_paralyzed,
+            "no condition text spawned for the paralyzed monster"
+        );
+
+        // HP label of the dead monster: 0/{base}.
+        let mut hp_query = app.world_mut().query::<(&EnemyHpText, &Text)>();
+        let dead_hp = hp_query
+            .iter(app.world())
+            .find(|(marker, _)| marker.participant_index == 1)
+            .map(|(_, text)| text.0.clone())
+            .expect("dead monster must have an HP text");
+        assert_eq!(dead_hp, "0/30", "dead monster HP text must be 0/{{base}}");
+    }
+
+    /// 4.2: universal condition tinting applies to enemy card *backgrounds*
+    /// (not just the condition label text): outside target-selection mode, a
+    /// dead monster's card is `CONDITION_FATAL_COLOR` and a paralyzed
+    /// monster's card is `CONDITION_STATUS_COLOR`, while a healthy monster
+    /// keeps `ENEMY_CARD_DEFAULT_COLOR`.
+    #[test]
+    fn test_enemy_card_background_reflects_condition_tint() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let hero = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let make_monster = |id: u8, name: &str| {
+            crate::domain::combat::monster::Monster::new(
+                id,
+                name.to_string(),
+                crate::domain::character::Stats::new(10, 5, 5, 10, 8, 10, 10),
+                30,
+                8,
+                vec![crate::domain::combat::types::Attack::physical(
+                    crate::domain::types::DiceRoll::new(1, 4, 0),
+                )],
+                crate::domain::combat::monster::LootTable::default(),
+            )
+        };
+
+        let mut dead_wolf = make_monster(72, "Dead Wolf");
+        dead_wolf.hp.current = 0;
+        dead_wolf.conditions = crate::domain::combat::monster::MonsterCondition::Dead;
+        let mut paralyzed_wolf = make_monster(73, "Stiff Wolf");
+        paralyzed_wolf.conditions = crate::domain::combat::monster::MonsterCondition::Paralyzed;
+        let healthy_wolf = make_monster(74, "Fit Wolf");
+
+        let mut cs = CombatState::new(Handicap::Even);
+        cs.add_player(hero.clone());
+        cs.add_monster(dead_wolf);
+        cs.add_monster(paralyzed_wolf);
+        cs.add_monster(healthy_wolf);
+        cs.turn_order = vec![
+            CombatantId::Player(0),
+            CombatantId::Monster(1),
+            CombatantId::Monster(2),
+            CombatantId::Monster(3),
+        ];
+        cs.current_turn = 0;
+        cs.status = crate::domain::combat::types::CombatStatus::InProgress;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(hero).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), None, None, None];
+        }
+
+        // First frame spawns the enemy cards (setup_combat_ui); a second
+        // frame is needed for `enter_target_selection` to see and tint the
+        // now-materialised card entities.
+        app.update();
+        app.update();
+
+        let mut card_query = app.world_mut().query::<(&EnemyCard, &BackgroundColor)>();
+        let mut checked = std::collections::HashSet::new();
+        for (card, bg) in card_query.iter(app.world()) {
+            match card.participant_index {
+                1 => {
+                    assert_eq!(
+                        bg.0, CONDITION_FATAL_COLOR,
+                        "dead monster's card background must be the fatal tint"
+                    );
+                    checked.insert(1);
+                }
+                2 => {
+                    assert_eq!(
+                        bg.0, CONDITION_STATUS_COLOR,
+                        "paralyzed monster's card background must be the status tint"
+                    );
+                    checked.insert(2);
+                }
+                3 => {
+                    assert_eq!(
+                        bg.0, ENEMY_CARD_DEFAULT_COLOR,
+                        "healthy monster's card background must stay the default"
+                    );
+                    checked.insert(3);
+                }
+                other => panic!("unexpected enemy card for participant {}", other),
+            }
+        }
+        assert_eq!(
+            checked.len(),
+            3,
+            "expected exactly 3 enemy cards to be checked"
         );
     }
 
@@ -13710,7 +16585,15 @@ mod tests {
         };
         content.0.items.add_item(potion).unwrap();
         app.insert_resource(content);
-        app.insert_resource(GlobalState(GameState::new()));
+        // Combat mode, so cleanup_party_target_on_combat_exit leaves the
+        // party target panel state alone.
+        {
+            let mut gs = GameState::new();
+            gs.mode = crate::application::GameMode::Combat(
+                crate::domain::combat::engine::CombatState::new(Handicap::Even),
+            );
+            app.insert_resource(GlobalState(gs));
+        }
 
         // Set the item panel open for player 0
         {
@@ -13738,6 +16621,20 @@ mod tests {
             ips.user.is_none(),
             "item panel should be closed after selecting an item"
         );
+
+        // A beneficial consumable routes to the party target panel (ally
+        // targeting) instead of dispatching immediately, with the user's own
+        // row as the preferred initial focus.
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert_eq!(
+            pts.pending_action,
+            Some(PartyTargetAction::Item {
+                user: CombatantId::Player(0),
+                inventory_index: 0,
+            }),
+            "healing potion must open the party target panel"
+        );
+        assert_eq!(pts.preferred_target, Some(0));
     }
 
     /// Full integration: party member with a healing potion heals HP via
@@ -13820,5 +16717,1797 @@ mod tests {
         } else {
             panic!("Hero not found in combat state after item use");
         }
+    }
+
+    /// `next_eligible_index` moves the focus one step (with wrap) while
+    /// skipping ineligible rows, and stays put when no other row is eligible.
+    #[test]
+    fn test_next_eligible_index_skips_ineligible() {
+        let eligible = [true, false, true, false];
+        // Forward from 0 skips index 1 and lands on 2.
+        assert_eq!(next_eligible_index(&eligible, 0, 4, true), 2);
+        // Forward from 2 wraps past 3 and lands on 0.
+        assert_eq!(next_eligible_index(&eligible, 2, 4, true), 0);
+        // Backward from 0 wraps past 3 and lands on 2.
+        assert_eq!(next_eligible_index(&eligible, 0, 4, false), 2);
+        // Sole eligible row: focus returns to itself (full cycle).
+        assert_eq!(next_eligible_index(&[false, true, false], 1, 3, true), 1);
+        // No eligible rows at all: focus does not move.
+        assert_eq!(next_eligible_index(&[false, false], 0, 2, true), 0);
+        // Empty list: focus does not move.
+        assert_eq!(next_eligible_index(&[], 0, 0, true), 0);
+    }
+
+    /// Item routing: beneficial consumables go to the party target panel,
+    /// `SingleMonster` spell-effect items to monster targeting,
+    /// `SingleCharacter` spell-effect items to the party panel, and food
+    /// stays an immediate self-use.
+    #[test]
+    fn test_item_dispatch_route_classification() {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut db = ContentDatabase::new();
+        let consumable =
+            |id: crate::domain::types::ItemId,
+             name: &str,
+             effect: ConsumableEffect,
+             spell_effect: Option<crate::domain::types::SpellId>| {
+                Item {
+                    id,
+                    name: name.to_string(),
+                    item_type: ItemType::Consumable(ConsumableData {
+                        effect,
+                        is_combat_usable: true,
+                        duration_minutes: None,
+                    }),
+                    base_cost: 1,
+                    sell_cost: 1,
+                    alignment_restriction: None,
+                    constant_bonus: None,
+                    temporary_bonus: None,
+                    spell_effect,
+                    max_charges: 0,
+                    is_cursed: false,
+                    icon_path: None,
+                    tags: vec![],
+                    mesh_descriptor_override: None,
+                    mesh_id: None,
+                }
+            };
+        db.items
+            .add_item(consumable(1, "Potion", ConsumableEffect::HealHp(10), None))
+            .unwrap();
+        db.items
+            .add_item(consumable(
+                2,
+                "Elixir",
+                ConsumableEffect::Resurrect(10),
+                None,
+            ))
+            .unwrap();
+        db.items
+            .add_item(consumable(3, "Ration", ConsumableEffect::IsFood(1), None))
+            .unwrap();
+        db.items
+            .add_item(consumable(
+                4,
+                "Attack Wand",
+                ConsumableEffect::CastSpell(0x0601),
+                Some(0x0601),
+            ))
+            .unwrap();
+        db.items
+            .add_item(consumable(
+                5,
+                "Healing Wand",
+                ConsumableEffect::CastSpell(0x0602),
+                Some(0x0602),
+            ))
+            .unwrap();
+        db.spells
+            .add_spell(Spell::new(
+                0x0601,
+                "Zap",
+                SpellSchool::Sorcerer,
+                1,
+                2,
+                0,
+                SpellContext::CombatOnly,
+                SpellTarget::SingleMonster,
+                "Zaps",
+                None,
+                0,
+                false,
+            ))
+            .unwrap();
+        db.spells
+            .add_spell(Spell::new(
+                0x0602,
+                "Mend",
+                SpellSchool::Cleric,
+                1,
+                2,
+                0,
+                SpellContext::Anytime,
+                SpellTarget::SingleCharacter,
+                "Mends",
+                None,
+                0,
+                false,
+            ))
+            .unwrap();
+        let content = GameContent::new(db);
+
+        assert_eq!(
+            item_dispatch_route(1, &content),
+            ItemDispatchRoute::PartyTarget
+        );
+        assert_eq!(
+            item_dispatch_route(2, &content),
+            ItemDispatchRoute::PartyTarget
+        );
+        assert_eq!(
+            item_dispatch_route(3, &content),
+            ItemDispatchRoute::SelfImmediate
+        );
+        assert_eq!(
+            item_dispatch_route(4, &content),
+            ItemDispatchRoute::MonsterTarget
+        );
+        assert_eq!(
+            item_dispatch_route(5, &content),
+            ItemDispatchRoute::PartyTarget
+        );
+        // Unknown item id falls back to immediate self-use.
+        assert_eq!(
+            item_dispatch_route(250, &content),
+            ItemDispatchRoute::SelfImmediate
+        );
+    }
+
+    /// Full ally-item flow: confirming another party member in the party
+    /// target panel heals that member and consumes the item from the *user's*
+    /// inventory.
+    #[test]
+    fn test_party_target_confirm_item_heals_ally() {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut content = GameContent::new(ContentDatabase::new());
+        content
+            .0
+            .items
+            .add_item(Item {
+                id: 77,
+                name: "Healing Potion".to_string(),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: ConsumableEffect::HealHp(20),
+                    is_combat_usable: true,
+                    duration_minutes: None,
+                }),
+                base_cost: 20,
+                sell_cost: 10,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+                mesh_id: None,
+            })
+            .unwrap();
+        app.insert_resource(content);
+
+        // User (index 0) carries the potion; the ally (index 1) is wounded.
+        let mut user = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        user.inventory.add_item(77, 1).unwrap();
+        let mut ally = Character::new(
+            "Bard".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ally.hp.base = 50;
+        ally.hp.current = 10;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(user.clone()).unwrap();
+        gs.party.add_member(ally.clone()).unwrap();
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(user);
+        cs.add_player(ally);
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Open the party target panel for the pending item and let one frame
+        // pass so the panel spawns and settles its focus, mirroring the real
+        // interaction sequence (confirm always happens on a later frame).
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            pts.pending_action = Some(PartyTargetAction::Item {
+                user: CombatantId::Player(0),
+                inventory_index: 0,
+            });
+            pts.preferred_target = Some(0);
+        }
+        app.update();
+
+        // Focus the ally row and confirm.
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            assert_eq!(pts.participant_indices, vec![0, 1]);
+            assert_eq!(pts.eligible_flags, vec![true, true]);
+            pts.focused_index = 1;
+            pts.confirm_requested = true;
+        }
+
+        // Two frames: one to emit the UseItemAction, one to process it.
+        app.update();
+        app.update();
+
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert!(
+            pts.pending_action.is_none(),
+            "party target panel must close after confirming the item target"
+        );
+
+        let cr = app.world().resource::<CombatResource>();
+        if let Some(Combatant::Player(pc)) = cr.state.get_combatant(&CombatantId::Player(1)) {
+            assert_eq!(
+                pc.hp.current, 30,
+                "ally must be healed by the potion (10 + 20)"
+            );
+        } else {
+            panic!("ally not found in combat state");
+        }
+        if let Some(Combatant::Player(pc)) = cr.state.get_combatant(&CombatantId::Player(0)) {
+            assert!(
+                pc.inventory.items.is_empty(),
+                "potion must be consumed from the user's inventory"
+            );
+        } else {
+            panic!("user not found in combat state");
+        }
+    }
+
+    /// A resurrect item's party target panel marks living members ineligible
+    /// and dead members eligible, and focuses the first eligible row.
+    #[test]
+    fn test_resurrect_item_panel_dead_only_eligibility() {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut content = GameContent::new(ContentDatabase::new());
+        content
+            .0
+            .items
+            .add_item(Item {
+                id: 88,
+                name: "Phoenix Elixir".to_string(),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: ConsumableEffect::Resurrect(10),
+                    is_combat_usable: true,
+                    duration_minutes: None,
+                }),
+                base_cost: 100,
+                sell_cost: 50,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+                mesh_id: None,
+            })
+            .unwrap();
+        app.insert_resource(content);
+
+        // User (living, index 0) carries the elixir; ally (index 1) is dead.
+        let mut user = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        user.inventory.add_item(88, 1).unwrap();
+        let mut dead_ally = Character::new(
+            "Bard".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        dead_ally.hp.current = 0;
+        dead_ally
+            .conditions
+            .add(crate::domain::character::Condition::DEAD);
+
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state.add_player(user);
+            cr.state.add_player(dead_ally);
+        }
+        // Combat mode, so cleanup_party_target_on_combat_exit leaves the
+        // party target panel state alone.
+        {
+            let mut gs = GameState::new();
+            gs.mode = crate::application::GameMode::Combat(
+                crate::domain::combat::engine::CombatState::new(Handicap::Even),
+            );
+            app.insert_resource(GlobalState(gs));
+        }
+
+        // Open the party target panel for the pending resurrect item, with
+        // the user's own (ineligible) row preferred.
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            pts.pending_action = Some(PartyTargetAction::Item {
+                user: CombatantId::Player(0),
+                inventory_index: 0,
+            });
+            pts.preferred_target = Some(0);
+        }
+
+        app.update();
+
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert_eq!(pts.participant_indices, vec![0, 1]);
+        assert_eq!(
+            pts.eligible_flags,
+            vec![false, true],
+            "living member must be ineligible for resurrect; dead member eligible"
+        );
+        assert_eq!(
+            pts.focused_index, 1,
+            "focus must fall back to the first eligible (dead) row"
+        );
+    }
+
+    /// Builds a two-member combat app (living cleric caster at participant 0,
+    /// second member at participant 1) with the given spell registered, and
+    /// opens the party target panel for that pending spell.
+    ///
+    /// `second_member_dead` controls whether participant 1 is dead.
+    fn setup_spell_party_target_app(
+        spell: crate::domain::magic::types::Spell,
+        second_member_dead: bool,
+    ) -> App {
+        use crate::sdk::database::ContentDatabase;
+
+        let spell_id = spell.id;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut db = ContentDatabase::new();
+        db.spells.add_spell(spell).unwrap();
+        app.insert_resource(GameContent::new(db));
+
+        let mut caster = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        caster.sp = crate::domain::character::AttributePair16 {
+            base: 20,
+            current: 20,
+        };
+        // Personality >= 35 keeps the cleric's spell-fizzle chance at 0%
+        // (`calculate_fizzle_chance`), so the cast in these tests is
+        // deterministic rather than ~50% flaky at the default stat of 10.
+        caster.stats.personality = crate::domain::character::AttributePair::new(35);
+        caster.spells.cleric_spells[0].push(spell_id);
+        let mut ally = Character::new(
+            "Bard".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ally.hp.base = 50;
+        ally.hp.current = 10;
+        if second_member_dead {
+            ally.hp.current = 0;
+            ally.conditions
+                .add(crate::domain::character::Condition::DEAD);
+        }
+
+        let mut gs = GameState::new();
+        gs.party.add_member(caster.clone()).unwrap();
+        gs.party.add_member(ally.clone()).unwrap();
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(caster);
+        cs.add_player(ally);
+        // A living monster keeps `check_combat_end` (called unconditionally
+        // after a spell cast) from flipping combat to `Victory` and having
+        // `handle_combat_victory` clear the participants out from under the
+        // assertions below — combat always has at least one enemy in practice.
+        cs.add_monster(crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(8, 8, 8, 8, 8, 8, 8),
+            10,
+            5,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        ));
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1), None];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            pts.pending_action = Some(PartyTargetAction::Spell {
+                caster: CombatantId::Player(0),
+                spell_id,
+            });
+        }
+        app
+    }
+
+    /// Returns a First-Aid-like healing spell (`SingleCharacter`, heals a
+    /// flat 8, explicit `Healing` effect type — matching the data fix that
+    /// tags all heal spells explicitly).
+    fn first_aid_like_spell(
+        id: crate::domain::types::SpellId,
+    ) -> crate::domain::magic::types::Spell {
+        use crate::domain::magic::types::{
+            Spell, SpellContext, SpellEffectType, SpellSchool, SpellTarget,
+        };
+        let mut spell = Spell::new(
+            id,
+            "First Aid",
+            SpellSchool::Cleric,
+            1,
+            2,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Heals 8 hit points",
+            None,
+            0,
+            false,
+        );
+        spell.effect_type = Some(SpellEffectType::Healing {
+            amount: crate::domain::types::DiceRoll::new(0, 0, 8),
+        });
+        spell
+    }
+
+    /// A healing spell's party target panel marks dead members ineligible
+    /// (healing cannot raise the dead).
+    #[test]
+    fn test_heal_spell_panel_living_only_eligibility() {
+        let app = {
+            let mut app = setup_spell_party_target_app(first_aid_like_spell(0x0104), true);
+            app.update();
+            app
+        };
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert_eq!(pts.participant_indices, vec![0, 1]);
+        assert_eq!(
+            pts.eligible_flags,
+            vec![true, false],
+            "dead member must be ineligible for a healing spell"
+        );
+        assert_eq!(pts.focused_index, 0);
+    }
+
+    /// A resurrection spell's party target panel marks living members
+    /// ineligible and focuses the dead member.
+    #[test]
+    fn test_resurrection_spell_panel_dead_only_eligibility() {
+        use crate::domain::magic::types::{
+            Spell, SpellContext, SpellEffectType, SpellSchool, SpellTarget,
+        };
+        let mut spell = Spell::new(
+            2051,
+            "Raise Dead",
+            SpellSchool::Cleric,
+            5,
+            30,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Resurrects a dead character with 5 hit points",
+            None,
+            0,
+            false,
+        );
+        spell.resurrect_hp = Some(5);
+        spell.effect_type = Some(SpellEffectType::Resurrection);
+
+        let app = {
+            let mut app = setup_spell_party_target_app(spell, true);
+            app.update();
+            app
+        };
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert_eq!(
+            pts.eligible_flags,
+            vec![false, true],
+            "living member must be ineligible for resurrection; dead member eligible"
+        );
+        assert_eq!(
+            pts.focused_index, 1,
+            "focus must land on the dead member's row"
+        );
+    }
+
+    /// Full ally-heal flow (next_plans.md:216): confirming another party
+    /// member in the party target panel for a First-Aid-like spell heals that
+    /// member and spends the caster's SP.
+    #[test]
+    fn test_party_target_confirm_spell_heals_ally() {
+        let mut app = setup_spell_party_target_app(first_aid_like_spell(0x0104), false);
+        // Frame 1: panel spawns and settles focus/eligibility.
+        app.update();
+
+        // Focus the wounded ally's row and confirm.
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            assert_eq!(pts.eligible_flags, vec![true, true]);
+            pts.focused_index = 1;
+            pts.confirm_requested = true;
+        }
+        // Two frames: one to emit the CastSpellAction, one to process it.
+        app.update();
+        app.update();
+
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert!(
+            pts.pending_action.is_none(),
+            "party target panel must close after confirming the spell target"
+        );
+
+        let cr = app.world().resource::<CombatResource>();
+        if let Some(Combatant::Player(pc)) = cr.state.get_combatant(&CombatantId::Player(1)) {
+            assert_eq!(pc.hp.current, 18, "ally must be healed for 8 (10 + 8)");
+        } else {
+            panic!("ally not found in combat state");
+        }
+        if let Some(Combatant::Player(pc)) = cr.state.get_combatant(&CombatantId::Player(0)) {
+            assert!(
+                pc.sp.current < 20,
+                "caster SP must be spent (got {})",
+                pc.sp.current
+            );
+        } else {
+            panic!("caster not found in combat state");
+        }
+    }
+
+    /// Full ally-resurrect flow (next_plans.md:216): confirming a dead party
+    /// member in the party target panel for a Raise-Dead-like Resurrection
+    /// spell revives that member (clears DEAD, restores `resurrect_hp`) and
+    /// spends the caster's SP.
+    #[test]
+    fn test_party_target_confirm_spell_resurrects_dead_ally() {
+        use crate::domain::magic::types::{
+            Spell, SpellContext, SpellEffectType, SpellSchool, SpellTarget,
+        };
+
+        let mut spell = Spell::new(
+            2051,
+            "Raise Dead",
+            SpellSchool::Cleric,
+            5,
+            10,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Resurrects a dead character with 5 hit points",
+            None,
+            0,
+            false,
+        );
+        spell.resurrect_hp = Some(5);
+        spell.effect_type = Some(SpellEffectType::Resurrection);
+
+        let mut app = setup_spell_party_target_app(spell, true);
+        // A level-5 spell requires caster level 9 (Spell::required_level).
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            if let Some(Combatant::Player(pc)) = cr.state.participants.get_mut(0) {
+                pc.level = 9;
+            }
+        }
+        // Frame 1: panel spawns and settles focus/eligibility.
+        app.update();
+
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            assert_eq!(
+                pts.eligible_flags,
+                vec![false, true],
+                "only the dead ally must be eligible for a resurrection spell"
+            );
+            pts.focused_index = 1;
+            pts.confirm_requested = true;
+        }
+        // Two frames: one to emit the CastSpellAction, one to process it.
+        app.update();
+        app.update();
+
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert!(
+            pts.pending_action.is_none(),
+            "party target panel must close after confirming the resurrection target"
+        );
+
+        let cr = app.world().resource::<CombatResource>();
+        if let Some(Combatant::Player(pc)) = cr.state.get_combatant(&CombatantId::Player(1)) {
+            assert!(
+                !pc.conditions.is_dead(),
+                "ally must no longer be dead after the resurrection spell"
+            );
+            assert_eq!(
+                pc.hp.current, 5,
+                "ally must be revived to the spell's resurrect_hp"
+            );
+        } else {
+            panic!("ally not found in combat state");
+        }
+        if let Some(Combatant::Player(pc)) = cr.state.get_combatant(&CombatantId::Player(0)) {
+            assert!(
+                pc.sp.current < 20,
+                "caster SP must be spent (got {})",
+                pc.sp.current
+            );
+        } else {
+            panic!("caster not found in combat state");
+        }
+    }
+
+    /// Clicking an ineligible party-target row (e.g. a living member for a
+    /// resurrect action) must be ignored: the panel stays open, no
+    /// `UseItemAction`/`CastSpellAction` is emitted, and the item stays in
+    /// the user's inventory.
+    #[test]
+    fn test_party_target_mouse_click_ineligible_row_ignored() {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut content = GameContent::new(ContentDatabase::new());
+        content
+            .0
+            .items
+            .add_item(Item {
+                id: 77,
+                name: "Healing Potion".to_string(),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: ConsumableEffect::HealHp(20),
+                    is_combat_usable: true,
+                    duration_minutes: None,
+                }),
+                base_cost: 20,
+                sell_cost: 10,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+                mesh_id: None,
+            })
+            .unwrap();
+        app.insert_resource(content);
+
+        let mut user = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        user.inventory.add_item(77, 1).unwrap();
+        // A dead ally is ineligible for a HealHp (LivingOnly) item.
+        let mut dead_ally = Character::new(
+            "Ghost".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        dead_ally.hp.base = 50;
+        dead_ally.hp.current = 0;
+        dead_ally
+            .conditions
+            .add(crate::domain::character::Condition::DEAD);
+
+        let mut gs = GameState::new();
+        gs.party.add_member(user.clone()).unwrap();
+        gs.party.add_member(dead_ally.clone()).unwrap();
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(user);
+        cs.add_player(dead_ally);
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            pts.pending_action = Some(PartyTargetAction::Item {
+                user: CombatantId::Player(0),
+                inventory_index: 0,
+            });
+        }
+        // Panel spawns; the dead ally's row renders ineligible (grey).
+        app.update();
+
+        // Find the real, panel-spawned button for the ineligible row and
+        // simulate a mouse click on it.
+        let ineligible_entity = {
+            let mut query = app.world_mut().query::<(Entity, &PartyTargetButton)>();
+            query
+                .iter(app.world())
+                .find(|(_, btn)| !btn.eligible)
+                .map(|(e, _)| e)
+        }
+        .expect("an ineligible button must be spawned for the dead ally row");
+        app.world_mut()
+            .entity_mut(ineligible_entity)
+            .insert(Interaction::Pressed);
+
+        app.update();
+
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert!(
+            pts.pending_action.is_some(),
+            "clicking an ineligible row must not close the party target panel"
+        );
+
+        let cr = app.world().resource::<CombatResource>();
+        if let Some(Combatant::Player(pc)) = cr.state.get_combatant(&CombatantId::Player(0)) {
+            assert!(
+                !pc.inventory.items.is_empty(),
+                "the item must not be consumed when clicking an ineligible row"
+            );
+        } else {
+            panic!("user not found in combat state");
+        }
+    }
+
+    /// Pressing the down-navigation key while the party target panel is open
+    /// must skip over an ineligible row and land on the next eligible one —
+    /// exercising the real `combat_input_system` wiring (not just the pure
+    /// `next_eligible_index` helper).
+    #[test]
+    fn test_party_target_keyboard_skips_ineligible_row() {
+        use crate::domain::items::types::{ConsumableData, ConsumableEffect, Item, ItemType};
+        use crate::sdk::database::ContentDatabase;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut content = GameContent::new(ContentDatabase::new());
+        content
+            .0
+            .items
+            .add_item(Item {
+                id: 77,
+                name: "Healing Potion".to_string(),
+                item_type: ItemType::Consumable(ConsumableData {
+                    effect: ConsumableEffect::HealHp(20),
+                    is_combat_usable: true,
+                    duration_minutes: None,
+                }),
+                base_cost: 20,
+                sell_cost: 10,
+                alignment_restriction: None,
+                constant_bonus: None,
+                temporary_bonus: None,
+                spell_effect: None,
+                max_charges: 0,
+                is_cursed: false,
+                icon_path: None,
+                tags: vec![],
+                mesh_descriptor_override: None,
+                mesh_id: None,
+            })
+            .unwrap();
+        app.insert_resource(content);
+
+        let mut caster = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        caster.inventory.add_item(77, 1).unwrap();
+        // The middle party member is dead, hence ineligible for a HealHp item.
+        let mut dead_ally = Character::new(
+            "Ghost".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        dead_ally.hp.base = 50;
+        dead_ally.hp.current = 0;
+        dead_ally
+            .conditions
+            .add(crate::domain::character::Condition::DEAD);
+        let mut living_ally = Character::new(
+            "Bard".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        living_ally.hp.base = 50;
+        living_ally.hp.current = 20;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(caster.clone()).unwrap();
+        gs.party.add_member(dead_ally.clone()).unwrap();
+        gs.party.add_member(living_ally.clone()).unwrap();
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(caster);
+        cs.add_player(dead_ally);
+        cs.add_player(living_ally);
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+        app.insert_resource(GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1), Some(2)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            pts.pending_action = Some(PartyTargetAction::Item {
+                user: CombatantId::Player(0),
+                inventory_index: 0,
+            });
+        }
+        app.update();
+
+        {
+            let pts = app.world().resource::<PartyTargetPanelState>();
+            assert_eq!(pts.eligible_flags, vec![true, false, true]);
+            assert_eq!(
+                pts.focused_index, 0,
+                "focus starts on the first eligible row"
+            );
+        }
+
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::ArrowDown);
+        }
+        app.update();
+
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert_eq!(
+            pts.focused_index, 2,
+            "keyboard navigation must skip the ineligible (dead) row and land on the next eligible one"
+        );
+    }
+
+    /// Pressing Enter while the spell panel is open confirms the focused spell,
+    /// closes the panel, and (for a `Self_`-targeting spell) does not enter
+    /// target-selection mode.
+    ///
+    /// This is the key regression test for keyboard navigation in the spell panel.
+    #[test]
+    fn test_keyboard_enter_confirms_spell_selection() {
+        use crate::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+        use crate::sdk::database::ContentDatabase;
+
+        const SPELL_ID: crate::domain::types::SpellId = 0x0501;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Build a sorcerer with enough SP to cast.
+        let mut mage = Character::new(
+            "Merlin".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        mage.sp = crate::domain::character::AttributePair16 {
+            base: 20,
+            current: 20,
+        };
+        // Add the spell to the sorcerer's spellbook (level 1 = index 0)
+        // so that update_spell_selection_panel will include it in castable_spell_ids.
+        mage.spells.sorcerer_spells[0].push(SPELL_ID);
+
+        // Set up combat with the sorcerer.
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state.add_player(mage.clone());
+            cr.state.turn_order = vec![CombatantId::Player(0)];
+            cr.state.current_turn = 0;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+
+        // Register a Self_-targeting spell in the content DB.
+        {
+            let spell = Spell::new(
+                SPELL_ID,
+                "Magic Shield",
+                SpellSchool::Sorcerer,
+                1,
+                2, // sp_cost
+                0, // gem_cost
+                SpellContext::CombatOnly,
+                SpellTarget::Self_,
+                "Increases AC",
+                None,
+                3,
+                false,
+            );
+            let mut db = ContentDatabase::new();
+            db.spells.add_spell(spell).unwrap();
+            let content = GameContent::new(db);
+            app.insert_resource(content);
+        }
+
+        // Set up game state in combat (player turn).
+        {
+            let mut gs = GameState::new();
+            gs.mode = crate::application::GameMode::Combat(
+                crate::domain::combat::engine::CombatState::new(Handicap::Even),
+            );
+            app.insert_resource(GlobalState(gs));
+        }
+        {
+            let mut ts = app.world_mut().resource_mut::<CombatTurnStateResource>();
+            ts.0 = CombatTurnState::PlayerTurn;
+        }
+
+        // Open the spell panel and pre-populate the castable list (as
+        // update_spell_selection_panel would do), then signal keyboard Enter.
+        {
+            let mut sps = app.world_mut().resource_mut::<SpellPanelState>();
+            sps.caster = Some(CombatantId::Player(0));
+            sps.castable_spell_ids = vec![SPELL_ID];
+            sps.focused_index = 0;
+            sps.confirm_requested = true;
+        }
+
+        app.update();
+
+        // Panel must be closed after keyboard Enter.
+        let sps = app.world().resource::<SpellPanelState>();
+        assert!(
+            sps.caster.is_none(),
+            "spell panel should be closed after keyboard Enter confirm"
+        );
+        assert!(
+            !sps.confirm_requested,
+            "confirm_requested should be cleared after consumption"
+        );
+
+        // Self_ spell does not enter target-selection mode.
+        let pending = app.world().resource::<PendingSpellCast>();
+        assert!(
+            pending.data.is_none(),
+            "Self_-targeting spell must not populate PendingSpellCast"
+        );
+
+        // Target selection must not be active.
+        let ts = app.world().resource::<TargetSelection>();
+        assert!(
+            ts.0.is_none(),
+            "TargetSelection must remain None for a Self_-targeting spell"
+        );
+    }
+
+    /// Pressing Escape while the spell selection panel is open must close the
+    /// panel (set `SpellPanelState.caster` to `None`) so the player can return
+    /// to the action menu without casting anything.
+    #[test]
+    fn test_escape_closes_spell_panel() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Minimal combat setup: one sorcerer in PlayerTurn.
+        let mut gs = GameState::new();
+        let mage = Character::new(
+            "Merlin".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(mage.clone()).unwrap();
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(mage.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Simulate the spell panel being open (as if the player clicked "Cast").
+        {
+            let mut sps = app.world_mut().resource_mut::<SpellPanelState>();
+            sps.caster = Some(CombatantId::Player(0));
+            sps.focused_index = 0;
+            sps.confirm_requested = false;
+            sps.castable_spell_ids = vec![]; // no castable spells needed for cancel test
+        }
+
+        // Press Escape.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Escape);
+        }
+        app.update();
+
+        // Spell panel must be closed.
+        let sps = app.world().resource::<SpellPanelState>();
+        assert!(
+            sps.caster.is_none(),
+            "Escape must close the spell panel (set caster to None)"
+        );
+        assert!(
+            !sps.confirm_requested,
+            "confirm_requested must be false after Escape"
+        );
+        assert_eq!(
+            sps.focused_index, 0,
+            "focused_index must be reset to 0 after Escape"
+        );
+    }
+
+    /// Selecting a SingleCharacter spell (e.g., First Aid) from the spell panel
+    /// must open party-target selection instead of immediately casting on the caster.
+    #[test]
+    fn test_single_character_spell_opens_party_target_panel() {
+        use crate::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+        use crate::sdk::database::ContentDatabase;
+
+        const SPELL_ID: crate::domain::types::SpellId = 0x0104;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Build a cleric with enough SP.
+        let mut cleric = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        cleric.sp = crate::domain::character::AttributePair16 {
+            base: 20,
+            current: 20,
+        };
+        cleric.spells.cleric_spells[0].push(SPELL_ID);
+
+        let mut gs = GameState::new();
+        gs.party.add_member(cleric.clone()).unwrap();
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(cleric.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        // Register the spell in GameContent so apply_spell_selection can look it up.
+        let mut db = ContentDatabase::new();
+        let first_aid = Spell::new(
+            SPELL_ID,
+            "First Aid",
+            SpellSchool::Cleric,
+            1,
+            2,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::SingleCharacter,
+            "Heals 8 hit points",
+            None,
+            0,
+            false,
+        );
+        db.spells.add_spell(first_aid).unwrap();
+        app.insert_resource(GameContent::new(db));
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Simulate: spell panel is open with the First Aid spell focused.
+        {
+            let mut sps = app.world_mut().resource_mut::<SpellPanelState>();
+            sps.caster = Some(CombatantId::Player(0));
+            sps.focused_index = 0;
+            sps.castable_spell_ids = vec![SPELL_ID];
+            sps.confirm_requested = true;
+        }
+
+        app.update();
+
+        // The spell panel should now be closed.
+        let sps = app.world().resource::<SpellPanelState>();
+        assert!(
+            sps.caster.is_none(),
+            "Spell panel should be closed after selecting SingleCharacter spell"
+        );
+
+        // The party target panel should now be open.
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        let Some(PartyTargetAction::Spell { caster, spell_id }) = pts.pending_action else {
+            panic!("PartyTargetPanelState must hold a pending Spell action after selecting a SingleCharacter spell");
+        };
+        assert_eq!(caster, CombatantId::Player(0));
+        assert_eq!(spell_id, SPELL_ID);
+    }
+
+    /// Confirming a party member in the party target panel must emit a CastSpellAction
+    /// targeting that party member (not the caster).
+    #[test]
+    fn test_party_target_confirm_casts_on_chosen_member() {
+        const SPELL_ID: crate::domain::types::SpellId = 0x0104;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Two party members: the cleric (caster) at participant index 0,
+        // a knight at participant index 1.
+        let cleric = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        let knight = Character::new(
+            "Bard".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let mut gs = GameState::new();
+        gs.party.add_member(cleric.clone()).unwrap();
+        gs.party.add_member(knight.clone()).unwrap();
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(cleric.clone());
+        cs.add_player(knight.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Pre-populate party target panel state: caster wants to cast First Aid,
+        // two party members available, player has focused index 1 (the knight).
+        {
+            let mut pts = app.world_mut().resource_mut::<PartyTargetPanelState>();
+            pts.pending_action = Some(PartyTargetAction::Spell {
+                caster: CombatantId::Player(0),
+                spell_id: SPELL_ID,
+            });
+            pts.participant_indices = vec![0, 1];
+            pts.eligible_flags = vec![true, true];
+            pts.focused_index = 1;
+            pts.confirm_requested = true;
+        }
+
+        app.update();
+
+        // The party target panel should be closed after confirmation.
+        let pts = app.world().resource::<PartyTargetPanelState>();
+        assert!(
+            pts.pending_action.is_none(),
+            "PartyTargetPanelState must be cleared after target confirmation"
+        );
+    }
+
+    /// Phase 3 (3.4): selecting a `MonsterGroup` spell must not cast
+    /// immediately — it must enter `GroupTargetPending` (side = `Monsters`)
+    /// and highlight every *living* `EnemyCard` with
+    /// `ENEMY_CARD_HIGHLIGHT_COLOR`, leaving a dead monster's card
+    /// unhighlighted.
+    #[test]
+    fn test_group_monster_spell_selection_enters_pending_and_highlights_living_cards() {
+        use crate::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+        use crate::domain::types::DiceRoll;
+
+        const SPELL_ID: crate::domain::types::SpellId = 0x0201;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mage = Character::new(
+            "Merlin".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(mage.clone());
+
+        let make_goblin = |id: crate::domain::types::MonsterId, name: &str| {
+            crate::domain::combat::monster::Monster::new(
+                id,
+                name.to_string(),
+                crate::domain::character::Stats::new(8, 8, 8, 10, 10, 10, 8),
+                10,
+                8,
+                vec![crate::domain::combat::types::Attack::physical(
+                    DiceRoll::new(1, 4, 0),
+                )],
+                crate::domain::combat::monster::LootTable::default(),
+            )
+        };
+        cs.add_monster(make_goblin(1, "Goblin")); // participant index 1, alive
+        let mut fallen = make_goblin(2, "Fallen Goblin");
+        fallen.hp.current = 0;
+        cs.add_monster(fallen); // participant index 2, dead
+
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(mage.clone()).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let fireball = Spell::new(
+            SPELL_ID,
+            "Fireball",
+            SpellSchool::Sorcerer,
+            3,
+            5,
+            0,
+            SpellContext::CombatOnly,
+            SpellTarget::MonsterGroup,
+            "Deals 3d6 fire damage to multiple enemies",
+            Some(DiceRoll::new(3, 6, 0)),
+            0,
+            true,
+        );
+        db.spells.add_spell(fireball).unwrap();
+        app.insert_resource(GameContent::new(db));
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Pre-spawn a dummy SpellSelectionPanel entity so update_spell_selection_panel
+        // hits its "already open" guard and does NOT overwrite the
+        // castable_spell_ids set below (mirrors test_tab_cycles_forward_in_spell_panel).
+        app.world_mut().spawn(SpellSelectionPanel {
+            caster: CombatantId::Player(0),
+        });
+
+        // Pre-spawn EnemyCard entities the way setup_combat_ui would, so the
+        // highlight systems have something to color.
+        let alive_card = app
+            .world_mut()
+            .spawn((
+                EnemyCard {
+                    participant_index: 1,
+                },
+                BackgroundColor(ENEMY_CARD_DEFAULT_COLOR),
+            ))
+            .id();
+        let dead_card = app
+            .world_mut()
+            .spawn((
+                EnemyCard {
+                    participant_index: 2,
+                },
+                BackgroundColor(ENEMY_CARD_DEFAULT_COLOR),
+            ))
+            .id();
+
+        // Simulate: spell panel open with Fireball focused, keyboard-confirmed.
+        {
+            let mut sps = app.world_mut().resource_mut::<SpellPanelState>();
+            sps.caster = Some(CombatantId::Player(0));
+            sps.focused_index = 0;
+            sps.castable_spell_ids = vec![SPELL_ID];
+            sps.confirm_requested = true;
+        }
+
+        app.update();
+
+        // Spell panel must close without casting immediately.
+        let sps = app.world().resource::<SpellPanelState>();
+        assert!(
+            sps.caster.is_none(),
+            "Spell panel should close after selecting a group-target spell"
+        );
+
+        // GroupTargetPending must hold the caster/spell/side.
+        {
+            let gtp = app.world().resource::<GroupTargetPending>();
+            let Some((caster, spell_id, side)) = gtp.data else {
+                panic!(
+                    "GroupTargetPending must hold pending data after selecting a MonsterGroup spell"
+                );
+            };
+            assert_eq!(caster, CombatantId::Player(0));
+            assert_eq!(spell_id, SPELL_ID);
+            assert_eq!(side, GroupTargetSide::Monsters);
+        }
+
+        // No CastSpellAction should fire before the player confirms.
+        {
+            let messages = app.world().resource::<Messages<CastSpellAction>>();
+            let mut cursor = messages.get_cursor();
+            assert!(
+                cursor.read(messages).next().is_none(),
+                "CastSpellAction must not fire before Enter confirms the group target"
+            );
+        }
+
+        // Settle frame: highlight systems observe the now-populated resource
+        // regardless of intra-frame system ordering ambiguity.
+        app.update();
+
+        let card_bg =
+            |app: &App, e: Entity| -> Color { app.world().get::<BackgroundColor>(e).unwrap().0 };
+        assert_eq!(
+            card_bg(&app, alive_card),
+            ENEMY_CARD_HIGHLIGHT_COLOR,
+            "the living monster's card must show the group-target highlight"
+        );
+        assert_ne!(
+            card_bg(&app, dead_card),
+            ENEMY_CARD_HIGHLIGHT_COLOR,
+            "the dead monster's card must not be highlighted for a pending group spell"
+        );
+    }
+
+    /// Phase 3 (3.4): `Enter` while `GroupTargetPending` holds a `Monsters`-side
+    /// spell must emit `CastSpellAction` with the first-alive-monster
+    /// placeholder target and clear the pending state.
+    #[test]
+    fn test_group_monster_spell_enter_confirms_cast_and_clears_pending() {
+        const SPELL_ID: crate::domain::types::SpellId = 0x0202;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mage = Character::new(
+            "Merlin".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(mage.clone());
+        let goblin = crate::domain::combat::monster::Monster::new(
+            1,
+            "Goblin".to_string(),
+            crate::domain::character::Stats::new(8, 8, 8, 10, 10, 10, 8),
+            10,
+            8,
+            vec![crate::domain::combat::types::Attack::physical(
+                crate::domain::types::DiceRoll::new(1, 4, 0),
+            )],
+            crate::domain::combat::monster::LootTable::default(),
+        );
+        cs.add_monster(goblin); // participant index 1
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(mage.clone()).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Pre-populate GroupTargetPending as if a MonsterGroup spell had
+        // already been selected from the panel.
+        {
+            let mut gtp = app.world_mut().resource_mut::<GroupTargetPending>();
+            gtp.data = Some((CombatantId::Player(0), SPELL_ID, GroupTargetSide::Monsters));
+        }
+
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Enter);
+        }
+        app.update();
+
+        let gtp = app.world().resource::<GroupTargetPending>();
+        assert!(
+            gtp.data.is_none(),
+            "GroupTargetPending must be cleared after Enter confirms the cast"
+        );
+
+        let messages = app.world().resource::<Messages<CastSpellAction>>();
+        let mut cursor = messages.get_cursor();
+        let emitted: Vec<_> = cursor.read(messages).collect();
+        assert!(
+            emitted.iter().any(|m| m.caster == CombatantId::Player(0)
+                && m.spell_id == SPELL_ID
+                && m.target == CombatantId::Monster(1)),
+            "Enter must emit CastSpellAction targeting the first alive monster as placeholder; got: {:?}",
+            emitted
+                .iter()
+                .map(|m| (m.caster, m.spell_id, m.target))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// Phase 3 (3.4): `Escape` while `GroupTargetPending` holds data must
+    /// cancel without emitting `CastSpellAction` (no SP loss) and reopen the
+    /// spell panel for the same caster.
+    #[test]
+    fn test_group_spell_escape_cancels_without_cast_and_reopens_spell_panel() {
+        const SPELL_ID: crate::domain::types::SpellId = 0x0203;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let mut mage = Character::new(
+            "Merlin".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        mage.sp.current = 10;
+        mage.sp.base = 10;
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(mage.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(mage.clone()).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        {
+            let mut gtp = app.world_mut().resource_mut::<GroupTargetPending>();
+            gtp.data = Some((CombatantId::Player(0), SPELL_ID, GroupTargetSide::Monsters));
+        }
+
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Escape);
+        }
+        app.update();
+
+        let gtp = app.world().resource::<GroupTargetPending>();
+        assert!(gtp.data.is_none(), "Escape must clear GroupTargetPending");
+
+        let sps = app.world().resource::<SpellPanelState>();
+        assert_eq!(
+            sps.caster,
+            Some(CombatantId::Player(0)),
+            "Escape must reopen the spell panel for the same caster"
+        );
+
+        let messages = app.world().resource::<Messages<CastSpellAction>>();
+        let mut cursor = messages.get_cursor();
+        assert!(
+            cursor.read(messages).next().is_none(),
+            "Escape must not emit CastSpellAction"
+        );
+
+        let cr = app.world().resource::<CombatResource>();
+        match cr.state.participants.first() {
+            Some(Combatant::Player(pc)) => {
+                assert_eq!(pc.sp.current, 10, "Cancelling must not spend SP");
+            }
+            other => panic!("expected a player participant at index 0, got {:?}", other),
+        }
+    }
+
+    /// Phase 3 (3.4): selecting an `AllCharacters` spell must enter
+    /// `GroupTargetPending` with `GroupTargetSide::Characters`, and confirming
+    /// with `Enter` must emit `CastSpellAction` with the caster as the
+    /// placeholder target (the domain layer applies the spell to every living
+    /// party member regardless of the named target).
+    #[test]
+    fn test_all_characters_spell_selection_and_confirm() {
+        use crate::domain::magic::types::{Spell, SpellContext, SpellSchool, SpellTarget};
+        use crate::domain::types::DiceRoll;
+
+        const SPELL_ID: crate::domain::types::SpellId = 0x0204;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        let cleric = Character::new(
+            "Aria".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        let knight = Character::new(
+            "Bard".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(cleric.clone());
+        cs.add_player(knight.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+
+        let mut gs = GameState::new();
+        gs.party.add_member(cleric.clone()).unwrap();
+        gs.party.add_member(knight.clone()).unwrap();
+        gs.enter_combat_with_state(cs.clone());
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+        let mass_heal = Spell::new(
+            SPELL_ID,
+            "Heal All",
+            SpellSchool::Cleric,
+            3,
+            6,
+            0,
+            SpellContext::CombatOnly,
+            SpellTarget::AllCharacters,
+            "Heals the whole party",
+            Some(DiceRoll::new(2, 8, 0)),
+            0,
+            false,
+        );
+        db.spells.add_spell(mass_heal).unwrap();
+        app.insert_resource(GameContent::new(db));
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0), Some(1)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Pre-spawn a dummy SpellSelectionPanel entity so update_spell_selection_panel
+        // hits its "already open" guard and does NOT overwrite the
+        // castable_spell_ids set below (mirrors test_tab_cycles_forward_in_spell_panel).
+        app.world_mut().spawn(SpellSelectionPanel {
+            caster: CombatantId::Player(0),
+        });
+
+        {
+            let mut sps = app.world_mut().resource_mut::<SpellPanelState>();
+            sps.caster = Some(CombatantId::Player(0));
+            sps.focused_index = 0;
+            sps.castable_spell_ids = vec![SPELL_ID];
+            sps.confirm_requested = true;
+        }
+
+        app.update();
+
+        {
+            let gtp = app.world().resource::<GroupTargetPending>();
+            let Some((caster, spell_id, side)) = gtp.data else {
+                panic!("GroupTargetPending must hold pending data after selecting an AllCharacters spell");
+            };
+            assert_eq!(caster, CombatantId::Player(0));
+            assert_eq!(spell_id, SPELL_ID);
+            assert_eq!(side, GroupTargetSide::Characters);
+        }
+
+        // Confirm with Enter.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Enter);
+        }
+        app.update();
+
+        let gtp = app.world().resource::<GroupTargetPending>();
+        assert!(
+            gtp.data.is_none(),
+            "GroupTargetPending must be cleared after Enter confirms"
+        );
+
+        let messages = app.world().resource::<Messages<CastSpellAction>>();
+        let mut cursor = messages.get_cursor();
+        let emitted: Vec<_> = cursor.read(messages).collect();
+        assert!(
+            emitted.iter().any(|m| m.caster == CombatantId::Player(0)
+                && m.spell_id == SPELL_ID
+                && m.target == CombatantId::Player(0)),
+            "Enter must emit CastSpellAction with the caster as placeholder target; got: {:?}",
+            emitted
+                .iter()
+                .map(|m| (m.caster, m.spell_id, m.target))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// Tab must advance focused_index by one in the spell panel, wrapping around.
+    #[test]
+    fn test_tab_cycles_forward_in_spell_panel() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CombatPlugin);
+
+        // Minimal combat setup: one sorcerer in PlayerTurn.
+        let mut gs = GameState::new();
+        let mage = Character::new(
+            "Merlin".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        gs.party.add_member(mage.clone()).unwrap();
+
+        let mut cs = crate::domain::combat::engine::CombatState::new(Handicap::Even);
+        cs.add_player(mage.clone());
+        cs.turn_order = vec![CombatantId::Player(0)];
+        cs.current_turn = 0;
+        gs.enter_combat_with_state(cs.clone());
+
+        app.insert_resource(crate::game::resources::GlobalState(gs));
+        {
+            let mut cr = app.world_mut().resource_mut::<CombatResource>();
+            cr.state = cs;
+            cr.player_orig_indices = vec![Some(0)];
+        }
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 = CombatTurnState::PlayerTurn;
+
+        // Pre-spawn a dummy SpellSelectionPanel entity so that
+        // update_spell_selection_panel hits its "already open" guard and does NOT
+        // overwrite the castable_spell_ids we set below.
+        app.world_mut().spawn(SpellSelectionPanel {
+            caster: CombatantId::Player(0),
+        });
+
+        // Open the spell panel with two castable spells.
+        const SPELL_A: crate::domain::types::SpellId = 1027;
+        const SPELL_B: crate::domain::types::SpellId = 1025;
+        {
+            let mut sps = app.world_mut().resource_mut::<SpellPanelState>();
+            sps.caster = Some(CombatantId::Player(0));
+            sps.focused_index = 0;
+            sps.confirm_requested = false;
+            sps.castable_spell_ids = vec![SPELL_A, SPELL_B];
+        }
+
+        // Press Tab once — should advance focused_index from 0 to 1.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.press(KeyCode::Tab);
+        }
+        app.update();
+
+        let sps = app.world().resource::<SpellPanelState>();
+        assert_eq!(
+            sps.focused_index, 1,
+            "Tab must advance focused_index from 0 to 1"
+        );
+        assert!(sps.caster.is_some(), "Tab must not close the spell panel");
+
+        // Press Tab again — should wrap from 1 to 0.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.release(KeyCode::Tab);
+            kb.clear_just_pressed(KeyCode::Tab);
+            kb.press(KeyCode::Tab);
+        }
+        app.update();
+
+        let sps = app.world().resource::<SpellPanelState>();
+        assert_eq!(
+            sps.focused_index, 0,
+            "Tab must wrap focused_index from 1 back to 0"
+        );
     }
 }

@@ -1525,6 +1525,8 @@ mod tests {
                 ],
                 gold: 75,
                 gems: 3,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         let mut world = World::new();
@@ -1742,6 +1744,8 @@ mod tests {
                 lock_id: lock_id.to_string(),
                 key_item_id: None,
                 initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -1828,6 +1832,8 @@ mod tests {
                 lock_id: lock_id.to_string(),
                 key_item_id: None,
                 initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 

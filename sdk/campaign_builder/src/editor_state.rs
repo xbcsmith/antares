@@ -66,6 +66,9 @@ pub struct CampaignData {
 
     /// Level thresholds loaded from `data/levels.ron`.
     pub levels: Vec<antares::domain::ClassLevelThresholds>,
+
+    /// Object entries resolved from `data/object_mesh_registry.ron`.
+    pub objects: Vec<objects_editor::ObjectEntry>,
 }
 
 // ─── EditorRegistry ──────────────────────────────────────────────────────────
@@ -108,6 +111,9 @@ pub struct EditorRegistry {
 
     /// Landscape editor state.
     pub landscape_editor_state: LandscapeEditorState,
+
+    /// Objects editor state.
+    pub objects_editor_state: objects_editor::ObjectsEditorState,
 
     /// Maps editor state.
     pub maps_editor_state: MapsEditorState,
@@ -166,6 +172,7 @@ impl Default for EditorRegistry {
             conditions_editor_state: ConditionsEditorState::new(),
             furniture_editor_state: furniture_editor::FurnitureEditorState::new(),
             landscape_editor_state: LandscapeEditorState::new(),
+            objects_editor_state: objects_editor::ObjectsEditorState::new(),
             maps_editor_state: MapsEditorState::new(),
             quest_editor_state: QuestEditorState::default(),
             dialogue_editor_state: DialogueEditorState::default(),

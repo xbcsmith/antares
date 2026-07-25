@@ -10,6 +10,7 @@ use crate::domain::types::{ItemId, MapId, Position};
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+pub mod font_handles;
 pub mod game_data;
 pub mod grass_quality_settings;
 pub mod performance;
@@ -18,6 +19,7 @@ pub mod terrain_material_cache;
 pub mod wind_config;
 
 // Re-export commonly used types
+pub use font_handles::CampaignFontHandles;
 pub use game_data::GameDataResource;
 pub use grass_quality_settings::{GrassPerformanceLevel, GrassQualitySettings};
 pub use performance::{

@@ -19,6 +19,7 @@
 //! - `dropped_items`: Domain record for items lying on the ground ([`DroppedItem`])
 //! - `furniture`: Data-driven furniture definitions ([`FurnitureDefinition`], [`FurnitureDatabase`])
 //! - `landscape`: Data-driven landscape definitions and map placements
+//! - `object_mesh`: Unified object mesh registry ([`ObjectMeshDatabase`])
 //! - `lock`: Lock state domain types and unlock functions ([`LockState`], [`try_unlock`], etc.)
 
 pub mod blueprint;
@@ -31,6 +32,7 @@ pub mod lock;
 mod movement;
 pub mod npc;
 pub mod npc_runtime;
+pub mod object_mesh;
 pub mod sprite_selection;
 mod types;
 pub mod wind;
@@ -57,6 +59,7 @@ pub use npc::{NpcDefinition, NpcId, NpcPlacement};
 pub use npc_runtime::{
     MerchantStockTemplate, MerchantStockTemplateDatabase, NpcRuntimeState, NpcRuntimeStore,
 };
+pub use object_mesh::{ObjectMeshDatabase, ObjectMeshError};
 pub use types::{
     ArchConfig, AsyncMeshConfig, AsyncMeshTaskId, ColumnConfig, ColumnStyle, DetailLevel,
     DoorFrameConfig, EncounterGroup, EncounterTable, FurnitureAppearancePreset, FurnitureCategory,

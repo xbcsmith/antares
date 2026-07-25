@@ -47,6 +47,39 @@ pub const BODY_FONT_SIZE: f32 = 16.0;
 /// labels, and the game-log header.
 pub const LABEL_FONT_SIZE: f32 = 14.0;
 
+// ===== Font-Size Tiers (combat/HUD text hierarchy) =====
+//
+// A second family of shared sizes, below `LABEL_FONT_SIZE`/`BODY_FONT_SIZE`,
+// covering the compact tiers used inside combat cards and modal panels
+// (spell/item/party-target selection). Introduced to close out
+// `docs/explanation/next_plans.md`'s "Fonts are using different sizes on the
+// same line" report: several sibling text nodes on the same card/row were
+// using ad-hoc literals that had silently drifted apart from one another.
+// See `docs/explanation/combat_improvements_implementation_plan.md` Phase 5.
+
+/// Hint / keyboard-footer text size (9.5 px) — the smallest tier, used for
+/// the "[Enter] confirm — [Esc] cancel"-style footer line at the bottom of
+/// modal selection panels (spell, party-target).
+pub const UI_FONT_SIZE_XS: f32 = 9.5;
+
+/// Compact numeric/status readout size (10 px) — HP numbers, condition
+/// labels, and the enemy inspect strip on combat cards, so a card's stat
+/// block reads as one consistent size instead of each line picking its own.
+pub const UI_FONT_SIZE_SM: f32 = 10.0;
+
+/// Interactive row / button label size (11 px) — spell, item, and
+/// party-target panel row buttons, their Cancel buttons, and empty-state
+/// messages shown in place of an empty row list.
+pub const UI_FONT_SIZE_MD: f32 = 11.0;
+
+/// Modal panel / section title size (13 px) — the header line of the spell,
+/// item, party-target, and group-target-confirm panels.
+pub const UI_FONT_SIZE_LG: f32 = 13.0;
+
+/// High-emphasis size (18 px) — floating combat damage/heal numbers at full
+/// impact and the defeat-screen headline.
+pub const UI_FONT_SIZE_XL: f32 = 18.0;
+
 /// Creates a ([`TextFont`], [`TextColor`]) bundle pair with the given size and
 /// color.
 ///
@@ -80,6 +113,50 @@ pub fn text_style(font_size: f32, color: Color) -> (TextFont, TextColor) {
         },
         TextColor(color),
     )
+}
+
+/// Creates a ([`TextFont`], [`TextColor`]) bundle pair, optionally applying a
+/// custom font handle.
+///
+/// When `font` is `Some`, the returned [`TextFont`] uses that specific font
+/// asset.  When `None`, the Bevy engine default font is used, matching the
+/// behavior of [`text_style`].
+///
+/// # Arguments
+///
+/// * `font`      — Custom font handle. `None` uses the Bevy engine default.
+/// * `font_size` — Font size in logical pixels.
+/// * `color`     — Text color.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use bevy::prelude::*;
+/// # use antares::game::systems::ui_helpers::text_style_with_font;
+/// # fn example(mut commands: Commands) {
+/// commands.spawn((
+///     Text::new("Hello"),
+///     text_style_with_font(None, 16.0, Color::WHITE),
+/// ));
+/// # }
+/// ```
+pub fn text_style_with_font(
+    font: Option<Handle<Font>>,
+    font_size: f32,
+    color: Color,
+) -> (TextFont, TextColor) {
+    let text_font = match font {
+        Some(handle) => TextFont {
+            font: handle,
+            font_size,
+            ..default()
+        },
+        None => TextFont {
+            font_size,
+            ..default()
+        },
+    };
+    (text_font, TextColor(color))
 }
 
 /// Creates a square RGBA8 image filled with transparent black pixels.
@@ -125,6 +202,270 @@ pub fn create_blank_rgba_image(size: u32) -> Image {
     )
 }
 
+// ===== Condition & Turn-State Card Color Scheme =====
+//
+// Single source of truth for condition-based card tinting, shared by the
+// combat enemy cards (`src/game/systems/combat.rs`) and the HUD party cards
+// (`src/game/systems/hud.rs`). See `docs/reference/condition_color_scheme.md`
+// for the full reference table. All tints use alpha < 1.0 — translucent
+// overlays only, never opaque, so the card's icon/text content stays legible.
+
+/// Colour for fatal condition tints ("Dead") — transparent red.
+pub const CONDITION_FATAL_COLOR: Color = Color::srgba(0.85, 0.2, 0.2, 0.85);
+
+/// Colour for generic non-fatal condition tints (Paralyzed, Asleep, …) —
+/// transparent yellow. The fallback used whenever a more specific tint
+/// (poisoned, unconscious) does not apply.
+pub const CONDITION_STATUS_COLOR: Color = Color::srgba(0.9, 0.85, 0.3, 0.85);
+
+/// Colour for poisoned/diseased condition tints — transparent green.
+pub const CONDITION_POISON_TINT_COLOR: Color = Color::srgba(0.2, 0.7, 0.2, 0.75);
+
+/// Colour for unconscious condition tints — transparent grey. Players only;
+/// monsters have no unconscious state (they go straight to `Dead`).
+pub const CONDITION_UNCONSCIOUS_TINT_COLOR: Color = Color::srgba(0.5, 0.5, 0.5, 0.75);
+
+/// Which condition category currently applies to a card's owner, used to
+/// select a background tint.
+///
+/// Both HUD party cards (from `Character` condition bitflags) and combat
+/// enemy cards (from `MonsterCondition`) reduce their richer, type-specific
+/// condition state down to one of these variants before calling
+/// [`resolve_card_background`], giving both card kinds one shared mapping to
+/// colour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CardConditionTint {
+    /// No active condition — the card keeps its default background.
+    #[default]
+    None,
+    /// Dead, or any other fatal state.
+    Fatal,
+    /// Poisoned or diseased.
+    Poisoned,
+    /// Unconscious (players only).
+    Unconscious,
+    /// Any other non-fatal status condition (paralyzed, asleep, blinded,
+    /// silenced, held, webbed, mindless, afraid, …).
+    Status,
+}
+
+impl CardConditionTint {
+    /// Returns the translucent background tint for this condition category,
+    /// or `None` when the card should keep its default background.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::systems::ui_helpers::{CardConditionTint, CONDITION_FATAL_COLOR};
+    ///
+    /// assert_eq!(CardConditionTint::Fatal.color(), Some(CONDITION_FATAL_COLOR));
+    /// assert_eq!(CardConditionTint::None.color(), None);
+    /// ```
+    pub fn color(self) -> Option<Color> {
+        match self {
+            CardConditionTint::None => None,
+            CardConditionTint::Fatal => Some(CONDITION_FATAL_COLOR),
+            CardConditionTint::Poisoned => Some(CONDITION_POISON_TINT_COLOR),
+            CardConditionTint::Unconscious => Some(CONDITION_UNCONSCIOUS_TINT_COLOR),
+            CardConditionTint::Status => Some(CONDITION_STATUS_COLOR),
+        }
+    }
+}
+
+/// Resolves a card's background colour from the universal precedence rule
+/// used across all combat UI: **active-turn highlight > condition tint >
+/// default background**. Pure and free of any Bevy `App`/ECS types, so it is
+/// directly unit-testable without spinning up a world.
+///
+/// `active_turn_color` is passed in by the caller (rather than hardcoded)
+/// because each card kind defines its own active-turn constant alongside its
+/// other card colours (e.g. `hud::ACTIVE_TURN_CARD_COLOR`).
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::ui_helpers::{
+///     resolve_card_background, CardConditionTint, CONDITION_FATAL_COLOR,
+/// };
+/// use bevy::prelude::Color;
+///
+/// let default_color = Color::srgba(0.2, 0.2, 0.2, 0.7);
+/// let active_color = Color::srgba(0.15, 0.45, 0.15, 0.7);
+///
+/// // Active turn wins even over a fatal condition.
+/// assert_eq!(
+///     resolve_card_background(true, active_color, CardConditionTint::Fatal, default_color),
+///     active_color
+/// );
+///
+/// // No active turn: condition tint wins over the default background.
+/// assert_eq!(
+///     resolve_card_background(false, active_color, CardConditionTint::Fatal, default_color),
+///     CONDITION_FATAL_COLOR
+/// );
+///
+/// // Neither active turn nor condition: keep the default background.
+/// assert_eq!(
+///     resolve_card_background(false, active_color, CardConditionTint::None, default_color),
+///     default_color
+/// );
+/// ```
+pub fn resolve_card_background(
+    is_active_turn: bool,
+    active_turn_color: Color,
+    condition: CardConditionTint,
+    default_color: Color,
+) -> Color {
+    if is_active_turn {
+        active_turn_color
+    } else if let Some(tint) = condition.color() {
+        tint
+    } else {
+        default_color
+    }
+}
+
+// ===== Party-Target Eligibility =====
+//
+// Single source of truth for "who may this beneficial action target?",
+// shared by the combat party-target panel for both item use (from
+// `ConsumableEffect`) and spell casting (from `SpellEffectType`). Pure and
+// free of Bevy ECS types so it is unit-testable without a world.
+
+/// Which party members a beneficial action (item or spell) may target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TargetEligibility {
+    /// Any party member is a valid target.
+    #[default]
+    Any,
+    /// Only living (non-dead) members — heals, cures, restores, boosts.
+    LivingOnly,
+    /// Only dead members — resurrection effects.
+    DeadOnly,
+}
+
+impl TargetEligibility {
+    /// Returns whether `character` is a valid target under this rule.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Alignment, Character, Condition, Sex};
+    /// use antares::game::systems::ui_helpers::TargetEligibility;
+    ///
+    /// let mut hero = Character::new(
+    ///     "Kira".to_string(),
+    ///     "human".to_string(),
+    ///     "knight".to_string(),
+    ///     Sex::Female,
+    ///     Alignment::Good,
+    /// );
+    /// assert!(TargetEligibility::LivingOnly.is_eligible(&hero));
+    /// assert!(!TargetEligibility::DeadOnly.is_eligible(&hero));
+    ///
+    /// hero.conditions.add(Condition::DEAD);
+    /// assert!(!TargetEligibility::LivingOnly.is_eligible(&hero));
+    /// assert!(TargetEligibility::DeadOnly.is_eligible(&hero));
+    /// assert!(TargetEligibility::Any.is_eligible(&hero));
+    /// ```
+    pub fn is_eligible(self, character: &crate::domain::character::Character) -> bool {
+        match self {
+            TargetEligibility::Any => true,
+            TargetEligibility::LivingOnly => !character.conditions.is_dead(),
+            TargetEligibility::DeadOnly => character.conditions.is_dead(),
+        }
+    }
+}
+
+/// Derives the party-target eligibility rule for a consumable effect.
+///
+/// `Resurrect` may only target dead members; every other beneficial effect
+/// (heal, restore, cure, boost) only living ones. Effects that never reach
+/// the party-target panel (`IsFood`, `CastSpell`, `LearnSpell`) return
+/// [`TargetEligibility::Any`].
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::items::types::ConsumableEffect;
+/// use antares::game::systems::ui_helpers::{
+///     consumable_target_eligibility, TargetEligibility,
+/// };
+///
+/// assert_eq!(
+///     consumable_target_eligibility(&ConsumableEffect::HealHp(20)),
+///     TargetEligibility::LivingOnly
+/// );
+/// assert_eq!(
+///     consumable_target_eligibility(&ConsumableEffect::Resurrect(10)),
+///     TargetEligibility::DeadOnly
+/// );
+/// ```
+pub fn consumable_target_eligibility(
+    effect: &crate::domain::items::types::ConsumableEffect,
+) -> TargetEligibility {
+    use crate::domain::items::types::ConsumableEffect;
+    match effect {
+        ConsumableEffect::Resurrect(_) => TargetEligibility::DeadOnly,
+        ConsumableEffect::HealHp(_)
+        | ConsumableEffect::RestoreSp(_)
+        | ConsumableEffect::CureCondition(_)
+        | ConsumableEffect::BoostAttribute(_, _)
+        | ConsumableEffect::BoostResistance(_, _) => TargetEligibility::LivingOnly,
+        ConsumableEffect::IsFood(_)
+        | ConsumableEffect::CastSpell(_)
+        | ConsumableEffect::LearnSpell(_) => TargetEligibility::Any,
+    }
+}
+
+/// Derives the party-target eligibility rule for a spell's effect type.
+///
+/// `Resurrection` may only target dead members; healing, cures, and buffs
+/// only living ones. A `Composite` is `DeadOnly` when any part resurrects
+/// (the revive must land first), otherwise `LivingOnly`. Effect types that
+/// normally never reach the party-target panel (`Damage`, `Debuff`,
+/// `Utility`, `DispelMagic`) return [`TargetEligibility::Any`].
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::magic::types::SpellEffectType;
+/// use antares::domain::types::DiceRoll;
+/// use antares::game::systems::ui_helpers::{spell_target_eligibility, TargetEligibility};
+///
+/// let heal = SpellEffectType::Healing { amount: DiceRoll::new(0, 0, 8) };
+/// assert_eq!(spell_target_eligibility(&heal), TargetEligibility::LivingOnly);
+/// assert_eq!(
+///     spell_target_eligibility(&SpellEffectType::Resurrection),
+///     TargetEligibility::DeadOnly
+/// );
+/// ```
+pub fn spell_target_eligibility(
+    effect: &crate::domain::magic::types::SpellEffectType,
+) -> TargetEligibility {
+    use crate::domain::magic::types::SpellEffectType;
+    match effect {
+        SpellEffectType::Resurrection => TargetEligibility::DeadOnly,
+        SpellEffectType::Healing { .. }
+        | SpellEffectType::CureCondition { .. }
+        | SpellEffectType::Buff { .. } => TargetEligibility::LivingOnly,
+        SpellEffectType::Composite(parts) => {
+            if parts
+                .iter()
+                .any(|p| matches!(p, SpellEffectType::Resurrection))
+            {
+                TargetEligibility::DeadOnly
+            } else {
+                TargetEligibility::LivingOnly
+            }
+        }
+        SpellEffectType::Damage
+        | SpellEffectType::Debuff
+        | SpellEffectType::Utility { .. }
+        | SpellEffectType::DispelMagic => TargetEligibility::Any,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,6 +483,222 @@ mod tests {
     }
 
     #[test]
+    fn test_text_style_with_font_none_font_size_correct() {
+        let (font, _color) = text_style_with_font(None, 20.0, Color::WHITE);
+        assert!((font.font_size - 20.0).abs() < f32::EPSILON);
+    }
+
+    // ── Condition & turn-state card color scheme ────────────────────────────
+
+    /// Active-turn highlight wins over every condition tint, per the
+    /// documented precedence rule.
+    #[test]
+    fn test_resolve_card_background_active_turn_wins_over_condition() {
+        let default_color = Color::srgba(0.2, 0.2, 0.2, 0.7);
+        let active_color = Color::srgba(0.15, 0.45, 0.15, 0.7);
+        for condition in [
+            CardConditionTint::None,
+            CardConditionTint::Fatal,
+            CardConditionTint::Poisoned,
+            CardConditionTint::Unconscious,
+            CardConditionTint::Status,
+        ] {
+            assert_eq!(
+                resolve_card_background(true, active_color, condition, default_color),
+                active_color,
+                "active turn must win over {:?}",
+                condition
+            );
+        }
+    }
+
+    /// Without an active turn, a condition tint wins over the default
+    /// background.
+    #[test]
+    fn test_resolve_card_background_condition_wins_over_default() {
+        let default_color = Color::srgba(0.2, 0.2, 0.2, 0.7);
+        let active_color = Color::srgba(0.15, 0.45, 0.15, 0.7);
+        let cases = [
+            (CardConditionTint::Fatal, CONDITION_FATAL_COLOR),
+            (CardConditionTint::Poisoned, CONDITION_POISON_TINT_COLOR),
+            (
+                CardConditionTint::Unconscious,
+                CONDITION_UNCONSCIOUS_TINT_COLOR,
+            ),
+            (CardConditionTint::Status, CONDITION_STATUS_COLOR),
+        ];
+        for (condition, expected) in cases {
+            assert_eq!(
+                resolve_card_background(false, active_color, condition, default_color),
+                expected
+            );
+        }
+    }
+
+    /// With no active turn and no condition, the card keeps its default
+    /// background.
+    #[test]
+    fn test_resolve_card_background_falls_back_to_default() {
+        let default_color = Color::srgba(0.2, 0.2, 0.2, 0.7);
+        let active_color = Color::srgba(0.15, 0.45, 0.15, 0.7);
+        assert_eq!(
+            resolve_card_background(false, active_color, CardConditionTint::None, default_color),
+            default_color
+        );
+    }
+
+    /// Every condition tint constant must be translucent (alpha < 1.0) — the
+    /// plan mandates translucent overlays only, never opaque high-saturation
+    /// colours.
+    #[test]
+    fn test_condition_tint_colors_are_translucent() {
+        for color in [
+            CONDITION_FATAL_COLOR,
+            CONDITION_STATUS_COLOR,
+            CONDITION_POISON_TINT_COLOR,
+            CONDITION_UNCONSCIOUS_TINT_COLOR,
+        ] {
+            let srgba = color.to_srgba();
+            assert!(
+                srgba.alpha < 1.0,
+                "condition tint {:?} must have alpha < 1.0",
+                color
+            );
+        }
+    }
+
+    // ── Party-target eligibility ────────────────────────────────────────────
+
+    fn test_character() -> crate::domain::character::Character {
+        use crate::domain::character::{Alignment, Character, Sex};
+        Character::new(
+            "Test".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Neutral,
+        )
+    }
+
+    /// Every beneficial non-resurrect consumable targets living members only;
+    /// resurrect targets dead members only; pass-through effects allow any.
+    #[test]
+    fn test_consumable_target_eligibility_mapping() {
+        use crate::domain::items::types::{AttributeType, ConsumableEffect, ResistanceType};
+        let cases = [
+            (ConsumableEffect::HealHp(20), TargetEligibility::LivingOnly),
+            (
+                ConsumableEffect::RestoreSp(10),
+                TargetEligibility::LivingOnly,
+            ),
+            (
+                ConsumableEffect::CureCondition(4),
+                TargetEligibility::LivingOnly,
+            ),
+            (
+                ConsumableEffect::BoostAttribute(AttributeType::Might, 2),
+                TargetEligibility::LivingOnly,
+            ),
+            (
+                ConsumableEffect::BoostResistance(ResistanceType::Fire, 10),
+                TargetEligibility::LivingOnly,
+            ),
+            (ConsumableEffect::Resurrect(10), TargetEligibility::DeadOnly),
+            (ConsumableEffect::IsFood(1), TargetEligibility::Any),
+            (ConsumableEffect::CastSpell(260), TargetEligibility::Any),
+            (ConsumableEffect::LearnSpell(260), TargetEligibility::Any),
+        ];
+        for (effect, expected) in cases {
+            assert_eq!(
+                consumable_target_eligibility(&effect),
+                expected,
+                "wrong eligibility for {:?}",
+                effect
+            );
+        }
+    }
+
+    /// Healing/cure/buff spells target living members only; resurrection
+    /// (including inside a composite) targets dead members only; offensive
+    /// and utility effects allow any target.
+    #[test]
+    fn test_spell_target_eligibility_mapping() {
+        use crate::domain::magic::types::{BuffField, SpellEffectType, UtilityType};
+        use crate::domain::types::DiceRoll;
+        let heal = SpellEffectType::Healing {
+            amount: DiceRoll::new(0, 0, 8),
+        };
+        let cure = SpellEffectType::CureCondition {
+            condition_id: "asleep".to_string(),
+        };
+        let buff = SpellEffectType::Buff {
+            buff_field: BuffField::Bless,
+            duration: 10,
+        };
+        let cases = [
+            (heal.clone(), TargetEligibility::LivingOnly),
+            (cure, TargetEligibility::LivingOnly),
+            (buff, TargetEligibility::LivingOnly),
+            (SpellEffectType::Resurrection, TargetEligibility::DeadOnly),
+            (
+                SpellEffectType::Composite(vec![SpellEffectType::Resurrection, heal.clone()]),
+                TargetEligibility::DeadOnly,
+            ),
+            (
+                SpellEffectType::Composite(vec![heal]),
+                TargetEligibility::LivingOnly,
+            ),
+            (SpellEffectType::Damage, TargetEligibility::Any),
+            (SpellEffectType::Debuff, TargetEligibility::Any),
+            (
+                SpellEffectType::Utility {
+                    utility_type: UtilityType::Information,
+                },
+                TargetEligibility::Any,
+            ),
+            (SpellEffectType::DispelMagic, TargetEligibility::Any),
+        ];
+        for (effect, expected) in cases {
+            assert_eq!(
+                spell_target_eligibility(&effect),
+                expected,
+                "wrong eligibility for {:?}",
+                effect
+            );
+        }
+    }
+
+    /// A living character is eligible for `LivingOnly`/`Any` but not
+    /// `DeadOnly`; a dead character is the reverse.
+    #[test]
+    fn test_target_eligibility_is_eligible() {
+        use crate::domain::character::Condition;
+        let mut ch = test_character();
+        assert!(TargetEligibility::Any.is_eligible(&ch));
+        assert!(TargetEligibility::LivingOnly.is_eligible(&ch));
+        assert!(!TargetEligibility::DeadOnly.is_eligible(&ch));
+
+        ch.conditions.add(Condition::DEAD);
+        assert!(TargetEligibility::Any.is_eligible(&ch));
+        assert!(!TargetEligibility::LivingOnly.is_eligible(&ch));
+        assert!(TargetEligibility::DeadOnly.is_eligible(&ch));
+    }
+
+    #[test]
+    fn test_text_style_with_font_none_color_correct() {
+        let (_font, color) = text_style_with_font(None, 16.0, Color::srgb(1.0, 0.0, 0.0));
+        assert_eq!(color.0, Color::srgb(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn test_text_style_with_font_some_sets_handle() {
+        use bevy::text::Font;
+        let handle: Handle<Font> = Handle::default();
+        let (text_font, _color) = text_style_with_font(Some(handle.clone()), 16.0, Color::WHITE);
+        assert_eq!(text_font.font, handle);
+    }
+
+    #[test]
     fn test_body_font_size_value() {
         assert!((BODY_FONT_SIZE - 16.0).abs() < f32::EPSILON);
     }
@@ -149,6 +706,31 @@ mod tests {
     #[test]
     fn test_label_font_size_value() {
         assert!((LABEL_FONT_SIZE - 14.0).abs() < f32::EPSILON);
+    }
+
+    /// Every `UI_FONT_SIZE_*` tier must be distinct and strictly ordered
+    /// XS < SM < MD < LG, and `LABEL_FONT_SIZE`/`BODY_FONT_SIZE` must sit
+    /// above `UI_FONT_SIZE_LG` in the same increasing sequence — otherwise
+    /// the tiers don't form a coherent hierarchy and callers can't reason
+    /// about "smaller than" / "bigger than" between them.
+    #[test]
+    fn test_font_size_tiers_are_distinct_and_ordered() {
+        let tiers = [
+            UI_FONT_SIZE_XS,
+            UI_FONT_SIZE_SM,
+            UI_FONT_SIZE_MD,
+            UI_FONT_SIZE_LG,
+            LABEL_FONT_SIZE,
+            BODY_FONT_SIZE,
+            UI_FONT_SIZE_XL,
+        ];
+        for window in tiers.windows(2) {
+            let [a, b] = window else { unreachable!() };
+            assert!(
+                a < b,
+                "font-size tiers must be strictly increasing: {a} is not < {b}"
+            );
+        }
     }
 
     #[test]

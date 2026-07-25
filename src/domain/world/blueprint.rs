@@ -165,6 +165,8 @@ impl From<MapBlueprint> for Map {
                     text,
                     time_condition: None,
                     facing: None,
+                    mesh_id: None,
+                    dialogue_id: None,
                 },
                 BlueprintEventType::Treasure(loot) => {
                     let loot_ids: Vec<u8> = loot.iter().map(|l| l.item_id).collect();
@@ -172,6 +174,8 @@ impl From<MapBlueprint> for Map {
                         name: bp_event.name,
                         description: bp_event.description,
                         loot: loot_ids,
+                        mesh_id: None,
+                        dialogue_id: None,
                     }
                 }
                 BlueprintEventType::Combat(spawns) => {

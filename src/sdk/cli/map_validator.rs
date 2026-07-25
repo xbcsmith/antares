@@ -728,6 +728,8 @@ mod tests {
                 text: "oob".into(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         let mut errors = Vec::new();
@@ -806,6 +808,8 @@ mod tests {
                 name: String::new(),
                 description: String::new(),
                 loot: vec![200],
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         let valid_ids: &[u8] = &[1, 2, 3];
@@ -846,6 +850,8 @@ mod tests {
                 text: "hello".into(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         let mut errors = Vec::new();
@@ -957,6 +963,8 @@ mod tests {
                 name: String::new(),
                 description: String::new(),
                 loot: vec![],
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         events.insert(
@@ -985,6 +993,8 @@ mod tests {
                 text: "A sign".into(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         events.insert(
@@ -1042,6 +1052,8 @@ mod tests {
                 items: vec![],
                 gold: 0,
                 gems: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         events.insert(
@@ -1059,6 +1071,8 @@ mod tests {
                 lock_id: "door_1".into(),
                 key_item_id: None,
                 initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         events.insert(
@@ -1069,6 +1083,8 @@ mod tests {
                 key_item_id: None,
                 items: vec![],
                 initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 

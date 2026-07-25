@@ -36,15 +36,17 @@
 use crate::game::components::furniture::DoorState;
 use crate::game::components::FurnitureEntity;
 use crate::game::resources::{GlobalState, LockInteractionPending};
-use crate::game::systems::dialogue::PendingRecruitmentContext;
+use crate::game::systems::dialogue::{PendingEventInteractionContext, PendingRecruitmentContext};
 use crate::game::systems::events::MapEventTriggered;
 use crate::game::systems::map::{NpcMarker, TileCoord};
 #[cfg(test)]
 use crate::game::systems::rest::InitiateRestEvent;
 use crate::game::systems::ui::GameLog;
 use crate::sdk::game_config::ControlsConfig;
+use bevy::ecs::schedule::common_conditions::not;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use bevy_egui::input::{egui_wants_any_keyboard_input, egui_wants_any_pointer_input};
 
 mod exploration_interact;
 mod exploration_movement;
@@ -131,9 +133,16 @@ impl Plugin for InputPlugin {
             Update,
             (
                 handle_global_input_toggles.in_set(GlobalInputSet::GlobalToggles),
-                handle_exploration_input_interact.after(handle_global_input_toggles),
-                handle_exploration_input_movement.after(handle_exploration_input_interact),
-            ),
+                handle_exploration_input_interact
+                    .after(handle_global_input_toggles)
+                    .run_if(not(egui_wants_any_pointer_input))
+                    .run_if(not(egui_wants_any_keyboard_input)),
+                handle_exploration_input_movement
+                    .after(handle_exploration_input_interact)
+                    .run_if(not(egui_wants_any_pointer_input))
+                    .run_if(not(egui_wants_any_keyboard_input)),
+            )
+                .chain(),
         );
     }
 }
@@ -176,6 +185,12 @@ fn handle_global_input_toggles(
         primary_window.single().ok(),
     );
 
+    if (keyboard_input.just_pressed(KeyCode::Escape) || keyboard_input.just_pressed(KeyCode::KeyP))
+        && global_state.0.close_modal()
+    {
+        return;
+    }
+
     let _frame_consumed =
         handle_global_mode_toggles(&mut global_state.0, frame_input, game_content.as_deref());
 }
@@ -210,6 +225,8 @@ fn handle_exploration_input_interact(
     mut quest_progress_messages: Option<
         MessageWriter<crate::application::quests::QuestProgressEvent>,
     >,
+    mut start_dialogue_writer: MessageWriter<crate::game::systems::dialogue::StartDialogue>,
+    mut pending_event_context: ResMut<PendingEventInteractionContext>,
 ) {
     let frame_input = decode_frame_input(
         &input_config.key_map,
@@ -238,6 +255,8 @@ fn handle_exploration_input_interact(
         &mut lock_pending,
         item_picked_up_messages.as_mut(),
         quest_progress_messages.as_mut(),
+        &mut start_dialogue_writer,
+        &mut pending_event_context,
     );
 }
 
@@ -337,10 +356,12 @@ mod dialogue_inventory_tests {
         app.insert_resource(ButtonInput::<MouseButton>::default());
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(PendingEventInteractionContext::default());
         app.insert_resource(GameContent::new(db));
         app.init_resource::<LockInteractionPending>();
         app.init_resource::<crate::game::systems::ui::GameLog>();
         app.add_message::<MapEventTriggered>();
+        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<InitiateRestEvent>();
         app.add_systems(
             Update,
@@ -516,9 +537,11 @@ mod integration_tests {
         app.insert_resource(ButtonInput::<MouseButton>::default());
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(PendingEventInteractionContext::default());
         app.init_resource::<LockInteractionPending>();
         app.init_resource::<crate::game::systems::ui::GameLog>();
         app.add_message::<MapEventTriggered>();
+        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<InitiateRestEvent>();
         app.add_systems(
             Update,
@@ -552,11 +575,13 @@ mod integration_tests {
         app.insert_resource(GlobalState(crate::application::GameState::new()));
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(PendingEventInteractionContext::default());
         app.init_resource::<LockInteractionPending>();
         app.init_resource::<crate::game::systems::ui::GameLog>();
 
         // Register message channels the input system depends on.
         app.add_message::<MapEventTriggered>();
+        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         // Add the split input systems under test
@@ -610,11 +635,13 @@ mod integration_tests {
         app.insert_resource(GlobalState(crate::application::GameState::new()));
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(PendingEventInteractionContext::default());
         app.init_resource::<LockInteractionPending>();
         app.init_resource::<crate::game::systems::ui::GameLog>();
 
         // Register messages used by input system
         app.add_message::<MapEventTriggered>();
+        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         // Add the split input systems so frames process input in explicit order
@@ -663,11 +690,13 @@ mod integration_tests {
         app.insert_resource(GlobalState(crate::application::GameState::new()));
         app.insert_resource::<Time>(Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(PendingEventInteractionContext::default());
         app.init_resource::<LockInteractionPending>();
         app.init_resource::<crate::game::systems::ui::GameLog>();
 
         // Register messages used by input system
         app.add_message::<MapEventTriggered>();
+        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         // Add the split input systems so frames process input in explicit order
@@ -1402,6 +1431,8 @@ mod interaction_tests {
                 text: "You found it!".to_string(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -1582,11 +1613,13 @@ mod inventory_guard_tests {
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(PendingEventInteractionContext::default());
         app.init_resource::<crate::game::systems::ui::GameLog>();
         app.init_resource::<LockInteractionPending>();
 
         // Register message channels that the split input systems depend on.
         app.add_message::<MapEventTriggered>();
+        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         // Register the split systems under test.
@@ -1638,10 +1671,12 @@ mod inventory_guard_tests {
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(PendingEventInteractionContext::default());
         app.init_resource::<crate::game::systems::ui::GameLog>();
         app.init_resource::<LockInteractionPending>();
 
         app.add_message::<MapEventTriggered>();
+        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         app.add_systems(
@@ -1705,11 +1740,13 @@ mod combat_guard_tests {
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(PendingEventInteractionContext::default());
         app.init_resource::<crate::game::systems::ui::GameLog>();
         app.init_resource::<LockInteractionPending>();
 
         // Register message channels that the split input systems depend on.
         app.add_message::<MapEventTriggered>();
+        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         app.add_systems(
@@ -1761,10 +1798,12 @@ mod combat_guard_tests {
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(PendingEventInteractionContext::default());
         app.init_resource::<crate::game::systems::ui::GameLog>();
         app.init_resource::<LockInteractionPending>();
 
         app.add_message::<MapEventTriggered>();
+        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         // Spawn a victory overlay marker to verify cleanup behavior.
@@ -1844,10 +1883,12 @@ mod door_interaction_tests {
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(PendingEventInteractionContext::default());
         app.init_resource::<crate::game::systems::ui::GameLog>();
         app.init_resource::<LockInteractionPending>();
 
         app.add_message::<MapEventTriggered>();
+        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         app.add_systems(
@@ -2295,10 +2336,12 @@ mod locked_container_map_event_tests {
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(PendingEventInteractionContext::default());
         app.init_resource::<LockInteractionPending>();
         app.init_resource::<crate::game::systems::ui::GameLog>();
 
         app.add_message::<MapEventTriggered>();
+        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         app.add_systems(
@@ -2327,6 +2370,8 @@ mod locked_container_map_event_tests {
                     key_item_id,
                     items: vec![],
                     initial_trap_chance: 0,
+                    mesh_id: None,
+                    dialogue_id: None,
                 },
             );
             map.lock_states.insert(
@@ -2500,10 +2545,12 @@ mod locked_door_map_event_tests {
         app.insert_resource(GlobalState(gs));
         app.insert_resource::<bevy::time::Time>(bevy::time::Time::default());
         app.insert_resource(PendingRecruitmentContext::default());
+        app.insert_resource(PendingEventInteractionContext::default());
         app.init_resource::<LockInteractionPending>();
         app.init_resource::<crate::game::systems::ui::GameLog>();
 
         app.add_message::<MapEventTriggered>();
+        app.add_message::<crate::game::systems::dialogue::StartDialogue>();
         app.add_message::<InitiateRestEvent>();
 
         app.add_systems(
@@ -2542,6 +2589,8 @@ mod locked_door_map_event_tests {
                     lock_id: LOCK_ID.to_string(),
                     key_item_id,
                     initial_trap_chance: 0,
+                    mesh_id: None,
+                    dialogue_id: None,
                 },
             );
             map.lock_states

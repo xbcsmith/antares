@@ -21,7 +21,7 @@ ron = "0.12"
 thiserror = "2.0"
 rand = "0.9"
 rustyline = "17.0.2"
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.6", features = ["derive"] }
 flate2 = "1.1"
 tar = "0.4"
 sha2 = "0.10"
@@ -29,11 +29,11 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0"
 bevy = { version = "0.17", default-features = true }
 bevy_egui = "0.38"
-wayland-client = "0.31.11"
-wayland-sys = "0.31.7"
+wayland-client = "0.31.15"
+wayland-sys = "0.31.11"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-ordered-float = "4.0"
+ordered-float = "4.6"
 image = { version = "0.25", features = ["png"] }
 noise = "0.9"
 bytemuck = { version = "1", features = ["derive"] }
@@ -55,4 +55,4 @@ name = "generate-normal-map"
 path = "src/bin/generate_normal_map.rs"
 
 [dev-dependencies]
-tempfile = "3.23"
+tempfile = "3.27"

@@ -1147,4 +1147,25 @@ mod tests {
             "Valid override must pass link_mesh_overrides"
         );
     }
+
+    /// Magic Potion (id 51) must be combat-usable so `RestoreSp` is a
+    /// classic mid-combat action, matching Healing/Cure/Resurrect potions.
+    #[test]
+    fn test_magic_potion_is_combat_usable() {
+        use crate::domain::items::types::ConsumableEffect;
+
+        let db = ItemDatabase::load_from_file("data/items.ron").expect("Failed to load items.ron");
+        let magic_potion = db.get_item(51).expect("Item 51 (Magic Potion) must exist");
+        assert_eq!(magic_potion.name, "Magic Potion");
+        match &magic_potion.item_type {
+            ItemType::Consumable(data) => {
+                assert!(
+                    data.is_combat_usable,
+                    "Magic Potion must be usable in combat"
+                );
+                assert_eq!(data.effect, ConsumableEffect::RestoreSp(10));
+            }
+            other => panic!("Expected Consumable item_type, got {other:?}"),
+        }
+    }
 }

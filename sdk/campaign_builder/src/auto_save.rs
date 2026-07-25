@@ -290,7 +290,7 @@ impl AutoSaveManager {
         let mut backups = self.list_backups(creature_name)?;
 
         // Sort by timestamp (newest first)
-        backups.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        backups.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
 
         // Remove old backups beyond max_backups
         for backup in backups.iter().skip(self.config.max_backups) {
@@ -350,7 +350,7 @@ impl AutoSaveManager {
         }
 
         // Sort by timestamp (newest first)
-        recovery_files.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        recovery_files.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
 
         Ok(recovery_files)
     }

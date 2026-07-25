@@ -29,6 +29,7 @@ use crate::domain::levels::LevelDatabase;
 use crate::domain::visual::creature_database::CreatureDatabase;
 use crate::domain::world::furniture::{FurnitureDatabase, FurnitureMeshDatabase};
 use crate::domain::world::landscape::{LandscapeDatabase, LandscapeMeshDatabase};
+use crate::domain::world::object_mesh::ObjectMeshDatabase;
 use crate::domain::world::wind::CampaignWindConfig;
 
 /// Campaign validation errors
@@ -80,6 +81,7 @@ pub enum CampaignError {
 /// use antares::domain::items::database::ItemMeshDatabase;
 /// use antares::domain::world::furniture::{FurnitureDatabase, FurnitureMeshDatabase};
 /// use antares::domain::world::landscape::{LandscapeDatabase, LandscapeMeshDatabase};
+/// use antares::domain::world::object_mesh::ObjectMeshDatabase;
 /// use antares::domain::world::wind::CampaignWindConfig;
 ///
 /// let game_data = GameData {
@@ -89,6 +91,7 @@ pub enum CampaignError {
 ///     furniture_meshes: FurnitureMeshDatabase::new(),
 ///     landscape: LandscapeDatabase::new(),
 ///     landscape_meshes: LandscapeMeshDatabase::new(),
+///     object_meshes: ObjectMeshDatabase::new(),
 ///     levels: None,
 ///     wind: CampaignWindConfig::default(),
 /// };
@@ -99,6 +102,7 @@ pub enum CampaignError {
 /// assert!(game_data.furniture_meshes.is_empty());
 /// assert!(game_data.landscape.is_empty());
 /// assert!(game_data.landscape_meshes.is_empty());
+/// assert!(game_data.object_meshes.is_empty());
 /// assert!(game_data.levels.is_none());
 /// ```
 #[derive(Debug, Clone, Default)]
@@ -115,6 +119,10 @@ pub struct GameData {
     pub landscape: LandscapeDatabase,
     /// Landscape mesh database — custom OBJ/GLB-imported landscape mesh definitions
     pub landscape_meshes: LandscapeMeshDatabase,
+    /// Unified object mesh database — string-keyed registry merging landscape,
+    /// furniture, and `object_mesh_registry.ron` entries.  This is the primary
+    /// lookup used by rendering code from Phase 4 onwards.
+    pub object_meshes: ObjectMeshDatabase,
     /// Optional per-class XP threshold tables loaded from `data/levels.ron`.
     ///
     /// `None` means the file was absent; all XP calculations fall back to
@@ -147,6 +155,7 @@ impl GameData {
             furniture_meshes: FurnitureMeshDatabase::new(),
             landscape: LandscapeDatabase::new(),
             landscape_meshes: LandscapeMeshDatabase::new(),
+            object_meshes: ObjectMeshDatabase::new(),
             levels: None,
             wind: CampaignWindConfig::default(),
         }
@@ -183,6 +192,11 @@ impl GameData {
         self.landscape
             .validate_mesh_references(&self.landscape_meshes)
             .map_err(|e| CampaignError::ValidationFailed(format!("Landscape validation: {}", e)))?;
+
+        // Validate unified object mesh database.
+        self.object_meshes.validate().map_err(|e| {
+            CampaignError::ValidationFailed(format!("Object mesh validation: {}", e))
+        })?;
 
         Ok(())
     }
@@ -273,6 +287,11 @@ impl CampaignLoader {
 
         // Load landscape mesh registry (opt-in per campaign; missing file is OK)
         game_data.landscape_meshes = self.load_landscape_meshes()?;
+
+        // Build unified object mesh registry: object_mesh_registry.ron (primary)
+        // merged with landscape and furniture legacy registries for backward compat.
+        game_data.object_meshes =
+            self.load_object_meshes(&game_data.landscape_meshes, &game_data.furniture_meshes)?;
 
         // Load per-class XP tables (opt-in per campaign; missing file is OK —
         // absent levels.ron means "use formula for all classes")
@@ -508,6 +527,47 @@ impl CampaignLoader {
             .map_err(|e| {
                 CampaignError::ValidationFailed(format!("Landscape texture validation: {}", e))
             })?;
+
+        Ok(db)
+    }
+
+    /// Builds the unified [`ObjectMeshDatabase`] for the campaign.
+    ///
+    /// Loads `data/object_mesh_registry.ron` when it exists, then merges entries
+    /// from the already-loaded `landscape_meshes` and `furniture_meshes` legacy
+    /// registries so that existing campaigns referencing numeric `mesh_id` values
+    /// continue to resolve without modification.
+    ///
+    /// `item_mesh_registry.ron` is intentionally excluded — item mesh lookup
+    /// follows a separate `DroppedItem` spawn path.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CampaignError::ReadError` if `object_mesh_registry.ron` exists
+    /// but cannot be read, or `CampaignError::ParseError` if it cannot be parsed.
+    fn load_object_meshes(
+        &self,
+        landscape_meshes: &LandscapeMeshDatabase,
+        furniture_meshes: &FurnitureMeshDatabase,
+    ) -> Result<ObjectMeshDatabase, CampaignError> {
+        let registry_path = self.campaign_path.join("data/object_mesh_registry.ron");
+
+        let mut db = if registry_path.exists() {
+            ObjectMeshDatabase::load_from_registry(&registry_path, &self.campaign_path).map_err(
+                |e| {
+                    CampaignError::ReadError(format!(
+                        "Object mesh registry '{}': {}",
+                        registry_path.display(),
+                        e
+                    ))
+                },
+            )?
+        } else {
+            ObjectMeshDatabase::new()
+        };
+
+        db.merge_landscape(landscape_meshes);
+        db.merge_furniture(furniture_meshes);
 
         Ok(db)
     }

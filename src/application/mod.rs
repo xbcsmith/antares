@@ -1754,10 +1754,36 @@ impl GameState {
             if let Some(encounter_group) =
                 crate::domain::world::random_encounter(&self.world, &mut rng)
             {
-                // Build combat state and initialize from the monster group
-                let mut cs = crate::domain::combat::engine::CombatState::new(
-                    crate::domain::combat::types::Handicap::Even,
-                );
+                // Determine handicap from encounter type: ambush gives monsters
+                // the initiative advantage for round 1.
+                let handicap = if encounter_group.combat_event_type.gives_monster_advantage() {
+                    crate::domain::combat::types::Handicap::MonsterAdvantage
+                } else {
+                    crate::domain::combat::types::Handicap::Even
+                };
+                let mut cs = crate::domain::combat::engine::CombatState::new(handicap);
+
+                // Copy campaign death-mode so apply_damage respects it.
+                cs.unconscious_before_death = self.campaign_config.unconscious_before_death;
+
+                // Suppress party actions during round 1 of an ambush.
+                cs.ambush_round_active = encounter_group.combat_event_type
+                    == crate::domain::combat::types::CombatEventType::Ambush;
+
+                // Apply boss-fight mechanics when the encounter type calls for it.
+                if encounter_group.combat_event_type.applies_boss_mechanics() {
+                    cs.monsters_advance = true;
+                    cs.monsters_regenerate = true;
+                    cs.can_bribe = false;
+                    cs.can_surrender = false;
+                }
+
+                // Add party members BEFORE monsters so that initialize_combat_from_group
+                // calls start_combat with all participants and computes a correct
+                // turn order for the full encounter.
+                for character in &self.party.members {
+                    cs.add_player(character.clone());
+                }
 
                 crate::domain::combat::engine::initialize_combat_from_group(
                     &mut cs,
@@ -1766,10 +1792,9 @@ impl GameState {
                 )
                 .map_err(MoveHandleError::CombatInit)?;
 
-                // Enter combat with prepared combat state
-                // store the type
+                // Enter combat with the fully-initialised state.
                 let _ = encounter_group.combat_event_type;
-                self.mode = GameMode::Combat(cs);
+                self.enter_combat_with_state(cs);
 
                 // Combat occurred instead of triggering a tile event; return early.
                 return Ok(());
@@ -1785,10 +1810,35 @@ impl GameState {
                 monster_group,
                 combat_event_type,
             } => {
-                // Build combat state and initialize from the monster group
-                let mut cs = crate::domain::combat::engine::CombatState::new(
-                    crate::domain::combat::types::Handicap::Even,
-                );
+                // Determine handicap from encounter type.
+                let handicap = if combat_event_type.gives_monster_advantage() {
+                    crate::domain::combat::types::Handicap::MonsterAdvantage
+                } else {
+                    crate::domain::combat::types::Handicap::Even
+                };
+                let mut cs = crate::domain::combat::engine::CombatState::new(handicap);
+
+                // Copy campaign death-mode so apply_damage respects it.
+                cs.unconscious_before_death = self.campaign_config.unconscious_before_death;
+
+                // Suppress party actions during round 1 of an ambush.
+                cs.ambush_round_active =
+                    combat_event_type == crate::domain::combat::types::CombatEventType::Ambush;
+
+                // Apply boss-fight mechanics when the encounter type calls for it.
+                if combat_event_type.applies_boss_mechanics() {
+                    cs.monsters_advance = true;
+                    cs.monsters_regenerate = true;
+                    cs.can_bribe = false;
+                    cs.can_surrender = false;
+                }
+
+                // Add party members BEFORE monsters so that initialize_combat_from_group
+                // calls start_combat with all participants and computes a correct
+                // turn order for the full encounter.
+                for character in &self.party.members {
+                    cs.add_player(character.clone());
+                }
 
                 crate::domain::combat::engine::initialize_combat_from_group(
                     &mut cs,
@@ -1797,11 +1847,9 @@ impl GameState {
                 )
                 .map_err(MoveHandleError::CombatInit)?;
 
-                // store the type
+                // Enter combat with the fully-initialised state.
                 let _ = combat_event_type;
-
-                // Enter combat with prepared combat state
-                self.mode = GameMode::Combat(cs);
+                self.enter_combat_with_state(cs);
             }
 
             crate::domain::world::EventResult::NpcDialogue { npc_id } => {
@@ -1872,7 +1920,7 @@ impl GameState {
                 }
             }
 
-            crate::domain::world::EventResult::Treasure { loot } => {
+            crate::domain::world::EventResult::Treasure { loot, .. } => {
                 // Distribute loot items across party members with inventory
                 // space.  Each item ID in the loot vec is an `ItemId` (u8).
                 for item_byte in &loot {
@@ -2491,6 +2539,74 @@ impl GameState {
         self.mode = GameMode::ContainerInventory(container_state);
     }
 
+    /// Distributes treasure loot from a [`MapEvent::Treasure`] at the given
+    /// position to party members and removes the event from the map.
+    ///
+    /// Items are given to the first party member with inventory space; items
+    /// that cannot be placed (all inventories full) are silently lost — the
+    /// caller is responsible for logging any "inventory full" warnings.
+    ///
+    /// # Arguments
+    ///
+    /// * `map_id`   – The map that contains the treasure event.
+    /// * `position` – The tile position of the `Treasure` event.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(distributed)` where `distributed` is a `Vec<(usize, ItemId)>`
+    /// of `(character_index, item_id)` pairs for the items successfully placed.
+    /// Returns `None` if there is no `Treasure` event at the given position.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use antares::application::GameState;
+    /// use antares::domain::types::Position;
+    ///
+    /// let mut state = GameState::new();
+    /// let map_id = state.world.current_map;
+    /// let pos = Position::new(1, 1);
+    /// // (place a Treasure event at pos first)
+    /// let result = state.collect_treasure_at_position(map_id, pos);
+    /// // result is None if no Treasure event was there
+    /// ```
+    pub fn collect_treasure_at_position(
+        &mut self,
+        map_id: crate::domain::types::MapId,
+        position: crate::domain::types::Position,
+    ) -> Option<Vec<(usize, crate::domain::types::ItemId)>> {
+        // Snapshot loot without holding a borrow on self.
+        let loot: Vec<u8> = self
+            .world
+            .get_map(map_id)
+            .and_then(|m| m.get_event(position))
+            .and_then(|e| {
+                if let crate::domain::world::MapEvent::Treasure { loot, .. } = e {
+                    Some(loot.clone())
+                } else {
+                    None
+                }
+            })?;
+
+        let mut distributed: Vec<(usize, crate::domain::types::ItemId)> = Vec::new();
+        for item_byte in &loot {
+            let item_id: crate::domain::types::ItemId = *item_byte;
+            for (char_idx, member) in self.party.members.iter_mut().enumerate() {
+                if member.inventory.has_space() && member.inventory.add_item(item_id, 1).is_ok() {
+                    distributed.push((char_idx, item_id));
+                    break;
+                }
+            }
+        }
+
+        // Remove the treasure event (one-time collection).
+        if let Some(map) = self.world.get_map_mut(map_id) {
+            map.remove_event(position);
+        }
+
+        Some(distributed)
+    }
+
     /// Returns to exploration mode (or resumes previous mode when exiting menu)
     pub fn return_to_exploration(&mut self) {
         let replaced = std::mem::replace(&mut self.mode, GameMode::Exploration);
@@ -3005,6 +3121,8 @@ mod tests {
                 items: vec![item_a, item_b],
                 gold: 5,
                 gems: 2,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         let mut state = GameState::new();
@@ -5926,6 +6044,8 @@ mod tests {
                 name: "Chest".to_string(),
                 description: "A shiny chest".to_string(),
                 loot: vec![5, 10],
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         state.world = World::new();
@@ -5966,6 +6086,8 @@ mod tests {
                 name: "Chest".to_string(),
                 description: "".to_string(),
                 loot: vec![1],
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         state.world = World::new();

@@ -75,6 +75,11 @@ pub enum ExportType {
     Furniture,
     /// Export as a static landscape mesh asset.
     Landscape,
+    /// Export as an object mesh registered in `data/object_mesh_registry.ron`.
+    ///
+    /// Unlike other export types, the registry key is the mesh name (a string),
+    /// not a numeric ID. The asset is written to `assets/meshes/objects/`.
+    ObjectMesh,
 }
 
 /// Records how the importer's current mesh color was chosen.
@@ -494,7 +499,7 @@ impl Default for ObjImporterState {
             landscape_mesh_id: LANDSCAPE_MESH_ID_MIN,
             creature_name: String::new(),
             category: String::new(),
-            scale: 0.01,
+            scale: 1.0,
             status_message: String::new(),
             custom_palette: CustomPalette::default(),
             active_mesh_index: None,

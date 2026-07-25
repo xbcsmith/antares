@@ -12,7 +12,7 @@ Supporting custom fonts requires updates to the campaign config to allow specify
 
 Write a plan with a phased approach to implementing custom fonts. THINK HARD and follow the rules in @PLAN.md
 
-✅ PLAN WRITTEN - [custom fonts](./custom_fonts_plan.md)
+✅ COMPLETED - [custom fonts](./custom_fonts_plan.md)
 
 ### Game Tray Icon Implementation Plan
 
@@ -180,8 +180,6 @@ The `baked_basecolor.png` texture file in `whisper_new.ron` was likely exported 
 
 ✅ COMPLETED - Campaing Builder --> Monster --> Edit --> Visual Asset hangs constantly when trying to change the creature mesh. It hangs when trying to scroll the window and it constantly hangs trying to select the mesh. It should work like the Character or NPC mesh selection wich is a text box with autocomplete.
 
-
-
 ## Game Engine Sky
 
 The Sky is Grey in the game. We have no concept of weather or if we are in a building. We should be able to mark an area inside or outside on the map ron. The SDK Map Editor should be able to mark an area inside or outside. When outside the sky should be whatever color that worlds sky is with as many suns as that world has. It should be part of the map ron to control the sky color and number of suns. We should also have a concept of night and day based on the clock time of day. Day has suns and night has stars. We should also be able to set star density based on map ron data. The SDK Map Editor should be updated to support setting the day sky color, number of suns, night sky color, and number of stars visible. We should have cloud coverage and color and density settings.
@@ -202,20 +200,43 @@ Status: completed. Landscape is now a first-class importer, SDK, map-editor, run
 
 ✅ COMPLETED - When leaving player inventory with ESC button the game menu pops up immediately. ESC in any inventory screen should just close the inventory.
 
-Party Inventory screen Mouse does not work on the Next Back or Party Overview buttons in the inventory screen.
+
 
 ✅ COMPLETED - Party Overview only shows the character that opened the inventory. It should show the whole party.
 
 ✅ COMPLETED - Recruitable Characters 3d models turn there back on the party when talking to them. There is no way to turn off auto rotate towards party in the SDK. For some reason the models seem to be oriented backwards causing the user to set which direction they face in the SDK. This causes the model to turn the other direction when facing the party and dialogue is engaged.
 
-Sorcerer Spell point bar does not go down as spell points are used.
+
+✅ COMPLETED - Sorcerer Spell point bar does not go down as spell points are used.
+
+During combat the hud should highlight the character attacking. Right now it is very hard to tell whose turn it is. Maybe a nice transparent green HUD card behind the portrait. After a player finishes a turn the actions menu should reset to Attack for the next character. The action buttons should change color when selected. Currently they are barely off a shade of grey and do not highlight at all when clicked with the mouse. The active button should be some color from the color scheme we are using for the Spell Panel.
+
+✅ COMPLETED - We should have the HUD card change colors based on conditions for the characters.
+
+✅ COMPLETED - Cleric spell first aid can not target a different character. Spells that remove conditions or replenish health should be able to be cast on other characters.
+
+✅ COMPLETED - If the party triggers combat by stepping on the same tile as the monsters the combat controls do not work. You can not attack or tab through types of actions. ESC doesn't work to exit. Basically the game becomes locked.
+
+When a monster hits 0 hitpoints the card for the monster shows the Hit points (example; 0/20) and has the word `condition` in yellow. The condition should be a real condition like `unconcious` or `dead`
+
+When there are multiple monsters in an encounter only the first monster is included in the attack order. Once the first monster is unable to attack because of a condition (like `unconcious`) the next monster never gets an attack in the combat rounds.
+
+During an ambush attack of 2 monsters or more the first monster makes a attack on the first turn. The second monster never attacks leaving combat stuck and unable to proceed. ESC does not work. If the party uses the [E] button a tile before the ambush neither monster attacks and the user is left stuck in the combat screen.
+2026-07-18T19:06:38.858413Z  INFO antares::game::systems::combat: Combat: Bandit: Misses Kira
+2026-07-18T19:06:59.710500Z  INFO antares::game::systems::combat: Combat: input blocked — not player turn
+2026-07-18T19:07:08.944043Z  INFO antares::game::systems::combat: Combat: input blocked — not player turn
+2026-07-18T19:07:10.576167Z  INFO antares::game::systems::combat: Combat: input blocked — not player turn
+
+Going to the player screen [p] or mouse click on character HUD portrait in combat resets combat participants hit points (monster and character) when closing the Player Screen [p] and returning to combat.
+
+✅ COMPLETED - Fonts are using different sizes on the same line.
 
 ✅ COMPLETED - Can not select a Rest option of (1) (2) or (3) because it opens the 1,2, or 3 character sheet. Remove triggering character sheet by number when in the rest menu. The rest menu should be navigable by number but it should not trigger the character sheet.
 
-✅ COMPLETED - When playing tutorial campaign ./campaigns/tutorial The oak and pine trees in the middle of that map_1 are not rendering. See the screenshot ./screenshots/trees_map_1.png The forrest of multiple different types of trees in map_1 are not using the new tree models. They look weird as you can see in the screenshot ./screenshots/forrest_map_1.png None of the trees on map_2 are rendering. I am assuming something changed in the tree rendering code and it broke the trees in the tutorial campaign. We should fix the tree rendering code so that the trees in the tutorial campaign render correctly.
+✅ COMPLETED - When playing tutorial campaign `./campaigns/tutorial` The oak and pine trees in the middle of that `map_1` are not rendering. See the screenshot `./screenshots/trees_map_1.png` The forrest of multiple different types of trees in `map_1` are not using the new tree models. They look weird as you can see in the screenshot `./screenshots/forrest_map_1.png` None of the trees on `map_2` are rendering. I am assuming something changed in the tree rendering code and it broke the trees in the tutorial campaign. We should fix the tree rendering code so that the trees in the tutorial campaign render correctly.
 
 ✅ COMPLETED - Hit A Trap. Everyone died. Mode is Gamever but I can keep moving around and the game is still responsive. I should not be able to move around when the mode is GameOver. The game should be frozen and I should only be able to click on the Game Over menu options.
-2026-06-11T20:14:50.026220Z  INFO antares::game::systems::input::global_toggles: Rest key pressed but mode is GameOver — ignoring
+2026-06-11T20:14:50.026220Z INFO antares::game::systems::input::global_toggles: Rest key pressed but mode is GameOver — ignoring
 
 ✅ COMPLETED - Bug: Open a Chest. Select item and click take. Item modes to inventory. TAB back to chest Item reapears in the chest. It should be removed from the chest when taken. Once item is taken there is no way to exit the Chest. ESC does not work. The chest menu should be exited when pressing ESC.
 
@@ -225,10 +246,26 @@ Unify the way we handle interactive objects like chests, doors, and treasure. Th
 
 Write a plan with a phased approach to unify how we handle furniture, items, doors, and landscape. THINK HARD and follow the rules in @PLAN.md
 
-[Unify Object Placement and Events](./unified_objects_and_events.md)
+✅ COMPLETED - [Unify Object Placement and Events](./unified_objects_and_events.md)
 
-Recruitable Characters --> Meet at the Inn dialogue --> Mesh does not disapear from the map and character is still recruitable from mesh on map even if character is in the party already.
+✅ COMPLETED - Recruitable Characters --> Meet at the Inn dialogue --> Mesh does not disapear from the map and character is still recruitable from mesh on map even if character is in the party already.
 
+### Character Sheet Imrpovements
+
+Character Sheet screen Mouse does not work on the Next Back or Party Overview buttons in the inventory screen.
+
+Character Sheet overview screen Mouse buttons for "View" and "Single View" do not work.
+
+✅ COMPLETED - Charachet Sheet overview should have more information about each character. Currently only has Level, Race, Class, Hit POints. SHould also contain Sex, Age, Gold, Gems, Conditions, and Experience Points.
+
+
+## Objects SDk
+
+Objects have no Editor Tab in the SDK. Add an editor tab for Objects that follows the same patterns we used for Items, Landscape, etc... We should be able to edit all aspects of an Object. Importing objects should update the list of Objects in the SDK immediately.
+
+Write a plan with a phased approach to add the feature to the SDK. THINK HARD and follow the rules in ./sdk/AGENTS.md and @PLAN.md
+
+✅ COMPLETED - [Object Editor SDK Plan](./object_editor_sdk_plan.md)
 
 ### SDK Bugs
 
@@ -240,5 +277,6 @@ Recruitable Characters --> Meet at the Inn dialogue --> Mesh does not disapear f
 
 ✅ COMPLETED - Campaign Builder --> Landscape Editor --> Delete does nothing. It should delete the landscape and update the landscape.ron file and the landscape_mesh_registry.ron file.
 
+✅ COMPLETED - Maps have scroll bar even when they are small. They should fit the default SDK window size without a scroll bar. This is a regression.
 
-Maps have scroll bar even when they are small. They should fit the default SDK window size without a scroll bar. This is a regression.
+✅ COMPLETED - Campaign Builder --> Landscape Editor --> Edit changes made in the editor for landscape are not saved to file. The "💾 Save" button now immediately writes `data/landscape.ron` to disk and also updates `CreatureDefinition.scale` in the linked mesh `.ron` file (e.g. `willow_tree.ron`) so mesh scale edits persist without requiring a full File > Save Campaign.

@@ -3153,3 +3153,216 @@ pub fn autocomplete_spell_selector(
     *selected_spell_id = cell.get();
     changed
 }
+
+/// Autocomplete selector for object mesh IDs.
+///
+/// Presents a text autocomplete backed by mesh IDs from the unified object mesh registry.
+/// Shows a hover tooltip with `"Mesh: <id>"` for known IDs or `"⚠ Unknown mesh ID '<id>'"` for
+/// IDs not present in `available_mesh_ids`.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI
+/// * `id_salt` - Unique salt for the autocomplete widget ID
+/// * `label` - Label shown to the left of the field (pass `""` to omit)
+/// * `selected_mesh_id` - Mutable reference to the current mesh ID string
+/// * `available_mesh_ids` - Slice of valid mesh IDs from `browse_event_mesh_ids`
+///
+/// # Returns
+///
+/// Returns `true` if the selection changed (set or cleared).
+///
+/// # Examples
+///
+/// ```no_run
+/// use campaign_builder::ui_helpers::autocomplete_mesh_id_selector;
+///
+/// // Called every frame inside a panel render function.
+/// // let changed = autocomplete_mesh_id_selector(ui, "event_mesh", "Mesh ID:", &mut mesh_id, &available_ids);
+/// ```
+pub fn autocomplete_mesh_id_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    selected_mesh_id: &mut String,
+    available_mesh_ids: &[String],
+) -> bool {
+    let mut changed = false;
+
+    ui.horizontal(|ui| {
+        if !label.is_empty() {
+            ui.label(label);
+        }
+
+        let current_value = selected_mesh_id.clone();
+        let buffer_id = make_autocomplete_id(ui, "mesh_id", id_salt);
+        let candidates: Vec<String> = available_mesh_ids.to_vec();
+
+        let mut text_buffer =
+            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_value.clone());
+
+        let mut response = AutocompleteInput::new(id_salt, &candidates)
+            .with_placeholder("Start typing mesh ID...")
+            .show(ui, &mut text_buffer);
+
+        // Tooltip: known mesh or warning
+        if !selected_mesh_id.is_empty() {
+            if available_mesh_ids.contains(selected_mesh_id) {
+                response = response.on_hover_text(format!("Mesh: {}", selected_mesh_id));
+            } else {
+                response =
+                    response.on_hover_text(format!("⚠ Unknown mesh ID '{}'", selected_mesh_id));
+            }
+        }
+
+        // Commit valid selections (only accept candidates that are in the list)
+        if response.changed()
+            && !text_buffer.is_empty()
+            && text_buffer != current_value
+            && available_mesh_ids.contains(&text_buffer)
+        {
+            *selected_mesh_id = text_buffer.clone();
+            changed = true;
+        }
+
+        // Built-in Clear button
+        if ui.button("Clear").clicked() && (!selected_mesh_id.is_empty() || !text_buffer.is_empty())
+        {
+            selected_mesh_id.clear();
+            text_buffer.clear();
+            changed = true;
+        }
+
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+    });
+
+    changed
+}
+
+/// Parses a `DialogueId` (u16) from a display buffer string.
+///
+/// Accepts either:
+/// - A plain number: `"500"`
+/// - The `"id \u{2014} title"` format used by [`autocomplete_dialogue_selector`]: `"500 \u{2014} Barred Passage"`
+///
+/// Returns `None` if the buffer is empty or the leading token is not a valid `u16`.
+///
+/// # Examples
+///
+/// ```
+/// use campaign_builder::ui_helpers::parse_dialogue_id_from_buf;
+///
+/// assert_eq!(parse_dialogue_id_from_buf("500"), Some(500_u16));
+/// assert_eq!(parse_dialogue_id_from_buf("500 \u{2014} Barred Passage"), Some(500_u16));
+/// assert_eq!(parse_dialogue_id_from_buf(""), None);
+/// assert_eq!(parse_dialogue_id_from_buf("bad"), None);
+/// ```
+pub fn parse_dialogue_id_from_buf(buf: &str) -> Option<u16> {
+    let s = buf.trim();
+    if s.is_empty() {
+        return None;
+    }
+    // Split on whitespace or em-dash (U+2014) and take the first token
+    let first_token = s
+        .split(|c: char| c.is_whitespace() || c == '\u{2014}')
+        .next()
+        .unwrap_or("");
+    first_token.parse::<u16>().ok()
+}
+
+/// Autocomplete selector for dialogue IDs.
+///
+/// Presents a text autocomplete showing entries in the format `"500 \u{2014} Barred Passage"`.
+/// The buffer stores the full display string; use [`parse_dialogue_id_from_buf`] to extract
+/// the numeric ID from the buffer after this function returns.
+///
+/// Shows a hover tooltip with the resolved dialogue title or a `⚠` warning for unknown IDs.
+///
+/// # Arguments
+///
+/// * `ui` - The egui UI
+/// * `id_salt` - Unique salt for the autocomplete widget ID
+/// * `label` - Label shown to the left of the field (pass `""` to omit)
+/// * `dialogue_id_buf` - Mutable reference to the display buffer string
+/// * `available_dialogues` - Slice of `(id, title)` pairs from `browse_dialogue_ids`
+///
+/// # Returns
+///
+/// Returns `true` if the selection changed (set or cleared).
+///
+/// # Examples
+///
+/// ```no_run
+/// use campaign_builder::ui_helpers::{autocomplete_dialogue_selector, parse_dialogue_id_from_buf};
+///
+/// // let changed = autocomplete_dialogue_selector(ui, "event_dialogue", "Dialogue:", &mut buf, &pairs);
+/// // if changed { treasure_dialogue_id = parse_dialogue_id_from_buf(&buf); }
+/// ```
+pub fn autocomplete_dialogue_selector(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    label: &str,
+    dialogue_id_buf: &mut String,
+    available_dialogues: &[(u16, String)],
+) -> bool {
+    let mut changed = false;
+
+    ui.horizontal(|ui| {
+        if !label.is_empty() {
+            ui.label(label);
+        }
+
+        let current_value = dialogue_id_buf.clone();
+        let buffer_id = make_autocomplete_id(ui, "dialogue_id", id_salt);
+
+        // Build display candidates "500 \u{2014} Barred Passage"
+        let candidates: Vec<String> = available_dialogues
+            .iter()
+            .map(|(id, title)| format!("{} \u{2014} {}", id, title))
+            .collect();
+
+        let mut text_buffer =
+            load_autocomplete_buffer(ui.ctx(), buffer_id, || current_value.clone());
+
+        let mut response = AutocompleteInput::new(id_salt, &candidates)
+            .with_placeholder("Start typing dialogue ID or title...")
+            .show(ui, &mut text_buffer);
+
+        // Tooltip: resolve current buffer to show title or warning
+        if !dialogue_id_buf.is_empty() {
+            if let Some(id) = parse_dialogue_id_from_buf(dialogue_id_buf) {
+                if let Some((_, title)) = available_dialogues.iter().find(|(did, _)| *did == id) {
+                    response =
+                        response.on_hover_text(format!("Dialogue: {} \u{2014} {}", id, title));
+                } else {
+                    response = response.on_hover_text(format!("⚠ Unknown dialogue ID {}", id));
+                }
+            }
+        }
+
+        // Commit: accept only valid candidates from the list
+        if response.changed() && !text_buffer.is_empty() && text_buffer != current_value {
+            let is_valid_candidate = candidates.contains(&text_buffer);
+            // Also accept a bare numeric ID if it resolves to a known dialogue
+            let is_valid_id = parse_dialogue_id_from_buf(&text_buffer)
+                .map(|id| available_dialogues.iter().any(|(did, _)| *did == id))
+                .unwrap_or(false);
+            if is_valid_candidate || is_valid_id {
+                *dialogue_id_buf = text_buffer.clone();
+                changed = true;
+            }
+        }
+
+        // Built-in Clear button
+        if ui.button("Clear").clicked() && (!dialogue_id_buf.is_empty() || !text_buffer.is_empty())
+        {
+            dialogue_id_buf.clear();
+            text_buffer.clear();
+            changed = true;
+        }
+
+        store_autocomplete_buffer(ui.ctx(), buffer_id, &text_buffer);
+    });
+
+    changed
+}
