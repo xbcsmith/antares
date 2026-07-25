@@ -590,7 +590,7 @@ impl PreviewRenderer {
                     egui::pos2(rect.min.x + 20.0, y),
                     egui::pos2(rect.max.x - 20.0, y),
                 ],
-                egui::Stroke::new(1.0, grid_color),
+                egui::Stroke::new(1.0_f32, grid_color),
             );
         }
 
@@ -602,7 +602,7 @@ impl PreviewRenderer {
                     egui::pos2(x, rect.min.y + 20.0),
                     egui::pos2(x, rect.max.y - 20.0),
                 ],
-                egui::Stroke::new(1.0, grid_color),
+                egui::Stroke::new(1.0_f32, grid_color),
             );
         }
     }
@@ -618,12 +618,18 @@ impl PreviewRenderer {
         let z_end = egui::pos2(origin.x - axis_length * 0.7, origin.y + axis_length * 0.7);
 
         // Draw axes
-        painter.line_segment([origin, x_end], egui::Stroke::new(2.0, egui::Color32::RED));
+        painter.line_segment(
+            [origin, x_end],
+            egui::Stroke::new(2.0_f32, egui::Color32::RED),
+        );
         painter.line_segment(
             [origin, y_end],
-            egui::Stroke::new(2.0, egui::Color32::GREEN),
+            egui::Stroke::new(2.0_f32, egui::Color32::GREEN),
         );
-        painter.line_segment([origin, z_end], egui::Stroke::new(2.0, egui::Color32::BLUE));
+        painter.line_segment(
+            [origin, z_end],
+            egui::Stroke::new(2.0_f32, egui::Color32::BLUE),
+        );
 
         // Draw labels
         painter.text(
@@ -778,7 +784,7 @@ impl PreviewRenderer {
             (mesh.color[2] * 255.0) as u8,
             (mesh.color[3] * 128.0) as u8, // Semi-transparent
         );
-        let selected_stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 165, 0));
+        let selected_stroke = egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(255, 165, 0));
 
         let mut drawn_triangles = 0usize;
 
@@ -838,9 +844,12 @@ impl PreviewRenderer {
 
                 // Draw wireframe edges
                 if self.options.show_wireframe {
-                    painter.line_segment([p0, p1], egui::Stroke::new(1.0, egui::Color32::BLACK));
-                    painter.line_segment([p1, p2], egui::Stroke::new(1.0, egui::Color32::BLACK));
-                    painter.line_segment([p2, p0], egui::Stroke::new(1.0, egui::Color32::BLACK));
+                    painter
+                        .line_segment([p0, p1], egui::Stroke::new(1.0_f32, egui::Color32::BLACK));
+                    painter
+                        .line_segment([p1, p2], egui::Stroke::new(1.0_f32, egui::Color32::BLACK));
+                    painter
+                        .line_segment([p2, p0], egui::Stroke::new(1.0_f32, egui::Color32::BLACK));
                 }
 
                 if is_selected {

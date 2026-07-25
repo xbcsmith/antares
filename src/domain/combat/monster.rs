@@ -162,6 +162,39 @@ impl MonsterCondition {
     }
 }
 
+impl std::fmt::Display for MonsterCondition {
+    /// Formats the condition as its player-facing label.
+    ///
+    /// `Normal` renders as an empty string (a healthy monster shows no
+    /// condition text on its combat card); every other variant renders its
+    /// name, e.g. "Paralyzed" or "Dead".
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::combat::monster::MonsterCondition;
+    ///
+    /// assert_eq!(MonsterCondition::Normal.to_string(), "");
+    /// assert_eq!(MonsterCondition::Paralyzed.to_string(), "Paralyzed");
+    /// assert_eq!(MonsterCondition::Dead.to_string(), "Dead");
+    /// ```
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            MonsterCondition::Normal => "",
+            MonsterCondition::Paralyzed => "Paralyzed",
+            MonsterCondition::Webbed => "Webbed",
+            MonsterCondition::Held => "Held",
+            MonsterCondition::Asleep => "Asleep",
+            MonsterCondition::Mindless => "Mindless",
+            MonsterCondition::Silenced => "Silenced",
+            MonsterCondition::Blinded => "Blinded",
+            MonsterCondition::Afraid => "Afraid",
+            MonsterCondition::Dead => "Dead",
+        };
+        write!(f, "{}", label)
+    }
+}
+
 // ===== LootTable =====
 
 /// Loot table for monsters
@@ -959,5 +992,32 @@ mod tests {
         m.tick_conditions_combat_end();
         assert_eq!(m.active_conditions.len(), 1);
         assert_eq!(m.active_conditions[0].condition_id, "poison");
+    }
+
+    /// Every `MonsterCondition` variant must map to its player-facing label
+    /// (`Normal` to an empty string) so combat enemy cards can render the
+    /// real condition instead of a placeholder.
+    #[test]
+    fn test_monster_condition_display_covers_all_variants() {
+        let cases = [
+            (MonsterCondition::Normal, ""),
+            (MonsterCondition::Paralyzed, "Paralyzed"),
+            (MonsterCondition::Webbed, "Webbed"),
+            (MonsterCondition::Held, "Held"),
+            (MonsterCondition::Asleep, "Asleep"),
+            (MonsterCondition::Mindless, "Mindless"),
+            (MonsterCondition::Silenced, "Silenced"),
+            (MonsterCondition::Blinded, "Blinded"),
+            (MonsterCondition::Afraid, "Afraid"),
+            (MonsterCondition::Dead, "Dead"),
+        ];
+        for (condition, expected) in cases {
+            assert_eq!(
+                condition.to_string(),
+                expected,
+                "Display mismatch for {:?}",
+                condition
+            );
+        }
     }
 }

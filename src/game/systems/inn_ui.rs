@@ -165,7 +165,7 @@ fn render_party_member_card(
     let mut frame = egui::Frame::group(ui.style()).multiply_with_opacity(0.7);
     if is_active {
         frame = frame.fill(egui::Color32::from_rgba_premultiplied(80, 80, 0, 100));
-        frame = frame.stroke(egui::Stroke::new(2.0, egui::Color32::YELLOW));
+        frame = frame.stroke(egui::Stroke::new(2.0_f32, egui::Color32::YELLOW));
     } else {
         frame = frame.fill(egui::Color32::from_gray(30));
     }
@@ -191,7 +191,7 @@ fn render_party_member_card(
         painter.rect_stroke(
             rect,
             4.0,
-            egui::Stroke::new(1.0, egui::Color32::LIGHT_GRAY),
+            egui::Stroke::new(1.0_f32, egui::Color32::LIGHT_GRAY),
             egui::StrokeKind::Inside,
         );
     }
@@ -252,7 +252,7 @@ fn render_roster_member_card(
     let mut frame = egui::Frame::group(ui.style()).multiply_with_opacity(0.7);
     if is_active {
         frame = frame.fill(egui::Color32::from_rgba_premultiplied(80, 80, 0, 100));
-        frame = frame.stroke(egui::Stroke::new(2.0, egui::Color32::YELLOW));
+        frame = frame.stroke(egui::Stroke::new(2.0_f32, egui::Color32::YELLOW));
     } else {
         frame = frame.fill(egui::Color32::from_gray(30));
     }
@@ -277,7 +277,7 @@ fn render_roster_member_card(
         painter.rect_stroke(
             rect,
             4.0,
-            egui::Stroke::new(1.0, egui::Color32::LIGHT_GRAY),
+            egui::Stroke::new(1.0_f32, egui::Color32::LIGHT_GRAY),
             egui::StrokeKind::Inside,
         );
     }
@@ -888,14 +888,8 @@ fn inn_input_system(
         // Navigate right (next)
         if keyboard.just_pressed(KeyCode::ArrowRight) {
             let next = match nav_state.selected_party_index {
-                Some(i) => {
-                    if i + 1 < party_count {
-                        i + 1
-                    } else {
-                        0
-                    }
-                }
-                None => 0,
+                Some(i) if i + 1 < party_count => i + 1,
+                _ => 0,
             };
             nav_state.selected_party_index = Some(next);
         }
@@ -957,14 +951,8 @@ fn inn_input_system(
                     inn_roster_indices.iter().position(|&x| x == global_idx)
                 });
                 let next_pos = match pos {
-                    Some(p) => {
-                        if p + 1 < roster_count {
-                            p + 1
-                        } else {
-                            0
-                        }
-                    }
-                    None => 0,
+                    Some(p) if p + 1 < roster_count => p + 1,
+                    _ => 0,
                 };
                 nav_state.selected_roster_index = Some(inn_roster_indices[next_pos]);
             }

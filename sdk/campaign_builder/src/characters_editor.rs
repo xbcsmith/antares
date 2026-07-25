@@ -2471,7 +2471,7 @@ fn show_portrait_placeholder(ui: &mut egui::Ui, size: egui::Vec2) {
     ui.painter().rect_stroke(
         rect,
         egui::CornerRadius::same(4),
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 100)),
+        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(100, 100, 100)),
         egui::StrokeKind::Outside,
     );
 

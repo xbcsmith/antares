@@ -268,7 +268,7 @@ fn render_dead_member_row(
         if is_active {
             frame = frame
                 .fill(egui::Color32::from_rgba_premultiplied(80, 80, 0, 120))
-                .stroke(egui::Stroke::new(2.0, egui::Color32::YELLOW));
+                .stroke(egui::Stroke::new(2.0_f32, egui::Color32::YELLOW));
         } else {
             frame = frame.fill(egui::Color32::from_gray(30));
         }

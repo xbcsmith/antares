@@ -2002,9 +2002,31 @@ impl TimeCondition {
 
 // ===== MapEvent =====
 
+/// Events that can be placed on map tiles.
+///
 /// Events are triggered when the party moves to a tile containing an event,
-/// or when the party explicitly interacts with the environment. Each event type
-/// has specific properties and effects on gameplay.
+/// or when the party explicitly interacts with the environment (`[E]` key).
+///
+/// # Cross-Cutting Fields
+///
+/// Several event variants carry two optional fields that decouple visual
+/// presentation and narrative flow from the core game effect:
+///
+/// - **`mesh_id: Option<String>`** — references a 3-D mesh asset in the unified
+///   [`ObjectMeshDatabase`](crate::domain::world::object_mesh::ObjectMeshDatabase)
+///   so the event tile displays a visible prop (chest, door, signpost, …).
+///   The mesh is spawned by `spawn_event_meshes` and tagged with
+///   `EventMeshMarker`; it is automatically despawned when the event is consumed.
+///
+/// - **`dialogue_id: Option<u16>`** — when `Some(id)`, pressing `[E]` on the tile
+///   opens the specified [`DialogueTree`](crate::domain::dialogue::DialogueTree)
+///   *before* executing the event's primary effect. The dialogue is responsible for
+///   firing the effect via a [`TriggerEvent`](crate::domain::dialogue::DialogueAction)
+///   action at the appropriate node.
+///
+/// Variants that support both fields: [`Treasure`](MapEvent::Treasure),
+/// [`Sign`](MapEvent::Sign), [`Container`](MapEvent::Container),
+/// [`LockedDoor`](MapEvent::LockedDoor), [`LockedContainer`](MapEvent::LockedContainer).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MapEvent {
     /// Random monster encounter
@@ -2063,6 +2085,19 @@ pub enum MapEvent {
         description: String,
         /// Loot table or item IDs
         loot: Vec<u8>,
+        /// Optional mesh reference for a visible 3-D object on the event tile.
+        ///
+        /// References an entry in the shared object mesh registry (Phase 4).
+        /// `None` means the event has no visual representation beyond tile art.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mesh_id: Option<String>,
+        /// Optional pre-interaction dialogue.
+        ///
+        /// When `Some(id)`, pressing [E] opens this dialogue tree before
+        /// executing the event's primary effect. `None` preserves the
+        /// immediate-effect behaviour.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dialogue_id: Option<crate::domain::dialogue::DialogueId>,
     },
     /// Teleport to another location
     Teleport {
@@ -2111,6 +2146,19 @@ pub enum MapEvent {
         /// to `#[serde(default)]`.
         #[serde(default)]
         facing: Option<Direction>,
+        /// Optional mesh reference for a visible 3-D object on the event tile.
+        ///
+        /// References an entry in the shared object mesh registry (Phase 4).
+        /// `None` means the event has no visual representation beyond tile art.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mesh_id: Option<String>,
+        /// Optional pre-interaction dialogue.
+        ///
+        /// When `Some(id)`, pressing [E] opens this dialogue tree before
+        /// executing the event's primary effect. `None` preserves the
+        /// immediate-effect behaviour.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dialogue_id: Option<crate::domain::dialogue::DialogueId>,
     },
     /// NPC dialogue trigger
     NpcDialogue {
@@ -2282,6 +2330,19 @@ pub enum MapEvent {
         /// Zeroed out after being taken.
         #[serde(default)]
         gems: u32,
+        /// Optional mesh reference for a visible 3-D object on the event tile.
+        ///
+        /// References an entry in the shared object mesh registry (Phase 4).
+        /// `None` means the event has no visual representation beyond tile art.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mesh_id: Option<String>,
+        /// Optional pre-interaction dialogue.
+        ///
+        /// When `Some(id)`, pressing [E] opens this dialogue tree before
+        /// executing the event's primary effect. `None` preserves the
+        /// immediate-effect behaviour.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dialogue_id: Option<crate::domain::dialogue::DialogueId>,
     },
     /// A single item lying on the ground, placed by a campaign author or
     /// dropped at runtime by the party.
@@ -2333,6 +2394,19 @@ pub enum MapEvent {
         /// when no prior state exists for this `lock_id`.
         #[serde(default)]
         initial_trap_chance: u8,
+        /// Optional mesh reference for a visible 3-D object on the event tile.
+        ///
+        /// References an entry in the shared object mesh registry (Phase 4).
+        /// `None` means the event has no visual representation beyond tile art.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mesh_id: Option<String>,
+        /// Optional pre-interaction dialogue.
+        ///
+        /// When `Some(id)`, pressing [E] opens this dialogue tree before
+        /// executing the event's primary effect. `None` preserves the
+        /// immediate-effect behaviour.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dialogue_id: Option<crate::domain::dialogue::DialogueId>,
     },
     /// A locked container (chest, crate, etc.) that requires a key,
     /// lockpicking, or bashing to open.
@@ -2361,6 +2435,19 @@ pub enum MapEvent {
         /// Starting trap chance percentage (0–100).
         #[serde(default)]
         initial_trap_chance: u8,
+        /// Optional mesh reference for a visible 3-D object on the event tile.
+        ///
+        /// References an entry in the shared object mesh registry (Phase 4).
+        /// `None` means the event has no visual representation beyond tile art.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mesh_id: Option<String>,
+        /// Optional pre-interaction dialogue.
+        ///
+        /// When `Some(id)`, pressing [E] opens this dialogue tree before
+        /// executing the event's primary effect. `None` preserves the
+        /// immediate-effect behaviour.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dialogue_id: Option<crate::domain::dialogue::DialogueId>,
     },
 }
 
@@ -3056,6 +3143,8 @@ impl Map {
     ///     text: "Hello!".to_string(),
     ///     time_condition: None,
     ///     facing: None,
+    ///     mesh_id: None,
+    ///     dialogue_id: None,
     /// };
     /// map.add_event(pos, event);
     ///
@@ -3269,12 +3358,10 @@ impl Map {
                     lock_id,
                     initial_trap_chance,
                     ..
-                } => {
-                    if !self.lock_states.contains_key(lock_id) {
-                        let mut state = LockState::new(lock_id.clone());
-                        state.trap_chance = *initial_trap_chance;
-                        self.lock_states.insert(lock_id.clone(), state);
-                    }
+                } if !self.lock_states.contains_key(lock_id) => {
+                    let mut state = LockState::new(lock_id.clone());
+                    state.trap_chance = *initial_trap_chance;
+                    self.lock_states.insert(lock_id.clone(), state);
                 }
                 _ => {}
             }
@@ -3945,6 +4032,8 @@ mod map_resize_tests {
             text: "hello".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         let sign_remove = MapEvent::Sign {
             name: "remove".to_string(),
@@ -3952,6 +4041,8 @@ mod map_resize_tests {
             text: "bye".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         map.events.insert(Position::new(3, 3), sign_keep);
         map.events.insert(Position::new(7, 7), sign_remove);
@@ -3982,6 +4073,8 @@ mod map_resize_tests {
             text: "hello".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         map.events.insert(Position::new(2, 2), event);
 
@@ -4032,6 +4125,8 @@ mod map_resize_tests {
             text: "hello".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         map.events.insert(Position::new(5, 5), event);
         map.npc_placements
@@ -4523,6 +4618,8 @@ mod time_condition_tests {
             text: "The monsters wake at night!".to_string(),
             time_condition: Some(TimeCondition::DuringPeriods(vec![TimeOfDay::Night])),
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         let ron_str = ron::to_string(&event).expect("serialize");
         // Ensure the RON contains the condition
@@ -5274,6 +5371,8 @@ mod tests {
             text: "Welcome!".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         map.add_event(pos, event);
@@ -5331,6 +5430,8 @@ mod tests {
             text: "Hello, World!".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         map.add_event(pos, event.clone());
 
@@ -6596,6 +6697,8 @@ mod tests {
                 name: "Chest".to_string(),
                 description: String::new(),
                 loot: vec![7, 8],
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -6734,5 +6837,141 @@ mod tests {
             ron::from_str(ron_str).expect("partial field deserialization must succeed");
         assert_eq!(sky.cloud_speed, 1.0, "cloud_speed should default to 1.0");
         assert_eq!(sky.day_sky_color, [0.1, 0.2, 0.3, 1.0]);
+    }
+
+    // ===== Phase 1: mesh_id / dialogue_id round-trip tests =====
+
+    #[test]
+    fn test_treasure_mesh_id_dialogue_id_nil_roundtrip() {
+        let event = MapEvent::Treasure {
+            name: "Chest".to_string(),
+            description: "A wooden chest.".to_string(),
+            loot: vec![1, 2, 3],
+            mesh_id: None,
+            dialogue_id: None,
+        };
+        let ron_str = ron::to_string(&event).expect("serialize Treasure with nil fields");
+        let parsed: MapEvent =
+            ron::from_str(&ron_str).expect("deserialize Treasure with nil fields");
+        assert_eq!(event, parsed);
+        // nil Options must not appear in the serialized output (skip_serializing_if)
+        assert!(
+            !ron_str.contains("mesh_id"),
+            "mesh_id: None must be omitted from RON output"
+        );
+        assert!(
+            !ron_str.contains("dialogue_id"),
+            "dialogue_id: None must be omitted from RON output"
+        );
+    }
+
+    #[test]
+    fn test_treasure_mesh_id_dialogue_id_some_roundtrip() {
+        let event = MapEvent::Treasure {
+            name: "Barred Passage".to_string(),
+            description: "A heavy iron bar blocks the passage.".to_string(),
+            loot: vec![],
+            mesh_id: Some("barred_door".to_string()),
+            dialogue_id: Some(42),
+        };
+        let ron_str = ron::to_string(&event).expect("serialize Treasure with Some fields");
+        let parsed: MapEvent =
+            ron::from_str(&ron_str).expect("deserialize Treasure with Some fields");
+        assert_eq!(event, parsed);
+        assert!(
+            ron_str.contains("barred_door"),
+            "mesh_id value must appear in RON"
+        );
+        assert!(
+            ron_str.contains("42"),
+            "dialogue_id value must appear in RON"
+        );
+    }
+
+    #[test]
+    fn test_treasure_backward_compat_ron_without_new_fields() {
+        // Existing RON files that omit mesh_id and dialogue_id must still parse
+        let ron_str = r#"Treasure(name: "Old Chest", description: "", loot: [5, 6])"#;
+        let parsed: MapEvent =
+            ron::from_str(ron_str).expect("backward-compat Treasure parse must succeed");
+        match parsed {
+            MapEvent::Treasure {
+                loot,
+                mesh_id,
+                dialogue_id,
+                ..
+            } => {
+                assert_eq!(loot, vec![5, 6]);
+                assert_eq!(mesh_id, None, "mesh_id must default to None");
+                assert_eq!(dialogue_id, None, "dialogue_id must default to None");
+            }
+            _ => panic!("Expected MapEvent::Treasure"),
+        }
+    }
+
+    #[test]
+    fn test_sign_mesh_id_dialogue_id_some_roundtrip() {
+        let event = MapEvent::Sign {
+            name: "Notice Board".to_string(),
+            description: String::new(),
+            text: "Beware of the dungeon.".to_string(),
+            time_condition: None,
+            facing: None,
+            mesh_id: Some("notice_board".to_string()),
+            dialogue_id: Some(7),
+        };
+        let ron_str = ron::to_string(&event).expect("serialize Sign with Some fields");
+        let parsed: MapEvent = ron::from_str(&ron_str).expect("deserialize Sign with Some fields");
+        assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn test_locked_door_mesh_id_dialogue_id_roundtrip() {
+        let event = MapEvent::LockedDoor {
+            name: "Iron Gate".to_string(),
+            lock_id: "gate_1".to_string(),
+            key_item_id: None,
+            initial_trap_chance: 10,
+            mesh_id: Some("iron_gate".to_string()),
+            dialogue_id: Some(101),
+        };
+        let ron_str = ron::to_string(&event).expect("serialize LockedDoor with Some fields");
+        let parsed: MapEvent =
+            ron::from_str(&ron_str).expect("deserialize LockedDoor with Some fields");
+        assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn test_container_mesh_id_dialogue_id_roundtrip() {
+        let event = MapEvent::Container {
+            id: "chest_01".to_string(),
+            name: "Ornate Chest".to_string(),
+            description: String::new(),
+            items: vec![],
+            gold: 0,
+            gems: 0,
+            mesh_id: Some("ornate_chest".to_string()),
+            dialogue_id: None,
+        };
+        let ron_str = ron::to_string(&event).expect("serialize Container with mesh_id");
+        let parsed: MapEvent = ron::from_str(&ron_str).expect("deserialize Container with mesh_id");
+        assert_eq!(event, parsed);
+    }
+
+    #[test]
+    fn test_locked_container_mesh_id_dialogue_id_roundtrip() {
+        let event = MapEvent::LockedContainer {
+            name: "Locked Crate".to_string(),
+            lock_id: "crate_1".to_string(),
+            key_item_id: None,
+            items: vec![],
+            initial_trap_chance: 0,
+            mesh_id: Some("wooden_crate".to_string()),
+            dialogue_id: Some(55),
+        };
+        let ron_str = ron::to_string(&event).expect("serialize LockedContainer with Some fields");
+        let parsed: MapEvent =
+            ron::from_str(&ron_str).expect("deserialize LockedContainer with Some fields");
+        assert_eq!(event, parsed);
     }
 }

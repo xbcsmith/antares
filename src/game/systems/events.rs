@@ -98,6 +98,16 @@ fn check_for_events(
                             current_pos
                         );
                     }
+                    MapEvent::Treasure {
+                        dialogue_id: Some(_),
+                        ..
+                    } => {
+                        info!(
+                            "Party at {:?} is on a Treasure with dialogue_id; \
+                             not auto-triggering (requires [E] interact)",
+                            current_pos
+                        );
+                    }
                     _ => {
                         // Trigger other event types automatically (traps, etc.)
                         event_writer.write(MapEventTriggered {
@@ -1227,6 +1237,8 @@ mod container_event_tests {
             items: vec![make_slot(1), make_slot(2)],
             gold: 0,
             gems: 0,
+            mesh_id: None,
+            dialogue_id: None,
         };
         map.add_event(event_pos, container_event.clone());
 
@@ -1274,6 +1286,8 @@ mod container_event_tests {
             items: vec![make_slot(10), make_slot(20), make_slot(30)],
             gold: 0,
             gems: 0,
+            mesh_id: None,
+            dialogue_id: None,
         };
         map.add_event(event_pos, container_event.clone());
 
@@ -1311,6 +1325,8 @@ mod container_event_tests {
             items: vec![],
             gold: 0,
             gems: 0,
+            mesh_id: None,
+            dialogue_id: None,
         };
         map.add_event(event_pos, container_event.clone());
 
@@ -1351,6 +1367,8 @@ mod container_event_tests {
                 items: vec![make_slot(99)],
                 gold: 0,
                 gems: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -2683,6 +2701,8 @@ mod locked_door_event_tests {
                 lock_id: LOCK_ID.to_string(),
                 key_item_id: Some(KEY_ID),
                 initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         map.lock_states
@@ -2727,6 +2747,8 @@ mod locked_door_event_tests {
                 lock_id: LOCK_ID.to_string(),
                 key_item_id: Some(KEY_ID),
                 initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
             position: lock_pos(),
         });
@@ -2848,6 +2870,8 @@ mod locked_door_event_tests {
                         lock_id: LOCK_ID.to_string(),
                         key_item_id: None,
                         initial_trap_chance: 0,
+                        mesh_id: None,
+                        dialogue_id: None,
                     },
                 );
             }
@@ -2865,6 +2889,8 @@ mod locked_door_event_tests {
                     lock_id: LOCK_ID.to_string(),
                     key_item_id: None,
                     initial_trap_chance: 0,
+                    mesh_id: None,
+                    dialogue_id: None,
                 },
                 position: lock_pos(),
             });
@@ -3203,6 +3229,8 @@ mod trap_treasure_tests {
             name: "Gold Chest".to_string(),
             description: "A shiny chest".to_string(),
             loot: vec![10, 20, 30],
+            mesh_id: None,
+            dialogue_id: None,
         };
         map.add_event(pos, treasure.clone());
 
@@ -3259,6 +3287,8 @@ mod trap_treasure_tests {
             name: "Overflow Chest".to_string(),
             description: "Too much loot".to_string(),
             loot: vec![99],
+            mesh_id: None,
+            dialogue_id: None,
         };
         map.add_event(pos, treasure.clone());
 
@@ -3315,6 +3345,8 @@ mod trap_treasure_tests {
             name: "One-Time Chest".to_string(),
             description: "Collect once".to_string(),
             loot: vec![1],
+            mesh_id: None,
+            dialogue_id: None,
         };
         map.add_event(pos, treasure.clone());
 

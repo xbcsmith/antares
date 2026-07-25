@@ -1230,7 +1230,7 @@ fn resolve_imported_obj_mtl_source_kind(
 
 fn build_imported_material_swatches(parsed: &ParsedObjData) -> Vec<ImportedObjMaterialSwatch> {
     let mut materials = parsed.materials.iter().collect::<Vec<_>>();
-    materials.sort_by(|(left_name, _), (right_name, _)| left_name.cmp(right_name));
+    materials.sort_by_key(|(left_name, _)| *left_name);
 
     materials
         .into_iter()

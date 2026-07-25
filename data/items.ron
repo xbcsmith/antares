@@ -636,7 +636,7 @@
         name: "Magic Potion",
         item_type: Consumable((
             effect: RestoreSp(10),
-            is_combat_usable: false,
+            is_combat_usable: true,
         )),
         base_cost: 100,
         sell_cost: 50,

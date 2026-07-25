@@ -3165,6 +3165,8 @@ mod tests {
                 lock_id: "gate_01".to_string(),
                 key_item_id: Some(200),
                 initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -3204,6 +3206,8 @@ mod tests {
                 lock_id: "vault_01".to_string(),
                 key_item_id: Some(254),
                 initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -3268,6 +3272,8 @@ mod tests {
                 lock_id: "secret_01".to_string(),
                 key_item_id: Some(201),
                 initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -3321,6 +3327,8 @@ mod tests {
                 lock_id: "shared_lock".to_string(),
                 key_item_id: None,
                 initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         map.add_event(
@@ -3330,6 +3338,8 @@ mod tests {
                 lock_id: "shared_lock".to_string(), // duplicate!
                 key_item_id: None,
                 initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 

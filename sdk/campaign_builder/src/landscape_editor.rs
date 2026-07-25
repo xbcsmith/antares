@@ -77,10 +77,18 @@ pub struct LandscapeEditorState {
     // blocking file reads in landscape_texture_validation_status are not
     // called on every render frame (which caused the right-click "timeout").
     texture_validation_cache: Option<(u32, String)>,
+    // Mesh scale cache: (definition_id, scale_or_None_if_no_mesh).
+    // Mirrors texture_validation_cache — refreshed once per selection change.
+    mesh_scale_preview_cache: Option<(u32, Option<f32>)>,
     /// Cached mesh options loaded from `landscape_mesh_registry.ron` when
     /// entering edit mode. Populated once per edit session; used to drive
     /// the Mesh picker ComboBox without re-reading the registry every frame.
     available_meshes: Vec<CreatureReference>,
+    /// Scale value read from the linked mesh file's `CreatureDefinition.scale`
+    /// when entering edit mode. Allows the author to correct import-time scale
+    /// errors (e.g. OBJ imported at 0.01 instead of 1.0) without leaving the
+    /// Landscape Editor. Only meaningful when `edit_buffer.mesh_id` is `Some`.
+    mesh_scale_buffer: f32,
 }
 
 impl LandscapeEditorState {
@@ -131,7 +139,7 @@ impl LandscapeEditorState {
         ui.separator();
 
         if self.mode == LandscapeEditorMode::Edit {
-            self.show_edit(ui, defs, unsaved_changes);
+            self.show_edit(ui, defs, campaign_dir, unsaved_changes);
         } else {
             self.show_list(ui, defs, campaign_dir, unsaved_changes);
         }
@@ -194,23 +202,38 @@ impl LandscapeEditorState {
             .filter(|&i| i < defs.len())
             .map(|i| defs[i].clone());
 
-        // Texture validation: only do the blocking file reads when the selected
-        // definition changes — not on every render frame. Without this cache the
-        // two fs::read_to_string + ron::from_str calls run at 60 fps and stall the
+        // Texture validation + mesh scale: only do the blocking file reads when
+        // the selected definition changes — not on every render frame. Without
+        // these caches the fs::read_to_string calls run at 60 fps and stall the
         // frame loop long enough to time out the right-click context menu.
         if let Some(def) = &preview_snapshot {
             let cached_id = self.texture_validation_cache.as_ref().map(|(id, _)| *id);
             if cached_id != Some(def.id) {
                 let status = landscape_texture_validation_status(def, campaign_dir);
                 self.texture_validation_cache = Some((def.id, status));
+
+                // Load mesh scale for the preview panel at the same time so we
+                // don't need a second registry read on the next frame.
+                let meshes = load_available_meshes(campaign_dir);
+                let mesh_scale = if def.mesh_id.is_some() {
+                    Some(load_mesh_scale(def.mesh_id, &meshes, campaign_dir))
+                } else {
+                    None
+                };
+                self.mesh_scale_preview_cache = Some((def.id, mesh_scale));
             }
         } else {
             self.texture_validation_cache = None;
+            self.mesh_scale_preview_cache = None;
         }
         let texture_status: Option<String> = self
             .texture_validation_cache
             .as_ref()
             .map(|(_, s)| s.clone());
+        let mesh_scale_preview: Option<f32> = self
+            .mesh_scale_preview_cache
+            .as_ref()
+            .and_then(|(_, ms)| *ms);
 
         // Deferred mutations applied after show_split (Rule 10).
         let mut pending_selection: Option<usize> = None;
@@ -290,6 +313,7 @@ impl LandscapeEditorState {
                     right_ui,
                     preview_snapshot.as_ref(),
                     texture_status.as_deref(),
+                    mesh_scale_preview,
                 );
             },
         );
@@ -317,6 +341,7 @@ impl LandscapeEditorState {
                     let _ = remove_landscape_mesh_registry_entry(dir, mesh_id);
                 }
                 self.texture_validation_cache = None;
+                self.mesh_scale_preview_cache = None;
                 *unsaved_changes = true;
                 ui.ctx().request_repaint();
             }
@@ -341,8 +366,9 @@ impl LandscapeEditorState {
         self.tags_buffer = def.tags.join(", ");
         self.description_buffer = def.description.clone().unwrap_or_default();
         self.icon_buffer = def.icon.clone().unwrap_or_default();
-        self.edit_buffer = Some(def.clone());
         self.available_meshes = load_available_meshes(campaign_dir);
+        self.mesh_scale_buffer = load_mesh_scale(def.mesh_id, &self.available_meshes, campaign_dir);
+        self.edit_buffer = Some(def.clone());
         self.mode = LandscapeEditorMode::Edit;
     }
 
@@ -376,6 +402,7 @@ impl LandscapeEditorState {
         &mut self,
         ui: &mut egui::Ui,
         defs: &mut [LandscapeDefinition],
+        campaign_dir: Option<&Path>,
         unsaved_changes: &mut bool,
     ) {
         let Some(buf) = self.edit_buffer.as_mut() else {
@@ -484,6 +511,19 @@ impl LandscapeEditorState {
                         }
                         ui.end_row();
 
+                        // Mesh scale is only meaningful when a mesh is linked.
+                        // Editing this value updates CreatureDefinition.scale in the
+                        // mesh .ron file on Save, correcting import-time scale errors.
+                        if buf.mesh_id.is_some() {
+                            ui.label("Mesh scale:");
+                            ui.add(
+                                egui::DragValue::new(&mut self.mesh_scale_buffer)
+                                    .speed(0.001)
+                                    .range(0.001..=100.0),
+                            );
+                            ui.end_row();
+                        }
+
                         ui.label("Icon:");
                         ui.text_edit_singleline(&mut self.icon_buffer);
                         ui.end_row();
@@ -517,8 +557,30 @@ impl LandscapeEditorState {
                 ui.ctx().request_repaint();
             }
             if ui.button("💾 Save").clicked() {
+                // Capture mesh info before apply_edit consumes the buffer.
+                let mesh_id = self.edit_buffer.as_ref().and_then(|b| b.mesh_id);
+                let mesh_scale = self.mesh_scale_buffer;
+
                 self.apply_edit(defs);
                 *unsaved_changes = true;
+
+                // Write landscape.ron immediately so changes persist even if
+                // the user exits without doing File > Save Campaign.
+                if let Some(dir) = campaign_dir {
+                    let landscape_path = dir.join("data/landscape.ron");
+                    let ron_config = ron::ser::PrettyConfig::new()
+                        .struct_names(false)
+                        .enumerate_arrays(false);
+                    if let Ok(contents) = ron::ser::to_string_pretty(&defs, ron_config) {
+                        let _ = fs::write(&landscape_path, contents);
+                    }
+
+                    // Write the updated mesh scale to the linked mesh .ron file.
+                    if let Some(mid) = mesh_id {
+                        let _ = save_mesh_scale(dir, mid, &self.available_meshes, mesh_scale);
+                    }
+                }
+
                 self.mode = LandscapeEditorMode::List;
                 ui.ctx().request_repaint();
             }
@@ -562,6 +624,7 @@ fn show_landscape_preview(
     ui: &mut egui::Ui,
     definition: Option<&LandscapeDefinition>,
     texture_status: Option<&str>,
+    mesh_scale: Option<f32>,
 ) {
     let Some(definition) = definition else {
         ui.centered_and_justified(|ui| {
@@ -579,6 +642,9 @@ fn show_landscape_preview(
     ui.label(format!("ID: {}", definition.id));
     ui.label(format!("Category: {}", definition.category.name()));
     ui.label(format!("Default scale: {:.3}", definition.default_scale));
+    if let Some(scale) = mesh_scale {
+        ui.label(format!("Mesh scale: {:.4}", scale));
+    }
     ui.label(format!("Blocking: {}", definition.flags.blocking));
     ui.label(format!(
         "Mesh ID: {}",
@@ -665,6 +731,119 @@ fn load_available_meshes(campaign_dir: Option<&Path>) -> Vec<CreatureReference> 
         return Vec::new();
     };
     ron::from_str::<Vec<CreatureReference>>(&contents).unwrap_or_default()
+}
+
+/// Reads `CreatureDefinition.scale` from the mesh file by scanning the last 20
+/// lines for the top-level `scale: <float>` field.
+///
+/// Avoids a full RON parse of large mesh files (which can be 50 000+ lines).
+/// Returns `1.0` when `mesh_id` is `None`, `campaign_dir` is `None`, the entry
+/// is not found, the file cannot be read, or the scale line is absent.
+fn load_mesh_scale(
+    mesh_id: Option<u32>,
+    available_meshes: &[CreatureReference],
+    campaign_dir: Option<&Path>,
+) -> f32 {
+    let Some(mid) = mesh_id else { return 1.0 };
+    let Some(dir) = campaign_dir else { return 1.0 };
+    let Some(reference) = available_meshes.iter().find(|m| m.id == mid) else {
+        return 1.0;
+    };
+    let mesh_path = dir.join(&reference.filepath);
+    let Ok(contents) = fs::read_to_string(&mesh_path) else {
+        return 1.0;
+    };
+    parse_top_level_scale(&contents).unwrap_or(1.0)
+}
+
+/// Extracts the top-level `scale: <float>` value from a `CreatureDefinition`
+/// RON file by scanning the last 20 lines.
+///
+/// Skips `scale: (...)` tuples (those are `mesh_transforms` per-mesh scale
+/// vectors, not the global `CreatureDefinition.scale`).
+fn parse_top_level_scale(contents: &str) -> Option<f32> {
+    for line in contents.lines().rev().take(20) {
+        if let Some(rest) = line.trim().strip_prefix("scale:") {
+            let value = rest.trim().trim_end_matches(',');
+            // Skip Vec3 tuples like "(1.0, 1.0, 1.0)".
+            if !value.starts_with('(') {
+                return value.parse::<f32>().ok();
+            }
+        }
+    }
+    None
+}
+
+/// Updates the top-level `scale:` field in a `CreatureDefinition` RON file
+/// by replacing just that one line in-place.
+///
+/// Does NOT deserialize/reserialize the full struct — that would reformat a
+/// 50 000-line mesh file and lose all original whitespace/structure.
+///
+/// Returns `true` when the file was successfully written, `false` on any error.
+/// Errors are intentionally swallowed — a scale write failure must never block
+/// the primary `landscape.ron` save or crash the editor.
+fn save_mesh_scale(
+    campaign_dir: &Path,
+    mesh_id: u32,
+    available_meshes: &[CreatureReference],
+    scale: f32,
+) -> bool {
+    let Some(reference) = available_meshes.iter().find(|m| m.id == mesh_id) else {
+        return false;
+    };
+    let mesh_path = campaign_dir.join(&reference.filepath);
+    let Ok(contents) = fs::read_to_string(&mesh_path) else {
+        return false;
+    };
+    let Some(updated) = replace_top_level_scale(&contents, scale) else {
+        return false;
+    };
+    fs::write(&mesh_path, updated).is_ok()
+}
+
+/// Replaces the top-level `scale: <float>` line in a `CreatureDefinition` RON
+/// string without touching the rest of the file.
+///
+/// Scans the last 20 lines to locate the line. Returns `None` if not found.
+fn replace_top_level_scale(contents: &str, new_scale: f32) -> Option<String> {
+    let lines: Vec<&str> = contents.lines().collect();
+    let n = lines.len();
+    let start = n.saturating_sub(20);
+
+    // Find the last top-level `scale: <float>` line (not a Vec3 tuple).
+    let target_idx = (start..n).rev().find(|&i| {
+        if let Some(rest) = lines[i].trim().strip_prefix("scale:") {
+            let value = rest.trim().trim_end_matches(',');
+            return !value.starts_with('(') && value.parse::<f32>().is_ok();
+        }
+        false
+    })?;
+
+    let indent = lines[target_idx].len() - lines[target_idx].trim_start().len();
+    let spaces = " ".repeat(indent);
+
+    // Format the float so it always has a decimal point (RON requires it for f32).
+    let scale_str = if new_scale.fract() == 0.0 {
+        format!("{:.1}", new_scale)
+    } else {
+        format!("{}", new_scale)
+    };
+
+    let ends_with_newline = contents.ends_with('\n');
+    let mut result = String::with_capacity(contents.len());
+    for (i, line) in lines.iter().enumerate() {
+        if i == target_idx {
+            result.push_str(&format!("{}scale: {},\n", spaces, scale_str));
+        } else {
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+    if !ends_with_newline && result.ends_with('\n') {
+        result.pop();
+    }
+    Some(result)
 }
 
 /// Removes the `landscape_mesh_registry.ron` entry whose `id` matches `mesh_id`.
@@ -1082,5 +1261,102 @@ mod tests {
             Some(11000),
             "mesh_id should be saved back to the definition"
         );
+    }
+
+    // =========================================================================
+    // parse_top_level_scale / replace_top_level_scale unit tests
+    // =========================================================================
+
+    fn make_creature_ron(scale: f32) -> String {
+        format!(
+            r#"(
+    id: 1,
+    name: "test",
+    meshes: [],
+    mesh_transforms: [
+        (
+            translation: (0.0, 0.0, 0.0),
+            rotation: (0.0, 0.0, 0.0),
+            scale: (1.0, 1.0, 1.0),
+        ),
+    ],
+    scale: {},
+    color_tint: None,
+)"#,
+            if scale.fract() == 0.0 {
+                format!("{:.1}", scale)
+            } else {
+                format!("{}", scale)
+            }
+        )
+    }
+
+    #[test]
+    fn test_parse_top_level_scale_reads_float() {
+        let ron = make_creature_ron(0.01);
+        assert!(
+            (parse_top_level_scale(&ron).unwrap() - 0.01).abs() < 1e-6,
+            "should parse 0.01"
+        );
+    }
+
+    #[test]
+    fn test_parse_top_level_scale_skips_vec3_tuple() {
+        // The file has `scale: (1.0, 1.0, 1.0)` in mesh_transforms AND
+        // `scale: 0.5` at the top level — must return 0.5, not panic.
+        let ron = make_creature_ron(0.5);
+        assert!(
+            (parse_top_level_scale(&ron).unwrap() - 0.5).abs() < 1e-6,
+            "should return top-level scale not the tuple"
+        );
+    }
+
+    #[test]
+    fn test_parse_top_level_scale_returns_none_when_missing() {
+        let ron = "(id: 1, name: \"test\", meshes: [])";
+        assert!(parse_top_level_scale(ron).is_none());
+    }
+
+    #[test]
+    fn test_replace_top_level_scale_updates_value() {
+        let original = make_creature_ron(0.01);
+        let updated = replace_top_level_scale(&original, 1.0).unwrap();
+        assert!(
+            updated.contains("scale: 1.0,"),
+            "updated file should contain 'scale: 1.0,'"
+        );
+        assert!(
+            !updated.contains("scale: 0.01,"),
+            "old value should be gone"
+        );
+    }
+
+    #[test]
+    fn test_replace_top_level_scale_preserves_mesh_transforms_scale() {
+        let original = make_creature_ron(0.01);
+        let updated = replace_top_level_scale(&original, 2.5).unwrap();
+        // The mesh_transforms scale tuple must be untouched.
+        assert!(
+            updated.contains("scale: (1.0, 1.0, 1.0),"),
+            "mesh_transforms scale tuple should be preserved"
+        );
+        assert!(
+            updated.contains("scale: 2.5,"),
+            "top-level scale should be updated to 2.5"
+        );
+    }
+
+    #[test]
+    fn test_replace_top_level_scale_returns_none_when_not_found() {
+        let ron = "(id: 1, name: \"test\", meshes: [])";
+        assert!(replace_top_level_scale(ron, 1.0).is_none());
+    }
+
+    #[test]
+    fn test_parse_and_replace_roundtrip() {
+        let original = make_creature_ron(0.01);
+        assert!((parse_top_level_scale(&original).unwrap() - 0.01).abs() < 1e-6);
+        let updated = replace_top_level_scale(&original, 1.0).unwrap();
+        assert!((parse_top_level_scale(&updated).unwrap() - 1.0).abs() < 1e-6);
     }
 }

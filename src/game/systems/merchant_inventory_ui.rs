@@ -723,7 +723,7 @@ fn render_character_sell_panel(
         painter.rect_stroke(
             panel_rect,
             2.0,
-            egui::Stroke::new(2.0, border_color),
+            egui::Stroke::new(2.0_f32, border_color),
             egui::StrokeKind::Outside,
         );
 
@@ -766,7 +766,7 @@ fn render_character_sell_panel(
                     egui::pos2(x, body_rect.min.y),
                     egui::pos2(x, body_rect.max.y),
                 ],
-                egui::Stroke::new(1.0, GRID_LINE_COLOR),
+                egui::Stroke::new(1.0_f32, GRID_LINE_COLOR),
             );
         }
         for row in 0..=slot_rows {
@@ -776,7 +776,7 @@ fn render_character_sell_panel(
                     egui::pos2(body_rect.min.x, y),
                     egui::pos2(body_rect.max.x, y),
                 ],
-                egui::Stroke::new(1.0, GRID_LINE_COLOR),
+                egui::Stroke::new(1.0_f32, GRID_LINE_COLOR),
             );
         }
         // painter borrow ends here — dropped at end of block.
@@ -814,7 +814,7 @@ fn render_character_sell_panel(
                 ui.painter().rect_stroke(
                     cell_rect.shrink(1.0),
                     0.0,
-                    egui::Stroke::new(2.0, SELECT_HIGHLIGHT_COLOR),
+                    egui::Stroke::new(2.0_f32, SELECT_HIGHLIGHT_COLOR),
                     egui::StrokeKind::Outside,
                 );
             } else if is_hovered && slot_idx < items.len() {
@@ -826,7 +826,7 @@ fn render_character_sell_panel(
                 ui.painter().rect_stroke(
                     cell_rect.shrink(1.0),
                     0.0,
-                    egui::Stroke::new(1.0, SELECT_HIGHLIGHT_COLOR),
+                    egui::Stroke::new(1.0_f32, SELECT_HIGHLIGHT_COLOR),
                     egui::StrokeKind::Outside,
                 );
             }
@@ -898,7 +898,8 @@ fn render_character_sell_panel(
                         .small();
                     let mut sell_btn = egui::Button::new(sell_label);
                     if sell_focused {
-                        sell_btn = sell_btn.stroke(egui::Stroke::new(2.0, ACTION_FOCUSED_COLOR));
+                        sell_btn =
+                            sell_btn.stroke(egui::Stroke::new(2.0_f32, ACTION_FOCUSED_COLOR));
                     }
                     if ui
                         .add(sell_btn)
@@ -1002,7 +1003,7 @@ fn render_merchant_stock_panel(
     painter.rect_stroke(
         panel_rect,
         2.0,
-        egui::Stroke::new(2.0, border_color),
+        egui::Stroke::new(2.0_f32, border_color),
         egui::StrokeKind::Outside,
     );
 
@@ -1077,7 +1078,7 @@ fn render_merchant_stock_panel(
                         ui.painter().rect_stroke(
                             row_rect.shrink(1.0),
                             0.0,
-                            egui::Stroke::new(1.5, SELECT_HIGHLIGHT_COLOR),
+                            egui::Stroke::new(1.5_f32, SELECT_HIGHLIGHT_COLOR),
                             egui::StrokeKind::Outside,
                         );
                     }
@@ -1106,7 +1107,7 @@ fn render_merchant_stock_panel(
                         ui.painter().rect_stroke(
                             row_rect.shrink(1.0),
                             0.0,
-                            egui::Stroke::new(1.0, SELECT_HIGHLIGHT_COLOR),
+                            egui::Stroke::new(1.0_f32, SELECT_HIGHLIGHT_COLOR),
                             egui::StrokeKind::Outside,
                         );
                     }
@@ -1175,7 +1176,8 @@ fn render_merchant_stock_panel(
                             .small();
                         let mut buy_btn = egui::Button::new(buy_label);
                         if buy_focused {
-                            buy_btn = buy_btn.stroke(egui::Stroke::new(2.0, ACTION_FOCUSED_COLOR));
+                            buy_btn =
+                                buy_btn.stroke(egui::Stroke::new(2.0_f32, ACTION_FOCUSED_COLOR));
                         }
 
                         let hover_text = if !can_afford {

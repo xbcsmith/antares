@@ -490,6 +490,8 @@ impl MapBuilder {
                         name: format!("Treasure at ({}, {})", x, y),
                         description: data,
                         loot: vec![],
+                        mesh_id: None,
+                        dialogue_id: None,
                     },
                     "sign" => MapEvent::Sign {
                         name: format!("Sign at ({}, {})", x, y),
@@ -497,6 +499,8 @@ impl MapBuilder {
                         text: data,
                         time_condition: None,
                         facing: None,
+                        mesh_id: None,
+                        dialogue_id: None,
                     },
                     "trap" => MapEvent::Trap {
                         name: format!("Trap at ({}, {})", x, y),
@@ -766,6 +770,8 @@ mod tests {
             text: "Test sign".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         builder.add_event(3, 3, event);
 

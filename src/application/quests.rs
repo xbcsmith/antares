@@ -219,16 +219,14 @@ impl QuestSystem {
                                     map_id: mid,
                                     position: pos,
                                 },
-                            ) => {
-                                if map_id == mid {
-                                    let dx = pos.x - position.x;
-                                    let dy = pos.y - position.y;
-                                    let dist_sq = dx * dx + dy * dy;
-                                    let radius_i32 = *radius as i32;
-                                    if dist_sq.abs() <= radius_i32 * radius_i32 {
-                                        // Mark objective as completed (use 1 to indicate completion)
-                                        progress.update_objective(obj_idx, 1);
-                                    }
+                            ) if map_id == mid => {
+                                let dx = pos.x - position.x;
+                                let dy = pos.y - position.y;
+                                let dist_sq = dx * dx + dy * dy;
+                                let radius_i32 = *radius as i32;
+                                if dist_sq.abs() <= radius_i32 * radius_i32 {
+                                    // Mark objective as completed (use 1 to indicate completion)
+                                    progress.update_objective(obj_idx, 1);
                                 }
                             }
                             // For other objective types (TalkToNpc, DeliverItem, EscortNpc, CustomFlag)

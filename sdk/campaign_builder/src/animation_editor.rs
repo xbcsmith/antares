@@ -358,7 +358,7 @@ impl AnimationEditorState {
             if x >= rect.min.x && x <= rect.max.x {
                 ui.painter().line_segment(
                     [egui::pos2(x, rect.min.y), egui::pos2(x, rect.max.y)],
-                    egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+                    egui::Stroke::new(1.0_f32, egui::Color32::from_gray(60)),
                 );
 
                 ui.painter().text(
@@ -392,7 +392,7 @@ impl AnimationEditorState {
                     egui::pos2(playhead_x, rect.min.y),
                     egui::pos2(playhead_x, rect.max.y),
                 ],
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 100, 100)),
+                egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(255, 100, 100)),
             );
         }
 

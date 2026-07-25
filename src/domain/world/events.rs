@@ -33,6 +33,12 @@ pub enum EventResult {
     Treasure {
         /// Item IDs in the treasure
         loot: Vec<u8>,
+        /// Optional mesh ID on the source [`MapEvent::Treasure`], forwarded so
+        /// the renderer can despawn the visual when the event is consumed.
+        mesh_id: Option<String>,
+        /// Optional dialogue ID on the source [`MapEvent::Treasure`], forwarded
+        /// so the caller can route through a dialogue tree before granting loot.
+        dialogue_id: Option<crate::domain::dialogue::DialogueId>,
     },
     /// Party teleported to new location
     Teleported {
@@ -52,6 +58,13 @@ pub enum EventResult {
     Sign {
         /// Text displayed
         text: String,
+        /// Optional mesh ID on the source [`MapEvent::Sign`], forwarded so the
+        /// renderer can spawn a visible sign-post mesh.
+        mesh_id: Option<String>,
+        /// Optional dialogue ID on the source [`MapEvent::Sign`], forwarded so
+        /// the caller can route through a dialogue tree instead of showing the
+        /// raw sign text directly.
+        dialogue_id: Option<crate::domain::dialogue::DialogueId>,
     },
     /// NPC dialogue initiated
     NpcDialogue {
@@ -245,6 +258,8 @@ pub enum EventError {
 ///     text: "Welcome to the dungeon!".to_string(),
 ///     time_condition: None,
 ///     facing: None,
+///     mesh_id: None,
+///     dialogue_id: None,
 /// });
 ///
 /// world.add_map(map);
@@ -255,7 +270,7 @@ pub enum EventError {
 /// let result = trigger_event(&mut world, pos, &game_time);
 /// assert!(result.is_ok());
 /// match result.unwrap() {
-///     EventResult::Sign { text } => assert_eq!(text, "Welcome to the dungeon!"),
+///     EventResult::Sign { text, .. } => assert_eq!(text, "Welcome to the dungeon!"),
 ///     _ => panic!("Expected Sign event"),
 /// }
 /// ```
@@ -333,21 +348,29 @@ pub fn trigger_event(
         MapEvent::Encounter {
             monster_group,
             combat_event_type,
-            time_condition: _,
             ..
         } => EventResult::Encounter {
             monster_group,
             combat_event_type,
         },
 
-        MapEvent::Treasure { loot, .. } => {
+        MapEvent::Treasure {
+            loot,
+            mesh_id,
+            dialogue_id,
+            ..
+        } => {
             // Remove treasure event after being collected (one-time)
             world
                 .get_current_map_mut()
                 .ok_or(EventError::MapNotFound(current_map_id))?
                 .remove_event(position);
 
-            EventResult::Treasure { loot }
+            EventResult::Treasure {
+                loot,
+                mesh_id,
+                dialogue_id,
+            }
         }
 
         MapEvent::Teleport {
@@ -377,29 +400,26 @@ pub fn trigger_event(
 
         MapEvent::Sign {
             text,
-            time_condition: _,
+            mesh_id,
+            dialogue_id,
             ..
         } => {
             // Signs are repeatable - don't remove
-            EventResult::Sign { text }
+            EventResult::Sign {
+                text,
+                mesh_id,
+                dialogue_id,
+            }
         }
 
-        MapEvent::NpcDialogue {
-            npc_id,
-            time_condition: _,
-            ..
-        } => {
+        MapEvent::NpcDialogue { npc_id, .. } => {
             // NPC dialogues are repeatable - don't remove
             EventResult::NpcDialogue {
                 npc_id: npc_id.clone(),
             }
         }
 
-        MapEvent::RecruitableCharacter {
-            character_id,
-            time_condition: _,
-            ..
-        } => {
+        MapEvent::RecruitableCharacter { character_id, .. } => {
             // Recruitables are not consumed by merely standing on or triggering
             // their tile. The event must remain in the map so the visible mesh
             // stays present until a dialogue recruitment action succeeds. The
@@ -509,10 +529,7 @@ pub fn random_encounter<R: rand::Rng>(world: &World, rng: &mut R) -> Option<Enco
     }
 
     // Must have a configured encounter table
-    let table = match &map.encounter_table {
-        Some(t) => t,
-        None => return None,
-    };
+    let table = map.encounter_table.as_ref()?;
 
     // No groups or zero chance => no encounter
     if table.groups.is_empty() || table.encounter_rate <= 0.0 {
@@ -622,6 +639,8 @@ mod tests {
                 name: "Treasure".to_string(),
                 description: "Desc".to_string(),
                 loot: vec![10, 20, 30],
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -631,7 +650,7 @@ mod tests {
         let result = trigger_event(&mut world, pos, &noon());
         assert!(result.is_ok());
         match result.unwrap() {
-            EventResult::Treasure { loot } => {
+            EventResult::Treasure { loot, .. } => {
                 assert_eq!(loot, vec![10, 20, 30]);
             }
             _ => panic!("Expected Treasure event"),
@@ -769,6 +788,8 @@ mod tests {
                 text: sign_text.clone(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -778,7 +799,7 @@ mod tests {
         let result = trigger_event(&mut world, pos, &noon());
         assert!(result.is_ok());
         match result.unwrap() {
-            EventResult::Sign { text } => {
+            EventResult::Sign { text, .. } => {
                 assert_eq!(text, sign_text);
             }
             _ => panic!("Expected Sign event"),
@@ -863,6 +884,8 @@ mod tests {
                 text: "Only after the fifth day shall this be revealed.".to_string(),
                 time_condition: Some(TimeCondition::AfterDay(5)),
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         world.add_map(map);
@@ -969,6 +992,8 @@ mod tests {
                 text: "Always visible".to_string(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         world.add_map(map);
@@ -1336,6 +1361,8 @@ mod tests {
                 text: "North".to_string(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         map.add_event(
@@ -1344,6 +1371,8 @@ mod tests {
                 name: "Treasure".to_string(),
                 description: "Desc".to_string(),
                 loot: vec![1, 2],
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         map.add_event(
@@ -1519,6 +1548,8 @@ mod tests {
                 items: items.clone(),
                 gold: 0,
                 gems: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -1570,6 +1601,8 @@ mod tests {
                 }],
                 gold: 0,
                 gems: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -1646,6 +1679,8 @@ mod tests {
                 text: "Hello".to_string(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         map.add_dropped_item(DroppedItem {
@@ -1739,6 +1774,8 @@ mod tests {
                 items: vec![],
                 gold: 0,
                 gems: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -1770,6 +1807,8 @@ mod tests {
                 items: vec![],
                 gold: 250,
                 gems: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         world.add_map(map);
@@ -1802,6 +1841,8 @@ mod tests {
                 items: vec![],
                 gold: 0,
                 gems: 7,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         world.add_map(map);

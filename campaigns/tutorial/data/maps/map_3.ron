@@ -5144,8 +5144,8 @@
             y: 8,
         ): Sign(
             name: "Exit Sign",
-            description: "A sign marking the path back to town.",
-            text: "Exit to Town",
+            description: "A sign marking the path back to the dark forrest",
+            text: "Exit to Forrest",
             time_condition: None,
             facing: None,
         ),

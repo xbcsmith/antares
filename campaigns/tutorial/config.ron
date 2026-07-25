@@ -54,6 +54,9 @@ GameConfig(
         training_fee_base: 500,
         training_fee_multiplier: 1.0,
     ),
+    fonts: FontConfig(
+        dialogue_font: Some("fonts/LiberationSerif-Regular.ttf"),
+        game_menu_font: Some("fonts/LiberationSerif-Regular.ttf"),),
     time: TimeConfig(
         movement_step_seconds: 30,
         combat_turn_seconds: 10,

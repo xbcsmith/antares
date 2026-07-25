@@ -92,6 +92,12 @@ const EVENT_COLOR_FURNITURE: Color32 = Color32::from_rgb(198, 120, 221);
 /// Teal for Container events - rgb(0, 180, 160)
 const EVENT_COLOR_CONTAINER: Color32 = Color32::from_rgb(0, 180, 160);
 
+/// Orange-brown for Locked Door events - rgb(200, 100, 50)
+const EVENT_COLOR_LOCKED_DOOR: Color32 = Color32::from_rgb(200, 100, 50);
+
+/// Darker orange-brown for Locked Container events - rgb(160, 80, 40)
+const EVENT_COLOR_LOCKED_CONTAINER: Color32 = Color32::from_rgb(160, 80, 40);
+
 // ===== Combat Event Type Inspector Colors =====
 // These are used only in the inspector detail panel, NOT on the grid tiles.
 // All encounter tiles stay EVENT_COLOR_ENCOUNTER on the grid for visual consistency.
@@ -2438,6 +2444,16 @@ pub struct EventEditorState {
     pub treasure_items: Vec<ItemId>,
     // Search query for treasure items (persisted across frames)
     pub treasure_items_query: String,
+    // Treasure mesh/dialogue fields (Phase 6)
+    /// Mesh ID string for the treasure event's 3-D visual (references ObjectMeshDatabase).
+    /// Empty string means no mesh.
+    pub treasure_mesh_id: String,
+    /// Parsed dialogue ID for the treasure event's pre-interaction dialogue.
+    /// `None` means no dialogue (immediate effect).
+    pub treasure_dialogue_id: Option<u16>,
+    /// Autocomplete display buffer for the dialogue ID picker.
+    /// Stores the formatted string "500 \u{2014} Barred Passage" or just "500".
+    pub treasure_dialogue_id_buf: String,
     // Teleport fields
     pub teleport_x: String,
     pub teleport_y: String,
@@ -2451,6 +2467,12 @@ pub struct EventEditorState {
     pub trap_effect: String,
     // Sign fields
     pub sign_text: String,
+    /// Mesh ID for a visible 3-D object on the sign event tile.
+    pub sign_mesh_id: String,
+    /// Pre-interaction dialogue ID for the sign event.
+    pub sign_dialogue_id: Option<u16>,
+    /// Display buffer for the sign dialogue ID picker.
+    pub sign_dialogue_id_buf: String,
     // NPC Dialogue fields
     pub npc_id: String,
     // Recruitable Character fields
@@ -2520,6 +2542,30 @@ pub struct EventEditorState {
     pub container_gold: String,
     /// Gems placed in the container (text field, parsed as u32 on save)
     pub container_gems: String,
+    /// Mesh ID for a visible 3-D object on the container event tile.
+    pub container_mesh_id: String,
+    /// Pre-interaction dialogue ID for the container event.
+    pub container_dialogue_id: Option<u16>,
+    /// Display buffer for the container dialogue ID picker.
+    pub container_dialogue_id_buf: String,
+
+    // Locked Door / Locked Container fields (shared between both)
+    /// Unique identifier used as the key in Map::lock_states.
+    pub lock_id: String,
+    /// Optional item ID (u8) required to unlock — empty means no key needed.
+    pub lock_key_item_id: String,
+    /// Starting trap chance (0–100) written into LockState on first init.
+    pub lock_initial_trap_chance: u8,
+    /// Mesh ID for a visible 3-D object on the locked event tile.
+    pub lock_mesh_id: String,
+    /// Pre-interaction dialogue ID for the locked event.
+    pub lock_dialogue_id: Option<u16>,
+    /// Display buffer for the lock dialogue ID picker.
+    pub lock_dialogue_id_buf: String,
+    /// Items stored inside a LockedContainer (not used by LockedDoor).
+    pub locked_container_items: Vec<ItemId>,
+    /// Freeform input buffer for adding an item to the locked container list.
+    pub locked_container_item_input: String,
 }
 
 impl Default for EventEditorState {
@@ -2534,6 +2580,9 @@ impl Default for EventEditorState {
             encounter_combat_event_type: CombatEventType::Normal,
             treasure_items: Vec::new(),
             treasure_items_query: String::new(),
+            treasure_mesh_id: String::new(),
+            treasure_dialogue_id: None,
+            treasure_dialogue_id_buf: String::new(),
             teleport_x: String::new(),
             teleport_y: String::new(),
             teleport_map_id: String::new(),
@@ -2543,6 +2592,9 @@ impl Default for EventEditorState {
             trap_damage: 0,
             trap_effect: String::new(),
             sign_text: String::new(),
+            sign_mesh_id: String::new(),
+            sign_dialogue_id: None,
+            sign_dialogue_id_buf: String::new(),
             npc_id: String::new(),
             recruit_character_id: String::new(),
             recruitable_dialogue_id: String::new(),
@@ -2574,6 +2626,17 @@ impl Default for EventEditorState {
             container_id: String::new(),
             container_gold: "0".to_string(),
             container_gems: "0".to_string(),
+            container_mesh_id: String::new(),
+            container_dialogue_id: None,
+            container_dialogue_id_buf: String::new(),
+            lock_id: String::new(),
+            lock_key_item_id: String::new(),
+            lock_initial_trap_chance: 0,
+            lock_mesh_id: String::new(),
+            lock_dialogue_id: None,
+            lock_dialogue_id_buf: String::new(),
+            locked_container_items: Vec::new(),
+            locked_container_item_input: String::new(),
         }
     }
 }
@@ -2591,6 +2654,8 @@ pub enum EventType {
     EnterInn,
     Furniture,
     Container,
+    LockedDoor,
+    LockedContainer,
 }
 
 impl EventType {
@@ -2606,6 +2671,8 @@ impl EventType {
             EventType::EnterInn => "Enter Inn",
             EventType::Furniture => "Furniture",
             EventType::Container => "Container",
+            EventType::LockedDoor => "Locked Door",
+            EventType::LockedContainer => "Locked Container",
         }
     }
 
@@ -2621,6 +2688,8 @@ impl EventType {
             EventType::EnterInn => "🏨",
             EventType::Furniture => "🪑",
             EventType::Container => "📦",
+            EventType::LockedDoor => "🔒",
+            EventType::LockedContainer => "🔐",
         }
     }
 
@@ -2650,6 +2719,8 @@ impl EventType {
             EventType::EnterInn => EVENT_COLOR_ENTER_INN,
             EventType::Furniture => EVENT_COLOR_FURNITURE,
             EventType::Container => EVENT_COLOR_CONTAINER,
+            EventType::LockedDoor => EVENT_COLOR_LOCKED_DOOR,
+            EventType::LockedContainer => EVENT_COLOR_LOCKED_CONTAINER,
         }
     }
 
@@ -2665,6 +2736,8 @@ impl EventType {
             EventType::EnterInn,
             EventType::Furniture,
             EventType::Container,
+            EventType::LockedDoor,
+            EventType::LockedContainer,
         ]
     }
 }
@@ -2695,10 +2768,18 @@ impl EventEditorState {
             }
             EventType::Treasure => {
                 let loot: Vec<ItemId> = self.treasure_items.clone();
+                let mesh_id = if self.treasure_mesh_id.is_empty() {
+                    None
+                } else {
+                    Some(self.treasure_mesh_id.clone())
+                };
+                let dialogue_id = self.treasure_dialogue_id;
                 Ok(MapEvent::Treasure {
                     name: self.name.clone(),
                     description: self.description.clone(),
                     loot,
+                    mesh_id,
+                    dialogue_id,
                 })
             }
             EventType::Teleport => {
@@ -2759,12 +2840,19 @@ impl EventEditorState {
                     return Err("Sign text cannot be empty".to_string());
                 }
                 let facing = Self::parse_facing(self.event_facing.as_deref());
+                let mesh_id = if self.sign_mesh_id.is_empty() {
+                    None
+                } else {
+                    Some(self.sign_mesh_id.clone())
+                };
                 Ok(MapEvent::Sign {
                     name: self.name.clone(),
                     description: self.description.clone(),
                     text: self.sign_text.clone(),
                     time_condition: None,
                     facing,
+                    mesh_id,
+                    dialogue_id: self.sign_dialogue_id,
                 })
             }
             EventType::NpcDialogue => {
@@ -2878,6 +2966,11 @@ impl EventEditorState {
                     .collect();
                 let gold = self.container_gold.trim().parse::<u32>().unwrap_or(0);
                 let gems = self.container_gems.trim().parse::<u32>().unwrap_or(0);
+                let container_mesh_id = if self.container_mesh_id.is_empty() {
+                    None
+                } else {
+                    Some(self.container_mesh_id.clone())
+                };
                 Ok(MapEvent::Container {
                     id,
                     name: self.name.clone(),
@@ -2885,6 +2978,63 @@ impl EventEditorState {
                     items,
                     gold,
                     gems,
+                    mesh_id: container_mesh_id,
+                    dialogue_id: self.container_dialogue_id,
+                })
+            }
+            EventType::LockedDoor => {
+                if self.lock_id.is_empty() {
+                    return Err("Locked Door requires a lock ID".to_string());
+                }
+                let key_item_id = if self.lock_key_item_id.is_empty() {
+                    None
+                } else {
+                    self.lock_key_item_id.trim().parse::<u8>().ok()
+                };
+                let mesh_id = if self.lock_mesh_id.is_empty() {
+                    None
+                } else {
+                    Some(self.lock_mesh_id.clone())
+                };
+                Ok(MapEvent::LockedDoor {
+                    name: self.name.clone(),
+                    lock_id: self.lock_id.clone(),
+                    key_item_id,
+                    initial_trap_chance: self.lock_initial_trap_chance,
+                    mesh_id,
+                    dialogue_id: self.lock_dialogue_id,
+                })
+            }
+            EventType::LockedContainer => {
+                if self.lock_id.is_empty() {
+                    return Err("Locked Container requires a lock ID".to_string());
+                }
+                let key_item_id = if self.lock_key_item_id.is_empty() {
+                    None
+                } else {
+                    self.lock_key_item_id.trim().parse::<u8>().ok()
+                };
+                let items = self
+                    .locked_container_items
+                    .iter()
+                    .map(|&item_id| antares::domain::character::InventorySlot {
+                        item_id,
+                        charges: 0,
+                    })
+                    .collect();
+                let mesh_id = if self.lock_mesh_id.is_empty() {
+                    None
+                } else {
+                    Some(self.lock_mesh_id.clone())
+                };
+                Ok(MapEvent::LockedContainer {
+                    name: self.name.clone(),
+                    lock_id: self.lock_id.clone(),
+                    key_item_id,
+                    items,
+                    initial_trap_chance: self.lock_initial_trap_chance,
+                    mesh_id,
+                    dialogue_id: self.lock_dialogue_id,
                 })
             }
         }
@@ -2910,6 +3060,8 @@ impl EventEditorState {
     ///     text: "Hello".to_string(),
     ///     time_condition: None,
     ///     facing: None,
+    ///     mesh_id: None,
+    ///     dialogue_id: None,
     /// };
     ///
     /// let editor = EventEditorState::from_map_event(Position::new(1, 1), &event);
@@ -2944,11 +3096,18 @@ impl EventEditorState {
                 name,
                 description,
                 loot,
+                mesh_id,
+                dialogue_id,
+                ..
             } => {
                 s.event_type = EventType::Treasure;
                 s.name = name.clone();
                 s.description = description.clone();
                 s.treasure_items = loot.clone();
+                s.treasure_mesh_id = mesh_id.clone().unwrap_or_default();
+                s.treasure_dialogue_id = *dialogue_id;
+                s.treasure_dialogue_id_buf =
+                    dialogue_id.map(|id| id.to_string()).unwrap_or_default();
             }
             MapEvent::Teleport {
                 name,
@@ -2983,6 +3142,8 @@ impl EventEditorState {
                 description,
                 text,
                 facing,
+                mesh_id,
+                dialogue_id,
                 ..
             } => {
                 s.event_type = EventType::Sign;
@@ -2990,6 +3151,9 @@ impl EventEditorState {
                 s.description = description.clone();
                 s.sign_text = text.clone();
                 s.event_facing = facing.map(|d| format!("{:?}", d));
+                s.sign_mesh_id = mesh_id.clone().unwrap_or_default();
+                s.sign_dialogue_id = *dialogue_id;
+                s.sign_dialogue_id_buf = dialogue_id.map(|id| id.to_string()).unwrap_or_default();
             }
             MapEvent::NpcDialogue {
                 name,
@@ -3073,7 +3237,8 @@ impl EventEditorState {
                 items,
                 gold,
                 gems,
-                ..
+                mesh_id,
+                dialogue_id,
             } => {
                 s.event_type = EventType::Container;
                 s.container_id = id.clone();
@@ -3084,18 +3249,50 @@ impl EventEditorState {
                 s.container_locked = false;
                 s.container_gold = gold.to_string();
                 s.container_gems = gems.to_string();
+                s.container_mesh_id = mesh_id.clone().unwrap_or_default();
+                s.container_dialogue_id = *dialogue_id;
+                s.container_dialogue_id_buf =
+                    dialogue_id.map(|id| id.to_string()).unwrap_or_default();
             }
             MapEvent::DroppedItem { name, .. } => {
                 s.event_type = EventType::Treasure;
                 s.name = name.clone();
             }
-            MapEvent::LockedDoor { name, .. } => {
-                s.event_type = EventType::Treasure;
+            MapEvent::LockedDoor {
+                name,
+                lock_id,
+                key_item_id,
+                initial_trap_chance,
+                mesh_id,
+                dialogue_id,
+            } => {
+                s.event_type = EventType::LockedDoor;
                 s.name = name.clone();
+                s.lock_id = lock_id.clone();
+                s.lock_key_item_id = key_item_id.map(|id| id.to_string()).unwrap_or_default();
+                s.lock_initial_trap_chance = *initial_trap_chance;
+                s.lock_mesh_id = mesh_id.clone().unwrap_or_default();
+                s.lock_dialogue_id = *dialogue_id;
+                s.lock_dialogue_id_buf = dialogue_id.map(|id| id.to_string()).unwrap_or_default();
             }
-            MapEvent::LockedContainer { name, .. } => {
-                s.event_type = EventType::Treasure;
+            MapEvent::LockedContainer {
+                name,
+                lock_id,
+                key_item_id,
+                items,
+                initial_trap_chance,
+                mesh_id,
+                dialogue_id,
+            } => {
+                s.event_type = EventType::LockedContainer;
                 s.name = name.clone();
+                s.lock_id = lock_id.clone();
+                s.lock_key_item_id = key_item_id.map(|id| id.to_string()).unwrap_or_default();
+                s.locked_container_items = items.iter().map(|slot| slot.item_id).collect();
+                s.lock_initial_trap_chance = *initial_trap_chance;
+                s.lock_mesh_id = mesh_id.clone().unwrap_or_default();
+                s.lock_dialogue_id = *dialogue_id;
+                s.lock_dialogue_id_buf = dialogue_id.map(|id| id.to_string()).unwrap_or_default();
             }
         }
         s
@@ -3661,13 +3858,14 @@ impl<'a> Widget for MapGridWidget<'a> {
         let map_width_px = self.state.map.width as f32 * self.tile_size;
         let map_height_px = self.state.map.height as f32 * self.tile_size;
 
-        // Obtain the UI available size so we can ensure the painter covers the full panel area
-        // and avoid the grid being cut off if the UI provides more space than the grid requires.
-        let avail = ui.available_size();
+        // Use clip_rect (the visible viewport) instead of available_size.
+        // Inside a ScrollArea, available_size() can exceed the actual viewport by a few px,
+        // causing spurious scroll bars even for small maps. clip_rect is always bounded to the
+        // true visible area, so content never overflows the scroll area viewport.
+        let avail = ui.clip_rect().size();
 
-        // The allocated painter size should be at least the map size but also at least
-        // the available UI size so the canvas won't be narrower/taller than the available
-        // area and nothing gets clipped in the layout.
+        // Allocated painter: at least map_size, at least viewport — ensures small maps fill the
+        // available canvas while large maps overflow the viewport (triggering the scroll bar).
         let width = map_width_px.max(avail.x).max(1.0);
         let height = map_height_px.max(avail.y).max(1.0);
 
@@ -3752,8 +3950,8 @@ impl<'a> Widget for MapGridWidget<'a> {
                                 MapEvent::Furniture { .. } => EventType::Furniture,
                                 MapEvent::Container { .. } => EventType::Container,
                                 MapEvent::DroppedItem { .. } => EventType::Treasure,
-                                MapEvent::LockedDoor { .. } => EventType::Treasure,
-                                MapEvent::LockedContainer { .. } => EventType::Treasure,
+                                MapEvent::LockedDoor { .. } => EventType::LockedDoor,
+                                MapEvent::LockedContainer { .. } => EventType::LockedContainer,
                             })
                         } else {
                             None
@@ -3776,7 +3974,7 @@ impl<'a> Widget for MapGridWidget<'a> {
                                 rect,
                                 0.0,
                                 // Make the grid color white for better visibility on dark themes
-                                Stroke::new(1.0, Color32::WHITE),
+                                Stroke::new(1.0_f32, Color32::WHITE),
                                 egui::StrokeKind::Outside,
                             );
                         }
@@ -3786,7 +3984,7 @@ impl<'a> Widget for MapGridWidget<'a> {
                             painter.rect_stroke(
                                 rect,
                                 0.0,
-                                Stroke::new(2.0, Color32::YELLOW),
+                                Stroke::new(2.0_f32, Color32::YELLOW),
                                 egui::StrokeKind::Outside,
                             );
                         }
@@ -3796,7 +3994,7 @@ impl<'a> Widget for MapGridWidget<'a> {
                             painter.rect_stroke(
                                 rect,
                                 0.0,
-                                Stroke::new(2.0, Color32::LIGHT_BLUE),
+                                Stroke::new(2.0_f32, Color32::LIGHT_BLUE),
                                 egui::StrokeKind::Outside,
                             );
                         }
@@ -3829,7 +4027,7 @@ impl<'a> Widget for MapGridWidget<'a> {
                                 painter.rect_stroke(
                                     rect,
                                     0.0,
-                                    Stroke::new(3.0, Color32::LIGHT_GREEN),
+                                    Stroke::new(3.0_f32, Color32::LIGHT_GREEN),
                                     egui::StrokeKind::Outside,
                                 );
 
@@ -3984,7 +4182,7 @@ impl<'a> Widget for MapPreviewWidget<'a> {
         let map_width_px = self.map.width as f32 * tile_size;
         let map_height_px = self.map.height as f32 * tile_size;
 
-        let avail = ui.available_size();
+        let avail = ui.clip_rect().size();
         let width = map_width_px.max(avail.x).max(1.0);
         let height = map_height_px.max(avail.y).max(1.0);
 
@@ -4059,7 +4257,7 @@ impl<'a> Widget for MapPreviewWidget<'a> {
                         painter.rect_stroke(
                             rect,
                             0.0,
-                            Stroke::new(1.0, Color32::WHITE),
+                            Stroke::new(1.0_f32, Color32::WHITE),
                             egui::StrokeKind::Outside,
                         );
 
@@ -4068,7 +4266,7 @@ impl<'a> Widget for MapPreviewWidget<'a> {
                                 painter.rect_stroke(
                                     rect,
                                     0.0,
-                                    Stroke::new(2.0, Color32::YELLOW),
+                                    Stroke::new(2.0_f32, Color32::YELLOW),
                                     egui::StrokeKind::Outside,
                                 );
                             }
@@ -4152,6 +4350,17 @@ pub struct MapsEditorState {
     pub zoom_level: f32,
     /// Request to open the NPC editor for a given NPC ID (set when user clicks Edit NPC)
     pub requested_open_npc: Option<String>,
+    /// Mesh IDs from the campaign's object mesh registry.
+    /// Rebuilt when `ctx.campaign_dir` changes or `mesh_cache_dirty` is set.
+    pub available_mesh_ids: Vec<String>,
+    /// Dialogue (id, title) pairs from the campaign dialogue database.
+    /// Rebuilt when `ctx.campaign_dir` changes. Never call the loader inside the render loop.
+    pub available_dialogue_ids: Vec<(u16, String)>,
+    /// Last campaign directory seen, used to detect when caches need to be rebuilt.
+    pub last_campaign_dir: Option<std::path::PathBuf>,
+    /// When `true`, the mesh ID cache will be rebuilt on the next render tick
+    /// regardless of whether the campaign directory changed.
+    pub mesh_cache_dirty: bool,
 }
 
 /// Minimum zoom level (25%)
@@ -4205,6 +4414,10 @@ impl Default for MapsEditorState {
             new_map_name: "New Map".to_string(),
             zoom_level: DEFAULT_ZOOM,
             requested_open_npc: None,
+            available_mesh_ids: Vec::new(),
+            available_dialogue_ids: Vec::new(),
+            last_campaign_dir: None,
+            mesh_cache_dirty: false,
         }
     }
 }
@@ -4239,6 +4452,10 @@ impl MapsEditorState {
     /// Create a new maps editor state
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn invalidate_mesh_cache(&mut self) {
+        self.mesh_cache_dirty = true;
     }
 
     /// Get the next available map ID
@@ -4297,6 +4514,48 @@ impl MapsEditorState {
     ) {
         ui.heading("🗺️ Maps Editor");
         ui.add_space(5.0);
+
+        // ── Autocomplete cache rebuild ──────────────────────────────────────────
+        // Rebuild available_mesh_ids and available_dialogue_ids when the campaign
+        // directory changes. Never load inside the render loop (Rule 10 / Rule 14).
+        let campaign_dir_changed = match (&self.last_campaign_dir, ctx.campaign_dir) {
+            (None, Some(_)) | (Some(_), None) => true,
+            (Some(last), Some(current)) => last != current,
+            (None, None) => false,
+        };
+        if campaign_dir_changed || self.mesh_cache_dirty {
+            if let Some(dir) = ctx.campaign_dir {
+                // Load object mesh IDs
+                let registry_path = dir.join("data/object_mesh_registry.ron");
+                if let Ok(db) =
+                    antares::domain::world::object_mesh::ObjectMeshDatabase::load_from_registry(
+                        &registry_path,
+                        dir,
+                    )
+                {
+                    self.available_mesh_ids = antares::sdk::map_editor::browse_event_mesh_ids(&db);
+                } else {
+                    self.available_mesh_ids.clear();
+                }
+                self.mesh_cache_dirty = false;
+                // Load dialogue IDs
+                let dialogue_path = dir.join("data/dialogues.ron");
+                if let Ok(db) =
+                    antares::sdk::database::DialogueDatabase::load_from_file(&dialogue_path)
+                {
+                    self.available_dialogue_ids =
+                        antares::sdk::map_editor::browse_dialogue_ids(&db);
+                } else {
+                    self.available_dialogue_ids.clear();
+                }
+                self.last_campaign_dir = Some(dir.to_path_buf());
+            } else {
+                self.available_mesh_ids.clear();
+                self.available_dialogue_ids.clear();
+                self.mesh_cache_dirty = false;
+                self.last_campaign_dir = None;
+            }
+        }
 
         // Use shared EditorToolbar component
         let toolbar_action = EditorToolbar::new("Maps")
@@ -4892,13 +5151,17 @@ impl MapsEditorState {
                             // Re-acquire the editor reference via raw pointer to avoid simultaneous borrows
                             let editor_ref: &mut MapEditorState = unsafe { &mut *editor_ptr };
 
-                            // Compute draw_zoom using left_ui available size to ensure Fit uses the actual left column
-                            // Honor "Auto Fit" when it's enabled (editor_auto_fit_on_resize).
+                            // Compute draw_zoom using the column width and the pre-computed panel_height.
+                            // DO NOT use left_ui.available_size().y here — inside the outer
+                            // ScrollArea::vertical, the vertical axis is unbounded (∞), which makes
+                            // zoom_y = ∞ and fit_zoom = zoom_x only. That causes the map to overflow
+                            // vertically and show a scroll bar even for small maps.
                             let draw_zoom = if fit_requested
                                 || (self.zoom_level == DEFAULT_ZOOM)
                                 || editor_ref.auto_fit_on_resize
                             {
-                                let avail = left_ui.available_size();
+                                let avail =
+                                    egui::Vec2::new(left_ui.available_width(), panel_height);
                                 let map_width = editor_ref.map.width as f32 * BASE_TILE_SIZE;
                                 let map_height = editor_ref.map.height as f32 * BASE_TILE_SIZE;
 
@@ -4976,9 +5239,13 @@ impl MapsEditorState {
                                         landscape_definitions: refs.landscape_definitions,
                                         characters: refs.characters,
                                     };
-                                    if let Some(npc_id) =
-                                        Self::show_inspector_panel(ui, editor_ref, &inspector_data)
-                                    {
+                                    if let Some(npc_id) = Self::show_inspector_panel(
+                                        ui,
+                                        editor_ref,
+                                        &inspector_data,
+                                        &self.available_mesh_ids,
+                                        &self.available_dialogue_ids,
+                                    ) {
                                         self.requested_open_npc = Some(npc_id);
                                     }
                                 });
@@ -5192,6 +5459,8 @@ impl MapsEditorState {
         ui: &mut egui::Ui,
         editor: &mut MapEditorState,
         data: &MapInspectorData<'_>,
+        available_mesh_ids: &[String],
+        available_dialogue_ids: &[(u16, String)],
     ) -> Option<String> {
         let mut requested_open_npc: Option<String> = None;
 
@@ -5818,6 +6087,8 @@ impl MapsEditorState {
                             data.conditions,
                             data.furniture_definitions,
                             data.characters,
+                            available_mesh_ids,
+                            available_dialogue_ids,
                         );
                     });
                 }
@@ -6654,6 +6925,8 @@ impl MapsEditorState {
         conditions: &[antares::domain::conditions::ConditionDefinition],
         furniture_definitions: &[antares::domain::world::furniture::FurnitureDefinition],
         characters: &[antares::domain::character_definition::CharacterDefinition],
+        available_mesh_ids: &[String],
+        available_dialogue_ids: &[(u16, String)],
     ) {
         if let Some(ref mut event_editor) = editor.event_editor {
             egui::ComboBox::from_id_salt("map_event_type_combo")
@@ -6801,6 +7074,38 @@ impl MapsEditorState {
                         items,
                     );
                     if changed {
+                        editor.has_changes = true;
+                    }
+
+                    // Mesh ID autocomplete (Rule 14 — no bare TextEdit for reference IDs)
+                    ui.separator();
+                    use crate::ui_helpers::{
+                        autocomplete_dialogue_selector, autocomplete_mesh_id_selector,
+                        parse_dialogue_id_from_buf,
+                    };
+                    ui.label("Visual Mesh (optional):");
+                    if autocomplete_mesh_id_selector(
+                        ui,
+                        "event_treasure_mesh_id",
+                        "Mesh ID:",
+                        &mut event_editor.treasure_mesh_id,
+                        available_mesh_ids,
+                    ) {
+                        editor.has_changes = true;
+                    }
+
+                    // Dialogue ID autocomplete (Rule 14)
+                    ui.label("Pre-interaction Dialogue (optional):");
+                    if autocomplete_dialogue_selector(
+                        ui,
+                        "event_treasure_dialogue_id",
+                        "Dialogue ID:",
+                        &mut event_editor.treasure_dialogue_id_buf,
+                        available_dialogue_ids,
+                    ) {
+                        // Parse and update the numeric dialogue_id from the buffer
+                        event_editor.treasure_dialogue_id =
+                            parse_dialogue_id_from_buf(&event_editor.treasure_dialogue_id_buf);
                         editor.has_changes = true;
                     }
                 }
@@ -6964,6 +7269,35 @@ impl MapsEditorState {
                         }
                     });
                     if event_editor.event_facing.is_some() {
+                        editor.has_changes = true;
+                    }
+
+                    ui.separator();
+                    use crate::ui_helpers::{
+                        autocomplete_dialogue_selector, autocomplete_mesh_id_selector,
+                        parse_dialogue_id_from_buf,
+                    };
+                    ui.label("Visual Mesh (optional):");
+                    if autocomplete_mesh_id_selector(
+                        ui,
+                        "sign_evt_mesh_id",
+                        "Mesh ID:",
+                        &mut event_editor.sign_mesh_id,
+                        available_mesh_ids,
+                    ) {
+                        editor.has_changes = true;
+                    }
+
+                    ui.label("Pre-interaction Dialogue (optional):");
+                    if autocomplete_dialogue_selector(
+                        ui,
+                        "sign_evt_dialogue",
+                        "Dialogue ID:",
+                        &mut event_editor.sign_dialogue_id_buf,
+                        available_dialogue_ids,
+                    ) {
+                        event_editor.sign_dialogue_id =
+                            parse_dialogue_id_from_buf(&event_editor.sign_dialogue_id_buf);
                         editor.has_changes = true;
                     }
                 }
@@ -7688,6 +8022,253 @@ impl MapsEditorState {
                         event_editor.container_items.remove(idx);
                         editor.has_changes = true;
                     }
+
+                    ui.separator();
+                    use crate::ui_helpers::{
+                        autocomplete_dialogue_selector, autocomplete_mesh_id_selector,
+                        parse_dialogue_id_from_buf,
+                    };
+                    ui.label("Visual Mesh (optional):");
+                    if autocomplete_mesh_id_selector(
+                        ui,
+                        "container_evt_mesh_id",
+                        "Mesh ID:",
+                        &mut event_editor.container_mesh_id,
+                        available_mesh_ids,
+                    ) {
+                        editor.has_changes = true;
+                    }
+
+                    ui.label("Pre-interaction Dialogue (optional):");
+                    if autocomplete_dialogue_selector(
+                        ui,
+                        "container_evt_dialogue",
+                        "Dialogue ID:",
+                        &mut event_editor.container_dialogue_id_buf,
+                        available_dialogue_ids,
+                    ) {
+                        event_editor.container_dialogue_id =
+                            parse_dialogue_id_from_buf(&event_editor.container_dialogue_id_buf);
+                        editor.has_changes = true;
+                    }
+                }
+                EventType::LockedDoor => {
+                    ui.label("Lock ID:").on_hover_text(
+                        "Unique identifier for this lock — used as the key in Map::lock_states",
+                    );
+                    if ui.text_edit_singleline(&mut event_editor.lock_id).changed() {
+                        editor.has_changes = true;
+                    }
+
+                    ui.horizontal(|ui| {
+                        ui.label("Key Item ID (optional):")
+                            .on_hover_text("Item ID (number) required to unlock with a key. Leave blank for no key.");
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut event_editor.lock_key_item_id)
+                                    .desired_width(60.0)
+                                    .hint_text("none"),
+                            )
+                            .changed()
+                        {
+                            editor.has_changes = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Trap Chance (0–100):").on_hover_text(
+                            "Starting trap percentage written to LockState on first map load.",
+                        );
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut event_editor.lock_initial_trap_chance)
+                                    .range(0..=100),
+                            )
+                            .changed()
+                        {
+                            editor.has_changes = true;
+                        }
+                    });
+
+                    ui.separator();
+                    use crate::ui_helpers::{
+                        autocomplete_dialogue_selector, autocomplete_mesh_id_selector,
+                        parse_dialogue_id_from_buf,
+                    };
+                    ui.label("Visual Mesh (optional):");
+                    if autocomplete_mesh_id_selector(
+                        ui,
+                        "locked_door_evt_mesh_id",
+                        "Mesh ID:",
+                        &mut event_editor.lock_mesh_id,
+                        available_mesh_ids,
+                    ) {
+                        editor.has_changes = true;
+                    }
+
+                    ui.label("Pre-interaction Dialogue (optional):");
+                    if autocomplete_dialogue_selector(
+                        ui,
+                        "locked_door_evt_dialogue",
+                        "Dialogue ID:",
+                        &mut event_editor.lock_dialogue_id_buf,
+                        available_dialogue_ids,
+                    ) {
+                        event_editor.lock_dialogue_id =
+                            parse_dialogue_id_from_buf(&event_editor.lock_dialogue_id_buf);
+                        editor.has_changes = true;
+                    }
+                }
+                EventType::LockedContainer => {
+                    ui.label("Lock ID:").on_hover_text(
+                        "Unique identifier for this lock — used as the key in Map::lock_states",
+                    );
+                    if ui.text_edit_singleline(&mut event_editor.lock_id).changed() {
+                        editor.has_changes = true;
+                    }
+
+                    ui.horizontal(|ui| {
+                        ui.label("Key Item ID (optional):")
+                            .on_hover_text("Item ID (number) required to unlock with a key. Leave blank for no key.");
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut event_editor.lock_key_item_id)
+                                    .desired_width(60.0)
+                                    .hint_text("none"),
+                            )
+                            .changed()
+                        {
+                            editor.has_changes = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Trap Chance (0–100):").on_hover_text(
+                            "Starting trap percentage written to LockState on first map load.",
+                        );
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut event_editor.lock_initial_trap_chance)
+                                    .range(0..=100),
+                            )
+                            .changed()
+                        {
+                            editor.has_changes = true;
+                        }
+                    });
+
+                    ui.separator();
+                    ui.label("📦 Initial Items:");
+
+                    ui.horizontal(|ui| {
+                        egui::ComboBox::from_id_salt("locked_container_evt_add_item")
+                            .selected_text(if event_editor.locked_container_item_input.is_empty() {
+                                "Select item…".to_string()
+                            } else {
+                                event_editor.locked_container_item_input.clone()
+                            })
+                            .show_ui(ui, |ui| {
+                                for item in items.iter() {
+                                    ui.push_id(item.id, |ui| {
+                                        let label = format!("{} - {}", item.id, item.name);
+                                        if ui
+                                            .selectable_label(
+                                                event_editor.locked_container_item_input
+                                                    == item.id.to_string(),
+                                                &label,
+                                            )
+                                            .clicked()
+                                        {
+                                            event_editor.locked_container_item_input =
+                                                item.id.to_string();
+                                        }
+                                    });
+                                }
+                            });
+
+                        if ui.button("➕ Add").clicked() {
+                            if let Ok(id) = event_editor
+                                .locked_container_item_input
+                                .trim()
+                                .parse::<ItemId>()
+                            {
+                                event_editor.locked_container_items.push(id);
+                                event_editor.locked_container_item_input.clear();
+                                editor.has_changes = true;
+                            }
+                        }
+                    });
+
+                    let mut remove_locked_idx: Option<usize> = None;
+                    egui::ScrollArea::vertical()
+                        .id_salt("locked_container_evt_items_scroll")
+                        .max_height(120.0)
+                        .show(ui, |ui| {
+                            for (i, &item_id) in
+                                event_editor.locked_container_items.iter().enumerate()
+                            {
+                                ui.push_id(format!("lc_item_{}", i), |ui| {
+                                    ui.horizontal(|ui| {
+                                        let item_name = items
+                                            .iter()
+                                            .find(|it| it.id == item_id)
+                                            .map(|it| it.name.as_str())
+                                            .unwrap_or("(unknown)");
+                                        ui.label(format!(
+                                            "{}.  {} — {}",
+                                            i + 1,
+                                            item_id,
+                                            item_name
+                                        ));
+                                        if ui.small_button("✕").clicked() {
+                                            remove_locked_idx = Some(i);
+                                        }
+                                    });
+                                });
+                            }
+                            if event_editor.locked_container_items.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(
+                                        "  (empty — container starts with no items)",
+                                    )
+                                    .weak(),
+                                );
+                            }
+                        });
+
+                    if let Some(idx) = remove_locked_idx {
+                        event_editor.locked_container_items.remove(idx);
+                        editor.has_changes = true;
+                    }
+
+                    ui.separator();
+                    use crate::ui_helpers::{
+                        autocomplete_dialogue_selector, autocomplete_mesh_id_selector,
+                        parse_dialogue_id_from_buf,
+                    };
+                    ui.label("Visual Mesh (optional):");
+                    if autocomplete_mesh_id_selector(
+                        ui,
+                        "locked_container_evt_mesh_id",
+                        "Mesh ID:",
+                        &mut event_editor.lock_mesh_id,
+                        available_mesh_ids,
+                    ) {
+                        editor.has_changes = true;
+                    }
+
+                    ui.label("Pre-interaction Dialogue (optional):");
+                    if autocomplete_dialogue_selector(
+                        ui,
+                        "locked_container_evt_dialogue",
+                        "Dialogue ID:",
+                        &mut event_editor.lock_dialogue_id_buf,
+                        available_dialogue_ids,
+                    ) {
+                        event_editor.lock_dialogue_id =
+                            parse_dialogue_id_from_buf(&event_editor.lock_dialogue_id_buf);
+                        editor.has_changes = true;
+                    }
                 }
             }
 
@@ -7697,46 +8278,62 @@ impl MapsEditorState {
             let mut add_event = false;
             let mut replace_event = false;
             let mut remove_event_flag = false;
+            let mut cancel_event_edit = false;
             let mut event_to_add: Option<MapEvent> = None;
             // Capture the position immediately so we do not hold the borrow on the editor while applying.
             let event_pos = event_editor.position;
 
-            // If there's an existing event at this position, show Save / Remove controls.
+            // If there's an existing event at this position, show Save / Remove / Cancel controls.
             let existing_event = editor.map.get_event(event_pos).cloned();
             if existing_event.is_some() {
-                if ui.button("💾 Save Changes").clicked() {
-                    match event_editor.to_map_event() {
-                        Ok(event) => {
-                            event_to_add = Some(event);
-                            replace_event = true;
-                        }
-                        Err(err) => {
-                            ui.label(format!("Error: {}", err));
+                ui.horizontal(|ui| {
+                    if ui.button("💾 Save Changes").clicked() {
+                        match event_editor.to_map_event() {
+                            Ok(event) => {
+                                event_to_add = Some(event);
+                                replace_event = true;
+                            }
+                            Err(err) => {
+                                ui.label(format!("Error: {}", err));
+                            }
                         }
                     }
-                }
 
-                if ui.button("🗑 Remove Event").clicked() {
-                    remove_event_flag = true;
-                }
+                    if ui.button("🗑 Remove Event").clicked() {
+                        remove_event_flag = true;
+                    }
+
+                    if ui.button("❌ Cancel").clicked() {
+                        cancel_event_edit = true;
+                    }
+                });
             } else {
-                // No existing event -> offer Add
-                if ui.button("➕ Add Event").clicked() {
-                    match event_editor.to_map_event() {
-                        Ok(event) => {
-                            event_to_add = Some(event);
-                            add_event = true;
-                        }
-                        Err(err) => {
-                            ui.label(format!("Error: {}", err));
+                // No existing event -> offer Add or Cancel
+                ui.horizontal(|ui| {
+                    if ui.button("➕ Add Event").clicked() {
+                        match event_editor.to_map_event() {
+                            Ok(event) => {
+                                event_to_add = Some(event);
+                                add_event = true;
+                            }
+                            Err(err) => {
+                                ui.label(format!("Error: {}", err));
+                            }
                         }
                     }
-                }
+
+                    if ui.button("❌ Cancel").clicked() {
+                        cancel_event_edit = true;
+                    }
+                });
             }
 
             // Apply after borrow ends (mutating the map/editor)
             if remove_event_flag {
                 editor.remove_event(event_pos);
+                editor.event_editor = None;
+                editor.current_tool = EditorTool::Select;
+            } else if cancel_event_edit {
                 editor.event_editor = None;
                 editor.current_tool = EditorTool::Select;
             } else if replace_event {
@@ -9547,6 +10144,8 @@ mod tests {
             text: "Test".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         state.add_event(pos, event);
@@ -9862,7 +10461,7 @@ mod tests {
     #[test]
     fn test_event_type_all() {
         let types = EventType::all();
-        assert_eq!(types.len(), 10);
+        assert_eq!(types.len(), 12);
         assert!(types.contains(&EventType::Encounter));
         assert!(types.contains(&EventType::Treasure));
         assert!(types.contains(&EventType::Teleport));
@@ -9873,6 +10472,8 @@ mod tests {
         assert!(types.contains(&EventType::EnterInn));
         assert!(types.contains(&EventType::Furniture));
         assert!(types.contains(&EventType::Container));
+        assert!(types.contains(&EventType::LockedDoor));
+        assert!(types.contains(&EventType::LockedContainer));
     }
 
     #[test]
@@ -10517,6 +11118,8 @@ mod tests {
             text: "Hello UndoRedo".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         // Add event
@@ -10561,6 +11164,8 @@ mod tests {
                 text: "Test sign".to_string(),
                 time_condition: None,
                 facing: None,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
 
@@ -10626,6 +11231,8 @@ mod tests {
             text: "Test sign".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         state.add_event_at_position(5, 5, event);
@@ -10653,6 +11260,8 @@ mod tests {
             text: "Welcome to town".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         let editor = EventEditorState::from_map_event(pos, &event);
@@ -10687,6 +11296,8 @@ mod tests {
             text: "Welcome to town".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         state.add_event_at_position(pos.x as u32, pos.y as u32, event);
         state.selected_position = Some(pos);
@@ -10713,7 +11324,7 @@ mod tests {
                 landscape_definitions: &[],
                 characters: &[],
             };
-            MapsEditorState::show_inspector_panel(ui, &mut state, &data);
+            MapsEditorState::show_inspector_panel(ui, &mut state, &data, &[], &[]);
         });
 
         // Verify selection was preserved and the inspector invocation completed
@@ -10741,6 +11352,8 @@ mod tests {
             text: "Hello, world!".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         state.add_event_at_position(pos.x as u32, pos.y as u32, event.clone());
         state.selected_position = Some(pos);
@@ -10772,7 +11385,7 @@ mod tests {
                 characters: &[],
             };
             // Must not panic.
-            MapsEditorState::show_inspector_panel(ui, &mut state, &data);
+            MapsEditorState::show_inspector_panel(ui, &mut state, &data, &[], &[]);
         });
 
         // The event editor state must still be intact after the panel has rendered;
@@ -10801,6 +11414,8 @@ mod tests {
             text: "Original".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         // Add the original event
@@ -10865,11 +11480,15 @@ mod tests {
             text: "Welcome".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         let event2 = MapEvent::Treasure {
             name: "Treasure".to_string(),
             description: "Desc".to_string(),
             loot: vec![1, 2, 3],
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         state.add_event_at_position(5, 5, event1);
@@ -11558,6 +12177,8 @@ mod tests {
             text: "Hello".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -11618,6 +12239,8 @@ mod tests {
             name: "Gold".to_string(),
             description: "A treasure".to_string(),
             loot: vec![1, 2, 3],
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -11658,6 +12281,8 @@ mod tests {
             text: "Text".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -11686,6 +12311,8 @@ mod tests {
             text: "Text".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos, event);
@@ -11715,6 +12342,8 @@ mod tests {
             text: "Text1".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         let event2 = MapEvent::Trap {
@@ -11802,6 +12431,8 @@ mod tests {
             name: "Test Treasure".to_string(),
             description: "A treasure".to_string(),
             loot: vec![],
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos1, event.clone());
@@ -11828,6 +12459,8 @@ mod tests {
             description: "A sign".to_string(),
             text: "Welcome to the dungeon!".to_string(),
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -11942,6 +12575,8 @@ mod tests {
             name: "Gold Coins".to_string(),
             description: "A pile of gold coins".to_string(),
             loot: vec![],
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos, event.clone());
@@ -11982,6 +12617,8 @@ mod tests {
             name: "Event 2".to_string(),
             description: "Second event".to_string(),
             loot: vec![],
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         let event3 = MapEvent::Sign {
@@ -11990,6 +12627,8 @@ mod tests {
             text: "Third event".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         editor.map.add_event(pos1, event1.clone());
@@ -12025,6 +12664,8 @@ mod tests {
             text: "Original text".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         state.add_event(pos, original_event.clone());
 
@@ -12082,6 +12723,8 @@ mod tests {
             text: "Text".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         state.add_event(pos, event.clone());
 
@@ -12123,6 +12766,8 @@ mod tests {
             text: "Text 1".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
         let event2 = MapEvent::Trap {
             name: "Trap 1".to_string(),
@@ -12746,6 +13391,8 @@ mod tests {
             ],
             gold: 0,
             gems: 0,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         let editor = EventEditorState::from_map_event(Position::new(3, 4), &event);
@@ -12848,6 +13495,8 @@ mod tests {
             text: "Go West!".to_string(),
             time_condition: None,
             facing: Some(Direction::West),
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         let editor = EventEditorState::from_map_event(Position::new(2, 3), &event);
@@ -12866,6 +13515,8 @@ mod tests {
             text: "Hello".to_string(),
             time_condition: None,
             facing: None,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         let editor = EventEditorState::from_map_event(Position::new(0, 0), &event);
@@ -13647,6 +14298,8 @@ mod tests {
             items: vec![],
             gold: 100,
             gems: 5,
+            mesh_id: None,
+            dialogue_id: None,
         };
 
         let editor = EventEditorState::from_map_event(Position::new(0, 0), &event);
@@ -14792,5 +15445,87 @@ mod tests {
             "visual height must be preserved across terrain type change"
         );
         assert!(tile.visual.tree_type.is_none(), "tree_type must be cleared");
+    }
+
+    #[test]
+    fn test_event_editor_state_treasure_mesh_id_and_dialogue_id_defaults() {
+        let state = EventEditorState::default();
+        assert!(state.treasure_mesh_id.is_empty());
+        assert!(state.treasure_dialogue_id.is_none());
+        assert!(state.treasure_dialogue_id_buf.is_empty());
+    }
+
+    #[test]
+    fn test_event_editor_state_to_treasure_with_mesh_and_dialogue() {
+        let editor = EventEditorState {
+            event_type: EventType::Treasure,
+            name: "Barred Passage".to_string(),
+            description: "Iron bar".to_string(),
+            treasure_mesh_id: "barred_passage".to_string(),
+            treasure_dialogue_id: Some(500),
+            ..Default::default()
+        };
+        let event = editor.to_map_event().unwrap();
+        match event {
+            antares::domain::world::MapEvent::Treasure {
+                name,
+                mesh_id,
+                dialogue_id,
+                ..
+            } => {
+                assert_eq!(name, "Barred Passage");
+                assert_eq!(mesh_id, Some("barred_passage".to_string()));
+                assert_eq!(dialogue_id, Some(500_u16));
+            }
+            _ => panic!("Expected MapEvent::Treasure"),
+        }
+    }
+
+    #[test]
+    fn test_event_editor_state_to_treasure_empty_mesh_gives_none() {
+        let editor = EventEditorState {
+            event_type: EventType::Treasure,
+            name: "Plain Chest".to_string(),
+            treasure_mesh_id: String::new(),
+            treasure_dialogue_id: None,
+            ..Default::default()
+        };
+        let event = editor.to_map_event().unwrap();
+        match event {
+            antares::domain::world::MapEvent::Treasure {
+                mesh_id,
+                dialogue_id,
+                ..
+            } => {
+                assert_eq!(mesh_id, None);
+                assert_eq!(dialogue_id, None);
+            }
+            _ => panic!("Expected MapEvent::Treasure"),
+        }
+    }
+
+    #[test]
+    fn test_event_editor_state_from_treasure_roundtrip() {
+        let event = antares::domain::world::MapEvent::Treasure {
+            name: "Chest".to_string(),
+            description: "A wooden chest".to_string(),
+            loot: vec![1, 2],
+            mesh_id: Some("treasure_chest".to_string()),
+            dialogue_id: Some(42_u16),
+        };
+        let pos = antares::domain::types::Position::new(3, 3);
+        let state = EventEditorState::from_map_event(pos, &event);
+        assert_eq!(state.event_type, EventType::Treasure);
+        assert_eq!(state.treasure_mesh_id, "treasure_chest");
+        assert_eq!(state.treasure_dialogue_id, Some(42));
+        assert_eq!(state.treasure_dialogue_id_buf, "42");
+    }
+
+    #[test]
+    fn test_maps_editor_state_default_has_empty_mesh_and_dialogue_caches() {
+        let state = MapsEditorState::default();
+        assert!(state.available_mesh_ids.is_empty());
+        assert!(state.available_dialogue_ids.is_empty());
+        assert!(state.last_campaign_dir.is_none());
     }
 }

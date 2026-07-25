@@ -483,23 +483,19 @@ impl ConditionsEditorState {
         // Apply sorting
         match self.sort_order {
             ConditionSortOrder::NameAsc => {
-                filtered_conditions
-                    .sort_by(|a, b| a.1.name.to_lowercase().cmp(&b.1.name.to_lowercase()));
+                filtered_conditions.sort_by_key(|a| a.1.name.to_lowercase());
             }
             ConditionSortOrder::NameDesc => {
-                filtered_conditions
-                    .sort_by(|a, b| b.1.name.to_lowercase().cmp(&a.1.name.to_lowercase()));
+                filtered_conditions.sort_by_key(|b| std::cmp::Reverse(b.1.name.to_lowercase()));
             }
             ConditionSortOrder::IdAsc => {
-                filtered_conditions
-                    .sort_by(|a, b| a.1.id.to_lowercase().cmp(&b.1.id.to_lowercase()));
+                filtered_conditions.sort_by_key(|a| a.1.id.to_lowercase());
             }
             ConditionSortOrder::IdDesc => {
-                filtered_conditions
-                    .sort_by(|a, b| b.1.id.to_lowercase().cmp(&a.1.id.to_lowercase()));
+                filtered_conditions.sort_by_key(|b| std::cmp::Reverse(b.1.id.to_lowercase()));
             }
             ConditionSortOrder::EffectCount => {
-                filtered_conditions.sort_by(|a, b| b.1.effects.len().cmp(&a.1.effects.len()));
+                filtered_conditions.sort_by_key(|b| std::cmp::Reverse(b.1.effects.len()));
             }
         }
 
@@ -1064,44 +1060,40 @@ impl ConditionsEditorState {
                     "delete" => {
                         new_cond.effects.remove(idx);
                     }
-                    "edit" => {
-                        if idx < new_cond.effects.len() {
-                            let eff = new_cond.effects[idx].clone();
-                            let effect_type = Some(match &eff {
-                                ConditionEffect::AttributeModifier { .. } => {
-                                    "AttributeModifier".to_string()
-                                }
-                                ConditionEffect::StatusEffect(_) => "StatusEffect".to_string(),
-                                ConditionEffect::DamageOverTime { .. } => {
-                                    "DamageOverTime".to_string()
-                                }
-                                ConditionEffect::HealOverTime { .. } => "HealOverTime".to_string(),
-                            });
-                            let mut buf = EffectEditBuffer {
-                                editing_index: Some(idx),
-                                effect_type,
-                                ..Default::default()
-                            };
-
-                            match eff {
-                                ConditionEffect::AttributeModifier { attribute, value } => {
-                                    buf.attribute = attribute;
-                                    buf.attribute_value = value;
-                                }
-                                ConditionEffect::StatusEffect(tag) => {
-                                    buf.status_tag = tag;
-                                }
-                                ConditionEffect::DamageOverTime { damage, element } => {
-                                    buf.dice = damage;
-                                    buf.element = element;
-                                }
-                                ConditionEffect::HealOverTime { amount } => {
-                                    buf.dice = amount;
-                                }
+                    "edit" if idx < new_cond.effects.len() => {
+                        let eff = new_cond.effects[idx].clone();
+                        let effect_type = Some(match &eff {
+                            ConditionEffect::AttributeModifier { .. } => {
+                                "AttributeModifier".to_string()
                             }
+                            ConditionEffect::StatusEffect(_) => "StatusEffect".to_string(),
+                            ConditionEffect::DamageOverTime { .. } => "DamageOverTime".to_string(),
+                            ConditionEffect::HealOverTime { .. } => "HealOverTime".to_string(),
+                        });
+                        let mut buf = EffectEditBuffer {
+                            editing_index: Some(idx),
+                            effect_type,
+                            ..Default::default()
+                        };
 
-                            self.effect_edit_buffer = Some(buf);
+                        match eff {
+                            ConditionEffect::AttributeModifier { attribute, value } => {
+                                buf.attribute = attribute;
+                                buf.attribute_value = value;
+                            }
+                            ConditionEffect::StatusEffect(tag) => {
+                                buf.status_tag = tag;
+                            }
+                            ConditionEffect::DamageOverTime { damage, element } => {
+                                buf.dice = damage;
+                                buf.element = element;
+                            }
+                            ConditionEffect::HealOverTime { amount } => {
+                                buf.dice = amount;
+                            }
                         }
+
+                        self.effect_edit_buffer = Some(buf);
                     }
                     _ => {}
                 }

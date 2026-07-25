@@ -271,10 +271,10 @@ impl AdvancedValidator {
                                 references_missing_items.push((quest.id, *item_id));
                             }
                         }
-                        QuestObjective::KillMonsters { monster_id, .. } => {
-                            if !self.monsters.iter().any(|m| m.id == *monster_id) {
-                                references_missing_monsters.push((quest.id, *monster_id));
-                            }
+                        QuestObjective::KillMonsters { monster_id, .. }
+                            if !self.monsters.iter().any(|m| m.id == *monster_id) =>
+                        {
+                            references_missing_monsters.push((quest.id, *monster_id));
                         }
                         _ => {}
                     }

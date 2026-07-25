@@ -428,12 +428,10 @@ pub fn validate_quest(quest: &Quest, db: &ContentDatabase) -> Vec<QuestValidatio
                     }
                 }
             }
-            QuestReward::UnlockQuest(quest_id) => {
-                if *quest_id == quest.id {
-                    errors.push(QuestValidationError::CircularDependency {
-                        quest_id: *quest_id,
-                    });
-                }
+            QuestReward::UnlockQuest(quest_id) if *quest_id == quest.id => {
+                errors.push(QuestValidationError::CircularDependency {
+                    quest_id: *quest_id,
+                });
                 // Note: Don't validate if quest exists, as it might be added later
             }
             _ => {

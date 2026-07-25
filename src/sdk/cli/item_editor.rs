@@ -107,7 +107,7 @@ impl ItemEditor {
             println!("Loading items from: {}", path.display());
             let contents = fs::read_to_string(&path)?;
             let mut items: Vec<Item> = ron::from_str(&contents)?;
-            items.sort_by(|a, b| a.id.cmp(&b.id));
+            items.sort_by_key(|a| a.id);
             items
         } else {
             println!("File not found, starting with empty item list");
@@ -292,7 +292,7 @@ impl ItemEditor {
         };
 
         self.items.push(item);
-        self.items.sort_by(|a, b| a.id.cmp(&b.id));
+        self.items.sort_by_key(|a| a.id);
         self.modified = true;
 
         println!("✅ Item added successfully!");

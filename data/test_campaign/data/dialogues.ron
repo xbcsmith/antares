@@ -1639,4 +1639,31 @@
         repeatable: true,
         associated_quest: None,
     ),
+    (
+        id: 500,
+        name: "Barred Passage",
+        root_node: 1,
+        nodes: {
+            1: (
+                id: 1,
+                text: "The passage is barred shut. You need to find a way to open it.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Leave it for now.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+            ),
+        },
+        speaker_name: None,
+        repeatable: true,
+        associated_quest: None,
+    ),
 ]

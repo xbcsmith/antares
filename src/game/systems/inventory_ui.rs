@@ -1397,7 +1397,7 @@ fn render_character_panel(
     painter.rect_stroke(
         panel_rect,
         2.0,
-        egui::Stroke::new(2.0, border_color),
+        egui::Stroke::new(2.0_f32, border_color),
         egui::StrokeKind::Outside,
     );
 
@@ -1450,7 +1450,7 @@ fn render_character_panel(
             painter.rect_stroke(
                 cell_rect.shrink(1.0),
                 1.0,
-                egui::Stroke::new(1.0, GRID_LINE_COLOR),
+                egui::Stroke::new(1.0_f32, GRID_LINE_COLOR),
                 egui::StrokeKind::Outside,
             );
 
@@ -1464,7 +1464,7 @@ fn render_character_panel(
                 painter.rect_stroke(
                     cell_rect.shrink(1.0),
                     1.0,
-                    egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 220, 100)),
+                    egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(0, 220, 100)),
                     egui::StrokeKind::Outside,
                 );
             }
@@ -1566,7 +1566,7 @@ fn render_character_panel(
                 egui::pos2(x, body_rect.min.y),
                 egui::pos2(x, body_rect.max.y),
             ],
-            egui::Stroke::new(1.0, GRID_LINE_COLOR),
+            egui::Stroke::new(1.0_f32, GRID_LINE_COLOR),
         );
     }
     for row in 0..=slot_rows {
@@ -1576,7 +1576,7 @@ fn render_character_panel(
                 egui::pos2(body_rect.min.x, y),
                 egui::pos2(body_rect.max.x, y),
             ],
-            egui::Stroke::new(1.0, GRID_LINE_COLOR),
+            egui::Stroke::new(1.0_f32, GRID_LINE_COLOR),
         );
     }
 
@@ -1597,7 +1597,7 @@ fn render_character_panel(
             painter.rect_stroke(
                 cell_rect.shrink(1.0),
                 0.0,
-                egui::Stroke::new(2.0, SELECT_HIGHLIGHT_COLOR),
+                egui::Stroke::new(2.0_f32, SELECT_HIGHLIGHT_COLOR),
                 egui::StrokeKind::Outside,
             );
         }
@@ -1710,7 +1710,7 @@ fn render_character_panel(
                         let mut equip_btn = egui::Button::new(equip_label);
                         if equip_focused {
                             equip_btn =
-                                equip_btn.stroke(egui::Stroke::new(2.0, ACTION_FOCUSED_COLOR));
+                                equip_btn.stroke(egui::Stroke::new(2.0_f32, ACTION_FOCUSED_COLOR));
                         }
                         if ui.add(equip_btn).on_hover_text("Equip this item").clicked() {
                             panel_action = Some(PanelAction::Equip {
@@ -1733,7 +1733,8 @@ fn render_character_panel(
                             .small();
                         let mut use_btn = egui::Button::new(use_label);
                         if use_focused {
-                            use_btn = use_btn.stroke(egui::Stroke::new(2.0, ACTION_FOCUSED_COLOR));
+                            use_btn =
+                                use_btn.stroke(egui::Stroke::new(2.0_f32, ACTION_FOCUSED_COLOR));
                         }
                         let use_tooltip = if is_usable_charged && slot_charges > 0 {
                             "Use this charged item"
@@ -1760,7 +1761,8 @@ fn render_character_panel(
                         .small();
                     let mut drop_btn = egui::Button::new(drop_label);
                     if drop_focused {
-                        drop_btn = drop_btn.stroke(egui::Stroke::new(2.0, ACTION_FOCUSED_COLOR));
+                        drop_btn =
+                            drop_btn.stroke(egui::Stroke::new(2.0_f32, ACTION_FOCUSED_COLOR));
                     }
                     if ui
                         .add(drop_btn)
@@ -1793,8 +1795,8 @@ fn render_character_panel(
                             .small();
                         let mut transfer_btn = egui::Button::new(transfer_label);
                         if transfer_focused {
-                            transfer_btn =
-                                transfer_btn.stroke(egui::Stroke::new(2.0, ACTION_FOCUSED_COLOR));
+                            transfer_btn = transfer_btn
+                                .stroke(egui::Stroke::new(2.0_f32, ACTION_FOCUSED_COLOR));
                         }
                         if ui
                             .add_enabled(!target_full, transfer_btn)

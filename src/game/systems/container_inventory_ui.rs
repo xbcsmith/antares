@@ -821,6 +821,8 @@ enum CharacterStashPanelResult {
 ///         items: vec![InventorySlot { item_id: 1, charges: 0 }],
 ///         gold: 0,
 ///         gems: 0,
+///         mesh_id: None,
+///         dialogue_id: None,
 ///     },
 /// );
 /// state.world.add_map(map);
@@ -930,7 +932,7 @@ fn render_character_stash_panel(
         painter.rect_stroke(
             panel_rect,
             2.0,
-            egui::Stroke::new(2.0, border_color),
+            egui::Stroke::new(2.0_f32, border_color),
             egui::StrokeKind::Outside,
         );
 
@@ -973,7 +975,7 @@ fn render_character_stash_panel(
                     egui::pos2(x, body_rect.min.y),
                     egui::pos2(x, body_rect.max.y),
                 ],
-                egui::Stroke::new(1.0, GRID_LINE_COLOR),
+                egui::Stroke::new(1.0_f32, GRID_LINE_COLOR),
             );
         }
         for row in 0..=slot_rows {
@@ -983,7 +985,7 @@ fn render_character_stash_panel(
                     egui::pos2(body_rect.min.x, y),
                     egui::pos2(body_rect.max.x, y),
                 ],
-                egui::Stroke::new(1.0, GRID_LINE_COLOR),
+                egui::Stroke::new(1.0_f32, GRID_LINE_COLOR),
             );
         }
         // painter borrow ends here.
@@ -1021,7 +1023,7 @@ fn render_character_stash_panel(
                 ui.painter().rect_stroke(
                     cell_rect.shrink(1.0),
                     0.0,
-                    egui::Stroke::new(2.0, SELECT_HIGHLIGHT_COLOR),
+                    egui::Stroke::new(2.0_f32, SELECT_HIGHLIGHT_COLOR),
                     egui::StrokeKind::Outside,
                 );
             } else if is_hovered && slot_idx < items.len() {
@@ -1034,7 +1036,7 @@ fn render_character_stash_panel(
                 ui.painter().rect_stroke(
                     cell_rect.shrink(1.0),
                     0.0,
-                    egui::Stroke::new(1.0, SELECT_HIGHLIGHT_COLOR),
+                    egui::Stroke::new(1.0_f32, SELECT_HIGHLIGHT_COLOR),
                     egui::StrokeKind::Outside,
                 );
             }
@@ -1100,7 +1102,8 @@ fn render_character_stash_panel(
                         .small();
                     let mut stash_btn = egui::Button::new(stash_label);
                     if stash_focused {
-                        stash_btn = stash_btn.stroke(egui::Stroke::new(2.0, ACTION_FOCUSED_COLOR));
+                        stash_btn =
+                            stash_btn.stroke(egui::Stroke::new(2.0_f32, ACTION_FOCUSED_COLOR));
                     }
                     if ui
                         .add(stash_btn)
@@ -1175,7 +1178,7 @@ fn render_container_items_panel(
         painter.rect_stroke(
             panel_rect,
             2.0,
-            egui::Stroke::new(2.0, border_color),
+            egui::Stroke::new(2.0_f32, border_color),
             egui::StrokeKind::Outside,
         );
 
@@ -1256,7 +1259,7 @@ fn render_container_items_panel(
                         ui.painter().rect_stroke(
                             row_rect.shrink(1.0),
                             0.0,
-                            egui::Stroke::new(1.5, SELECT_HIGHLIGHT_COLOR),
+                            egui::Stroke::new(1.5_f32, SELECT_HIGHLIGHT_COLOR),
                             egui::StrokeKind::Outside,
                         );
                     } else if row_response.hovered() {
@@ -1269,7 +1272,7 @@ fn render_container_items_panel(
                         ui.painter().rect_stroke(
                             row_rect.shrink(1.0),
                             0.0,
-                            egui::Stroke::new(1.0, SELECT_HIGHLIGHT_COLOR),
+                            egui::Stroke::new(1.0_f32, SELECT_HIGHLIGHT_COLOR),
                             egui::StrokeKind::Outside,
                         );
                     }
@@ -1431,7 +1434,8 @@ fn render_container_items_panel(
                         .small();
                     let mut take_btn = egui::Button::new(take_label);
                     if take_focused {
-                        take_btn = take_btn.stroke(egui::Stroke::new(2.0, ACTION_FOCUSED_COLOR));
+                        take_btn =
+                            take_btn.stroke(egui::Stroke::new(2.0_f32, ACTION_FOCUSED_COLOR));
                     }
                     let take_hover = if char_inv_full {
                         "Character's inventory is full".to_string()
@@ -1462,7 +1466,7 @@ fn render_container_items_panel(
                     let mut take_all_btn = egui::Button::new(take_all_label);
                     if take_all_focused {
                         take_all_btn =
-                            take_all_btn.stroke(egui::Stroke::new(2.0, ACTION_FOCUSED_COLOR));
+                            take_all_btn.stroke(egui::Stroke::new(2.0_f32, ACTION_FOCUSED_COLOR));
                     }
                     let take_all_hover = if char_inv_full {
                         "Character's inventory is full".to_string()
@@ -2112,6 +2116,8 @@ mod tests {
                 items: initial_items,
                 gold: 0,
                 gems: 0,
+                mesh_id: None,
+                dialogue_id: None,
             },
         );
         state.world.add_map(map);

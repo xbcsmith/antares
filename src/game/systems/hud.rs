@@ -17,13 +17,19 @@
 
 use crate::application::GameMode;
 use crate::domain::character::{Condition, PARTY_MAX_SIZE};
+use crate::domain::combat::types::CombatantId;
 use crate::domain::conditions::ActiveCondition;
 use crate::domain::types::{Direction, Position};
 use crate::game::components::inventory::{CharacterEntity, PartyEntities};
-use crate::game::resources::GlobalState;
+use crate::game::resources::{CampaignFontHandles, GlobalState};
+use crate::game::systems::combat::{
+    CombatResource, CombatTurnState, CombatTurnStateResource, GroupTargetPending, GroupTargetSide,
+    ENEMY_CARD_HIGHLIGHT_COLOR,
+};
 use crate::game::systems::mouse_input;
 use crate::game::systems::ui_helpers::{
-    create_blank_rgba_image, text_style, BODY_FONT_SIZE, LABEL_FONT_SIZE,
+    create_blank_rgba_image, resolve_card_background, text_style, CardConditionTint,
+    BODY_FONT_SIZE, LABEL_FONT_SIZE, UI_FONT_SIZE_SM,
 };
 use bevy::prelude::*;
 use bevy::render::render_resource::Extent3d;
@@ -123,6 +129,15 @@ pub const CONDITION_POISONED_COLOR: Color = Color::srgb(0.20, 0.71, 0.20);
 pub const CONDITION_PARALYZED_COLOR: Color = Color::srgb(0.39, 0.39, 0.78);
 pub const CONDITION_BUFFED_COLOR: Color = Color::srgb(0.78, 0.71, 0.39);
 
+/// Background color for the HUD card of the party member whose turn it
+/// currently is — transparent green. Wins over any condition tint per the
+/// universal precedence rule (active-turn > condition > default); see
+/// `docs/reference/condition_color_scheme.md`.
+pub const ACTIVE_TURN_CARD_COLOR: Color = Color::srgba(0.15, 0.45, 0.15, 0.7);
+
+/// Default (idle) background color for a party member's HUD card.
+pub const DEFAULT_CARD_COLOR: Color = Color::srgba(0.2, 0.2, 0.2, 0.7);
+
 // HP thresholds
 pub const HP_HEALTHY_THRESHOLD: f32 = 0.75;
 pub const HP_CRITICAL_THRESHOLD: f32 = 0.25;
@@ -204,6 +219,9 @@ pub const AUTOMAP_VISITED_DOOR: [u8; 4] = [180, 140, 80, 255];
 pub const AUTOMAP_VISITED_WATER: [u8; 4] = [60, 80, 160, 255];
 pub const AUTOMAP_VISITED_FOREST: [u8; 4] = [50, 120, 50, 255];
 pub const AUTOMAP_PLAYER: [u8; 4] = [255, 255, 255, 255];
+/// Font size of the automap legend panel's "Automap" title, above its
+/// `LABEL_FONT_SIZE`-sized entry rows.
+pub const AUTOMAP_LEGEND_TITLE_FONT_SIZE: f32 = 22.0;
 
 // Clock display constants
 /// Font size used for both time and day lines in the clock widget
@@ -248,7 +266,9 @@ pub struct CharacterCard {
 
 /// Marker component for HP bar background
 #[derive(Component)]
-pub struct HpBarBackground;
+pub struct HpBarBackground {
+    pub party_index: usize,
+}
 
 /// Marker component for HP bar fill (the colored portion)
 #[derive(Component)]
@@ -424,6 +444,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(PortraitAssets::default())
             .init_resource::<FullPortraitAssets>()
+            .init_resource::<CampaignFontHandles>()
             // PostStartup (not Startup): the mini-map/automap canvas images
             // must be allocated AFTER every Startup-issued asset load has
             // reserved its asset index. If a canvas allocation interleaves
@@ -462,6 +483,7 @@ impl Plugin for HudPlugin {
                 (
                     ensure_portraits_loaded,
                     ensure_full_portraits_loaded,
+                    ensure_campaign_fonts_loaded,
                     update_mini_map,
                     update_compass,
                     update_clock,
@@ -581,7 +603,7 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                             row_gap: Val::Px(0.0),
                             ..default()
                         },
-                        BackgroundColor(Color::srgba(0.2, 0.2, 0.2, 0.7)),
+                        BackgroundColor(DEFAULT_CARD_COLOR),
                         BorderRadius::all(Val::Px(4.0)),
                         CharacterCard { party_index },
                     ))
@@ -608,10 +630,11 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                                 width: Val::Percent(100.0),
                                 height: HP_BAR_HEIGHT,
                                 position_type: PositionType::Relative,
+                                overflow: Overflow::visible(),
                                 ..default()
                             },
                             BackgroundColor(Color::srgba(0.3, 0.3, 0.3, 1.0)),
-                            HpBarBackground,
+                            HpBarBackground { party_index },
                         ))
                         .with_children(|bar| {
                             // HP bar fill (the colored part)
@@ -642,7 +665,7 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                                 ZIndex(1),
                                 Text::new(""),
                                 TextFont {
-                                    font_size: 10.0,
+                                    font_size: UI_FONT_SIZE_SM,
                                     ..default()
                                 },
                                 TextColor(HP_TEXT_HEALTHY_COLOR),
@@ -687,7 +710,10 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                                 ZIndex(1),
                                 Text::new(""),
                                 TextFont {
-                                    font_size: 8.0,
+                                    // Matches HpTextOverlay/ConditionText (UI_FONT_SIZE_SM) so the
+                                    // HP/SP/condition stat block reads as one consistent size
+                                    // instead of the SP number looking smaller than its siblings.
+                                    font_size: UI_FONT_SIZE_SM,
                                     ..default()
                                 },
                                 TextColor(SP_TEXT_COLOR),
@@ -699,7 +725,7 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                         card.spawn((
                             Text::new(""),
                             TextFont {
-                                font_size: 10.0,
+                                font_size: UI_FONT_SIZE_SM,
                                 ..default()
                             },
                             TextColor(Color::WHITE),
@@ -898,11 +924,17 @@ fn handle_portrait_click_system(
 /// Updates HUD elements based on current party state
 ///
 /// This system runs every frame to sync UI with game state.
-/// Updates HP bars, HP overlay text color, condition text, SP bars, and character card visibility.
+/// Updates HP bars, HP overlay text color, condition text, SP bars, and
+/// character card visibility and background tint (group-target highlight >
+/// active-turn highlight > condition tint > default, see
+/// [`resolve_card_background`]).
 ///
 /// # Arguments
 /// * `global_state` - Game state containing party data
-/// * `card_query` - Query for character card visibility
+/// * `combat_res` - Combat state, used to find the active-turn party member (absent outside combat)
+/// * `turn_state` - Current combat turn state, used to gate the active-turn highlight to `PlayerTurn` (absent outside combat)
+/// * `group_target` - Pending group-spell target selection; when it holds `GroupTargetSide::Characters`, every living party member's card is highlighted with `ENEMY_CARD_HIGHLIGHT_COLOR`, taking precedence over the active-turn/condition tint (absent outside combat, since only `CombatPlugin` inserts it)
+/// * `card_query` - Query for character card visibility and background tint
 /// * `hp_bar_query` - Query for HP bar fill entities
 /// * `hp_overlay_query` - Query for HP text overlay entities
 /// * `condition_text_query` - Query for condition text entities
@@ -912,7 +944,10 @@ fn handle_portrait_click_system(
 #[allow(clippy::too_many_arguments)]
 fn update_hud(
     global_state: Res<GlobalState>,
-    mut card_query: Query<(&CharacterCard, &mut Node), Without<HpBarFill>>,
+    combat_res: Option<Res<CombatResource>>,
+    turn_state: Option<Res<CombatTurnStateResource>>,
+    group_target: Option<Res<GroupTargetPending>>,
+    mut card_query: Query<(&CharacterCard, &mut Node, &mut BackgroundColor), Without<HpBarFill>>,
     mut hp_bar_query: Query<(&HpBarFill, &mut Node, &mut BackgroundColor)>,
     mut hp_overlay_query: HpOverlayQuery,
     mut condition_text_query: ConditionTextQuery,
@@ -922,12 +957,62 @@ fn update_hud(
 ) {
     let party = &global_state.0.party;
 
-    // Update card visibility - hide cards that don't have characters
-    for (card, mut node) in card_query.iter_mut() {
-        if party.members.get(card.party_index).is_some() {
-            node.display = Display::Flex;
-        } else {
-            node.display = Display::None;
+    // Which party member (if any) is the current combat actor this frame —
+    // drives the active-turn card highlight (4.1). Only meaningful during
+    // PlayerTurn; `Option<Res<_>>` so the HUD still renders correctly outside
+    // combat (both resources absent) or in tests without `CombatPlugin`.
+    let active_party_index =
+        combat_res
+            .as_deref()
+            .zip(turn_state.as_deref())
+            .and_then(|(combat_res, turn_state)| {
+                if !matches!(turn_state.0, CombatTurnState::PlayerTurn) {
+                    return None;
+                }
+                match combat_res
+                    .state
+                    .turn_order
+                    .get(combat_res.state.current_turn)
+                {
+                    Some(CombatantId::Player(pidx)) => {
+                        combat_res.player_orig_indices.get(*pidx).copied().flatten()
+                    }
+                    _ => None,
+                }
+            });
+
+    // Whether a group-spell target selection targeting party members
+    // (`GroupTargetSide::Characters`) is currently pending (Phase 3,
+    // "Group-Spell Target Clarity"). Mirrors `enter_target_selection`'s
+    // handling of `GroupTargetSide::Monsters` for enemy cards.
+    let group_characters_pending = group_target
+        .as_deref()
+        .is_some_and(|gt| matches!(gt.data, Some((_, _, GroupTargetSide::Characters))));
+
+    // Update card visibility and background tint. Precedence: group-target
+    // highlight (Phase 3) > active-turn highlight (4.1) > condition tint
+    // (4.2) > default background.
+    for (card, mut node, mut bg) in card_query.iter_mut() {
+        match party.members.get(card.party_index) {
+            Some(character) => {
+                node.display = Display::Flex;
+                let is_living = !character.conditions.is_dead();
+                *bg = if group_characters_pending && is_living {
+                    BackgroundColor(ENEMY_CARD_HIGHLIGHT_COLOR)
+                } else {
+                    let is_active = Some(card.party_index) == active_party_index;
+                    let tint = condition_tint_category(&character.conditions);
+                    BackgroundColor(resolve_card_background(
+                        is_active,
+                        ACTIVE_TURN_CARD_COLOR,
+                        tint,
+                        DEFAULT_CARD_COLOR,
+                    ))
+                };
+            }
+            None => {
+                node.display = Display::None;
+            }
         }
     }
 
@@ -1375,7 +1460,7 @@ fn setup_automap(mut commands: Commands, automap_image: Res<AutomapImage>) {
                 legend.spawn((
                     Text::new("Automap"),
                     TextFont {
-                        font_size: 22.0,
+                        font_size: AUTOMAP_LEGEND_TITLE_FONT_SIZE,
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -2171,6 +2256,76 @@ fn ensure_full_portraits_loaded(
     );
 }
 
+/// Ensures campaign font handles are loaded for the active campaign.
+///
+/// Reads `campaign.game_config.fonts` and loads each configured `.ttf` path via
+/// the `AssetServer`, storing `Handle<Font>` values in [`CampaignFontHandles`].
+/// Called every frame (guarded by `not_in_combat`), but exits immediately after
+/// the first successful load for each campaign.
+///
+/// # Behavior
+///
+/// * No campaign active → returns immediately.
+/// * `AssetServer` resource absent → logs `debug!` and returns (retries next frame).
+/// * Handles already loaded for this campaign → returns immediately.
+/// * Font field is `None` → leaves the handle as `None` (uses engine default).
+/// * Font path produces a default handle → logs `warn!` and leaves as `None`.
+fn ensure_campaign_fonts_loaded(
+    global_state: Res<GlobalState>,
+    asset_server: Option<Res<AssetServer>>,
+    mut font_handles: ResMut<CampaignFontHandles>,
+) {
+    let campaign = match &global_state.0.campaign {
+        Some(c) => c,
+        None => return,
+    };
+
+    let asset_server = match asset_server {
+        Some(a) => a,
+        None => {
+            debug!(
+                "ensure_campaign_fonts_loaded: no AssetServer available; skipping for campaign {}",
+                campaign.id
+            );
+            return;
+        }
+    };
+
+    if font_handles.loaded_for_campaign.as_deref() == Some(campaign.id.as_str()) {
+        return;
+    }
+
+    if let Some(rel_path) = &campaign.game_config.fonts.dialogue_font {
+        let handle: Handle<Font> = asset_server.load(rel_path.clone());
+        if handle == Handle::default() {
+            warn!(
+                "ensure_campaign_fonts_loaded: failed to load '{}' for campaign '{}'; using default font",
+                rel_path, campaign.id
+            );
+        } else {
+            font_handles.dialogue_font = Some(handle);
+        }
+    }
+
+    if let Some(rel_path) = &campaign.game_config.fonts.game_menu_font {
+        let handle: Handle<Font> = asset_server.load(rel_path.clone());
+        if handle == Handle::default() {
+            warn!(
+                "ensure_campaign_fonts_loaded: failed to load '{}' for campaign '{}'; using default font",
+                rel_path, campaign.id
+            );
+        } else {
+            font_handles.game_menu_font = Some(handle);
+        }
+    }
+
+    font_handles.loaded_for_campaign = Some(campaign.id.clone());
+    debug!(
+        "ensure_campaign_fonts_loaded: loaded fonts for campaign '{}'",
+        campaign.id
+    );
+}
+
 // (removed) Path canonicalization helper
 // Portraits are now loaded via named campaign asset sources (e.g. `campaign_id://assets/portraits/foo.png`)
 // so the dedicated absolute-path helper is no longer needed.
@@ -2701,6 +2856,50 @@ pub fn hp_text_overlay_color(hp_percent: f32) -> Color {
 /// let (text, color) = get_priority_condition(&conditions, &[]);
 /// assert!(text.contains("Dead"));
 /// ```
+/// Reduces a character's condition bitflags down to the shared
+/// [`CardConditionTint`] category used for HUD card background tinting
+/// (universal condition tinting, 4.2).
+///
+/// Mirrors the same precedence order as [`get_priority_condition`] (fatal >
+/// unconscious > poisoned/diseased > other status), but maps to one of the
+/// small set of background tint categories instead of a display label.
+/// Being merely "buffed" (only positive active conditions, no bad status
+/// flags) does not tint the card background — a temporary buff is not a
+/// warning state worth highlighting the same way a bad condition is.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::Condition;
+/// use antares::game::systems::hud::condition_tint_category;
+/// use antares::game::systems::ui_helpers::CardConditionTint;
+///
+/// let mut conditions = Condition::new();
+/// conditions.add(Condition::DEAD);
+/// assert_eq!(condition_tint_category(&conditions), CardConditionTint::Fatal);
+/// assert_eq!(
+///     condition_tint_category(&Condition::new()),
+///     CardConditionTint::None
+/// );
+/// ```
+pub fn condition_tint_category(conditions: &Condition) -> CardConditionTint {
+    if conditions.is_fatal() {
+        CardConditionTint::Fatal
+    } else if conditions.has(Condition::UNCONSCIOUS) {
+        CardConditionTint::Unconscious
+    } else if conditions.has(Condition::POISONED) || conditions.has(Condition::DISEASED) {
+        CardConditionTint::Poisoned
+    } else if conditions.has(Condition::PARALYZED)
+        || conditions.has(Condition::BLINDED)
+        || conditions.has(Condition::SILENCED)
+        || conditions.has(Condition::ASLEEP)
+    {
+        CardConditionTint::Status
+    } else {
+        CardConditionTint::None
+    }
+}
+
 pub fn get_priority_condition(
     conditions: &Condition,
     active_conditions: &[ActiveCondition],
@@ -3640,6 +3839,290 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Regression test: SP bar fill width decreases in the HUD after
+    /// `sync_party_hp_during_combat` mirrors reduced SP from CombatResource
+    /// back into `party.members`.
+    ///
+    /// This end-to-end test combines CombatPlugin + HudPlugin to verify the
+    /// full data path: combat SP decrease → sync → HUD bar update.
+    ///
+    /// Before the fix (missing `.after(handle_spell_button_interaction)` /
+    /// `.after(combat_input_system)` ordering on `handle_cast_spell_action`),
+    /// the SP bar could remain at 100 % for an entire frame because the sync
+    /// read stale CombatResource data.  This test catches that regression.
+    #[test]
+    fn test_sp_bar_decreases_after_spell_cast_in_combat() {
+        use super::{GlobalState, HudPlugin, SpBarFill};
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, AttributePair16, Character, Sex};
+        use crate::domain::combat::engine::{CombatState, Combatant};
+        use crate::domain::combat::types::Handicap;
+        use crate::game::systems::combat::{CombatPlugin, CombatResource};
+        use bevy::prelude::*;
+
+        // Build a Sorcerer with 10 base SP and full current SP.
+        let mut state = GameState::new();
+        let mut mage = Character::new(
+            "Merlin".to_string(),
+            "elf".to_string(),
+            "sorcerer".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        mage.hp = AttributePair16 {
+            base: 20,
+            current: 20,
+        };
+        mage.sp = AttributePair16 {
+            base: 10,
+            current: 10,
+        };
+        state.party.add_member(mage.clone()).unwrap();
+        state.enter_combat(); // GameMode::Combat
+
+        // Build CombatResource: the sorcerer has spent 4 SP (current = 6).
+        let mut cr = CombatResource::new();
+        let mut combat_mage = mage.clone();
+        combat_mage.sp.current = 6; // simulates casting a 4-SP spell
+        cr.state = CombatState::new(Handicap::Even);
+        cr.state
+            .participants
+            .push(Combatant::Player(Box::new(combat_mage)));
+        cr.player_orig_indices = vec![Some(0)];
+        crate::domain::combat::engine::start_combat(&mut cr.state);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<Assets<Image>>();
+        // Both plugins must be present: CombatPlugin provides the sync system,
+        // HudPlugin provides the bar rendering.
+        app.add_plugins(CombatPlugin);
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(state));
+        app.insert_resource(cr);
+
+        // PostStartup (setup_hud) runs on the first update.
+        app.update();
+        // Update runs sync_party_hp_during_combat and update_hud.
+        app.update();
+
+        let world = app.world_mut();
+        let mut q = world.query::<(&SpBarFill, &Node)>();
+        let mut found = false;
+        for (fill, node) in q.iter(world) {
+            if fill.party_index == 0 {
+                found = true;
+                // 6 / 10 = 60.0 %
+                assert!(
+                    matches!(node.width, Val::Percent(p) if (p - 60.0).abs() < 0.5),
+                    "SP bar fill should be ~60 %% (6/10) after spell cast; got {:?}",
+                    node.width
+                );
+            }
+        }
+        assert!(found, "SpBarFill for party slot 0 not found");
+    }
+
+    /// 4.1/4.6: during `PlayerTurn` the active party member's `CharacterCard`
+    /// background must equal `ACTIVE_TURN_CARD_COLOR`, other cards keep their
+    /// default background, and the highlight reverts once it becomes
+    /// `EnemyTurn`.
+    #[test]
+    fn test_active_turn_card_highlight_and_revert() {
+        use super::{
+            CharacterCard, GlobalState, HudPlugin, ACTIVE_TURN_CARD_COLOR, DEFAULT_CARD_COLOR,
+        };
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::combat::engine::{CombatState, Combatant};
+        use crate::domain::combat::types::{CombatantId, Handicap};
+        use crate::game::systems::combat::{CombatPlugin, CombatResource, CombatTurnStateResource};
+        use bevy::prelude::*;
+
+        let mut state = GameState::new();
+        let hero0 = Character::new(
+            "Hero Zero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let hero1 = Character::new(
+            "Hero One".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero0.clone()).unwrap();
+        state.party.add_member(hero1.clone()).unwrap();
+        state.enter_combat();
+
+        let mut cr = CombatResource::new();
+        cr.state = CombatState::new(Handicap::Even);
+        cr.state
+            .participants
+            .push(Combatant::Player(Box::new(hero0)));
+        cr.state
+            .participants
+            .push(Combatant::Player(Box::new(hero1)));
+        cr.state.turn_order = vec![CombatantId::Player(0), CombatantId::Player(1)];
+        cr.state.current_turn = 0;
+        cr.player_orig_indices = vec![Some(0), Some(1)];
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<Assets<Image>>();
+        app.add_plugins(CombatPlugin);
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(state));
+        app.insert_resource(cr);
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 =
+            crate::game::systems::combat::CombatTurnState::PlayerTurn;
+
+        app.update(); // PostStartup: setup_hud spawns cards.
+        app.update(); // Update: sync_party_hp_during_combat + update_hud.
+
+        let card_bg = |app: &mut App, idx: usize| -> Color {
+            let world = app.world_mut();
+            let mut q = world.query::<(&CharacterCard, &BackgroundColor)>();
+            q.iter(world)
+                .find(|(card, _)| card.party_index == idx)
+                .map(|(_, bg)| bg.0)
+                .unwrap_or_else(|| panic!("no CharacterCard found for party_index {}", idx))
+        };
+
+        assert_eq!(
+            card_bg(&mut app, 0),
+            ACTIVE_TURN_CARD_COLOR,
+            "party slot 0 (current actor) must show the active-turn highlight"
+        );
+        assert_eq!(
+            card_bg(&mut app, 1),
+            DEFAULT_CARD_COLOR,
+            "party slot 1 (not acting) must keep the default card background"
+        );
+
+        // Revert on EnemyTurn: no party member should be highlighted.
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 =
+            crate::game::systems::combat::CombatTurnState::EnemyTurn;
+        app.update();
+
+        assert_eq!(
+            card_bg(&mut app, 0),
+            DEFAULT_CARD_COLOR,
+            "active-turn highlight must revert once it becomes EnemyTurn"
+        );
+    }
+
+    /// Verifies the Phase 3 "Group-Spell Target Clarity" highlight: while
+    /// `GroupTargetPending.data` holds `GroupTargetSide::Characters`, every
+    /// living party member's `CharacterCard` shows
+    /// `ENEMY_CARD_HIGHLIGHT_COLOR`, taking precedence over the active-turn
+    /// highlight. Clearing `GroupTargetPending.data` reverts the cards to
+    /// their normal active-turn/default precedence.
+    #[test]
+    fn test_group_target_characters_card_highlight_and_revert() {
+        use super::{
+            CharacterCard, GlobalState, HudPlugin, ACTIVE_TURN_CARD_COLOR, DEFAULT_CARD_COLOR,
+        };
+        use crate::application::GameState;
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::combat::engine::{CombatState, Combatant};
+        use crate::domain::combat::types::{CombatantId, Handicap};
+        use crate::game::systems::combat::{
+            CombatPlugin, CombatResource, CombatTurnStateResource, GroupTargetPending,
+            GroupTargetSide, ENEMY_CARD_HIGHLIGHT_COLOR,
+        };
+        use bevy::prelude::*;
+
+        let mut state = GameState::new();
+        let hero0 = Character::new(
+            "Hero Zero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        let hero1 = Character::new(
+            "Hero One".to_string(),
+            "human".to_string(),
+            "cleric".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.party.add_member(hero0.clone()).unwrap();
+        state.party.add_member(hero1.clone()).unwrap();
+        state.enter_combat();
+
+        let mut cr = CombatResource::new();
+        cr.state = CombatState::new(Handicap::Even);
+        cr.state
+            .participants
+            .push(Combatant::Player(Box::new(hero0)));
+        cr.state
+            .participants
+            .push(Combatant::Player(Box::new(hero1)));
+        cr.state.turn_order = vec![CombatantId::Player(0), CombatantId::Player(1)];
+        cr.state.current_turn = 0;
+        cr.player_orig_indices = vec![Some(0), Some(1)];
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<Assets<Image>>();
+        app.add_plugins(CombatPlugin);
+        app.add_plugins(HudPlugin);
+        app.insert_resource(GlobalState(state));
+        app.insert_resource(cr);
+        app.world_mut().resource_mut::<CombatTurnStateResource>().0 =
+            crate::game::systems::combat::CombatTurnState::PlayerTurn;
+
+        app.update(); // PostStartup: setup_hud spawns cards.
+        app.update(); // Update: sync_party_hp_during_combat + update_hud.
+
+        let card_bg = |app: &mut App, idx: usize| -> Color {
+            let world = app.world_mut();
+            let mut q = world.query::<(&CharacterCard, &BackgroundColor)>();
+            q.iter(world)
+                .find(|(card, _)| card.party_index == idx)
+                .map(|(_, bg)| bg.0)
+                .unwrap_or_else(|| panic!("no CharacterCard found for party_index {}", idx))
+        };
+
+        // Pending a group spell targeting all characters (e.g. a party-wide
+        // heal) should highlight both living party members, overriding the
+        // active-turn highlight on slot 0.
+        app.world_mut().resource_mut::<GroupTargetPending>().data =
+            Some((CombatantId::Player(0), 1, GroupTargetSide::Characters));
+        app.update();
+
+        assert_eq!(
+            card_bg(&mut app, 0),
+            ENEMY_CARD_HIGHLIGHT_COLOR,
+            "party slot 0 must show the group-target highlight, overriding active-turn"
+        );
+        assert_eq!(
+            card_bg(&mut app, 1),
+            ENEMY_CARD_HIGHLIGHT_COLOR,
+            "party slot 1 must show the group-target highlight"
+        );
+
+        // Clearing the pending group target reverts to normal precedence.
+        app.world_mut().resource_mut::<GroupTargetPending>().data = None;
+        app.update();
+
+        assert_eq!(
+            card_bg(&mut app, 0),
+            ACTIVE_TURN_CARD_COLOR,
+            "party slot 0 (current actor) must revert to the active-turn highlight"
+        );
+        assert_eq!(
+            card_bg(&mut app, 1),
+            DEFAULT_CARD_COLOR,
+            "party slot 1 (not acting) must revert to the default card background"
+        );
     }
 
     #[test]
@@ -5059,5 +5542,153 @@ mod full_portrait_tests {
         let results = scan_full_portraits_dir(tmp.path());
         assert_eq!(results.len(), 1, "only image files should be indexed");
         assert_eq!(results[0].0, "warrior");
+    }
+}
+
+// ===== Campaign Font Handle Tests =====
+
+#[cfg(test)]
+mod campaign_font_tests {
+    use super::*;
+    use crate::application::GameState;
+    use crate::sdk::campaign_loader::{Campaign, CampaignAssets, CampaignConfig, CampaignData};
+    use crate::sdk::game_config::{FontConfig, GameConfig};
+    use std::path::PathBuf;
+
+    fn make_test_campaign(fonts: FontConfig) -> Campaign {
+        Campaign {
+            id: "test_fonts".to_string(),
+            name: "Test Campaign".to_string(),
+            version: "1.0.0".to_string(),
+            author: "Test Author".to_string(),
+            description: "A test campaign".to_string(),
+            engine_version: env!("CARGO_PKG_VERSION").to_string(),
+            required_features: vec![],
+            config: CampaignConfig::default(),
+            data: CampaignData::default(),
+            assets: CampaignAssets::default(),
+            root_path: PathBuf::from("data/test_campaign"),
+            game_config: GameConfig {
+                fonts,
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn test_campaign_font_handles_default_both_none() {
+        let handles = CampaignFontHandles::default();
+        assert!(handles.dialogue_font.is_none());
+        assert!(handles.game_menu_font.is_none());
+    }
+
+    #[test]
+    fn test_campaign_font_handles_loaded_for_campaign_default_none() {
+        assert!(CampaignFontHandles::default().loaded_for_campaign.is_none());
+    }
+
+    #[test]
+    fn test_ensure_campaign_fonts_loaded_skips_when_no_campaign() {
+        let mut app = App::new();
+        // No AssetPlugin — system exits at step 1 (no campaign), never reaches step 2.
+        let state = GameState::new();
+        app.insert_resource(GlobalState(state));
+        app.insert_resource(CampaignFontHandles::default());
+        app.add_systems(Update, ensure_campaign_fonts_loaded);
+        app.update();
+
+        let handles = app.world().resource::<CampaignFontHandles>();
+        assert!(handles.loaded_for_campaign.is_none());
+        assert!(handles.dialogue_font.is_none());
+        assert!(handles.game_menu_font.is_none());
+    }
+
+    #[test]
+    fn test_ensure_campaign_fonts_loaded_skips_when_no_asset_server() {
+        let mut app = App::new();
+        // No AssetPlugin → no AssetServer resource → system returns at step 2.
+        let mut state = GameState::new();
+        state.campaign = Some(make_test_campaign(FontConfig::default()));
+        app.insert_resource(GlobalState(state));
+        app.insert_resource(CampaignFontHandles::default());
+        app.add_systems(Update, ensure_campaign_fonts_loaded);
+        app.update();
+
+        let handles = app.world().resource::<CampaignFontHandles>();
+        assert!(
+            handles.loaded_for_campaign.is_none(),
+            "early return at step 2 must not set loaded_for_campaign"
+        );
+        assert!(handles.dialogue_font.is_none());
+        assert!(handles.game_menu_font.is_none());
+    }
+
+    #[test]
+    fn test_ensure_campaign_fonts_loaded_skips_when_already_loaded() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        let mut state = GameState::new();
+        state.campaign = Some(make_test_campaign(FontConfig::default()));
+        app.insert_resource(GlobalState(state));
+        // Pre-set: loaded_for_campaign already matches campaign id.
+        app.insert_resource(CampaignFontHandles {
+            loaded_for_campaign: Some("test_fonts".to_string()),
+            ..Default::default()
+        });
+        app.add_systems(Update, ensure_campaign_fonts_loaded);
+        app.update();
+
+        let handles = app.world().resource::<CampaignFontHandles>();
+        assert_eq!(
+            handles.loaded_for_campaign.as_deref(),
+            Some("test_fonts"),
+            "loaded_for_campaign must remain unchanged when already loaded"
+        );
+        assert!(handles.dialogue_font.is_none());
+        assert!(handles.game_menu_font.is_none());
+    }
+
+    #[test]
+    fn test_ensure_campaign_fonts_loaded_none_config_leaves_handles_none() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        let mut state = GameState::new();
+        state.campaign = Some(make_test_campaign(FontConfig::default()));
+        app.insert_resource(GlobalState(state));
+        app.insert_resource(CampaignFontHandles::default());
+        app.add_systems(Update, ensure_campaign_fonts_loaded);
+        app.update();
+
+        let handles = app.world().resource::<CampaignFontHandles>();
+        assert!(
+            handles.dialogue_font.is_none(),
+            "None dialogue_font config must leave handle as None"
+        );
+        assert!(
+            handles.game_menu_font.is_none(),
+            "None game_menu_font config must leave handle as None"
+        );
+    }
+
+    #[test]
+    fn test_ensure_campaign_fonts_loaded_sets_loaded_for_campaign() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        let mut state = GameState::new();
+        state.campaign = Some(make_test_campaign(FontConfig::default()));
+        app.insert_resource(GlobalState(state));
+        app.insert_resource(CampaignFontHandles::default());
+        app.add_systems(Update, ensure_campaign_fonts_loaded);
+        app.update();
+
+        let handles = app.world().resource::<CampaignFontHandles>();
+        assert_eq!(
+            handles.loaded_for_campaign.as_deref(),
+            Some("test_fonts"),
+            "loaded_for_campaign must equal campaign id after system runs"
+        );
     }
 }

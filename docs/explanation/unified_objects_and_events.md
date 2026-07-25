@@ -132,10 +132,10 @@ single funnel.
 
 #### 1.5 Deliverables
 
-- [ ] `mesh_id` and `dialogue_id` fields added to `Treasure`, `Sign`, `Container`,
+- [x] `mesh_id` and `dialogue_id` fields added to `Treasure`, `Sign`, `Container`,
   `LockedContainer`, `LockedDoor` in `types.rs`
-- [ ] `EventResult` variants updated to surface the new fields
-- [ ] Round-trip serialization tests pass
+- [x] `EventResult` variants updated to surface the new fields
+- [x] Round-trip serialization tests pass
 
 #### 1.6 Success Criteria
 
@@ -182,10 +182,11 @@ paths are still resolved via the existing registry files until Phase 4 unifies t
 
 #### 2.5 Deliverables
 
-- [ ] `EventMeshMarker` component defined
-- [ ] `spawn_event_meshes` system implemented and wired into map load
-- [ ] `DespawnEventMesh` message and `despawn_event_mesh` handler implemented
-- [ ] Existing `RecruitableCharacter` mesh spawning refactored to use the shared path
+- [x] `EventMeshMarker` component defined
+- [x] `spawn_event_meshes` system implemented and wired into map load
+- [x] `DespawnEventMesh` message and `handle_despawn_event_mesh` handler implemented
+- [x] `cleanup_event_mesh_markers` passive cleanup wired into `MapManagerPlugin`
+- [ ] Existing `RecruitableCharacter` mesh spawning refactored to use the shared path (deferred to Phase 4 — recruitable path uses creature-specific components distinct from generic event meshes)
 
 #### 2.6 Success Criteria
 
@@ -216,7 +217,7 @@ update the [E]-dispatch for `Treasure`, `Sign`, `Container`, `LockedContainer`, 
   Door event, so the `TriggerEvent` handlers can locate and remove the originating event.
 - The dialogue must be able to trigger the original effect via a `DialogueAction::TriggerEvent`
   action (mechanism exists: `dialogue.rs:1010` `execute_action`, matched at `:1095`). Add new
-  `event_name` branches alongside the existing `"open_inn_party_management"` / 
+  `event_name` branches alongside the existing `"open_inn_party_management"` /
   `"recruit_character_to_party"` / `"recruit_character_to_inn"` branches:
   - `"collect_treasure"` — runs the existing loot-collection + event-removal logic currently inside
     `try_interact_adjacent_world_events` (`exploration_interact.rs:688`); extract it into a shared
@@ -252,17 +253,17 @@ with id `42` in `dialogues.ron` presents choices and ends with a `TriggerEvent` 
 
 #### 3.5 Deliverables
 
-- [ ] `EventInteractionContext` + `event_context: Option<EventInteractionContext>` field added to
+- [x] `EventInteractionContext` + `event_context: Option<EventInteractionContext>` field added to
   `DialogueState` (generalized, separate from `recruitment_context`)
-- [ ] New `open_dialogue_for_event` helper in `exploration_interact.rs` that builds `DialogueState`
+- [x] New `open_dialogue_for_event` helper in `exploration_interact.rs` that builds `DialogueState`
   and sets `event_context`
-- [ ] Loot-collection logic extracted from `try_interact_adjacent_world_events` into a shared
+- [x] Loot-collection logic extracted from `try_interact_adjacent_world_events` into a shared
   function callable from both [E]-dispatch and the dialogue handler
-- [ ] `dialogue_id` routing added to [E]-dispatch for Treasure, Sign, Container, LockedContainer,
+- [x] `dialogue_id` routing added to [E]-dispatch for Treasure, Sign, Container, LockedContainer,
   LockedDoor
-- [ ] `TriggerEvent` handlers: `"collect_treasure"`, `"open_container"`, `"unlock_door"`,
+- [x] `TriggerEvent` handlers: `"collect_treasure"`, `"open_container"`, `"unlock_door"`,
   `"unlock_container"`
-- [ ] Event removal + `DespawnEventMesh` wired inside each handler
+- [x] Event removal + `DespawnEventMesh` wired inside each handler
 
 #### 3.6 Success Criteria
 

@@ -86,6 +86,7 @@ fn main() {
         primary_window: Some(Window {
             resolution: graphics_config.resolution.into(),
             title: format!("Antares - {}", campaign.name),
+            prevent_default_event_handling: false,
             mode: if graphics_config.fullscreen {
                 WindowMode::BorderlessFullscreen(MonitorSelection::Primary)
             } else {

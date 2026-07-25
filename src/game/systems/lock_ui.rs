@@ -682,6 +682,8 @@ pub(crate) fn apply_success(
                             items: items.clone(),
                             gold: 0,
                             gems: 0,
+                            mesh_id: None,
+                            dialogue_id: None,
                         },
                     );
                 }
@@ -890,6 +892,8 @@ mod tests {
             lock_id: lock_id.to_string(),
             key_item_id: None,
             initial_trap_chance: 0,
+            mesh_id: None,
+            dialogue_id: None,
         };
         let mut gs = make_game_state_with_event(position, event, lock_id, 0);
 
@@ -1118,6 +1122,8 @@ mod tests {
             key_item_id: None,
             items: vec![],
             initial_trap_chance: 0,
+            mesh_id: None,
+            dialogue_id: None,
         };
         let mut gs = make_game_state_with_event(position, event, lock_id, 0);
 
@@ -1174,6 +1180,8 @@ mod tests {
             lock_id: lock_id.to_string(),
             key_item_id: None,
             initial_trap_chance: 0,
+            mesh_id: None,
+            dialogue_id: None,
         };
         let mut gs = make_game_state_with_event(position, event, lock_id, 0);
 
@@ -1209,6 +1217,8 @@ mod tests {
             key_item_id: None,
             items: vec![],
             initial_trap_chance: 0,
+            mesh_id: None,
+            dialogue_id: None,
         };
         let mut gs = make_game_state_with_event(position, event, lock_id, 0);
 
@@ -1268,6 +1278,8 @@ mod tests {
             key_item_id: None,
             items: chest_items.clone(),
             initial_trap_chance: 0,
+            mesh_id: None,
+            dialogue_id: None,
         };
         let mut gs = make_game_state_with_event(position, event, lock_id, 0);
 
@@ -1387,6 +1399,8 @@ mod tests {
             lock_id: lock_id.to_string(),
             key_item_id: None,
             initial_trap_chance: 0,
+            mesh_id: None,
+            dialogue_id: None,
         };
         let mut gs = make_game_state_with_event(position, event, lock_id, 0);
 
@@ -1424,6 +1438,8 @@ mod tests {
             lock_id: lock_id.to_string(),
             key_item_id: None,
             initial_trap_chance: 0,
+            mesh_id: None,
+            dialogue_id: None,
         };
         let mut gs = make_game_state_with_event(position, event, lock_id, 0);
 
@@ -1459,6 +1475,8 @@ mod tests {
             lock_id: lock_id.to_string(),
             key_item_id: None,
             initial_trap_chance: 0,
+            mesh_id: None,
+            dialogue_id: None,
         };
         let mut gs = make_game_state_with_event(position, event, lock_id, 0);
 
