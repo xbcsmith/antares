@@ -10,7 +10,7 @@ use crate::domain::character::Character;
 use crate::domain::combat::monster::Monster;
 use crate::domain::conditions::{ActiveCondition, ConditionDefinition, ConditionEffect};
 use crate::domain::magic::types::Spell;
-use rand::Rng;
+use rand::RngExt;
 
 /// Helper to get the element of a condition from its effects
 fn get_condition_element(def: &ConditionDefinition) -> Option<&str> {

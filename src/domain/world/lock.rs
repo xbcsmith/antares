@@ -12,7 +12,7 @@
 //! See `docs/reference/architecture.md` Section 12.10 for the unlock and
 //! bash mechanical rules that govern success formulae and trap behaviour.
 
-use rand::Rng;
+use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::character::{Character, Party};

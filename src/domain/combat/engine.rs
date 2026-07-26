@@ -21,7 +21,7 @@ use crate::domain::magic::types::Spell;
 use crate::domain::types::DiceRoll;
 use std::collections::HashSet;
 // Condition types referenced by fully-qualified paths where needed
-use rand::Rng;
+use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

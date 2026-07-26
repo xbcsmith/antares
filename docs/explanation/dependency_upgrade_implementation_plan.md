@@ -152,10 +152,12 @@ Update in [Cargo.toml](Cargo.toml); fix the single affected call site.
 
 #### 2.6 Deliverables
 
-- [ ] `rand` 0.10 migration (trait rename across 13 files)
-- [ ] `rustyline` 18 migration
-- [ ] `sha2` 0.11 migration
-- [ ] `ordered-float` 5 migration
+- [x] `rand` 0.10 migration (trait rename; 12 files actually required changes,
+      not all 22 files importing `rand::Rng` called a renamed method)
+- [x] `rustyline` 18 migration (no source changes required)
+- [x] `sha2` 0.11 migration (`Sha256` digest output type dropped `LowerHex`;
+      switched to manual hex formatting in `calculate_checksum`)
+- [x] `ordered-float` 5 migration (no source changes required)
 
 #### 2.7 Success Criteria
 
