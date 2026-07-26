@@ -473,7 +473,7 @@ fn calculate_checksum<P: AsRef<Path>>(path: P) -> Result<String, PackageError> {
     }
 
     let hash = hasher.finalize();
-    Ok(format!("{:x}", hash))
+    Ok(hash.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 #[cfg(test)]

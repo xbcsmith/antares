@@ -855,7 +855,7 @@ pub fn process_rest(
             // probability gate.  If the base roll returns a group, accept it
             // only with probability == multiplier.
             random_encounter(&game_state.world, &mut rng).and_then(|group| {
-                use rand::Rng as _;
+                use rand::RngExt as _;
                 if rng.random::<f32>() < multiplier {
                     Some(group)
                 } else {

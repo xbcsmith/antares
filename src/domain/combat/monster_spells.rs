@@ -32,7 +32,7 @@ use crate::domain::magic::effect_dispatch::apply_buff_spell;
 use crate::domain::magic::types::{SpellEffectType, SpellResult};
 use crate::domain::types::SpellId;
 use crate::sdk::database::ContentDatabase;
-use rand::Rng;
+use rand::{Rng, RngExt};
 
 // ===== MonsterAction =====
 

@@ -13,6 +13,7 @@
 use super::types::{EncounterGroup, MapEvent, World};
 use crate::domain::combat::types::CombatEventType;
 use crate::domain::types::{GameTime, ItemId, Position};
+use rand::RngExt;
 use thiserror::Error;
 
 /// Result of triggering an event

@@ -13,7 +13,7 @@
 
 use std::fmt;
 
-use rand::Rng;
+use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 
 // Re-export GameMode from application layer for convenience

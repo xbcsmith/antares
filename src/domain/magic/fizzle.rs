@@ -29,7 +29,7 @@
 //! See `docs/reference/architecture.md` Section 5.3 for complete magic system
 //! specifications.
 
-use rand::Rng;
+use rand::{Rng, RngExt};
 
 /// Calculates the fizzle chance (in percent, 0–100) for a spell cast attempt.
 ///

@@ -25,7 +25,7 @@ use bevy::camera::visibility::NoFrustumCulling;
 use bevy::log::debug;
 use bevy::prelude::*;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use std::collections::HashMap;
 
 use crate::domain::types;
