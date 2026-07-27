@@ -272,7 +272,7 @@ fn character_sheet_ui_system(
         Err(_) => return,
     };
 
-    let screen_rect = ctx.available_rect();
+    let screen_rect = ctx.viewport_rect();
     let screen_w = screen_rect.width();
     let screen_h = screen_rect.height();
 
@@ -1260,7 +1260,7 @@ mod tests {
 
         let mut gs = crate::game::resources::GlobalState(state);
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render_party_overview(ui, &mut gs, 4);
             });
@@ -1306,7 +1306,7 @@ mod tests {
         ));
 
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render_party_overview_card(ui, &plain);
                 render_party_overview_card(ui, &poisoned);
@@ -1403,7 +1403,7 @@ mod tests {
 
         // Use a bare egui Context -- no Bevy ECS needed for render function tests.
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 // full_portrait_id = None triggers the placeholder path
                 render_single_view(
@@ -1445,7 +1445,7 @@ mod tests {
         let campaign_config = crate::domain::campaign::CampaignConfig::default();
 
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::Window::new("Character Sheet").show(ctx, |ui| {
                 render_single_view(
                     ui,
@@ -1526,7 +1526,7 @@ mod tests {
 
         // Verify the render helper does not panic when value == 0.
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render_resistance_row(ui, "Magic", 0);
             });
@@ -1548,7 +1548,7 @@ mod tests {
 
         // Verify the render helper does not panic when value > 0.
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render_resistance_row(ui, "Fire", 25);
                 render_resistance_row(ui, "Cold", 255);
@@ -1593,7 +1593,7 @@ mod tests {
         let campaign_config = crate::domain::campaign::CampaignConfig::default();
 
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render_single_view(
                     ui,
@@ -1652,7 +1652,7 @@ mod tests {
         let _: Option<SkillScalingMode> = None;
 
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render_single_view(
                     ui,
@@ -1813,7 +1813,7 @@ mod tests {
         let campaign_config = crate::domain::campaign::CampaignConfig::default();
 
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 // content_db = None simulates missing skill database
                 render_single_view(

@@ -120,7 +120,7 @@ fn setup_camera(mut commands: Commands, config: Res<CameraConfigResource>) {
     commands.spawn((
         PointLight {
             intensity: camera_config.light_intensity,
-            shadows_enabled: camera_config.shadows_enabled,
+            shadow_maps_enabled: camera_config.shadows_enabled,
             range: camera_config.light_range,
             ..default()
         },

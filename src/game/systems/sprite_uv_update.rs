@@ -166,7 +166,7 @@ fn apply_sprite_uv_transform(
     let (offset, scale) = sprite_assets.get_sprite_uv_transform(&sheet_key, sprite_index);
 
     // Update the material
-    if let Some(material) = materials.get_mut(material_handle) {
+    if let Some(mut material) = materials.get_mut(material_handle) {
         // Build UV transform using Affine2
         // First translate to the frame position, then scale the region
         material.uv_transform = Affine2::from_translation(offset) * Affine2::from_scale(scale);

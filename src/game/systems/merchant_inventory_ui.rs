@@ -571,7 +571,8 @@ fn merchant_inventory_ui_system(
     let char_focused = merchant_state.character_has_focus();
     let merchant_focused = merchant_state.merchant_has_focus();
 
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let mut root = crate::game::systems::ui_helpers::root_ui(ctx, "merchant_inventory_ui");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         render_merchant_top_bar(ui, global_state.0.party.gold);
         ui.label(
             egui::RichText::new(merchant_hint_text(&nav_state.phase))

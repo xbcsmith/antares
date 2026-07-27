@@ -34,19 +34,18 @@
 
 use bevy::core_pipeline::core_3d::{Opaque3d, Opaque3dBatchSetKey, Opaque3dBinKey};
 use bevy::ecs::{
-    component::Tick,
     query::ROQueryItem,
     system::{lifetimeless::*, SystemParamItem},
 };
 use bevy::mesh::{MeshVertexBufferLayoutRef, VertexBufferLayout};
 use bevy::pbr::{
     MeshPipeline, MeshPipelineKey, RenderMeshInstances, SetMeshBindGroup, SetMeshViewBindGroup,
-    SetMeshViewBindingArrayBindGroup,
+    SetMeshViewBindingArrayBindGroup, ViewKeyCache,
 };
 use bevy::prelude::*;
 use bevy::render::{
     extract_component::{ExtractComponent, ExtractComponentPlugin},
-    mesh::{allocator::MeshAllocator, RenderMesh, RenderMeshBufferInfo},
+    mesh::{allocator::MeshAllocator, allocator::MeshSlabs, RenderMesh, RenderMeshBufferInfo},
     render_asset::RenderAssets,
     render_phase::{
         AddRenderCommand, BinnedRenderPhaseType, DrawFunctions, InputUniformIndex, PhaseItem,
@@ -54,15 +53,17 @@ use bevy::render::{
         ViewBinnedRenderPhases,
     },
     render_resource::{
-        BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, BindingResource,
-        BindingType, BufferBindingType, BufferInitDescriptor, BufferUsages, PipelineCache,
-        RenderPipelineDescriptor, SamplerBindingType, ShaderStages, SpecializedMeshPipeline,
-        SpecializedMeshPipelineError, SpecializedMeshPipelines, TextureSampleType,
-        TextureViewDimension, VertexAttribute, VertexFormat, VertexStepMode,
+        BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
+        BindGroupLayoutEntry, BindingResource, BindingType, BufferBindingType,
+        BufferInitDescriptor, BufferUsages, PipelineCache, RenderPipelineDescriptor,
+        SamplerBindingType, ShaderStages, SpecializedMeshPipeline, SpecializedMeshPipelineError,
+        SpecializedMeshPipelines, TextureSampleType, TextureViewDimension, VertexAttribute,
+        VertexFormat, VertexStepMode,
     },
     renderer::RenderDevice,
+    sync_component::SyncComponent,
     sync_world::MainEntity,
-    view::{ExtractedView, NoIndirectDrawing},
+    view::ExtractedView,
     Render, RenderApp, RenderStartup, RenderSystems,
 };
 use bytemuck::{Pod, Zeroable};
@@ -209,6 +210,10 @@ impl ExtractComponent for GrassInstanceBatch {
     }
 }
 
+impl SyncComponent for GrassInstanceBatch {
+    type Target = Self;
+}
+
 // ── Render-world GPU buffer component ─────────────────────────────────────────
 
 /// Render-world component holding the uploaded instance vertex buffer.
@@ -313,7 +318,15 @@ impl SpecializedMeshPipeline for GrassInstancedPipeline {
 
         // Append the wind bind group layout at index 3 (after the three
         // layouts that MeshPipeline::specialize inserts at indices 0–2).
-        descriptor.layout.push(self.wind_bind_group_layout.clone());
+        //
+        // `RenderPipelineDescriptor::layout` takes `BindGroupLayoutDescriptor`
+        // (a value description used for pipeline caching), not the `BindGroupLayout`
+        // GPU handle stored on `self` — that handle is still what
+        // `prepare_grass_wind_bind_group` uses to actually create bind groups.
+        descriptor.layout.push(BindGroupLayoutDescriptor::new(
+            "grass_wind_bind_group_layout",
+            &wind_bind_group_layout_entries(),
+        ));
 
         Ok(descriptor)
     }
@@ -382,7 +395,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawGrassInstancedInner {
         else {
             return RenderCommandResult::Skip;
         };
-        let Some(gpu_mesh) = meshes.into_inner().get(mesh_instance.mesh_asset_id) else {
+        let Some(gpu_mesh) = meshes.into_inner().get(mesh_instance.mesh_asset_id()) else {
             return RenderCommandResult::Skip;
         };
         let Some(instance_buffer) = instance_buffer else {
@@ -392,7 +405,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawGrassInstancedInner {
             return RenderCommandResult::Skip;
         }
         let Some(vertex_buffer_slice) =
-            mesh_allocator.mesh_vertex_slice(&mesh_instance.mesh_asset_id)
+            mesh_allocator.mesh_vertex_slice(&mesh_instance.mesh_asset_id())
         else {
             return RenderCommandResult::Skip;
         };
@@ -406,12 +419,12 @@ impl<P: PhaseItem> RenderCommand<P> for DrawGrassInstancedInner {
                 count,
             } => {
                 let Some(index_buffer_slice) =
-                    mesh_allocator.mesh_index_slice(&mesh_instance.mesh_asset_id)
+                    mesh_allocator.mesh_index_slice(&mesh_instance.mesh_asset_id())
                 else {
                     return RenderCommandResult::Skip;
                 };
 
-                pass.set_index_buffer(index_buffer_slice.buffer.slice(..), 0, *index_format);
+                pass.set_index_buffer(index_buffer_slice.buffer.slice(..), *index_format);
                 pass.draw_indexed(
                     index_buffer_slice.range.start..(index_buffer_slice.range.start + count),
                     vertex_buffer_slice.range.start as i32,
@@ -447,6 +460,48 @@ pub type DrawGrassInstanced = (
 ///
 /// Called once at [`RenderStartup`]; must run before map spawn so the pipeline
 /// is ready when grass is first queued.
+/// Entries for the @group(3) bind group layout: wind uniform buffer, noise
+/// texture, and sampler.
+///
+/// Shared between [`init_grass_instanced_pipeline`] (which creates the real
+/// GPU [`BindGroupLayout`] used to build bind groups) and
+/// [`GrassInstancedPipeline::specialize`] (which needs a
+/// [`BindGroupLayoutDescriptor`] describing the same layout for pipeline
+/// caching) so the two can never drift out of sync.
+fn wind_bind_group_layout_entries() -> [BindGroupLayoutEntry; 3] {
+    [
+        BindGroupLayoutEntry {
+            binding: 0,
+            visibility: ShaderStages::VERTEX,
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                // GrassWindUniform is 32 bytes:
+                // strength(4) + frequency(4) + direction(8) +
+                // wind_system(4) + perlin_scale(4) + _pad(8) = 32
+                min_binding_size: NonZeroU64::new(32),
+            },
+            count: None,
+        },
+        BindGroupLayoutEntry {
+            binding: 1,
+            visibility: ShaderStages::VERTEX,
+            ty: BindingType::Texture {
+                multisampled: false,
+                view_dimension: TextureViewDimension::D2,
+                sample_type: TextureSampleType::Float { filterable: true },
+            },
+            count: None,
+        },
+        BindGroupLayoutEntry {
+            binding: 2,
+            visibility: ShaderStages::VERTEX,
+            ty: BindingType::Sampler(SamplerBindingType::Filtering),
+            count: None,
+        },
+    ]
+}
+
 pub fn init_grass_instanced_pipeline(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -458,37 +513,7 @@ pub fn init_grass_instanced_pipeline(
     // @group(3) bind group layout: wind uniform buffer + noise texture + sampler.
     let wind_bind_group_layout = render_device.create_bind_group_layout(
         "grass_wind_bind_group_layout",
-        &[
-            BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::VERTEX,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    // GrassWindUniform is 32 bytes:
-                    // strength(4) + frequency(4) + direction(8) +
-                    // wind_system(4) + perlin_scale(4) + _pad(8) = 32
-                    min_binding_size: NonZeroU64::new(32),
-                },
-                count: None,
-            },
-            BindGroupLayoutEntry {
-                binding: 1,
-                visibility: ShaderStages::VERTEX,
-                ty: BindingType::Texture {
-                    multisampled: false,
-                    view_dimension: TextureViewDimension::D2,
-                    sample_type: TextureSampleType::Float { filterable: true },
-                },
-                count: None,
-            },
-            BindGroupLayoutEntry {
-                binding: 2,
-                visibility: ShaderStages::VERTEX,
-                ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                count: None,
-            },
-        ],
+        &wind_bind_group_layout_entries(),
     );
 
     commands.insert_resource(GrassInstancedPipeline {
@@ -617,8 +642,8 @@ pub fn queue_grass_instanced(
     render_mesh_instances: Res<RenderMeshInstances>,
     batches: Query<(Entity, &MainEntity), With<GrassInstanceBatch>>,
     mut opaque_render_phases: ResMut<ViewBinnedRenderPhases<Opaque3d>>,
-    views: Query<(Entity, &ExtractedView, &Msaa, Option<&NoIndirectDrawing>)>,
-    mut next_tick: Local<Tick>,
+    views: Query<&ExtractedView>,
+    view_key_cache: Res<ViewKeyCache>,
 ) {
     let Some(pipeline) = pipeline else {
         return;
@@ -626,13 +651,14 @@ pub fn queue_grass_instanced(
 
     let draw_function = opaque_draw_functions.read().id::<DrawGrassInstanced>();
 
-    for (_view_entity, view, msaa, _no_indirect) in &views {
+    for view in &views {
         let Some(opaque_phase) = opaque_render_phases.get_mut(&view.retained_view_entity) else {
             continue;
         };
 
-        let msaa_key = MeshPipelineKey::from_msaa_samples(msaa.samples());
-        let view_key = msaa_key | MeshPipelineKey::from_hdr(view.hdr);
+        let Some(&view_key) = view_key_cache.get(&view.retained_view_entity) else {
+            continue;
+        };
 
         for (entity, main_entity) in &batches {
             // Retrieve the mesh from RenderMeshInstances (the batch entity
@@ -641,12 +667,15 @@ pub fn queue_grass_instanced(
             else {
                 continue;
             };
-            let Some(gpu_mesh) = meshes.get(mesh_instance.mesh_asset_id) else {
+            let Some(gpu_mesh) = meshes.get(mesh_instance.mesh_asset_id()) else {
                 continue;
             };
 
-            let pipeline_key =
-                view_key | MeshPipelineKey::from_primitive_topology(gpu_mesh.primitive_topology());
+            let pipeline_key = view_key
+                | MeshPipelineKey::from_primitive_topology_and_strip_index(
+                    gpu_mesh.primitive_topology(),
+                    gpu_mesh.index_format(),
+                );
 
             let Ok(pipeline_id) =
                 pipelines.specialize(&pipeline_cache, &pipeline, pipeline_key, &gpu_mesh.layout)
@@ -654,26 +683,20 @@ pub fn queue_grass_instanced(
                 continue;
             };
 
-            // Bump change tick so Bevy doesn't skip rebuilding the bin.
-            let this_tick = next_tick.get() + 1;
-            next_tick.set(this_tick);
-
             opaque_phase.add(
                 Opaque3dBatchSetKey {
                     pipeline: pipeline_id,
                     draw_function,
                     material_bind_group_index: None,
                     lightmap_slab: None,
-                    vertex_slab: default(),
-                    index_slab: None,
+                    slabs: MeshSlabs::default(),
                 },
                 Opaque3dBinKey {
-                    asset_id: mesh_instance.mesh_asset_id.untyped(),
+                    asset_id: mesh_instance.mesh_asset_id().untyped(),
                 },
                 (entity, *main_entity),
                 InputUniformIndex::default(),
                 BinnedRenderPhaseType::NonMesh,
-                *next_tick,
             );
         }
     }

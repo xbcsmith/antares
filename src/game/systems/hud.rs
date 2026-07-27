@@ -601,10 +601,10 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                             flex_direction: FlexDirection::Column,
                             padding: UiRect::all(CARD_PADDING),
                             row_gap: Val::Px(0.0),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
                             ..default()
                         },
                         BackgroundColor(DEFAULT_CARD_COLOR),
-                        BorderRadius::all(Val::Px(4.0)),
                         CharacterCard { party_index },
                     ))
                     .with_children(|card| {
@@ -614,10 +614,10 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                                 width: Val::Percent(PORTRAIT_PERCENT_OF_CARD),
                                 height: Val::Percent(PORTRAIT_PERCENT_OF_CARD),
                                 margin: UiRect::all(Val::Auto),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(PORTRAIT_PLACEHOLDER_COLOR),
-                            BorderRadius::all(Val::Px(4.0)),
                             ImageNode::default(),
                             Button,
                             Interaction::None,
@@ -665,7 +665,7 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                                 ZIndex(1),
                                 Text::new(""),
                                 TextFont {
-                                    font_size: UI_FONT_SIZE_SM,
+                                    font_size: FontSize::Px(UI_FONT_SIZE_SM),
                                     ..default()
                                 },
                                 TextColor(HP_TEXT_HEALTHY_COLOR),
@@ -713,7 +713,7 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                                     // Matches HpTextOverlay/ConditionText (UI_FONT_SIZE_SM) so the
                                     // HP/SP/condition stat block reads as one consistent size
                                     // instead of the SP number looking smaller than its siblings.
-                                    font_size: UI_FONT_SIZE_SM,
+                                    font_size: FontSize::Px(UI_FONT_SIZE_SM),
                                     ..default()
                                 },
                                 TextColor(SP_TEXT_COLOR),
@@ -725,7 +725,7 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                         card.spawn((
                             Text::new(""),
                             TextFont {
-                                font_size: UI_FONT_SIZE_SM,
+                                font_size: FontSize::Px(UI_FONT_SIZE_SM),
                                 ..default()
                             },
                             TextColor(Color::WHITE),
@@ -792,7 +792,7 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                     parent.spawn((
                         Text::new("N"),
                         TextFont {
-                            font_size: COMPASS_FONT_SIZE,
+                            font_size: FontSize::Px(COMPASS_FONT_SIZE),
                             ..default()
                         },
                         TextColor(COMPASS_TEXT_COLOR),
@@ -820,7 +820,7 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                     parent.spawn((
                         Text::new("00:00:00"),
                         TextFont {
-                            font_size: CLOCK_FONT_SIZE,
+                            font_size: FontSize::Px(CLOCK_FONT_SIZE),
                             ..default()
                         },
                         TextColor(CLOCK_DAY_TEXT_COLOR),
@@ -831,7 +831,7 @@ fn setup_hud(mut commands: Commands, mini_map_image: Res<MiniMapImage>) {
                     parent.spawn((
                         Text::new("Y1 M1 D1"),
                         TextFont {
-                            font_size: CLOCK_FONT_SIZE,
+                            font_size: FontSize::Px(CLOCK_FONT_SIZE),
                             ..default()
                         },
                         TextColor(CLOCK_TEXT_COLOR),
@@ -1187,7 +1187,7 @@ fn update_mini_map(
     }
     *last_painted_state = Some(paint_state);
 
-    let Some(image) = images.get_mut(&mini_map_image.handle) else {
+    let Some(mut image) = images.get_mut(&mini_map_image.handle) else {
         return;
     };
 
@@ -1460,7 +1460,7 @@ fn setup_automap(mut commands: Commands, automap_image: Res<AutomapImage>) {
                 legend.spawn((
                     Text::new("Automap"),
                     TextFont {
-                        font_size: AUTOMAP_LEGEND_TITLE_FONT_SIZE,
+                        font_size: FontSize::Px(AUTOMAP_LEGEND_TITLE_FONT_SIZE),
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -1632,7 +1632,7 @@ fn update_automap_image(
     let image_width = map.width * tile_px;
     let image_height = map.height * tile_px;
 
-    let Some(image) = images.get_mut(&automap_image.handle) else {
+    let Some(mut image) = images.get_mut(&automap_image.handle) else {
         return;
     };
 
@@ -2011,8 +2011,10 @@ fn ensure_portraits_loaded(
                                 "ensure_portraits_loaded: AssetServer returned default handle when loading '{}' (likely unapproved path or missing loader); attempting load_override (campaign='{}')",
                                 rel_str, campaign.id
                             );
-                            let override_handle: Handle<Image> =
-                                asset_server.load_override(rel_str.clone());
+                            let override_handle: Handle<Image> = asset_server
+                                .load_builder()
+                                .override_unapproved()
+                                .load(rel_str.clone());
 
                             debug!(
                                 "ensure_portraits_loaded: after load_override(): handle id={:?}, load_state={:?}",
@@ -2205,8 +2207,10 @@ fn ensure_full_portraits_loaded(
                                 "ensure_full_portraits_loaded: AssetServer returned default handle for '{}' (campaign='{}'); attempting load_override",
                                 rel_str, campaign.id
                             );
-                            let override_handle: Handle<Image> =
-                                asset_server.load_override(rel_str.clone());
+                            let override_handle: Handle<Image> = asset_server
+                                .load_builder()
+                                .override_unapproved()
+                                .load(rel_str.clone());
 
                             debug!(
                                 "ensure_full_portraits_loaded: after load_override(): handle id={:?}, load_state={:?}",

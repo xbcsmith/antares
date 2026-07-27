@@ -1294,7 +1294,7 @@ mod tests {
         let handled = {
             let world = app.world_mut();
             let mut state = SystemState::<MessageWriter<StartDialogue>>::new(world);
-            let mut writer = state.get_mut(world);
+            let mut writer = state.get_mut(world).unwrap();
             let result = try_interact_locked_door_event(
                 &mut game_state,
                 Position::new(5, 4),
@@ -1357,7 +1357,7 @@ mod tests {
         let handled = {
             let world = app.world_mut();
             let mut state = SystemState::<MessageWriter<StartDialogue>>::new(world);
-            let mut writer = state.get_mut(world);
+            let mut writer = state.get_mut(world).unwrap();
             let result = try_interact_locked_door_event(
                 &mut game_state,
                 Position::new(5, 4),
@@ -1445,7 +1445,7 @@ mod tests {
                 MessageWriter<MapEventTriggered>,
             )>::new(world);
             let result = {
-                let (mut start_writer, mut map_writer) = state.get_mut(world);
+                let (mut start_writer, mut map_writer) = state.get_mut(world).unwrap();
                 try_interact_adjacent_world_events(
                     &mut game_state,
                     party_pos,

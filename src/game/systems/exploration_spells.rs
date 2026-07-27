@@ -184,17 +184,17 @@ pub fn setup_spell_casting_ui(
                     padding: UiRect::all(Val::Px(16.0)),
                     row_gap: Val::Px(8.0),
                     overflow: Overflow::scroll_y(),
+                    border_radius: BorderRadius::all(Val::Px(10.0)),
                     ..default()
                 },
                 BackgroundColor(PANEL_BG),
-                BorderRadius::all(Val::Px(10.0)),
             ))
             .with_children(|panel| {
                 // Title placeholder — updated each frame by update_spell_casting_ui.
                 panel.spawn((
                     Text::new("Spell Casting"),
                     TextFont {
-                        font_size: BODY_FONT_SIZE,
+                        font_size: FontSize::Px(BODY_FONT_SIZE),
                         ..default()
                     },
                     TextColor(TITLE_COLOR),
@@ -216,7 +216,7 @@ pub fn setup_spell_casting_ui(
                 panel.spawn((
                     Text::new("↑↓ Navigate   Enter Confirm   Esc Cancel"),
                     TextFont {
-                        font_size: LABEL_FONT_SIZE,
+                        font_size: FontSize::Px(LABEL_FONT_SIZE),
                         ..default()
                     },
                     TextColor(HINT_COLOR),
@@ -668,7 +668,7 @@ fn build_caster_rows(
         list.spawn((
             Text::new("No party members."),
             TextFont {
-                font_size: BODY_FONT_SIZE,
+                font_size: FontSize::Px(BODY_FONT_SIZE),
                 ..default()
             },
             TextColor(DISABLED_ROW_COLOR),
@@ -696,7 +696,7 @@ fn build_spell_rows(
         list.spawn((
             Text::new("No caster selected."),
             TextFont {
-                font_size: BODY_FONT_SIZE,
+                font_size: FontSize::Px(BODY_FONT_SIZE),
                 ..default()
             },
             TextColor(DISABLED_ROW_COLOR),
@@ -708,7 +708,7 @@ fn build_spell_rows(
         list.spawn((
             Text::new("Content not available."),
             TextFont {
-                font_size: BODY_FONT_SIZE,
+                font_size: FontSize::Px(BODY_FONT_SIZE),
                 ..default()
             },
             TextColor(DISABLED_ROW_COLOR),
@@ -722,7 +722,7 @@ fn build_spell_rows(
         list.spawn((
             Text::new("No castable spells."),
             TextFont {
-                font_size: BODY_FONT_SIZE,
+                font_size: FontSize::Px(BODY_FONT_SIZE),
                 ..default()
             },
             TextColor(DISABLED_ROW_COLOR),
@@ -762,7 +762,7 @@ fn build_target_rows(
         list.spawn((
             Text::new("No valid targets."),
             TextFont {
-                font_size: BODY_FONT_SIZE,
+                font_size: FontSize::Px(BODY_FONT_SIZE),
                 ..default()
             },
             TextColor(DISABLED_ROW_COLOR),
@@ -789,7 +789,7 @@ fn build_result_rows(list: &mut ChildSpawnerCommands<'_>, sc: &SpellCastingState
     list.spawn((
         Text::new(msg.to_string()),
         TextFont {
-            font_size: BODY_FONT_SIZE,
+            font_size: FontSize::Px(BODY_FONT_SIZE),
             ..default()
         },
         TextColor(Color::srgb(0.8, 1.0, 0.8)),
@@ -797,7 +797,7 @@ fn build_result_rows(list: &mut ChildSpawnerCommands<'_>, sc: &SpellCastingState
     list.spawn((
         Text::new("Press Enter or Esc to continue."),
         TextFont {
-            font_size: LABEL_FONT_SIZE,
+            font_size: FontSize::Px(LABEL_FONT_SIZE),
             ..default()
         },
         TextColor(HINT_COLOR),
@@ -824,16 +824,16 @@ fn spawn_row(list: &mut ChildSpawnerCommands<'_>, label: &str, selected: bool, d
         Node {
             width: Val::Percent(100.0),
             padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
             ..default()
         },
         BackgroundColor(bg),
-        BorderRadius::all(Val::Px(4.0)),
     ))
     .with_children(|row| {
         row.spawn((
             Text::new(label.to_string()),
             TextFont {
-                font_size: BODY_FONT_SIZE,
+                font_size: FontSize::Px(BODY_FONT_SIZE),
                 ..default()
             },
             TextColor(text_color),

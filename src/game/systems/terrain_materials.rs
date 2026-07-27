@@ -191,7 +191,7 @@ pub(crate) fn refresh_terrain_materials_after_startup_allocations_system(
         let Some(material_handle) = terrain_cache.get(terrain) else {
             continue;
         };
-        let Some(material) = materials.get_mut(material_handle) else {
+        let Some(mut material) = materials.get_mut(material_handle) else {
             continue;
         };
 

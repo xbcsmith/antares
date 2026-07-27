@@ -125,14 +125,14 @@ pub fn spawn_choice_ui(
                         margin: UiRect::vertical(Val::Px(4.0)),
                         padding: UiRect::all(Val::Px(6.0)),
                         flex_direction: FlexDirection::Row,
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
                     BackgroundColor(bg_color),
-                    BorderRadius::all(Val::Px(4.0)),
                     // Display number + text like "1. Choice"
                     Text::new(format!("{}. {}", index + 1, choice_text)),
                     TextFont {
-                        font_size: DIALOGUE_CONTENT_FONT_SIZE * 0.9,
+                        font_size: FontSize::Px(DIALOGUE_CONTENT_FONT_SIZE * 0.9),
                         ..default()
                     },
                     TextColor(text_color),

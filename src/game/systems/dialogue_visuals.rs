@@ -82,10 +82,10 @@ pub fn spawn_dialogue_bubble(
                     padding: UiRect::all(DIALOGUE_PANEL_PADDING),
                     flex_direction: FlexDirection::Column,
                     row_gap: Val::Px(8.0),
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
                     ..default()
                 },
                 BackgroundColor(DIALOGUE_BACKGROUND_COLOR),
-                BorderRadius::all(Val::Px(8.0)),
                 ZIndex(10), // Ensure above HUD
                 DialoguePanelRoot,
             ))
@@ -654,7 +654,7 @@ mod tests {
             text_style_with_font(None, DIALOGUE_SPEAKER_FONT_SIZE, DIALOGUE_CHOICE_COLOR);
         assert_eq!(
             text_font.font,
-            Handle::default(),
+            FontSource::Handle(Handle::default()),
             "absent font config must produce default TextFont handle for dialogue text"
         );
     }

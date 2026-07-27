@@ -415,7 +415,8 @@ fn inn_ui_system(
     let selected_roster = inn_state.selected_roster_slot;
 
     // Main inn panel
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let mut root = crate::game::systems::ui_helpers::root_ui(ctx, "inn_ui");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         ui.heading(format!("Inn: Town {} - Party Management", current_inn_id));
         ui.add_space(10.0);
 

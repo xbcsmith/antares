@@ -135,10 +135,10 @@ fn main() {
                 ..Default::default()
             })
             .set(RenderPlugin {
-                render_creation: RenderCreation::Automatic(WgpuSettings {
+                render_creation: RenderCreation::Automatic(Box::new(WgpuSettings {
                     backends: Some(Backends::all()),
                     ..default()
-                }),
+                })),
                 ..default()
             })
             .set(LogPlugin {
@@ -276,10 +276,10 @@ fn create_neutral_tonemapping_gpu_image(
     GpuImage {
         texture,
         texture_view,
-        texture_format: image.texture_descriptor.format,
         sampler: (**default_sampler).clone(),
-        size: image.texture_descriptor.size,
-        mip_level_count: image.texture_descriptor.mip_level_count,
+        had_data: image.data.is_some(),
+        texture_descriptor: image.texture_descriptor,
+        texture_view_descriptor: image.texture_view_descriptor,
     }
 }
 

@@ -1090,8 +1090,8 @@ pub fn update_sky_body_visibility(
         if skip_material_writes {
             continue;
         }
-        if let Some(material) = materials.get_mut(&material_handle.0) {
-            apply_material_alpha(material, render_state.sun_alpha);
+        if let Some(mut material) = materials.get_mut(&material_handle.0) {
+            apply_material_alpha(&mut material, render_state.sun_alpha);
         }
     }
     for (mut vis, material_handle) in star_query.iter_mut() {
@@ -1099,8 +1099,8 @@ pub fn update_sky_body_visibility(
         if skip_material_writes {
             continue;
         }
-        if let Some(material) = materials.get_mut(&material_handle.0) {
-            apply_material_alpha(material, render_state.star_alpha);
+        if let Some(mut material) = materials.get_mut(&material_handle.0) {
+            apply_material_alpha(&mut material, render_state.star_alpha);
         }
     }
 }

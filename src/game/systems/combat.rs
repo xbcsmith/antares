@@ -2159,10 +2159,10 @@ fn setup_combat_ui(
                                         flex_direction: FlexDirection::Column,
                                         padding: UiRect::all(ENEMY_CARD_PADDING),
                                         row_gap: Val::Px(4.0),
+                                        border_radius: BorderRadius::all(Val::Px(4.0)),
                                         ..default()
                                     },
                                     BackgroundColor(ENEMY_CARD_DEFAULT_COLOR),
-                                    BorderRadius::all(Val::Px(4.0)),
                                     EnemyCard {
                                         participant_index: idx,
                                     },
@@ -2212,7 +2212,7 @@ fn setup_combat_ui(
                                             monster.hp.current, monster.hp.base
                                         )),
                                         TextFont {
-                                            font_size: UI_FONT_SIZE_SM,
+                                            font_size: FontSize::Px(UI_FONT_SIZE_SM),
                                             ..default()
                                         },
                                         TextColor(Color::WHITE),
@@ -2226,7 +2226,7 @@ fn setup_combat_ui(
                                     card.spawn((
                                         Text::new(""),
                                         TextFont {
-                                            font_size: UI_FONT_SIZE_SM,
+                                            font_size: FontSize::Px(UI_FONT_SIZE_SM),
                                             ..default()
                                         },
                                         TextColor(CONDITION_STATUS_COLOR),
@@ -2240,7 +2240,7 @@ fn setup_combat_ui(
                                     card.spawn((
                                         Text::new(""),
                                         TextFont {
-                                            font_size: UI_FONT_SIZE_SM,
+                                            font_size: FontSize::Px(UI_FONT_SIZE_SM),
                                             ..default()
                                         },
                                         TextColor(Color::srgb(0.75, 0.85, 1.0)),
@@ -2275,10 +2275,10 @@ fn setup_combat_ui(
                                     justify_content: JustifyContent::Center,
                                     row_gap: Val::Px(4.0),
                                     padding: UiRect::all(Val::Px(6.0)),
+                                    border_radius: BorderRadius::all(Val::Px(6.0)),
                                     ..default()
                                 },
                                 BackgroundColor(Color::srgba(0.15, 0.05, 0.05, 0.92)),
-                                BorderRadius::all(Val::Px(6.0)),
                                 BossHpBar {
                                     participant_index: idx,
                                 },
@@ -2288,7 +2288,7 @@ fn setup_combat_ui(
                                 boss_panel.spawn((
                                     Text::new(format!("⚔ {} ⚔", monster.name)),
                                     TextFont {
-                                        font_size: LABEL_FONT_SIZE,
+                                        font_size: FontSize::Px(LABEL_FONT_SIZE),
                                         ..default()
                                     },
                                     TextColor(Color::srgb(1.0, 0.8, 0.2)),
@@ -2326,7 +2326,7 @@ fn setup_combat_ui(
                                         monster.hp.current, monster.hp.base
                                     )),
                                     TextFont {
-                                        font_size: UI_FONT_SIZE_SM,
+                                        font_size: FontSize::Px(UI_FONT_SIZE_SM),
                                         ..default()
                                     },
                                     TextColor(Color::srgb(1.0, 0.9, 0.9)),
@@ -2419,10 +2419,10 @@ fn setup_combat_ui(
                                     height: ACTION_BUTTON_HEIGHT,
                                     justify_content: JustifyContent::Center,
                                     align_items: AlignItems::Center,
+                                    border_radius: BorderRadius::all(Val::Px(4.0)),
                                     ..default()
                                 },
                                 BackgroundColor(ACTION_BUTTON_COLOR),
-                                BorderRadius::all(Val::Px(4.0)),
                                 ActionButton { button_type },
                             ))
                             .with_children(|button| {
@@ -2445,10 +2445,10 @@ fn setup_combat_ui(
                                     height: ACTION_BUTTON_HEIGHT,
                                     justify_content: JustifyContent::Center,
                                     align_items: AlignItems::Center,
+                                    border_radius: BorderRadius::all(Val::Px(4.0)),
                                     ..default()
                                 },
                                 BackgroundColor(ACTION_BUTTON_DISABLED_COLOR),
-                                BorderRadius::all(Val::Px(4.0)),
                                 ActionButton {
                                     button_type: ActionButtonType::RangedAttack,
                                 },
@@ -2475,10 +2475,10 @@ fn setup_combat_ui(
                         flex_direction: FlexDirection::Column,
                         padding: UiRect::all(Val::Px(10.0)),
                         row_gap: Val::Px(8.0),
+                        border_radius: BorderRadius::all(Val::Px(12.0)),
                         ..default()
                     },
                     BackgroundColor(Color::srgba(0.06, 0.09, 0.13, 0.92)),
-                    BorderRadius::all(Val::Px(12.0)),
                     CombatLogBubbleRoot,
                 ))
                 .with_children(|bubble| {
@@ -2487,7 +2487,7 @@ fn setup_combat_ui(
                         // Matches the exploration-mode "Game Log" header (ui.rs) so both
                         // log headers share one size instead of drifting apart (was 15.0).
                         TextFont {
-                            font_size: LABEL_FONT_SIZE,
+                            font_size: FontSize::Px(LABEL_FONT_SIZE),
                             ..default()
                         },
                         TextColor(Color::srgb(0.92, 0.96, 1.0)),
@@ -2500,10 +2500,10 @@ fn setup_combat_ui(
                                 flex_grow: 1.0,
                                 overflow: Overflow::scroll_y(),
                                 padding: UiRect::all(Val::Px(2.0)),
+                                border_radius: BorderRadius::all(Val::Px(6.0)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgba(0.03, 0.05, 0.08, 0.35)),
-                            BorderRadius::all(Val::Px(6.0)),
                             CombatLogBubbleViewport,
                         ))
                         .with_children(|viewport| {
@@ -2637,10 +2637,10 @@ fn update_spell_selection_panel(
                 padding: UiRect::all(Val::Px(10.0)),
                 row_gap: Val::Px(4.0),
                 overflow: Overflow::scroll_y(),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.08, 0.08, 0.16, 0.97)),
-            BorderRadius::all(Val::Px(8.0)),
             SpellSelectionPanel { caster },
         ))
         .with_children(|panel| {
@@ -2648,7 +2648,7 @@ fn update_spell_selection_panel(
             panel.spawn((
                 Text::new(format!("{} — Select Spell", character.name)),
                 TextFont {
-                    font_size: UI_FONT_SIZE_LG,
+                    font_size: FontSize::Px(UI_FONT_SIZE_LG),
                     ..default()
                 },
                 TextColor(Color::srgb(0.9, 0.9, 1.0)),
@@ -2658,7 +2658,7 @@ fn update_spell_selection_panel(
                 panel.spawn((
                     Text::new("No spells known."),
                     TextFont {
-                        font_size: UI_FONT_SIZE_MD,
+                        font_size: FontSize::Px(UI_FONT_SIZE_MD),
                         ..default()
                     },
                     TextColor(Color::srgb(0.6, 0.6, 0.6)),
@@ -2680,7 +2680,7 @@ fn update_spell_selection_panel(
                     panel.spawn((
                         Text::new(format!("─── Level {} ───", level)),
                         TextFont {
-                            font_size: UI_FONT_SIZE_SM,
+                            font_size: FontSize::Px(UI_FONT_SIZE_SM),
                             ..default()
                         },
                         TextColor(Color::srgb(0.55, 0.55, 0.85)),
@@ -2729,10 +2729,10 @@ fn update_spell_selection_panel(
                                     width: Val::Percent(100.0),
                                     padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
                                     justify_content: JustifyContent::FlexStart,
+                                    border_radius: BorderRadius::all(Val::Px(4.0)),
                                     ..default()
                                 },
                                 BackgroundColor(btn_color),
-                                BorderRadius::all(Val::Px(4.0)),
                                 SpellButton {
                                     spell_id: spell.id,
                                     sp_cost: spell.sp_cost,
@@ -2743,7 +2743,7 @@ fn update_spell_selection_panel(
                                 btn.spawn((
                                     Text::new(label),
                                     TextFont {
-                                        font_size: UI_FONT_SIZE_MD,
+                                        font_size: FontSize::Px(UI_FONT_SIZE_MD),
                                         ..default()
                                     },
                                     TextColor(text_color),
@@ -2765,17 +2765,17 @@ fn update_spell_selection_panel(
                             top: Val::Px(6.0),
                             ..default()
                         },
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
                     BackgroundColor(Color::srgb(0.35, 0.15, 0.15)),
-                    BorderRadius::all(Val::Px(4.0)),
                     SpellCancelButton,
                 ))
                 .with_children(|btn| {
                     btn.spawn((
                         Text::new("Cancel"),
                         TextFont {
-                            font_size: UI_FONT_SIZE_MD,
+                            font_size: FontSize::Px(UI_FONT_SIZE_MD),
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -2788,7 +2788,7 @@ fn update_spell_selection_panel(
                     "[\u{2191}\u{2193}/Tab] Navigate \u{00b7} [Enter] Cast \u{00b7} [Esc] Cancel",
                 ),
                 TextFont {
-                    font_size: UI_FONT_SIZE_XS,
+                    font_size: FontSize::Px(UI_FONT_SIZE_XS),
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.55, 0.75)),
@@ -3195,10 +3195,10 @@ fn update_party_target_panel(
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(Val::Px(10.0)),
                 row_gap: Val::Px(4.0),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.08, 0.08, 0.16, 0.97)),
-            BorderRadius::all(Val::Px(8.0)),
             PartyTargetPanel,
         ))
         .with_children(|panel| {
@@ -3206,7 +3206,7 @@ fn update_party_target_panel(
             panel.spawn((
                 Text::new("Select Target"),
                 TextFont {
-                    font_size: UI_FONT_SIZE_LG,
+                    font_size: FontSize::Px(UI_FONT_SIZE_LG),
                     ..default()
                 },
                 TextColor(Color::srgb(0.9, 0.9, 1.0)),
@@ -3217,7 +3217,7 @@ fn update_party_target_panel(
                 panel.spawn((
                     Text::new("No valid target"),
                     TextFont {
-                        font_size: UI_FONT_SIZE_MD,
+                        font_size: FontSize::Px(UI_FONT_SIZE_MD),
                         ..default()
                     },
                     TextColor(Color::srgb(0.75, 0.55, 0.55)),
@@ -3254,6 +3254,7 @@ fn update_party_target_panel(
                             width: Val::Percent(100.0),
                             padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
                             justify_content: JustifyContent::FlexStart,
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
                             ..default()
                         },
                         BackgroundColor(if eligible {
@@ -3261,7 +3262,6 @@ fn update_party_target_panel(
                         } else {
                             ACTION_BUTTON_DISABLED_COLOR
                         }),
-                        BorderRadius::all(Val::Px(4.0)),
                         PartyTargetButton {
                             list_index,
                             participant_index: pidx,
@@ -3272,7 +3272,7 @@ fn update_party_target_panel(
                         btn.spawn((
                             Text::new(label),
                             TextFont {
-                                font_size: UI_FONT_SIZE_MD,
+                                font_size: FontSize::Px(UI_FONT_SIZE_MD),
                                 ..default()
                             },
                             TextColor(if eligible {
@@ -3296,17 +3296,17 @@ fn update_party_target_panel(
                             top: Val::Px(6.0),
                             ..default()
                         },
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
                     BackgroundColor(Color::srgb(0.35, 0.15, 0.15)),
-                    BorderRadius::all(Val::Px(4.0)),
                     PartyTargetCancelButton,
                 ))
                 .with_children(|btn| {
                     btn.spawn((
                         Text::new("Cancel"),
                         TextFont {
-                            font_size: UI_FONT_SIZE_MD,
+                            font_size: FontSize::Px(UI_FONT_SIZE_MD),
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -3317,7 +3317,7 @@ fn update_party_target_panel(
             panel.spawn((
                 Text::new("[\u{2191}\u{2193}/Tab] Navigate \u{00b7} [Enter] Confirm \u{00b7} [Esc] Cancel"),
                 TextFont {
-                    font_size: UI_FONT_SIZE_XS,
+                    font_size: FontSize::Px(UI_FONT_SIZE_XS),
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.55, 0.75)),
@@ -3541,17 +3541,17 @@ fn update_group_target_prompt(
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(Val::Px(10.0)),
                 row_gap: Val::Px(4.0),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.08, 0.08, 0.16, 0.97)),
-            BorderRadius::all(Val::Px(8.0)),
             GroupTargetPrompt,
         ))
         .with_children(|panel| {
             panel.spawn((
                 Text::new(format!("{spell_name} — targets {targets_desc}")),
                 TextFont {
-                    font_size: UI_FONT_SIZE_LG,
+                    font_size: FontSize::Px(UI_FONT_SIZE_LG),
                     ..default()
                 },
                 TextColor(Color::srgb(0.9, 0.9, 1.0)),
@@ -3559,7 +3559,7 @@ fn update_group_target_prompt(
             panel.spawn((
                 Text::new(hint),
                 TextFont {
-                    font_size: UI_FONT_SIZE_MD,
+                    font_size: FontSize::Px(UI_FONT_SIZE_MD),
                     ..default()
                 },
                 TextColor(Color::srgb(0.55, 0.55, 0.75)),
@@ -3681,10 +3681,10 @@ fn update_item_selection_panel(
                 padding: UiRect::all(Val::Px(10.0)),
                 row_gap: Val::Px(4.0),
                 overflow: Overflow::scroll_y(),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.08, 0.16, 0.08, 0.97)),
-            BorderRadius::all(Val::Px(8.0)),
             ItemSelectionPanel { user },
         ))
         .with_children(|panel| {
@@ -3692,7 +3692,7 @@ fn update_item_selection_panel(
             panel.spawn((
                 Text::new(format!("{} — Select Item", character.name)),
                 TextFont {
-                    font_size: UI_FONT_SIZE_LG,
+                    font_size: FontSize::Px(UI_FONT_SIZE_LG),
                     ..default()
                 },
                 TextColor(Color::srgb(0.9, 1.0, 0.9)),
@@ -3702,7 +3702,7 @@ fn update_item_selection_panel(
                 panel.spawn((
                     Text::new("No usable items."),
                     TextFont {
-                        font_size: UI_FONT_SIZE_MD,
+                        font_size: FontSize::Px(UI_FONT_SIZE_MD),
                         ..default()
                     },
                     TextColor(Color::srgb(0.6, 0.6, 0.6)),
@@ -3724,10 +3724,10 @@ fn update_item_selection_panel(
                                 width: Val::Percent(100.0),
                                 padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
                                 justify_content: JustifyContent::FlexStart,
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(ACTION_BUTTON_COLOR),
-                            BorderRadius::all(Val::Px(4.0)),
                             ItemButton {
                                 item_id: *item_id,
                                 charges: *charges,
@@ -3738,7 +3738,7 @@ fn update_item_selection_panel(
                             btn.spawn((
                                 Text::new(label),
                                 TextFont {
-                                    font_size: UI_FONT_SIZE_MD,
+                                    font_size: FontSize::Px(UI_FONT_SIZE_MD),
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -3759,17 +3759,17 @@ fn update_item_selection_panel(
                             top: Val::Px(6.0),
                             ..default()
                         },
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
                     BackgroundColor(Color::srgb(0.35, 0.15, 0.15)),
-                    BorderRadius::all(Val::Px(4.0)),
                     ItemCancelButton,
                 ))
                 .with_children(|btn| {
                     btn.spawn((
                         Text::new("✖ Cancel"),
                         TextFont {
-                            font_size: UI_FONT_SIZE_MD,
+                            font_size: FontSize::Px(UI_FONT_SIZE_MD),
                             ..default()
                         },
                         TextColor(Color::WHITE),
@@ -7495,7 +7495,7 @@ fn handle_combat_defeat(
                 parent.spawn((
                     Text::new("Defeat! You have been defeated."),
                     TextFont {
-                        font_size: UI_FONT_SIZE_XL,
+                        font_size: FontSize::Px(UI_FONT_SIZE_XL),
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -8015,7 +8015,7 @@ fn update_combat_log_bubble_text(
                         row.spawn((
                             Text::new(segment.text),
                             TextFont {
-                                font_size: COMBAT_LOG_LINE_FONT_SIZE,
+                                font_size: FontSize::Px(COMBAT_LOG_LINE_FONT_SIZE),
                                 ..default()
                             },
                             TextColor(segment.color),
@@ -8371,7 +8371,7 @@ fn spawn_combat_feedback(
                                 p.spawn((
                                     Text::new(text),
                                     TextFont {
-                                        font_size,
+                                        font_size: FontSize::Px(font_size),
                                         ..default()
                                     },
                                     TextColor(color),
@@ -8398,7 +8398,7 @@ fn spawn_combat_feedback(
                             p.spawn((
                                 Text::new(text),
                                 TextFont {
-                                    font_size,
+                                    font_size: FontSize::Px(font_size),
                                     ..default()
                                 },
                                 TextColor(color),
@@ -8440,7 +8440,7 @@ fn spawn_combat_feedback(
                                 p.spawn((
                                     Text::new(text),
                                     TextFont {
-                                        font_size,
+                                        font_size: FontSize::Px(font_size),
                                         ..default()
                                     },
                                     TextColor(color),
@@ -8471,7 +8471,7 @@ fn spawn_combat_feedback(
                             p.spawn((
                                 Text::new(text),
                                 TextFont {
-                                    font_size,
+                                    font_size: FontSize::Px(font_size),
                                     ..default()
                                 },
                                 TextColor(color),
@@ -8547,10 +8547,10 @@ fn spawn_monster_hp_hover_bars(
                         padding: UiRect::all(Val::Px(4.0)),
                         left: Val::Px(0.0),
                         top: Val::Px(0.0),
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
                     BackgroundColor(Color::srgba(0.08, 0.10, 0.12, 0.92)),
-                    BorderRadius::all(Val::Px(4.0)),
                     ZIndex(i32::MAX),
                     MonsterHpHoverBar {
                         participant_index: idx,
@@ -8569,7 +8569,7 @@ fn spawn_monster_hp_hover_bars(
                             header.spawn((
                                 Text::new(mon.name.clone()),
                                 TextFont {
-                                    font_size: UI_FONT_SIZE_SM,
+                                    font_size: FontSize::Px(UI_FONT_SIZE_SM),
                                     ..default()
                                 },
                                 TextColor(Color::WHITE),
@@ -8581,7 +8581,7 @@ fn spawn_monster_hp_hover_bars(
                             header.spawn((
                                 Text::new(format!("{}/{}", mon.hp.base, mon.hp.current)),
                                 TextFont {
-                                    font_size: UI_FONT_SIZE_SM,
+                                    font_size: FontSize::Px(UI_FONT_SIZE_SM),
                                     ..default()
                                 },
                                 TextColor(Color::srgb(0.86, 0.92, 0.98)),
@@ -8596,20 +8596,20 @@ fn spawn_monster_hp_hover_bars(
                             Node {
                                 width: Val::Percent(100.0),
                                 height: MONSTER_HP_HOVER_BAR_HEIGHT,
+                                border_radius: BorderRadius::all(Val::Px(2.0)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
-                            BorderRadius::all(Val::Px(2.0)),
                         ))
                         .with_children(|bar_bg| {
                             bar_bg.spawn((
                                 Node {
                                     width: Val::Percent(fill_pct * 100.0),
                                     height: Val::Percent(100.0),
+                                    border_radius: BorderRadius::all(Val::Px(2.0)),
                                     ..default()
                                 },
                                 BackgroundColor(bar_color),
-                                BorderRadius::all(Val::Px(2.0)),
                                 MonsterHpHoverBarFill {
                                     participant_index: fill_idx,
                                 },

@@ -251,10 +251,10 @@ fn spawn_main_menu(
                         justify_content: JustifyContent::FlexStart,
                         padding: UiRect::all(Val::Px(20.0)),
                         row_gap: Val::Px(BUTTON_SPACING),
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
                     BackgroundColor(MENU_BACKGROUND_COLOR),
-                    BorderRadius::all(Val::Px(4.0)),
                     MainMenuPanel,
                 ))
                 .with_children(|panel| {
@@ -333,10 +333,10 @@ fn spawn_main_menu(
                                     height: Val::Px(BUTTON_HEIGHT),
                                     justify_content: JustifyContent::Center,
                                     align_items: AlignItems::Center,
+                                    border_radius: BorderRadius::all(Val::Px(4.0)),
                                     ..default()
                                 },
                                 BackgroundColor(bg_color),
-                                BorderRadius::all(Val::Px(4.0)),
                                 *btn_type,
                             ))
                             .with_children(|button_root| {
@@ -401,10 +401,10 @@ fn spawn_save_load_menu(
                         justify_content: JustifyContent::FlexStart,
                         padding: UiRect::all(Val::Px(20.0)),
                         row_gap: Val::Px(10.0),
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
                     BackgroundColor(MENU_BACKGROUND_COLOR),
-                    BorderRadius::all(Val::Px(4.0)),
                     SaveLoadPanel,
                 ))
                 .with_children(|panel| {
@@ -466,10 +466,10 @@ fn spawn_save_load_menu(
                                             padding: UiRect::all(Val::Px(10.0)),
                                             margin: UiRect::all(Val::Px(5.0)),
                                             flex_direction: FlexDirection::Column,
+                                            border_radius: BorderRadius::all(Val::Px(4.0)),
                                             ..default()
                                         },
                                         BackgroundColor(bg_color),
-                                        BorderRadius::all(Val::Px(4.0)),
                                         MenuButton::SelectSave(index),
                                     ))
                                     .with_children(|slot| {
@@ -583,10 +583,10 @@ fn spawn_save_load_menu(
                                         height: Val::Px(BUTTON_HEIGHT),
                                         justify_content: JustifyContent::Center,
                                         align_items: AlignItems::Center,
+                                        border_radius: BorderRadius::all(Val::Px(4.0)),
                                         ..default()
                                     },
                                     BackgroundColor(BUTTON_NORMAL_COLOR),
-                                    BorderRadius::all(Val::Px(4.0)),
                                     MenuButton::Confirm,
                                 ))
                                 .with_children(|button_root| {
@@ -604,10 +604,10 @@ fn spawn_save_load_menu(
                                         height: Val::Px(BUTTON_HEIGHT),
                                         justify_content: JustifyContent::Center,
                                         align_items: AlignItems::Center,
+                                        border_radius: BorderRadius::all(Val::Px(4.0)),
                                         ..default()
                                     },
                                     BackgroundColor(BUTTON_NORMAL_COLOR),
-                                    BorderRadius::all(Val::Px(4.0)),
                                     MenuButton::LoadGame,
                                 ))
                                 .with_children(|button_root| {
@@ -625,10 +625,10 @@ fn spawn_save_load_menu(
                                         height: Val::Px(BUTTON_HEIGHT),
                                         justify_content: JustifyContent::Center,
                                         align_items: AlignItems::Center,
+                                        border_radius: BorderRadius::all(Val::Px(4.0)),
                                         ..default()
                                     },
                                     BackgroundColor(BUTTON_NORMAL_COLOR),
-                                    BorderRadius::all(Val::Px(4.0)),
                                     MenuButton::DeleteGame,
                                 ))
                                 .with_children(|button_root| {
@@ -646,10 +646,10 @@ fn spawn_save_load_menu(
                                         height: Val::Px(BUTTON_HEIGHT),
                                         justify_content: JustifyContent::Center,
                                         align_items: AlignItems::Center,
+                                        border_radius: BorderRadius::all(Val::Px(4.0)),
                                         ..default()
                                     },
                                     BackgroundColor(BUTTON_NORMAL_COLOR),
-                                    BorderRadius::all(Val::Px(4.0)),
                                     MenuButton::Back,
                                 ))
                                 .with_children(|button_root| {
@@ -702,10 +702,10 @@ fn spawn_settings_menu(
                         padding: UiRect::all(Val::Px(20.0)),
                         row_gap: Val::Px(10.0),
                         overflow: Overflow::scroll_y(),
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
                     BackgroundColor(MENU_BACKGROUND_COLOR),
-                    BorderRadius::all(Val::Px(4.0)),
                     SettingsPanel,
                 ))
                 .with_children(|panel| {
@@ -769,10 +769,10 @@ fn spawn_settings_menu(
                                 margin: UiRect::vertical(Val::Px(4.0)),
                                 justify_content: JustifyContent::FlexStart,
                                 align_items: AlignItems::Center,
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(SLIDER_TRACK_COLOR),
-                            BorderRadius::all(Val::Px(4.0)),
                             SliderTrack {
                                 slider_type: VolumeSlider::Master,
                             },
@@ -782,10 +782,10 @@ fn spawn_settings_menu(
                                 Node {
                                     width: Val::Percent(master_vol * 100.0),
                                     height: Val::Percent(100.0),
+                                    border_radius: BorderRadius::all(Val::Px(4.0)),
                                     ..default()
                                 },
                                 BackgroundColor(SLIDER_FILL_COLOR),
-                                BorderRadius::all(Val::Px(4.0)),
                             ));
                         });
                     panel.spawn(SettingSlider::new(VolumeSlider::Master, master_vol));
@@ -813,10 +813,10 @@ fn spawn_settings_menu(
                                 margin: UiRect::vertical(Val::Px(4.0)),
                                 justify_content: JustifyContent::FlexStart,
                                 align_items: AlignItems::Center,
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(SLIDER_TRACK_COLOR),
-                            BorderRadius::all(Val::Px(4.0)),
                             SliderTrack {
                                 slider_type: VolumeSlider::Music,
                             },
@@ -826,10 +826,10 @@ fn spawn_settings_menu(
                                 Node {
                                     width: Val::Percent(music_vol * 100.0),
                                     height: Val::Percent(100.0),
+                                    border_radius: BorderRadius::all(Val::Px(4.0)),
                                     ..default()
                                 },
                                 BackgroundColor(SLIDER_FILL_COLOR),
-                                BorderRadius::all(Val::Px(4.0)),
                             ));
                         });
                     panel.spawn(SettingSlider::new(VolumeSlider::Music, music_vol));
@@ -857,10 +857,10 @@ fn spawn_settings_menu(
                                 margin: UiRect::vertical(Val::Px(4.0)),
                                 justify_content: JustifyContent::FlexStart,
                                 align_items: AlignItems::Center,
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(SLIDER_TRACK_COLOR),
-                            BorderRadius::all(Val::Px(4.0)),
                             SliderTrack {
                                 slider_type: VolumeSlider::Sfx,
                             },
@@ -870,10 +870,10 @@ fn spawn_settings_menu(
                                 Node {
                                     width: Val::Percent(sfx_vol * 100.0),
                                     height: Val::Percent(100.0),
+                                    border_radius: BorderRadius::all(Val::Px(4.0)),
                                     ..default()
                                 },
                                 BackgroundColor(SLIDER_FILL_COLOR),
-                                BorderRadius::all(Val::Px(4.0)),
                             ));
                         });
                     panel.spawn(SettingSlider::new(VolumeSlider::Sfx, sfx_vol));
@@ -901,10 +901,10 @@ fn spawn_settings_menu(
                                 margin: UiRect::vertical(Val::Px(4.0)),
                                 justify_content: JustifyContent::FlexStart,
                                 align_items: AlignItems::Center,
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(SLIDER_TRACK_COLOR),
-                            BorderRadius::all(Val::Px(4.0)),
                             SliderTrack {
                                 slider_type: VolumeSlider::Ambient,
                             },
@@ -914,10 +914,10 @@ fn spawn_settings_menu(
                                 Node {
                                     width: Val::Percent(ambient_vol * 100.0),
                                     height: Val::Percent(100.0),
+                                    border_radius: BorderRadius::all(Val::Px(4.0)),
                                     ..default()
                                 },
                                 BackgroundColor(SLIDER_FILL_COLOR),
-                                BorderRadius::all(Val::Px(4.0)),
                             ));
                         });
                     panel.spawn(SettingSlider::new(VolumeSlider::Ambient, ambient_vol));
@@ -956,10 +956,10 @@ fn spawn_settings_menu(
                                 margin: UiRect::vertical(Val::Px(5.0)),
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(BUTTON_NORMAL_COLOR),
-                            BorderRadius::all(Val::Px(4.0)),
                             MenuButton::ToggleFullscreen,
                         ))
                         .with_children(|button| {
@@ -981,10 +981,10 @@ fn spawn_settings_menu(
                                 margin: UiRect::vertical(Val::Px(5.0)),
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(BUTTON_NORMAL_COLOR),
-                            BorderRadius::all(Val::Px(4.0)),
                             MenuButton::ToggleCombatMonsterHpBars,
                         ))
                         .with_children(|button| {
@@ -1010,10 +1010,10 @@ fn spawn_settings_menu(
                                 margin: UiRect::vertical(Val::Px(5.0)),
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(BUTTON_NORMAL_COLOR),
-                            BorderRadius::all(Val::Px(4.0)),
                             MenuButton::ToggleVSync,
                         ))
                         .with_children(|button| {
@@ -1035,10 +1035,10 @@ fn spawn_settings_menu(
                                 margin: UiRect::vertical(Val::Px(5.0)),
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(BUTTON_NORMAL_COLOR),
-                            BorderRadius::all(Val::Px(4.0)),
                             MenuButton::CycleShadowQuality,
                         ))
                         .with_children(|button| {
@@ -1165,10 +1165,10 @@ fn spawn_settings_menu(
                                         height: Val::Px(BUTTON_HEIGHT),
                                         justify_content: JustifyContent::Center,
                                         align_items: AlignItems::Center,
+                                        border_radius: BorderRadius::all(Val::Px(4.0)),
                                         ..default()
                                     },
                                     BackgroundColor(BUTTON_NORMAL_COLOR),
-                                    BorderRadius::all(Val::Px(4.0)),
                                     MenuButton::Confirm,
                                 ))
                                 .with_children(|button_root| {
@@ -1190,10 +1190,10 @@ fn spawn_settings_menu(
                                         height: Val::Px(BUTTON_HEIGHT),
                                         justify_content: JustifyContent::Center,
                                         align_items: AlignItems::Center,
+                                        border_radius: BorderRadius::all(Val::Px(4.0)),
                                         ..default()
                                     },
                                     BackgroundColor(BUTTON_NORMAL_COLOR),
-                                    BorderRadius::all(Val::Px(4.0)),
                                     MenuButton::Cancel,
                                 ))
                                 .with_children(|button_root| {
@@ -1215,10 +1215,10 @@ fn spawn_settings_menu(
                                         height: Val::Px(BUTTON_HEIGHT),
                                         justify_content: JustifyContent::Center,
                                         align_items: AlignItems::Center,
+                                        border_radius: BorderRadius::all(Val::Px(4.0)),
                                         ..default()
                                     },
                                     BackgroundColor(BUTTON_NORMAL_COLOR),
-                                    BorderRadius::all(Val::Px(4.0)),
                                     MenuButton::Back,
                                 ))
                                 .with_children(|button_root| {
@@ -2599,7 +2599,7 @@ mod tests {
         let (text_font, _) = text_style_with_font(None, TITLE_FONT_SIZE, TITLE_TEXT_COLOR);
         assert_eq!(
             text_font.font,
-            Handle::default(),
+            FontSource::Handle(Handle::default()),
             "menu_font = None must produce default TextFont handle"
         );
     }

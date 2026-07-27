@@ -666,7 +666,8 @@ fn container_inventory_ui_system(
     let char_focused = container_state.character_has_focus();
     let cont_focused = container_state.container_has_focus();
 
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let mut root = crate::game::systems::ui_helpers::root_ui(ctx, "container_inventory_ui");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         render_container_top_bar(ui, &container_state.container_name);
         ui.label(
             egui::RichText::new(container_hint_text(&nav_state.phase))
