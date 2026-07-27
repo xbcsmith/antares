@@ -6,6 +6,7 @@
 //!
 //! Also contains [`dispatch_list_action`] for uniform CRUD dispatch across editors.
 
+use super::autocomplete_widget::AutoCompleteTextEdit;
 use super::layout::{
     load_autocomplete_buffer, make_autocomplete_id, remove_autocomplete_buffer,
     store_autocomplete_buffer, ItemAction,
@@ -15,7 +16,6 @@ use antares::domain::proficiency::{
     ProficiencyCategory, ProficiencyDatabase, ProficiencyDefinition,
 };
 use eframe::egui;
-use egui_autocomplete::AutoCompleteTextEdit;
 use std::path::PathBuf;
 
 // =============================================================================

@@ -4734,7 +4734,7 @@ mod tests {
         assert!(state.reset_autocomplete_buffers);
 
         // Render the form (this will clear previous buffer and store current value)
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 state.show_edit_view(ui, None, "data/npcs.ron", None);
             });

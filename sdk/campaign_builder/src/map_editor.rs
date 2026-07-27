@@ -11312,7 +11312,8 @@ mod tests {
         };
         ctx.begin_pass(raw_input);
 
-        egui::CentralPanel::default().show(&ctx, |ui| {
+        let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "map_editor_1");
+        egui::CentralPanel::default().show(&mut root, |ui| {
             // Should render the inspector without panicking (and include name/description)
             let data = MapInspectorData {
                 maps: &[],
@@ -11373,7 +11374,8 @@ mod tests {
         };
         ctx.begin_pass(raw_input);
 
-        egui::CentralPanel::default().show(&ctx, |ui| {
+        let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "map_editor_2");
+        egui::CentralPanel::default().show(&mut root, |ui| {
             let data = MapInspectorData {
                 maps: &[],
                 monsters: &[],

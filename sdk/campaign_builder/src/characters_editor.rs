@@ -3677,7 +3677,7 @@ mod tests {
         assert!(state.reset_autocomplete_buffers);
 
         // Render the form (this will clear previous buffers and store current values)
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let mut unsaved = false;
                 let mut status = String::new();

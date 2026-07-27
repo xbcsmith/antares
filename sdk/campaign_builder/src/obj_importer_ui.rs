@@ -2916,7 +2916,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut logger = Logger::default();
 
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let signal =
                     show_obj_importer_tab(ui, &mut state, None, "data/landscape.ron", &mut logger);
@@ -2936,7 +2936,7 @@ mod tests {
         let mut logger = Logger::default();
 
         // Verify that rendering does not panic when is_error is true.
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let signal =
                     show_obj_importer_tab(ui, &mut state, None, "data/landscape.ron", &mut logger);
@@ -3435,7 +3435,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut logger = crate::logging::Logger::default();
         let did_not_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     crate::obj_importer_ui::show_obj_importer_tab(
                         ui,
@@ -3976,7 +3976,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut logger = Logger::default();
 
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let signal = show_obj_importer_tab(
                     ui,

@@ -815,7 +815,12 @@ impl Default for CampaignBuilderApp {
 }
 
 impl eframe::App for CampaignBuilderApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // egui 0.35 replaced `App::update(&Context, ...)` with `App::ui(&mut Ui,
+        // ...)`; clone the Context so the rest of this (large, pre-existing)
+        // function body can keep using `ctx.foo(...)` unchanged.
+        let ctx = ui.ctx().clone();
+        let ctx = &ctx;
         // Poll macOS menu-bar status item events once per frame.
         // `handle_tray_events` translates raw MenuEvent IDs into TrayCommand
         // values and sends them over the mpsc channel.  The Receiver is drained
@@ -850,7 +855,7 @@ impl eframe::App for CampaignBuilderApp {
         }
 
         // Top menu bar
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+        egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("🆕 New Campaign").clicked() {
@@ -1100,10 +1105,10 @@ impl eframe::App for CampaignBuilderApp {
         }
 
         // Left sidebar with tabs
-        egui::SidePanel::left("tab_panel")
+        egui::Panel::left("tab_panel")
             .resizable(false)
-            .exact_width(150.0)
-            .show(ctx, |ui| {
+            .exact_size(150.0)
+            .show(ui, |ui| {
                 ui.heading("Editors");
                 ui.separator();
 
@@ -1189,7 +1194,7 @@ impl eframe::App for CampaignBuilderApp {
             });
 
         // Bottom status bar
-        egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+        egui::Panel::bottom("status_bar").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Status:");
                 ui.label(&self.ui_state.status_message);
@@ -1205,7 +1210,7 @@ impl eframe::App for CampaignBuilderApp {
         self.handle_validation_open_npc_request();
 
         // Central panel with editor content
-        egui::CentralPanel::default().show(ctx, |ui| match self.ui_state.active_tab {
+        egui::CentralPanel::default().show(ui, |ui| match self.ui_state.active_tab {
             EditorTab::Metadata => self.show_metadata_editor(ui),
             EditorTab::ItemMeshes => {
                 if let Some(signal) = self

@@ -292,7 +292,8 @@ fn two_column_layout_show_split_calls_both_closures() {
     {
         let left_clone = left_called.clone();
         let right_clone = right_called.clone();
-        egui::CentralPanel::default().show(&ctx, |ui| {
+        let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_1");
+        egui::CentralPanel::default().show(&mut root, |ui| {
             TwoColumnLayout::new("test")
                 .with_left_width(400.0)
                 .with_inspector_min_width(300.0)
@@ -329,7 +330,8 @@ fn render_grid_header_draws_headers() {
     };
     ctx.begin_pass(raw_input);
 
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_2");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         egui::Grid::new("test_grid").num_columns(3).show(ui, |ui| {
             render_grid_header(ui, &["Status", "Message", "File"]);
             // Add a sample row to ensure grid usage doesn't panic
@@ -355,7 +357,8 @@ fn show_validation_severity_icon_shows_icon() {
     };
     ctx.begin_pass(raw_input);
 
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_3");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         super::show_validation_severity_icon(ui, crate::validation::ValidationSeverity::Error);
     });
 
@@ -757,7 +760,8 @@ fn autocomplete_monster_selector_preserves_passed_buffer() {
     };
     ctx.begin_pass(raw_input);
 
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_4");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         use antares::domain::character::{AttributePair, AttributePair16, Stats};
         use antares::domain::combat::database::MonsterDefinition;
         use antares::domain::combat::{monster::MonsterCondition, LootTable, MonsterResistances};
@@ -807,7 +811,8 @@ fn autocomplete_item_selector_persists_buffer() {
     };
     ctx.begin_pass(raw_input);
 
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_5");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         use crate::items_editor::ItemsEditorState;
 
         let mut item = ItemsEditorState::default_item();
@@ -857,7 +862,8 @@ fn autocomplete_map_selector_persists_buffer() {
     };
     ctx.begin_pass(raw_input);
 
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_6");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         let mut selected_map_id: String = String::new();
         let maps: Vec<antares::domain::world::Map> = vec![];
         // First call should initialize persistent buffer
@@ -896,7 +902,8 @@ fn autocomplete_buffer_helpers_work() {
     };
     ctx.begin_pass(raw_input);
 
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_7");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         // Use the same ID pattern as widgets use so we validate the helpers operate on the same keys.
         let id = make_autocomplete_id(ui, "test", "helper_test");
 
@@ -1599,7 +1606,8 @@ fn show_entity_validation_warning_displays_nothing_when_valid() {
     };
     ctx.begin_pass(raw_input);
 
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_8");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         // Should not display warning when entity exists
         show_entity_validation_warning(ui, "Item", 42, true);
     });
@@ -1644,7 +1652,8 @@ fn show_item_validation_warning_checks_existence() {
         mesh_id: None,
     }];
 
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_9");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         // Should show warning for non-existent item ID (use a valid u8 value)
         show_item_validation_warning(ui, 255, &items);
         // Should not show warning for existing item ID
@@ -1668,7 +1677,8 @@ fn show_monster_validation_warning_handles_empty_name() {
 
     let monsters = vec![];
 
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_10");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         // Should not show warning for empty name
         show_monster_validation_warning(ui, "", &monsters);
     });
@@ -1690,7 +1700,8 @@ fn show_condition_validation_warning_handles_empty_id() {
 
     let conditions = vec![];
 
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_11");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         // Should not show warning for empty condition ID
         show_condition_validation_warning(ui, "", &conditions);
     });
@@ -2192,7 +2203,7 @@ fn test_autocomplete_portrait_selector_basic_selection() {
     let mut portrait_id = String::new();
     let available_portraits = vec!["0".to_string(), "1".to_string(), "2".to_string()];
 
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             // Initially no selection
             assert_eq!(portrait_id, "");
@@ -2222,7 +2233,7 @@ fn test_autocomplete_portrait_selector_clear_button() {
     let mut portrait_id = "5".to_string();
     let available_portraits = vec!["5".to_string(), "10".to_string()];
 
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             assert_eq!(portrait_id, "5");
 
@@ -2258,7 +2269,7 @@ fn test_autocomplete_portrait_selector_clear_resets_text_buffer() {
 
     // --- Frame 1: portrait "5" is selected, buffer is populated ---
     let mut portrait_id = "5".to_string();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             autocomplete_portrait_selector(
                 ui,
@@ -2286,7 +2297,7 @@ fn test_autocomplete_portrait_selector_clear_resets_text_buffer() {
     store_autocomplete_buffer(&ctx, buffer_id, "");
 
     // --- Frame 2: render with cleared portrait_id; buffer must stay "" ---
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             autocomplete_portrait_selector(
                 ui,
@@ -2318,7 +2329,7 @@ fn test_autocomplete_portrait_selector_empty_candidates() {
     let mut portrait_id = String::new();
     let available_portraits: Vec<String> = vec![];
 
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let changed = autocomplete_portrait_selector(
                 ui,
@@ -2343,7 +2354,7 @@ fn test_autocomplete_portrait_selector_validates_selection() {
     let mut portrait_id = String::new();
     let available_portraits = vec!["0".to_string(), "1".to_string()];
 
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             // Try to set an invalid portrait ID
             portrait_id = "999".to_string();
@@ -2376,7 +2387,7 @@ fn test_autocomplete_portrait_selector_numeric_ids() {
         "100".to_string(),
     ];
 
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             autocomplete_portrait_selector(
                 ui,
@@ -2401,7 +2412,7 @@ fn test_autocomplete_portrait_selector_preserves_buffer() {
     let available_portraits = vec!["0".to_string(), "1".to_string()];
 
     // Frame 1
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             autocomplete_portrait_selector(
                 ui,
@@ -2415,7 +2426,7 @@ fn test_autocomplete_portrait_selector_preserves_buffer() {
     });
 
     // Frame 2 - buffer should be persisted
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             autocomplete_portrait_selector(
                 ui,
@@ -2702,7 +2713,8 @@ fn test_autocomplete_entity_selector_generic_returns_false_with_no_interaction()
         ..Default::default()
     };
     ctx.begin_pass(raw_input);
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_12");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         let mut select_called = false;
         let cfg = AutocompleteSelectorConfig {
             id_salt: "test_generic_no_interaction",
@@ -2742,7 +2754,8 @@ fn test_autocomplete_entity_selector_generic_empty_label_does_not_panic() {
         ..Default::default()
     };
     ctx.begin_pass(raw_input);
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_13");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         // Use RefCell so both closures can share mutation without conflicting borrows.
         let cell = std::cell::RefCell::new(String::new());
         let is_selected = !cell.borrow().is_empty();
@@ -2780,7 +2793,8 @@ fn test_autocomplete_entity_selector_generic_initialises_buffer_in_egui_memory()
         ..Default::default()
     };
     ctx.begin_pass(raw_input);
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_14");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         // Use RefCell so both closures can share mutation without conflicting borrows.
         let cell = std::cell::RefCell::new(String::new());
         let is_selected = !cell.borrow().is_empty();
@@ -2830,7 +2844,8 @@ fn test_autocomplete_list_selector_generic_starts_with_no_change() {
         ..Default::default()
     };
     ctx.begin_pass(raw_input);
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_15");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         let mut selected: Vec<String> = Vec::new();
         let cfg = AutocompleteListSelectorConfig {
             id_salt: "list_no_change",
@@ -2887,7 +2902,8 @@ fn test_autocomplete_list_selector_generic_initialises_buffer_in_egui_memory() {
         ..Default::default()
     };
     ctx.begin_pass(raw_input);
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_16");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         let mut selected: Vec<String> = Vec::new();
         let cfg = AutocompleteListSelectorConfig {
             id_salt: "list_buf_init",
@@ -3123,7 +3139,8 @@ fn test_autocomplete_spell_selector_no_panic_on_empty() {
     };
     ctx.begin_pass(raw_input);
 
-    egui::CentralPanel::default().show(&ctx, |ui| {
+    let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "ui_helpers_tests_17");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         let spells: Vec<antares::domain::magic::types::Spell> = vec![];
         let mut selected_spell_id: antares::domain::types::SpellId = 0;
 
