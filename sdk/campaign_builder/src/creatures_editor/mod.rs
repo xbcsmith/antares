@@ -1727,27 +1727,27 @@ impl CreaturesEditorState {
         ui.separator();
 
         // Three-panel layout: Mesh List | 3D Preview | Mesh Properties
-        egui::SidePanel::left("mesh_list_panel")
+        egui::Panel::left("mesh_list_panel")
             .resizable(true)
-            .default_width(250.0)
-            .min_width(200.0)
-            .max_width(400.0)
-            .show_inside(ui, |ui| {
+            .default_size(250.0)
+            .min_size(200.0)
+            .max_size(400.0)
+            .show(ui, |ui| {
                 self.show_mesh_list_panel(ui, unsaved_changes);
             });
 
-        egui::SidePanel::right("mesh_properties_panel")
+        egui::Panel::right("mesh_properties_panel")
             .resizable(true)
-            .default_width(350.0)
-            .min_width(300.0)
-            .max_width(500.0)
-            .show_inside(ui, |ui| {
+            .default_size(350.0)
+            .min_size(300.0)
+            .max_size(500.0)
+            .show(ui, |ui| {
                 if let Some(msg) = self.show_mesh_properties_panel(ui, unsaved_changes) {
                     result_message = Some(msg);
                 }
             });
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             self.show_preview_panel(ui);
         });
 
@@ -1757,10 +1757,10 @@ impl CreaturesEditorState {
         }
 
         // Bottom panel for creature-level properties
-        egui::TopBottomPanel::bottom("creature_properties_bottom")
+        egui::Panel::bottom("creature_properties_bottom")
             .resizable(false)
-            .min_height(100.0)
-            .show_inside(ui, |ui| {
+            .min_size(100.0)
+            .show(ui, |ui| {
                 if let Some(msg) = self.show_creature_level_properties(
                     ui,
                     creatures,
@@ -4253,7 +4253,7 @@ mod tests {
 
         let ctx = egui::Context::default();
         let execution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     result_message = state.show(
                         ui,

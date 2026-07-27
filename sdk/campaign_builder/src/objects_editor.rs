@@ -1067,7 +1067,7 @@ mod tests {
     fn with_test_ui(body: impl FnOnce(&mut egui::Ui)) {
         let mut body = Some(body);
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 if let Some(body) = body.take() {
                     body(ui);

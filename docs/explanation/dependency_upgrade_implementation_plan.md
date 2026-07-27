@@ -286,16 +286,48 @@ audit) against the two-minor-version `egui` API drift.
 
 #### 4.6 Deliverables
 
-- [ ] `eframe`/`egui` 0.35 migration across 45 files
-- [ ] `rfd` 0.17 migration
-- [ ] `tray-icon` 0.24 migration (macOS)
-- [ ] `egui_autocomplete` compatibility confirmed/bumped
-- [ ] Tests listed in 4.5
+- [x] `eframe`/`egui` 0.35 migration (16 files touched, not 45 — the audit's
+      per-file estimate was high; actual compile-error surface was smaller)
+- [x] `rfd` 0.17 migration (no source changes required)
+- [x] `tray-icon` 0.24 migration (macOS; no source changes required — this
+      environment is macOS, so the `#[cfg(target_os = "macos")]` tray code
+      path was actually compiled and checked, not just skipped)
+- [x] `egui_autocomplete` compatibility confirmed/bumped — **not bumped**:
+      the latest release (12.0.0) has no egui-0.35-compatible version, and
+      the only fix (upstream PR #53) points at an unpublished third-party
+      fork. Per user decision, vendored a local reimplementation instead
+      (`ui_helpers/autocomplete_widget.rs`, ported from egui_autocomplete's
+      MIT-licensed source with attribution) and dropped the dependency
+      entirely, adding `fuzzy-matcher` directly since that's the only piece
+      of egui_autocomplete's dependency tree the widget still needs.
+- [x] Tests listed in 4.5 (clippy, `cargo nextest run -p campaign_builder
+      --all-features`: 2627 passed)
 
 #### 4.7 Success Criteria
 
 - `campaign_builder` builds clean on the new `egui` stack; all editor tabs
-  and file dialogs function in manual verification.
+  and file dialogs function in manual verification. **Partially verified**:
+  `cargo run -p campaign_builder --bin campaign-builder -- --campaign
+  campaigns/tutorial` launches, auto-loads the tutorial campaign, and stays
+  up with no panics or errors (checked via a background launch + `ps`, since
+  `screencapture` reported "could not create image from display" — this
+  agent's environment has no accessible WindowServer session to actually see
+  or interact with the window). That's a real signal the `App::ui()` split,
+  the `Panel`/`CentralPanel` rewiring, and the vendored autocomplete widget
+  don't crash across many render frames, but it is **not** the same as a
+  human confirming each editor tab, file dialog, and the macOS tray icon
+  actually look and behave correctly. Needs a human pass with a real display
+  before merging.
+- Verification was done per-crate rather than as one final combined
+  `cargo clippy --workspace` / `cargo nextest run --workspace` pass: `antares`
+  (root crate) — clippy clean, 5379/5379 tests pass; `campaign_builder` —
+  clippy clean, 2627/2627 tests pass. The last combined-workspace re-run hit
+  `ENOSPC` (root disk 100% full, 927GB used / 118MB free — a machine-wide
+  condition, not caused by this change, though this project's `target/` is
+  103GB of it) before it could complete. Re-run
+  `cargo clippy --workspace --all-targets -- -D warnings` and
+  `cargo nextest run --workspace --all-features` once disk space is freed to
+  confirm nothing changes when both crates build together.
 
 ### Phase 5: Workspace-Wide Verification and Documentation
 

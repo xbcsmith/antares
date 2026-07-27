@@ -23,7 +23,7 @@ fn make_mesh(color: [f32; 4]) -> MeshDefinition {
 fn run_editor_frame(state: &mut CreaturesEditorState, creatures: &mut Vec<CreatureDefinition>) {
     let mut unsaved_changes = false;
     let ctx = egui::Context::default();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let _ = state.show(
                 ui,

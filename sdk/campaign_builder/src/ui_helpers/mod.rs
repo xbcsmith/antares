@@ -14,9 +14,12 @@
 //! - [`file_io`]     – CSV helpers, import/export dialog, file load/save/reload
 //! - [`attribute`]   – `AttributePair` and `AttributePair16` input widgets
 //! - [`autocomplete`]– Autocomplete widgets, selectors, candidate extraction, cache
+//! - `autocomplete_widget` – Vendored `AutoCompleteTextEdit` widget (private;
+//!   used only by [`autocomplete`])
 
 pub mod attribute;
 pub mod autocomplete;
+mod autocomplete_widget;
 pub mod file_io;
 pub mod layout;
 

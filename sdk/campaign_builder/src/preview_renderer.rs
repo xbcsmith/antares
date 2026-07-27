@@ -1179,7 +1179,7 @@ mod tests {
         let ctx = egui::Context::default();
 
         let mut observed: Option<(usize, usize)> = None;
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let (_, painter) =
                     ui.allocate_painter(egui::vec2(400.0, 400.0), egui::Sense::hover());
@@ -1222,7 +1222,7 @@ mod tests {
         assert!(renderer.last_rendered_signature.is_none());
 
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 renderer.show(ui);
             });
@@ -1239,7 +1239,7 @@ mod tests {
         );
 
         // Second show with identical camera and no needs_update must NOT re-render.
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 renderer.show(ui);
             });

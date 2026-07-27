@@ -2137,7 +2137,8 @@ mod tests {
         };
         ctx.begin_pass(raw_input);
         let state = StockTemplatesEditorState::default();
-        egui::CentralPanel::default().show(&ctx, |ui| {
+        let mut root = crate::ui_helpers::layout::test_root_ui(&ctx, "stock_templates_editor_1");
+        egui::CentralPanel::default().show(&mut root, |ui| {
             // Must not panic for a template with a non-empty description.
             state.show_preview(ui, &tmpl_with_desc);
         });
@@ -2152,7 +2153,8 @@ mod tests {
             ..Default::default()
         };
         ctx2.begin_pass(raw_input2);
-        egui::CentralPanel::default().show(&ctx2, |ui| {
+        let mut root = crate::ui_helpers::layout::test_root_ui(&ctx2, "stock_templates_editor_2");
+        egui::CentralPanel::default().show(&mut root, |ui| {
             // Must not panic for a template with an empty description either.
             state.show_preview(ui, &tmpl_no_desc);
         });

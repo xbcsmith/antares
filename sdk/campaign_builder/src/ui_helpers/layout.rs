@@ -58,6 +58,24 @@ pub(crate) fn make_autocomplete_id(_ui: &egui::Ui, prefix: &str, id_salt: &str) 
     egui::Id::new(format!("autocomplete:{}:{}", prefix, id_salt))
 }
 
+/// Builds a full-viewport root [`egui::Ui`] for tests that drive panels
+/// against a manually-paced `Context` (`ctx.begin_pass(...)` /
+/// `ctx.end_pass()`), without going through a full `eframe::App`.
+///
+/// egui 0.35 removed `Context`-based top-level `Panel::show(&Context, ...)`;
+/// panels can now only be shown inside an existing `Ui`. `id_source` should
+/// be unique per test so parallel tests don't share ID-stack state.
+#[cfg(test)]
+pub(crate) fn test_root_ui(ctx: &egui::Context, id_source: &str) -> egui::Ui {
+    egui::Ui::new(
+        ctx.clone(),
+        egui::Id::new(id_source),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(ctx.viewport_rect()),
+    )
+}
+
 /// Load an autocomplete buffer from egui Memory.
 ///
 /// Returns an owned `String` initialized from the stored buffer or `default()`
