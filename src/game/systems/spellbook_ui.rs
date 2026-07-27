@@ -235,7 +235,8 @@ fn spellbook_ui_system(
 
     let spell_ids = collect_spell_ids_from_state(&global_state.0, content.as_deref());
 
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let mut root = crate::game::systems::ui_helpers::root_ui(ctx, "spellbook_ui");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         // ── Title bar — hints included right-aligned so columns get the full
         //   remaining height with no bottom reservation needed ─────────────────
         ui.horizontal(|ui| {
@@ -854,7 +855,7 @@ mod tests {
         let global_state = GlobalState(GameState::new()); // empty party
 
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render_char_tabs(ui, &sb, &global_state);
             });
@@ -872,7 +873,7 @@ mod tests {
         let global_state = GlobalState(GameState::new()); // empty party → index 0 out of range
 
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render_spell_list(ui, &sb, &global_state, None, &[]);
             });
@@ -890,7 +891,7 @@ mod tests {
         let sb = SpellBookState::new(0, GameMode::Exploration);
 
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render_detail_panel(ui, &sb, None);
             });

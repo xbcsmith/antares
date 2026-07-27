@@ -805,7 +805,8 @@ fn skill_training_ui_system(
 
     let party_gold = global_state.0.party.gold;
 
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let mut root = crate::game::systems::ui_helpers::root_ui(ctx, "skill_training_ui");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         // ── Title bar — hints right-aligned so columns get the full remaining
         //   height without bottom reservation needed ──────────────────────────
         ui.horizontal(|ui| {

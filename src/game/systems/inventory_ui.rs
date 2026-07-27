@@ -1249,7 +1249,8 @@ fn inventory_ui_system(
     let mut pending_action: Option<PanelAction> = None;
     let mut clicked_slot_update: Option<(usize, usize, bool)> = None;
 
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let mut root = crate::game::systems::ui_helpers::root_ui(ctx, "inventory_ui");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         // ── Top bar: title + close hint ──────────────────────────────────
         ui.horizontal(|ui| {
             ui.heading("Inventory");
@@ -3081,7 +3082,7 @@ mod tests {
 
         // Build a minimal egui context so we can drive rendering
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let result = render_character_panel(
                     ui,
@@ -3140,7 +3141,7 @@ mod tests {
             .expect("add_member failed");
 
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let result = render_character_panel(
                     ui,
@@ -3172,7 +3173,7 @@ mod tests {
         // Party is empty; party_index=0 is out of bounds
 
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let result = render_character_panel(
                     ui,
@@ -3814,7 +3815,7 @@ mod tests {
         let panel_names = vec![(0usize, "Hero".to_string()), (1usize, "Ally".to_string())];
 
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 // No simulated click occurs in headless context; return value carries no action.
                 let result = render_character_panel(
@@ -3872,7 +3873,7 @@ mod tests {
         let panel_names = vec![(0usize, "Hero".to_string()), (1usize, "Ally".to_string())];
 
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let result = render_character_panel(
                     ui,
@@ -3929,7 +3930,7 @@ mod tests {
         let panel_names = vec![(0usize, "Hero".to_string()), (1usize, "Ally".to_string())];
 
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let result = render_character_panel(
                     ui,
@@ -5923,7 +5924,7 @@ mod tests {
 
         // Render the panel with the equipment strip cell focused — must not panic
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let result = render_character_panel(
                     ui,

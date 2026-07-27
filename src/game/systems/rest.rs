@@ -416,7 +416,7 @@ pub fn setup_rest_ui(mut commands: Commands) {
                     panel.spawn((
                         Text::new("Rest \u{2014} Choose Duration"),
                         TextFont {
-                            font_size: 28.0,
+                            font_size: FontSize::Px(28.0),
                             ..default()
                         },
                         TextColor(Color::srgba(1.0, 0.9, 0.6, 1.0)),
@@ -424,7 +424,7 @@ pub fn setup_rest_ui(mut commands: Commands) {
                     panel.spawn((
                         Text::new("[1]  4 hours  \u{2014}  50% HP/SP restored"),
                         TextFont {
-                            font_size: 20.0,
+                            font_size: FontSize::Px(20.0),
                             ..default()
                         },
                         TextColor(Color::srgba(0.8, 1.0, 0.8, 1.0)),
@@ -432,7 +432,7 @@ pub fn setup_rest_ui(mut commands: Commands) {
                     panel.spawn((
                         Text::new("[2]  8 hours  \u{2014}  75% HP/SP restored"),
                         TextFont {
-                            font_size: 20.0,
+                            font_size: FontSize::Px(20.0),
                             ..default()
                         },
                         TextColor(Color::srgba(0.8, 1.0, 0.8, 1.0)),
@@ -440,7 +440,7 @@ pub fn setup_rest_ui(mut commands: Commands) {
                     panel.spawn((
                         Text::new("[3] 12 hours  \u{2014} 100% HP/SP restored"),
                         TextFont {
-                            font_size: 20.0,
+                            font_size: FontSize::Px(20.0),
                             ..default()
                         },
                         TextColor(Color::srgba(0.8, 1.0, 0.8, 1.0)),
@@ -448,7 +448,7 @@ pub fn setup_rest_ui(mut commands: Commands) {
                     panel.spawn((
                         Text::new("[Esc]  Cancel"),
                         TextFont {
-                            font_size: 16.0,
+                            font_size: FontSize::Px(16.0),
                             ..default()
                         },
                         TextColor(Color::srgba(0.6, 0.6, 0.6, 1.0)),
@@ -487,7 +487,7 @@ pub fn setup_rest_ui(mut commands: Commands) {
                     panel.spawn((
                         Text::new("Resting\u{2026}"),
                         TextFont {
-                            font_size: 32.0,
+                            font_size: FontSize::Px(32.0),
                             ..default()
                         },
                         TextColor(Color::srgba(1.0, 0.9, 0.6, 1.0)),
@@ -496,7 +496,7 @@ pub fn setup_rest_ui(mut commands: Commands) {
                     panel.spawn((
                         Text::new("Hour 0 / 12"),
                         TextFont {
-                            font_size: 22.0,
+                            font_size: FontSize::Px(22.0),
                             ..default()
                         },
                         TextColor(Color::srgba(0.9, 0.9, 0.9, 1.0)),
@@ -506,7 +506,7 @@ pub fn setup_rest_ui(mut commands: Commands) {
                     panel.spawn((
                         Text::new(REST_FLAVOUR_MESSAGES[0]),
                         TextFont {
-                            font_size: 16.0,
+                            font_size: FontSize::Px(16.0),
                             ..default()
                         },
                         TextColor(Color::srgba(0.6, 0.8, 0.6, 1.0)),
@@ -516,7 +516,7 @@ pub fn setup_rest_ui(mut commands: Commands) {
                     panel.spawn((
                         Text::new("(encounter may interrupt)"),
                         TextFont {
-                            font_size: 13.0,
+                            font_size: FontSize::Px(13.0),
                             ..default()
                         },
                         TextColor(Color::srgba(0.7, 0.5, 0.5, 1.0)),

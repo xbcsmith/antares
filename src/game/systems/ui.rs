@@ -551,7 +551,7 @@ fn setup_game_log_panel(
                                         button.spawn((
                                             Text::new(category.short_label()),
                                             TextFont {
-                                                font_size: 10.0,
+                                                font_size: FontSize::Px(10.0),
                                                 ..default()
                                             },
                                             TextColor(Color::WHITE),
@@ -563,7 +563,7 @@ fn setup_game_log_panel(
                     header.spawn((
                         Text::new("0 entries"),
                         TextFont {
-                            font_size: 11.0,
+                            font_size: FontSize::Px(11.0),
                             ..default()
                         },
                         TextColor(Color::srgb(0.70, 0.70, 0.70)),
@@ -713,7 +713,7 @@ fn sync_game_log_ui(
             list.spawn((
                 Text::new(entry.text.clone()),
                 TextFont {
-                    font_size: 12.0,
+                    font_size: FontSize::Px(12.0),
                     ..default()
                 },
                 TextColor(entry.color),
@@ -855,7 +855,8 @@ fn fullscreen_game_log_ui_system(
         Err(_) => return,
     };
 
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let mut root = crate::game::systems::ui_helpers::root_ui(ctx, "game_log_ui");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         ui.vertical(|ui| {
             // ── Header row ───────────────────────────────────────────────
             ui.horizontal(|ui| {

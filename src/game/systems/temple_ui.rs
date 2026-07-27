@@ -445,7 +445,8 @@ fn temple_ui_system(
     let party_gold = global_state.0.party.gold;
     let party_gems = global_state.0.party.gems;
 
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let mut root = crate::game::systems::ui_helpers::root_ui(ctx, "temple_ui");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         render_temple_header(ui, npc_name, party_gold, party_gems, service_cost);
 
         // Dead party members list

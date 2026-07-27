@@ -8,7 +8,7 @@
 //! ## Ambient Lighting ([`TimeOfDayPlugin`])
 //!
 //! Reads the current [`TimeOfDay`] from the game state every frame and adjusts
-//! the scene's [`AmbientLight`] intensity:
+//! the scene's [`GlobalAmbientLight`] intensity:
 //!
 //! - During bright periods (Dawn → Dusk) the ambient light is at full
 //!   brightness (`AMBIENT_DAY_BRIGHTNESS`).
@@ -126,7 +126,7 @@ impl Plugin for TimeOfDayPlugin {
 
 // ===== Systems =====
 
-/// Updates the scene's [`AmbientLight`] intensity based on the current
+/// Updates the scene's [`GlobalAmbientLight`] intensity based on the current
 /// [`TimeOfDay`] read from [`GlobalState`].
 ///
 /// Called every frame so that any in-game time advancement is reflected
@@ -142,7 +142,7 @@ impl Plugin for TimeOfDayPlugin {
 /// | Afternoon | [`AMBIENT_DAY_BRIGHTNESS`]      |
 pub fn update_ambient_light(
     global_state: Res<GlobalState>,
-    mut ambient_light: ResMut<AmbientLight>,
+    mut ambient_light: ResMut<GlobalAmbientLight>,
 ) {
     let brightness = time_of_day_brightness(global_state.0.time_of_day());
     ambient_light.brightness = brightness;
@@ -349,7 +349,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         // Register the message and the apply_time_advance system manually so we
-        // don't need the full TimeOfDayPlugin (which requires AmbientLight).
+        // don't need the full TimeOfDayPlugin (which requires GlobalAmbientLight).
         app.add_message::<TimeAdvanceEvent>();
         app.add_systems(Update, apply_time_advance);
 

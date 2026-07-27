@@ -220,12 +220,25 @@ already covered by 3.1–3.4.
 
 #### 3.7 Deliverables
 
-- [ ] `bevy` 0.19 + `bevy_egui` 0.41 pinned and building
-- [ ] Text/font system migration (`FontSize::Px`, `FontSource`)
-- [ ] `AmbientLight`/`GlobalAmbientLight` split applied
-- [ ] Resources-as-components query audit
-- [ ] Remaining compile-error sweep resolved
-- [ ] Tests listed in 3.6
+- [x] `bevy` 0.19 + `bevy_egui` 0.41 pinned and building
+- [x] Text/font system migration (`FontSize::Px`, `FontSource`)
+- [x] `AmbientLight`/`GlobalAmbientLight` split applied
+- [x] Resources-as-components query audit (the one `Query<Entity>` in
+      `dialogue_visuals.rs` is a single-entity `.get()` lookup, not a full
+      iteration, so the new resource-backing entities have no effect)
+- [x] Remaining compile-error sweep resolved (also required: `bevy_egui`
+      0.41/egui 0.35's `Context`-based top-level panel API removal, a new
+      `AssetMut` wrapper on `Assets::get_mut`, fallible `SystemState::get_mut`
+      in tests, and a `grass_instancing.rs` custom render-pipeline rewrite —
+      see implementation notes below)
+- [x] Automated tests listed in 3.6 (clippy, `cargo nextest run
+      --all-features`)
+- [ ] Manual verification listed in 3.6 (launch tutorial campaign, visually
+      confirm HUD/combat text, day/night lighting, combat flow) — **not
+      performed**; this agent has no display/GPU to run the game binary.
+      Needs a human pass before merging, especially for the
+      `grass_instancing.rs` GPU pipeline rewrite (compiles and passes its
+      unit tests, but wasn't visually verified).
 
 #### 3.8 Success Criteria
 

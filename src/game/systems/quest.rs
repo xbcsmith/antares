@@ -97,7 +97,7 @@ mod tests {
                 ResMut<crate::application::quests::QuestSystem>,
                 ResMut<GlobalState>,
             )>::new(world);
-            let (mut qs, mut gs) = system_state.get_mut(world);
+            let (mut qs, mut gs) = system_state.get_mut(world).unwrap();
             qs.start_quest(1, &mut gs.0, &db).expect("start quest");
             system_state.apply(world);
         }
@@ -113,7 +113,7 @@ mod tests {
                 ResMut<crate::application::quests::QuestSystem>,
                 ResMut<GlobalState>,
             )>::new(world);
-            let (mut qs, mut gs) = system_state.get_mut(world);
+            let (mut qs, mut gs) = system_state.get_mut(world).unwrap();
 
             qs.process_event(
                 &crate::application::quests::QuestProgressEvent::MonsterKilled {

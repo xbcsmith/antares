@@ -34,6 +34,7 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy_egui::egui;
 
 /// Standard body-text font size (16 px).
 ///
@@ -108,7 +109,7 @@ pub const UI_FONT_SIZE_XL: f32 = 18.0;
 pub fn text_style(font_size: f32, color: Color) -> (TextFont, TextColor) {
     (
         TextFont {
-            font_size,
+            font_size: FontSize::Px(font_size),
             ..default()
         },
         TextColor(color),
@@ -147,16 +148,36 @@ pub fn text_style_with_font(
 ) -> (TextFont, TextColor) {
     let text_font = match font {
         Some(handle) => TextFont {
-            font: handle,
-            font_size,
+            font: FontSource::Handle(handle),
+            font_size: FontSize::Px(font_size),
             ..default()
         },
         None => TextFont {
-            font_size,
+            font_size: FontSize::Px(font_size),
             ..default()
         },
     };
     (text_font, TextColor(color))
+}
+
+/// Builds the full-viewport root [`egui::Ui`] for the current frame.
+///
+/// `egui` 0.35 (`bevy_egui` 0.41) removed the `Context`-based top-level
+/// `Panel::show(&Context, ...)` overload; panels can now only be shown
+/// inside an existing [`egui::Ui`]. This constructs that root `Ui` from a
+/// `bevy_egui` context, matching the pattern used by `bevy_egui`'s own
+/// examples.
+///
+/// `id_source` should be unique per calling system so that systems which
+/// may render in the same frame don't share ID-stack state.
+pub fn root_ui(ctx: &egui::Context, id_source: &str) -> egui::Ui {
+    egui::Ui::new(
+        ctx.clone(),
+        egui::Id::new(id_source),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(ctx.viewport_rect()),
+    )
 }
 
 /// Creates a square RGBA8 image filled with transparent black pixels.
@@ -473,7 +494,7 @@ mod tests {
     #[test]
     fn test_text_style_returns_correct_font_size() {
         let (font, _color) = text_style(20.0, Color::WHITE);
-        assert!((font.font_size - 20.0).abs() < f32::EPSILON);
+        assert_eq!(font.font_size, FontSize::Px(20.0));
     }
 
     #[test]
@@ -485,7 +506,7 @@ mod tests {
     #[test]
     fn test_text_style_with_font_none_font_size_correct() {
         let (font, _color) = text_style_with_font(None, 20.0, Color::WHITE);
-        assert!((font.font_size - 20.0).abs() < f32::EPSILON);
+        assert_eq!(font.font_size, FontSize::Px(20.0));
     }
 
     // ── Condition & turn-state card color scheme ────────────────────────────
@@ -695,7 +716,7 @@ mod tests {
         use bevy::text::Font;
         let handle: Handle<Font> = Handle::default();
         let (text_font, _color) = text_style_with_font(Some(handle.clone()), 16.0, Color::WHITE);
-        assert_eq!(text_font.font, handle);
+        assert_eq!(text_font.font, FontSource::Handle(handle));
     }
 
     #[test]

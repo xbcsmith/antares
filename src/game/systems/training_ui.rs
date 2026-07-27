@@ -511,7 +511,8 @@ fn training_ui_system(
     let members = eligible_members(&training_state, &global_state.0.party);
     let party_gold = global_state.0.party.gold;
 
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let mut root = crate::game::systems::ui_helpers::root_ui(ctx, "training_ui");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         render_training_header(ui, npc_name, party_gold);
 
         ui.label(
