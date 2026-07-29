@@ -30,7 +30,7 @@
 //! use bevy::prelude::*;
 //! use antares::game::systems::time::TimeAdvanceEvent;
 //!
-//! fn my_system(mut writer: EventWriter<TimeAdvanceEvent>) {
+//! fn my_system(mut writer: MessageWriter<TimeAdvanceEvent>) {
 //!     // Advance 5 minutes (e.g. one combat round)
 //!     writer.write(TimeAdvanceEvent { minutes: 5 });
 //! }
