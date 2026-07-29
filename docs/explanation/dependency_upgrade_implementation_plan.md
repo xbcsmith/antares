@@ -355,15 +355,21 @@ the combat-improvements work.
 
 #### 5.5 Deliverables
 
-- [ ] Full workspace clippy/test pass on final dependency set
-- [ ] `block v0.1.6` future-incompatibility warning confirmed resolved
-- [ ] `implementations.md` entry added
+- [x] Full workspace clippy/test pass on final dependency set (8006/8006
+      tests pass: 5379 `antares` + 2627 `campaign_builder`)
+- [x] `block v0.1.6` future-incompatibility warning confirmed resolved
+- [x] `implementations.md` entry added
 
 #### 5.6 Success Criteria
 
 - Every direct dependency in the workspace is on its latest stable version;
   `cargo report future-incompatibilities` is clean; both binaries run
-  correctly end to end.
+  correctly end to end. **Partially verified**: both binaries launch and run
+  without crashing (`antares` — see Phase 3's manual-verification note;
+  `campaign-builder` — see Phase 4's), but neither was visually or
+  interactively confirmed correct, since this agent had no display/GPU
+  access throughout. A human pass with a real display is the one remaining
+  step before this plan can be considered fully closed out.
 
 ## Copyright
 

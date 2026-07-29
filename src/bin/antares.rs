@@ -215,10 +215,10 @@ fn install_compatible_tonemapping_luts(app: &mut App) {
         }
         render_app.add_systems(
             RenderStartup,
-            move |render_device: Res<RenderDevice>,
-                  render_queue: Res<RenderQueue>,
-                  default_sampler: Res<DefaultImageSampler>,
-                  mut render_images: ResMut<RenderAssets<GpuImage>>| {
+            (move |render_device: Res<RenderDevice>,
+                   render_queue: Res<RenderQueue>,
+                   default_sampler: Res<DefaultImageSampler>,
+                   mut render_images: ResMut<RenderAssets<GpuImage>>| {
                 render_images.insert(
                     lut_handle.id(),
                     create_neutral_tonemapping_gpu_image(
@@ -227,7 +227,11 @@ fn install_compatible_tonemapping_luts(app: &mut App) {
                         &default_sampler,
                     ),
                 );
-            },
+            })
+            // Bevy 0.19 moved `DefaultImageSampler` init from `Plugin::build` to a
+            // `RenderStartup` system (`TexturePlugin::finish`); without this ordering
+            // edge the two `RenderStartup` systems race and this one can run first.
+            .after(bevy::render::init_gpu_resource::<DefaultImageSampler>),
         );
     }
 }

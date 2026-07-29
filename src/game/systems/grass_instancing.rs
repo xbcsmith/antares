@@ -39,8 +39,8 @@ use bevy::ecs::{
 };
 use bevy::mesh::{MeshVertexBufferLayoutRef, VertexBufferLayout};
 use bevy::pbr::{
-    MeshPipeline, MeshPipelineKey, RenderMeshInstances, SetMeshBindGroup, SetMeshViewBindGroup,
-    SetMeshViewBindingArrayBindGroup, ViewKeyCache,
+    MeshPipeline, MeshPipelineKey, MeshPipelineSystems, RenderMeshInstances, SetMeshBindGroup,
+    SetMeshViewBindGroup, SetMeshViewBindingArrayBindGroup, ViewKeyCache,
 };
 use bevy::prelude::*;
 use bevy::render::{
@@ -748,7 +748,13 @@ impl Plugin for GrassInstancingPlugin {
                 .add_render_command::<Opaque3d, DrawGrassInstanced>()
                 .init_resource::<SpecializedMeshPipelines<GrassInstancedPipeline>>()
                 .init_resource::<GrassWindBindGroupResource>()
-                .add_systems(RenderStartup, init_grass_instanced_pipeline)
+                .add_systems(
+                    RenderStartup,
+                    // `MeshPipeline` is inserted by bevy_pbr's own `RenderStartup`
+                    // system, which is in `MeshPipelineSystems`; without this
+                    // ordering edge the two `RenderStartup` systems race.
+                    init_grass_instanced_pipeline.after(MeshPipelineSystems),
+                )
                 .add_systems(
                     Render,
                     (
