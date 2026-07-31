@@ -25,9 +25,8 @@
 //! 5. [`cleanup_spell_casting_ui`] despawns the overlay when the mode leaves
 //!    `SpellCasting`.
 //!
-//! # Architecture Reference
-//!
-//! Phase 3 of `docs/explanation/spell_system_updates_implementation_plan.md`.
+//! Casting outside combat is driven entirely through this plugin's UI overlay
+//! and multi-step selection flow; no combat turn structure is involved.
 
 use crate::application::resources::GameContent;
 use crate::application::spell_casting_state::{SpellCastingState, SpellCastingStep};
@@ -314,10 +313,19 @@ pub fn handle_spell_casting_input(
     mut global_state: ResMut<GlobalState>,
     content: Option<Res<GameContent>>,
     mut game_log: Option<ResMut<GameLog>>,
+    mut game_rng: Option<ResMut<crate::game::resources::GameRng>>,
 ) {
     if !matches!(global_state.0.mode, GameMode::SpellCasting(_)) {
         return;
     }
+
+    // Resolve the deterministic gameplay RNG (falling back to a standalone
+    // generator only in minimal test apps where the resource is absent).
+    let mut fallback_rng = crate::game::resources::GameRng::fallback_std_rng();
+    let rng: &mut rand::rngs::StdRng = match game_rng.as_deref_mut() {
+        Some(gr) => gr.rng(),
+        None => &mut fallback_rng,
+    };
 
     let Some(ref kb) = keyboard else {
         return;
@@ -415,6 +423,7 @@ pub fn handle_spell_casting_input(
                             &mut global_state,
                             content.as_deref(),
                             &mut game_log,
+                            rng,
                         );
                     }
                 }
@@ -437,7 +446,7 @@ pub fn handle_spell_casting_input(
                 if let GameMode::SpellCasting(sc) = &mut global_state.0.mode {
                     sc.select_target(target_idx);
                 }
-                execute_exploration_cast(&mut global_state, content.as_deref(), &mut game_log);
+                execute_exploration_cast(&mut global_state, content.as_deref(), &mut game_log, rng);
             }
         }
 
@@ -515,6 +524,7 @@ fn execute_exploration_cast(
     global_state: &mut GlobalState,
     content: Option<&GameContent>,
     game_log: &mut Option<ResMut<GameLog>>,
+    rng: &mut impl rand::Rng,
 ) {
     let (caster_index, spell_id, target) = {
         let sc = match &global_state.0.mode {
@@ -566,14 +576,13 @@ fn execute_exploration_cast(
         &owned_item_db
     };
 
-    let mut rng = rand::rng();
     let result = cast_exploration_spell(
         caster_index,
         &spell,
         target,
         &mut global_state.0,
         item_db,
-        &mut rng,
+        rng,
     );
 
     let message = match result {

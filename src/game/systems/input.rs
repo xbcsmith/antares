@@ -282,6 +282,7 @@ fn handle_exploration_input_movement(
     )>,
     mut game_log: ResMut<GameLog>,
     lock_pending: Res<LockInteractionPending>,
+    mut game_rng: Option<ResMut<crate::game::resources::GameRng>>,
 ) {
     // Block all movement while lock prompt is visible.
     if lock_pending.lock_id.is_some() {
@@ -310,6 +311,12 @@ fn handle_exploration_input_movement(
         return;
     }
 
+    let mut fallback_rng = crate::game::resources::GameRng::fallback_std_rng();
+    let rng: &mut rand::rngs::StdRng = match game_rng.as_deref_mut() {
+        Some(gr) => gr.rng(),
+        None => &mut fallback_rng,
+    };
+
     if handle_exploration_movement(
         &mut commands,
         frame_input,
@@ -320,6 +327,7 @@ fn handle_exploration_input_movement(
         current_time,
         &mut last_move_time,
         &victory_roots,
+        rng,
     ) {
         // Future follow-up: evaluate whether any move-triggered event check
         // should be separated further from movement orchestration.

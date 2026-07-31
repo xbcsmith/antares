@@ -6,6 +6,24 @@
 //! Turn-based RPG inspired by Might and Magic 1.
 //! Now powered by Bevy Engine.
 
+// Error-handling regression gate (Phase 4): forbid new panicking `unwrap`/
+// `expect` and ignored `#[must_use]` results in non-test code. The few
+// remaining sites are fail-fast startup/infrastructure panics that carry
+// targeted `#[allow(...)]` attributes with rationale. Test code is exempt.
+#![warn(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::let_underscore_must_use
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::let_underscore_must_use
+    )
+)]
+
 use antares::application::GameState;
 use antares::game::resources::GlobalState;
 use antares::game::systems::camera::CameraPlugin;
@@ -46,6 +64,9 @@ struct Args {
     log: Option<PathBuf>,
 }
 
+// Binary entry point: a missing/invalid campaign at startup is unrecoverable,
+// so failing fast with a descriptive `expect` is the intended behavior.
+#[allow(clippy::expect_used)]
 fn main() {
     let args = Args::parse();
 
@@ -182,6 +203,9 @@ fn main() {
 /// Installs a render-safe 3D tonemapping LUT for Bevy view bind groups.
 const ANTARES_TONEMAPPING_LUT_UUID: u128 = 0xaea7_0000_0000_0000_0000_0000_0000_0001;
 
+// Infrastructure setup: the tonemapping LUT is a UUID-backed asset that is
+// constructed in-process, so insertion cannot fail here.
+#[allow(clippy::expect_used)]
 fn install_compatible_tonemapping_luts(app: &mut App) {
     // Diagnostic kill-switch for isolating render-world image-map issues.
     if std::env::var("ANTARES_DIAG_NO_LUT").is_ok() {
@@ -257,6 +281,9 @@ fn create_neutral_tonemapping_lut_image() -> Image {
 }
 
 /// Creates the render-world GPU image for Antares' neutral tonemapping LUT.
+// The neutral LUT image is created immediately above with pixel data always
+// present, so `data` is guaranteed `Some` here.
+#[allow(clippy::expect_used)]
 fn create_neutral_tonemapping_gpu_image(
     render_device: &RenderDevice,
     render_queue: &RenderQueue,
@@ -308,10 +335,14 @@ fn antares_console_fmt_layer(_app: &mut App) -> Option<BoxedFmtLayer> {
 struct ArcFileWriter(Arc<Mutex<std::fs::File>>);
 
 impl std::io::Write for ArcFileWriter {
+    // The mutex only guards a log file handle and is never held across a panic,
+    // so it cannot be poisoned; locking here cannot fail in practice.
+    #[allow(clippy::unwrap_used)]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let mut f = self.0.lock().unwrap();
         f.write(buf)
     }
+    #[allow(clippy::unwrap_used)]
     fn flush(&mut self) -> std::io::Result<()> {
         let mut f = self.0.lock().unwrap();
         f.flush()
@@ -360,6 +391,9 @@ struct AntaresPlugin {
 }
 
 impl Plugin for AntaresPlugin {
+    // Binary startup: a campaign that fails to initialize is unrecoverable, so
+    // failing fast with a descriptive `expect` is the intended behavior.
+    #[allow(clippy::expect_used)]
     fn build(&self, app: &mut App) {
         // Initialize game state and load campaign content (new_game returns (GameState, ContentDatabase))
         let (mut game_state, content_db) = GameState::new_game(self.campaign.clone())
@@ -395,8 +429,12 @@ impl Plugin for AntaresPlugin {
         );
         game_state.world.party_facing = self.campaign.config.starting_direction;
 
-        // Insert global state and content DB as a resource
+        // Insert global state and content DB as a resource. Seed the shared
+        // deterministic RNG from the game state's persisted seed so that combat
+        // and encounter outcomes are reproducible across save/load.
+        let rng_seed = game_state.rng_seed;
         app.insert_resource(GlobalState(game_state));
+        app.insert_resource(antares::game::resources::GameRng::from_seed(rng_seed));
         app.insert_resource(antares::application::resources::GameContent::new(
             content_db,
         ));

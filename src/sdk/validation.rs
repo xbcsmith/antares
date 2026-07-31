@@ -85,9 +85,9 @@ impl fmt::Display for Severity {
 /// # Examples
 ///
 /// ```
-/// use antares::sdk::validation::{ValidationError, Severity};
+/// use antares::sdk::validation::{CampaignValidationError, Severity};
 ///
-/// let error = ValidationError::MissingClass {
+/// let error = CampaignValidationError::MissingClass {
 ///     context: "Character creation".to_string(),
 ///     class_id: "invalid_class".to_string(),
 /// };
@@ -96,7 +96,7 @@ impl fmt::Display for Severity {
 /// assert_eq!(error.severity(), Severity::Error);
 /// ```
 #[derive(Error, Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum ValidationError {
+pub enum CampaignValidationError {
     /// Referenced class does not exist
     #[error("Missing class '{class_id}' referenced in {context}")]
     MissingClass { context: String, class_id: ClassId },
@@ -306,15 +306,15 @@ pub enum ValidationError {
     },
 }
 
-impl ValidationError {
+impl CampaignValidationError {
     /// Returns the severity of this validation error
     ///
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::validation::{ValidationError, Severity};
+    /// use antares::sdk::validation::{CampaignValidationError, Severity};
     ///
-    /// let error = ValidationError::MissingClass {
+    /// let error = CampaignValidationError::MissingClass {
     ///     context: "test".to_string(),
     ///     class_id: "invalid".to_string(),
     /// };
@@ -323,37 +323,36 @@ impl ValidationError {
     /// ```
     pub fn severity(&self) -> Severity {
         match self {
-            ValidationError::MissingClass { .. }
-            | ValidationError::MissingRace { .. }
-            | ValidationError::MissingItem { .. }
-            | ValidationError::MissingMonster { .. }
-            | ValidationError::MissingSpell { .. }
-            | ValidationError::DuplicateId { .. }
-            | ValidationError::InvalidStartingInnkeeper { .. }
-            | ValidationError::InnkeeperMissingDialogue { .. }
-            | ValidationError::CreatureEmptyName { .. }
-            | ValidationError::CreatureInvalidScale { .. }
-            | ValidationError::CreatureNoMeshes { .. }
-            | ValidationError::CreatureMeshTopology { .. }
-            | ValidationError::CreatureDuplicateMeshNames { .. }
-            | ValidationError::MissingStockTemplateItem { .. }
-            | ValidationError::ItemMeshDescriptorInvalid { .. }
-            | ValidationError::HelmetSlotTypeMismatch { .. }
-            | ValidationError::BootsSlotTypeMismatch { .. }
-            | ValidationError::LockedObjectKeyNotKeyItem { .. }
-            | ValidationError::DuplicateLockId { .. } => Severity::Error,
+            CampaignValidationError::MissingClass { .. }
+            | CampaignValidationError::MissingRace { .. }
+            | CampaignValidationError::MissingItem { .. }
+            | CampaignValidationError::MissingMonster { .. }
+            | CampaignValidationError::MissingSpell { .. }
+            | CampaignValidationError::DuplicateId { .. }
+            | CampaignValidationError::InvalidStartingInnkeeper { .. }
+            | CampaignValidationError::InnkeeperMissingDialogue { .. }
+            | CampaignValidationError::CreatureEmptyName { .. }
+            | CampaignValidationError::CreatureInvalidScale { .. }
+            | CampaignValidationError::CreatureNoMeshes { .. }
+            | CampaignValidationError::CreatureMeshTopology { .. }
+            | CampaignValidationError::CreatureDuplicateMeshNames { .. }
+            | CampaignValidationError::MissingStockTemplateItem { .. }
+            | CampaignValidationError::ItemMeshDescriptorInvalid { .. }
+            | CampaignValidationError::HelmetSlotTypeMismatch { .. }
+            | CampaignValidationError::BootsSlotTypeMismatch { .. }
+            | CampaignValidationError::LockedObjectKeyNotKeyItem { .. }
+            | CampaignValidationError::DuplicateLockId { .. } => Severity::Error,
 
-            ValidationError::DisconnectedMap { .. } | ValidationError::InvalidServiceId { .. } => {
-                Severity::Warning
-            }
+            CampaignValidationError::DisconnectedMap { .. }
+            | CampaignValidationError::InvalidServiceId { .. } => Severity::Warning,
 
-            ValidationError::BalanceWarning { severity, .. } => *severity,
+            CampaignValidationError::BalanceWarning { severity, .. } => *severity,
 
-            ValidationError::TooManyStartingPartyMembers { .. } => Severity::Error,
+            CampaignValidationError::TooManyStartingPartyMembers { .. } => Severity::Error,
 
-            ValidationError::WindConfigInvalid { .. } => Severity::Error,
+            CampaignValidationError::WindConfigInvalid { .. } => Severity::Error,
 
-            ValidationError::InvalidDiceRoll { .. } => Severity::Error,
+            CampaignValidationError::InvalidDiceRoll { .. } => Severity::Error,
         }
     }
 
@@ -431,13 +430,13 @@ impl<'a> Validator<'a> {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(Vec<ValidationError>)` with all validation issues found.
+    /// Returns `Ok(Vec<CampaignValidationError>)` with all validation issues found.
     /// An empty vector means the content is valid.
     ///
     /// # Errors
     ///
     /// Returns an error only if validation itself fails (e.g., I/O errors).
-    /// Content validation issues are returned as ValidationError items in the Vec.
+    /// Content validation issues are returned as CampaignValidationError items in the Vec.
     ///
     /// # Examples
     ///
@@ -455,7 +454,7 @@ impl<'a> Validator<'a> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn validate_all(&self) -> Result<Vec<ValidationError>, Box<dyn std::error::Error>> {
+    pub fn validate_all(&self) -> Result<Vec<CampaignValidationError>, Box<dyn std::error::Error>> {
         let mut errors = Vec::new();
 
         // Validate cross-references
@@ -499,7 +498,7 @@ impl<'a> Validator<'a> {
     /// Every attack's damage die must have at least one side. A die with
     /// `sides == 0` is nonsensical and historically panicked `DiceRoll::roll`
     /// (the range `1..=0` is empty). Each offending attack produces an
-    /// [`ValidationError::InvalidDiceRoll`].
+    /// [`CampaignValidationError::InvalidDiceRoll`].
     ///
     /// # Examples
     ///
@@ -512,14 +511,14 @@ impl<'a> Validator<'a> {
     /// // An empty database has no monsters and therefore no dice-roll errors.
     /// assert!(validator.validate_dice_rolls().is_empty());
     /// ```
-    pub fn validate_dice_rolls(&self) -> Vec<ValidationError> {
+    pub fn validate_dice_rolls(&self) -> Vec<CampaignValidationError> {
         let mut errors = Vec::new();
 
         for monster_id in self.db.monsters.all_monsters() {
             if let Some(monster) = self.db.monsters.get_monster(monster_id) {
                 for (i, attack) in monster.attacks.iter().enumerate() {
                     if attack.damage.sides == 0 {
-                        errors.push(ValidationError::InvalidDiceRoll {
+                        errors.push(CampaignValidationError::InvalidDiceRoll {
                             context: format!(
                                 "Monster '{}' (id={}) attack #{}",
                                 monster.name, monster_id, i
@@ -538,7 +537,7 @@ impl<'a> Validator<'a> {
     ///
     /// Checks that all ID references (class IDs, race IDs, item IDs, etc.)
     /// point to existing content.
-    fn validate_references(&self) -> Vec<ValidationError> {
+    fn validate_references(&self) -> Vec<CampaignValidationError> {
         let mut errors = Vec::new();
 
         // Validate monster loot references: each loot item_id must exist in the item database
@@ -546,7 +545,7 @@ impl<'a> Validator<'a> {
             if let Some(monster) = self.db.monsters.get_monster(monster_id) {
                 for &(_probability, item_id) in &monster.loot.items {
                     if !self.db.items.has_item(&(item_id as ItemId)) {
-                        errors.push(ValidationError::MissingItem {
+                        errors.push(CampaignValidationError::MissingItem {
                             context: format!(
                                 "Monster '{}' (id={}) loot table",
                                 monster.name, monster_id
@@ -563,7 +562,7 @@ impl<'a> Validator<'a> {
             if let Some(spell) = self.db.spells.get_spell(spell_id) {
                 for condition_id in &spell.applied_conditions {
                     if !self.db.conditions.has_condition(condition_id) {
-                        errors.push(ValidationError::BalanceWarning {
+                        errors.push(CampaignValidationError::BalanceWarning {
                             severity: Severity::Warning,
                             message: format!(
                                 "Spell '{}' (id={}) references unknown condition '{}'",
@@ -581,7 +580,7 @@ impl<'a> Validator<'a> {
                 match self.validate_map(map) {
                     Ok(map_errors) => errors.extend(map_errors),
                     Err(e) => {
-                        errors.push(ValidationError::BalanceWarning {
+                        errors.push(CampaignValidationError::BalanceWarning {
                             severity: Severity::Error,
                             message: format!("Failed to validate map {}: {}", map_id, e),
                         });
@@ -603,7 +602,7 @@ impl<'a> Validator<'a> {
     /// - Valid class IDs
     /// - Valid item IDs for starting items
     /// - Valid item IDs for starting equipment
-    fn validate_character_references(&self) -> Vec<ValidationError> {
+    fn validate_character_references(&self) -> Vec<CampaignValidationError> {
         let mut errors = Vec::new();
 
         for character in self.db.characters.all_characters() {
@@ -611,7 +610,7 @@ impl<'a> Validator<'a> {
 
             // Check race reference
             if !self.db.races.has_race(&character.race_id) {
-                errors.push(ValidationError::MissingRace {
+                errors.push(CampaignValidationError::MissingRace {
                     context: context.clone(),
                     race_id: character.race_id.clone(),
                 });
@@ -619,7 +618,7 @@ impl<'a> Validator<'a> {
 
             // Check class reference
             if self.db.classes.get_class(&character.class_id).is_none() {
-                errors.push(ValidationError::MissingClass {
+                errors.push(CampaignValidationError::MissingClass {
                     context: context.clone(),
                     class_id: character.class_id.clone(),
                 });
@@ -628,7 +627,7 @@ impl<'a> Validator<'a> {
             // Check starting items references
             for item_id in &character.starting_items {
                 if !self.db.items.has_item(item_id) {
-                    errors.push(ValidationError::MissingItem {
+                    errors.push(CampaignValidationError::MissingItem {
                         context: format!("{} starting items", context),
                         item_id: *item_id,
                     });
@@ -638,7 +637,7 @@ impl<'a> Validator<'a> {
             // Check starting equipment references
             for item_id in character.starting_equipment.all_item_ids() {
                 if !self.db.items.has_item(&item_id) {
-                    errors.push(ValidationError::MissingItem {
+                    errors.push(CampaignValidationError::MissingItem {
                         context: format!("{} starting equipment", context),
                         item_id,
                     });
@@ -653,7 +652,7 @@ impl<'a> Validator<'a> {
                         ItemType::Armor(data)
                             if data.classification != ArmorClassification::Helmet =>
                         {
-                            errors.push(ValidationError::HelmetSlotTypeMismatch {
+                            errors.push(CampaignValidationError::HelmetSlotTypeMismatch {
                                 character_id: character.id.clone(),
                                 item_id: helmet_id,
                                 actual_classification: format!("{:?}", data.classification),
@@ -661,7 +660,7 @@ impl<'a> Validator<'a> {
                         }
                         ItemType::Armor(_) => {} // correct classification — ok
                         _ => {
-                            errors.push(ValidationError::HelmetSlotTypeMismatch {
+                            errors.push(CampaignValidationError::HelmetSlotTypeMismatch {
                                 character_id: character.id.clone(),
                                 item_id: helmet_id,
                                 actual_classification: format!("{:?}", item.item_type),
@@ -679,7 +678,7 @@ impl<'a> Validator<'a> {
                         ItemType::Armor(data)
                             if data.classification != ArmorClassification::Boots =>
                         {
-                            errors.push(ValidationError::BootsSlotTypeMismatch {
+                            errors.push(CampaignValidationError::BootsSlotTypeMismatch {
                                 character_id: character.id.clone(),
                                 item_id: boots_id,
                                 actual_classification: format!("{:?}", data.classification),
@@ -687,7 +686,7 @@ impl<'a> Validator<'a> {
                         }
                         ItemType::Armor(_) => {} // correct classification — ok
                         _ => {
-                            errors.push(ValidationError::BootsSlotTypeMismatch {
+                            errors.push(CampaignValidationError::BootsSlotTypeMismatch {
                                 character_id: character.id.clone(),
                                 item_id: boots_id,
                                 actual_classification: format!("{:?}", item.item_type),
@@ -705,13 +704,13 @@ impl<'a> Validator<'a> {
     ///
     /// This is an error-level validation because innkeeper NPCs are expected to
     /// present dialogue options (for example, to open the party management UI).
-    fn validate_innkeepers(&self) -> Vec<ValidationError> {
+    fn validate_innkeepers(&self) -> Vec<CampaignValidationError> {
         let mut errors = Vec::new();
 
         for npc_id in self.db.npcs.all_npcs() {
             if let Some(npc) = self.db.npcs.get_npc(&npc_id) {
                 if npc.is_innkeeper && npc.dialogue_id.is_none() {
-                    errors.push(ValidationError::InnkeeperMissingDialogue {
+                    errors.push(CampaignValidationError::InnkeeperMissingDialogue {
                         innkeeper_id: npc_id.clone(),
                     });
                 }
@@ -731,7 +730,7 @@ impl<'a> Validator<'a> {
     ///
     /// # Returns
     ///
-    /// A `Vec<ValidationError>` containing any errors found.  An empty vector
+    /// A `Vec<CampaignValidationError>` containing any errors found.  An empty vector
     /// means all merchant stock references are valid.
     ///
     /// # Examples
@@ -745,7 +744,7 @@ impl<'a> Validator<'a> {
     /// let errors = validator.validate_merchant_stock();
     /// assert!(errors.is_empty());
     /// ```
-    pub fn validate_merchant_stock(&self) -> Vec<ValidationError> {
+    pub fn validate_merchant_stock(&self) -> Vec<CampaignValidationError> {
         let mut errors = Vec::new();
 
         for npc_id in self.db.npcs.all_npcs() {
@@ -767,7 +766,7 @@ impl<'a> Validator<'a> {
             let template = match self.db.npc_stock_templates.get(template_id) {
                 Some(t) => t,
                 None => {
-                    errors.push(ValidationError::MissingItem {
+                    errors.push(CampaignValidationError::MissingItem {
                         context: format!("NPC '{}' stock_template '{}'", npc_id, template_id),
                         item_id: 0,
                     });
@@ -778,7 +777,7 @@ impl<'a> Validator<'a> {
             // Validate every item in the template exists
             for entry in &template.entries {
                 if !self.db.items.has_item(&entry.item_id) {
-                    errors.push(ValidationError::MissingStockTemplateItem {
+                    errors.push(CampaignValidationError::MissingStockTemplateItem {
                         context: npc_id.clone(),
                         item_id: entry.item_id,
                     });
@@ -810,12 +809,12 @@ impl<'a> Validator<'a> {
     /// For every NPC whose `service_catalog` is `Some`, each `ServiceEntry`
     /// is checked against [`Validator::KNOWN_SERVICE_IDS`].  Entries with
     /// unknown service IDs are emitted as `Warning`-severity
-    /// [`ValidationError::InvalidServiceId`] to allow forward-compatible
+    /// [`CampaignValidationError::InvalidServiceId`] to allow forward-compatible
     /// custom service IDs.
     ///
     /// # Returns
     ///
-    /// A `Vec<ValidationError>` containing any warnings found.  An empty
+    /// A `Vec<CampaignValidationError>` containing any warnings found.  An empty
     /// vector means all service IDs are known built-in IDs.
     ///
     /// # Examples
@@ -829,7 +828,7 @@ impl<'a> Validator<'a> {
     /// let warnings = validator.validate_service_catalogs();
     /// assert!(warnings.is_empty());
     /// ```
-    pub fn validate_service_catalogs(&self) -> Vec<ValidationError> {
+    pub fn validate_service_catalogs(&self) -> Vec<CampaignValidationError> {
         let mut errors = Vec::new();
 
         for npc_id in self.db.npcs.all_npcs() {
@@ -845,7 +844,7 @@ impl<'a> Validator<'a> {
 
             for entry in &catalog.services {
                 if !Self::KNOWN_SERVICE_IDS.contains(&entry.service_id.as_str()) {
-                    errors.push(ValidationError::InvalidServiceId {
+                    errors.push(CampaignValidationError::InvalidServiceId {
                         context: npc_id.clone(),
                         service_id: entry.service_id.clone(),
                     });
@@ -878,7 +877,7 @@ impl<'a> Validator<'a> {
     /// procedural mesh descriptor.
     ///
     /// Calls [`ItemDatabase::validate_mesh_descriptors`] and converts any
-    /// resulting error into a [`ValidationError::ItemMeshDescriptorInvalid`].
+    /// resulting error into a [`CampaignValidationError::ItemMeshDescriptorInvalid`].
     ///
     /// # Examples
     ///
@@ -892,32 +891,32 @@ impl<'a> Validator<'a> {
     /// // Empty database has no items to fail validation
     /// assert!(errors.is_empty());
     /// ```
-    pub fn validate_item_mesh_descriptors(&self) -> Vec<ValidationError> {
+    pub fn validate_item_mesh_descriptors(&self) -> Vec<CampaignValidationError> {
         use crate::domain::items::database::ItemDatabaseError;
 
         match self.db.items.validate_mesh_descriptors() {
             Ok(()) => Vec::new(),
             Err(ItemDatabaseError::InvalidMeshDescriptor { item_id, message }) => {
-                vec![ValidationError::ItemMeshDescriptorInvalid { item_id, message }]
+                vec![CampaignValidationError::ItemMeshDescriptorInvalid { item_id, message }]
             }
             Err(_) => Vec::new(),
         }
     }
 
-    fn validate_creatures(&self) -> Vec<ValidationError> {
+    fn validate_creatures(&self) -> Vec<CampaignValidationError> {
         let mut errors = Vec::new();
 
         for creature in self.db.creatures.all_creatures() {
             // Check name not empty
             if creature.name.trim().is_empty() {
-                errors.push(ValidationError::CreatureEmptyName {
+                errors.push(CampaignValidationError::CreatureEmptyName {
                     creature_id: creature.id,
                 });
             }
 
             // Check scale is positive
             if creature.scale <= 0.0 {
-                errors.push(ValidationError::CreatureInvalidScale {
+                errors.push(CampaignValidationError::CreatureInvalidScale {
                     creature_id: creature.id,
                     name: creature.name.clone(),
                     scale: creature.scale,
@@ -926,7 +925,7 @@ impl<'a> Validator<'a> {
 
             // Check has at least one mesh
             if creature.meshes.is_empty() {
-                errors.push(ValidationError::CreatureNoMeshes {
+                errors.push(CampaignValidationError::CreatureNoMeshes {
                     creature_id: creature.id,
                     name: creature.name.clone(),
                 });
@@ -934,7 +933,7 @@ impl<'a> Validator<'a> {
 
             // Validate mesh topology
             if let Err(topology_error) = validate_creature_topology(creature) {
-                errors.push(ValidationError::CreatureMeshTopology {
+                errors.push(CampaignValidationError::CreatureMeshTopology {
                     creature_id: creature.id,
                     name: creature.name.clone(),
                     mesh_index: 0, // Error doesn't specify which mesh, use 0
@@ -967,7 +966,7 @@ impl<'a> Validator<'a> {
     /// let errors = validator.validate_all().expect("validation failed");
     /// // Check for party size violations
     /// ```
-    fn validate_characters(&self) -> Vec<ValidationError> {
+    fn validate_characters(&self) -> Vec<CampaignValidationError> {
         let mut errors = Vec::new();
 
         // Count characters with starts_in_party = true
@@ -981,7 +980,7 @@ impl<'a> Validator<'a> {
         // Enforce max party size of 6
         const MAX_PARTY_SIZE: usize = 6;
         if starting_party_count > MAX_PARTY_SIZE {
-            errors.push(ValidationError::TooManyStartingPartyMembers {
+            errors.push(CampaignValidationError::TooManyStartingPartyMembers {
                 count: starting_party_count,
                 max: MAX_PARTY_SIZE,
             });
@@ -1016,7 +1015,7 @@ impl<'a> Validator<'a> {
     /// use antares::sdk::campaign_loader::{CampaignConfig, Difficulty};
     /// use antares::domain::campaign::LevelUpMode;
     /// use antares::domain::types::{Position, Direction};
-    /// use antares::sdk::validation::ValidationError;
+    /// use antares::sdk::validation::CampaignValidationError;
     ///
     /// let db = ContentDatabase::new();
     /// let validator = Validator::new(&db);
@@ -1041,23 +1040,23 @@ impl<'a> Validator<'a> {
     /// };
     ///
     /// let errors = validator.validate_campaign_config(&config);
-    /// assert!(errors.iter().any(|e| matches!(e, ValidationError::InvalidStartingInnkeeper { .. })));
+    /// assert!(errors.iter().any(|e| matches!(e, CampaignValidationError::InvalidStartingInnkeeper { .. })));
     /// ```
     pub fn validate_campaign_config(
         &self,
         config: &crate::sdk::campaign_loader::CampaignConfig,
-    ) -> Vec<ValidationError> {
+    ) -> Vec<CampaignValidationError> {
         let mut errors = Vec::new();
 
         // Validate starting_innkeeper exists and is an innkeeper
         if config.starting_innkeeper.is_empty() {
-            errors.push(ValidationError::InvalidStartingInnkeeper {
+            errors.push(CampaignValidationError::InvalidStartingInnkeeper {
                 innkeeper_id: config.starting_innkeeper.clone(),
                 reason: "Starting innkeeper ID is empty".to_string(),
             });
         } else if let Some(npc) = self.db.npcs.get_npc(&config.starting_innkeeper) {
             if !npc.is_innkeeper {
-                errors.push(ValidationError::InvalidStartingInnkeeper {
+                errors.push(CampaignValidationError::InvalidStartingInnkeeper {
                     innkeeper_id: config.starting_innkeeper.clone(),
                     reason: format!(
                         "NPC '{}' exists but is not marked as is_innkeeper=true",
@@ -1066,7 +1065,7 @@ impl<'a> Validator<'a> {
                 });
             }
         } else {
-            errors.push(ValidationError::InvalidStartingInnkeeper {
+            errors.push(CampaignValidationError::InvalidStartingInnkeeper {
                 innkeeper_id: config.starting_innkeeper.clone(),
                 reason: "NPC not found in database".to_string(),
             });
@@ -1075,7 +1074,7 @@ impl<'a> Validator<'a> {
         if !self.db.maps.all_maps().is_empty() {
             if let Some(map) = self.db.maps.get_map(config.starting_map) {
                 if !map.is_valid_position(config.starting_position) {
-                    errors.push(ValidationError::BalanceWarning {
+                    errors.push(CampaignValidationError::BalanceWarning {
                         severity: Severity::Error,
                         message: format!(
                             "Campaign starting position ({}, {}) is outside map {}",
@@ -1087,7 +1086,7 @@ impl<'a> Validator<'a> {
                 } else if map.get_tile(config.starting_position).is_some_and(|tile| {
                     tile.blocked || tile.wall_type != crate::domain::world::WallType::None
                 }) {
-                    errors.push(ValidationError::BalanceWarning {
+                    errors.push(CampaignValidationError::BalanceWarning {
                         severity: Severity::Error,
                         message: format!(
                             "Campaign starting position ({}, {}) on map {} is blocked by terrain or a wall",
@@ -1100,7 +1099,7 @@ impl<'a> Validator<'a> {
                     &map.landscape_placements,
                     config.starting_position,
                 ) {
-                    errors.push(ValidationError::BalanceWarning {
+                    errors.push(CampaignValidationError::BalanceWarning {
                         severity: Severity::Error,
                         message: format!(
                             "Campaign starting position ({}, {}) on map {} is blocked by a landscape placement",
@@ -1111,7 +1110,7 @@ impl<'a> Validator<'a> {
                     });
                 }
             } else {
-                errors.push(ValidationError::BalanceWarning {
+                errors.push(CampaignValidationError::BalanceWarning {
                     severity: Severity::Error,
                     message: format!(
                         "Campaign starting map {} does not exist",
@@ -1124,7 +1123,7 @@ impl<'a> Validator<'a> {
         errors
     }
 
-    fn validate_connectivity(&self) -> Vec<ValidationError> {
+    fn validate_connectivity(&self) -> Vec<CampaignValidationError> {
         let mut errors = Vec::new();
 
         let all_maps = self.db.maps.all_maps();
@@ -1169,7 +1168,7 @@ impl<'a> Validator<'a> {
         // Report unreachable maps
         for &map_id in &all_maps {
             if !visited.contains(&map_id) {
-                errors.push(ValidationError::DisconnectedMap { map_id });
+                errors.push(CampaignValidationError::DisconnectedMap { map_id });
             }
         }
 
@@ -1177,7 +1176,7 @@ impl<'a> Validator<'a> {
         for &map_id in &all_maps {
             if let Some(exits) = adjacency.get(&map_id) {
                 if exits.is_empty() {
-                    errors.push(ValidationError::BalanceWarning {
+                    errors.push(CampaignValidationError::BalanceWarning {
                         severity: Severity::Warning,
                         message: format!("Map {} has no teleport exits (dead end)", map_id),
                     });
@@ -1194,35 +1193,35 @@ impl<'a> Validator<'a> {
     /// - Items that are too powerful for their availability
     /// - Monsters that are too strong/weak for their location
     /// - Inconsistent progression curves
-    fn check_balance(&self) -> Vec<ValidationError> {
+    fn check_balance(&self) -> Vec<CampaignValidationError> {
         let mut errors = Vec::new();
 
         // Check for empty content databases
         let stats = self.db.stats();
 
         if stats.class_count == 0 {
-            errors.push(ValidationError::BalanceWarning {
+            errors.push(CampaignValidationError::BalanceWarning {
                 severity: Severity::Warning,
                 message: "No classes defined in database".to_string(),
             });
         }
 
         if stats.item_count == 0 {
-            errors.push(ValidationError::BalanceWarning {
+            errors.push(CampaignValidationError::BalanceWarning {
                 severity: Severity::Info,
                 message: "No items defined in database".to_string(),
             });
         }
 
         if stats.monster_count == 0 {
-            errors.push(ValidationError::BalanceWarning {
+            errors.push(CampaignValidationError::BalanceWarning {
                 severity: Severity::Info,
                 message: "No monsters defined in database".to_string(),
             });
         }
 
         if stats.map_count == 0 {
-            errors.push(ValidationError::BalanceWarning {
+            errors.push(CampaignValidationError::BalanceWarning {
                 severity: Severity::Warning,
                 message: "No maps defined in database".to_string(),
             });
@@ -1251,7 +1250,7 @@ impl<'a> Validator<'a> {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(Vec<ValidationError>)` with all validation issues found.
+    /// Returns `Ok(Vec<CampaignValidationError>)` with all validation issues found.
     /// An empty vector means the map is valid.
     ///
     /// # Examples
@@ -1274,7 +1273,7 @@ impl<'a> Validator<'a> {
     pub fn validate_map(
         &self,
         map: &crate::domain::world::Map,
-    ) -> Result<Vec<ValidationError>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<CampaignValidationError>, Box<dyn std::error::Error>> {
         let mut errors = Vec::new();
 
         // Validate map events
@@ -1284,7 +1283,7 @@ impl<'a> Validator<'a> {
                     // Validate monster IDs
                     for &monster_id in monster_group {
                         if !self.db.monsters.has_monster(&(monster_id as MonsterId)) {
-                            errors.push(ValidationError::MissingMonster {
+                            errors.push(CampaignValidationError::MissingMonster {
                                 map: map.id,
                                 monster_id: monster_id as MonsterId,
                             });
@@ -1295,7 +1294,7 @@ impl<'a> Validator<'a> {
                     // Validate item IDs
                     for &item_id in loot {
                         if !self.db.items.has_item(&(item_id as ItemId)) {
-                            errors.push(ValidationError::MissingItem {
+                            errors.push(CampaignValidationError::MissingItem {
                                 context: format!(
                                     "Map {} treasure at ({}, {})",
                                     map.id, pos.x, pos.y
@@ -1312,7 +1311,7 @@ impl<'a> Validator<'a> {
                 } => {
                     // Validate destination map exists
                     if !self.db.maps.has_map(map_id) {
-                        errors.push(ValidationError::BalanceWarning {
+                        errors.push(CampaignValidationError::BalanceWarning {
                             severity: Severity::Error,
                             message: format!(
                                 "Map {} has teleport to non-existent map {} at ({}, {})",
@@ -1326,7 +1325,7 @@ impl<'a> Validator<'a> {
                             &target_map.landscape_placements,
                             *destination,
                         ) {
-                            errors.push(ValidationError::BalanceWarning {
+                            errors.push(CampaignValidationError::BalanceWarning {
                                 severity: Severity::Error,
                                 message: format!(
                                     "Map {} has teleport at ({}, {}) to map {} position ({}, {}) blocked by a landscape placement",
@@ -1339,7 +1338,7 @@ impl<'a> Validator<'a> {
                 crate::domain::world::MapEvent::Trap { damage, .. } => {
                     // Balance check for trap damage
                     if *damage > 100 {
-                        errors.push(ValidationError::BalanceWarning {
+                        errors.push(CampaignValidationError::BalanceWarning {
                             severity: Severity::Warning,
                             message: format!(
                                 "Map {} has high-damage trap ({} damage) at ({}, {})",
@@ -1357,7 +1356,7 @@ impl<'a> Validator<'a> {
                         || map.npc_placements.iter().any(|p| &p.npc_id == npc_id);
 
                     if !npc_exists {
-                        errors.push(ValidationError::BalanceWarning {
+                        errors.push(CampaignValidationError::BalanceWarning {
                             severity: Severity::Error,
                             message: format!(
                                 "Map {} has NPC dialogue event for non-existent NPC '{}' at ({}, {})",
@@ -1369,7 +1368,7 @@ impl<'a> Validator<'a> {
                 crate::domain::world::MapEvent::RecruitableCharacter { character_id, .. } => {
                     // Validate character exists in database
                     if self.db.characters.get_character(character_id).is_none() {
-                        errors.push(ValidationError::BalanceWarning {
+                        errors.push(CampaignValidationError::BalanceWarning {
                             severity: Severity::Error,
                             message: format!(
                                 "Map {} has recruitable character event for non-existent character '{}' at ({}, {})",
@@ -1382,7 +1381,7 @@ impl<'a> Validator<'a> {
                     // Validate `innkeeper_id` references a valid innkeeper NPC (non-empty and exists)
                     let innkeeper_id_trimmed = innkeeper_id.trim();
                     if innkeeper_id_trimmed.is_empty() {
-                        errors.push(ValidationError::BalanceWarning {
+                        errors.push(CampaignValidationError::BalanceWarning {
                             severity: Severity::Error,
                             message: format!(
                                 "Map {} has EnterInn event with empty innkeeper_id at ({}, {}).",
@@ -1398,7 +1397,7 @@ impl<'a> Validator<'a> {
                             .any(|p| p.npc_id == innkeeper_id_trimmed);
 
                         if !npc_exists_in_db && !npc_placed_on_map {
-                            errors.push(ValidationError::BalanceWarning {
+                            errors.push(CampaignValidationError::BalanceWarning {
                                 severity: Severity::Error,
                                 message: format!(
                                     "Map {} has EnterInn event referencing non-existent NPC '{}' at ({}, {}).",
@@ -1409,7 +1408,7 @@ impl<'a> Validator<'a> {
                             // If NPC is present in DB, ensure it's marked as an innkeeper
                             if let Some(npc_def) = self.db.npcs.get_npc(innkeeper_id_trimmed) {
                                 if !npc_def.is_innkeeper {
-                                    errors.push(ValidationError::BalanceWarning {
+                                    errors.push(CampaignValidationError::BalanceWarning {
                                         severity: Severity::Error,
                                         message: format!(
                                             "Map {} has EnterInn event referencing NPC '{}' which is not an innkeeper at ({}, {}). Set `is_innkeeper: true` on the NPC definition.",
@@ -1427,7 +1426,7 @@ impl<'a> Validator<'a> {
                 crate::domain::world::MapEvent::Container { id, items, .. } => {
                     // Validate that the container id is non-empty
                     if id.trim().is_empty() {
-                        errors.push(ValidationError::BalanceWarning {
+                        errors.push(CampaignValidationError::BalanceWarning {
                             severity: Severity::Error,
                             message: format!(
                                 "Map {} has Container event with empty id at ({}, {})",
@@ -1438,7 +1437,7 @@ impl<'a> Validator<'a> {
                     // Validate each item id referenced in the container
                     for slot in items {
                         if !self.db.items.has_item(&(slot.item_id as ItemId)) {
-                            errors.push(ValidationError::MissingItem {
+                            errors.push(CampaignValidationError::MissingItem {
                                 context: format!(
                                     "Map {} container '{}' at ({}, {})",
                                     map.id, id, pos.x, pos.y
@@ -1451,7 +1450,7 @@ impl<'a> Validator<'a> {
                 crate::domain::world::MapEvent::DroppedItem { item_id, .. } => {
                     // Validate that the item exists in the database
                     if !self.db.items.has_item(item_id) {
-                        errors.push(ValidationError::MissingItem {
+                        errors.push(CampaignValidationError::MissingItem {
                             context: format!(
                                 "Map {} DroppedItem event at ({}, {})",
                                 map.id, pos.x, pos.y
@@ -1467,7 +1466,7 @@ impl<'a> Validator<'a> {
                 } => {
                     // Validate that the lock_id is non-empty
                     if lock_id.trim().is_empty() {
-                        errors.push(ValidationError::BalanceWarning {
+                        errors.push(CampaignValidationError::BalanceWarning {
                             severity: Severity::Error,
                             message: format!(
                                 "Map {} has LockedDoor event with empty lock_id at ({}, {})",
@@ -1478,7 +1477,7 @@ impl<'a> Validator<'a> {
                     // Validate key item exists if one is specified
                     if let Some(kid) = key_item_id {
                         if !self.db.items.has_item(kid) {
-                            errors.push(ValidationError::MissingItem {
+                            errors.push(CampaignValidationError::MissingItem {
                                 context: format!(
                                     "Map {} LockedDoor '{}' key_item_id at ({}, {})",
                                     map.id, lock_id, pos.x, pos.y
@@ -1495,7 +1494,7 @@ impl<'a> Validator<'a> {
                                 crate::domain::items::ItemType::Quest(q) if q.is_key_item
                             );
                             if !is_key {
-                                errors.push(ValidationError::LockedObjectKeyNotKeyItem {
+                                errors.push(CampaignValidationError::LockedObjectKeyNotKeyItem {
                                     map_id: map.id,
                                     lock_id: lock_id.clone(),
                                     item_id: *kid,
@@ -1512,7 +1511,7 @@ impl<'a> Validator<'a> {
                 } => {
                     // Validate that the lock_id is non-empty
                     if lock_id.trim().is_empty() {
-                        errors.push(ValidationError::BalanceWarning {
+                        errors.push(CampaignValidationError::BalanceWarning {
                             severity: Severity::Error,
                             message: format!(
                                 "Map {} has LockedContainer event with empty lock_id at ({}, {})",
@@ -1523,7 +1522,7 @@ impl<'a> Validator<'a> {
                     // Validate key item exists if one is specified
                     if let Some(kid) = key_item_id {
                         if !self.db.items.has_item(kid) {
-                            errors.push(ValidationError::MissingItem {
+                            errors.push(CampaignValidationError::MissingItem {
                                 context: format!(
                                     "Map {} LockedContainer '{}' key_item_id at ({}, {})",
                                     map.id, lock_id, pos.x, pos.y
@@ -1540,7 +1539,7 @@ impl<'a> Validator<'a> {
                                 crate::domain::items::ItemType::Quest(q) if q.is_key_item
                             );
                             if !is_key {
-                                errors.push(ValidationError::LockedObjectKeyNotKeyItem {
+                                errors.push(CampaignValidationError::LockedObjectKeyNotKeyItem {
                                     map_id: map.id,
                                     lock_id: lock_id.clone(),
                                     item_id: *kid,
@@ -1576,7 +1575,7 @@ impl<'a> Validator<'a> {
                 }
             }
             for dup_id in duplicate_ids {
-                errors.push(ValidationError::DuplicateLockId {
+                errors.push(CampaignValidationError::DuplicateLockId {
                     map_id: map.id,
                     lock_id: dup_id,
                 });
@@ -1585,7 +1584,7 @@ impl<'a> Validator<'a> {
 
         // Validate landscape placements and movement-critical blocking conflicts.
         if let Err(error) = self.db.landscape.validate_map_placements(map) {
-            errors.push(ValidationError::BalanceWarning {
+            errors.push(CampaignValidationError::BalanceWarning {
                 severity: Severity::Error,
                 message: format!(
                     "Map {} landscape placement validation failed: {}",
@@ -1598,7 +1597,7 @@ impl<'a> Validator<'a> {
         for placement in &map.npc_placements {
             // Check if placement position is valid
             if !map.is_valid_position(placement.position) {
-                errors.push(ValidationError::BalanceWarning {
+                errors.push(CampaignValidationError::BalanceWarning {
                     severity: Severity::Error,
                     message: format!(
                         "Map {} has NPC placement '{}' at invalid position ({}, {})",
@@ -1610,7 +1609,7 @@ impl<'a> Validator<'a> {
 
         // Balance checks
         if map.events.len() > 1000 {
-            errors.push(ValidationError::BalanceWarning {
+            errors.push(CampaignValidationError::BalanceWarning {
                 severity: Severity::Warning,
                 message: format!(
                     "Map {} has {} events, which may cause performance issues",
@@ -1621,7 +1620,7 @@ impl<'a> Validator<'a> {
         }
 
         if map.npc_placements.len() > 100 {
-            errors.push(ValidationError::BalanceWarning {
+            errors.push(CampaignValidationError::BalanceWarning {
                 severity: Severity::Warning,
                 message: format!(
                     "Map {} has {} NPC placements, which may cause performance issues",
@@ -1642,44 +1641,44 @@ impl<'a> Validator<'a> {
     /// - `direction` non-zero and all components finite
     /// - `perlin_scale > 0.0`
     /// - `1 ≤ perlin_octaves ≤ 8`
-    fn validate_wind_config(&self) -> Vec<ValidationError> {
+    fn validate_wind_config(&self) -> Vec<CampaignValidationError> {
         use crate::domain::world::wind::WindSystemKind;
         let cfg = &self.db.wind;
         let mut errors = Vec::new();
 
         if cfg.strength < 0.0 {
-            errors.push(ValidationError::WindConfigInvalid {
+            errors.push(CampaignValidationError::WindConfigInvalid {
                 message: format!("strength must be ≥ 0.0, got {}", cfg.strength),
             });
         }
 
         if cfg.frequency <= 0.0 {
-            errors.push(ValidationError::WindConfigInvalid {
+            errors.push(CampaignValidationError::WindConfigInvalid {
                 message: format!("frequency must be > 0.0, got {}", cfg.frequency),
             });
         }
 
         if !cfg.direction[0].is_finite() || !cfg.direction[1].is_finite() {
-            errors.push(ValidationError::WindConfigInvalid {
+            errors.push(CampaignValidationError::WindConfigInvalid {
                 message: format!(
                     "direction components must be finite, got [{}, {}]",
                     cfg.direction[0], cfg.direction[1]
                 ),
             });
         } else if cfg.direction[0] == 0.0 && cfg.direction[1] == 0.0 {
-            errors.push(ValidationError::WindConfigInvalid {
+            errors.push(CampaignValidationError::WindConfigInvalid {
                 message: "direction must be non-zero".to_string(),
             });
         }
 
         if matches!(cfg.wind_system, WindSystemKind::Perlin) {
             if cfg.perlin_scale <= 0.0 {
-                errors.push(ValidationError::WindConfigInvalid {
+                errors.push(CampaignValidationError::WindConfigInvalid {
                     message: format!("perlin_scale must be > 0.0, got {}", cfg.perlin_scale),
                 });
             }
             if !(1..=8).contains(&cfg.perlin_octaves) {
-                errors.push(ValidationError::WindConfigInvalid {
+                errors.push(CampaignValidationError::WindConfigInvalid {
                     message: format!(
                         "perlin_octaves must be in [1, 8], got {}",
                         cfg.perlin_octaves
@@ -1713,7 +1712,7 @@ mod tests {
 
     #[test]
     fn test_validation_error_severity() {
-        let error = ValidationError::MissingClass {
+        let error = CampaignValidationError::MissingClass {
             context: "test".to_string(),
             class_id: "invalid".to_string(),
         };
@@ -1722,7 +1721,7 @@ mod tests {
         assert!(!error.is_warning());
         assert!(!error.is_info());
 
-        let warning = ValidationError::DisconnectedMap { map_id: 1 };
+        let warning = CampaignValidationError::DisconnectedMap { map_id: 1 };
         assert_eq!(warning.severity(), Severity::Warning);
         assert!(!warning.is_error());
         assert!(warning.is_warning());
@@ -1747,13 +1746,13 @@ mod tests {
         // Assert: we found the InnkeeperMissingDialogue error for our NPC
         assert!(errors.iter().any(|e| matches!(
             e,
-            ValidationError::InnkeeperMissingDialogue { innkeeper_id } if innkeeper_id == "missing_dialogue"
+            CampaignValidationError::InnkeeperMissingDialogue { innkeeper_id } if innkeeper_id == "missing_dialogue"
         )));
     }
 
     #[test]
     fn test_balance_warning_severity() {
-        let info = ValidationError::BalanceWarning {
+        let info = CampaignValidationError::BalanceWarning {
             severity: Severity::Info,
             message: "test".to_string(),
         };
@@ -1765,7 +1764,7 @@ mod tests {
 
     #[test]
     fn test_validation_error_display() {
-        let error = ValidationError::MissingClass {
+        let error = CampaignValidationError::MissingClass {
             context: "Character creation".to_string(),
             class_id: "knight".to_string(),
         };
@@ -1773,7 +1772,7 @@ mod tests {
         assert!(display.contains("knight"));
         assert!(display.contains("Character creation"));
 
-        let error = ValidationError::MissingItem {
+        let error = CampaignValidationError::MissingItem {
             context: "Loot table".to_string(),
             item_id: 42,
         };
@@ -1804,7 +1803,7 @@ mod tests {
         let errors = validator.validate_map(&map).expect("Validation failed");
 
         assert!(
-            errors.iter().any(|e| matches!(e, ValidationError::BalanceWarning { severity: Severity::Error, message } if message.contains("non-existent NPC") || message.contains("referencing non-existent NPC"))),
+            errors.iter().any(|e| matches!(e, CampaignValidationError::BalanceWarning { severity: Severity::Error, message } if message.contains("non-existent NPC") || message.contains("referencing non-existent NPC"))),
             "Expected an error about a non-existent NPC for EnterInn, got: {:?}",
             errors
         );
@@ -1840,7 +1839,7 @@ mod tests {
         let errors = validator.validate_map(&map).expect("Validation failed");
 
         assert!(
-            errors.iter().any(|e| matches!(e, ValidationError::BalanceWarning { severity: Severity::Error, message } if message.contains("not an innkeeper") || message.contains("which is not an innkeeper"))),
+            errors.iter().any(|e| matches!(e, CampaignValidationError::BalanceWarning { severity: Severity::Error, message } if message.contains("not an innkeeper") || message.contains("which is not an innkeeper"))),
             "Expected an error about NPC not being an innkeeper, got: {:?}",
             errors
         );
@@ -1898,7 +1897,7 @@ mod tests {
         assert!(
             errors.iter().any(|e| matches!(
                 e,
-                ValidationError::InvalidStartingInnkeeper { innkeeper_id, reason }
+                CampaignValidationError::InvalidStartingInnkeeper { innkeeper_id, reason }
                 if innkeeper_id == "missing_inn" && reason == "NPC not found in database"
             )),
             "Expected InvalidStartingInnkeeper for missing NPC, got: {:?}",
@@ -1931,7 +1930,7 @@ mod tests {
         assert!(
             errors.iter().any(|e| matches!(
                 e,
-                ValidationError::InvalidStartingInnkeeper { innkeeper_id, reason }
+                CampaignValidationError::InvalidStartingInnkeeper { innkeeper_id, reason }
                 if innkeeper_id == "not_inn" && reason.contains("not marked as is_innkeeper")
             )),
             "Expected InvalidStartingInnkeeper for existing non-innkeeper NPC, got: {:?}",
@@ -1986,7 +1985,7 @@ mod tests {
         let has_class_warning = errors.iter().any(|e| {
             matches!(
                 e,
-                ValidationError::BalanceWarning { message, .. }
+                CampaignValidationError::BalanceWarning { message, .. }
                 if message.contains("No classes")
             )
         });
@@ -2010,7 +2009,7 @@ mod tests {
 
     #[test]
     fn test_validation_error_missing_spell_format() {
-        let error = ValidationError::MissingSpell {
+        let error = CampaignValidationError::MissingSpell {
             context: "Class spell list".to_string(),
             spell_id: 0x0101,
         };
@@ -2021,7 +2020,7 @@ mod tests {
 
     #[test]
     fn test_validation_error_clone() {
-        let error = ValidationError::MissingClass {
+        let error = CampaignValidationError::MissingClass {
             context: "test".to_string(),
             class_id: "knight".to_string(),
         };
@@ -2069,8 +2068,8 @@ mod tests {
             .filter(|e| {
                 matches!(
                     e,
-                    ValidationError::MissingClass { context, .. }
-                    | ValidationError::MissingRace { context, .. }
+                    CampaignValidationError::MissingClass { context, .. }
+                    | CampaignValidationError::MissingRace { context, .. }
                     if context.contains("test_knight")
                 )
             })
@@ -2111,7 +2110,7 @@ mod tests {
         let has_race_error = errors.iter().any(|e| {
             matches!(
                 e,
-                ValidationError::MissingRace { race_id, .. }
+                CampaignValidationError::MissingRace { race_id, .. }
                 if race_id == "nonexistent_race"
             )
         });
@@ -2152,7 +2151,7 @@ mod tests {
         let has_class_error = errors.iter().any(|e| {
             matches!(
                 e,
-                ValidationError::MissingClass { class_id, .. }
+                CampaignValidationError::MissingClass { class_id, .. }
                 if class_id == "nonexistent_class"
             )
         });
@@ -2200,7 +2199,7 @@ mod tests {
             .filter(|e| {
                 matches!(
                     e,
-                    ValidationError::MissingItem { context, .. }
+                    CampaignValidationError::MissingItem { context, .. }
                     if context.contains("test_knight")
                 )
             })
@@ -2257,7 +2256,7 @@ mod tests {
             .filter(|e| {
                 matches!(
                     e,
-                    ValidationError::MissingItem { context, .. }
+                    CampaignValidationError::MissingItem { context, .. }
                     if context.contains("equipment")
                 )
             })
@@ -2310,7 +2309,12 @@ mod tests {
         // Should NOT have TooManyStartingPartyMembers error
         let party_size_errors: Vec<_> = errors
             .iter()
-            .filter(|e| matches!(e, ValidationError::TooManyStartingPartyMembers { .. }))
+            .filter(|e| {
+                matches!(
+                    e,
+                    CampaignValidationError::TooManyStartingPartyMembers { .. }
+                )
+            })
             .collect();
         assert_eq!(
             party_size_errors.len(),
@@ -2360,7 +2364,12 @@ mod tests {
         // Should have TooManyStartingPartyMembers error
         let party_size_errors: Vec<_> = errors
             .iter()
-            .filter(|e| matches!(e, ValidationError::TooManyStartingPartyMembers { .. }))
+            .filter(|e| {
+                matches!(
+                    e,
+                    CampaignValidationError::TooManyStartingPartyMembers { .. }
+                )
+            })
             .collect();
         assert_eq!(
             party_size_errors.len(),
@@ -2369,7 +2378,7 @@ mod tests {
         );
 
         // Verify error details
-        if let Some(ValidationError::TooManyStartingPartyMembers { count, max }) =
+        if let Some(CampaignValidationError::TooManyStartingPartyMembers { count, max }) =
             party_size_errors.first()
         {
             assert_eq!(*count, 7, "Should report 7 starting party members");
@@ -2435,7 +2444,12 @@ mod tests {
         // Should NOT have TooManyStartingPartyMembers error (only 3 starting)
         let party_size_errors: Vec<_> = errors
             .iter()
-            .filter(|e| matches!(e, ValidationError::TooManyStartingPartyMembers { .. }))
+            .filter(|e| {
+                matches!(
+                    e,
+                    CampaignValidationError::TooManyStartingPartyMembers { .. }
+                )
+            })
             .collect();
         assert_eq!(
             party_size_errors.len(),
@@ -2446,7 +2460,7 @@ mod tests {
 
     #[test]
     fn test_validation_error_party_size_severity() {
-        let error = ValidationError::TooManyStartingPartyMembers { count: 7, max: 6 };
+        let error = CampaignValidationError::TooManyStartingPartyMembers { count: 7, max: 6 };
 
         assert_eq!(error.severity(), Severity::Error);
         assert!(error.is_error());
@@ -2456,7 +2470,7 @@ mod tests {
 
     #[test]
     fn test_validation_error_party_size_display() {
-        let error = ValidationError::TooManyStartingPartyMembers { count: 8, max: 6 };
+        let error = CampaignValidationError::TooManyStartingPartyMembers { count: 8, max: 6 };
 
         let message = error.to_string();
         assert!(message.contains("8"));
@@ -2488,7 +2502,7 @@ mod tests {
         // Assert: No InnkeeperMissingDialogue error
         assert!(!errors
             .iter()
-            .any(|e| matches!(e, ValidationError::InnkeeperMissingDialogue { .. })));
+            .any(|e| matches!(e, CampaignValidationError::InnkeeperMissingDialogue { .. })));
     }
 
     #[test]
@@ -2512,7 +2526,7 @@ mod tests {
         // Assert: Should have 3 errors for missing dialogues
         let missing_dialogue_errors: Vec<_> = errors
             .iter()
-            .filter(|e| matches!(e, ValidationError::InnkeeperMissingDialogue { .. }))
+            .filter(|e| matches!(e, CampaignValidationError::InnkeeperMissingDialogue { .. }))
             .collect();
 
         assert_eq!(missing_dialogue_errors.len(), 3);
@@ -2521,7 +2535,7 @@ mod tests {
     #[test]
     fn test_innkeeper_missing_dialogue_error_severity() {
         // Verify InnkeeperMissingDialogue is Error severity
-        let error = ValidationError::InnkeeperMissingDialogue {
+        let error = CampaignValidationError::InnkeeperMissingDialogue {
             innkeeper_id: "test_inn".to_string(),
         };
 
@@ -2534,7 +2548,7 @@ mod tests {
     #[test]
     fn test_innkeeper_missing_dialogue_display() {
         // Verify error message format
-        let error = ValidationError::InnkeeperMissingDialogue {
+        let error = CampaignValidationError::InnkeeperMissingDialogue {
             innkeeper_id: "broken_inn".to_string(),
         };
 
@@ -2562,7 +2576,7 @@ mod tests {
         // Assert: No InnkeeperMissingDialogue error for non-innkeeper
         assert!(!errors.iter().any(|e| matches!(
             e,
-            ValidationError::InnkeeperMissingDialogue { innkeeper_id } if innkeeper_id == "merchant"
+            CampaignValidationError::InnkeeperMissingDialogue { innkeeper_id } if innkeeper_id == "merchant"
         )));
     }
 
@@ -2582,7 +2596,7 @@ mod tests {
         // Assert: Should still validate (empty ID is valid string)
         assert!(errors.iter().any(|e| matches!(
             e,
-            ValidationError::InnkeeperMissingDialogue { innkeeper_id } if innkeeper_id.is_empty()
+            CampaignValidationError::InnkeeperMissingDialogue { innkeeper_id } if innkeeper_id.is_empty()
         )));
     }
 
@@ -2607,7 +2621,7 @@ mod tests {
         for id in special_ids {
             assert!(errors.iter().any(|e| matches!(
                 e,
-                ValidationError::InnkeeperMissingDialogue { innkeeper_id } if innkeeper_id == id
+                CampaignValidationError::InnkeeperMissingDialogue { innkeeper_id } if innkeeper_id == id
             )));
         }
     }
@@ -2644,7 +2658,7 @@ mod tests {
         // Assert: Should find exactly 10 innkeeper errors
         let innkeeper_errors: Vec<_> = errors
             .iter()
-            .filter(|e| matches!(e, ValidationError::InnkeeperMissingDialogue { .. }))
+            .filter(|e| matches!(e, CampaignValidationError::InnkeeperMissingDialogue { .. }))
             .collect();
 
         assert_eq!(innkeeper_errors.len(), 10);
@@ -2669,7 +2683,7 @@ mod tests {
         assert_eq!(errors.len(), 1);
         assert!(matches!(
             errors[0],
-            ValidationError::InnkeeperMissingDialogue { ref innkeeper_id } if innkeeper_id == "isolated_test"
+            CampaignValidationError::InnkeeperMissingDialogue { ref innkeeper_id } if innkeeper_id == "isolated_test"
         ));
     }
 
@@ -2804,7 +2818,7 @@ mod tests {
         let has_missing_stock_item = errors.iter().any(|e| {
             matches!(
                 e,
-                ValidationError::MissingStockTemplateItem {
+                CampaignValidationError::MissingStockTemplateItem {
                     context,
                     item_id: 200,
                 } if context == "item_merchant"
@@ -2905,7 +2919,7 @@ mod tests {
         assert!(
             matches!(
                 &warnings[0],
-                ValidationError::InvalidServiceId {
+                CampaignValidationError::InvalidServiceId {
                     context,
                     service_id,
                 } if context == "custom_priest" && service_id == "transmute_gold"
@@ -2983,7 +2997,7 @@ mod tests {
         // Should have exactly one HelmetSlotTypeMismatch error
         let mismatch_errors: Vec<_> = errors
             .iter()
-            .filter(|e| matches!(e, ValidationError::HelmetSlotTypeMismatch { .. }))
+            .filter(|e| matches!(e, CampaignValidationError::HelmetSlotTypeMismatch { .. }))
             .collect();
 
         assert_eq!(
@@ -3078,7 +3092,7 @@ mod tests {
         // Should have exactly one BootsSlotTypeMismatch error
         let mismatch_errors: Vec<_> = errors
             .iter()
-            .filter(|e| matches!(e, ValidationError::BootsSlotTypeMismatch { .. }))
+            .filter(|e| matches!(e, CampaignValidationError::BootsSlotTypeMismatch { .. }))
             .collect();
 
         assert_eq!(
@@ -3173,7 +3187,7 @@ mod tests {
         // Should have NO HelmetSlotTypeMismatch errors
         let mismatch_errors: Vec<_> = errors
             .iter()
-            .filter(|e| matches!(e, ValidationError::HelmetSlotTypeMismatch { .. }))
+            .filter(|e| matches!(e, CampaignValidationError::HelmetSlotTypeMismatch { .. }))
             .collect();
 
         assert!(
@@ -3235,14 +3249,14 @@ mod tests {
         assert!(
             !errors
                 .iter()
-                .any(|e| matches!(e, ValidationError::LockedObjectKeyNotKeyItem { .. })),
+                .any(|e| matches!(e, CampaignValidationError::LockedObjectKeyNotKeyItem { .. })),
             "Expected no LockedObjectKeyNotKeyItem error but got: {:?}",
             errors
         );
         assert!(
             !errors
                 .iter()
-                .any(|e| matches!(e, ValidationError::DuplicateLockId { .. })),
+                .any(|e| matches!(e, CampaignValidationError::DuplicateLockId { .. })),
             "Expected no DuplicateLockId error but got: {:?}",
             errors
         );
@@ -3276,7 +3290,7 @@ mod tests {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e, ValidationError::MissingItem { item_id: 254, .. })),
+                .any(|e| matches!(e, CampaignValidationError::MissingItem { item_id: 254, .. })),
             "Expected MissingItem error for item_id 254 but got: {:?}",
             errors
         );
@@ -3284,7 +3298,7 @@ mod tests {
         assert!(
             !errors
                 .iter()
-                .any(|e| matches!(e, ValidationError::LockedObjectKeyNotKeyItem { .. })),
+                .any(|e| matches!(e, CampaignValidationError::LockedObjectKeyNotKeyItem { .. })),
             "Should not emit LockedObjectKeyNotKeyItem when item is missing entirely, got: {:?}",
             errors
         );
@@ -3342,7 +3356,7 @@ mod tests {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e, ValidationError::LockedObjectKeyNotKeyItem { .. })),
+                .any(|e| matches!(e, CampaignValidationError::LockedObjectKeyNotKeyItem { .. })),
             "Expected LockedObjectKeyNotKeyItem error but got: {:?}",
             errors
         );
@@ -3350,7 +3364,7 @@ mod tests {
         assert!(
             errors.iter().any(|e| matches!(
                 e,
-                ValidationError::LockedObjectKeyNotKeyItem { map_id, lock_id, item_id }
+                CampaignValidationError::LockedObjectKeyNotKeyItem { map_id, lock_id, item_id }
                 if *map_id == 3 && lock_id == "secret_01" && *item_id == 201
             )),
             "Expected LockedObjectKeyNotKeyItem with map_id=3, lock_id='secret_01', item_id=201, got: {:?}",
@@ -3359,7 +3373,7 @@ mod tests {
         // Verify severity
         let key_errors: Vec<_> = errors
             .iter()
-            .filter(|e| matches!(e, ValidationError::LockedObjectKeyNotKeyItem { .. }))
+            .filter(|e| matches!(e, CampaignValidationError::LockedObjectKeyNotKeyItem { .. }))
             .collect();
         assert_eq!(
             key_errors[0].severity(),
@@ -3408,7 +3422,7 @@ mod tests {
         assert!(
             errors
                 .iter()
-                .any(|e| matches!(e, ValidationError::DuplicateLockId { .. })),
+                .any(|e| matches!(e, CampaignValidationError::DuplicateLockId { .. })),
             "Expected DuplicateLockId error but got: {:?}",
             errors
         );
@@ -3416,7 +3430,7 @@ mod tests {
         assert!(
             errors.iter().any(|e| matches!(
                 e,
-                ValidationError::DuplicateLockId { map_id, lock_id }
+                CampaignValidationError::DuplicateLockId { map_id, lock_id }
                 if *map_id == 4 && lock_id == "shared_lock"
             )),
             "Expected DuplicateLockId with map_id=4, lock_id='shared_lock', got: {:?}",
@@ -3425,7 +3439,7 @@ mod tests {
         // Verify severity
         let dup_errors: Vec<_> = errors
             .iter()
-            .filter(|e| matches!(e, ValidationError::DuplicateLockId { .. }))
+            .filter(|e| matches!(e, CampaignValidationError::DuplicateLockId { .. }))
             .collect();
         assert_eq!(
             dup_errors[0].severity(),
@@ -3442,7 +3456,7 @@ mod tests {
         // No maps → no connectivity errors
         let disconnected = errors
             .iter()
-            .filter(|e| matches!(e, ValidationError::DisconnectedMap { .. }))
+            .filter(|e| matches!(e, CampaignValidationError::DisconnectedMap { .. }))
             .count();
         assert_eq!(disconnected, 0);
     }
@@ -3455,7 +3469,7 @@ mod tests {
         // Empty database should have no reference errors
         let missing_items = errors
             .iter()
-            .filter(|e| matches!(e, ValidationError::MissingItem { .. }))
+            .filter(|e| matches!(e, CampaignValidationError::MissingItem { .. }))
             .count();
         assert_eq!(missing_items, 0);
     }
@@ -3501,7 +3515,7 @@ mod tests {
         assert!(
             dice_errors.iter().any(|e| matches!(
                 e,
-                ValidationError::InvalidDiceRoll { context, .. }
+                CampaignValidationError::InvalidDiceRoll { context, .. }
                 if context.contains("Broken Goblin")
             )),
             "validate_dice_rolls should flag the 0-sided attack, got: {:?}",
@@ -3513,7 +3527,7 @@ mod tests {
         assert!(
             all_errors
                 .iter()
-                .any(|e| matches!(e, ValidationError::InvalidDiceRoll { .. })),
+                .any(|e| matches!(e, CampaignValidationError::InvalidDiceRoll { .. })),
             "validate_all should surface InvalidDiceRoll"
         );
     }

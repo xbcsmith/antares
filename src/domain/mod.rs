@@ -71,7 +71,7 @@ pub use path_security::{
     PathSecurityError,
 };
 
-// Re-export skill types (Phase 1 + Phase 2 + Phase 3)
+// Re-export skill types
 pub use skills::{
     rank_for_level, rank_for_level_with_bonus, validate_skill_id, validate_skill_rank,
     CharacterSkillRanks, PartySkillScope, SkillBreakdown, SkillBreakdownEntry, SkillCategory,
@@ -82,7 +82,7 @@ pub use skills::{
 // Re-export skill resolver
 pub use skill_resolver::{SkillResolver, SkillResolverContext};
 
-// Re-export skill check types (Phase 3)
+// Re-export skill check types
 pub use skill_checks::{
     evaluate_party_skill_scope, evaluate_skill_check_without_roll, skill_check_for_character,
     SkillCheckDifficulty, SkillCheckError, SkillCheckRequest, SkillCheckResult,

@@ -320,3 +320,170 @@ not an omission.
   touched module pass.
 
 All new tests/fixtures use `data`/`data/test_campaign` only, per Rule 5.
+
+## Codebase Cleanup — Phase 3: Stale "Phase N" & Comment Cleanup
+
+Executed per `docs/explanation/codebase_cleanup_plan.md` §3. A comment-only pass
+that removed the last of the internal dev-plan scaffolding ("Phase N",
+"Phase-N", "Phase N.M") from `src/`, rewording each site to describe *what the
+code does* instead of *which plan step introduced it*. No behavior, identifiers,
+or string literals changed (with one explicit test-fn rename), so the test count
+is unchanged. All four quality gates pass on the whole workspace with zero
+warnings.
+
+### What changed
+
+- **71 `Phase N` comments reworded across 30 files.** Module `//! Phase N of
+  plan.md` headers were replaced with one-line behavioral summaries (or the plan
+  pointer dropped); inline `// Phase-6 path` / `// Phase-7 path` render comments
+  now name the actual path they guard — e.g. the per-entity `ExtendedMaterial`
+  path vs. the GPU-instanced (`GrassInstanceBatch`) path — so the comment stays
+  useful without referencing a plan that no longer exists.
+- **One plan-named test renamed** in `src/domain/world/landscape.rs`:
+  `test_test_campaign_phase1_landscape_mesh_fixture_integrity` →
+  `test_test_campaign_landscape_mesh_fixture_integrity` (still runs and passes).
+- **`inventory_ui.rs` placeholder comments** (4 sites) normalized to
+  `// resolved to the focused slot when the action is executed`, clarifying the
+  intent instead of reading as unfinished work.
+- **Legitimate `Phase`-named identifiers preserved** (Bevy render API surface,
+  not dev-plan scaffolding): `NavigationPhase`, `RenderPhase`, `PhaseItem`,
+  `BinnedRenderPhaseType` were verified present and left untouched.
+
+### Verification
+
+- `grep -rInE '\bPhase[ _-]?[0-9]' src` — **zero** matches (case-sensitive
+  success criterion met).
+- `grep -rIniE 'phase[ _-]?[0-9]' src` — **zero** matches (case-insensitive,
+  including the renamed test).
+- `cargo fmt --all -- --check` — clean.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` — clean
+  for **both** `antares` and `campaign_builder`.
+- `cargo nextest run --workspace --all-features` — 8030 passed, 8 skipped,
+  0 failed (identical to pre-Phase-3; changes are comment-only).
+- Targeted doctests on edited modules pass; all reworded prose was outside code
+  fences, so no doctest behavior changed.
+
+## Phase 4: Error-Handling Consistency & Determinism
+
+Executed per `docs/explanation/codebase_cleanup_plan.md` §4. Goal: one boundary
+error type at the domain↔Bevy seam, no cross-layer error-name ambiguity, a
+seeded deterministic RNG restoring the reproducible-gameplay architecture
+guarantee, and a Clippy regression gate that forbids new panicking `unwrap`/
+`expect` and ignored `#[must_use]` results in non-test code.
+
+### Item F — colliding error enums renamed (layer-qualified)
+
+- `sdk::game_config::ConfigError` → `GameConfigError`;
+  `sdk::tool_config::ConfigError` → `ToolConfigError`.
+- `sdk::campaign_loader::CampaignError` → `CampaignLoadError` (the **domain**
+  `CampaignError` is a different type and was left unchanged).
+- `sdk::validation::ValidationError` → `CampaignValidationError` (the **domain**
+  `ValidationError` was left unchanged).
+- Binary generators: `generate_foliage_textures::GeneratorError` →
+  `FoliageGeneratorError`; `generate_normal_map::GeneratorError` →
+  `NormalMapGeneratorError`.
+- Fixed the one stale reference the rename exposed in the separate
+  `campaign_builder` workspace crate
+  (`sdk/campaign_builder/src/campaign_io.rs` matched
+  `validation::ValidationError::InvalidStartingInnkeeper`). This regression was
+  invisible to `cargo check --all-targets` because that does **not** compile
+  workspace members without `--workspace`; caught by the workspace clippy gate.
+
+### Central `GameError` + `report_err!`
+
+- New `src/error.rs` at the crate root (placed there, not under `domain/`, to
+  avoid a layering violation) defines `GameError`, aggregating the library
+  module errors via `#[error(transparent)] #[from]`. Registered as
+  `pub mod error;` + `pub use error::GameError;` in `lib.rs`.
+- `#[macro_export] report_err!` provides three forms — `(err)` (tracing only);
+  `(writer, err)`; `(writer, category, err)` — so Bevy systems (which cannot
+  return `Result`) route domain errors into a `GameLogEvent` **and**
+  `tracing::error!` uniformly. Integrated into the dialogue buy/sell failure
+  arms as the reference call site. 6 unit tests cover the `#[from]` conversion
+  paths and each macro form.
+- Note on `#[error(transparent)]`: `source()` forwards to the *inner* error's
+  source (a leaf error yields `None`), which the tests assert accordingly.
+
+### thiserror migration
+
+- Migrated the two genuine manual `Display`/`Error` implementations to
+  `#[derive(thiserror::Error)]`: `DialogueValidationError`
+  (`sdk/dialogue_editor.rs`) and `QuestValidationError` (`sdk/quest_editor.rs`).
+- Plan §4.1 also named `domain/types.rs`, `domain/character.rs`,
+  `domain/combat/monster.rs`, `domain/items/types.rs`, and `game/systems/ui.rs`.
+  On inspection those `Display` impls are **value formatters** (`GameTime`,
+  `Item`, `AttributePair`, `MonsterCondition`, `LogEntry`), not `Error` types,
+  so converting them to `thiserror` would be incorrect; they were correctly left
+  as-is. Documented here per the "explain WHY your code differs" rule.
+
+### Seeded `GameRng` (Item L) — deterministic gameplay restored
+
+- New `src/game/resources/game_rng.rs`: `GameRng` is a Bevy `Resource` wrapping
+  a seed (`u64`) + `StdRng`. API: `from_seed`, `from_entropy`, `seed`, `reseed`,
+  `rng() -> &mut StdRng`, and `fallback_std_rng()` for Option-parameter systems
+  in minimal test apps. `Default` = entropy. Registered in
+  `src/game/resources/mod.rs`.
+- `GameState` gained a persisted `rng_seed: u64` field (`#[serde(default)]`),
+  populated by a new `generate_rng_seed()` (non-zero random) in both `new()` and
+  `new_game()` — this is the save-schema change from §4.3.
+- **Threading (production gameplay boundaries only):** domain functions already
+  took `&mut rng`; the holes were fresh `rand::rng()` calls at the Bevy seam.
+  Contract: domain/helper fns take `rng: &mut impl rand::Rng` as the last
+  parameter; systems take `ResMut<GameRng>` (combat) or
+  `Option<ResMut<GameRng>>` + the `fallback_std_rng()` pattern (test-friendly
+  systems). Threaded through: combat (`combat.rs` 5 systems + defend/flee),
+  spell effects/casting, the combat `engine` turn/round/DOT chain, exploration
+  spells, `rest.rs` `process_rest`, `lock_ui.rs`, `inventory_ui.rs`, and
+  `application/mod.rs::move_party_and_handle_events` (the main movement→encounter
+  path, plus its `exploration_movement.rs` → `input.rs` caller chain).
+- **App wiring:** `bin/antares.rs` inserts `GameRng::from_seed(game_state.rng_seed)`
+  before adding plugins; `CombatPlugin` calls `init_resource::<GameRng>()` (a
+  no-op when a seeded instance already exists, so the ~81 combat test apps get a
+  resource and never panic on the non-optional `ResMut<GameRng>` param). A new
+  `sync_game_rng_seed` system in `MenuPlugin` reseeds `GameRng` whenever
+  `GameState::rng_seed` diverges from the resource seed — the single cheap
+  per-frame comparison keeps save/load reproducible without threading the seed
+  through the 9 `handle_button_press`/`load_game_operation` call sites.
+- Cosmetic/tooling RNG left on `rand::rng()` by design: procedural grass
+  placement (`advanced_grass.rs`) and the `name_generator` SDK authoring tool
+  are outside the combat/encounter determinism guarantee.
+- Adding the `GameRng` param pushed two combat systems over Clippy's
+  7-argument limit; both received `#[allow(clippy::too_many_arguments)]` with a
+  "Bevy system, inherent param count" justification.
+
+### Determinism test (§4.4)
+
+- New `tests/combat_determinism_test.rs` drives a fixed, combat-representative
+  roll sequence (1d20 attacks, 2d6+1 damage, per-class HP dice, fizzle checks,
+  raw range rolls) against `GameRng` and asserts: same seed → identical trace;
+  different seeds → divergent traces; `reseed` to the original seed rewinds the
+  stream (the exact guarantee the save/load path relies on).
+
+### Non-test `unwrap`/`expect`/`let _` debt + regression Clippy gate
+
+- Enabled `#![warn(clippy::unwrap_used, clippy::expect_used,
+  clippy::let_underscore_must_use)]` with `#![cfg_attr(test, allow(...))]` at the
+  crate roots of the `antares` lib, all four binaries, and the
+  `campaign_builder` crate. Test code (unit tests, fixtures) is exempt.
+- Resolved every pre-existing non-test occurrence (~53 in the main lib, 6 in the
+  `antares` bin, 1 in `antares_sdk`, ~33 in `campaign_builder`): each is either
+  refactored to real error handling (e.g. `autocomplete_widget` `is_some_and`,
+  `landscape_editor` `if let Err(e)`) or carries a tightly-scoped
+  `#[allow(...)]` with a concrete, code-based justification comment explaining
+  why the panic is unreachable or the discard is intentional (guarded indices,
+  compile-time-embedded assets, never-poisoned log-file mutexes, best-effort
+  history/clipboard/cleanup I/O, side-effect-capturing `run_export`).
+- The Export Wizard `let _ = wizard.run_export(dir)` was verified correct:
+  `run_export` records success/failure into its own
+  `export_error`/`progress_message` fields, which the UI surfaces, so the
+  returned manifest is intentionally discarded (annotated, not refactored).
+
+### Verification
+
+- `cargo fmt --all -- --check` — clean.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` — clean
+  for both `antares` and `campaign_builder`, with the three new restriction
+  lints active and test code exempted.
+- `cargo nextest run --workspace --all-features` — **8043 passed, 8 skipped,
+  0 failed** (up from 8030; +3 determinism tests, plus the newly-compiling
+  `campaign_builder` fix).

@@ -2239,7 +2239,7 @@ mod tests {
 
         let stats = db.stats();
 
-        // The test campaign fixture defines 5 Phase 1 skills.
+        // The test campaign fixture defines 5 starter skills.
         assert_eq!(
             stats.skill_count,
             db.skills.len(),
@@ -4308,7 +4308,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 4: Object Mesh Registry Integration Tests =====
+    // ===== Object Mesh Registry Integration Tests =====
 
     /// P4-OM1: Loading a campaign that has `object_mesh_registry.ron` populates
     /// `object_meshes` with the primary entries and verifies string-keyed lookup.

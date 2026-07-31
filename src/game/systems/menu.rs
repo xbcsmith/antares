@@ -88,8 +88,33 @@ impl Plugin for MenuPlugin {
                 populate_save_list,
                 apply_settings,
                 menu_cleanup,
+                sync_game_rng_seed,
             ),
         );
+    }
+}
+
+/// Keeps the shared [`GameRng`] resource aligned with the persisted
+/// [`GameState::rng_seed`].
+///
+/// The seed only changes when a new game starts or a save is loaded (both
+/// replace the entire `GameState`). Whenever the resource seed diverges from
+/// the game-state seed, the RNG is reseeded so encounter/combat outcomes are
+/// reproducible from the persisted seed. During normal play the two seeds are
+/// identical, so this system performs a single cheap comparison per frame.
+///
+/// The `GameRng` resource is optional so the menu plugin remains usable in
+/// minimal test apps that do not insert it.
+fn sync_game_rng_seed(
+    global_state: Option<Res<GlobalState>>,
+    game_rng: Option<ResMut<crate::game::resources::GameRng>>,
+) {
+    let (Some(global_state), Some(mut game_rng)) = (global_state, game_rng) else {
+        return;
+    };
+    let target_seed = global_state.0.rng_seed;
+    if game_rng.seed() != target_seed {
+        game_rng.reseed(target_seed);
     }
 }
 

@@ -442,7 +442,7 @@ mod tests {
         }
     }
 
-    // ── Required tests from Phase 2.4 ───────────────────────────────────────
+    // ── Skill-resolution tests ──────────────────────────────────────────────
 
     #[test]
     fn test_effective_skill_rank_uses_auto_level_scaling() {

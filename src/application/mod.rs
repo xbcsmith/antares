@@ -33,7 +33,7 @@ use crate::domain::party_manager::{PartyManagementError, PartyManager};
 use crate::domain::types::{GameTime, InnkeeperId, TimeOfDay};
 use crate::domain::world::npc_runtime::NpcRuntimeStore;
 use crate::domain::world::World;
-use crate::sdk::campaign_loader::{Campaign, CampaignError};
+use crate::sdk::campaign_loader::{Campaign, CampaignLoadError};
 use crate::sdk::database::ContentDatabase;
 use crate::sdk::game_config::GameConfig;
 use serde::{Deserialize, Serialize};
@@ -985,6 +985,21 @@ impl QuestLog {
 /// assert!(game_state.party.is_empty());
 /// assert_eq!(game_state.time.day, 1);
 /// ```
+/// Generates a fresh, non-zero seed for the deterministic gameplay RNG.
+///
+/// Uses the OS entropy source once at game-creation time; the resulting seed is
+/// then persisted in the save file so the run can be reproduced deterministically
+/// via [`crate::game::resources::GameRng`].
+fn generate_rng_seed() -> u64 {
+    use rand::RngExt;
+    let mut seed = rand::rng().random::<u64>();
+    // Reserve 0 as the "unset" sentinel used by `#[serde(default)]` on old saves.
+    if seed == 0 {
+        seed = 1;
+    }
+    seed
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameState {
     /// Active campaign (if playing campaign mode)
@@ -1040,6 +1055,17 @@ pub struct GameState {
     /// before this field was added load cleanly with an empty log.
     #[serde(default)]
     pub game_log_entries: Vec<SavedLogEntry>,
+
+    /// Seed for the deterministic gameplay RNG ([`crate::error`]-free; see
+    /// [`crate::game::resources::GameRng`]).
+    ///
+    /// Persisting the seed lets a loaded game reproduce the same random stream
+    /// for a given sequence of inputs, restoring the deterministic-gameplay
+    /// architecture guarantee. Uses `#[serde(default)]` so saves predating this
+    /// field load cleanly (they receive seed `0`, which the runtime replaces
+    /// with a fresh random seed on load).
+    #[serde(default)]
+    pub rng_seed: u64,
 }
 
 /// Errors returned by `GameState::initialize_roster`.
@@ -1169,6 +1195,7 @@ impl GameState {
             npc_runtime: NpcRuntimeStore::new(),
             campaign_config: CampaignConfig::default(),
             game_log_entries: Vec::new(),
+            rng_seed: generate_rng_seed(),
         }
     }
 
@@ -1192,7 +1219,7 @@ impl GameState {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let loader = CampaignLoader::new("data");
     /// let campaign = loader.load_campaign("test_campaign")?;
-    /// // `new_game` returns a Result<(GameState, ContentDatabase), CampaignError>
+    /// // `new_game` returns a Result<(GameState, ContentDatabase), CampaignLoadError>
     /// let (state, _content_db) = GameState::new_game(campaign)?;
     ///
     /// assert!(state.campaign.is_some());
@@ -1200,23 +1227,23 @@ impl GameState {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new_game(campaign: Campaign) -> Result<(Self, ContentDatabase), CampaignError> {
-        // Load campaign content (propagates CampaignError::DatabaseError or others)
+    pub fn new_game(campaign: Campaign) -> Result<(Self, ContentDatabase), CampaignLoadError> {
+        // Load campaign content (propagates CampaignLoadError::DatabaseError or others)
         let content_db = campaign.load_content()?;
 
         // Basic validation: ensure core content groups are present
         if content_db.classes.all_classes().count() == 0 {
-            return Err(CampaignError::DatabaseError(
+            return Err(CampaignLoadError::DatabaseError(
                 "Classes database is empty".to_string(),
             ));
         }
         if content_db.races.all_races().count() == 0 {
-            return Err(CampaignError::DatabaseError(
+            return Err(CampaignLoadError::DatabaseError(
                 "Races database is empty".to_string(),
             ));
         }
         if content_db.characters.all_characters().count() == 0 {
-            return Err(CampaignError::DatabaseError(
+            return Err(CampaignLoadError::DatabaseError(
                 "Characters database is empty".to_string(),
             ));
         }
@@ -1272,11 +1299,12 @@ impl GameState {
                 ..CampaignConfig::default()
             },
             game_log_entries: Vec::new(),
+            rng_seed: generate_rng_seed(),
         };
 
         // Initialize roster from content database (premade characters)
         state.initialize_roster(&content_db).map_err(|e| {
-            CampaignError::DatabaseError(format!("Roster initialization failed: {}", e))
+            CampaignLoadError::DatabaseError(format!("Roster initialization failed: {}", e))
         })?;
 
         Ok((state, content_db))
@@ -1286,12 +1314,12 @@ impl GameState {
     ///
     /// # Errors
     ///
-    /// Returns `CampaignError` if no campaign is loaded or the campaign fails to load its content.
-    pub fn load_campaign_content(&self) -> Result<ContentDatabase, CampaignError> {
+    /// Returns `CampaignLoadError` if no campaign is loaded or the campaign fails to load its content.
+    pub fn load_campaign_content(&self) -> Result<ContentDatabase, CampaignLoadError> {
         if let Some(campaign) = &self.campaign {
             campaign.load_content()
         } else {
-            Err(CampaignError::InvalidStructure(
+            Err(CampaignLoadError::InvalidStructure(
                 "No campaign loaded".to_string(),
             ))
         }
@@ -1731,6 +1759,7 @@ impl GameState {
         &mut self,
         direction: crate::domain::types::Direction,
         content: &ContentDatabase,
+        rng: &mut impl rand::Rng,
     ) -> Result<(), MoveHandleError> {
         // Perform the move (may return MovementError)
         let position = crate::domain::world::move_party(&mut self.world, direction)
@@ -1750,9 +1779,7 @@ impl GameState {
             .and_then(|m| m.get_event(position))
             .is_none()
         {
-            let mut rng = rand::rng();
-            if let Some(encounter_group) =
-                crate::domain::world::random_encounter(&self.world, &mut rng)
+            if let Some(encounter_group) = crate::domain::world::random_encounter(&self.world, rng)
             {
                 // Determine handicap from encounter type: ambush gives monsters
                 // the initiative advantage for round 1.
@@ -5046,7 +5073,7 @@ mod tests {
 
         let content = ContentDatabase::new();
         state
-            .move_party_and_handle_events(Direction::North, &content)
+            .move_party_and_handle_events(Direction::North, &content, &mut rand::rng())
             .expect("move north on clear map must succeed");
 
         let after = total_seconds(&state);
@@ -5084,7 +5111,8 @@ mod tests {
         let content = ContentDatabase::new();
 
         // Walking North should fail (blocked tile).
-        let result = state.move_party_and_handle_events(Direction::North, &content);
+        let result =
+            state.move_party_and_handle_events(Direction::North, &content, &mut rand::rng());
         assert!(result.is_err(), "move into a wall must return an error");
 
         assert_eq!(
@@ -5663,7 +5691,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 2: Time Advancement System Tests =====
+    // ===== Time Advancement System Tests =====
 
     /// `advance_time_seconds(30)` from 12:00:00 yields 12:00:30 — sub-minute
     /// resolution works and does NOT tick spell/boost effects.
@@ -5744,7 +5772,7 @@ mod tests {
 
         let content = ContentDatabase::new();
         state
-            .move_party_and_handle_events(Direction::North, &content)
+            .move_party_and_handle_events(Direction::North, &content, &mut rand::rng())
             .expect("move north on clear map must succeed");
 
         let after = total_seconds(&state);
@@ -5936,8 +5964,11 @@ mod tests {
         // Build a minimal content database
         let content = crate::sdk::database::ContentDatabase::new();
 
-        let result =
-            state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        let result = state.move_party_and_handle_events(
+            crate::domain::types::Direction::East,
+            &content,
+            &mut rand::rng(),
+        );
         assert!(result.is_ok());
 
         // Hero should have taken 10 damage: 50 - 10 = 40
@@ -5977,7 +6008,11 @@ mod tests {
         state.world.set_current_map(1);
 
         let content = crate::sdk::database::ContentDatabase::new();
-        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        let _ = state.move_party_and_handle_events(
+            crate::domain::types::Direction::East,
+            &content,
+            &mut rand::rng(),
+        );
 
         assert_eq!(state.party.members[0].hp.current, 95);
         assert!(state.party.members[0].conditions.has(Condition::POISONED));
@@ -6015,7 +6050,11 @@ mod tests {
         state.world.set_current_map(1);
 
         let content = crate::sdk::database::ContentDatabase::new();
-        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        let _ = state.move_party_and_handle_events(
+            crate::domain::types::Direction::East,
+            &content,
+            &mut rand::rng(),
+        );
 
         assert_eq!(state.party.living_count(), 0);
         assert!(matches!(state.mode, GameMode::GameOver));
@@ -6053,7 +6092,11 @@ mod tests {
         state.world.set_current_map(1);
 
         let content = crate::sdk::database::ContentDatabase::new();
-        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        let _ = state.move_party_and_handle_events(
+            crate::domain::types::Direction::East,
+            &content,
+            &mut rand::rng(),
+        );
 
         // Items should be in first member's inventory
         let inv = &state.party.members[0].inventory;
@@ -6095,7 +6138,11 @@ mod tests {
         state.world.set_current_map(1);
 
         let content = crate::sdk::database::ContentDatabase::new();
-        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        let _ = state.move_party_and_handle_events(
+            crate::domain::types::Direction::East,
+            &content,
+            &mut rand::rng(),
+        );
 
         // Treasure event should have been consumed by trigger_event (domain layer)
         assert!(state
@@ -6141,8 +6188,11 @@ mod tests {
         state.world.set_current_map(1);
 
         let content = crate::sdk::database::ContentDatabase::new();
-        let result =
-            state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        let result = state.move_party_and_handle_events(
+            crate::domain::types::Direction::East,
+            &content,
+            &mut rand::rng(),
+        );
 
         assert!(result.is_ok());
         assert!(
@@ -6197,7 +6247,11 @@ mod tests {
         state.world.set_current_map(1);
 
         let content = crate::sdk::database::ContentDatabase::new();
-        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        let _ = state.move_party_and_handle_events(
+            crate::domain::types::Direction::East,
+            &content,
+            &mut rand::rng(),
+        );
 
         // Should be in dialogue mode with npc_id set
         match &state.mode {
@@ -6254,7 +6308,11 @@ mod tests {
         state.world.set_current_map(1);
 
         let content = crate::sdk::database::ContentDatabase::new();
-        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        let _ = state.move_party_and_handle_events(
+            crate::domain::types::Direction::East,
+            &content,
+            &mut rand::rng(),
+        );
 
         // Living hero takes damage
         assert_eq!(state.party.members[0].hp.current, 40);
@@ -6298,8 +6356,11 @@ mod tests {
         state.world.set_current_map(1);
 
         let content = crate::sdk::database::ContentDatabase::new();
-        let result =
-            state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        let result = state.move_party_and_handle_events(
+            crate::domain::types::Direction::East,
+            &content,
+            &mut rand::rng(),
+        );
         assert!(result.is_ok());
 
         // No damage: levitate buff must have negated the trap.
@@ -6349,7 +6410,11 @@ mod tests {
         state.world.set_current_map(1);
 
         let content = crate::sdk::database::ContentDatabase::new();
-        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        let _ = state.move_party_and_handle_events(
+            crate::domain::types::Direction::East,
+            &content,
+            &mut rand::rng(),
+        );
 
         // HP unchanged and poison condition not applied.
         assert_eq!(state.party.members[0].hp.current, 50);
@@ -6393,7 +6458,11 @@ mod tests {
         state.world.set_current_map(1);
 
         let content = crate::sdk::database::ContentDatabase::new();
-        let _ = state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        let _ = state.move_party_and_handle_events(
+            crate::domain::types::Direction::East,
+            &content,
+            &mut rand::rng(),
+        );
 
         assert_eq!(
             state.party.members[0].hp.current, 40,
@@ -6462,8 +6531,11 @@ mod tests {
         state.world.set_current_map(1);
 
         let content = crate::sdk::database::ContentDatabase::new();
-        let result =
-            state.move_party_and_handle_events(crate::domain::types::Direction::East, &content);
+        let result = state.move_party_and_handle_events(
+            crate::domain::types::Direction::East,
+            &content,
+            &mut rand::rng(),
+        );
         assert!(result.is_ok());
 
         assert!(

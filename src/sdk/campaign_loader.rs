@@ -46,7 +46,7 @@ use thiserror::Error;
 
 /// Errors that can occur when working with campaigns
 #[derive(Error, Debug)]
-pub enum CampaignError {
+pub enum CampaignLoadError {
     #[error("Campaign not found: {0}")]
     NotFound(String),
 
@@ -500,17 +500,17 @@ impl Campaign {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, CampaignError> {
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, CampaignLoadError> {
         let path = path.as_ref();
 
         if !path.exists() {
-            return Err(CampaignError::NotFound(path.display().to_string()));
+            return Err(CampaignLoadError::NotFound(path.display().to_string()));
         }
 
         // Load campaign.ron
         let campaign_file = path.join("campaign.ron");
         if !campaign_file.exists() {
-            return Err(CampaignError::InvalidStructure(
+            return Err(CampaignLoadError::InvalidStructure(
                 "campaign.ron not found".to_string(),
             ));
         }
@@ -521,17 +521,19 @@ impl Campaign {
         if let Ok(metadata) = ron::from_str::<CampaignMetadata>(&contents) {
             let mut campaign: Campaign = metadata
                 .try_into()
-                .map_err(|e: String| CampaignError::MetadataError(e))?;
+                .map_err(|e: String| CampaignLoadError::MetadataError(e))?;
 
             // Set root path
             campaign.root_path = path.to_path_buf();
 
             // Load game configuration from config.ron
             let config_path = path.join("config.ron");
-            campaign.game_config =
-                crate::sdk::game_config::GameConfig::load_or_default(&config_path).map_err(
-                    |e| CampaignError::MetadataError(format!("Failed to load game config: {}", e)),
-                )?;
+            campaign.game_config = crate::sdk::game_config::GameConfig::load_or_default(
+                &config_path,
+            )
+            .map_err(|e| {
+                CampaignLoadError::MetadataError(format!("Failed to load game config: {}", e))
+            })?;
 
             // Ensure ID matches directory if possible, or keep metadata ID
             if let Some(dir_name) = path.file_name() {
@@ -548,8 +550,8 @@ impl Campaign {
         }
 
         // Fallback to loading as Campaign (Engine format)
-        let mut campaign: Campaign =
-            ron::from_str(&contents).map_err(|e| CampaignError::MetadataError(e.to_string()))?;
+        let mut campaign: Campaign = ron::from_str(&contents)
+            .map_err(|e| CampaignLoadError::MetadataError(e.to_string()))?;
 
         // Set root path
         campaign.root_path = path.to_path_buf();
@@ -558,7 +560,7 @@ impl Campaign {
         let config_path = path.join("config.ron");
         campaign.game_config = crate::sdk::game_config::GameConfig::load_or_default(&config_path)
             .map_err(|e| {
-            CampaignError::MetadataError(format!("Failed to load game config: {}", e))
+            CampaignLoadError::MetadataError(format!("Failed to load game config: {}", e))
         })?;
 
         // Extract ID from directory name
@@ -748,9 +750,9 @@ impl Campaign {
     }
 
     /// Load campaign content into ContentDatabase
-    pub fn load_content(&self) -> Result<ContentDatabase, CampaignError> {
+    pub fn load_content(&self) -> Result<ContentDatabase, CampaignLoadError> {
         ContentDatabase::load_campaign_with_skills_file(&self.root_path, &self.data.skills)
-            .map_err(|e| CampaignError::DatabaseError(e.to_string()))
+            .map_err(|e| CampaignLoadError::DatabaseError(e.to_string()))
     }
 
     /// Validate campaign structure and metadata
@@ -821,7 +823,7 @@ impl CampaignLoader {
     }
 
     /// List all available campaigns
-    pub fn list_campaigns(&self) -> Result<Vec<CampaignInfo>, CampaignError> {
+    pub fn list_campaigns(&self) -> Result<Vec<CampaignInfo>, CampaignLoadError> {
         if !self.campaigns_dir.exists() {
             return Ok(Vec::new());
         }
@@ -861,18 +863,18 @@ impl CampaignLoader {
     ///
     /// # Errors
     ///
-    /// Returns [`CampaignError::InvalidId`] if `id` fails identifier validation,
+    /// Returns [`CampaignLoadError::InvalidId`] if `id` fails identifier validation,
     /// or any error surfaced by [`Campaign::load`].
-    pub fn load_campaign(&self, id: &str) -> Result<Campaign, CampaignError> {
+    pub fn load_campaign(&self, id: &str) -> Result<Campaign, CampaignLoadError> {
         validate_identifier(id).map_err(|e| {
-            CampaignError::InvalidId(format!("Invalid campaign id '{}': {}", id, e))
+            CampaignLoadError::InvalidId(format!("Invalid campaign id '{}': {}", id, e))
         })?;
         let path = self.campaigns_dir.join(id);
         Campaign::load(path)
     }
 
     /// Validate a campaign
-    pub fn validate_campaign(&self, id: &str) -> Result<ValidationReport, CampaignError> {
+    pub fn validate_campaign(&self, id: &str) -> Result<ValidationReport, CampaignLoadError> {
         let campaign = self.load_campaign(id)?;
 
         let mut errors = Vec::new();
@@ -1300,14 +1302,14 @@ mod tests {
 
         let result = loader.load_campaign("../evil");
         assert!(
-            matches!(result, Err(CampaignError::InvalidId(_))),
+            matches!(result, Err(CampaignLoadError::InvalidId(_))),
             "expected InvalidId for '../evil', got {:?}",
             result
         );
 
         let result = loader.load_campaign("a/b");
         assert!(
-            matches!(result, Err(CampaignError::InvalidId(_))),
+            matches!(result, Err(CampaignLoadError::InvalidId(_))),
             "expected InvalidId for 'a/b', got {:?}",
             result
         );
@@ -1323,7 +1325,7 @@ mod tests {
         let result = loader.load_campaign("does_not_exist_valid_id");
         assert!(result.is_err(), "nonexistent campaign should error");
         assert!(
-            !matches!(result, Err(CampaignError::InvalidId(_))),
+            !matches!(result, Err(CampaignLoadError::InvalidId(_))),
             "a valid id must not be rejected as InvalidId, got {:?}",
             result
         );

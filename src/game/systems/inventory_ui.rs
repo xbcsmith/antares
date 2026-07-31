@@ -437,7 +437,7 @@ fn build_action_list(
     if is_equipable {
         actions.push(PanelAction::Equip {
             party_index: focused_party_index,
-            slot_index: 0, // placeholder — filled at execution time
+            slot_index: 0, // resolved to the focused slot when the action is executed
         });
     }
 
@@ -468,21 +468,21 @@ fn build_action_list(
     if is_consumable || (is_usable_charged_item && slot_has_charges) {
         actions.push(PanelAction::Use {
             party_index: focused_party_index,
-            slot_index: 0, // placeholder — filled at execution time
+            slot_index: 0, // resolved to the focused slot when the action is executed
         });
     }
 
     // Drop is always present
     actions.push(PanelAction::Drop {
         party_index: focused_party_index,
-        slot_index: 0, // placeholder — filled in at execution time
+        slot_index: 0, // resolved to the focused slot when the action is executed
     });
     // One Transfer per other visible panel, in panel order
     for &(other_index, _) in panel_names {
         if other_index != focused_party_index {
             actions.push(PanelAction::Transfer {
                 from_party_index: focused_party_index,
-                from_slot_index: 0, // placeholder — filled in at execution time
+                from_slot_index: 0, // resolved to the focused slot when the action is executed
                 to_party_index: other_index,
             });
         }
@@ -2625,7 +2625,11 @@ fn handle_use_item_action_exploration(
     mut nav_state: ResMut<InventoryNavigationState>,
     game_content: Option<Res<GameContent>>,
     mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
+    mut game_rng: Option<ResMut<crate::game::resources::GameRng>>,
 ) {
+    // Deterministic RNG source: prefer the shared `GameRng` resource, falling
+    // back to a fresh seeded `StdRng` when it is absent (e.g. in unit tests).
+    let mut fallback_rng = crate::game::resources::GameRng::fallback_std_rng();
     // Collect messages upfront to avoid borrow conflicts with mutable state.
     let messages: Vec<(usize, usize)> = reader
         .read()
@@ -2785,14 +2789,17 @@ fn handle_use_item_action_exploration(
             let log_msg: String = if let Some(spell_id) = spell_id_opt {
                 if let Some(spell_def) = content_db.spells.get_spell(spell_id).cloned() {
                     let spell_name = spell_def.name.clone();
-                    let mut rng = rand::rng();
+                    let rng: &mut rand::rngs::StdRng = match game_rng.as_deref_mut() {
+                        Some(gr) => gr.rng(),
+                        None => &mut fallback_rng,
+                    };
                     match cast_exploration_spell(
                         party_index,
                         &spell_def,
                         ExplorationTarget::Self_,
                         &mut global_state.0,
                         &content_db.items,
-                        &mut rng,
+                        rng,
                     ) {
                         Ok(_) => format!("{item_name} used. {character_name} casts {spell_name}."),
                         Err(e) => format!("{item_name} used. Failed to cast {spell_name}: {e}."),
@@ -2906,14 +2913,17 @@ fn handle_use_item_action_exploration(
         let cast_spell_log: Option<String> = if let Some(spell_id) = result.spell_cast_id {
             if let Some(spell_def) = content_db.spells.get_spell(spell_id).cloned() {
                 let spell_name = spell_def.name.clone();
-                let mut rng = rand::rng();
+                let rng: &mut rand::rngs::StdRng = match game_rng.as_deref_mut() {
+                    Some(gr) => gr.rng(),
+                    None => &mut fallback_rng,
+                };
                 match cast_exploration_spell(
                     party_index,
                     &spell_def,
                     ExplorationTarget::Self_,
                     &mut global_state.0,
                     &content_db.items,
-                    &mut rng,
+                    rng,
                 ) {
                     Ok(_) => Some(format!(
                         "{item_name} used. {character_name} casts {spell_name}."
@@ -6324,7 +6334,7 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Phase 3: Charged Magical Item (wand/staff) tests
+    // Charged Magical Item (wand/staff) tests
     // ------------------------------------------------------------------
 
     /// Helper: builds a `ContentDatabase` with a single non-consumable accessory

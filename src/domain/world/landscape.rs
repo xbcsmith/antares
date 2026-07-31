@@ -1843,7 +1843,7 @@ mod tests {
     }
 
     #[test]
-    fn test_test_campaign_phase1_landscape_mesh_fixture_integrity() {
+    fn test_test_campaign_landscape_mesh_fixture_integrity() {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data/test_campaign");
         let registry_path = root.join("data/landscape_mesh_registry.ron");
         let db = LandscapeMeshDatabase::load_from_registry(&registry_path, &root).unwrap();

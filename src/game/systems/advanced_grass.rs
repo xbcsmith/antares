@@ -13,7 +13,7 @@
 //! applies **performance scaling** (`GrassPerformanceLevel`) to determine
 //! the final blade count per tile.
 //!
-//! # Phase 7 — GPU instancing
+//! # GPU instancing
 //!
 //! When [`GrassRenderMode::Instanced`] is active (default), per-clump entities
 //! are spawned WITHOUT `Mesh3d`/`MeshMaterial3d`.  The
@@ -1182,6 +1182,8 @@ fn create_curved_grass_card_mesh(
     mesh
 }
 
+// create_curved_grass_card_mesh always inserts POSITION/NORMAL/UV_0/COLOR attributes, so these attribute lookups on the just-built card mesh cannot be None.
+#[allow(clippy::expect_used)]
 fn create_grass_clump_mesh(
     height: f32,
     width: f32,
@@ -1344,7 +1346,7 @@ fn spawn_grass_clump(
     // In Instanced mode the per-clump entities carry only the transform and
     // component data used by the batch-building system; they do NOT have
     // Mesh3d/MeshMaterial3d so the standard material pipeline skips them.
-    // In PerEntity mode the Phase-6 ExtendedMaterial path renders each clump
+    // In PerEntity mode the ExtendedMaterial path renders each clump
     // directly with Mesh3d + MeshMaterial3d.
     let clump_transform = Transform::from_xyz(
         clump_center.x,
@@ -1938,7 +1940,7 @@ pub fn build_grass_instance_batches_system(
     >,
 ) {
     // Run when either the legacy enabled flag is set OR the instancing mode
-    // is active (default path for Phase 7).
+    // is active (the default GPU-instanced path).
     let instanced = render_mode.as_deref() == Some(&GrassRenderMode::Instanced);
     if !config.enabled && !instanced {
         return;

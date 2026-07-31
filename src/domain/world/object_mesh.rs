@@ -3,7 +3,7 @@
 
 //! Unified object mesh registry — `ObjectMeshDatabase`.
 //!
-//! `ObjectMeshDatabase` is the Phase 4 replacement for the split
+//! `ObjectMeshDatabase` is the replacement for the split
 //! `LandscapeMeshDatabase` / `FurnitureMeshDatabase` lookup used by rendering
 //! code. It holds mesh assets keyed by an arbitrary **string** identifier so
 //! that map-event `mesh_id` values can be human-readable names like

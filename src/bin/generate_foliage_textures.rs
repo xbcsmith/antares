@@ -8,6 +8,23 @@
 //! - `assets/textures/trees/foliage_{species}.png`
 //! - `campaigns/tutorial/assets/textures/trees/foliage_{species}.png`
 
+// Error-handling regression gate (Phase 4): forbid new panicking `unwrap`/
+// `expect` and ignored `#[must_use]` results in non-test code. Test code is
+// exempt.
+#![warn(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::let_underscore_must_use
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::let_underscore_must_use
+    )
+)]
+
 use image::{ImageBuffer, Rgba};
 use std::f32::consts::PI;
 use std::path::Path;
@@ -17,7 +34,7 @@ use thiserror::Error;
 
 /// Errors that can occur while generating or saving foliage textures.
 #[derive(Error, Debug)]
-pub enum GeneratorError {
+pub enum FoliageGeneratorError {
     /// An I/O error occurred (e.g. directory creation or file copy).
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
@@ -320,9 +337,12 @@ pub fn assert_spec(img: &ImageBuffer<Rgba<u8>, Vec<u8>>, species: &str) {
 /// Saves a generated image to `path`, creating parent directories as needed.
 ///
 /// # Errors
-/// Returns `GeneratorError::Io` if directory creation fails, or
-/// `GeneratorError::Image` if the PNG cannot be written.
-pub fn save_image(img: &ImageBuffer<Rgba<u8>, Vec<u8>>, path: &Path) -> Result<(), GeneratorError> {
+/// Returns `FoliageGeneratorError::Io` if directory creation fails, or
+/// `FoliageGeneratorError::Image` if the PNG cannot be written.
+pub fn save_image(
+    img: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    path: &Path,
+) -> Result<(), FoliageGeneratorError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -350,7 +370,7 @@ struct SpeciesParams {
 
 // ── main ──────────────────────────────────────────────────────────────────────
 
-fn main() -> Result<(), GeneratorError> {
+fn main() -> Result<(), FoliageGeneratorError> {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
 
     let species = [

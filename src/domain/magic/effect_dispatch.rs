@@ -5,7 +5,7 @@
 //!
 //! This module is the **central routing layer** for spell effect resolution.
 //! Both the combat casting system (`domain::combat::spell_casting`) and the
-//! exploration casting system (Phase 3) delegate to the functions here for
+//! exploration casting system delegate to the functions here for
 //! healing, buff, condition-cure, utility, and composite spell effects.
 //!
 //! # Design
@@ -25,8 +25,8 @@
 //!
 //! # Architecture Reference
 //!
-//! See `docs/reference/architecture.md` Section 5.3 and the Spell System
-//! Updates Implementation Plan Phase 1 for complete specifications.
+//! See `docs/reference/architecture.md` Section 5.3 for complete
+//! specifications.
 
 use crate::application::ActiveSpells;
 use crate::domain::character::Character;

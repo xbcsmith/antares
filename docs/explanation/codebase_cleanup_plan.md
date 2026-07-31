@@ -322,9 +322,9 @@ Mechanical, near-zero risk. Removes shipping-codebase dev-plan cruft.
 
 #### 3.5 Deliverables
 
-- [ ] 71 `Phase N` comments reworded/removed
-- [ ] Plan-named test fn renamed
-- [ ] Misleading placeholder comments clarified
+- [x] 71 `Phase N` comments reworded/removed
+- [x] Plan-named test fn renamed
+- [x] Misleading placeholder comments clarified
 
 #### 3.6 Success Criteria
 
@@ -390,13 +390,13 @@ Structural improvements at the domain↔Bevy boundary.
 
 #### 4.5 Deliverables
 
-- [ ] Colliding error enums renamed
-- [ ] Central `GameError` + `report_err!` helper
-- [ ] 5 manual impls migrated to `thiserror`
-- [ ] `name_generator` unwrap justification
-- [ ] Seeded `GameRng` + persisted seed (dedicated work item, in scope)
-- [ ] Non-test `unwrap`/`expect`/`let _` debt migrated or justified
-- [ ] Regression Clippy gate enabled (`unwrap_used`/`expect_used`/
+- [x] Colliding error enums renamed
+- [x] Central `GameError` + `report_err!` helper
+- [x] 5 manual impls migrated to `thiserror`
+- [x] `name_generator` unwrap justification
+- [x] Seeded `GameRng` + persisted seed (dedicated work item, in scope)
+- [x] Non-test `unwrap`/`expect`/`let _` debt migrated or justified
+- [x] Regression Clippy gate enabled (`unwrap_used`/`expect_used`/
       `let_underscore_must_use` as `warn`, `#[cfg(test)]` exempt) — **folded in
       from Phase 2 §2.3**
 

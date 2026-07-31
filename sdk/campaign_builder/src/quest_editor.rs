@@ -2469,6 +2469,9 @@ impl QuestEditorState {
                     *unsaved_changes = true;
                     // Immediately start editing the new reward; failure is non-critical
                     // — the reward was already added and can be edited manually.
+                    // `add_default_reward` returns `Ok` only when `selected_quest`
+                    // is `Some`, so the unwrap here cannot panic.
+                    #[allow(clippy::let_underscore_must_use, clippy::unwrap_used)]
                     let _ =
                         self.edit_reward(quests.as_slice(), self.selected_quest.unwrap(), new_idx);
                 }

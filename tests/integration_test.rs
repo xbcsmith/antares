@@ -9,7 +9,7 @@ use antares::domain::types::ItemId;
 use antares::sdk::cache::{CacheConfig, ContentCache, ValidationCache};
 use antares::sdk::error_formatter::{ErrorContext, ErrorFormatter, ProgressReporter};
 use antares::sdk::tool_config::ToolConfig;
-use antares::sdk::validation::ValidationError;
+use antares::sdk::validation::CampaignValidationError;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -83,7 +83,7 @@ fn test_tool_config_custom_paths() {
 #[test]
 fn test_error_formatter_missing_item() {
     let formatter = ErrorFormatter::new(false);
-    let error = ValidationError::MissingItem {
+    let error = CampaignValidationError::MissingItem {
         context: "Monster loot table".to_string(),
         item_id: ItemId::from(99),
     };
@@ -97,7 +97,7 @@ fn test_error_formatter_missing_item() {
 #[test]
 fn test_error_formatter_with_context() {
     let formatter = ErrorFormatter::new(false);
-    let error = ValidationError::MissingItem {
+    let error = CampaignValidationError::MissingItem {
         context: "Treasure chest".to_string(),
         item_id: ItemId::from(99),
     };
@@ -117,7 +117,7 @@ fn test_error_formatter_with_context() {
 #[test]
 fn test_error_formatter_missing_class() {
     let formatter = ErrorFormatter::new(false);
-    let error = ValidationError::MissingClass {
+    let error = CampaignValidationError::MissingClass {
         context: "Character creation".to_string(),
         class_id: "wizard".to_string(),
     };
@@ -131,7 +131,7 @@ fn test_error_formatter_missing_class() {
 #[test]
 fn test_error_formatter_disconnected_map() {
     let formatter = ErrorFormatter::new(false);
-    let error = ValidationError::DisconnectedMap { map_id: 42 };
+    let error = CampaignValidationError::DisconnectedMap { map_id: 42 };
 
     let formatted = formatter.format_validation_error(&error, None);
     assert!(formatted.contains("42"));
@@ -142,7 +142,7 @@ fn test_error_formatter_disconnected_map() {
 #[test]
 fn test_error_formatter_duplicate_id() {
     let formatter = ErrorFormatter::new(false);
-    let error = ValidationError::DuplicateId {
+    let error = CampaignValidationError::DuplicateId {
         entity_type: "item".to_string(),
         id: "42".to_string(),
     };
@@ -157,15 +157,15 @@ fn test_error_formatter_duplicate_id() {
 fn test_error_report_multiple_errors() {
     let formatter = ErrorFormatter::new(false);
     let errors = vec![
-        ValidationError::MissingItem {
+        CampaignValidationError::MissingItem {
             context: "Test 1".to_string(),
             item_id: ItemId::from(1),
         },
-        ValidationError::MissingItem {
+        CampaignValidationError::MissingItem {
             context: "Test 2".to_string(),
             item_id: ItemId::from(2),
         },
-        ValidationError::MissingItem {
+        CampaignValidationError::MissingItem {
             context: "Test 3".to_string(),
             item_id: ItemId::from(3),
         },
@@ -182,7 +182,7 @@ fn test_error_report_multiple_errors() {
 #[test]
 fn test_error_formatter_no_color() {
     let formatter = ErrorFormatter::new(false);
-    let error = ValidationError::MissingItem {
+    let error = CampaignValidationError::MissingItem {
         context: "Test".to_string(),
         item_id: ItemId::from(1),
     };
@@ -310,7 +310,7 @@ fn test_config_and_formatter_integration() {
     let formatter = ErrorFormatter::new(config.display.color);
 
     // Format an error
-    let error = ValidationError::MissingItem {
+    let error = CampaignValidationError::MissingItem {
         context: "Test".to_string(),
         item_id: ItemId::from(1),
     };
@@ -349,7 +349,7 @@ fn test_end_to_end_validation_workflow() {
     let mut val_cache = ValidationCache::new(CacheConfig::default());
 
     // 4. Simulate validation
-    let errors = vec![ValidationError::MissingItem {
+    let errors = vec![CampaignValidationError::MissingItem {
         context: "Test".to_string(),
         item_id: ItemId::from(1),
     }];
@@ -371,7 +371,7 @@ fn test_end_to_end_validation_workflow() {
 #[test]
 fn test_error_context_with_suggestions() {
     let formatter = ErrorFormatter::new(false);
-    let error = ValidationError::MissingItem {
+    let error = CampaignValidationError::MissingItem {
         context: "Monster drop".to_string(),
         item_id: ItemId::from(100),
     };
@@ -440,7 +440,7 @@ fn test_error_formatting_performance() {
 
     // Format many errors
     let errors: Vec<_> = (0..100)
-        .map(|i| ValidationError::MissingItem {
+        .map(|i| CampaignValidationError::MissingItem {
             context: format!("Test {}", i),
             item_id: ItemId::from(i),
         })

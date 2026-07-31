@@ -14,8 +14,7 @@
 //!
 //! # Architecture Reference
 //!
-//! See `docs/reference/architecture.md` Section 12.5 and
-//! `docs/explanation/level_up_plan.md` Phase 1 for full specifications.
+//! See `docs/reference/architecture.md` Section 12.5 for full specifications.
 //!
 //! # Data File Format
 //!

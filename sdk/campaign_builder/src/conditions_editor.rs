@@ -1137,6 +1137,8 @@ impl ConditionsEditorState {
 
             // Effect editor UI (for the edit/add panel)
             if self.effect_edit_buffer.is_some() {
+                // Guarded by the is_some() check above, so take() always yields Some.
+                #[allow(clippy::unwrap_used)]
                 let mut buf = self.effect_edit_buffer.take().unwrap();
                 let mut keep_buf = true;
 

@@ -2846,7 +2846,7 @@ impl CampaignBuilderApp {
             let config_errors = validator.validate_campaign_config(&config);
             for ve in config_errors {
                 match ve {
-                    antares::sdk::validation::ValidationError::InvalidStartingInnkeeper {
+                    antares::sdk::validation::CampaignValidationError::InvalidStartingInnkeeper {
                         innkeeper_id,
                         reason,
                     } => {

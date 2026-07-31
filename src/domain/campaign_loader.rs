@@ -121,7 +121,7 @@ pub struct GameData {
     pub landscape_meshes: LandscapeMeshDatabase,
     /// Unified object mesh database — string-keyed registry merging landscape,
     /// furniture, and `object_mesh_registry.ron` entries.  This is the primary
-    /// lookup used by rendering code from Phase 4 onwards.
+    /// lookup used by rendering code.
     pub object_meshes: ObjectMeshDatabase,
     /// Optional per-class XP threshold tables loaded from `data/levels.ron`.
     ///
@@ -784,7 +784,7 @@ mod tests {
         assert!(meshes.unwrap().is_empty());
     }
 
-    /// Phase 1 — a campaign without `levels.ron` loads without error and
+    /// A campaign without `levels.ron` loads without error and
     /// returns `None` (formula fallback).
     #[test]
     fn test_levels_missing_is_ok() {
@@ -805,7 +805,7 @@ mod tests {
         );
     }
 
-    /// Phase 1 — loads `data/test_campaign` and asserts `levels` is `Some`
+    /// Loads `data/test_campaign` and asserts `levels` is `Some`
     /// with the expected knight and sorcerer entries.
     #[test]
     fn test_campaign_loader_loads_levels_from_fixture() {

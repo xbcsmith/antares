@@ -1771,13 +1771,11 @@ fn execute_action(
                 }
                 Err(e) => {
                     // On failure nothing was mutated: no commit needed
-                    warn!("BuyItem failed: {}", e);
-                    if let Some(writer) = game_log_writer.as_mut() {
-                        writer.write(crate::game::systems::ui::GameLogEvent {
-                            text: format!("Cannot buy item: {}", e),
-                            category: crate::game::systems::ui::LogCategory::System,
-                        });
-                    }
+                    crate::report_err!(
+                        game_log_writer,
+                        crate::game::systems::ui::LogCategory::System,
+                        format!("Cannot buy item: {}", e)
+                    );
                 }
             }
         }
@@ -1909,13 +1907,11 @@ fn execute_action(
                     }
                 }
                 Err(e) => {
-                    warn!("SellItem failed: {}", e);
-                    if let Some(writer) = game_log_writer.as_mut() {
-                        writer.write(crate::game::systems::ui::GameLogEvent {
-                            text: format!("Cannot sell item: {}", e),
-                            category: crate::game::systems::ui::LogCategory::System,
-                        });
-                    }
+                    crate::report_err!(
+                        game_log_writer,
+                        crate::game::systems::ui::LogCategory::System,
+                        format!("Cannot sell item: {}", e)
+                    );
                 }
             }
         }

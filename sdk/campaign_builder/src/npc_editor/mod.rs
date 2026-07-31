@@ -2218,6 +2218,8 @@ impl NpcEditorState {
         if id.is_empty() {
             return false;
         }
+        // Guarded by the is_empty() check above, so the id has at least one char.
+        #[allow(clippy::unwrap_used)]
         let first_char = id.chars().next().unwrap();
         if !first_char.is_ascii_alphabetic() && first_char != '_' {
             return false;

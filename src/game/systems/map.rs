@@ -40,7 +40,7 @@ const TILE_CENTER_OFFSET: f32 = 0.5;
 
 /// Returns whether a forest tile should receive an extra random shrub.
 ///
-/// Phase 1 vegetation cleanup intentionally keeps extra forest shrubs away from
+/// The vegetation cleanup intentionally keeps extra forest shrubs away from
 /// tiles that already have centered vegetation, because the current shrub
 /// spawner uses the tile center and visibly clips tree trunks there.
 fn should_spawn_extra_forest_shrub(is_forest: bool, spawned_center_vegetation: bool) -> bool {
@@ -641,7 +641,7 @@ impl Plugin for MapRenderingPlugin {
             .init_resource::<super::advanced_grass::GrassAssetCache>()
             .init_resource::<super::advanced_grass::GrassRenderConfig>()
             .init_resource::<super::advanced_grass::GrassInstanceConfig>()
-            // Phase-7 GPU instancing plugin — must be added before the material
+            // GPU instancing plugin — must be added before the material
             // plugin so the GrassRenderMode resource is available at startup.
             .add_plugins(super::grass_instancing::GrassInstancingPlugin)
             .add_plugins(bevy::pbr::MaterialPlugin::<GrassMaterial>::default())
@@ -6507,7 +6507,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 2: EventMeshMarker spawn / despawn tests =====
+    // ===== EventMeshMarker spawn / despawn tests =====
 
     /// P2-EM1: A Treasure event with mesh_id causes spawn_event_meshes to create an
     /// entity tagged with EventMeshMarker at the correct map position.

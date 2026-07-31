@@ -56,7 +56,6 @@ pub const LABEL_FONT_SIZE: f32 = 14.0;
 // `docs/explanation/next_plans.md`'s "Fonts are using different sizes on the
 // same line" report: several sibling text nodes on the same card/row were
 // using ad-hoc literals that had silently drifted apart from one another.
-// See `docs/explanation/combat_improvements_implementation_plan.md` Phase 5.
 
 /// Hint / keyboard-footer text size (9.5 px) — the smallest tier, used for
 /// the "[Enter] confirm — [Esc] cancel"-style footer line at the bottom of

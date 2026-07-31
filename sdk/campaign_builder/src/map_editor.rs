@@ -4123,15 +4123,17 @@ impl<'a> Widget for MapGridWidget<'a> {
                                     landscape_id,
                                     pos,
                                 ));
-                                self.state.landscape_placement_editor =
-                                    Some(LandscapePlacementEditorState::from_placement(
-                                        self.state.map.landscape_placements.len() - 1,
-                                        self.state
-                                            .map
-                                            .landscape_placements
-                                            .last()
-                                            .expect("just-added landscape placement must exist"),
-                                    ));
+                                // The last() expect cannot fail: a placement was just pushed above.
+                                #[allow(clippy::expect_used)]
+                                {
+                                    self.state.landscape_placement_editor =
+                                        Some(LandscapePlacementEditorState::from_placement(
+                                            self.state.map.landscape_placements.len() - 1,
+                                            self.state.map.landscape_placements.last().expect(
+                                                "just-added landscape placement must exist",
+                                            ),
+                                        ));
+                                }
                             }
                         }
                         EditorTool::Fill => {
@@ -4902,6 +4904,8 @@ impl MapsEditorState {
                         if let Some(dir) = campaign_dir {
                             let map_path = dir.join(maps_dir).join(format!("map_{}.ron", map.id));
                             if map_path.exists() {
+                                // Best-effort cleanup of the map file being deleted; failure is not fatal.
+                                #[allow(clippy::let_underscore_must_use)]
                                 let _ = fs::remove_file(&map_path);
                             }
                         }

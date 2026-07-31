@@ -817,6 +817,9 @@ impl CreaturesEditorState {
                         // Ignore errors — the creature may not have been saved to disk yet.
                         if let Some(ref dir) = *campaign_dir {
                             let asset_manager = CreatureAssetManager::new(dir.clone());
+                            // Delete is best-effort: the creature may not have
+                            // been saved to disk yet, so a failure is expected.
+                            #[allow(clippy::let_underscore_must_use)]
                             let _ = asset_manager.delete_creature(creature_id);
                         }
                         creatures.remove(idx);
@@ -1173,6 +1176,9 @@ impl CreaturesEditorState {
             let validation_result =
                 Self::validate_creature_asset_file(full_path, existing_creatures);
 
+            // Send failure only occurs if the UI dropped the receiver (editor
+            // closed the register dialog); the discard is intentional.
+            #[allow(clippy::let_underscore_must_use)]
             let _ = tx.send(RegisterAssetValidationResult {
                 request_path,
                 result: validation_result,
@@ -1661,6 +1667,9 @@ impl CreaturesEditorState {
                         // Ignore errors — the creature may not have been saved to disk yet.
                         if let Some(ref dir) = *campaign_dir {
                             let asset_manager = CreatureAssetManager::new(dir.clone());
+                            // Delete is best-effort: the creature may not have
+                            // been saved to disk yet, so a failure is expected.
+                            #[allow(clippy::let_underscore_must_use)]
                             let _ = asset_manager.delete_creature(creature_id);
                         }
                         creatures.remove(idx);

@@ -629,7 +629,9 @@ fn render_container_character_strip(
                     })
                     .small();
                 // Mouse clicks on character buttons are informational only;
-                // switching is handled via number keys in the input system.
+                // switching is handled via number keys in the input system, so
+                // the button's click Response is intentionally discarded.
+                #[allow(clippy::let_underscore_must_use)]
                 let _ = ui.button(label);
             });
         }

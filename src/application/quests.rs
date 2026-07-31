@@ -923,7 +923,7 @@ mod tests {
         assert!(gs.party.members[0].spells.sorcerer_spells[0].contains(&0x0501));
     }
 
-    // ===== Phase 2: experience_rate scaling tests =====
+    // ===== experience_rate scaling tests =====
 
     #[test]
     fn test_quest_experience_reward_scaled_by_experience_rate() {

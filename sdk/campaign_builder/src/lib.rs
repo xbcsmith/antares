@@ -11,6 +11,24 @@
 //! - Data editors for all game content types
 //! - Unsaved changes tracking and warnings
 
+// Error-handling regression gate (Phase 4): forbid new panicking `unwrap`/
+// `expect` and ignored `#[must_use]` results in non-test code. Existing
+// justified sites carry targeted `#[allow(...)]` attributes with rationale.
+// Test code is exempt.
+#![warn(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::let_underscore_must_use
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::let_underscore_must_use
+    )
+)]
+
 pub mod advanced_validation;
 pub mod animation_editor;
 pub mod app_dialogs;
@@ -1168,6 +1186,9 @@ impl eframe::App for CampaignBuilderApp {
                     // then reuse the cached TextureHandle every subsequent frame.
                     let logo_bytes: &[u8] = include_bytes!("../assets/antares_logo.png");
                     let texture = self.logo_texture.get_or_insert_with(|| {
+                        // The logo is embedded at compile time via include_bytes!,
+                        // so it is always a valid PNG and decoding cannot fail.
+                        #[allow(clippy::expect_used)]
                         let img = image::load_from_memory(logo_bytes)
                             .expect("antares_logo.png is a valid PNG");
                         let rgba = img.to_rgba8();
@@ -2242,6 +2263,10 @@ impl CampaignBuilderApp {
         if do_export {
             match &campaign_dir {
                 Some(dir) => {
+                    // `run_export` records success/failure via its own
+                    // `export_error`/`progress_message` state (surfaced below),
+                    // so the returned manifest is intentionally discarded here.
+                    #[allow(clippy::let_underscore_must_use)]
                     let _ = wizard.run_export(dir);
                 }
                 None => {

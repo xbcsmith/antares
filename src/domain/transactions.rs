@@ -237,6 +237,11 @@ pub struct ServiceOutcome {
 /// assert_eq!(slot.item_id, 1);
 /// assert_eq!(party.gold, 90); // 100 - 10
 /// ```
+// Inventory-space and item-existence are validated earlier in each function
+// (see the `is_full()` / `can_equip_item` / bounds checks and the SAFETY/Step
+// comments at each call site), so these `expect`s guard genuinely unreachable
+// logic-error states rather than recoverable runtime failures.
+#[allow(clippy::expect_used)]
 pub fn buy_item(
     party: &mut Party,
     character: &mut Character,
@@ -712,6 +717,10 @@ fn character_roster_id(_character: &Character) -> CharacterId {
 /// assert!(character.inventory.items.is_empty());
 /// assert_eq!(world.get_map(1).unwrap().dropped_items.len(), 1);
 /// ```
+// Slot bounds and map existence are verified in earlier steps of this function
+// (see the Step comments), so these `expect`s guard unreachable logic-error
+// states rather than recoverable failures.
+#[allow(clippy::expect_used)]
 pub fn drop_item(
     character: &mut Character,
     character_id: CharacterId,
@@ -906,6 +915,9 @@ pub fn pickup_item(
 /// * [`EquipError::RaceRestriction`]     – Character race has an incompatible item tag.
 /// * [`EquipError::AlignmentRestriction`]– Character alignment cannot use the item.
 /// * [`EquipError::NoSlotAvailable`]     – Item type is not equippable.
+// `can_equip_item` and the Step 1 bounds check guarantee the item and slot
+// exist, so these `expect`s guard unreachable logic-error states.
+#[allow(clippy::expect_used)]
 pub fn equip_item(
     character: &mut Character,
     inventory_slot_index: usize,
@@ -993,6 +1005,9 @@ pub fn equip_item(
 /// # Errors
 ///
 /// * [`TransactionError::InventoryFull`] – No inventory space for the unequipped item.
+// `!is_full()` was verified in Step 2 and a slot was just cleared, so adding the
+// item back cannot fail; this `expect` guards an unreachable logic-error state.
+#[allow(clippy::expect_used)]
 pub fn unequip_item(
     character: &mut Character,
     slot: EquipmentSlot,

@@ -117,6 +117,8 @@ impl PatternMatcher {
     /// Panics if the regex pattern is invalid.
     pub fn new(pattern: &str, description: &str) -> Self {
         Self {
+            // Test-support helper; an invalid setup regex is unrecoverable and should panic.
+            #[allow(clippy::expect_used)]
             pattern: Regex::new(pattern).expect("Invalid regex pattern"),
             description: description.to_string(),
         }

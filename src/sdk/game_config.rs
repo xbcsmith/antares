@@ -101,7 +101,7 @@ use thiserror::Error;
 
 /// Game configuration error types
 #[derive(Error, Debug)]
-pub enum ConfigError {
+pub enum GameConfigError {
     /// Failed to read configuration file
     #[error("Failed to read config file: {0}")]
     ReadError(String),
@@ -184,8 +184,8 @@ impl GameConfig {
     ///
     /// # Errors
     ///
-    /// Returns `ConfigError::ReadError` if file exists but cannot be read
-    /// Returns `ConfigError::ParseError` if file content is invalid RON
+    /// Returns `GameConfigError::ReadError` if file exists but cannot be read
+    /// Returns `GameConfigError::ParseError` if file content is invalid RON
     ///
     /// # Examples
     ///
@@ -198,7 +198,7 @@ impl GameConfig {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn load_or_default(path: &Path) -> Result<Self, ConfigError> {
+    pub fn load_or_default(path: &Path) -> Result<Self, GameConfigError> {
         if !path.exists() {
             tracing::warn!(
                 "Config file not found at {:?}, using default configuration",
@@ -208,10 +208,10 @@ impl GameConfig {
         }
 
         let contents = fs::read_to_string(path)
-            .map_err(|e| ConfigError::ReadError(format!("{}: {}", path.display(), e)))?;
+            .map_err(|e| GameConfigError::ReadError(format!("{}: {}", path.display(), e)))?;
 
         let config: GameConfig = ron::from_str(&contents)
-            .map_err(|e| ConfigError::ParseError(format!("{}: {}", path.display(), e)))?;
+            .map_err(|e| GameConfigError::ParseError(format!("{}: {}", path.display(), e)))?;
 
         config.validate()?;
         Ok(config)
@@ -225,7 +225,7 @@ impl GameConfig {
     ///
     /// # Errors
     ///
-    /// Returns `ConfigError::ValidationError` if any validation fails
+    /// Returns `GameConfigError::ValidationError` if any validation fails
     ///
     /// # Examples
     ///
@@ -235,7 +235,7 @@ impl GameConfig {
     /// let config = GameConfig::default();
     /// assert!(config.validate().is_ok());
     /// ```
-    pub fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), GameConfigError> {
         self.graphics.validate()?;
         self.audio.validate()?;
         self.controls.validate()?;
@@ -331,48 +331,48 @@ impl GameLogConfig {
     ///
     /// # Errors
     ///
-    /// Returns `ConfigError::ValidationError` if:
+    /// Returns `GameConfigError::ValidationError` if:
     /// - `max_entries` is zero
     /// - `toggle_key` is empty
     /// - `panel_width_px` or `panel_height_px` are non-positive
     /// - `panel_opacity` is outside `0.0..=1.0`
     /// - `default_enabled_categories` is empty
-    pub fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), GameConfigError> {
         if self.max_entries == 0 {
-            return Err(ConfigError::ValidationError(
+            return Err(GameConfigError::ValidationError(
                 "game_log.max_entries must be at least 1".to_string(),
             ));
         }
 
         if self.toggle_key.trim().is_empty() {
-            return Err(ConfigError::ValidationError(
+            return Err(GameConfigError::ValidationError(
                 "game_log.toggle_key must not be empty".to_string(),
             ));
         }
 
         if self.panel_width_px <= 0.0 {
-            return Err(ConfigError::ValidationError(format!(
+            return Err(GameConfigError::ValidationError(format!(
                 "game_log.panel_width_px must be positive, got {}",
                 self.panel_width_px
             )));
         }
 
         if self.panel_height_px <= 0.0 {
-            return Err(ConfigError::ValidationError(format!(
+            return Err(GameConfigError::ValidationError(format!(
                 "game_log.panel_height_px must be positive, got {}",
                 self.panel_height_px
             )));
         }
 
         if !(0.0..=1.0).contains(&self.panel_opacity) {
-            return Err(ConfigError::ValidationError(format!(
+            return Err(GameConfigError::ValidationError(format!(
                 "game_log.panel_opacity must be in range 0.0-1.0, got {}",
                 self.panel_opacity
             )));
         }
 
         if self.default_enabled_categories.is_empty() {
-            return Err(ConfigError::ValidationError(
+            return Err(GameConfigError::ValidationError(
                 "game_log.default_enabled_categories must not be empty".to_string(),
             ));
         }
@@ -439,15 +439,15 @@ impl GraphicsConfig {
     /// # Errors
     ///
     /// Returns error if resolution is zero or MSAA samples is not a power of 2
-    pub fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), GameConfigError> {
         if self.resolution.0 == 0 || self.resolution.1 == 0 {
-            return Err(ConfigError::ValidationError(
+            return Err(GameConfigError::ValidationError(
                 "Resolution width and height must be greater than 0".to_string(),
             ));
         }
 
         if self.msaa_samples > 0 && !self.msaa_samples.is_power_of_two() {
-            return Err(ConfigError::ValidationError(format!(
+            return Err(GameConfigError::ValidationError(format!(
                 "MSAA samples must be a power of 2, got {}",
                 self.msaa_samples
             )));
@@ -510,7 +510,7 @@ impl AudioConfig {
     /// # Errors
     ///
     /// Returns error if any volume is outside 0.0-1.0 range
-    pub fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), GameConfigError> {
         let volumes = [
             ("master_volume", self.master_volume),
             ("music_volume", self.music_volume),
@@ -520,7 +520,7 @@ impl AudioConfig {
 
         for (name, volume) in volumes {
             if !(0.0..=1.0).contains(&volume) {
-                return Err(ConfigError::ValidationError(format!(
+                return Err(GameConfigError::ValidationError(format!(
                     "{} must be in range 0.0-1.0, got {}",
                     name, volume
                 )));
@@ -713,37 +713,37 @@ impl ControlsConfig {
     ///
     /// # Errors
     ///
-    /// Returns `ConfigError::ValidationError` if movement cooldown is negative,
+    /// Returns `GameConfigError::ValidationError` if movement cooldown is negative,
     /// if the inventory key list is empty, if the rest key list is empty, if
     /// the automap key list is empty, or if the character_sheet key list is empty.
-    pub fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), GameConfigError> {
         if self.movement_cooldown < 0.0 {
-            return Err(ConfigError::ValidationError(format!(
+            return Err(GameConfigError::ValidationError(format!(
                 "movement_cooldown must be non-negative, got {}",
                 self.movement_cooldown
             )));
         }
 
         if self.inventory.is_empty() {
-            return Err(ConfigError::ValidationError(
+            return Err(GameConfigError::ValidationError(
                 "inventory key list must not be empty".to_string(),
             ));
         }
 
         if self.rest.is_empty() {
-            return Err(ConfigError::ValidationError(
+            return Err(GameConfigError::ValidationError(
                 "rest key list must not be empty".to_string(),
             ));
         }
 
         if self.automap.is_empty() {
-            return Err(ConfigError::ValidationError(
+            return Err(GameConfigError::ValidationError(
                 "automap key list must not be empty".to_string(),
             ));
         }
 
         if self.character_sheet.is_empty() {
-            return Err(ConfigError::ValidationError(
+            return Err(GameConfigError::ValidationError(
                 "character_sheet key list must not be empty".to_string(),
             ));
         }
@@ -757,7 +757,7 @@ impl ControlsConfig {
             ("character_select_6", &self.character_select_6),
         ] {
             if keys.is_empty() {
-                return Err(ConfigError::ValidationError(format!(
+                return Err(GameConfigError::ValidationError(format!(
                     "{field_name} key list must not be empty"
                 )));
             }
@@ -831,30 +831,30 @@ impl CameraConfig {
     /// # Errors
     ///
     /// Returns error if values are out of reasonable ranges
-    pub fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), GameConfigError> {
         if self.eye_height <= 0.0 {
-            return Err(ConfigError::ValidationError(format!(
+            return Err(GameConfigError::ValidationError(format!(
                 "eye_height must be positive, got {}",
                 self.eye_height
             )));
         }
 
         if !(30.0..=120.0).contains(&self.fov) {
-            return Err(ConfigError::ValidationError(format!(
+            return Err(GameConfigError::ValidationError(format!(
                 "fov must be in range 30.0-120.0 degrees, got {}",
                 self.fov
             )));
         }
 
         if self.near_clip <= 0.0 {
-            return Err(ConfigError::ValidationError(format!(
+            return Err(GameConfigError::ValidationError(format!(
                 "near_clip must be positive, got {}",
                 self.near_clip
             )));
         }
 
         if self.far_clip <= self.near_clip {
-            return Err(ConfigError::ValidationError(format!(
+            return Err(GameConfigError::ValidationError(format!(
                 "far_clip ({}) must be greater than near_clip ({})",
                 self.far_clip, self.near_clip
             )));
@@ -932,7 +932,7 @@ impl RestConfig {
     ///
     /// # Errors
     ///
-    /// Returns `ConfigError::ValidationError` if:
+    /// Returns `GameConfigError::ValidationError` if:
     /// - `full_rest_hours` is zero.
     /// - `rest_encounter_rate_multiplier` is negative.
     ///
@@ -943,14 +943,14 @@ impl RestConfig {
     ///
     /// assert!(RestConfig::default().validate().is_ok());
     /// ```
-    pub fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), GameConfigError> {
         if self.full_rest_hours == 0 {
-            return Err(ConfigError::ValidationError(
+            return Err(GameConfigError::ValidationError(
                 "full_rest_hours must be at least 1".to_string(),
             ));
         }
         if self.rest_encounter_rate_multiplier < 0.0 {
-            return Err(ConfigError::ValidationError(format!(
+            return Err(GameConfigError::ValidationError(format!(
                 "rest_encounter_rate_multiplier must be >= 0.0, got {}",
                 self.rest_encounter_rate_multiplier
             )));
@@ -1048,7 +1048,7 @@ impl TimeConfig {
     ///
     /// assert!(TimeConfig::default().validate().is_ok());
     /// ```
-    pub fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), GameConfigError> {
         // movement_step_seconds can be 0 (instant) or positive
         // combat_turn_seconds can be 0 or positive
         // map_transition_seconds can be 0 or positive
@@ -1141,7 +1141,7 @@ impl LevelingConfig {
     ///
     /// # Errors
     ///
-    /// Returns `ConfigError::ValidationError` if:
+    /// Returns `GameConfigError::ValidationError` if:
     /// - `base_xp` is 0 (must be at least 1)
     /// - `xp_multiplier` is below 0.1
     /// - `training_fee_multiplier` is below 0.01
@@ -1153,19 +1153,19 @@ impl LevelingConfig {
     ///
     /// assert!(LevelingConfig::default().validate().is_ok());
     /// ```
-    pub fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), GameConfigError> {
         if self.base_xp < 1 {
-            return Err(ConfigError::ValidationError(
+            return Err(GameConfigError::ValidationError(
                 "leveling.base_xp must be at least 1".to_string(),
             ));
         }
         if self.xp_multiplier < 0.1 {
-            return Err(ConfigError::ValidationError(
+            return Err(GameConfigError::ValidationError(
                 "leveling.xp_multiplier must be at least 0.1".to_string(),
             ));
         }
         if self.training_fee_multiplier < 0.01 {
-            return Err(ConfigError::ValidationError(
+            return Err(GameConfigError::ValidationError(
                 "leveling.training_fee_multiplier must be at least 0.01".to_string(),
             ));
         }
@@ -1217,13 +1217,13 @@ impl FontConfig {
     ///
     /// # Errors
     ///
-    /// Returns `ConfigError::ValidationError` with a descriptive message when
+    /// Returns `GameConfigError::ValidationError` with a descriptive message when
     /// any rule is violated.
     ///
     /// # Examples
     ///
     /// ```
-    /// use antares::sdk::game_config::{ConfigError, FontConfig};
+    /// use antares::sdk::game_config::{GameConfigError, FontConfig};
     ///
     /// // None fields always pass.
     /// assert!(FontConfig::default().validate().is_ok());
@@ -1240,31 +1240,31 @@ impl FontConfig {
     ///     dialogue_font: Some("fonts/my_font.otf".to_string()),
     ///     ..Default::default()
     /// };
-    /// assert!(matches!(bad.validate(), Err(ConfigError::ValidationError(_))));
+    /// assert!(matches!(bad.validate(), Err(GameConfigError::ValidationError(_))));
     /// ```
-    pub fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), GameConfigError> {
         for (field_name, opt_path) in [
             ("fonts.dialogue_font", &self.dialogue_font),
             ("fonts.game_menu_font", &self.game_menu_font),
         ] {
             if let Some(path) = opt_path {
                 if path.starts_with('/') || path.contains(":\\") {
-                    return Err(ConfigError::ValidationError(format!(
+                    return Err(GameConfigError::ValidationError(format!(
                         "{field_name} must be a relative path (got {path:?})"
                     )));
                 }
                 if path.contains("..") {
-                    return Err(ConfigError::ValidationError(format!(
+                    return Err(GameConfigError::ValidationError(format!(
                         "{field_name} must not contain '..' (got {path:?})"
                     )));
                 }
                 if !path.starts_with("fonts/") {
-                    return Err(ConfigError::ValidationError(format!(
+                    return Err(GameConfigError::ValidationError(format!(
                         "{field_name} must start with 'fonts/' (got {path:?})"
                     )));
                 }
                 if !path.ends_with(".ttf") {
-                    return Err(ConfigError::ValidationError(format!(
+                    return Err(GameConfigError::ValidationError(format!(
                         "{field_name} must end with '.ttf' (got {path:?})"
                     )));
                 }
@@ -1621,7 +1621,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
 
         let config = GraphicsConfig {
@@ -1630,7 +1630,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
     }
 
@@ -1642,7 +1642,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
     }
 
@@ -1669,7 +1669,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
 
         let config = AudioConfig {
@@ -1678,7 +1678,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
 
         let config = AudioConfig {
@@ -1688,7 +1688,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
     }
 
@@ -1721,7 +1721,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
 
         let config = CameraConfig {
@@ -1730,7 +1730,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
     }
 
@@ -1742,7 +1742,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
 
         let config = CameraConfig {
@@ -1751,7 +1751,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
 
         let config = CameraConfig {
@@ -1775,7 +1775,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
 
         let config = CameraConfig {
@@ -1785,7 +1785,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
     }
 
@@ -1803,7 +1803,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
     }
 
@@ -1826,7 +1826,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
     }
 
@@ -1850,7 +1850,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
     }
 
@@ -1871,7 +1871,7 @@ mod tests {
         };
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
     }
 
@@ -1929,7 +1929,7 @@ mod tests {
         };
         let result = config.validate();
         assert!(result.is_err());
-        if let Err(ConfigError::ValidationError(msg)) = result {
+        if let Err(GameConfigError::ValidationError(msg)) = result {
             assert!(
                 msg.contains("character_sheet"),
                 "error message should mention character_sheet, got: {msg}"
@@ -2053,7 +2053,7 @@ mod tests {
         temp_file.flush().unwrap();
 
         let result = GameConfig::load_or_default(temp_file.path());
-        assert!(matches!(result, Err(ConfigError::ParseError(_))));
+        assert!(matches!(result, Err(GameConfigError::ParseError(_))));
     }
 
     #[test]
@@ -2076,7 +2076,7 @@ mod tests {
 
         assert!(matches!(
             config.validate(),
-            Err(ConfigError::ValidationError(_))
+            Err(GameConfigError::ValidationError(_))
         ));
     }
 
@@ -2462,7 +2462,7 @@ mod tests {
                 "character_select_{} empty list must fail validation",
                 idx + 1
             );
-            if let Err(ConfigError::ValidationError(ref msg)) = result {
+            if let Err(GameConfigError::ValidationError(ref msg)) = result {
                 assert!(
                     msg.contains(&format!("character_select_{}", idx + 1)),
                     "error message should mention character_select_{}, got: {msg}",

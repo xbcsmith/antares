@@ -171,6 +171,11 @@ static TRAY_CMD_TX: OnceLock<SyncSender<TrayCommand>> = OnceLock::new();
 /// // `_tray` stays alive for the duration of `run()`; `tray_cmd_rx` is moved
 /// // into the app inside the `run_native` closure.
 /// ```
+// The `.expect(...)` sites operate on compile-time-embedded PNG bytes and
+// platform invariants (consistent RGBA dims, main-thread NSStatusItem) that
+// cannot fail at runtime; the `let _ = TRAY_CMD_TX.set(tx)` discard is the
+// intentional first-writer-wins behaviour documented in the body.
+#[allow(clippy::expect_used, clippy::let_underscore_must_use)]
 pub fn build_tray_icon() -> (tray_icon::TrayIcon, Receiver<TrayCommand>) {
     // Create the bounded command channel (capacity 32).
     // `SyncSender` is `Send + Sync`, satisfying the `OnceLock` static bound.
@@ -249,6 +254,9 @@ pub fn build_tray_icon() -> (tray_icon::TrayIcon, Receiver<TrayCommand>) {
 /// #[cfg(target_os = "macos")]
 /// tray::handle_tray_events();
 /// ```
+// The `tx.send(...)` discards are intentional best-effort delivery: a send
+// error only occurs when the receiver has been dropped (window already gone).
+#[allow(clippy::let_underscore_must_use)]
 pub fn handle_tray_events() {
     // Retrieve the sender stored by `build_tray_icon()`.  If the static has
     // not yet been initialised (should never happen in production since

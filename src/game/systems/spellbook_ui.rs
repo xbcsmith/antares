@@ -42,10 +42,6 @@
 //!      the currently browsed character.
 //!    - **Esc**                 — exit SpellBook and restore previous mode.
 //! 3. [`spellbook_ui_system`] renders the three-column egui panel every frame.
-//!
-//! # Architecture Reference
-//!
-//! Phase 2 of `docs/explanation/spell_management_implementation_plan.md`.
 
 use crate::application::resources::GameContent;
 use crate::application::spell_book_state::SpellBookState;

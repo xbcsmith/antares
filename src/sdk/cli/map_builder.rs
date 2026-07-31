@@ -673,6 +673,10 @@ pub fn print_help() {
 ///
 /// Returns `Err` only if `rustyline` fails to initialise (which is not
 /// expected in normal operation).
+// Command-history load/save/append are best-effort convenience features; a
+// failure (e.g. missing history file on first run) is intentionally ignored so
+// the interactive builder still works.
+#[allow(clippy::let_underscore_must_use)]
 pub fn run_build() -> Result<(), Box<dyn std::error::Error>> {
     println!("╔═══════════════════════════════════════╗");
     println!("║   Antares RPG - Map Builder v1.0     ║");

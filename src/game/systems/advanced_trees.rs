@@ -1393,7 +1393,7 @@ fn append_leaf_shape(
 /// (`up = Y.lerp(direction, 0.35)`), which would collapse a direction-based
 /// second pass to near-zero area.
 ///
-/// `double_sided: true` on the foliage material (Phase 1) covers both winding
+/// `double_sided: true` on the foliage material covers both winding
 /// orders without needing reversed indices for the second pass.
 ///
 /// Used by Oak, Birch, Willow, Palm, and Shrub. Pine uses a single pass
@@ -3828,7 +3828,7 @@ mod tests {
         }
     }
 
-    // ==================== Phase 2: Cross-Pattern Leaf Volume Tests ====================
+    // ==================== Cross-Pattern Leaf Volume Tests ====================
 
     /// Tests that `append_leaf_card_cross` produces exactly twice the vertices
     /// of a single `append_leaf_shape` call for Oak.
@@ -3968,11 +3968,11 @@ mod tests {
     }
 
     /// Tests that `LeafPreset.count` for cross-pattern species is 30–40% lower
-    /// than the pre-Phase-2 values (budget compensation for doubled polygon count).
+    /// than the earlier values (budget compensation for doubled polygon count).
     #[test]
     fn test_leaf_preset_count_reduced_for_cross_pattern_species() {
-        // Pre-Phase-2 counts: Oak=5, Birch=3, Willow=6, Palm=8, Shrub=6
-        // Post-Phase-2 target: each reduced 30–40%
+        // Earlier counts: Oak=5, Birch=3, Willow=6, Palm=8, Shrub=6
+        // Target after the cross-pattern leaf change: each reduced 30–40%
         let cases = [
             (TreeType::Oak, 5u32),
             (TreeType::Birch, 3),

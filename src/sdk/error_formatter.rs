@@ -10,10 +10,10 @@
 //!
 //! ```
 //! use antares::sdk::error_formatter::{ErrorFormatter, ErrorContext};
-//! use antares::sdk::validation::ValidationError;
+//! use antares::sdk::validation::CampaignValidationError;
 //! use antares::domain::types::ItemId;
 //!
-//! let error = ValidationError::MissingItem {
+//! let error = CampaignValidationError::MissingItem {
 //!     context: "Monster loot table".to_string(),
 //!     item_id: ItemId::from(99),
 //! };
@@ -29,7 +29,7 @@
 //! println!("{}", formatted);
 //! ```
 
-use crate::sdk::validation::ValidationError;
+use crate::sdk::validation::CampaignValidationError;
 
 use std::path::PathBuf;
 
@@ -78,7 +78,7 @@ impl ErrorFormatter {
     /// Formats a validation error with enhanced context
     pub fn format_validation_error(
         &self,
-        error: &ValidationError,
+        error: &CampaignValidationError,
         context: Option<&ErrorContext>,
     ) -> String {
         let mut output = String::new();
@@ -101,7 +101,7 @@ impl ErrorFormatter {
     }
 
     /// Formats multiple errors as a report
-    pub fn format_error_report(&self, errors: &[ValidationError]) -> String {
+    pub fn format_error_report(&self, errors: &[CampaignValidationError]) -> String {
         let mut output = String::new();
 
         let error_count = errors.iter().filter(|e| e.is_error()).count();
@@ -135,7 +135,7 @@ impl ErrorFormatter {
 
     // === Private Helper Methods ===
 
-    fn append_header(&self, output: &mut String, error: &ValidationError) {
+    fn append_header(&self, output: &mut String, error: &CampaignValidationError) {
         let (symbol, color) = if error.is_error() {
             ("✗", ERROR_COLOR)
         } else if error.is_warning() {
@@ -161,14 +161,14 @@ impl ErrorFormatter {
         }
     }
 
-    fn append_error_details(&self, output: &mut String, error: &ValidationError) {
+    fn append_error_details(&self, output: &mut String, error: &CampaignValidationError) {
         output.push_str(&format!("{}\n", error));
     }
 
     fn append_suggestions(
         &self,
         output: &mut String,
-        error: &ValidationError,
+        error: &CampaignValidationError,
         context: Option<&ErrorContext>,
     ) {
         let suggestions = self.get_suggestions(error, context);
@@ -187,11 +187,11 @@ impl ErrorFormatter {
 
     fn get_suggestions(
         &self,
-        error: &ValidationError,
+        error: &CampaignValidationError,
         context: Option<&ErrorContext>,
     ) -> Vec<String> {
         match error {
-            ValidationError::MissingClass {
+            CampaignValidationError::MissingClass {
                 class_id,
                 context: _,
             } => {
@@ -212,7 +212,7 @@ impl ErrorFormatter {
                 suggestions
             }
 
-            ValidationError::MissingRace { race_id, .. } => {
+            CampaignValidationError::MissingRace { race_id, .. } => {
                 vec![
                     format!("Run 'race_editor' to create race with ID '{race_id}'"),
                     format!("Check that 'data/races.ron' contains race '{race_id}'"),
@@ -220,14 +220,14 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::InvalidDiceRoll { context, reason } => {
+            CampaignValidationError::InvalidDiceRoll { context, reason } => {
                 vec![
                     format!("Invalid dice roll in {context}: {reason}"),
                     "A die must have at least 1 side; set `sides` to a positive value (e.g. 1d6) in the monster's attack damage.".to_string(),
                 ]
             }
 
-            ValidationError::MissingItem {
+            CampaignValidationError::MissingItem {
                 item_id,
                 context: _,
             } => {
@@ -255,7 +255,7 @@ impl ErrorFormatter {
                 suggestions
             }
 
-            ValidationError::MissingMonster { monster_id, map } => {
+            CampaignValidationError::MissingMonster { monster_id, map } => {
                 vec![
                     format!("Add monster {monster_id} to 'data/monsters.ron'"),
                     format!("Or remove reference from map '{map}'"),
@@ -264,7 +264,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::MissingSpell { spell_id, .. } => {
+            CampaignValidationError::MissingSpell { spell_id, .. } => {
                 vec![
                     format!("Add spell {spell_id} to 'data/spells.ron'"),
                     "Spell definitions are loaded from the spells data file".to_string(),
@@ -272,7 +272,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::InvalidStartingInnkeeper {
+            CampaignValidationError::InvalidStartingInnkeeper {
                 innkeeper_id,
                 reason,
             } => {
@@ -286,7 +286,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::DisconnectedMap { map_id } => {
+            CampaignValidationError::DisconnectedMap { map_id } => {
                 vec![
                     format!("Add a connection to map {map_id} from another map"),
                     "Use 'map_builder' to add exits/entrances".to_string(),
@@ -295,7 +295,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::DuplicateId { entity_type, id } => {
+            CampaignValidationError::DuplicateId { entity_type, id } => {
                 vec![
                     format!("Each {entity_type} must have a unique ID"),
                     format!("Change one of the '{id}' IDs to a different value"),
@@ -303,7 +303,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::BalanceWarning { .. } => {
+            CampaignValidationError::BalanceWarning { .. } => {
                 vec![
                     "This is a balance suggestion, not a critical error".to_string(),
                     "Review the values and adjust if desired".to_string(),
@@ -311,7 +311,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::InnkeeperMissingDialogue { innkeeper_id } => {
+            CampaignValidationError::InnkeeperMissingDialogue { innkeeper_id } => {
                 vec![
                     format!("Innkeeper '{}' must have a dialogue tree configured (set `dialogue_id` in `data/npcs.ron`)", innkeeper_id),
                     "Use the default innkeeper dialogue template (Dialogue ID 999) as a starting point"
@@ -321,7 +321,7 @@ impl ErrorFormatter {
                     "Run the campaign validator to verify changes: `cargo run --bin campaign_validator -- <campaign_path>`".to_string(),
                 ]
             }
-            ValidationError::TooManyStartingPartyMembers { count, max } => {
+            CampaignValidationError::TooManyStartingPartyMembers { count, max } => {
                 vec![
                     format!("Found {count} characters with starts_in_party=true, but max is {max}"),
                     "Edit data/characters.ron and set starts_in_party=false for some characters"
@@ -332,7 +332,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::CreatureEmptyName { creature_id } => {
+            CampaignValidationError::CreatureEmptyName { creature_id } => {
                 vec![
                     format!("Creature ID {} has an empty name", creature_id),
                     "Edit data/creatures.ron and add a name for this creature".to_string(),
@@ -340,7 +340,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::CreatureInvalidScale {
+            CampaignValidationError::CreatureInvalidScale {
                 creature_id,
                 name,
                 scale,
@@ -356,7 +356,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::CreatureNoMeshes { creature_id, name } => {
+            CampaignValidationError::CreatureNoMeshes { creature_id, name } => {
                 vec![
                     format!("Creature '{}' (ID {}) has no meshes", name, creature_id),
                     "Every creature must have at least one mesh definition".to_string(),
@@ -366,7 +366,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::CreatureMeshTopology {
+            CampaignValidationError::CreatureMeshTopology {
                 creature_id,
                 name,
                 mesh_index,
@@ -385,7 +385,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::CreatureDuplicateMeshNames { creature_id, name } => {
+            CampaignValidationError::CreatureDuplicateMeshNames { creature_id, name } => {
                 vec![
                     format!(
                         "Creature '{}' (ID {}) has duplicate mesh names",
@@ -396,7 +396,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::MissingStockTemplateItem { context, item_id } => {
+            CampaignValidationError::MissingStockTemplateItem { context, item_id } => {
                 vec![
                     format!(
                         "NPC '{}' stock template references item ID {} which does not exist",
@@ -408,7 +408,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::InvalidServiceId {
+            CampaignValidationError::InvalidServiceId {
                 context,
                 service_id,
             } => {
@@ -423,7 +423,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::ItemMeshDescriptorInvalid { item_id, message } => {
+            CampaignValidationError::ItemMeshDescriptorInvalid { item_id, message } => {
                 vec![
                     format!(
                         "Item ID {} produced an invalid procedural mesh descriptor: {}",
@@ -436,7 +436,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::HelmetSlotTypeMismatch {
+            CampaignValidationError::HelmetSlotTypeMismatch {
                 character_id,
                 item_id,
                 actual_classification,
@@ -462,7 +462,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::BootsSlotTypeMismatch {
+            CampaignValidationError::BootsSlotTypeMismatch {
                 character_id,
                 item_id,
                 actual_classification,
@@ -488,7 +488,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::LockedObjectKeyNotKeyItem {
+            CampaignValidationError::LockedObjectKeyNotKeyItem {
                 map_id,
                 lock_id,
                 item_id,
@@ -511,7 +511,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::DuplicateLockId { map_id, lock_id } => {
+            CampaignValidationError::DuplicateLockId { map_id, lock_id } => {
                 vec![
                     format!(
                         "Map {} has multiple LockedDoor/LockedContainer events sharing lock_id '{}'",
@@ -529,7 +529,7 @@ impl ErrorFormatter {
                 ]
             }
 
-            ValidationError::WindConfigInvalid { message } => {
+            CampaignValidationError::WindConfigInvalid { message } => {
                 vec![
                     format!("Wind configuration error: {message}"),
                     "Edit 'data/wind.ron' and correct the invalid field value.".to_string(),
@@ -654,7 +654,7 @@ mod tests {
     #[test]
     fn test_formatter_without_color() {
         let formatter = ErrorFormatter::new(false);
-        let error = ValidationError::MissingItem {
+        let error = CampaignValidationError::MissingItem {
             context: "Test".to_string(),
             item_id: ItemId::from(99),
         };
@@ -669,7 +669,7 @@ mod tests {
     #[test]
     fn test_formatter_with_context() {
         let formatter = ErrorFormatter::new(false);
-        let error = ValidationError::MissingItem {
+        let error = CampaignValidationError::MissingItem {
             context: "Test".to_string(),
             item_id: ItemId::from(99),
         };
@@ -739,11 +739,11 @@ mod tests {
     fn test_error_report() {
         let formatter = ErrorFormatter::new(false);
         let errors = vec![
-            ValidationError::MissingItem {
+            CampaignValidationError::MissingItem {
                 context: "Test 1".to_string(),
                 item_id: ItemId::from(1),
             },
-            ValidationError::MissingItem {
+            CampaignValidationError::MissingItem {
                 context: "Test 2".to_string(),
                 item_id: ItemId::from(2),
             },

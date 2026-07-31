@@ -6,7 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 //! Combat-oriented item usage helpers
 //!
 //! This module provides combat-facing helpers for validating and executing
-//! item usage (Phase 8: Item Usage System).
+//! item usage.
 //!
 //! ## Responsibilities
 //!
@@ -26,7 +26,7 @@ SPDX-License-Identifier: Apache-2.0
 //! [`apply_consumable_effect`] in
 //! [`crate::domain::items::consumable_usage`].  This ensures there is exactly
 //! one authoritative implementation shared between the combat path and the
-//! exploration/menu path introduced in Phase 3.
+//! exploration/menu path.
 //!
 //! ## Design Notes
 //!
@@ -529,7 +529,7 @@ pub fn execute_item_use_by_slot<R: Rng>(
         .filter_map(|id| content.conditions.get_condition(id).cloned())
         .collect();
 
-    let _round_effects = combat_state.advance_turn(&cond_defs);
+    let _round_effects = combat_state.advance_turn(&cond_defs, rng);
 
     // Check end-of-combat conditions
     combat_state.check_combat_end();
@@ -1032,10 +1032,10 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Phase 4: Cross-mode regression tests
+    // Cross-mode regression tests
     // ------------------------------------------------------------------
 
-    /// After the Phase 1 refactor, `execute_item_use_by_slot` with an item
+    /// `execute_item_use_by_slot` with an item
     /// whose `is_combat_usable: false` must still return
     /// `Err(ItemUseError::NotUsableInCombat)`.  This regression test confirms
     /// the combat gate is not broken by the delegation to `apply_consumable_effect`.
@@ -1076,7 +1076,7 @@ mod tests {
         );
     }
 
-    /// After Phase 1, `BoostAttribute` applied via `execute_item_use_by_slot`
+    /// `BoostAttribute` applied via `execute_item_use_by_slot`
     /// must produce the same stat delta as a direct call to
     /// `apply_consumable_effect`.  This verifies the shared helper produces
     /// consistent results on both paths.
@@ -1152,7 +1152,7 @@ mod tests {
         }
     }
 
-    /// After Phase 1, `BoostResistance` applied via `execute_item_use_by_slot`
+    /// `BoostResistance` applied via `execute_item_use_by_slot`
     /// must produce the same resistance delta as a direct call to
     /// `apply_consumable_effect`.  This verifies the shared helper produces
     /// consistent results on both paths.
@@ -1254,7 +1254,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 3 regression tests — timed boosts via combat path
+    // Timed-boost regression tests via combat path
     // -----------------------------------------------------------------------
 
     /// Combat use of a `BoostAttribute` item with `duration_minutes: Some(30)`

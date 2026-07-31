@@ -976,16 +976,15 @@ fn update_hud(
             });
 
     // Whether a group-spell target selection targeting party members
-    // (`GroupTargetSide::Characters`) is currently pending (Phase 3,
-    // "Group-Spell Target Clarity"). Mirrors `enter_target_selection`'s
+    // (`GroupTargetSide::Characters`) is currently pending for
+    // "Group-Spell Target Clarity". Mirrors `enter_target_selection`'s
     // handling of `GroupTargetSide::Monsters` for enemy cards.
     let group_characters_pending = group_target
         .as_deref()
         .is_some_and(|gt| matches!(gt.data, Some((_, _, GroupTargetSide::Characters))));
 
     // Update card visibility and background tint. Precedence: group-target
-    // highlight (Phase 3) > active-turn highlight (4.1) > condition tint
-    // (4.2) > default background.
+    // highlight > active-turn highlight > condition tint > default background.
     for (card, mut node, mut bg) in card_query.iter_mut() {
         match party.members.get(card.party_index) {
             Some(character) => {
@@ -4015,7 +4014,7 @@ mod tests {
         );
     }
 
-    /// Verifies the Phase 3 "Group-Spell Target Clarity" highlight: while
+    /// Verifies the "Group-Spell Target Clarity" highlight: while
     /// `GroupTargetPending.data` holds `GroupTargetSide::Characters`, every
     /// living party member's `CharacterCard` shows
     /// `ENEMY_CARD_HIGHLIGHT_COLOR`, taking precedence over the active-turn

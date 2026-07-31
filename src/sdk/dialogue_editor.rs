@@ -143,101 +143,58 @@ pub fn suggest_item_ids(db: &ContentDatabase, partial_name: &str) -> Vec<(ItemId
 // ===== Dialogue Validation =====
 
 /// Validation error for dialogues
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 pub enum DialogueValidationError {
     /// Dialogue has no nodes
+    #[error("Dialogue has no nodes")]
     NoNodes,
 
     /// Root node doesn't exist
+    #[error("Root node {root_node} doesn't exist")]
     RootNodeMissing { root_node: NodeId },
 
     /// Choice references non-existent node
+    #[error("Node {source_node} has choice targeting non-existent node {target_node}")]
     InvalidChoiceTarget {
         source_node: NodeId,
         target_node: NodeId,
     },
 
     /// Node has no choices and is not marked as terminal
+    #[error("Node {node_id} has no choices and is not marked as terminal")]
     NonTerminalNodeWithoutChoices { node_id: NodeId },
 
     /// Referenced quest ID doesn't exist
+    #[error("Invalid quest ID: {quest_id}")]
     InvalidQuestId { quest_id: QuestId },
 
     /// Referenced item ID doesn't exist
+    #[error("Invalid item ID: {item_id}")]
     InvalidItemId { item_id: ItemId },
 
     /// Orphaned node (unreachable from root)
+    #[error("Node {node_id} is orphaned (unreachable from root)")]
     OrphanedNode { node_id: NodeId },
 
     /// Circular path detected (infinite loop possible)
+    #[error("Circular path detected at node {node_id}")]
     CircularPath { node_id: NodeId },
 
     /// Node marked as terminal but has choices
+    #[error("Node {node_id} is marked as terminal but has choices")]
     TerminalNodeWithChoices { node_id: NodeId },
 
     /// Empty node text
+    #[error("Node {node_id} has empty text")]
     EmptyNodeText { node_id: NodeId },
 
     /// Choice has no text
+    #[error("Node {node_id} choice {choice_index} has empty text")]
     EmptyChoiceText {
         node_id: NodeId,
         choice_index: usize,
     },
 }
-
-impl std::fmt::Display for DialogueValidationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DialogueValidationError::NoNodes => write!(f, "Dialogue has no nodes"),
-            DialogueValidationError::RootNodeMissing { root_node } => {
-                write!(f, "Root node {} doesn't exist", root_node)
-            }
-            DialogueValidationError::InvalidChoiceTarget {
-                source_node,
-                target_node,
-            } => {
-                write!(
-                    f,
-                    "Node {} has choice targeting non-existent node {}",
-                    source_node, target_node
-                )
-            }
-            DialogueValidationError::NonTerminalNodeWithoutChoices { node_id } => {
-                write!(
-                    f,
-                    "Node {} has no choices and is not marked as terminal",
-                    node_id
-                )
-            }
-            DialogueValidationError::InvalidQuestId { quest_id } => {
-                write!(f, "Invalid quest ID: {}", quest_id)
-            }
-            DialogueValidationError::InvalidItemId { item_id } => {
-                write!(f, "Invalid item ID: {}", item_id)
-            }
-            DialogueValidationError::OrphanedNode { node_id } => {
-                write!(f, "Node {} is orphaned (unreachable from root)", node_id)
-            }
-            DialogueValidationError::CircularPath { node_id } => {
-                write!(f, "Circular path detected at node {}", node_id)
-            }
-            DialogueValidationError::TerminalNodeWithChoices { node_id } => {
-                write!(f, "Node {} is marked as terminal but has choices", node_id)
-            }
-            DialogueValidationError::EmptyNodeText { node_id } => {
-                write!(f, "Node {} has empty text", node_id)
-            }
-            DialogueValidationError::EmptyChoiceText {
-                node_id,
-                choice_index,
-            } => {
-                write!(f, "Node {} choice {} has empty text", node_id, choice_index)
-            }
-        }
-    }
-}
-
-impl std::error::Error for DialogueValidationError {}
 
 /// Validate a dialogue tree against the content database
 ///
