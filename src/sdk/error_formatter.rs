@@ -220,6 +220,13 @@ impl ErrorFormatter {
                 ]
             }
 
+            ValidationError::InvalidDiceRoll { context, reason } => {
+                vec![
+                    format!("Invalid dice roll in {context}: {reason}"),
+                    "A die must have at least 1 side; set `sides` to a positive value (e.g. 1d6) in the monster's attack damage.".to_string(),
+                ]
+            }
+
             ValidationError::MissingItem {
                 item_id,
                 context: _,

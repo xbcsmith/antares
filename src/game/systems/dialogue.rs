@@ -376,16 +376,12 @@ fn handle_select_choice(
         // --- Read-only phase: inspect mode and capture identifiers ---
         let speaker_entity = match &global_state.0.mode {
             GameMode::Dialogue(state) => {
-                if state.active_tree_id.is_none() {
+                let Some(active_tree_id) = state.active_tree_id else {
                     // Simple dialogue: any choice (like "Goodbye") ends it
                     global_state.0.return_to_exploration();
                     continue;
-                }
-                (
-                    state.active_tree_id.unwrap(),
-                    state.current_node_id,
-                    state.speaker_entity,
-                )
+                };
+                (active_tree_id, state.current_node_id, state.speaker_entity)
             }
             _ => {
                 // Not in dialogue mode - ignore the choice

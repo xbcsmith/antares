@@ -291,6 +291,19 @@ pub enum ValidationError {
         /// Description of the specific validation failure.
         message: String,
     },
+
+    /// A dice roll specification is invalid (e.g. a die with 0 sides).
+    ///
+    /// Emitted when content defines a [`DiceRoll`](crate::domain::types::DiceRoll)
+    /// whose `sides` field is 0. A 0-sided die is nonsensical and, historically,
+    /// caused a runtime panic in `DiceRoll::roll` before it was guarded.
+    #[error("Invalid dice roll in {context}: {reason}")]
+    InvalidDiceRoll {
+        /// Human-readable description of where the bad dice roll was found.
+        context: String,
+        /// Human-readable reason describing why the dice roll is invalid.
+        reason: String,
+    },
 }
 
 impl ValidationError {
@@ -339,6 +352,8 @@ impl ValidationError {
             ValidationError::TooManyStartingPartyMembers { .. } => Severity::Error,
 
             ValidationError::WindConfigInvalid { .. } => Severity::Error,
+
+            ValidationError::InvalidDiceRoll { .. } => Severity::Error,
         }
     }
 
@@ -473,7 +488,50 @@ impl<'a> Validator<'a> {
         // Validate wind configuration ranges
         errors.extend(self.validate_wind_config());
 
+        // Validate dice roll specifications (e.g. monster attacks with 0-sided dice)
+        errors.extend(self.validate_dice_rolls());
+
         Ok(errors)
+    }
+
+    /// Validates dice roll specifications used by monster attacks.
+    ///
+    /// Every attack's damage die must have at least one side. A die with
+    /// `sides == 0` is nonsensical and historically panicked `DiceRoll::roll`
+    /// (the range `1..=0` is empty). Each offending attack produces an
+    /// [`ValidationError::InvalidDiceRoll`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::sdk::database::ContentDatabase;
+    /// use antares::sdk::validation::Validator;
+    ///
+    /// let db = ContentDatabase::new();
+    /// let validator = Validator::new(&db);
+    /// // An empty database has no monsters and therefore no dice-roll errors.
+    /// assert!(validator.validate_dice_rolls().is_empty());
+    /// ```
+    pub fn validate_dice_rolls(&self) -> Vec<ValidationError> {
+        let mut errors = Vec::new();
+
+        for monster_id in self.db.monsters.all_monsters() {
+            if let Some(monster) = self.db.monsters.get_monster(monster_id) {
+                for (i, attack) in monster.attacks.iter().enumerate() {
+                    if attack.damage.sides == 0 {
+                        errors.push(ValidationError::InvalidDiceRoll {
+                            context: format!(
+                                "Monster '{}' (id={}) attack #{}",
+                                monster.name, monster_id, i
+                            ),
+                            reason: "die has 0 sides".into(),
+                        });
+                    }
+                }
+            }
+        }
+
+        errors
     }
 
     /// Validates all cross-references in the content
@@ -3400,5 +3458,103 @@ mod tests {
             .filter(|e| matches!(e, ValidationError::MissingItem { .. }))
             .count();
         assert_eq!(missing_items, 0);
+    }
+
+    #[test]
+    fn test_validate_dice_rolls_flags_zero_sided_monster_attack() {
+        use crate::domain::character::{AttributePair, AttributePair16, Stats};
+        use crate::domain::combat::database::MonsterDefinition;
+        use crate::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
+        use crate::domain::combat::types::{Attack, AttackType};
+        use crate::domain::types::DiceRoll;
+
+        let mut db = ContentDatabase::new();
+
+        // A monster whose only attack rolls a 0-sided die (invalid content).
+        let bad_attack = Attack::new(DiceRoll::new(1, 0, 2), AttackType::Physical, None);
+        let monster = MonsterDefinition {
+            id: 1,
+            name: "Broken Goblin".to_string(),
+            stats: Stats::new(10, 8, 6, 10, 12, 10, 8),
+            hp: AttributePair16::new(15),
+            ac: AttributePair::new(6),
+            attacks: vec![bad_attack],
+            flee_threshold: 0,
+            special_attack_threshold: 0,
+            resistances: MonsterResistances::new(),
+            can_regenerate: false,
+            can_advance: false,
+            is_undead: false,
+            magic_resistance: 0,
+            loot: LootTable::none(),
+            creature_id: None,
+            conditions: MonsterCondition::Normal,
+            active_conditions: vec![],
+            has_acted: false,
+        };
+        db.monsters.add_monster(monster).unwrap();
+
+        let validator = Validator::new(&db);
+
+        // The targeted check flags the invalid die.
+        let dice_errors = validator.validate_dice_rolls();
+        assert!(
+            dice_errors.iter().any(|e| matches!(
+                e,
+                ValidationError::InvalidDiceRoll { context, .. }
+                if context.contains("Broken Goblin")
+            )),
+            "validate_dice_rolls should flag the 0-sided attack, got: {:?}",
+            dice_errors
+        );
+
+        // validate_all wires the check in and surfaces the same error.
+        let all_errors = validator.validate_all().unwrap();
+        assert!(
+            all_errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::InvalidDiceRoll { .. })),
+            "validate_all should surface InvalidDiceRoll"
+        );
+    }
+
+    #[test]
+    fn test_validate_dice_rolls_accepts_valid_monster_attack() {
+        use crate::domain::character::{AttributePair, AttributePair16, Stats};
+        use crate::domain::combat::database::MonsterDefinition;
+        use crate::domain::combat::monster::{LootTable, MonsterCondition, MonsterResistances};
+        use crate::domain::combat::types::{Attack, AttackType};
+        use crate::domain::types::DiceRoll;
+
+        let mut db = ContentDatabase::new();
+
+        let good_attack = Attack::new(DiceRoll::new(1, 6, 0), AttackType::Physical, None);
+        let monster = MonsterDefinition {
+            id: 2,
+            name: "Healthy Goblin".to_string(),
+            stats: Stats::new(10, 8, 6, 10, 12, 10, 8),
+            hp: AttributePair16::new(15),
+            ac: AttributePair::new(6),
+            attacks: vec![good_attack],
+            flee_threshold: 0,
+            special_attack_threshold: 0,
+            resistances: MonsterResistances::new(),
+            can_regenerate: false,
+            can_advance: false,
+            is_undead: false,
+            magic_resistance: 0,
+            loot: LootTable::none(),
+            creature_id: None,
+            conditions: MonsterCondition::Normal,
+            active_conditions: vec![],
+            has_acted: false,
+        };
+        db.monsters.add_monster(monster).unwrap();
+
+        let validator = Validator::new(&db);
+        assert!(
+            validator.validate_dice_rolls().is_empty(),
+            "A valid 1d6 attack should produce no dice-roll errors"
+        );
     }
 }

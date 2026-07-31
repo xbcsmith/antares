@@ -33,6 +33,7 @@ pub mod items;
 pub mod levels;
 pub mod magic;
 pub mod party_manager;
+pub mod path_security;
 pub mod proficiency;
 pub mod progression;
 pub mod quest;
@@ -63,6 +64,12 @@ pub use types::{
     LandscapeId, LandscapeMeshId, MapId, MeshId, MonsterId, RaceId, SpellId,
 };
 pub use types::{DiceRoll, Direction, GameTime, Position};
+
+// Re-export path-security helpers for untrusted campaign/asset paths
+pub use path_security::{
+    validate_campaign_relative_path, validate_filename_component, validate_identifier,
+    PathSecurityError,
+};
 
 // Re-export skill types (Phase 1 + Phase 2 + Phase 3)
 pub use skills::{

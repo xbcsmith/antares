@@ -33,6 +33,7 @@
 //! ```
 
 use crate::domain::campaign::LevelUpMode;
+use crate::domain::path_security::validate_identifier;
 use crate::domain::types::{Direction, GameTime, Position};
 use crate::sdk::database::ContentDatabase;
 use serde::{Deserialize, Serialize};
@@ -72,6 +73,9 @@ pub enum CampaignError {
 
     #[error("Database error: {0}")]
     DatabaseError(String),
+
+    #[error("invalid campaign id: {0}")]
+    InvalidId(String),
 }
 
 // ===== Campaign Structures =====
@@ -848,7 +852,21 @@ impl CampaignLoader {
     }
 
     /// Load a campaign by ID
+    ///
+    /// The `id` is used as a single directory name joined onto the campaigns
+    /// directory, so it is validated with [`validate_identifier`] first to
+    /// prevent path-traversal (`..`, separators, absolute paths) into arbitrary
+    /// locations. Real campaign ids such as `tutorial` and `test_campaign`
+    /// satisfy the `^[A-Za-z0-9_-]+$` allowlist and remain valid.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CampaignError::InvalidId`] if `id` fails identifier validation,
+    /// or any error surfaced by [`Campaign::load`].
     pub fn load_campaign(&self, id: &str) -> Result<Campaign, CampaignError> {
+        validate_identifier(id).map_err(|e| {
+            CampaignError::InvalidId(format!("Invalid campaign id '{}': {}", id, e))
+        })?;
         let path = self.campaigns_dir.join(id);
         Campaign::load(path)
     }
@@ -1272,5 +1290,45 @@ mod tests {
             "Expected no issues, got {} issues",
             report.issue_count()
         );
+    }
+
+    #[test]
+    fn test_load_campaign_rejects_traversal_id() {
+        // An id containing traversal must be rejected before any filesystem
+        // access, yielding the dedicated InvalidId variant.
+        let loader = CampaignLoader::new("data");
+
+        let result = loader.load_campaign("../evil");
+        assert!(
+            matches!(result, Err(CampaignError::InvalidId(_))),
+            "expected InvalidId for '../evil', got {:?}",
+            result
+        );
+
+        let result = loader.load_campaign("a/b");
+        assert!(
+            matches!(result, Err(CampaignError::InvalidId(_))),
+            "expected InvalidId for 'a/b', got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_load_campaign_valid_id_reaches_campaign_load() {
+        // A syntactically valid but nonexistent id must pass id validation and
+        // reach Campaign::load, producing a non-InvalidId error. This proves the
+        // guard does not reject legitimate identifiers.
+        let loader = CampaignLoader::new("data");
+
+        let result = loader.load_campaign("does_not_exist_valid_id");
+        assert!(result.is_err(), "nonexistent campaign should error");
+        assert!(
+            !matches!(result, Err(CampaignError::InvalidId(_))),
+            "a valid id must not be rejected as InvalidId, got {:?}",
+            result
+        );
+
+        // And a real fixture id still loads successfully through the guard.
+        assert!(loader.load_campaign("test_campaign").is_ok());
     }
 }

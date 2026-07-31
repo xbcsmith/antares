@@ -323,7 +323,9 @@ fn antares_file_custom_layer(_app: &mut App) -> Option<BoxedLayer> {
     if let Ok(path_str) = std::env::var("ANTARES_LOG_FILE") {
         let path = std::path::PathBuf::from(path_str);
         if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                tracing::warn!(?e, "failed to create save directory");
+            }
         }
         match std::fs::OpenOptions::new()
             .create(true)

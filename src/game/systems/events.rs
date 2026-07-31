@@ -158,9 +158,6 @@ fn handle_events(
 ) {
     let mut furniture_cache = ProceduralMeshCache::default();
     for trigger in event_reader.read() {
-        // Only process furniture events if we have the necessary resources
-        let can_spawn_furniture = commands.is_some() && materials.is_some() && meshes.is_some();
-
         match &trigger.event {
             MapEvent::Teleport {
                 destination,
@@ -708,52 +705,55 @@ fn handle_events(
                     });
                 }
 
-                // Only spawn furniture if we have the necessary resources (full game context)
-                if can_spawn_furniture {
-                    let map_id = global_state.0.world.current_map;
-                    let commands = commands.as_mut().unwrap();
-                    let materials_res = materials.as_mut().unwrap();
-                    let meshes_res = meshes.as_mut().unwrap();
+                // Only spawn furniture if we have the necessary resources (full
+                // game context). Binding all three resources in one pattern keeps
+                // the guard and the usage from drifting apart; without every
+                // resource we simply skip rendering this event.
+                let (Some(commands), Some(materials_res), Some(meshes_res)) =
+                    (commands.as_mut(), materials.as_mut(), meshes.as_mut())
+                else {
+                    continue;
+                };
+                let map_id = global_state.0.world.current_map;
 
-                    // Resolve final furniture properties: definition defaults merged
-                    // with per-instance inline overrides.
-                    let (
-                        resolved_type,
-                        resolved_material,
-                        resolved_scale,
-                        resolved_flags,
-                        resolved_tint,
-                    ) = resolve_furniture_fields(
-                        *furniture_id,
-                        *furniture_type,
-                        *material,
-                        *scale,
-                        flags,
-                        *color_tint,
-                        &content.db().furniture,
-                    );
+                // Resolve final furniture properties: definition defaults merged
+                // with per-instance inline overrides.
+                let (
+                    resolved_type,
+                    resolved_material,
+                    resolved_scale,
+                    resolved_flags,
+                    resolved_tint,
+                ) = resolve_furniture_fields(
+                    *furniture_id,
+                    *furniture_type,
+                    *material,
+                    *scale,
+                    flags,
+                    *color_tint,
+                    &content.db().furniture,
+                );
 
-                    let mut ctx = MeshSpawnContext {
-                        commands,
-                        materials: materials_res,
-                        meshes: meshes_res,
-                        cache: &mut furniture_cache,
-                    };
-                    spawn_furniture_with_rendering(
-                        &mut ctx,
-                        trigger.position,
-                        map_id,
-                        &FurnitureSpawnParams {
-                            furniture_type: resolved_type,
-                            rotation_y: *rotation_y,
-                            scale: resolved_scale,
-                            material_type: resolved_material,
-                            flags: resolved_flags,
-                            color_tint: resolved_tint,
-                            key_item_id: *key_item_id,
-                        },
-                    );
-                }
+                let mut ctx = MeshSpawnContext {
+                    commands,
+                    materials: materials_res,
+                    meshes: meshes_res,
+                    cache: &mut furniture_cache,
+                };
+                spawn_furniture_with_rendering(
+                    &mut ctx,
+                    trigger.position,
+                    map_id,
+                    &FurnitureSpawnParams {
+                        furniture_type: resolved_type,
+                        rotation_y: *rotation_y,
+                        scale: resolved_scale,
+                        material_type: resolved_material,
+                        flags: resolved_flags,
+                        color_tint: resolved_tint,
+                        key_item_id: *key_item_id,
+                    },
+                );
             }
             MapEvent::Container {
                 id,

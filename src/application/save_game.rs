@@ -26,6 +26,7 @@
 //! ```
 
 use crate::application::GameState;
+use crate::domain::path_security::validate_filename_component;
 use bevy::prelude::Resource;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -103,6 +104,10 @@ pub enum SaveGameError {
     /// I/O error
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
+
+    /// Save name failed path-security validation (traversal/separator/absolute).
+    #[error("Invalid save name '{name}': {reason}")]
+    InvalidName { name: String, reason: String },
 }
 
 /// Campaign reference stored in save games
@@ -382,7 +387,7 @@ impl SaveGameManager {
     /// ```
     pub fn save(&self, name: &str, game_state: &GameState) -> Result<(), SaveGameError> {
         let save = SaveGame::new(game_state.clone());
-        let path = self.save_path(name);
+        let path = self.save_path(name)?;
 
         let ron_string = ron::ser::to_string_pretty(&save, Default::default())
             .map_err(|e| SaveGameError::WriteError(e.to_string()))?;
@@ -419,7 +424,7 @@ impl SaveGameManager {
     /// # }
     /// ```
     pub fn load(&self, name: &str) -> Result<GameState, SaveGameError> {
-        let path = self.save_path(name);
+        let path = self.save_path(name)?;
 
         let contents = fs::read_to_string(&path)
             .map_err(|e| SaveGameError::ReadError(format!("{}: {}", path.display(), e)))?;
@@ -475,9 +480,22 @@ impl SaveGameManager {
         Ok(saves)
     }
 
-    /// Gets full path for a save file
-    fn save_path(&self, name: &str) -> PathBuf {
-        self.saves_dir.join(format!("{}.ron", name))
+    /// Gets full path for a save file after validating the name.
+    ///
+    /// The `name` is treated as a single, safe path component (a file stem):
+    /// path separators, `..` traversal, and absolute paths are rejected so an
+    /// untrusted save name cannot escape the saves directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SaveGameError::InvalidName`] if `name` is not a single safe
+    /// path component.
+    fn save_path(&self, name: &str) -> Result<PathBuf, SaveGameError> {
+        validate_filename_component(name).map_err(|e| SaveGameError::InvalidName {
+            name: name.to_string(),
+            reason: e.to_string(),
+        })?;
+        Ok(self.saves_dir.join(format!("{}.ron", name)))
     }
 
     /// Deletes a save game file
@@ -490,7 +508,7 @@ impl SaveGameManager {
     ///
     /// Returns `Ok(())` if deletion succeeded
     pub fn delete(&self, name: &str) -> Result<(), SaveGameError> {
-        let path = self.save_path(name);
+        let path = self.save_path(name)?;
         if path.exists() {
             fs::remove_file(path)?;
         }
@@ -681,8 +699,85 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let manager = SaveGameManager::new(temp_dir.path()).unwrap();
 
-        let path = manager.save_path("test");
+        let path = manager.save_path("test").unwrap();
         assert_eq!(path, temp_dir.path().join("test.ron"));
+    }
+
+    #[test]
+    fn test_save_rejects_traversal_name_and_writes_nothing_outside_saves_dir() {
+        let temp_dir = TempDir::new().unwrap();
+        let saves_dir = temp_dir.path().join("saves");
+        let manager = SaveGameManager::new(&saves_dir).unwrap();
+        let game_state = GameState::new();
+
+        // A traversal name must be rejected before any filesystem write.
+        let result = manager.save("../escape", &game_state);
+        assert!(matches!(
+            result,
+            Err(SaveGameError::InvalidName { ref name, .. }) if name == "../escape"
+        ));
+
+        // A separator-containing name must likewise be rejected.
+        let result = manager.save("sub/dir", &game_state);
+        assert!(matches!(
+            result,
+            Err(SaveGameError::InvalidName { ref name, .. }) if name == "sub/dir"
+        ));
+
+        // Nothing may have been written outside the saves directory.
+        assert!(!temp_dir.path().join("escape.ron").exists());
+        assert!(!temp_dir.path().join("sub").exists());
+        // And nothing leaked into the saves directory either.
+        assert_eq!(manager.list_saves().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_load_rejects_traversal_name() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        assert!(matches!(
+            manager.load("../escape"),
+            Err(SaveGameError::InvalidName { .. })
+        ));
+        assert!(matches!(
+            manager.load("sub/dir"),
+            Err(SaveGameError::InvalidName { .. })
+        ));
+    }
+
+    #[test]
+    fn test_delete_rejects_traversal_name() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+
+        assert!(matches!(
+            manager.delete("../escape"),
+            Err(SaveGameError::InvalidName { .. })
+        ));
+        assert!(matches!(
+            manager.delete("sub/dir"),
+            Err(SaveGameError::InvalidName { .. })
+        ));
+    }
+
+    #[test]
+    fn test_normal_timestamp_name_round_trips() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SaveGameManager::new(temp_dir.path()).unwrap();
+        let game_state = GameState::new();
+
+        // A legitimate generated timestamp name must still save and load.
+        manager.save("save_20260101_120000", &game_state).unwrap();
+        let loaded = manager.load("save_20260101_120000").unwrap();
+        assert_eq!(loaded.time.day, game_state.time.day);
+
+        // And it must be deletable through the validated path as well.
+        manager.delete("save_20260101_120000").unwrap();
+        assert!(matches!(
+            manager.load("save_20260101_120000"),
+            Err(SaveGameError::ReadError(_))
+        ));
     }
 
     #[test]
@@ -886,7 +981,7 @@ mod tests {
         manager.save("migration_test", &game_state).unwrap();
 
         // Load the save file as RON string
-        let save_path = manager.save_path("migration_test");
+        let save_path = manager.save_path("migration_test").unwrap();
         let mut ron_content = std::fs::read_to_string(&save_path).unwrap();
 
         // Remove encountered_characters field to simulate old format.
@@ -1317,7 +1412,7 @@ mod tests {
         // The field serialises as a single line:
         //   npc_runtime: (npcs: {}),
         // We strip the entire line so the save parser falls back to Default.
-        let save_path = manager.save_path("legacy_test");
+        let save_path = manager.save_path("legacy_test").unwrap();
         let ron_content = std::fs::read_to_string(&save_path).unwrap();
 
         // Strip the npc_runtime field from the RON.  Because ron pretty-print

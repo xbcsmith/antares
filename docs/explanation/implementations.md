@@ -81,3 +81,111 @@ Every direct dependency in the workspace is now on its latest stable version.
 The one remaining open item across the whole plan is human, on-display visual
 verification of both binaries (`antares` game and `campaign-builder` SDK
 tool), which cannot be performed headlessly.
+
+## Codebase Cleanup — Phase 1: Security & Correctness Hardening
+
+Executed per `docs/explanation/codebase_cleanup_plan.md` §1. The goal was to
+close every reachable panic and path-traversal/decompression-bomb sink in the
+campaign, save, and asset-loading paths, and to stop silently swallowing
+errors. Untrusted, filesystem-bound identifiers are now validated at the sink
+through one shared helper module before any path is constructed. All four
+quality gates pass with zero warnings (`fmt`, `check`, `clippy -D warnings`,
+`nextest`), and every touched module's doctests pass.
+
+### Foundation — shared path-security helper (`src/domain/path_security.rs`)
+
+New module, registered in `src/domain/mod.rs` with re-exports. Uses
+`thiserror` (`PathSecurityError`) and provides three primitives reused by every
+other deliverable below:
+
+- `validate_campaign_relative_path(base, candidate) -> Result<PathBuf, _>` —
+  rejects absolute paths and any `..`/root components, then canonicalizes the
+  join and asserts it stays inside `base` (containment check).
+- `validate_identifier(id)` — allowlist `^[A-Za-z0-9_-]+$` (no separators, no
+  `..`, non-empty).
+- `validate_filename_component(name)` — accepts exactly one safe path
+  component (rejects separators, `..`, absolute paths).
+
+Documented with runnable examples; 10 unit tests cover the traversal,
+absolute-path, and empty-input edge cases.
+
+### A — `DiceRoll` panic guard + validation (`src/domain/types.rs`)
+
+- `DiceRoll::roll` now returns `bonus.max(0)` when `sides == 0` instead of
+  panicking on the modulo-by-zero in the RNG path.
+- Added `DiceRollError` + `DiceRoll::validate()` (rejects `sides == 0`).
+- Tests: `sides == 0` no longer panics and `validate()` rejects it.
+
+### B — Dice-roll validation wired into the SDK validator
+
+- `src/sdk/validation.rs`: added `ValidationError::InvalidDiceRoll { context,
+  reason }` (+ `severity()` arm → `Severity::Error`), a `validate_dice_rolls()`
+  pass that flags `sides == 0` across `monster.attacks`, and a call to it from
+  `validate_all()`.
+- `src/sdk/error_formatter.rs`: added the matching `InvalidDiceRoll` arm to the
+  exhaustive `get_suggestions` match.
+
+### C — Registry `filepath` + campaign id + texture-path sanitization
+
+- `src/domain/visual/creature_database.rs` and
+  `src/domain/world/object_mesh.rs`: registry `filepath` joins now route
+  through `validate_campaign_relative_path` (reusing the existing
+  `ReadError`/`AssetReadError` variants).
+- `src/domain/world/landscape.rs`: `validate_texture_paths` now rejects `..`
+  components.
+- `src/sdk/campaign_loader.rs`: `CampaignLoader::load_campaign` validates the
+  id via `validate_identifier` (new `CampaignError::InvalidId`) before joining
+  it onto the campaigns dir; `validate_campaign` inherits the guard through it.
+  Real ids (`tutorial`, `test_campaign`) remain valid.
+
+### D — Decompression-bomb cap + safe extraction (`src/sdk/campaign_packager.rs`)
+
+- `install_package` validates `campaign_id` via `validate_identifier` plus a
+  parent-containment check (new `UnsafeCampaignId`), and extracts entries in a
+  streaming loop with a `MAX_UNCOMPRESSED_BYTES = 512 MiB` cap (new
+  `ArchiveTooLarge`). Test-only `total_uncompressed_size` helper is
+  `#[cfg(test)]`.
+- Tests: a fixture archive exceeding the cap is rejected; hand-built tar-gz
+  fixtures correctly finish the gzip stream (`tar.into_inner()?` +
+  `enc.finish()?`).
+
+### E — Save-file name sanitization (`src/application/save_game.rs`)
+
+- `SaveGameManager::save_path` now returns `Result<PathBuf, SaveGameError>`,
+  validating the name as a single safe component (new
+  `SaveGameError::InvalidName`). Callers `save`/`load`/`delete` propagate with
+  `?`.
+- Tests: traversal/separator names return `InvalidName` and write nothing
+  outside the saves dir; a normal timestamp name still round-trips.
+
+### F — Error-swallowing `let _ =` discards logged
+
+An audit of the flagged sites found only **two** genuine `Result` discards (the
+plan's "6 sites" over-counted: the `inventory_ui.rs` and `spell_casting.rs`
+sites discard an `Option`/plain struct, not a `Result`, and were correctly left
+unchanged). Both real discards now log via `tracing::warn!(?e, ...)`:
+`src/domain/combat/monster_spells.rs` and `src/bin/antares.rs`.
+
+### G — Guarded-Option unwraps converted + graceful saves-dir error
+
+- `src/game/systems/events.rs`, `dialogue.rs`, `menu.rs`, and
+  `src/sdk/cli/map_builder.rs`: guarded-`Option` unwraps rewritten as
+  `let ... else`.
+- `menu.rs`: the `SaveGameManager` startup `expect` is now graceful — it is an
+  optional resource with a temp-dir fallback, and all three consumers were
+  updated to handle its absence.
+
+### Verification
+
+- `cargo fmt --all` — clean.
+- `cargo check --all-targets --all-features` — 0 warnings.
+- `cargo clippy --all-targets --all-features -- -D warnings` — clean.
+- `cargo nextest run --all-features` — 5407 passed, 8 pre-existing skips, 0
+  failed.
+- `cargo test --doc` — every touched module's doctests pass (`path_security`,
+  `types::DiceRoll`, `save_game`, `campaign_loader`, `campaign_packager`,
+  `validation`, `landscape`, `creature_database`, `object_mesh`,
+  `monster_spells`).
+
+All new tests and fixtures use `data`/`data/test_campaign` only (never
+`campaigns/tutorial`), per Implementation Rule 5.

@@ -34,12 +34,47 @@ const ANTARES_ICON_PATH: &str = "assets/icons/antares_icon.png";
 /// Plugin for the in-game menu system
 pub struct MenuPlugin;
 
+/// Initializes the [`SaveGameManager`], preferring the local `saves/` directory.
+///
+/// Startup must never panic here. If the preferred directory cannot be created
+/// (for example, the game is installed in a read-only location) the error is
+/// logged and a subdirectory of the OS temporary directory is used instead. If
+/// even that fails, `None` is returned and the save/load feature is disabled for
+/// the session rather than crashing the game.
+fn init_save_manager() -> Option<SaveGameManager> {
+    match SaveGameManager::new("saves") {
+        Ok(manager) => Some(manager),
+        Err(e) => {
+            let fallback_dir = std::env::temp_dir().join("antares_saves");
+            tracing::error!(
+                ?e,
+                ?fallback_dir,
+                "failed to initialize save manager at 'saves'; falling back to a \
+                 temporary directory (saves may not persist across sessions)"
+            );
+            match SaveGameManager::new(&fallback_dir) {
+                Ok(manager) => Some(manager),
+                Err(fallback_err) => {
+                    tracing::error!(
+                        ?fallback_err,
+                        ?fallback_dir,
+                        "failed to initialize fallback save manager; saving and \
+                         loading will be unavailable this session"
+                    );
+                    None
+                }
+            }
+        }
+    }
+}
+
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(
-            SaveGameManager::new("saves")
-                .expect("SaveGameManager state directory 'saves' must be writable"),
-        );
+        // Initialize the save manager gracefully. A failure here must not crash
+        // startup, so the resource is only inserted when construction succeeds.
+        if let Some(save_manager) = init_save_manager() {
+            app.insert_resource(save_manager);
+        }
 
         app.add_systems(
             Update,
@@ -1239,7 +1274,10 @@ fn spawn_settings_menu(
 }
 
 /// Populate the save list from the filesystem
-fn populate_save_list(mut global_state: ResMut<GlobalState>, save_manager: Res<SaveGameManager>) {
+fn populate_save_list(
+    mut global_state: ResMut<GlobalState>,
+    save_manager: Option<Res<SaveGameManager>>,
+) {
     let GameMode::Menu(menu_state) = &mut global_state.0.mode else {
         return;
     };
@@ -1248,6 +1286,11 @@ fn populate_save_list(mut global_state: ResMut<GlobalState>, save_manager: Res<S
     if menu_state.current_submenu != MenuType::SaveLoad || !menu_state.save_list.is_empty() {
         return;
     }
+
+    // If save initialization failed at startup, there is nothing to populate.
+    let Some(save_manager) = save_manager else {
+        return;
+    };
 
     match save_manager.list_saves() {
         Ok(save_filenames) => {
@@ -1344,7 +1387,7 @@ fn menu_button_interaction(
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
     mut interaction_query: Query<(&Interaction, Ref<Interaction>, &MenuButton), With<Button>>,
     mut global_state: ResMut<GlobalState>,
-    save_manager: Res<SaveGameManager>,
+    save_manager: Option<Res<SaveGameManager>>,
     mut game_log: Option<ResMut<GameLog>>,
     mut combat_res: Option<ResMut<CombatResource>>,
 ) {
@@ -1361,7 +1404,7 @@ fn menu_button_interaction(
             handle_button_press(
                 button,
                 &mut global_state,
-                &save_manager,
+                save_manager.as_deref(),
                 game_log.as_deref_mut(),
                 combat_res.as_deref_mut(),
             );
@@ -1371,12 +1414,15 @@ fn menu_button_interaction(
 
 /// Handle button press actions
 ///
-/// This accepts plain `&mut GlobalState` and `&SaveGameManager` so it can be
-/// called from both systems and unit tests without wrapping/unwrapping Res/ResMut.
+/// This accepts plain `&mut GlobalState` and an optional `&SaveGameManager` so it
+/// can be called from both systems and unit tests without wrapping/unwrapping
+/// Res/ResMut. When the save manager is `None` (initialization failed at
+/// startup), save/load/delete actions are skipped with a warning while all other
+/// menu actions continue to work.
 fn handle_button_press(
     button: &MenuButton,
     global_state: &mut GlobalState,
-    save_manager: &SaveGameManager,
+    save_manager: Option<&SaveGameManager>,
     game_log: Option<&mut GameLog>,
     combat_res: Option<&mut CombatResource>,
 ) {
@@ -1402,13 +1448,17 @@ fn handle_button_press(
                     debug!("Load Game pressed (in SaveLoad)");
                     if let Some(save_info) = menu_state.save_list.get(menu_state.selected_index) {
                         let filename = save_info.filename.clone();
-                        load_game_operation(
-                            global_state,
-                            save_manager,
-                            &filename,
-                            game_log,
-                            combat_res,
-                        );
+                        if let Some(save_manager) = save_manager {
+                            load_game_operation(
+                                global_state,
+                                save_manager,
+                                &filename,
+                                game_log,
+                                combat_res,
+                            );
+                        } else {
+                            warn!("Load pressed but the save manager is unavailable");
+                        }
                     } else {
                         warn!("Load pressed but no save selected");
                     }
@@ -1445,7 +1495,11 @@ fn handle_button_press(
             match submenu {
                 Some(MenuType::SaveLoad) => {
                     // In the Save/Load dialog the Confirm button is labeled "Save".
-                    save_game_operation(global_state, save_manager, game_log);
+                    if let Some(save_manager) = save_manager {
+                        save_game_operation(global_state, save_manager, game_log);
+                    } else {
+                        warn!("Save pressed but the save manager is unavailable");
+                    }
                 }
                 Some(MenuType::Settings) => {
                     if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
@@ -1485,7 +1539,11 @@ fn handle_button_press(
         }
         MenuButton::DeleteGame => {
             debug!("Delete Game pressed");
-            delete_game_operation(global_state, save_manager);
+            if let Some(save_manager) = save_manager {
+                delete_game_operation(global_state, save_manager);
+            } else {
+                warn!("Delete pressed but the save manager is unavailable");
+            }
         }
         MenuButton::ToggleFullscreen => {
             global_state.0.config.graphics.fullscreen = !global_state.0.config.graphics.fullscreen;
@@ -1810,7 +1868,7 @@ fn update_button_colors(
 fn handle_menu_keyboard(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut global_state: ResMut<GlobalState>,
-    save_manager: Res<SaveGameManager>,
+    save_manager: Option<Res<SaveGameManager>>,
     mut game_log: Option<ResMut<GameLog>>,
     mut combat_res: Option<ResMut<CombatResource>>,
 ) {
@@ -1878,7 +1936,7 @@ fn handle_menu_keyboard(
                 handle_button_press(
                     &sel_button,
                     &mut global_state,
-                    &save_manager,
+                    save_manager.as_deref(),
                     game_log.as_deref_mut(),
                     combat_res.as_deref_mut(),
                 );
@@ -1889,7 +1947,7 @@ fn handle_menu_keyboard(
                     handle_button_press(
                         &MenuButton::LoadGame,
                         &mut global_state,
-                        &save_manager,
+                        save_manager.as_deref(),
                         game_log.as_deref_mut(),
                         combat_res.as_deref_mut(),
                     );
@@ -2170,7 +2228,7 @@ mod tests {
         gs.0.enter_menu();
 
         // Press Save (simulate button press)
-        handle_button_press(&MenuButton::SaveGame, &mut gs, &manager, None, None);
+        handle_button_press(&MenuButton::SaveGame, &mut gs, Some(&manager), None, None);
 
         // Should be in Menu mode and SaveLoad submenu
         if let GameMode::Menu(ms) = &gs.0.mode {
@@ -2200,7 +2258,7 @@ mod tests {
         assert_eq!(manager.list_saves().unwrap().len(), 0);
 
         // Press Confirm (Save) in SaveLoad
-        handle_button_press(&MenuButton::Confirm, &mut gs, &manager, None, None);
+        handle_button_press(&MenuButton::Confirm, &mut gs, Some(&manager), None, None);
 
         // After save, we should have at least one save file and menu returned to Main
         let saves = manager.list_saves().unwrap();
@@ -2241,7 +2299,7 @@ mod tests {
         }
 
         // Press Load
-        handle_button_press(&MenuButton::LoadGame, &mut gs, &manager, None, None);
+        handle_button_press(&MenuButton::LoadGame, &mut gs, Some(&manager), None, None);
 
         // After a successful load the game mode should be Exploration
         assert!(matches!(gs.0.mode, GameMode::Exploration));
