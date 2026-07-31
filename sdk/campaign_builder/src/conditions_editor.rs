@@ -302,6 +302,53 @@ impl ConditionsEditorState {
             icon_id: None,
         }
     }
+
+    /// Returns the conditions matching the current search filter and effect-type
+    /// filter.
+    ///
+    /// The text search is a case-insensitive substring test against the
+    /// condition `name` and `id`. The active `filter_effect_type` is applied
+    /// together with the query. An empty query with the `All` effect filter
+    /// returns every condition (paired with its original index).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::conditions_editor::ConditionsEditorState;
+    ///
+    /// let mut poison = ConditionsEditorState::default_condition();
+    /// poison.id = "poison".to_string();
+    /// poison.name = "Poisoned".to_string();
+    /// let mut bless = ConditionsEditorState::default_condition();
+    /// bless.id = "bless".to_string();
+    /// bless.name = "Blessed".to_string();
+    /// let conditions = vec![poison, bless];
+    ///
+    /// let mut state = ConditionsEditorState::new();
+    /// state.search_filter = "poison".to_string();
+    /// let filtered = state.filtered_conditions(&conditions);
+    /// assert_eq!(filtered.len(), 1);
+    /// assert_eq!(filtered[0].1.id, "poison");
+    /// ```
+    pub fn filtered_conditions<'a>(
+        &self,
+        conditions: &'a [ConditionDefinition],
+    ) -> Vec<(usize, &'a ConditionDefinition)> {
+        let search_lower = self.search_filter.to_lowercase();
+        conditions
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| {
+                // Text filter
+                let text_match = search_lower.is_empty()
+                    || c.name.to_lowercase().contains(&search_lower)
+                    || c.id.to_lowercase().contains(&search_lower);
+                // Effect type filter
+                let type_match = self.filter_effect_type.matches(c);
+                text_match && type_match
+            })
+            .collect()
+    }
 }
 
 impl ConditionsEditorState {
@@ -462,21 +509,10 @@ impl ConditionsEditorState {
         spells: &mut [Spell],
         ctx: &mut EditorContext<'_>,
     ) {
-        let search_lower = self.search_filter.to_lowercase();
-
         // Build filtered list snapshot to avoid borrow conflicts in closures
-        let mut filtered_conditions: Vec<(usize, ConditionDefinition)> = conditions
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| {
-                // Text filter
-                let text_match = search_lower.is_empty()
-                    || c.name.to_lowercase().contains(&search_lower)
-                    || c.id.to_lowercase().contains(&search_lower);
-                // Effect type filter
-                let type_match = self.filter_effect_type.matches(c);
-                text_match && type_match
-            })
+        let mut filtered_conditions: Vec<(usize, ConditionDefinition)> = self
+            .filtered_conditions(conditions)
+            .into_iter()
             .map(|(idx, c)| (idx, c.clone()))
             .collect();
 
@@ -2079,6 +2115,58 @@ mod tests {
         assert!(!state.show_import_dialog);
         assert!(state.import_export_buffer.is_empty());
         assert!(state.show_preview); // Default is true
+    }
+
+    #[test]
+    fn test_filtered_conditions_search_behavior() {
+        let conditions = {
+            let mut poison = ConditionsEditorState::default_condition();
+            poison.id = "poison".to_string();
+            poison.name = "Poisoned".to_string();
+            let mut deep_poison = ConditionsEditorState::default_condition();
+            deep_poison.id = "deep_poison".to_string();
+            deep_poison.name = "Deep Poison".to_string();
+            let mut bless = ConditionsEditorState::default_condition();
+            bless.id = "bless".to_string();
+            bless.name = "Blessed".to_string();
+            vec![poison, deep_poison, bless]
+        };
+
+        let mut state = ConditionsEditorState::new();
+
+        // Empty query with All effect filter returns every condition.
+        assert_eq!(
+            state
+                .filtered_conditions(&conditions)
+                .iter()
+                .map(|(_, c)| c.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["poison", "deep_poison", "bless"]
+        );
+
+        // Case-insensitive substring keeps both poison conditions (id/name).
+        state.search_filter = "POISON".to_string();
+        assert_eq!(
+            state
+                .filtered_conditions(&conditions)
+                .iter()
+                .map(|(_, c)| c.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["poison", "deep_poison"]
+        );
+
+        // Narrower query isolates a single survivor.
+        state.search_filter = "bless".to_string();
+        let survivors: Vec<String> = state
+            .filtered_conditions(&conditions)
+            .iter()
+            .map(|(_, c)| c.id.clone())
+            .collect();
+        assert_eq!(survivors, vec!["bless"]);
+
+        // A non-matching query returns nothing.
+        state.search_filter = "stunned".to_string();
+        assert!(state.filtered_conditions(&conditions).is_empty());
     }
 
     #[test]

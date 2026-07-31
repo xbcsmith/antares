@@ -11570,6 +11570,36 @@ mod tests {
     }
 
     #[test]
+    fn test_build_filtered_maps_snapshot_search_behavior() {
+        let maps = vec![
+            Map::new(1, "Forest Cave".to_string(), "Desc".to_string(), 10, 10),
+            Map::new(2, "Forest Town".to_string(), "Desc".to_string(), 10, 10),
+            Map::new(3, "Desert Ruins".to_string(), "Desc".to_string(), 10, 10),
+        ];
+
+        // Empty query returns every map (sorted by id).
+        let all = MapsEditorState::build_filtered_maps_snapshot(&maps, "");
+        assert_eq!(all.iter().map(|t| t.1).collect::<Vec<_>>(), vec![1, 2, 3]);
+
+        // Case-insensitive name substring keeps both forest maps.
+        let forests = MapsEditorState::build_filtered_maps_snapshot(&maps, "FOREST");
+        assert_eq!(forests.iter().map(|t| t.1).collect::<Vec<_>>(), vec![1, 2]);
+
+        // A narrower name query isolates a single survivor.
+        let desert = MapsEditorState::build_filtered_maps_snapshot(&maps, "desert");
+        let survivors: Vec<u16> = desert.iter().map(|t| t.1).collect();
+        assert_eq!(survivors, vec![3]);
+
+        // The id is also searchable.
+        let by_id = MapsEditorState::build_filtered_maps_snapshot(&maps, "3");
+        assert_eq!(by_id.iter().map(|t| t.1).collect::<Vec<_>>(), vec![3]);
+
+        // A non-matching query returns nothing.
+        let none = MapsEditorState::build_filtered_maps_snapshot(&maps, "ocean");
+        assert!(none.is_empty());
+    }
+
+    #[test]
     fn test_next_available_map_id() {
         let maps = vec![
             Map::new(1, "Map 1".to_string(), "Desc".to_string(), 10, 10),

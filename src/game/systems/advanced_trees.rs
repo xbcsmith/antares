@@ -1063,16 +1063,6 @@ fn make_trunk(config: &TreeConfig) -> Branch {
     }
 }
 
-/// Generates a reusable deterministic mesh cache key for a tree placement.
-pub fn tree_mesh_cache_key(
-    tree_type: TreeType,
-    foliage_density: f32,
-    quality_level: u8,
-    generation_seed: TreeGenerationSeed,
-) -> TreeMeshCacheKey {
-    TreeMeshCacheKey::new(tree_type, foliage_density, quality_level, generation_seed.0)
-}
-
 // ==================== Mesh Generation ====================
 
 /// Generates a tree mesh from a branch graph

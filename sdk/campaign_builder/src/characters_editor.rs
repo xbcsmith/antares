@@ -2553,6 +2553,7 @@ fn item_name_by_id(items: &[Item], id: ItemId) -> String {
 ///     starting_armor_id: None,
 ///     starting_items: vec![],
 ///     proficiencies: vec![],
+///     skill_grants: vec![],
 /// };
 /// ```
 fn filter_spells_for_class(

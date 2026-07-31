@@ -653,14 +653,9 @@ impl StockTemplatesEditorState {
         let avail = ui.available_width();
         let list_width = (avail * 0.35).clamp(180.0, 300.0);
 
-        let filter_lower = self.search_filter.to_lowercase();
         let filtered_templates: Vec<(usize, MerchantStockTemplate)> = self
-            .templates
-            .iter()
-            .enumerate()
-            .filter(|(_, tmpl)| {
-                filter_lower.is_empty() || tmpl.id.to_lowercase().contains(&filter_lower)
-            })
+            .filtered_templates()
+            .into_iter()
             .map(|(idx, tmpl)| (idx, tmpl.clone()))
             .collect();
 
@@ -1376,6 +1371,44 @@ impl StockTemplatesEditorState {
         }
     }
 
+    /// Returns the stock templates whose ID matches the current search filter.
+    ///
+    /// The match is a case-insensitive substring test against `id`. An empty
+    /// filter returns every template (paired with its original index).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::world::npc_runtime::MerchantStockTemplate;
+    /// use campaign_builder::stock_templates_editor::StockTemplatesEditorState;
+    ///
+    /// let template = |id: &str| MerchantStockTemplate {
+    ///     id: id.to_string(),
+    ///     entries: vec![],
+    ///     magic_item_pool: vec![],
+    ///     magic_slot_count: 0,
+    ///     magic_refresh_days: 7,
+    ///     description: String::new(),
+    /// };
+    ///
+    /// let mut state = StockTemplatesEditorState::default();
+    /// state.templates = vec![template("blacksmith"), template("apothecary")];
+    /// state.search_filter = "black".to_string();
+    /// let filtered = state.filtered_templates();
+    /// assert_eq!(filtered.len(), 1);
+    /// assert_eq!(filtered[0].1.id, "blacksmith");
+    /// ```
+    pub fn filtered_templates(&self) -> Vec<(usize, &MerchantStockTemplate)> {
+        let filter_lower = self.search_filter.to_lowercase();
+        self.templates
+            .iter()
+            .enumerate()
+            .filter(|(_, tmpl)| {
+                filter_lower.is_empty() || tmpl.id.to_lowercase().contains(&filter_lower)
+            })
+            .collect()
+    }
+
     // ------------------------------------------------------------------ I/O
 
     /// Load templates from a RON file.
@@ -1486,6 +1519,52 @@ mod tests {
         assert!(state.selected_template.is_none());
         assert!(state.validation_errors.is_empty());
         assert!(!state.has_unsaved_changes);
+    }
+
+    #[test]
+    fn test_filtered_templates_search_behavior() {
+        let mut state = StockTemplatesEditorState {
+            templates: vec![
+                make_template("blacksmith"),
+                make_template("black_market"),
+                make_template("apothecary"),
+            ],
+            ..Default::default()
+        };
+
+        // Empty filter returns every template.
+        assert_eq!(
+            state
+                .filtered_templates()
+                .iter()
+                .map(|(_, t)| t.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["blacksmith", "black_market", "apothecary"]
+        );
+
+        // Case-insensitive substring keeps both "black" templates.
+        state.search_filter = "BLACK".to_string();
+        assert_eq!(
+            state
+                .filtered_templates()
+                .iter()
+                .map(|(_, t)| t.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["blacksmith", "black_market"]
+        );
+
+        // Narrower query isolates a single survivor.
+        state.search_filter = "apoth".to_string();
+        let survivors: Vec<String> = state
+            .filtered_templates()
+            .iter()
+            .map(|(_, t)| t.id.clone())
+            .collect();
+        assert_eq!(survivors, vec!["apothecary"]);
+
+        // A non-matching query returns nothing.
+        state.search_filter = "tailor".to_string();
+        assert!(state.filtered_templates().is_empty());
     }
 
     // ── StockTemplateEditBuffer ──────────────────────────────────────────────

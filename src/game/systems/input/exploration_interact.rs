@@ -667,7 +667,6 @@ pub fn try_interact_npc_or_recruitable(
 ///
 /// Returns `true` when a dropped item was found and the interaction was consumed,
 /// regardless of whether the pickup succeeded.
-#[allow(clippy::needless_pass_by_value)]
 pub fn try_pickup_adjacent_dropped_item(
     game_state: &mut GameState,
     party_position: Position,

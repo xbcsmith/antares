@@ -3447,17 +3447,11 @@ impl CampaignBuilderApp {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 if let Ok(metadata) = entry.metadata() {
-                    let path = entry.path();
                     let name = entry.file_name().to_string_lossy().to_string();
 
                     let node = FileNode {
                         name,
                         is_directory: metadata.is_dir(),
-                        _children: if metadata.is_dir() {
-                            self.read_directory(&path)
-                        } else {
-                            Vec::new()
-                        },
                     };
 
                     self.ui_state.file_tree.push(node);
@@ -3473,32 +3467,6 @@ impl CampaignBuilderApp {
                 (false, true) => std::cmp::Ordering::Greater,
                 _ => a.name.cmp(&b.name),
             });
-    }
-
-    pub fn read_directory(&self, dir: &PathBuf) -> Vec<FileNode> {
-        let mut children = Vec::new();
-
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                if let Ok(metadata) = entry.metadata() {
-                    let name = entry.file_name().to_string_lossy().to_string();
-
-                    children.push(FileNode {
-                        name,
-                        is_directory: metadata.is_dir(),
-                        _children: Vec::new(), // Don't recurse deeper for now
-                    });
-                }
-            }
-        }
-
-        children.sort_by(|a, b| match (a.is_directory, b.is_directory) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.cmp(&b.name),
-        });
-
-        children
     }
 
     /// Check for unsaved changes before action

@@ -27,32 +27,6 @@ use crate::sdk::database::ContentDatabase;
 use rand::Rng;
 use thiserror::Error;
 
-/// Action to cast a spell in combat
-///
-/// This simple struct mirrors the data produced by UI systems when the player
-/// chooses to cast a spell. It is small and serializable-friendly so UI
-/// layers can pass it through message buses if needed.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SpellCastAction {
-    pub spell_id: SpellId,
-    pub caster: CombatantId,
-    pub target: CombatantId,
-    /// An optimization so callers can avoid looking the spell up again
-    /// (set by UI when building buttons). Not required for execution.
-    pub sp_cost: u16,
-    /// Gem cost carried for convenience
-    pub gem_cost: u16,
-}
-
-/// Result of attempting to cast a spell in combat
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SpellCastResult {
-    /// Spell cast succeeded and produced an effect result
-    Success { effect: SpellResult },
-    /// Spell casting failed with a reason
-    Failed { reason: SpellCastError },
-}
-
 /// Errors that can happen when validating or executing a spell cast
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum SpellCastError {

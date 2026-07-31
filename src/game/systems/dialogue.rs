@@ -558,11 +558,6 @@ fn handle_select_choice(
 /// - `HasItem` sums the party's inventories
 /// - `HasGold` reads party gold
 /// - `MinLevel` checks first party member's level (simplified)
-// NOTE: `db` is intentionally kept for forward compatibility. Future condition types
-// (e.g. HasItem, CheckSkill) will need to consult the content database for validation.
-// The suppression is correct — removing `db` would require adding it back when those
-// conditions are implemented, breaking the API.
-#[allow(clippy::only_used_in_recursion)]
 fn evaluate_conditions(
     conds: &[DialogueCondition],
     game_state: &crate::application::GameState,

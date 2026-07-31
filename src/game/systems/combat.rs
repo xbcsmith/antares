@@ -1206,13 +1206,6 @@ impl CombatLogState {
     }
 }
 
-/// Marker component placed on the currently highlighted `ActionButton` entity.
-///
-/// Used by `update_action_highlight` to apply the hover background colour to
-/// the active button while restoring the default colour on all others.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct ActiveActionHighlight;
-
 /// One-shot timer that gates [`execute_monster_turn`].
 ///
 /// When the turn transitions to [`CombatTurnState::EnemyTurn`] the timer is

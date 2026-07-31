@@ -215,6 +215,54 @@ impl ProficienciesEditorState {
         }
     }
 
+    /// Returns the proficiencies matching the current search query and category
+    /// filter.
+    ///
+    /// The search is a case-insensitive substring test against the proficiency
+    /// `id` and `name`. The active `filter_category` is applied together with
+    /// the query. An empty query with the `All` category filter returns every
+    /// proficiency (paired with its original index).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::proficiencies_editor::ProficienciesEditorState;
+    ///
+    /// let mut sword = ProficienciesEditorState::default_proficiency();
+    /// sword.id = "sword_mastery".to_string();
+    /// sword.name = "Sword Mastery".to_string();
+    /// let mut bow = ProficienciesEditorState::default_proficiency();
+    /// bow.id = "bow_mastery".to_string();
+    /// bow.name = "Bow Mastery".to_string();
+    /// let profs = vec![sword, bow];
+    ///
+    /// let mut state = ProficienciesEditorState::new();
+    /// state.search_query = "sword".to_string();
+    /// let filtered = state.filtered_proficiencies(&profs);
+    /// assert_eq!(filtered.len(), 1);
+    /// assert_eq!(filtered[0].1.id, "sword_mastery");
+    /// ```
+    pub fn filtered_proficiencies<'a>(
+        &self,
+        proficiencies: &'a [ProficiencyDefinition],
+    ) -> Vec<(usize, &'a ProficiencyDefinition)> {
+        proficiencies
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| {
+                let matches_category = self.filter_category.matches(p);
+                let matches_search = self.search_query.is_empty()
+                    || p.id
+                        .to_lowercase()
+                        .contains(&self.search_query.to_lowercase())
+                    || p.name
+                        .to_lowercase()
+                        .contains(&self.search_query.to_lowercase());
+                matches_category && matches_search
+            })
+            .collect()
+    }
+
     /// Generate the next available proficiency ID based on category
     pub fn next_proficiency_id(
         proficiencies: &[ProficiencyDefinition],
@@ -451,20 +499,9 @@ impl ProficienciesEditorState {
         status_message: &mut String,
     ) {
         // Build filtered snapshot to avoid borrow conflicts in closures
-        let filtered_proficiencies: Vec<(usize, ProficiencyDefinition)> = proficiencies
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| {
-                let matches_category = self.filter_category.matches(p);
-                let matches_search = self.search_query.is_empty()
-                    || p.id
-                        .to_lowercase()
-                        .contains(&self.search_query.to_lowercase())
-                    || p.name
-                        .to_lowercase()
-                        .contains(&self.search_query.to_lowercase());
-                matches_category && matches_search
-            })
+        let filtered_proficiencies: Vec<(usize, ProficiencyDefinition)> = self
+            .filtered_proficiencies(proficiencies)
+            .into_iter()
             .map(|(idx, prof)| (idx, prof.clone()))
             .collect();
 
@@ -995,6 +1032,58 @@ mod tests {
         assert_eq!(state.search_query, "");
         assert_eq!(state.selected_proficiency, None);
         assert!(!state.show_import_dialog);
+    }
+
+    #[test]
+    fn test_filtered_proficiencies_search_behavior() {
+        let profs = {
+            let mut sword = ProficienciesEditorState::default_proficiency();
+            sword.id = "sword_mastery".to_string();
+            sword.name = "Sword Mastery".to_string();
+            let mut short_sword = ProficienciesEditorState::default_proficiency();
+            short_sword.id = "short_sword".to_string();
+            short_sword.name = "Short Sword".to_string();
+            let mut bow = ProficienciesEditorState::default_proficiency();
+            bow.id = "bow_mastery".to_string();
+            bow.name = "Bow Mastery".to_string();
+            vec![sword, short_sword, bow]
+        };
+
+        let mut state = ProficienciesEditorState::new();
+
+        // Empty query with All category returns every proficiency.
+        assert_eq!(
+            state
+                .filtered_proficiencies(&profs)
+                .iter()
+                .map(|(_, p)| p.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["sword_mastery", "short_sword", "bow_mastery"]
+        );
+
+        // Case-insensitive substring keeps both sword proficiencies.
+        state.search_query = "SWORD".to_string();
+        assert_eq!(
+            state
+                .filtered_proficiencies(&profs)
+                .iter()
+                .map(|(_, p)| p.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["sword_mastery", "short_sword"]
+        );
+
+        // Narrower query isolates a single survivor.
+        state.search_query = "bow".to_string();
+        let survivors: Vec<String> = state
+            .filtered_proficiencies(&profs)
+            .iter()
+            .map(|(_, p)| p.id.clone())
+            .collect();
+        assert_eq!(survivors, vec!["bow_mastery"]);
+
+        // A non-matching query returns nothing.
+        state.search_query = "shield".to_string();
+        assert!(state.filtered_proficiencies(&profs).is_empty());
     }
 
     #[test]

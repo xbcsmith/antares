@@ -67,10 +67,6 @@ pub enum ItemDatabaseError {
 /// if let Some(item) = db.get_item(1) {
 ///     println!("Found item: {}", item.name);
 /// }
-///
-/// // Get all weapons
-/// let weapons = db.get_weapons();
-/// println!("Total weapons: {}", weapons.len());
 /// # Ok(())
 /// # }
 /// ```
@@ -169,51 +165,6 @@ impl ItemDatabase {
     /// Get all items in the database
     pub fn all_items(&self) -> Vec<&Item> {
         self.items.values().collect()
-    }
-
-    /// Get all weapons
-    pub fn get_weapons(&self) -> Vec<&Item> {
-        self.items
-            .values()
-            .filter(|item| item.is_weapon())
-            .collect()
-    }
-
-    /// Get all armor
-    pub fn get_armor(&self) -> Vec<&Item> {
-        self.items.values().filter(|item| item.is_armor()).collect()
-    }
-
-    /// Get all accessories
-    pub fn get_accessories(&self) -> Vec<&Item> {
-        self.items
-            .values()
-            .filter(|item| item.is_accessory())
-            .collect()
-    }
-
-    /// Get all consumables
-    pub fn get_consumables(&self) -> Vec<&Item> {
-        self.items
-            .values()
-            .filter(|item| item.is_consumable())
-            .collect()
-    }
-
-    /// Get all quest items
-    pub fn get_quest_items(&self) -> Vec<&Item> {
-        self.items
-            .values()
-            .filter(|item| item.is_quest_item())
-            .collect()
-    }
-
-    /// Get all magical items
-    pub fn get_magical_items(&self) -> Vec<&Item> {
-        self.items
-            .values()
-            .filter(|item| item.is_magical())
-            .collect()
     }
 
     /// Get number of items in database
@@ -348,60 +299,6 @@ impl ItemDatabase {
                 if !prof_db.has(&prof) {
                     return Err(ItemDatabaseError::InvalidProficiency(*id, prof.clone()));
                 }
-            }
-        }
-        Ok(())
-    }
-
-    /// Validate that every item whose `mesh_descriptor_override` carries an explicit
-    /// creature ID exists in the supplied `ItemMeshDatabase`.
-    ///
-    /// Currently the domain `ItemMeshDescriptorOverride` does not store a creature ID
-    /// directly — that link lives at the campaign layer.  This method is therefore a
-    /// forward-compatibility hook: it validates the override *if* an explicit
-    /// `creature_id` field is ever added to `ItemMeshDescriptorOverride`.  For now it
-    /// simply walks all items and confirms that any item whose `mesh_descriptor_override`
-    /// is `Some` can still produce a valid `CreatureDefinition` via
-    /// `ItemMeshDescriptor::from_item`, ensuring the override does not break mesh
-    /// generation.  Full registry cross-linking is performed separately by
-    /// `CampaignLoader`.
-    ///
-    /// # Arguments
-    ///
-    /// * `registry` - The `ItemMeshDatabase` (thin wrapper around `CreatureDatabase`)
-    ///   loaded for this campaign.
-    ///
-    /// # Errors
-    ///
-    /// Returns `ItemDatabaseError::InvalidMeshDescriptor` if the descriptor produced
-    /// for an override item fails `CreatureDefinition::validate`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::domain::items::database::{ItemDatabase, ItemMeshDatabase};
-    ///
-    /// let item_db = ItemDatabase::new();
-    /// let mesh_db = ItemMeshDatabase::new();
-    /// assert!(item_db.link_mesh_overrides(&mesh_db).is_ok());
-    /// ```
-    pub fn link_mesh_overrides(
-        &self,
-        _registry: &ItemMeshDatabase,
-    ) -> Result<(), ItemDatabaseError> {
-        use crate::domain::visual::item_mesh::ItemMeshDescriptor;
-
-        for (id, item) in &self.items {
-            // Only validate items that carry an explicit override
-            if item.mesh_descriptor_override.is_some() {
-                let descriptor = ItemMeshDescriptor::from_item(item);
-                let creature_def = descriptor.to_creature_definition();
-                creature_def
-                    .validate()
-                    .map_err(|e| ItemDatabaseError::InvalidMeshDescriptor {
-                        item_id: *id,
-                        message: e.to_string(),
-                    })?;
             }
         }
         Ok(())
@@ -769,16 +666,6 @@ mod tests {
     }
 
     #[test]
-    fn test_filter_weapons() {
-        let mut db = ItemDatabase::new();
-        db.add_item(create_test_item(1, "Sword")).unwrap();
-        db.add_item(create_test_item(2, "Axe")).unwrap();
-
-        let weapons = db.get_weapons();
-        assert_eq!(weapons.len(), 2);
-    }
-
-    #[test]
     fn test_all_items() {
         let mut db = ItemDatabase::new();
         db.add_item(create_test_item(1, "Item1")).unwrap();
@@ -1076,75 +963,6 @@ mod tests {
         assert!(
             db.validate().is_ok(),
             "ItemMeshDatabase loaded from test_campaign must validate without errors"
-        );
-    }
-
-    // ── link_mesh_overrides unit tests ─────────────────────────────────────
-
-    /// `link_mesh_overrides` succeeds on an empty `ItemDatabase`.
-    #[test]
-    fn test_link_mesh_overrides_empty_item_db() {
-        let item_db = ItemDatabase::new();
-        let mesh_db = ItemMeshDatabase::new();
-        assert!(item_db.link_mesh_overrides(&mesh_db).is_ok());
-    }
-
-    /// Items without `mesh_descriptor_override` are skipped by
-    /// `link_mesh_overrides`.
-    #[test]
-    fn test_link_mesh_overrides_no_override_items_skipped() {
-        let mut item_db = ItemDatabase::new();
-        item_db
-            .add_item(create_test_item(1, "Plain Sword"))
-            .unwrap();
-
-        let mesh_db = ItemMeshDatabase::new();
-        assert!(
-            item_db.link_mesh_overrides(&mesh_db).is_ok(),
-            "Items without overrides must not cause link_mesh_overrides to fail"
-        );
-    }
-
-    /// An item with a valid `mesh_descriptor_override` passes validation.
-    #[test]
-    fn test_link_mesh_overrides_valid_override_passes() {
-        use crate::domain::visual::item_mesh::ItemMeshDescriptorOverride;
-
-        let mut item_db = ItemDatabase::new();
-        item_db
-            .add_item(Item {
-                id: 100,
-                name: "Fancy Sword".to_string(),
-                item_type: ItemType::Weapon(WeaponData {
-                    damage: DiceRoll::new(1, 8, 0),
-                    bonus: 0,
-                    hands_required: 1,
-                    classification: WeaponClassification::MartialMelee,
-                }),
-                base_cost: 50,
-                sell_cost: 25,
-                alignment_restriction: None,
-                constant_bonus: None,
-                temporary_bonus: None,
-                spell_effect: None,
-                max_charges: 0,
-                is_cursed: false,
-                icon_path: None,
-                tags: vec![],
-                mesh_descriptor_override: Some(ItemMeshDescriptorOverride {
-                    primary_color: Some([0.8, 0.2, 0.2, 1.0]),
-                    accent_color: None,
-                    scale: Some(0.4),
-                    emissive: None,
-                }),
-                mesh_id: None,
-            })
-            .unwrap();
-
-        let mesh_db = ItemMeshDatabase::new();
-        assert!(
-            item_db.link_mesh_overrides(&mesh_db).is_ok(),
-            "Valid override must pass link_mesh_overrides"
         );
     }
 

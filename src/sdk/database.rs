@@ -229,30 +229,6 @@ impl SpellDatabase {
     pub fn has_spell(&self, id: &SpellId) -> bool {
         self.spells.contains_key(id)
     }
-
-    /// Gets a spell by name (case-insensitive)
-    pub fn get_spell_by_name(&self, name: &str) -> Option<&Spell> {
-        let name_lower = name.to_lowercase();
-        self.spells
-            .values()
-            .find(|s| s.name.to_lowercase() == name_lower)
-    }
-
-    /// Returns all spells for a given school
-    pub fn spells_by_school(
-        &self,
-        school: crate::domain::magic::types::SpellSchool,
-    ) -> Vec<&Spell> {
-        self.spells
-            .values()
-            .filter(|s| s.school == school)
-            .collect()
-    }
-
-    /// Returns all spells of a given level
-    pub fn spells_by_level(&self, level: u8) -> Vec<&Spell> {
-        self.spells.values().filter(|s| s.level == level).collect()
-    }
 }
 
 // ===== Monster System =====
@@ -347,27 +323,6 @@ impl MonsterDatabase {
     ) -> Result<(), DatabaseError> {
         self.monsters.insert(def.id, def.to_monster());
         Ok(())
-    }
-
-    /// Gets a monster by name (case-insensitive)
-    pub fn get_monster_by_name(&self, name: &str) -> Option<&Monster> {
-        let name_lower = name.to_lowercase();
-        self.monsters
-            .values()
-            .find(|m| m.name.to_lowercase() == name_lower)
-    }
-
-    /// Returns all undead monsters
-    pub fn undead_monsters(&self) -> Vec<&Monster> {
-        self.monsters.values().filter(|m| m.is_undead).collect()
-    }
-
-    /// Returns monsters within an experience value range
-    pub fn monsters_by_experience_range(&self, min_xp: u32, max_xp: u32) -> Vec<&Monster> {
-        self.monsters
-            .values()
-            .filter(|m| m.loot.experience >= min_xp && m.loot.experience <= max_xp)
-            .collect()
     }
 }
 
@@ -547,36 +502,6 @@ impl QuestDatabase {
     /// Adds a quest to the database
     pub fn add_quest(&mut self, quest: Quest) {
         self.quests.insert(quest.id, quest);
-    }
-
-    /// Gets a quest by name (case-insensitive)
-    pub fn get_quest_by_name(&self, name: &str) -> Option<&Quest> {
-        let name_lower = name.to_lowercase();
-        self.quests
-            .values()
-            .find(|q| q.name.to_lowercase() == name_lower)
-    }
-
-    /// Returns all main quests
-    pub fn main_quests(&self) -> Vec<&Quest> {
-        self.quests.values().filter(|q| q.is_main_quest).collect()
-    }
-
-    /// Returns all repeatable quests
-    pub fn repeatable_quests(&self) -> Vec<&Quest> {
-        self.quests.values().filter(|q| q.repeatable).collect()
-    }
-
-    /// Returns quests available at a given level
-    pub fn quests_for_level(&self, level: u8) -> Vec<&Quest> {
-        self.quests
-            .values()
-            .filter(|q| {
-                let min_ok = q.min_level.is_none_or(|min| level >= min);
-                let max_ok = q.max_level.is_none_or(|max| level <= max);
-                min_ok && max_ok
-            })
-            .collect()
     }
 }
 
@@ -834,27 +759,6 @@ impl DialogueDatabase {
         }
         Ok(())
     }
-
-    /// Gets a dialogue by name (case-insensitive)
-    pub fn get_dialogue_by_name(&self, name: &str) -> Option<&DialogueTree> {
-        let name_lower = name.to_lowercase();
-        self.dialogues
-            .values()
-            .find(|d| d.name.to_lowercase() == name_lower)
-    }
-
-    /// Returns all repeatable dialogues
-    pub fn repeatable_dialogues(&self) -> Vec<&DialogueTree> {
-        self.dialogues.values().filter(|d| d.repeatable).collect()
-    }
-
-    /// Returns dialogues associated with a specific quest
-    pub fn dialogues_for_quest(&self, quest_id: QuestId) -> Vec<&DialogueTree> {
-        self.dialogues
-            .values()
-            .filter(|d| d.associated_quest == Some(quest_id))
-            .collect()
-    }
 }
 
 // ===== NPC Database =====
@@ -969,14 +873,6 @@ impl NpcDatabase {
     /// Checks if an NPC exists in the database
     pub fn has_npc(&self, id: &str) -> bool {
         self.npcs.contains_key(id)
-    }
-
-    /// Gets an NPC by name (case-insensitive)
-    pub fn get_npc_by_name(&self, name: &str) -> Option<&crate::domain::world::NpcDefinition> {
-        let name_lower = name.to_lowercase();
-        self.npcs
-            .values()
-            .find(|n| n.name.to_lowercase() == name_lower)
     }
 
     /// Returns all merchant NPCs
@@ -3338,23 +3234,6 @@ mod tests {
     fn test_npc_database_get_npc_not_found() {
         let db = NpcDatabase::new();
         assert!(db.get_npc("nonexistent").is_none());
-    }
-
-    #[test]
-    fn test_npc_database_get_npc_by_name() {
-        let mut db = NpcDatabase::new();
-
-        let npc =
-            crate::domain::world::NpcDefinition::new("merchant_1", "Merchant Bob", "merchant.png");
-
-        db.add_npc(npc).expect("Failed to add NPC");
-
-        let retrieved = db.get_npc_by_name("Merchant Bob").expect("NPC not found");
-        assert_eq!(retrieved.id, "merchant_1");
-
-        // Case insensitive
-        let retrieved = db.get_npc_by_name("merchant bob").expect("NPC not found");
-        assert_eq!(retrieved.id, "merchant_1");
     }
 
     #[test]

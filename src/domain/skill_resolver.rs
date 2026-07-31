@@ -64,7 +64,6 @@ use crate::domain::skills::{
     rank_for_level, CharacterSkillRanks, SkillBreakdown, SkillBreakdownEntry, SkillDatabase,
     SkillError, SkillGrant, SkillGrantSource, SkillId, SkillRank,
 };
-use std::collections::HashMap;
 
 // ===== SkillResolverContext =====
 
@@ -162,56 +161,6 @@ impl SkillResolver {
     ) -> Result<SkillRank, SkillError> {
         let ctx = Self::context_for_character(character, classes, races)?;
         Self::effective_skill_rank(&ctx, skill_id, skills)
-    }
-
-    /// Computes a character's effective skill breakdown using class/race lookups.
-    ///
-    /// # Errors
-    ///
-    /// Returns a recoverable [`SkillError`] for missing skill, class, or race data.
-    pub fn effective_skill_breakdown_for_character(
-        character: &Character,
-        skill_id: &SkillId,
-        skills: &SkillDatabase,
-        classes: &ClassDatabase,
-        races: &RaceDatabase,
-    ) -> Result<SkillBreakdown, SkillError> {
-        let ctx = Self::context_for_character(character, classes, races)?;
-        Self::effective_skill_breakdown(&ctx, skill_id, skills)
-    }
-
-    /// Computes all effective skill ranks for a character using class/race lookups.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SkillError::ClassNotFound`] or [`SkillError::RaceNotFound`] if the
-    /// character references missing class/race definitions.
-    pub fn all_effective_skill_ranks_for_character(
-        character: &Character,
-        skills: &SkillDatabase,
-        classes: &ClassDatabase,
-        races: &RaceDatabase,
-    ) -> Result<HashMap<SkillId, SkillRank>, SkillError> {
-        let ctx = Self::context_for_character(character, classes, races)?;
-        Ok(Self::all_effective_skill_ranks(&ctx, skills))
-    }
-
-    /// Returns whether a character meets a minimum effective skill rank.
-    ///
-    /// # Errors
-    ///
-    /// Returns a recoverable [`SkillError`] for missing skill, class, or race data.
-    pub fn character_has_skill_rank_for_character(
-        character: &Character,
-        skill_id: &SkillId,
-        minimum: SkillRank,
-        skills: &SkillDatabase,
-        classes: &ClassDatabase,
-        races: &RaceDatabase,
-    ) -> Result<bool, SkillError> {
-        let rank =
-            Self::effective_skill_rank_for_character(character, skill_id, skills, classes, races)?;
-        Ok(rank >= minimum)
     }
 
     /// Computes the effective skill rank for `skill_id`.
@@ -439,91 +388,6 @@ impl SkillResolver {
             applied_minimum_rank: min_rank,
             applied_maximum_rank_override: max_rank_override,
         })
-    }
-
-    /// Computes effective ranks for **all** skills in `skills`, returning a map.
-    ///
-    /// Skills absent from the context's grants and `char_ranks` receive their
-    /// auto-scaled rank only (clamped to their `max_rank`).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::domain::skills::{SkillDatabase, SkillGrant, CharacterSkillRanks};
-    /// use antares::domain::skill_resolver::{SkillResolver, SkillResolverContext};
-    ///
-    /// let skill_ron = r#"[
-    ///     (id: "perception", name: "Perception", category: Exploration,
-    ///      description: "", scaling: Linear(base: 0, per_level: 1),
-    ///      max_rank: 50, is_trainable: true),
-    ///     (id: "athletics", name: "Athletics", category: Utility,
-    ///      description: "", scaling: Flat, max_rank: 20, is_trainable: true),
-    /// ]"#;
-    /// let skills = SkillDatabase::load_from_string(skill_ron).unwrap();
-    /// let ranks = CharacterSkillRanks::new();
-    /// let grants: Vec<SkillGrant> = vec![];
-    /// let ctx = SkillResolverContext {
-    ///     level: 1, class_id: "knight", race_id: "human",
-    ///     char_ranks: &ranks, class_grants: &grants, race_grants: &grants,
-    /// };
-    ///
-    /// let all = SkillResolver::all_effective_skill_ranks(&ctx, &skills);
-    /// assert!(all.contains_key("perception"));
-    /// assert!(all.contains_key("athletics"));
-    /// ```
-    pub fn all_effective_skill_ranks(
-        ctx: &SkillResolverContext<'_>,
-        skills: &SkillDatabase,
-    ) -> HashMap<SkillId, SkillRank> {
-        let mut result = HashMap::new();
-        for skill_id in skills.all_ids() {
-            // Safe: skill_id is always present in the database we iterate over
-            let rank = Self::effective_skill_rank(ctx, skill_id, skills).unwrap_or(0);
-            result.insert(skill_id.clone(), rank);
-        }
-        result
-    }
-
-    /// Returns `true` if the character's effective rank in `skill_id` ≥ `minimum`.
-    ///
-    /// Returns `false` if the skill is not in the database.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use antares::domain::skills::{SkillDatabase, SkillGrant, CharacterSkillRanks};
-    /// use antares::domain::skill_resolver::{SkillResolver, SkillResolverContext};
-    ///
-    /// let skill_ron = r#"[
-    ///     (id: "perception", name: "Perception", category: Exploration,
-    ///      description: "", scaling: Linear(base: 0, per_level: 1),
-    ///      max_rank: 50, is_trainable: true),
-    /// ]"#;
-    /// let skills = SkillDatabase::load_from_string(skill_ron).unwrap();
-    /// let ranks = CharacterSkillRanks::new();
-    /// let grants: Vec<SkillGrant> = vec![];
-    /// let ctx = SkillResolverContext {
-    ///     level: 10, class_id: "knight", race_id: "human",
-    ///     char_ranks: &ranks, class_grants: &grants, race_grants: &grants,
-    /// };
-    ///
-    /// // Level 10 auto-rank for linear(0, 1) = 9
-    /// assert!(SkillResolver::character_has_skill_rank(
-    ///     &ctx, &"perception".to_string(), 9, &skills,
-    /// ));
-    /// assert!(!SkillResolver::character_has_skill_rank(
-    ///     &ctx, &"perception".to_string(), 10, &skills,
-    /// ));
-    /// ```
-    pub fn character_has_skill_rank(
-        ctx: &SkillResolverContext<'_>,
-        skill_id: &SkillId,
-        minimum: SkillRank,
-        skills: &SkillDatabase,
-    ) -> bool {
-        Self::effective_skill_rank(ctx, skill_id, skills)
-            .map(|r| r >= minimum)
-            .unwrap_or(false)
     }
 }
 
@@ -778,27 +642,6 @@ mod tests {
     }
 
     #[test]
-    fn test_all_effective_skill_ranks_contains_all_database_skills() {
-        let skills = make_linear_skills_db();
-        let ranks = CharacterSkillRanks::new();
-        let no_grants: Vec<SkillGrant> = vec![];
-
-        let all = SkillResolver::all_effective_skill_ranks(
-            &make_ctx(5, &ranks, &no_grants, &no_grants),
-            &skills,
-        );
-
-        for skill_id in skills.all_ids() {
-            assert!(
-                all.contains_key(skill_id),
-                "all_effective_skill_ranks missing '{}'",
-                skill_id
-            );
-        }
-        assert_eq!(all.len(), skills.len());
-    }
-
-    #[test]
     fn test_effective_skill_rank_combines_class_and_race_grants() {
         let skills = make_linear_skills_db();
         let ranks = CharacterSkillRanks::new();
@@ -888,38 +731,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(rank, 10, "maximum_rank_override should cap rank at 10");
-    }
-
-    #[test]
-    fn test_character_has_skill_rank_true_when_sufficient() {
-        let skills = make_linear_skills_db();
-        let ranks = CharacterSkillRanks::new();
-        let no_grants: Vec<SkillGrant> = vec![];
-        let ctx = make_ctx(10, &ranks, &no_grants, &no_grants);
-
-        // level 10, linear(0,1) → rank 9
-        assert!(SkillResolver::character_has_skill_rank(
-            &ctx,
-            &"perception".to_string(),
-            9,
-            &skills,
-        ));
-    }
-
-    #[test]
-    fn test_character_has_skill_rank_false_when_insufficient() {
-        let skills = make_linear_skills_db();
-        let ranks = CharacterSkillRanks::new();
-        let no_grants: Vec<SkillGrant> = vec![];
-        let ctx = make_ctx(10, &ranks, &no_grants, &no_grants);
-
-        // level 10, linear(0,1) → rank 9; need 10
-        assert!(!SkillResolver::character_has_skill_rank(
-            &ctx,
-            &"perception".to_string(),
-            10,
-            &skills,
-        ));
     }
 
     #[test]

@@ -247,7 +247,11 @@ two entire modules exercised **only** by their own unit tests.
   UI/combat `too_many_arguments` offenders move to Phase 5.
 - Add a scoped Clippy gate (`unwrap_used`, `expect_used`,
   `let_underscore_must_use` as `warn`, allowed in `#[cfg(test)]`) to prevent
-  regression.
+  regression. **MOVED to Phase 4 §4.1/§4.5**: measurement found ≈51 pre-existing
+  non-test occurrences in the main-crate lib alone (plus more in bins and the
+  SDK crate), so enabling the gate before the Phase 4 `unwrap`/`expect` cleanup
+  would break the mandatory `-D warnings` gate. Sequenced to run immediately
+  after that cleanup.
 
 #### 2.4 Testing Requirements
 
@@ -256,20 +260,27 @@ two entire modules exercised **only** by their own unit tests.
 
 #### 2.5 Deliverables
 
-- [ ] 7 stale `#[allow(deprecated)]` removed
-- [ ] 7 dead structs/enums removed
-- [ ] 5 dead systems/helpers removed
-- [ ] 16 dead domain fns removed
-- [ ] 12 dead `sdk/database.rs` query methods removed (domain-layer API kept)
-- [ ] SDK search verified/contract-tested across all editors (no DB-query wiring)
-- [ ] Dead `EditorRegistry._quests_*` + `_stock_templates_file` state removed + tests updated
-- [ ] Stale `campaign_editor.rs` `(future)` search stub removed
-- [ ] `FileNode._children` write-only field removed
-- [ ] `CampaignBuilderApp` `// Future / unused fields` block resolved
-- [ ] Test Play removed: `test_play.rs` + `_test_play_*` fields + tests deleted
-- [ ] Export Wizard finished + wired: "Export / Package Campaign" dialog live, driven by `campaign_packager`, end-to-end test added
-- [ ] 2 lint fixes + `#[allow]` removed
-- [ ] Regression Clippy gate added
+- [x] 7 stale `#[allow(deprecated)]` removed
+- [x] 7 dead structs/enums removed
+- [x] 16 dead domain fns removed
+- [x] 5 dead systems/helpers removed
+- [x] 12 dead `sdk/database.rs` query methods removed (domain-layer API kept)
+      — actual count **14** (the `get_*_by_name` family had 6 members, 5 dead;
+      `get_condition_by_name` kept as live)
+- [x] SDK search verified/contract-tested across all editors (no DB-query wiring)
+      — 8 editors already covered; 10 inline-only editors gained a `filtered_*`
+      seam + contract test; `map_editor` tested via existing snapshot seam
+- [x] Dead `EditorRegistry._quests_*` + `_stock_templates_file` state removed + tests updated
+- [x] Stale `campaign_editor.rs` `(future)` search stub removed
+- [x] `FileNode._children` write-only field removed (+ dead `read_directory` removed)
+- [x] `CampaignBuilderApp` `// Future / unused fields` block resolved
+- [x] Test Play removed: `test_play.rs` + `_test_play_*` fields + tests deleted
+- [x] Export Wizard finished + wired: "Export / Package Campaign" dialog live, driven by `campaign_packager`, end-to-end test added
+- [x] 2 lint fixes + `#[allow]` removed (`only_used_in_recursion`, `needless_pass_by_value`)
+- [x] Regression Clippy gate — **moved to Phase 4** (§4.1/§4.5). Not addable in
+      Phase 2 without breaking the mandatory `-D warnings` gate (≈51 pre-existing
+      non-test `unwrap`/`expect`/`let _` in the lib alone); folded into the
+      Phase 4 error-handling cleanup where it can be enabled cleanly.
 
 #### 2.6 Success Criteria
 
@@ -338,6 +349,22 @@ Structural improvements at the domain↔Bevy boundary.
   `domain/items/types.rs`, `game/systems/ui.rs`).
 - Give `name_generator.rs` static-slice unwraps a `.expect("static name table
   is non-empty")` justification.
+- **Regression Clippy gate (folded in from Phase 2 §2.3)**: once the
+  `unwrap`/`expect` debt below is cleared, enable a scoped Clippy gate
+  (`clippy::unwrap_used`, `clippy::expect_used`, `clippy::let_underscore_must_use`
+  as `warn`, `allow`ed under `#[cfg(test)]`) to prevent regression. This was
+  **deferred out of Phase 2** because measurement found ≈51 pre-existing
+  non-test occurrences in the main-crate lib alone (≈20 `unwrap`, ≈27 `expect`,
+  4 `let _`), plus more in the binaries and the `sdk/campaign_builder` crate;
+  enabling it before this phase's cleanup would promote all of them to hard
+  errors under the mandatory `cargo clippy -- -D warnings` gate. Order of
+  operations for this phase: (1) migrate/justify the non-test
+  `unwrap`/`expect`/`let _` sites (using the `GameError` + `report_err!` /
+  `?`-propagation infrastructure introduced above, and `.expect("...")`
+  justifications where a panic is genuinely unreachable), then (2) turn the gate
+  on and confirm `-D warnings` stays green with `#[cfg(test)]` code exempted via
+  a crate-level `#![cfg_attr(test, allow(clippy::unwrap_used,
+  clippy::expect_used, clippy::let_underscore_must_use))]`.
 
 #### 4.2 Integrate Feature
 
@@ -357,6 +384,9 @@ Structural improvements at the domain↔Bevy boundary.
 
 - Modifier/error-conversion tests for the new `GameError` `#[from]` paths.
 - Determinism test: same seed + same inputs → identical combat outcomes.
+- After the `unwrap`/`expect` cleanup, `cargo clippy --workspace --all-targets
+  --all-features -- -D warnings` must stay green with the new restriction lints
+  enabled (test code exempted).
 
 #### 4.5 Deliverables
 
@@ -365,11 +395,17 @@ Structural improvements at the domain↔Bevy boundary.
 - [ ] 5 manual impls migrated to `thiserror`
 - [ ] `name_generator` unwrap justification
 - [ ] Seeded `GameRng` + persisted seed (dedicated work item, in scope)
+- [ ] Non-test `unwrap`/`expect`/`let _` debt migrated or justified
+- [ ] Regression Clippy gate enabled (`unwrap_used`/`expect_used`/
+      `let_underscore_must_use` as `warn`, `#[cfg(test)]` exempt) — **folded in
+      from Phase 2 §2.3**
 
 #### 4.6 Success Criteria
 
 - One boundary error type consumed by systems; no cross-layer name ambiguity.
 - Seeded runs reproducible; quality gates pass.
+- Regression Clippy gate active and green; no non-test `unwrap`/`expect` remains
+  unjustified.
 
 ### Phase 5: Duplicate-Code Consolidation
 

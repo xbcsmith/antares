@@ -1,9 +1,10 @@
 //! Campaign Packager Integration Module
 //!
 //! This module provides UI and logic for packaging campaigns into distributable
-//! .zip archives using the SDK's campaign_packager functionality.
+//! .tar.gz archives using the main crate's campaign_packager functionality.
 
-use std::path::PathBuf;
+use antares::sdk::campaign_packager::{CampaignPackager, PackageManifest};
+use std::path::{Path, PathBuf};
 
 /// Export wizard state for multi-step packaging process
 #[derive(Debug, Clone, PartialEq)]
@@ -108,6 +109,116 @@ impl ExportWizard {
             ExportWizardStep::Settings => self.output_path.is_some(),
             ExportWizardStep::Exporting => false,
             ExportWizardStep::Complete => false,
+        }
+    }
+
+    /// Populates [`selected_files`](Self::selected_files) from the top-level
+    /// entries of a campaign directory.
+    ///
+    /// This scans the immediate children of `campaign_dir` (files and
+    /// sub-directories such as `campaign.ron`, `config.ron`, and `data/`) and
+    /// records their paths so the `FileSelection` step's
+    /// [`can_proceed`](Self::can_proceed) check can be satisfied. Existing
+    /// entries are cleared first so repeated calls are idempotent. If the
+    /// directory cannot be read the selection is left empty.
+    ///
+    /// Note: this list is informational for the UI; the actual packaging is
+    /// performed by the main-crate [`CampaignPackager`], which walks the
+    /// campaign directory itself.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    /// use campaign_builder::packager::ExportWizard;
+    ///
+    /// let mut wizard = ExportWizard::new();
+    /// wizard.populate_files_from_campaign(Path::new("campaigns/example"));
+    /// assert!(!wizard.selected_files.is_empty());
+    /// ```
+    pub fn populate_files_from_campaign(&mut self, campaign_dir: &Path) {
+        self.selected_files.clear();
+        if let Ok(entries) = std::fs::read_dir(campaign_dir) {
+            let mut paths: Vec<PathBuf> = entries
+                .filter_map(|entry| entry.ok().map(|e| e.path()))
+                .collect();
+            // Deterministic ordering keeps the UI list and tests stable.
+            paths.sort();
+            self.selected_files = paths;
+        }
+    }
+
+    /// Runs the real campaign export via the main-crate
+    /// [`CampaignPackager`].
+    ///
+    /// This is a pure, egui-free method so it can be unit/integration tested
+    /// headlessly. It builds a packager at the wizard's configured
+    /// [`compression_level`](Self::compression_level), packages `campaign_dir`
+    /// into the wizard's [`output_path`](Self::output_path) (a `.tar.gz`
+    /// archive), and updates the wizard's progress/error/completion state.
+    ///
+    /// # Arguments
+    ///
+    /// * `campaign_dir` - Path to the campaign directory (containing
+    ///   `campaign.ron`).
+    ///
+    /// # Returns
+    ///
+    /// Returns the [`PackageManifest`] describing the produced archive on
+    /// success.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(String)` if [`output_path`](Self::output_path) is `None`
+    /// or if the underlying packaging operation fails. The same message is
+    /// stored in [`export_error`](Self::export_error).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::path::{Path, PathBuf};
+    /// use campaign_builder::packager::ExportWizard;
+    ///
+    /// let mut wizard = ExportWizard::new();
+    /// wizard.output_path = Some(PathBuf::from("example_v1.0.0.tar.gz"));
+    /// let manifest = wizard.run_export(Path::new("campaigns/example")).unwrap();
+    /// assert!(manifest.total_size > 0);
+    /// ```
+    pub fn run_export(&mut self, campaign_dir: &Path) -> Result<PackageManifest, String> {
+        self.export_error = None;
+        self.export_complete = false;
+
+        let output_path = match self.output_path.clone() {
+            Some(path) => path,
+            None => {
+                let msg = "No output path selected for export".to_string();
+                self.export_error = Some(msg.clone());
+                self.progress_message = msg.clone();
+                return Err(msg);
+            }
+        };
+
+        self.progress_message = format!("Packaging campaign to {}...", output_path.display());
+
+        let packager = CampaignPackager::with_compression(self.compression_level as u32);
+        match packager.package_campaign(campaign_dir, &output_path) {
+            Ok(manifest) => {
+                self.export_complete = true;
+                self.progress_message = format!(
+                    "Exported '{}' v{} ({} files, {} bytes)",
+                    manifest.campaign_name,
+                    manifest.campaign_version,
+                    manifest.files.len(),
+                    manifest.total_size
+                );
+                Ok(manifest)
+            }
+            Err(e) => {
+                let msg = format!("Export failed: {}", e);
+                self.export_error = Some(msg.clone());
+                self.progress_message = msg.clone();
+                Err(msg)
+            }
         }
     }
 }

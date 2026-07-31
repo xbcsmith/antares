@@ -53,16 +53,6 @@ use crate::game::systems::ui::GameLog;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-// ── Marker component ─────────────────────────────────────────────────────────
-
-/// Marker component attached to the root entity of the temple service UI.
-///
-/// Spawned by external setup code when entering [`GameMode::TempleService`].
-/// `cleanup_temple_ui` despawns all entities that carry this component when
-/// the session ends.
-#[derive(Component)]
-pub struct TempleUiRoot;
-
 // ── Plugin ────────────────────────────────────────────────────────────────────
 
 /// Bevy plugin for the priest temple resurrection service UI.

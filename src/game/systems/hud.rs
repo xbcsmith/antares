@@ -276,12 +276,6 @@ pub struct HpBarFill {
     pub party_index: usize,
 }
 
-/// Marker component for HP text label
-#[derive(Component)]
-pub struct HpText {
-    pub party_index: usize,
-}
-
 /// Marker component for condition text label
 #[derive(Component)]
 pub struct ConditionText {

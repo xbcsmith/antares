@@ -72,7 +72,6 @@ pub mod stock_templates_editor;
 pub mod template_browser;
 pub mod template_metadata;
 pub mod templates;
-pub mod test_play;
 pub mod test_utils;
 #[cfg(target_os = "macos")]
 pub mod tray;
@@ -754,12 +753,9 @@ pub struct CampaignBuilderApp {
     pub ui_state: editor_state::EditorUiState,
     pub validation_state: editor_state::ValidationState,
 
-    // ─── Future / unused fields ──────────────────────────────────────────
-    _export_wizard: Option<packager::ExportWizard>,
-    _test_play_session: Option<test_play::TestPlaySession>,
-    _test_play_config: test_play::TestPlayConfig,
-    _show_export_dialog: bool,
-    _show_test_play_panel: bool,
+    // ─── Export wizard state ──────────────────────────────────────────────
+    export_wizard: Option<packager::ExportWizard>,
+    show_export_dialog: bool,
 
     /// Receiver for macOS menu-bar tray commands.
     #[cfg(target_os = "macos")]
@@ -778,7 +774,6 @@ enum PendingAction {
 pub struct FileNode {
     pub name: String,
     pub is_directory: bool,
-    pub _children: Vec<FileNode>,
 }
 
 impl Default for CampaignBuilderApp {
@@ -803,11 +798,8 @@ impl Default for CampaignBuilderApp {
             editor_registry: editor_state::EditorRegistry::default(),
             ui_state: editor_state::EditorUiState::default(),
             validation_state: editor_state::ValidationState::default(),
-            _export_wizard: None,
-            _test_play_session: None,
-            _test_play_config: test_play::TestPlayConfig::default(),
-            _show_export_dialog: false,
-            _show_test_play_panel: false,
+            export_wizard: None,
+            show_export_dialog: false,
             #[cfg(target_os = "macos")]
             tray_cmd_rx: None,
         }
@@ -1009,9 +1001,17 @@ impl eframe::App for CampaignBuilderApp {
                             "Test play would launch the game here...".to_string();
                         ui.close();
                     }
-                    if ui.button("📦 Export Campaign...").clicked() {
-                        self.ui_state.status_message =
-                            "Export would create .zip archive here...".to_string();
+                    if ui.button("📦 Export / Package Campaign...").clicked() {
+                        if self.campaign_dir.is_some() {
+                            self.export_wizard = Some(packager::ExportWizard::new());
+                            self.show_export_dialog = true;
+                            self.ui_state.status_message =
+                                "Opened Export / Package Campaign wizard".to_string();
+                            ui.ctx().request_repaint();
+                        } else {
+                            self.ui_state.status_message =
+                                "Load a campaign before exporting.".to_string();
+                        }
                         ui.close();
                     }
                     ui.separator();
@@ -1964,10 +1964,322 @@ impl eframe::App for CampaignBuilderApp {
         if self.ui_state.show_debug_panel {
             self.show_debug_panel_window(ctx);
         }
+
+        // Export / Package Campaign wizard
+        if self.show_export_dialog {
+            self.render_export_wizard(ctx);
+        }
     }
 }
 
 impl CampaignBuilderApp {
+    /// Renders the multi-step Export / Package Campaign wizard window.
+    ///
+    /// The wizard walks the user through validation, file selection, metadata
+    /// confirmation, export settings, the export itself, and a completion
+    /// summary. The actual packaging is delegated to the wizard's
+    /// [`run_export`](packager::ExportWizard::run_export), which uses the
+    /// main-crate `CampaignPackager`.
+    ///
+    /// To keep the borrow checker happy, the [`packager::ExportWizard`] is
+    /// `take()`n out of `self` into a local for the duration of the frame and
+    /// stored back afterwards (unless the window was closed). All campaign
+    /// state consumed inside the egui closure is cloned up front so the closure
+    /// never borrows `self`.
+    fn render_export_wizard(&mut self, ctx: &egui::Context) {
+        // Move the wizard out so the closure can mutate it without borrowing self.
+        let mut wizard = match self.export_wizard.take() {
+            Some(w) => w,
+            None => {
+                self.show_export_dialog = false;
+                return;
+            }
+        };
+
+        // Clone everything the closure needs so it never touches `self`.
+        let campaign_dir = self.campaign_dir.clone();
+        let campaign_name = self.campaign.name.clone();
+        let campaign_version = self.campaign.version.clone();
+        let campaign_author = self.campaign.author.clone();
+        let campaign_description = self.campaign.description.clone();
+        let has_campaign_dir = campaign_dir.is_some();
+
+        let validation_error_count = Self::count_validation_errors(&self.validation_state);
+
+        let mut open = true;
+        let mut step_changed = false;
+        let mut do_validate = false;
+        let mut do_export = false;
+        let mut close_requested = false;
+        let mut new_version: Option<String> = None;
+
+        egui::Window::new("Export / Package Campaign")
+            .open(&mut open)
+            .resizable(true)
+            .default_width(520.0)
+            .show(ctx, |ui| {
+                match wizard.current_step {
+                    packager::ExportWizardStep::Validation => {
+                        ui.heading("Step 1 · Validation");
+                        ui.separator();
+                        if has_campaign_dir {
+                            ui.label(format!("Campaign: {}", campaign_name));
+                            if let Some(dir) = &campaign_dir {
+                                ui.label(format!("Directory: {}", dir.display()));
+                            }
+                        } else {
+                            ui.colored_label(
+                                validation::ValidationSeverity::Error.color(),
+                                "No campaign loaded.",
+                            );
+                        }
+                        ui.separator();
+                        if ui.button("✅ Run Validation").clicked() {
+                            do_validate = true;
+                        }
+                        if wizard.validation_passed {
+                            ui.colored_label(
+                                validation::ValidationSeverity::Passed.color(),
+                                "Validation passed — ready to continue.",
+                            );
+                        } else if validation_error_count > 0 {
+                            ui.colored_label(
+                                validation::ValidationSeverity::Error.color(),
+                                format!("{} blocking error(s) found.", validation_error_count),
+                            );
+                        } else {
+                            ui.label("Run validation to continue.");
+                        }
+                    }
+                    packager::ExportWizardStep::FileSelection => {
+                        ui.heading("Step 2 · Files");
+                        ui.separator();
+                        // Populate once; don't clobber the list every frame.
+                        if wizard.selected_files.is_empty() {
+                            if let Some(dir) = &campaign_dir {
+                                wizard.populate_files_from_campaign(dir);
+                            }
+                        }
+                        ui.label(format!(
+                            "{} top-level entr{} will be packaged:",
+                            wizard.selected_files.len(),
+                            if wizard.selected_files.len() == 1 {
+                                "y"
+                            } else {
+                                "ies"
+                            },
+                        ));
+                        egui::ScrollArea::vertical()
+                            .id_salt("export_wizard_files")
+                            .max_height(220.0)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                for path in &wizard.selected_files {
+                                    let label = path
+                                        .file_name()
+                                        .and_then(|n| n.to_str())
+                                        .unwrap_or("<unknown>");
+                                    ui.label(label);
+                                }
+                            });
+                    }
+                    packager::ExportWizardStep::Metadata => {
+                        ui.heading("Step 3 · Metadata");
+                        ui.separator();
+                        ui.label(format!("Name: {}", campaign_name));
+                        ui.label(format!("Version: {}", campaign_version));
+                        ui.label(format!("Author: {}", campaign_author));
+                        ui.label(format!("Description: {}", campaign_description));
+                        ui.separator();
+                        ui.label("Bump version:");
+                        ui.horizontal(|ui| {
+                            if ui.button("Major").clicked() {
+                                new_version = Some(packager::increment_version(
+                                    &campaign_version,
+                                    packager::VersionIncrement::Major,
+                                ));
+                            }
+                            if ui.button("Minor").clicked() {
+                                new_version = Some(packager::increment_version(
+                                    &campaign_version,
+                                    packager::VersionIncrement::Minor,
+                                ));
+                            }
+                            if ui.button("Patch").clicked() {
+                                new_version = Some(packager::increment_version(
+                                    &campaign_version,
+                                    packager::VersionIncrement::Patch,
+                                ));
+                            }
+                        });
+                    }
+                    packager::ExportWizardStep::Settings => {
+                        ui.heading("Step 4 · Settings");
+                        ui.separator();
+                        ui.add(
+                            egui::Slider::new(&mut wizard.compression_level, 0..=9)
+                                .text("Compression level"),
+                        );
+                        ui.checkbox(&mut wizard.include_readme, "Include README");
+                        ui.checkbox(&mut wizard.include_all_maps, "Include all maps");
+                        ui.separator();
+                        if ui.button("📁 Choose Output...").clicked() {
+                            if let Some(mut path) = rfd::FileDialog::new()
+                                .add_filter("Campaign package", &["gz", "tar.gz"])
+                                .save_file()
+                            {
+                                let is_targz = path
+                                    .to_string_lossy()
+                                    .to_ascii_lowercase()
+                                    .ends_with(".tar.gz");
+                                if !is_targz {
+                                    let file_name = path
+                                        .file_name()
+                                        .and_then(|n| n.to_str())
+                                        .unwrap_or("campaign")
+                                        .to_string();
+                                    let base = file_name.split('.').next().unwrap_or("campaign");
+                                    path.set_file_name(format!("{}.tar.gz", base));
+                                }
+                                wizard.output_path = Some(path);
+                            }
+                        }
+                        if let Some(path) = &wizard.output_path {
+                            ui.label(format!("Output: {}", path.display()));
+                        } else {
+                            ui.label("No output file chosen.");
+                        }
+                    }
+                    packager::ExportWizardStep::Exporting => {
+                        ui.heading("Step 5 · Exporting");
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(&wizard.progress_message);
+                        });
+                    }
+                    packager::ExportWizardStep::Complete => {
+                        ui.heading("Step 6 · Complete");
+                        ui.separator();
+                        if let Some(err) = &wizard.export_error {
+                            ui.colored_label(validation::ValidationSeverity::Error.color(), err);
+                        } else {
+                            ui.colored_label(
+                                validation::ValidationSeverity::Passed.color(),
+                                "✅ Export complete!",
+                            );
+                            ui.label(&wizard.progress_message);
+                            if let Some(path) = &wizard.output_path {
+                                ui.label(format!("Output: {}", path.display()));
+                            }
+                        }
+                    }
+                }
+
+                ui.separator();
+                ui.horizontal(|ui| {
+                    let can_back = !matches!(
+                        wizard.current_step,
+                        packager::ExportWizardStep::Validation
+                            | packager::ExportWizardStep::Exporting
+                    );
+                    if ui
+                        .add_enabled(can_back, egui::Button::new("⬅ Back"))
+                        .clicked()
+                    {
+                        wizard.previous_step();
+                        step_changed = true;
+                    }
+
+                    match wizard.current_step {
+                        packager::ExportWizardStep::Complete => {
+                            if ui.button("✔ Finish").clicked() {
+                                close_requested = true;
+                            }
+                        }
+                        packager::ExportWizardStep::Settings => {
+                            if ui
+                                .add_enabled(wizard.can_proceed(), egui::Button::new("📦 Export ➡"))
+                                .clicked()
+                            {
+                                wizard.next_step(); // Settings -> Exporting
+                                do_export = true;
+                                step_changed = true;
+                            }
+                        }
+                        packager::ExportWizardStep::Exporting => {}
+                        _ => {
+                            if ui
+                                .add_enabled(wizard.can_proceed(), egui::Button::new("Next ➡"))
+                                .clicked()
+                            {
+                                wizard.next_step();
+                                step_changed = true;
+                            }
+                        }
+                    }
+
+                    if ui.button("✖ Cancel").clicked() {
+                        close_requested = true;
+                    }
+                });
+            });
+
+        // ── Post-window processing (needs &mut self or the local wizard) ──────
+        if do_validate {
+            self.validate_campaign();
+            let err_count = Self::count_validation_errors(&self.validation_state);
+            wizard.validation_passed = has_campaign_dir && err_count == 0;
+            step_changed = true;
+        }
+
+        if let Some(version) = new_version {
+            self.campaign.version = version;
+            self.unsaved_changes = true;
+            step_changed = true;
+        }
+
+        if do_export {
+            match &campaign_dir {
+                Some(dir) => {
+                    let _ = wizard.run_export(dir);
+                }
+                None => {
+                    wizard.export_error = Some("No campaign directory loaded".to_string());
+                }
+            }
+            wizard.next_step(); // Exporting -> Complete
+            self.ui_state.status_message = wizard.progress_message.clone();
+            step_changed = true;
+        }
+
+        if step_changed {
+            ctx.request_repaint();
+        }
+
+        if !open || close_requested {
+            self.show_export_dialog = false;
+            self.export_wizard = None;
+        } else {
+            self.export_wizard = Some(wizard);
+        }
+    }
+
+    /// Counts blocking (Error/Critical) validation results in the given state.
+    fn count_validation_errors(state: &editor_state::ValidationState) -> usize {
+        state
+            .validation_errors
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.severity,
+                    validation::ValidationSeverity::Error
+                        | validation::ValidationSeverity::Critical
+                )
+            })
+            .count()
+    }
+
     /// Synchronises loaded skill definitions into the NPC editor autocomplete cache.
     fn sync_npc_editor_skill_candidates(&mut self) {
         self.editor_registry.npc_editor_state.available_skills = self.campaign_data.skills.clone();

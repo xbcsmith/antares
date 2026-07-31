@@ -45,20 +45,6 @@ use crate::sdk::database::ContentDatabase;
 use rand::Rng;
 use thiserror::Error;
 
-/// Action to use an inventory item in combat
-///
-/// This is a small, serializable-friendly data structure that mirrors the data
-/// produced by UI layers when a player chooses to use an item.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ItemUseAction {
-    /// Who is using the item (combatant id)
-    pub user: CombatantId,
-    /// Inventory slot index in the user's backpack
-    pub inventory_index: usize,
-    /// Target for the item (meaning depends on effect)
-    pub target: CombatantId,
-}
-
 /// Result of applying an item effect in combat
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemUseResult {

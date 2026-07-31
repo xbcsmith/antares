@@ -189,3 +189,134 @@ unchanged). Both real discards now log via `tracing::warn!(?e, ...)`:
 
 All new tests and fixtures use `data`/`data/test_campaign` only (never
 `campaigns/tutorial`), per Implementation Rule 5.
+
+## Codebase Cleanup — Phase 2: Dead Code & Suppressed-Lint Removal
+
+Executed per `docs/explanation/codebase_cleanup_plan.md` §2. Low-risk deletions
+using the compiler + workspace-wide grep as the authority (the "dead" items are
+`pub`, so `rustc` does not flag them — each was proven dead by confirming its
+only references were its own definition/doc/tests). Net effect: ~1000+ lines
+removed, one full module deleted, one dormant feature finished and wired, and
+search behavior contract-tested across every SDK editor. All four quality gates
+pass on the whole workspace with zero warnings.
+
+### Main crate (`src/`) removals
+
+- **7 stale `#[allow(deprecated)]`** removed from `src/sdk/cli/item_editor.rs`
+  (no `#[deprecated]` exists anywhere in the crate).
+- **7 dead `pub` types** removed: `ActiveActionHighlight` (`combat.rs`),
+  `HpText` (`hud.rs`, keeping the live `HpTextOverlay`), `RecruitmentDialogState`
+  (`recruitment_dialog.rs`), `TempleUiRoot` (`temple_ui.rs`), `ItemUseAction`
+  (`domain/combat/item_usage.rs`), `SpellCastAction` + `SpellCastResult`
+  (`domain/combat/spell_casting.rs`).
+- **5 dead systems / spawn helpers** removed: `creature_spawning_system`,
+  `spawn_shrub` (keeping `spawn_shrub_with_offset`), `get_or_create_tree_mesh`
+  (keeping `get_or_create_tree_mesh_pair`), `tree_mesh_cache_key`,
+  `spawn_custom_furniture_mesh_with_rendering`. Orphaned imports were cleaned up;
+  a test-only `SpawnCreatureRequest` import was moved into the `#[cfg(test)]`
+  module.
+- **Dead domain query/accessor fns** removed from `domain/items/database.rs`,
+  `domain/character.rs`, and `domain/skill_resolver.rs` (each grep-verified as
+  unreferenced; 481 lines net).
+- **14 dead `sdk/database.rs` query methods** removed (the plan estimated 12;
+  the `get_*_by_name` family had 6 members of which 5 were dead —
+  `get_condition_by_name` is live and was kept): `get_spell_by_name`,
+  `spells_by_school`, `spells_by_level`, `get_monster_by_name`,
+  `undead_monsters`, `monsters_by_experience_range`, `get_quest_by_name`,
+  `main_quests`, `repeatable_quests`, `quests_for_level`, `get_dialogue_by_name`,
+  `repeatable_dialogues`, `dialogues_for_quest`, `get_npc_by_name`. These were
+  unwired dead duplicates of the tested domain-layer query API (kept intact).
+- **Item H lint fixes**: removed `#[allow(clippy::only_used_in_recursion)]` on
+  `evaluate_conditions` (`dialogue.rs`) — the `db` param is now genuinely used
+  by the `SkillCheck` arm, so the lint no longer fires and the stale
+  "forward-compat" comment was deleted; removed the spurious
+  `#[allow(clippy::needless_pass_by_value)]` on `try_pickup_adjacent_dropped_item`
+  (`input/exploration_interact.rs`) — all its params are `Copy`, so the lint
+  never fired.
+
+### SDK crate (`sdk/campaign_builder/`) hygiene
+
+- **Test Play removed** (decided: not wiring it): deleted `src/test_play.rs`
+  (`TestPlaySession`/`TestPlayConfig` + tests), its `pub mod test_play;`, and the
+  three `_test_play_*` fields from `CampaignBuilderApp` (+ `Default`).
+- **Dead `EditorRegistry` state removed** (`editor_state.rs`):
+  `_quests_search_filter`, `_quests_show_preview`, `_quests_import_buffer`,
+  `_quests_show_import_dialog`, `_stock_templates_file` (superseded by
+  `QuestEditorState` and `CampaignMetadata.stock_templates_file`); the two
+  self-referential tests in `tests/editor_state_tests.rs` were deleted and the
+  `_quests_show_preview` assertion dropped.
+- **Stale `(future)` search stub removed** from `campaign_editor.rs`: the
+  single-campaign `search_filter` field + its `.with_search(...)` toolbar wiring
+  (a lone campaign has nothing to filter).
+- **Write-only `FileNode._children` removed** (`lib.rs`) along with the now-dead
+  recursive `read_directory` method in `campaign_io.rs`.
+
+### Export Wizard — finished and wired (decided: keep + implement)
+
+The dormant `sdk/campaign_builder/src/packager.rs` `ExportWizard` (a guided
+multi-step campaign **export/packaging** dialog — not a game character) is now
+live:
+
+- Activated the two remaining `// Future / unused fields` on
+  `CampaignBuilderApp` by renaming `_export_wizard` → `export_wizard` and
+  `_show_export_dialog` → `show_export_dialog` (the block is fully resolved and
+  its banner removed).
+- Added egui-free, testable methods to `ExportWizard`:
+  `populate_files_from_campaign(&mut self, &Path)` and
+  `run_export(&mut self, &Path) -> Result<PackageManifest, String>`, the latter
+  driving the actual packaging through the Phase 1-hardened main-crate
+  `antares::sdk::campaign_packager::CampaignPackager` (no duplicated pack logic).
+- Wired a `📦 Export / Package Campaign...` menu entry and a
+  `render_export_wizard` `egui::Window` (Validation → FileSelection → Metadata →
+  Settings → Exporting → Complete) following the SDK egui rules (unique window
+  title, `id_salt` on the file `ScrollArea`, `request_repaint()` on step
+  changes, `rfd` save dialog forcing a `.tar.gz` output).
+- Added `tests/export_wizard_tests.rs`: a full end-to-end flow packaging the
+  `data/test_campaign` fixture and asserting a valid `.tar.gz` + manifest, plus
+  error-path and helper tests.
+
+### SDK search — verified and contract-tested across all 18 editors
+
+SDK content search was already functional (per-editor `search_filter`/
+`search_query` + inline substring matching over editor-local `Vec`s; the deleted
+`sdk/database.rs` query methods were never part of it). To lock the behavior in:
+8 editors already exposed a testable `filtered_*` seam with a test; the
+remaining 10 inline-only editors (`spells`, `monsters`, `items`, `skills`,
+`proficiencies`, `conditions`, `furniture`, `levels`, `stock_templates`,
+`creatures`) each gained a minimal pure `filtered_*` method (their render code
+now calls it, so there is no duplicate predicate) plus a behavior-asserting
+contract test (identity of survivors for empty / matching / non-matching
+queries, per SDK Rule 11). `map_editor` was tested against its existing
+`build_filtered_maps_snapshot` seam. Net: 11 new search contract tests.
+
+### Regression Clippy gate — deferred to Phase 4 (documented, not skipped)
+
+The plan calls for a `unwrap_used` / `expect_used` / `let_underscore_must_use`
+"warn" gate. Measurement shows the main-crate **lib alone** has ≈51 pre-existing
+non-test occurrences (≈20 `unwrap`, ≈27 `expect`, 4 `let _`), with more in the
+binaries and the SDK crate. Because the mandatory gate is
+`cargo clippy --all-targets --all-features -- -D warnings`, enabling these
+lints crate-wide now would promote every pre-existing occurrence to a hard error
+and **break the mandatory zero-warning gate** (AGENTS.md Rule 3). Converting
+~50+ call sites is behavior-changing error-handling work that is explicitly the
+scope of **Phase 4 (Error-Handling Consistency & Determinism)** and conflicts
+with Phase 2's "no behavior change" criterion. Grandfathering with ~50+
+`#[allow(...)]` annotations would itself add the clutter this phase removes.
+The gate is therefore sequenced into Phase 4, to be switched on cleanly once the
+unwrap/expect debt is cleared. This is a documented, evidence-based decision,
+not an omission.
+
+### Verification
+
+- `cargo fmt --all` — clean.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` — clean
+  for **both** `antares` and `campaign_builder`.
+- `cargo nextest run --workspace --all-features` — 8030 passed (up from 8013:
+  +6 Export Wizard, +11 search contract tests), 8 pre-existing skips, 0 failed.
+- Doctests: the full `campaign_builder` doctest suite passes (386); two
+  pre-existing stale doctests unrelated to this phase (`visible_innkeepers`,
+  `filter_spells_for_class`, broken by earlier `NpcDefinition`/`ClassDefinition`
+  field additions) were repaired as hygiene. Main-crate doctests for every
+  touched module pass.
+
+All new tests/fixtures use `data`/`data/test_campaign` only, per Rule 5.
