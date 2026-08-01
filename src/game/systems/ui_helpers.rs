@@ -486,9 +486,219 @@ pub fn spell_target_eligibility(
     }
 }
 
+// ===== Shared egui UI Palette =====
+//
+// A single source of truth for the light-blue title colour, grey hint-bar
+// colour, and lighter-blue section-header colour used across the egui overlay
+// screens (character sheet, spell book, skill training). Previously each screen
+// re-declared its own private `TITLE_COLOR` / `HINT_COLOR` / `*_HEADER_COLOR`
+// constants; these are the canonical values they now share.
+
+/// Title / heading text colour for egui overlay screens (light blue).
+///
+/// Canonical value for the per-screen `TITLE_COLOR` constants that previously
+/// lived in `character_sheet_ui.rs` and `spellbook_ui.rs`.
+pub const UI_TITLE_COLOR: egui::Color32 = egui::Color32::from_rgb(204, 217, 255);
+
+/// Hint-bar / secondary text colour for egui overlay screens (muted grey).
+///
+/// Canonical value for the per-screen `HINT_COLOR` constants that previously
+/// lived in `character_sheet_ui.rs`, `spellbook_ui.rs`, and
+/// `skill_training_ui.rs`.
+pub const UI_HINT_COLOR: egui::Color32 = egui::Color32::from_rgb(140, 140, 166);
+
+/// Section / group-header text colour for egui overlay screens (lighter blue).
+///
+/// Canonical value for the "Level N" group-header colour that previously lived
+/// in `spellbook_ui.rs`.
+pub const UI_HEADER_COLOR: egui::Color32 = egui::Color32::from_rgb(179, 204, 255);
+
+/// Renders a screen title heading with a set of keyboard hints right-aligned on
+/// the same row, followed by a separator.
+///
+/// This is the canonical AGENTS.md Rule 6 title-bar pattern: navigation hints
+/// live in the title row (never a separate bottom bar) so the column body below
+/// owns the full remaining height with no height-reservation arithmetic.
+///
+/// The hints are laid out right-to-left (the first element of `hints` is the
+/// right-most label), matching the existing screens' appearance, with a
+/// separator drawn between adjacent hints. Every hint is coloured with
+/// [`UI_HINT_COLOR`].
+///
+/// # Arguments
+///
+/// * `ui`    — The egui [`Ui`](egui::Ui) to draw into.
+/// * `title` — The heading text.
+/// * `hints` — Keyboard-hint labels, first element right-most.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use bevy_egui::egui;
+/// # use antares::game::systems::ui_helpers::title_bar_with_hints;
+/// # fn ui_example(ui: &mut egui::Ui) {
+/// title_bar_with_hints(ui, "\u{1F4DA} Spell Book", &["[ESC] Close", "[C] Cast"]);
+/// # }
+/// ```
+pub fn title_bar_with_hints(ui: &mut egui::Ui, title: impl Into<String>, hints: &[&str]) {
+    ui.horizontal(|ui| {
+        ui.heading(title.into());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            for (index, hint) in hints.iter().enumerate() {
+                if index > 0 {
+                    ui.separator();
+                }
+                ui.label(egui::RichText::new(*hint).color(UI_HINT_COLOR));
+            }
+        });
+    });
+    ui.separator();
+}
+
+/// Formats a gold amount with thousands separators (US locale style).
+///
+/// Groups digits in threes from the right with a comma separator, e.g.
+/// `1234` becomes `"1,234"`.
+///
+/// # Arguments
+///
+/// * `gold` — The gold amount to format.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::ui_helpers::format_gold;
+///
+/// assert_eq!(format_gold(0), "0");
+/// assert_eq!(format_gold(999), "999");
+/// assert_eq!(format_gold(1_000), "1,000");
+/// assert_eq!(format_gold(1_234), "1,234");
+/// assert_eq!(format_gold(1_000_000), "1,000,000");
+/// ```
+pub fn format_gold(gold: u32) -> String {
+    let s = gold.to_string();
+    let mut result = String::with_capacity(s.len() + s.len() / 3);
+    for (i, ch) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push(',');
+        }
+        result.push(ch);
+    }
+    result.chars().rev().collect()
+}
+
+/// Lays out three side-by-side columns following AGENTS.md Rule 6.
+///
+/// This is the canonical multi-column scaffold: it reads
+/// [`available_size`](egui::Ui::available_size) **before** entering the
+/// horizontal layout, gives each column an explicit
+/// `(width, col_h)` rect via [`allocate_ui`](egui::Ui::allocate_ui), and draws a
+/// separator between columns. The centre column's width is derived from the
+/// remaining space after the two fixed side columns and the two separators.
+///
+/// Each column closure receives a `&mut Ui` whose allocated rect is exactly
+/// `col_h` tall, so any inner [`ScrollArea`](egui::ScrollArea) fills the full
+/// column height. Inner scroll areas MUST use `.auto_shrink([true, false])`.
+/// The closures run sequentially (left, then centre, then right); their return
+/// values are collected into the returned `(left, centre, right)` tuple, which
+/// is handy for surfacing click results.
+///
+/// # Arguments
+///
+/// * `ui`          — The parent [`Ui`](egui::Ui).
+/// * `left_width`  — Fixed width of the left column, in points.
+/// * `right_width` — Fixed width of the right column, in points.
+/// * `min_center`  — Minimum width of the centre column, in points.
+/// * `left` / `center` / `right` — Column body closures.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use bevy_egui::egui;
+/// # use antares::game::systems::ui_helpers::three_column;
+/// # fn ui_example(ui: &mut egui::Ui) {
+/// let (_l, _c, _r) = three_column(
+///     ui,
+///     160.0,
+///     220.0,
+///     200.0,
+///     |ui| ui.label("left"),
+///     |ui| ui.label("center"),
+///     |ui| ui.label("right"),
+/// );
+/// # }
+/// ```
+pub fn three_column<L, C, R, LO, CO, RO>(
+    ui: &mut egui::Ui,
+    left_width: f32,
+    right_width: f32,
+    min_center: f32,
+    left: L,
+    center: C,
+    right: R,
+) -> (LO, CO, RO)
+where
+    L: FnOnce(&mut egui::Ui) -> LO,
+    C: FnOnce(&mut egui::Ui) -> CO,
+    R: FnOnce(&mut egui::Ui) -> RO,
+{
+    // Pre-compute geometry from available_size() BEFORE ui.horizontal so the
+    // allocated column height is the full remaining window height.
+    let available = ui.available_size();
+    let col_h = available.y;
+    // Two separators: each is a 1 px line plus item_spacing.x on either side.
+    let sep_total = (1.0 + 2.0 * ui.spacing().item_spacing.x) * 2.0;
+    let center_width = (available.x - left_width - right_width - sep_total).max(min_center);
+
+    ui.horizontal(|ui| {
+        let left_out = ui.allocate_ui(egui::vec2(left_width, col_h), left).inner;
+        ui.separator();
+        let center_out = ui
+            .allocate_ui(egui::vec2(center_width, col_h), center)
+            .inner;
+        ui.separator();
+        let right_out = ui.allocate_ui(egui::vec2(right_width, col_h), right).inner;
+        (left_out, center_out, right_out)
+    })
+    .inner
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_format_gold_zero() {
+        assert_eq!(format_gold(0), "0");
+    }
+
+    #[test]
+    fn test_format_gold_below_thousand() {
+        assert_eq!(format_gold(999), "999");
+        assert_eq!(format_gold(1), "1");
+        assert_eq!(format_gold(500), "500");
+    }
+
+    #[test]
+    fn test_format_gold_thousands_separator() {
+        assert_eq!(format_gold(1_000), "1,000");
+        assert_eq!(format_gold(1_234), "1,234");
+        assert_eq!(format_gold(10_000), "10,000");
+        assert_eq!(format_gold(999_999), "999,999");
+    }
+
+    #[test]
+    fn test_format_gold_millions() {
+        assert_eq!(format_gold(1_000_000), "1,000,000");
+        assert_eq!(format_gold(1_234_567), "1,234,567");
+    }
+
+    #[test]
+    fn test_ui_palette_values_are_stable() {
+        assert_eq!(UI_TITLE_COLOR, egui::Color32::from_rgb(204, 217, 255));
+        assert_eq!(UI_HINT_COLOR, egui::Color32::from_rgb(140, 140, 166));
+        assert_eq!(UI_HEADER_COLOR, egui::Color32::from_rgb(179, 204, 255));
+    }
 
     #[test]
     fn test_text_style_returns_correct_font_size() {

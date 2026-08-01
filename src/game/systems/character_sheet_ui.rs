@@ -55,6 +55,7 @@ use crate::game::resources::game_data::GameDataResource;
 use crate::game::resources::GlobalState;
 use crate::game::systems::hud::{get_portrait_color, FullPortraitAssets};
 use crate::game::systems::input::{GameAction, InputConfigResource};
+use crate::game::systems::ui_helpers::{three_column, UI_HINT_COLOR, UI_TITLE_COLOR};
 use crate::sdk::database::ContentDatabase;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiTextureHandle};
@@ -69,10 +70,6 @@ const STAT_EMPTY_COLOR: egui::Color32 = egui::Color32::from_rgb(128, 128, 128);
 const LEVEL_READY_COLOR: egui::Color32 = egui::Color32::from_rgb(80, 200, 120);
 /// Yellow used for "visit a trainer" message.
 const TRAINER_NEEDED_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 215, 0);
-/// Header / title colour.
-const TITLE_COLOR: egui::Color32 = egui::Color32::from_rgb(204, 217, 255);
-/// Hint bar colour.
-const HINT_COLOR: egui::Color32 = egui::Color32::from_rgb(140, 140, 166);
 /// Color for skill category subheadings.
 const SKILL_CATEGORY_COLOR: egui::Color32 = egui::Color32::from_rgb(180, 220, 180);
 /// Color for the trainable marker on skills.
@@ -292,13 +289,15 @@ fn character_sheet_ui_system(
                 render_single_view(
                     ui,
                     &mut global_state,
-                    party_len,
-                    focused_index,
-                    &campaign_config,
-                    level_db.as_ref().and_then(|opt| opt.as_ref()),
-                    content_db,
-                    full_portrait_id,
-                    &portrait_key,
+                    SingleViewParams {
+                        party_len,
+                        focused_index,
+                        campaign_config: &campaign_config,
+                        level_db: level_db.as_ref().and_then(|opt| opt.as_ref()),
+                        content_db,
+                        full_portrait_id,
+                        portrait_key: &portrait_key,
+                    },
                 );
             }
             CharacterSheetView::PartyOverview => {
@@ -320,18 +319,44 @@ fn character_sheet_ui_system(
 ///   placeholder fill.
 /// * `portrait_key` -- normalized portrait filename stem used for placeholder
 ///   colour derivation when no texture is available.
-#[allow(clippy::too_many_arguments)]
+///
+/// Groups the read-only inputs of [`render_single_view`] so the helper stays
+/// under clippy's argument-count threshold. `ui` and `global_state` are passed
+/// separately because they are `&mut` and awkward to bundle behind a shared
+/// borrow.
+struct SingleViewParams<'a> {
+    /// Number of members in the active party.
+    party_len: usize,
+    /// Index of the currently focused party member.
+    focused_index: usize,
+    /// Campaign configuration used for experience/level-up display.
+    campaign_config: &'a crate::domain::campaign::CampaignConfig,
+    /// Optional level database for experience-to-next-level lookups.
+    level_db: Option<&'a crate::domain::levels::LevelDatabase>,
+    /// Optional content database for proficiency/skill lookups.
+    content_db: Option<&'a ContentDatabase>,
+    /// Optional egui texture id for the full-length portrait.
+    full_portrait_id: Option<egui::TextureId>,
+    /// Normalized portrait filename stem for placeholder colour derivation.
+    portrait_key: &'a str,
+}
+
+/// Renders the detailed single-character panel from grouped [`SingleViewParams`].
 fn render_single_view(
     ui: &mut egui::Ui,
     global_state: &mut GlobalState,
-    party_len: usize,
-    focused_index: usize,
-    campaign_config: &crate::domain::campaign::CampaignConfig,
-    level_db: Option<&crate::domain::levels::LevelDatabase>,
-    content_db: Option<&ContentDatabase>,
-    full_portrait_id: Option<egui::TextureId>,
-    portrait_key: &str,
+    params: SingleViewParams<'_>,
 ) {
+    let SingleViewParams {
+        party_len,
+        focused_index,
+        campaign_config,
+        level_db,
+        content_db,
+        full_portrait_id,
+        portrait_key,
+    } = params;
+
     if party_len == 0 {
         ui.colored_label(STAT_EMPTY_COLOR, "No party members.");
         return;
@@ -378,7 +403,7 @@ fn render_single_view(
                         "{} -- Level {} {} {}",
                         character.name, character.level, character.race_id, character.class_id
                     ))
-                    .color(TITLE_COLOR)
+                    .color(UI_TITLE_COLOR)
                     .size(16.0)
                     .strong(),
                 )
@@ -390,32 +415,31 @@ fn render_single_view(
     // -- Hint line: keyboard shortcuts only, never blocks button hit regions.
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.colored_label(HINT_COLOR, "[Esc/P] Close");
+            ui.colored_label(UI_HINT_COLOR, "[Esc/P] Close");
             ui.separator();
-            ui.colored_label(HINT_COLOR, "[O] Overview");
+            ui.colored_label(UI_HINT_COLOR, "[O] Overview");
             ui.separator();
-            ui.colored_label(HINT_COLOR, "[1-6] Select");
+            ui.colored_label(UI_HINT_COLOR, "[1-6] Select");
             ui.separator();
-            ui.colored_label(HINT_COLOR, "[Shift+Tab/←] Prev");
+            ui.colored_label(UI_HINT_COLOR, "[Shift+Tab/\u{2190}] Prev");
             ui.separator();
-            ui.colored_label(HINT_COLOR, "[Tab/→] Next");
+            ui.colored_label(UI_HINT_COLOR, "[Tab/\u{2192}] Next");
         });
     });
 
     ui.separator();
 
     let available = ui.available_size();
-    let col_h = available.y;
-    let left_w = 180.0;
     let sep_total = (1.0 + 2.0 * ui.spacing().item_spacing.x) * 2.0;
-    let remaining = (available.x - left_w - sep_total).max(0.0);
-    let split_w = (remaining / 2.0).max(320.0);
-    let middle_w = split_w;
-    let right_w = split_w;
+    let split_w = ((available.x - 180.0 - sep_total) / 2.0).max(320.0);
 
-    ui.horizontal(|ui| {
+    three_column(
+        ui,
+        180.0,
+        split_w,
+        320.0,
         // -- Left column: portrait + character identity
-        ui.allocate_ui(egui::vec2(left_w, col_h), |ui| {
+        |ui| {
             egui::ScrollArea::vertical()
                 .id_salt("character_sheet_portrait_scroll")
                 .auto_shrink([true, false])
@@ -461,7 +485,7 @@ fn render_single_view(
 
                         ui.add_space(8.0);
                         ui.colored_label(
-                            TITLE_COLOR,
+                            UI_TITLE_COLOR,
                             egui::RichText::new(&character.name).strong(),
                         );
                         ui.label(format!(
@@ -470,7 +494,7 @@ fn render_single_view(
                         ));
 
                         ui.add_space(8.0);
-                        ui.colored_label(TITLE_COLOR, "About");
+                        ui.colored_label(UI_TITLE_COLOR, "About");
                         ui.separator();
                         ui.horizontal(|ui| {
                             ui.label("Sex:");
@@ -494,18 +518,15 @@ fn render_single_view(
                         });
                     });
                 });
-        });
-
-        ui.separator();
-
+        },
         // -- Middle column: stats, conditions, combat, experience
-        ui.allocate_ui(egui::vec2(middle_w, col_h), |ui| {
+        |ui| {
             egui::ScrollArea::vertical()
                 .id_salt("character_sheet_stats_scroll")
                 .auto_shrink([true, false])
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
-                        ui.colored_label(TITLE_COLOR, "Core Stats");
+                        ui.colored_label(UI_TITLE_COLOR, "Core Stats");
                         ui.separator();
                         render_stat_row(
                             ui,
@@ -551,7 +572,7 @@ fn render_single_view(
                         );
 
                         ui.add_space(8.0);
-                        ui.colored_label(TITLE_COLOR, "Conditions");
+                        ui.colored_label(UI_TITLE_COLOR, "Conditions");
                         ui.separator();
                         if character.active_conditions.is_empty() {
                             ui.colored_label(STAT_EMPTY_COLOR, "None");
@@ -565,7 +586,7 @@ fn render_single_view(
                         }
 
                         ui.add_space(8.0);
-                        ui.colored_label(TITLE_COLOR, "Combat");
+                        ui.colored_label(UI_TITLE_COLOR, "Combat");
                         ui.separator();
                         render_hp_row(ui, "HP", character.hp.current, character.hp.base);
                         render_hp_row(ui, "SP", character.sp.current, character.sp.base);
@@ -578,7 +599,7 @@ fn render_single_view(
                         );
 
                         ui.add_space(8.0);
-                        ui.colored_label(TITLE_COLOR, "Experience");
+                        ui.colored_label(UI_TITLE_COLOR, "Experience");
                         ui.separator();
                         let xp_next = experience_for_level_with_config(
                             character.level + 1,
@@ -599,18 +620,15 @@ fn render_single_view(
                         }
                     });
                 });
-        });
-
-        ui.separator();
-
+        },
         // -- Right column: equipment, resistances, proficiencies
-        ui.allocate_ui(egui::vec2(right_w, col_h), |ui| {
+        |ui| {
             egui::ScrollArea::vertical()
                 .id_salt("character_sheet_equipment_scroll")
                 .auto_shrink([true, false])
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
-                        ui.colored_label(TITLE_COLOR, "Equipment");
+                        ui.colored_label(UI_TITLE_COLOR, "Equipment");
                         ui.separator();
                         render_equip_slot(
                             ui,
@@ -649,7 +667,7 @@ fn render_single_view(
                         );
 
                         ui.add_space(8.0);
-                        ui.colored_label(TITLE_COLOR, "Resistances");
+                        ui.colored_label(UI_TITLE_COLOR, "Resistances");
                         ui.separator();
                         render_resistance_row(ui, "Magic", character.resistances.magic.current);
                         render_resistance_row(ui, "Fire", character.resistances.fire.current);
@@ -665,7 +683,7 @@ fn render_single_view(
                         render_resistance_row(ui, "Psychic", character.resistances.psychic.current);
 
                         ui.add_space(8.0);
-                        ui.colored_label(TITLE_COLOR, "Proficiencies");
+                        ui.colored_label(UI_TITLE_COLOR, "Proficiencies");
                         ui.separator();
                         let mut profs: Vec<String> = Vec::new();
                         if let Some(db) = content_db {
@@ -689,8 +707,8 @@ fn render_single_view(
                         render_skill_section(ui, &character, content_db);
                     });
                 });
-        });
-    });
+        },
+    );
 }
 
 /// Renders a single core-stat row showing `base / current`.
@@ -815,7 +833,7 @@ fn render_skill_section(
     content_db: Option<&ContentDatabase>,
 ) {
     ui.add_space(8.0);
-    ui.colored_label(TITLE_COLOR, "Skills");
+    ui.colored_label(UI_TITLE_COLOR, "Skills");
     ui.separator();
 
     let db = match content_db {
@@ -964,7 +982,7 @@ fn render_party_overview_card(
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(&character.name)
-                            .color(TITLE_COLOR)
+                            .color(UI_TITLE_COLOR)
                             .strong(),
                     )
                     .truncate(),
@@ -1041,7 +1059,7 @@ fn render_party_overview(ui: &mut egui::Ui, global_state: &mut GlobalState, part
             ui.add(
                 egui::Label::new(
                     egui::RichText::new("Party Overview")
-                        .color(TITLE_COLOR)
+                        .color(UI_TITLE_COLOR)
                         .size(16.0)
                         .strong(),
                 )
@@ -1409,13 +1427,15 @@ mod tests {
                 render_single_view(
                     ui,
                     &mut gs,
-                    1,
-                    0,
-                    &campaign_config,
-                    None,
-                    None,
-                    None,
-                    "aldric",
+                    SingleViewParams {
+                        party_len: 1,
+                        focused_index: 0,
+                        campaign_config: &campaign_config,
+                        level_db: None,
+                        content_db: None,
+                        full_portrait_id: None,
+                        portrait_key: "aldric",
+                    },
                 );
             });
         });
@@ -1450,26 +1470,28 @@ mod tests {
                 render_single_view(
                     ui,
                     &mut gs,
-                    1,
-                    0,
-                    &campaign_config,
-                    None,
-                    None,
-                    None,
-                    "mira_windwhisper",
+                    SingleViewParams {
+                        party_len: 1,
+                        focused_index: 0,
+                        campaign_config: &campaign_config,
+                        level_db: None,
+                        content_db: None,
+                        full_portrait_id: None,
+                        portrait_key: "mira_windwhisper",
+                    },
                 );
                 // Hint bar -- verify it renders without panic
                 ui.separator();
                 ui.horizontal(|ui| {
-                    ui.colored_label(HINT_COLOR, "[Esc] Close");
+                    ui.colored_label(UI_HINT_COLOR, "[Esc] Close");
                     ui.separator();
-                    ui.colored_label(HINT_COLOR, "[Tab/→] Next");
+                    ui.colored_label(UI_HINT_COLOR, "[Tab/→] Next");
                     ui.separator();
-                    ui.colored_label(HINT_COLOR, "[Shift+Tab/←] Prev");
+                    ui.colored_label(UI_HINT_COLOR, "[Shift+Tab/←] Prev");
                     ui.separator();
-                    ui.colored_label(HINT_COLOR, "[1-6] Select");
+                    ui.colored_label(UI_HINT_COLOR, "[1-6] Select");
                     ui.separator();
-                    ui.colored_label(HINT_COLOR, "[O] Toggle View");
+                    ui.colored_label(UI_HINT_COLOR, "[O] Toggle View");
                 });
             });
         });
@@ -1598,13 +1620,15 @@ mod tests {
                 render_single_view(
                     ui,
                     &mut gs,
-                    1,
-                    0,
-                    &campaign_config,
-                    None,
-                    None,
-                    None,
-                    "elara_silverveil",
+                    SingleViewParams {
+                        party_len: 1,
+                        focused_index: 0,
+                        campaign_config: &campaign_config,
+                        level_db: None,
+                        content_db: None,
+                        full_portrait_id: None,
+                        portrait_key: "elara_silverveil",
+                    },
                 );
             });
         });
@@ -1657,13 +1681,15 @@ mod tests {
                 render_single_view(
                     ui,
                     &mut gs,
-                    1,
-                    0,
-                    &campaign_config,
-                    None,
-                    Some(&content_db),
-                    None,
-                    "aldric",
+                    SingleViewParams {
+                        party_len: 1,
+                        focused_index: 0,
+                        campaign_config: &campaign_config,
+                        level_db: None,
+                        content_db: Some(&content_db),
+                        full_portrait_id: None,
+                        portrait_key: "aldric",
+                    },
                 );
             });
         });
@@ -1819,13 +1845,15 @@ mod tests {
                 render_single_view(
                     ui,
                     &mut gs,
-                    1,
-                    0,
-                    &campaign_config,
-                    None,
-                    None,
-                    None,
-                    "gareth",
+                    SingleViewParams {
+                        party_len: 1,
+                        focused_index: 0,
+                        campaign_config: &campaign_config,
+                        level_db: None,
+                        content_db: None,
+                        full_portrait_id: None,
+                        portrait_key: "gareth",
+                    },
                 );
             });
         });

@@ -487,3 +487,210 @@ guarantee, and a Clippy regression gate that forbids new panicking `unwrap`/
 - `cargo nextest run --workspace --all-features` — **8043 passed, 8 skipped,
   0 failed** (up from 8030; +3 determinism tests, plus the newly-compiling
   `campaign_builder` fix).
+
+## Phase 5 — Shared UI Helpers, RON-Loader & Cleanup Consolidation
+
+Foundational duplicate-code consolidation for Phase 5. New shared helpers plus
+adoption across UI screens, SDK databases, the campaign loader, and combat
+cleanup systems.
+
+### Shared egui UI helpers (`game::systems::ui_helpers`)
+
+- **Palette constants** `UI_TITLE_COLOR` (204,217,255), `UI_HINT_COLOR`
+  (140,140,166), `UI_HEADER_COLOR` (179,204,255) — the single source of truth
+  for the per-screen `TITLE_COLOR`/`HINT_COLOR`/`*_HEADER_COLOR` duplicates that
+  previously lived in `character_sheet_ui`, `spellbook_ui`, and
+  `skill_training_ui`.
+- **`title_bar_with_hints(ui, title, &[&str])`** — the canonical Rule 6 title bar
+  (heading + right-aligned `UI_HINT_COLOR` hints + trailing separator). Adopted
+  in `spellbook_ui` and `skill_training_ui`.
+- **`format_gold(u32)`** — comma-grouped thousands formatter, promoted from
+  `merchant_inventory_ui` (whose local copy + tests were removed).
+- **`three_column(ui, left_w, right_w, min_center, left, center, right)`** — the
+  Rule 6 three-column scaffold (reads `available_size()` before `ui.horizontal`,
+  gives each column an explicit `allocate_ui` rect of full `col_h`, computes
+  center width, draws separators, returns each column closure's output). Adopted
+  in `spellbook_ui`, `skill_training_ui`, and `character_sheet_ui`
+  (`render_single_view`), retiring the most fragile UI failure mode.
+
+`skill_training_ui`'s hint colour was unified from (160,160,120) to the shared
+`UI_HINT_COLOR`. `character_sheet_ui`'s single-view title bar keeps its
+interactive **Party Overview / Next / Prev** buttons (they mutate
+`GameMode::CharacterSheet`) rather than adopting the hints-only
+`title_bar_with_hints`, so no on-screen interaction was lost; it uses the shared
+palette and `three_column`.
+
+### SDK RON databases routed through `impl_ron_database!`
+
+Extended the `impl_ron_database!` macro (`domain::database_common`) with an
+optional **`missing_ok:` arm** that treats a missing file as `Ok(empty)` instead
+of an I/O error, then routed the six hand-written single-`HashMap` loaders
+(`SpellDatabase`, `MonsterDatabase`, `QuestDatabase`, `ConditionDatabase`,
+`DialogueDatabase`, `NpcDatabase`) in `sdk::database` through it. This preserves
+their historical empty-on-missing contract (asserted by existing tests) while
+deleting the duplicated read+parse+dedup wrappers and the now-unused
+`load_ron_entries` import. `MapDatabase` (directory loader) is unchanged.
+
+### Campaign loader optional-file collapse (`domain::campaign_loader`)
+
+Added `load_optional_ron<T>(rel) -> Result<Option<T>, CampaignError>` (pure RON
+deserialize; `Ok(None)` when absent) and `load_optional_registry(...)` (exists-
+check + error wrapping for asset-resolving registry databases). Collapsed five
+near-identical loaders (`load_item_meshes`, `load_furniture_meshes`,
+`load_landscape_meshes`, `load_object_meshes`, `load_wind_config`); loaders whose
+`load_from_file` does extra work (index rebuild, list-parse with dup detection,
+`validate_definition_ids`, or campaign/base fallback) were left with an inline
+note explaining why.
+
+### Combat cleanup helpers (`game::systems::combat`)
+
+Added `despawn_all<T: Component>`, `combat_exited(&GameMode) -> bool`, and
+`reset_on_combat_exit<R: Resource + Default>`. Refactored the eight combat-exit
+cleanup/reset systems to use them (three despawn loops → `despawn_all`, all
+`matches!(…Combat…)` guards → the shared predicate, one full reset →
+`reset_on_combat_exit`), preserving each system's signature, guard polarity, and
+place in the plugin schedule.
+
+### Verification (Phase 5 — helpers)
+
+- `cargo fmt --all` — clean.
+- `cargo check --all-targets --all-features` — clean.
+- `cargo clippy --all-targets --all-features -- -D warnings` — clean.
+- `cargo nextest run --all-features` — **5415 passed, 8 skipped, 0 failed**.
+- `cargo test --doc` (`ui_helpers`, `database_common`) — passed.
+
+## Phase 5 — `too_many_arguments` Consolidation (Item J, UI/combat helpers)
+
+Refactored the *plain helper* functions that carried
+`#[allow(clippy::too_many_arguments)]` into params/context structs and dropped
+the attribute. Idiomatic Bevy **systems** (whose parameters are `SystemParam`
+dependency injection — `Commands`, `Query`, `Res`/`ResMut`, `Message*`) were
+intentionally left untouched: bundling their DI params into a plain struct would
+not compile as a system, so those `#[allow]`s remain documented false positives.
+
+### Refactored plain helpers
+
+- `character_sheet_ui::render_single_view` (9 → 3 args): read-only inputs grouped
+  into a new `SingleViewParams<'a>` struct (`party_len`, `focused_index`,
+  `campaign_config`, `level_db`, `content_db`, `full_portrait_id`,
+  `portrait_key`). `ui: &mut egui::Ui` and `global_state: &mut GlobalState` stay
+  separate because they are `&mut` and awkward to bundle. Struct destructured at
+  the top so the body is byte-identical.
+- `combat::dispatch_combat_action` (9 → 5 args): mutable resource refs grouped
+  into `CombatActionState<'a>` (`target_sel`, `action_menu_state`,
+  `ranged_pending`, `spell_panel_state`, `item_panel_state`); the two
+  `&mut Option<MessageWriter<…>>` writers stay separate to avoid nested-lifetime
+  borrow-checker friction.
+- `combat::confirm_attack_target` (7 → 5 args): mutable target-selection refs
+  grouped into `TargetConfirmState<'a>` (`target_sel`, `action_menu_state`,
+  `ranged_pending`); `attack_writer`/`ranged_writer` kept separate.
+- `combat::dispatch_item_button` (10 → 6 args): mutable resource refs grouped
+  into `ItemDispatchState<'a>` (`item_panel_state`, `pending_item`,
+  `party_target_state`, `target_sel`, `action_menu_state`); `content:
+  &GameContent` and `use_item_writer` kept separate.
+
+All four helpers now pass `clippy -D warnings` without `#[allow]`. Every new
+struct carries `///` docs. Behavior is byte-identical (same events emitted, same
+UI); each struct is destructured at the function head so the existing bodies and
+all call sites (production + unit tests) were mechanically updated only.
+
+### Deliberately left `#[allow(clippy::too_many_arguments)]` (Bevy systems)
+
+`combat.rs`: `update_spell_selection_panel`, `handle_spell_button_interaction`,
+`apply_spell_selection`, `update_item_selection_panel`,
+`handle_item_button_interaction`, `update_combat_ui`, `combat_input_system`,
+`select_target`, `handle_attack_action`, `handle_use_item_action`,
+`execute_monster_turn`, `handle_combat_victory` — all `SystemParam` DI systems;
+their argument lists are Bevy's dependency injection and must remain individual
+params.
+
+### Verification (Phase 5)
+
+- `cargo fmt --all` — clean.
+- `cargo check --all-targets --all-features` — clean.
+- `cargo clippy --all-targets --all-features -- -D warnings` — clean.
+- `cargo nextest run --all-features character_sheet_ui combat` — **408 passed,
+  0 failed**.
+
+## Phase 5 — Split-Inventory Overlay Consolidation (merchant + container)
+
+Removed duplicated scaffolding shared by the merchant buy/sell overlay
+(`merchant_inventory_ui.rs`) and the container take/stash overlay
+(`container_inventory_ui.rs`), centralising it in
+`game::systems::inventory_ui_common`. These are **split** (two-panel) screens, so
+their existing half-width split-panel geometry was preserved (not converted to
+Rule-6 three-column layout).
+
+### Shared `format_gold`
+
+`merchant_inventory_ui::format_gold` (an exact duplicate of the comma-grouping
+helper now living in `ui_helpers::format_gold`) and its four `test_format_gold_*`
+unit tests were deleted. `merchant_inventory_ui.rs` now
+`use`s `crate::game::systems::ui_helpers::format_gold`; the `render_merchant_top_bar`
+call site is unchanged. No coverage was lost — the identical tests already exist
+in `ui_helpers.rs`, and nothing outside the merchant module imported the old
+function.
+
+### Helpers added to `inventory_ui_common.rs` (all `pub(crate)`)
+
+- `SLOT_NAV_HINT: &str` — the single slot-navigation hint string both overlays
+  display during `NavigationPhase::SlotNavigation`. Each screen keeps its own
+  distinct `ActionNavigation` hint (Sell/Buy vs. Take/Stash cycling).
+- `render_character_strip(ui, party, active_char_idx, id_prefix)` — the
+  active-character selector strip. The former `render_merchant_character_strip`
+  and `render_container_character_strip` were byte-identical except the
+  `push_id` salt prefix, so the shared fn takes an `id_prefix` and builds
+  `format!("{id_prefix}_{i}")`. Callers pass `"merch_char_btn"` /
+  `"cont_char_btn"`, keeping every widget-id salt byte-identical to before. Both
+  original strips are purely visual (button click responses discarded; character
+  switching is driven by number keys in the input systems), so the merge is
+  behaviour-preserving.
+- `split_panel(ui, left, right)` — reproduces the
+  `available`/`half_w = (available.x - 8.0)/2.0`/`ui.horizontal`/`item_spacing.x = 8.0`
+  scaffold and calls `left(ui, half_w)` then `right(ui, half_w)`. Both
+  `*_ui_system`s adopt it; each panel's existing `ui.push_id("<salt>", …)` block
+  moved unchanged into the corresponding closure. The panel height is sampled as
+  `ui.available_size().y` immediately before the call (same UI state
+  `split_panel` reads) and captured in each closure, so `size` remains
+  `egui::vec2(half_w, panel_h)` exactly as before. The two closures write to
+  disjoint message writers, so no borrow-check dispatch-after-return workaround
+  was needed.
+
+### Plain-helper params-struct refactors (dropped `#[allow(clippy::too_many_arguments)]`)
+
+Four plain render helpers had their argument lists grouped into a borrowing
+params struct, destructured at the function head so the bodies stay identical:
+
+- `merchant_inventory_ui::render_character_sell_panel` (9 → 1 arg) →
+  `CharacterSellPanelParams<'a>`.
+- `merchant_inventory_ui::render_merchant_stock_panel` (8 → 1 arg) →
+  `MerchantStockPanelParams<'a>`.
+- `container_inventory_ui::render_character_stash_panel` (8 → 1 arg) →
+  `CharacterStashPanelParams<'a>`.
+- `container_inventory_ui::render_container_items_panel` (8 → 1 arg) →
+  `ContainerItemsPanelParams<'a>`.
+
+The Bevy **systems** that also carry the allow
+(`merchant_inventory_ui_system`, `container_inventory_ui_system`,
+`container_inventory_action_system`) were left untouched — their argument lists
+are `SystemParam` dependency injection (false positives).
+
+### Tests
+
+- Added `test_merchant_keyboard_navigation_phase_transitions` and
+  `test_container_keyboard_navigation_phase_transitions`, each driving the real
+  input system inside a minimal Bevy `App` through the full flow: Enter starts
+  slot nav, a second Enter enters action mode, Esc cancels, Tab switches panels,
+  arrows move the selection (and cycle container action buttons), and a number
+  key resets to a character. All fixtures are built in-memory (no
+  `campaigns/tutorial` reference).
+- All pre-existing merchant/container unit tests still pass unchanged.
+
+### Verification (Phase 5 — inventory)
+
+- `cargo fmt --all` — clean.
+- `cargo check --all-targets --all-features` — clean.
+- `cargo clippy --all-targets --all-features -- -D warnings` — clean.
+- `cargo nextest run --all-features merchant_inventory_ui container_inventory_ui
+  inventory_ui_common` — **66 passed, 0 failed**.
+- `cargo test --doc --all-features inventory` — **79 passed, 0 failed**.

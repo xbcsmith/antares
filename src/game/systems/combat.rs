@@ -2525,20 +2525,43 @@ fn setup_combat_ui(
 /// System: Cleanup combat UI when exiting combat mode
 ///
 /// Despawns all combat HUD entities when combat ends.
+/// Despawns every entity yielded by a marker-component query.
+///
+/// Used by the combat-exit cleanup systems to tear down mode-scoped UI
+/// entities. Despawning a parent also despawns its children.
+fn despawn_all<T: Component>(commands: &mut Commands, query: &Query<Entity, With<T>>) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn();
+    }
+}
+
+/// Returns `true` when the game is no longer in combat (combat has been exited),
+/// i.e. the mode is not `GameMode::Combat(_)`.
+fn combat_exited(mode: &GameMode) -> bool {
+    !matches!(mode, GameMode::Combat(_))
+}
+
+/// Resets a `Default`-able resource to its default value when combat has been
+/// exited. Used by combat-exit cleanup systems whose reset is exactly
+/// `*res = R::default()`.
+fn reset_on_combat_exit<R: Resource + Default>(mode: &GameMode, res: &mut R) {
+    if combat_exited(mode) {
+        *res = R::default();
+    }
+}
+
 fn cleanup_combat_ui(
     mut commands: Commands,
     global_state: Res<GlobalState>,
     combat_ui: Query<Entity, With<crate::game::components::combat::CombatHudRoot>>,
 ) {
     // Only cleanup when not in combat mode
-    if matches!(global_state.0.mode, GameMode::Combat(_)) {
+    if !combat_exited(&global_state.0.mode) {
         return;
     }
 
     // Despawn combat UI if it exists (despawn will automatically handle children)
-    for entity in combat_ui.iter() {
-        commands.entity(entity).despawn();
-    }
+    despawn_all(&mut commands, &combat_ui);
 }
 
 /// System: Spawn or despawn the spell selection panel based on `SpellPanelState`.
@@ -3064,7 +3087,7 @@ fn cleanup_spell_panel_on_combat_exit(
     mut spell_panel_state: ResMut<SpellPanelState>,
     mut pending_spell: ResMut<PendingSpellCast>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+    if combat_exited(&global_state.0.mode) {
         spell_panel_state.caster = None;
         spell_panel_state.focused_index = 0;
         spell_panel_state.confirm_requested = false;
@@ -3478,9 +3501,7 @@ fn cleanup_party_target_on_combat_exit(
     global_state: Res<GlobalState>,
     mut state: ResMut<PartyTargetPanelState>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        *state = PartyTargetPanelState::default();
-    }
+    reset_on_combat_exit(&global_state.0.mode, state.as_mut());
 }
 
 /// System: Spawn or despawn the group-spell confirm prompt based on
@@ -3576,11 +3597,9 @@ fn cleanup_group_target_on_combat_exit(
     mut commands: Commands,
     existing_prompt: Query<Entity, With<GroupTargetPrompt>>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+    if combat_exited(&global_state.0.mode) {
         group_target.data = None;
-        for entity in existing_prompt.iter() {
-            commands.entity(entity).despawn();
-        }
+        despawn_all(&mut commands, &existing_prompt);
     }
 }
 
@@ -3835,6 +3854,25 @@ fn item_dispatch_route(
     }
 }
 
+/// Mutable combat state threaded into [`dispatch_item_button`].
+///
+/// Groups the resource references the dispatcher mutates so the function stays
+/// under clippy's argument-count threshold. The `UseItemAction` message writer
+/// is kept as a separate parameter because bundling `&mut MessageWriter` behind
+/// a shared borrow fights the borrow checker.
+struct ItemDispatchState<'a> {
+    /// Item selection panel state; closed by the dispatcher.
+    item_panel_state: &'a mut ItemPanelState,
+    /// Pending item-use record for monster-target items.
+    pending_item: &'a mut PendingItemUse,
+    /// Party target panel state for beneficial consumables.
+    party_target_state: &'a mut PartyTargetPanelState,
+    /// Monster target selection state.
+    target_sel: &'a mut TargetSelection,
+    /// Keyboard action/target menu state.
+    action_menu_state: &'a mut ActionMenuState,
+}
+
 /// Internal helper: given a chosen item button (from mouse or keyboard), decide
 /// whether to enter monster target-selection mode (offensive spell_effect
 /// items), open the party target panel (beneficial consumables — potion,
@@ -3843,19 +3881,21 @@ fn item_dispatch_route(
 ///
 /// Closes the item panel in all cases. When the party target panel opens, the
 /// user's own row receives initial focus so self-use stays one confirm away.
-#[allow(clippy::too_many_arguments)]
 fn dispatch_item_button(
     user: CombatantId,
     inventory_index: usize,
     item_id: crate::domain::types::ItemId,
     content: &GameContent,
-    item_panel_state: &mut ItemPanelState,
-    pending_item: &mut PendingItemUse,
-    party_target_state: &mut PartyTargetPanelState,
-    target_sel: &mut TargetSelection,
-    action_menu_state: &mut ActionMenuState,
+    state: ItemDispatchState<'_>,
     use_item_writer: &mut Option<MessageWriter<UseItemAction>>,
 ) {
+    let ItemDispatchState {
+        item_panel_state,
+        pending_item,
+        party_target_state,
+        target_sel,
+        action_menu_state,
+    } = state;
     let route = item_dispatch_route(item_id, content);
 
     // Close the item panel regardless of path.
@@ -3983,11 +4023,13 @@ fn handle_item_button_interaction(
                     inv_idx,
                     item_id,
                     content_ref,
-                    &mut item_panel_state,
-                    &mut pending_item,
-                    &mut party_target_state,
-                    &mut target_sel,
-                    &mut action_menu_state,
+                    ItemDispatchState {
+                        item_panel_state: &mut item_panel_state,
+                        pending_item: &mut pending_item,
+                        party_target_state: &mut party_target_state,
+                        target_sel: &mut target_sel,
+                        action_menu_state: &mut action_menu_state,
+                    },
                     &mut use_item_writer,
                 );
             }
@@ -4006,11 +4048,13 @@ fn handle_item_button_interaction(
             item_btn.inventory_index,
             item_btn.item_id,
             content_ref,
-            &mut item_panel_state,
-            &mut pending_item,
-            &mut party_target_state,
-            &mut target_sel,
-            &mut action_menu_state,
+            ItemDispatchState {
+                item_panel_state: &mut item_panel_state,
+                pending_item: &mut pending_item,
+                party_target_state: &mut party_target_state,
+                target_sel: &mut target_sel,
+                action_menu_state: &mut action_menu_state,
+            },
             &mut use_item_writer,
         );
 
@@ -4027,7 +4071,7 @@ fn cleanup_item_panel_on_combat_exit(
     mut item_panel_state: ResMut<ItemPanelState>,
     mut pending_item: ResMut<PendingItemUse>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+    if combat_exited(&global_state.0.mode) {
         item_panel_state.user = None;
         item_panel_state.focused_index = 0;
         item_panel_state.usable_slot_indices.clear();
@@ -4282,6 +4326,25 @@ fn update_ranged_button_color(
 /// so that any future private callers have a short, stable name.
 const ACTION_BUTTON_ORDER: [ActionButtonType; COMBAT_ACTION_COUNT] = COMBAT_ACTION_ORDER;
 
+/// Mutable combat state threaded into [`dispatch_combat_action`].
+///
+/// Groups the resource references the dispatcher mutates so the function stays
+/// under clippy's argument-count threshold. Message writers are kept as
+/// separate parameters because bundling `&mut MessageWriter` behind a shared
+/// borrow fights the borrow checker.
+struct CombatActionState<'a> {
+    /// Monster target selection state.
+    target_sel: &'a mut TargetSelection,
+    /// Keyboard action/target menu state.
+    action_menu_state: &'a mut ActionMenuState,
+    /// Ranged-attack pending flag.
+    ranged_pending: &'a mut RangedAttackPending,
+    /// Spell selection panel state.
+    spell_panel_state: &'a mut SpellPanelState,
+    /// Item selection panel state.
+    item_panel_state: &'a mut ItemPanelState,
+}
+
 /// Unified combat action dispatcher.
 ///
 /// Both mouse (`Interaction::Pressed`) and keyboard (`Enter`) routes call this
@@ -4313,18 +4376,20 @@ const ACTION_BUTTON_ORDER: [ActionButtonType; COMBAT_ACTION_COUNT] = COMBAT_ACTI
 /// | Cast             | Open `SpellPanelState` for spell selection      |
 /// | Item             | Open `ItemPanelState` for item selection        |
 /// | Flee             | Write `FleeAction` immediately                  |
-#[allow(clippy::too_many_arguments)]
 fn dispatch_combat_action(
     button_type: ActionButtonType,
     actor: CombatantId,
-    target_sel: &mut TargetSelection,
-    action_menu_state: &mut ActionMenuState,
-    ranged_pending: &mut RangedAttackPending,
-    spell_panel_state: &mut SpellPanelState,
-    item_panel_state: &mut ItemPanelState,
+    state: CombatActionState<'_>,
     defend_writer: &mut Option<MessageWriter<DefendAction>>,
     flee_writer: &mut Option<MessageWriter<FleeAction>>,
 ) {
+    let CombatActionState {
+        target_sel,
+        action_menu_state,
+        ranged_pending,
+        spell_panel_state,
+        item_panel_state,
+    } = state;
     match button_type {
         ActionButtonType::Attack => {
             target_sel.0 = Some(actor);
@@ -4360,6 +4425,19 @@ fn dispatch_combat_action(
     }
 }
 
+/// Mutable target-selection state threaded into [`confirm_attack_target`].
+///
+/// Groups the resource references the confirm path clears so the function stays
+/// under clippy's argument-count threshold.
+struct TargetConfirmState<'a> {
+    /// Monster target selection state; cleared to `None`.
+    target_sel: &'a mut TargetSelection,
+    /// Keyboard action/target menu state; `active_target_index` cleared.
+    action_menu_state: &'a mut ActionMenuState,
+    /// Ranged-attack pending flag; consumed and reset.
+    ranged_pending: &'a mut RangedAttackPending,
+}
+
 /// Write an `AttackAction` or `RangedAttackAction` and clear both
 /// `TargetSelection` and the keyboard target index.
 ///
@@ -4380,16 +4458,22 @@ fn dispatch_combat_action(
 ///   and reset to `false` when a ranged action is confirmed.
 /// * `attack_writer` - Optional message writer for `AttackAction`.
 /// * `ranged_writer` - Optional message writer for `RangedAttackAction`.
-#[allow(clippy::too_many_arguments)]
+///
+/// `state` bundles the mutable target-selection resources; the two message
+/// writers stay separate because bundling `&mut MessageWriter` behind a shared
+/// borrow fights the borrow checker.
 fn confirm_attack_target(
     attacker: CombatantId,
     target_monster_idx: usize,
-    target_sel: &mut TargetSelection,
-    action_menu_state: &mut ActionMenuState,
-    ranged_pending: &mut RangedAttackPending,
+    state: TargetConfirmState<'_>,
     attack_writer: &mut Option<MessageWriter<AttackAction>>,
     ranged_writer: &mut Option<MessageWriter<RangedAttackAction>>,
 ) {
+    let TargetConfirmState {
+        target_sel,
+        action_menu_state,
+        ranged_pending,
+    } = state;
     if ranged_pending.0 {
         if let Some(ref mut w) = ranged_writer {
             w.write(RangedAttackAction {
@@ -4549,11 +4633,13 @@ fn combat_input_system(
                 dispatch_combat_action(
                     button.button_type,
                     actor,
-                    &mut target_sel,
-                    &mut action_menu_state,
-                    &mut ranged_pending,
-                    &mut spell_state.panel,
-                    &mut item_state.panel,
+                    CombatActionState {
+                        target_sel: &mut target_sel,
+                        action_menu_state: &mut action_menu_state,
+                        ranged_pending: &mut ranged_pending,
+                        spell_panel_state: &mut spell_state.panel,
+                        item_panel_state: &mut item_state.panel,
+                    },
                     &mut defend_writer,
                     &mut flee_writer,
                 );
@@ -4622,9 +4708,11 @@ fn combat_input_system(
                             confirm_attack_target(
                                 attacker,
                                 pidx,
-                                &mut target_sel,
-                                &mut action_menu_state,
-                                &mut ranged_pending,
+                                TargetConfirmState {
+                                    target_sel: &mut target_sel,
+                                    action_menu_state: &mut action_menu_state,
+                                    ranged_pending: &mut ranged_pending,
+                                },
                                 &mut attack_writer,
                                 &mut ranged_writer,
                             );
@@ -4811,9 +4899,11 @@ fn combat_input_system(
                     confirm_attack_target(
                         actor,
                         pidx,
-                        &mut target_sel,
-                        &mut action_menu_state,
-                        &mut ranged_pending,
+                        TargetConfirmState {
+                            target_sel: &mut target_sel,
+                            action_menu_state: &mut action_menu_state,
+                            ranged_pending: &mut ranged_pending,
+                        },
                         &mut attack_writer,
                         &mut ranged_writer,
                     );
@@ -4822,11 +4912,13 @@ fn combat_input_system(
                     dispatch_combat_action(
                         selected_type,
                         actor,
-                        &mut target_sel,
-                        &mut action_menu_state,
-                        &mut ranged_pending,
-                        &mut spell_state.panel,
-                        &mut item_state.panel,
+                        CombatActionState {
+                            target_sel: &mut target_sel,
+                            action_menu_state: &mut action_menu_state,
+                            ranged_pending: &mut ranged_pending,
+                            spell_panel_state: &mut spell_state.panel,
+                            item_panel_state: &mut item_state.panel,
+                        },
                         &mut defend_writer,
                         &mut flee_writer,
                     );
@@ -4835,11 +4927,13 @@ fn combat_input_system(
                 dispatch_combat_action(
                     selected_type,
                     actor,
-                    &mut target_sel,
-                    &mut action_menu_state,
-                    &mut ranged_pending,
-                    &mut spell_state.panel,
-                    &mut item_state.panel,
+                    CombatActionState {
+                        target_sel: &mut target_sel,
+                        action_menu_state: &mut action_menu_state,
+                        ranged_pending: &mut ranged_pending,
+                        spell_panel_state: &mut spell_state.panel,
+                        item_panel_state: &mut item_state.panel,
+                    },
                     &mut defend_writer,
                     &mut flee_writer,
                 );
@@ -5164,9 +5258,11 @@ fn select_target(
                 confirm_attack_target(
                     attacker,
                     enemy_card.participant_index,
-                    &mut target_sel,
-                    &mut action_menu_state,
-                    &mut ranged_pending,
+                    TargetConfirmState {
+                        target_sel: &mut target_sel,
+                        action_menu_state: &mut action_menu_state,
+                        ranged_pending: &mut ranged_pending,
+                    },
                     &mut attack_writer,
                     &mut ranged_writer,
                 );
@@ -8068,7 +8164,7 @@ fn reset_combat_log_colors_on_exit(
     global_state: Res<GlobalState>,
     mut color_state: ResMut<CombatLogColorState>,
 ) {
-    if matches!(global_state.0.mode, GameMode::Combat(_)) {
+    if !combat_exited(&global_state.0.mode) {
         return;
     }
 
@@ -8289,7 +8385,7 @@ fn reset_combat_log_on_exit(
     global_state: Res<GlobalState>,
     mut combat_log_state: ResMut<CombatLogState>,
 ) {
-    if matches!(global_state.0.mode, GameMode::Combat(_)) {
+    if !combat_exited(&global_state.0.mode) {
         return;
     }
 
@@ -8756,15 +8852,13 @@ fn cleanup_monster_hp_hover_bars(
     bars: Query<Entity, With<MonsterHpHoverBar>>,
 ) {
     // Leave bars in place only while in combat and setting is enabled.
-    if matches!(global_state.0.mode, GameMode::Combat(_))
+    if !combat_exited(&global_state.0.mode)
         && global_state.0.config.graphics.show_combat_monster_hp_bars
     {
         return;
     }
 
-    for entity in bars.iter() {
-        commands.entity(entity).despawn();
-    }
+    despawn_all(&mut commands, &bars);
 }
 
 /// Animates and despawns floating damage/heal/miss numbers.
@@ -8867,11 +8961,13 @@ mod tests {
         dispatch_combat_action(
             ActionButtonType::Cast,
             actor,
-            &mut target_sel,
-            &mut action_menu_state,
-            &mut ranged_pending,
-            &mut spell_panel_state,
-            &mut item_panel_state,
+            CombatActionState {
+                target_sel: &mut target_sel,
+                action_menu_state: &mut action_menu_state,
+                ranged_pending: &mut ranged_pending,
+                spell_panel_state: &mut spell_panel_state,
+                item_panel_state: &mut item_panel_state,
+            },
             &mut defend_writer,
             &mut flee_writer,
         );
@@ -8904,11 +9000,13 @@ mod tests {
         dispatch_combat_action(
             ActionButtonType::Item,
             actor,
-            &mut target_sel,
-            &mut action_menu_state,
-            &mut ranged_pending,
-            &mut spell_panel_state,
-            &mut item_panel_state,
+            CombatActionState {
+                target_sel: &mut target_sel,
+                action_menu_state: &mut action_menu_state,
+                ranged_pending: &mut ranged_pending,
+                spell_panel_state: &mut spell_panel_state,
+                item_panel_state: &mut item_panel_state,
+            },
             &mut defend_writer,
             &mut flee_writer,
         );
@@ -16459,11 +16557,13 @@ mod tests {
         dispatch_combat_action(
             ActionButtonType::Item,
             actor,
-            &mut target_sel,
-            &mut action_menu_state,
-            &mut ranged_pending,
-            &mut spell_panel_state,
-            &mut item_panel_state,
+            CombatActionState {
+                target_sel: &mut target_sel,
+                action_menu_state: &mut action_menu_state,
+                ranged_pending: &mut ranged_pending,
+                spell_panel_state: &mut spell_panel_state,
+                item_panel_state: &mut item_panel_state,
+            },
             &mut defend_writer,
             &mut flee_writer,
         );

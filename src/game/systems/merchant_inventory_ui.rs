@@ -50,11 +50,12 @@ use crate::domain::character::Inventory;
 use crate::domain::types::ItemId;
 use crate::game::resources::GlobalState;
 use crate::game::systems::inventory_ui_common::{
-    NavigationPhase, ACTION_FOCUSED_COLOR, FOCUSED_BORDER_COLOR, GRID_LINE_COLOR, HEADER_BG_COLOR,
-    PANEL_ACTION_H, PANEL_BG_COLOR, PANEL_HEADER_H, SELECT_HIGHLIGHT_COLOR, SLOT_COLS,
-    UNFOCUSED_BORDER_COLOR,
+    render_character_strip, split_panel, NavigationPhase, ACTION_FOCUSED_COLOR,
+    FOCUSED_BORDER_COLOR, GRID_LINE_COLOR, HEADER_BG_COLOR, PANEL_ACTION_H, PANEL_BG_COLOR,
+    PANEL_HEADER_H, SELECT_HIGHLIGHT_COLOR, SLOT_COLS, SLOT_NAV_HINT, UNFOCUSED_BORDER_COLOR,
 };
 use crate::game::systems::ui::{GameLogEvent, LogCategory};
+use crate::game::systems::ui_helpers::format_gold;
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -73,31 +74,6 @@ const BUY_COLOR: egui::Color32 = egui::Color32::from_rgb(80, 200, 120);
 const SELL_COLOR: egui::Color32 = egui::Color32::from_rgb(220, 160, 60);
 
 // ===== Helpers =====
-
-/// Format a gold amount with thousands-separator grouping.
-///
-/// # Examples
-///
-/// ```
-/// use antares::game::systems::merchant_inventory_ui::format_gold;
-///
-/// assert_eq!(format_gold(0), "0");
-/// assert_eq!(format_gold(999), "999");
-/// assert_eq!(format_gold(1_000), "1,000");
-/// assert_eq!(format_gold(1_234), "1,234");
-/// assert_eq!(format_gold(1_000_000), "1,000,000");
-/// ```
-pub fn format_gold(g: u32) -> String {
-    let s = g.to_string();
-    let mut result = String::with_capacity(s.len() + s.len() / 3);
-    for (i, ch) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(ch);
-    }
-    result.chars().rev().collect()
-}
 
 /// Compute the sell price a character receives for an item at a given merchant.
 ///
@@ -505,42 +481,9 @@ fn render_merchant_top_bar(ui: &mut egui::Ui, party_gold: u32) {
 /// Returns the hint text for the current navigation phase.
 fn merchant_hint_text(phase: &NavigationPhase) -> &'static str {
     match phase {
-        NavigationPhase::SlotNavigation => {
-            "Tab: switch panel   1-6: change character   ←→↑↓: navigate   Enter: select   Esc: close"
-        }
+        NavigationPhase::SlotNavigation => SLOT_NAV_HINT,
         NavigationPhase::ActionNavigation => "Enter: execute action   Esc: cancel",
     }
-}
-
-/// Renders the active-character selector strip (number-key buttons).
-fn render_merchant_character_strip(
-    ui: &mut egui::Ui,
-    party: &crate::domain::character::Party,
-    active_char_idx: usize,
-) {
-    let party_len = party.members.len();
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Character:").strong());
-        for i in 0..party_len {
-            ui.push_id(format!("merch_char_btn_{}", i), |ui| {
-                let member = &party.members[i];
-                let is_active = i == active_char_idx;
-                let label = egui::RichText::new(format!("[{}] {}", i + 1, member.name))
-                    .color(if is_active {
-                        egui::Color32::YELLOW
-                    } else {
-                        egui::Color32::LIGHT_GRAY
-                    })
-                    .small();
-                if ui.button(label).clicked() {
-                    // Character switching via mouse is handled via direct
-                    // mutation within the UI — we send the action inline.
-                    // (Cannot call ResMut here; handled in input system on
-                    //  next frame — acceptable single-frame lag)
-                }
-            });
-        }
-    });
 }
 
 // ===== UI system =====
@@ -580,82 +523,88 @@ fn merchant_inventory_ui_system(
                 .weak(),
         );
         ui.separator();
-        render_merchant_character_strip(ui, &global_state.0.party, char_idx);
+        render_character_strip(ui, &global_state.0.party, char_idx, "merch_char_btn");
         ui.add_space(4.0);
 
         // ── Split panel layout ───────────────────────────────────────────
-        let available = ui.available_size();
-        let half_w = (available.x - 8.0) / 2.0;
-        let panel_h = available.y;
+        // Sample the full remaining height *before* entering the horizontal
+        // split; `split_panel` samples the same UI state for the half-width.
+        let panel_h = ui.available_size().y;
 
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-
+        split_panel(
+            ui,
             // ── LEFT: Character inventory panel ──────────────────────────
-            ui.push_id("merch_char_panel", |ui| {
-                let panel_result = render_character_sell_panel(
-                    ui,
-                    char_idx,
-                    char_focused,
-                    merchant_state.character_selected_slot,
-                    if char_focused && nav_state.phase == NavigationPhase::ActionNavigation {
-                        Some(nav_state.focused_action_index)
-                    } else {
-                        None
-                    },
-                    egui::vec2(half_w, panel_h),
-                    &global_state,
-                    game_content.as_deref(),
-                    &merchant_state.npc_id,
-                );
-
-                if let Some(action) = panel_result.sell_action {
-                    sell_writer.write(SellItemAction {
-                        npc_id: merchant_state.npc_id.clone(),
-                        character_index: action.character_index,
-                        slot_index: action.slot_index,
+            |ui, half_w| {
+                ui.push_id("merch_char_panel", |ui| {
+                    let panel_result = render_character_sell_panel(CharacterSellPanelParams {
+                        ui,
+                        party_index: char_idx,
+                        is_focused: char_focused,
+                        selected_slot: merchant_state.character_selected_slot,
+                        focused_action_index: if char_focused
+                            && nav_state.phase == NavigationPhase::ActionNavigation
+                        {
+                            Some(nav_state.focused_action_index)
+                        } else {
+                            None
+                        },
+                        size: egui::vec2(half_w, panel_h),
+                        global_state: &global_state,
+                        game_content: game_content.as_deref(),
+                        npc_id: &merchant_state.npc_id,
                     });
-                }
 
-                if let Some(slot_idx) = panel_result.clicked_slot {
-                    select_char_writer.write(SelectMerchantCharacterSlotAction {
-                        slot_index: slot_idx,
+                    if let Some(action) = panel_result.sell_action {
+                        sell_writer.write(SellItemAction {
+                            npc_id: merchant_state.npc_id.clone(),
+                            character_index: action.character_index,
+                            slot_index: action.slot_index,
+                        });
+                    }
+
+                    if let Some(slot_idx) = panel_result.clicked_slot {
+                        select_char_writer.write(SelectMerchantCharacterSlotAction {
+                            slot_index: slot_idx,
+                        });
+                    }
+                });
+            },
+            // ── RIGHT: Merchant stock panel ──────────────────────────────
+            |ui, half_w| {
+                ui.push_id("merch_stock_panel", |ui| {
+                    let panel_result = render_merchant_stock_panel(MerchantStockPanelParams {
+                        ui,
+                        merchant_state: &merchant_state,
+                        is_focused: merchant_focused,
+                        selected_slot: merchant_state.merchant_selected_slot,
+                        focused_action_index: if merchant_focused
+                            && nav_state.phase == NavigationPhase::ActionNavigation
+                        {
+                            Some(nav_state.focused_action_index)
+                        } else {
+                            None
+                        },
+                        size: egui::vec2(half_w, panel_h),
+                        global_state: &global_state,
+                        game_content: game_content.as_deref(),
                     });
-                }
-            });
 
-            // ── RIGHT: Merchant stock panel ───────────────────────────────
-            ui.push_id("merch_stock_panel", |ui| {
-                let panel_result = render_merchant_stock_panel(
-                    ui,
-                    &merchant_state,
-                    merchant_focused,
-                    merchant_state.merchant_selected_slot,
-                    if merchant_focused && nav_state.phase == NavigationPhase::ActionNavigation {
-                        Some(nav_state.focused_action_index)
-                    } else {
-                        None
-                    },
-                    egui::vec2(half_w, panel_h),
-                    &global_state,
-                    game_content.as_deref(),
-                );
+                    if let Some(action) = panel_result.buy_action {
+                        buy_writer.write(BuyItemAction {
+                            npc_id: action.npc_id.clone(),
+                            stock_index: action.stock_index,
+                            character_index: action.character_index,
+                        });
+                    }
 
-                if let Some(action) = panel_result.buy_action {
-                    buy_writer.write(BuyItemAction {
-                        npc_id: action.npc_id.clone(),
-                        stock_index: action.stock_index,
-                        character_index: action.character_index,
-                    });
-                }
-
-                if let Some(slot_idx) = panel_result.clicked_row {
-                    select_stock_writer.write(SelectMerchantStockSlotAction {
-                        stock_index: slot_idx,
-                    });
-                }
-            });
-        });
+                    if let Some(slot_idx) = panel_result.clicked_row {
+                        select_stock_writer.write(SelectMerchantStockSlotAction {
+                            stock_index: slot_idx,
+                        });
+                    }
+                });
+            },
+        );
     });
 }
 
@@ -677,20 +626,46 @@ struct CharacterPanelResult {
     clicked_slot: Option<usize>,
 }
 
+/// Parameters for [`render_character_sell_panel`].
+///
+/// Grouping these into a struct keeps the render helper down to a single
+/// argument (satisfying `clippy::too_many_arguments` without an allow).
+struct CharacterSellPanelParams<'a> {
+    /// UI to draw the panel into.
+    ui: &'a mut egui::Ui,
+    /// Index of the character whose inventory is shown.
+    party_index: usize,
+    /// Whether this panel currently has keyboard focus.
+    is_focused: bool,
+    /// Currently highlighted slot, if any.
+    selected_slot: Option<usize>,
+    /// Focused action-button index when in action-navigation mode.
+    focused_action_index: Option<usize>,
+    /// Allocated panel size (`half_w` × `panel_h`).
+    size: egui::Vec2,
+    /// Global game state (party, inventories).
+    global_state: &'a GlobalState,
+    /// Loaded game content for item lookups, if available.
+    game_content: Option<&'a GameContent>,
+    /// Merchant NPC id (used to price sells).
+    npc_id: &'a str,
+}
+
 /// Render the character inventory panel (left side) and return a
 /// [`CharacterPanelResult`] describing any mouse interaction.
-#[allow(clippy::too_many_arguments)]
-fn render_character_sell_panel(
-    ui: &mut egui::Ui,
-    party_index: usize,
-    is_focused: bool,
-    selected_slot: Option<usize>,
-    focused_action_index: Option<usize>,
-    size: egui::Vec2,
-    global_state: &GlobalState,
-    game_content: Option<&GameContent>,
-    npc_id: &str,
-) -> CharacterPanelResult {
+fn render_character_sell_panel(params: CharacterSellPanelParams) -> CharacterPanelResult {
+    let CharacterSellPanelParams {
+        ui,
+        party_index,
+        is_focused,
+        selected_slot,
+        focused_action_index,
+        size,
+        global_state,
+        game_content,
+        npc_id,
+    } = params;
+
     if party_index >= global_state.0.party.members.len() {
         return CharacterPanelResult {
             sell_action: None,
@@ -942,20 +917,44 @@ struct MerchantStockPanelResult {
     clicked_row: Option<usize>,
 }
 
+/// Parameters for [`render_merchant_stock_panel`].
+///
+/// Grouping these into a struct keeps the render helper down to a single
+/// argument (satisfying `clippy::too_many_arguments` without an allow).
+struct MerchantStockPanelParams<'a> {
+    /// UI to draw the panel into.
+    ui: &'a mut egui::Ui,
+    /// Current merchant inventory state.
+    merchant_state: &'a MerchantInventoryState,
+    /// Whether this panel currently has keyboard focus.
+    is_focused: bool,
+    /// Currently highlighted stock row, if any.
+    selected_slot: Option<usize>,
+    /// Focused action-button index when in action-navigation mode.
+    focused_action_index: Option<usize>,
+    /// Allocated panel size (`half_w` × `panel_h`).
+    size: egui::Vec2,
+    /// Global game state (party gold, npc runtime).
+    global_state: &'a GlobalState,
+    /// Loaded game content for item lookups, if available.
+    game_content: Option<&'a GameContent>,
+}
+
 /// Render the merchant stock panel (right side) and return a
 /// [`MerchantStockPanelResult`] describing any mouse interaction
 /// (row click → select, Buy button → buy).
-#[allow(clippy::too_many_arguments)]
-fn render_merchant_stock_panel(
-    ui: &mut egui::Ui,
-    merchant_state: &MerchantInventoryState,
-    is_focused: bool,
-    selected_slot: Option<usize>,
-    focused_action_index: Option<usize>,
-    size: egui::Vec2,
-    global_state: &GlobalState,
-    game_content: Option<&GameContent>,
-) -> MerchantStockPanelResult {
+fn render_merchant_stock_panel(params: MerchantStockPanelParams) -> MerchantStockPanelResult {
+    let MerchantStockPanelParams {
+        ui,
+        merchant_state,
+        is_focused,
+        selected_slot,
+        focused_action_index,
+        size,
+        global_state,
+        game_content,
+    } = params;
+
     let mut result = MerchantStockPanelResult {
         buy_action: None,
         clicked_row: None,
@@ -1827,34 +1826,6 @@ mod tests {
         }
     }
 
-    // ── format_gold tests ─────────────────────────────────────────────────
-
-    #[test]
-    fn test_format_gold_zero() {
-        assert_eq!(format_gold(0), "0");
-    }
-
-    #[test]
-    fn test_format_gold_below_thousand() {
-        assert_eq!(format_gold(999), "999");
-        assert_eq!(format_gold(1), "1");
-        assert_eq!(format_gold(500), "500");
-    }
-
-    #[test]
-    fn test_format_gold_thousands_separator() {
-        assert_eq!(format_gold(1_000), "1,000");
-        assert_eq!(format_gold(1_234), "1,234");
-        assert_eq!(format_gold(10_000), "10,000");
-        assert_eq!(format_gold(999_999), "999,999");
-    }
-
-    #[test]
-    fn test_format_gold_millions() {
-        assert_eq!(format_gold(1_000_000), "1,000,000");
-        assert_eq!(format_gold(1_234_567), "1,234,567");
-    }
-
     // ── compute_sell_price tests ──────────────────────────────────────────
 
     #[test]
@@ -2361,5 +2332,88 @@ mod tests {
         }
         assert_eq!(nav.selected_slot_index, Some(0));
         assert!(matches!(nav.phase, NavigationPhase::SlotNavigation));
+    }
+
+    // ── Keyboard navigation flow ────────────────────────────────────────────
+
+    /// Drives `merchant_inventory_input_system` through a full keyboard
+    /// navigation flow: Enter starts slot nav, a second Enter enters action
+    /// mode, Esc cancels, Tab switches panels, arrows move the selection, and a
+    /// number key resets to a character. This locks in the two-phase
+    /// [`NavigationPhase`] transitions after the split-screen consolidation.
+    #[test]
+    fn test_merchant_keyboard_navigation_phase_transitions() {
+        fn press(app: &mut App, key: KeyCode) {
+            {
+                let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+                input.reset_all();
+                input.press(key);
+            }
+            app.update();
+        }
+
+        let (game_state, _npc_id) = make_game_state_with_merchant();
+
+        let mut app = App::new();
+        app.insert_resource(GlobalState(game_state));
+        app.init_resource::<MerchantNavState>();
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_message::<BuyItemAction>();
+        app.add_message::<SellItemAction>();
+        app.add_systems(Update, merchant_inventory_input_system);
+
+        // Focus defaults to the character (left) panel. Enter with no slot
+        // highlighted starts navigation at slot 0.
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.world()
+                .resource::<MerchantNavState>()
+                .selected_slot_index,
+            Some(0)
+        );
+
+        // Enter again on a slot holding an item advances to ActionNavigation.
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.world().resource::<MerchantNavState>().phase,
+            NavigationPhase::ActionNavigation
+        );
+
+        // Esc cancels back to SlotNavigation.
+        press(&mut app, KeyCode::Escape);
+        assert_eq!(
+            app.world().resource::<MerchantNavState>().phase,
+            NavigationPhase::SlotNavigation
+        );
+
+        // Tab toggles focus to the merchant (right) panel and clears selection.
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(
+            app.world()
+                .resource::<MerchantNavState>()
+                .selected_slot_index,
+            None
+        );
+        if let GameMode::MerchantInventory(ref ms) = app.world().resource::<GlobalState>().0.mode {
+            assert!(matches!(ms.focus, MerchantFocus::Right));
+        } else {
+            panic!("expected MerchantInventory mode");
+        }
+
+        // Enter starts stock navigation at row 0; ArrowDown advances to row 1.
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::ArrowDown);
+        assert_eq!(
+            app.world()
+                .resource::<MerchantNavState>()
+                .selected_slot_index,
+            Some(1)
+        );
+
+        // Number key 1 resets to character 0 and SlotNavigation.
+        press(&mut app, KeyCode::Digit1);
+        let nav = app.world().resource::<MerchantNavState>();
+        assert_eq!(nav.phase, NavigationPhase::SlotNavigation);
+        assert_eq!(nav.selected_slot_index, None);
     }
 }

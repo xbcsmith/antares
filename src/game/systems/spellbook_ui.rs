@@ -51,7 +51,10 @@ use crate::domain::magic::learning::can_learn_spell;
 use crate::domain::magic::types::SpellContext;
 use crate::domain::types::SpellId;
 use crate::game::resources::GlobalState;
-use crate::game::systems::ui_helpers::BODY_FONT_SIZE;
+use crate::game::systems::ui_helpers::{
+    three_column, title_bar_with_hints, BODY_FONT_SIZE, UI_HEADER_COLOR, UI_HINT_COLOR,
+    UI_TITLE_COLOR,
+};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -70,16 +73,10 @@ pub const SPELLBOOK_SELECTED_ROW_BG: egui::Color32 =
 pub const SPELLBOOK_NORMAL_ROW_COLOR: egui::Color32 = egui::Color32::WHITE;
 /// Text color when the character has insufficient SP to cast the spell.
 pub const SPELLBOOK_DISABLED_SPELL_COLOR: egui::Color32 = egui::Color32::from_rgb(115, 115, 115);
-/// Text color for "Level N" group header rows.
-pub const SPELLBOOK_LEVEL_HEADER_COLOR: egui::Color32 = egui::Color32::from_rgb(179, 204, 255);
 /// Text / background highlight for the active character tab.
 pub const SPELLBOOK_CHAR_TAB_ACTIVE_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 230, 51);
 /// Text color for inactive character tabs.
 pub const SPELLBOOK_CHAR_TAB_INACTIVE_COLOR: egui::Color32 = egui::Color32::from_rgb(153, 153, 179);
-/// Text color for hint / secondary text at the bottom and in the detail panel.
-pub const SPELLBOOK_HINT_COLOR: egui::Color32 = egui::Color32::from_rgb(140, 140, 166);
-/// Text color for the main "Spell Book" title and column headers.
-pub const SPELLBOOK_TITLE_COLOR: egui::Color32 = egui::Color32::from_rgb(204, 217, 255);
 
 // ── Plugin ─────────────────────────────────────────────────────────────────────
 
@@ -234,49 +231,32 @@ fn spellbook_ui_system(
     let mut root = crate::game::systems::ui_helpers::root_ui(ctx, "spellbook_ui");
     egui::CentralPanel::default().show(&mut root, |ui| {
         // ── Title bar — hints included right-aligned so columns get the full
-        //   remaining height with no bottom reservation needed ─────────────────
-        ui.horizontal(|ui| {
-            ui.heading("\u{1F4DA} Spell Book"); // 📚
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new("[ESC] Close").color(SPELLBOOK_HINT_COLOR));
-                ui.separator();
-                ui.label(
-                    egui::RichText::new("[\u{2191}\u{2193}] Select Spell")
-                        .color(SPELLBOOK_HINT_COLOR),
-                );
-                ui.separator();
-                ui.label(egui::RichText::new("[Tab] Switch Char").color(SPELLBOOK_HINT_COLOR));
-                ui.separator();
-                ui.label(egui::RichText::new("[C] Cast Spell").color(SPELLBOOK_HINT_COLOR));
-            });
-        });
-
-        ui.separator();
-
-        // Pre-compute column geometry from the available rect before entering
-        // ui.horizontal. ui.allocate_ui gives each column an explicit rect so the
-        // ScrollAreas fill the full column height rather than collapsing.
-        let available = ui.available_size();
-        let col_h = available.y;
-        let left_w = 160.0_f32;
-        let right_w = 220.0_f32;
-        // Reserve approx width for 2 separators (1 px line + item_spacing.x each side).
-        let sep_total = (1.0 + 2.0 * ui.spacing().item_spacing.x) * 2.0;
-        let center_w = (available.x - left_w - right_w - sep_total).max(200.0);
+        //   remaining height with no bottom reservation needed ───────────────────
+        title_bar_with_hints(
+            ui,
+            "\u{1F4DA} Spell Book", // 📚
+            &[
+                "[ESC] Close",
+                "[\u{2191}\u{2193}] Select Spell",
+                "[Tab] Switch Char",
+                "[C] Cast Spell",
+            ],
+        );
 
         // ── Three-column body — each column owns an explicit rect ─────────────
-        ui.horizontal(|ui| {
+        three_column(
+            ui,
+            160.0,
+            220.0,
+            200.0,
             // Left column — character tabs (fixed width, no scroll needed ≤6 chars)
-            ui.allocate_ui(egui::vec2(left_w, col_h), |ui| {
+            |ui| {
                 ui.vertical(|ui| {
                     render_char_tabs(ui, &sb, &global_state);
                 });
-            });
-
-            ui.separator();
-
+            },
             // Center column — spell list (scrollable, fills window height)
-            ui.allocate_ui(egui::vec2(center_w, col_h), |ui| {
+            |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("spellbook_spell_list")
                     .auto_shrink([true, false])
@@ -291,12 +271,9 @@ fn spellbook_ui_system(
                             );
                         });
                     });
-            });
-
-            ui.separator();
-
+            },
             // Right column — spell detail panel (scrollable, fills window height)
-            ui.allocate_ui(egui::vec2(right_w, col_h), |ui| {
+            |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("spellbook_detail_pane")
                     .auto_shrink([true, false])
@@ -305,8 +282,8 @@ fn spellbook_ui_system(
                             render_detail_panel(ui, &sb, content.as_deref());
                         });
                     });
-            });
-        });
+            },
+        );
     });
 }
 
@@ -370,7 +347,7 @@ pub fn collect_spell_ids_from_state(
 /// * `global_state` — read-only access to party members and their spell data.
 fn render_char_tabs(ui: &mut egui::Ui, sb: &SpellBookState, global_state: &GlobalState) {
     // Column header
-    ui.label(egui::RichText::new("Characters").color(SPELLBOOK_TITLE_COLOR));
+    ui.label(egui::RichText::new("Characters").color(UI_TITLE_COLOR));
 
     let members = &global_state.0.party.members;
     if members.is_empty() {
@@ -426,7 +403,7 @@ fn render_spell_list(
     spell_ids: &[SpellId],
 ) {
     // Column header
-    ui.label(egui::RichText::new("Known Spells").color(SPELLBOOK_TITLE_COLOR));
+    ui.label(egui::RichText::new("Known Spells").color(UI_TITLE_COLOR));
 
     let Some(character) = global_state.0.party.members.get(sb.character_index) else {
         ui.label(
@@ -463,7 +440,7 @@ fn render_spell_list(
             // ── Level header ──────────────────────────────────────────────────
             ui.label(
                 egui::RichText::new(format!("-- Level {} --", level_idx + 1))
-                    .color(SPELLBOOK_LEVEL_HEADER_COLOR),
+                    .color(UI_HEADER_COLOR),
             );
 
             for &spell_id in level_spells {
@@ -543,9 +520,7 @@ fn render_spell_list(
         .collect();
 
     if !scroll_entries.is_empty() {
-        ui.label(
-            egui::RichText::new("-- Learnable Scrolls --").color(SPELLBOOK_LEVEL_HEADER_COLOR),
-        );
+        ui.label(egui::RichText::new("-- Learnable Scrolls --").color(UI_HEADER_COLOR));
 
         for (scroll_name, spell_id, eligible) in scroll_entries {
             let spell_name = spell_db
@@ -584,12 +559,10 @@ fn render_spell_list(
 /// * `content` — optional loaded content database (spell definitions).
 fn render_detail_panel(ui: &mut egui::Ui, sb: &SpellBookState, content: Option<&GameContent>) {
     // Column header
-    ui.label(egui::RichText::new("Detail").color(SPELLBOOK_TITLE_COLOR));
+    ui.label(egui::RichText::new("Detail").color(UI_TITLE_COLOR));
 
     let Some(spell_id) = sb.selected_spell_id else {
-        ui.label(
-            egui::RichText::new("Select a spell to view details.").color(SPELLBOOK_HINT_COLOR),
-        );
+        ui.label(egui::RichText::new("Select a spell to view details.").color(UI_HINT_COLOR));
         return;
     };
 
@@ -609,7 +582,7 @@ fn render_detail_panel(ui: &mut egui::Ui, sb: &SpellBookState, content: Option<&
     // Spell name — displayed larger
     ui.label(
         egui::RichText::new(spell.name.clone())
-            .color(SPELLBOOK_TITLE_COLOR)
+            .color(UI_TITLE_COLOR)
             .size(BODY_FONT_SIZE + 2.0),
     );
 
@@ -644,7 +617,7 @@ fn render_detail_panel(ui: &mut egui::Ui, sb: &SpellBookState, content: Option<&
 
     // Description text
     if !spell.description.is_empty() {
-        ui.label(egui::RichText::new(spell.description.clone()).color(SPELLBOOK_HINT_COLOR));
+        ui.label(egui::RichText::new(spell.description.clone()).color(UI_HINT_COLOR));
     }
 }
 
