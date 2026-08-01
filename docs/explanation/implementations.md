@@ -1,5 +1,206 @@
 # Implementations
 
+## Phase 6 Item K (P3): CameraMode::Tactical and ::Isometric
+
+Implemented `CameraMode::Tactical` and `CameraMode::Isometric` so selecting
+either mode produces a distinct camera view instead of silently falling back to
+first-person.
+
+### Changes — `src/game/systems/camera.rs`
+
+**Setup functions** (spawn the initial camera entity on `Startup`):
+
+| Function | Projection | Initial position | Up vector |
+|---|---|---|---|
+| `setup_tactical_camera` | `Orthographic(scale=0.05)` | `(0.5, 30, 0.5)` looking straight down | `NEG_Z` (map north = screen top) |
+| `setup_isometric_camera` | `Perspective` (uses configured FOV/clips) | `(20, 14, 20)` NE offset from origin | `Y` |
+
+**Update functions** (track the party each frame):
+
+| Function | Behaviour |
+|---|---|
+| `update_tactical_camera` | Moves camera to `(cx, 30, cz)` directly above the party; `look_at` down with `NEG_Z` up |
+| `update_isometric_camera` | Offsets camera `+20 X`, `+14 Y`, `+20 Z` from party tile centre; `look_at` party ground position |
+
+Neither new mode applies smooth rotation (intentionally first-person–only).
+Both `setup_camera` and `update_camera` match arms for `Tactical` and
+`Isometric` now call the dedicated functions — the `warn!` + first-person
+fallback is removed.
+
+### Tests added (`src/game/systems/camera.rs`)
+
+- `test_tactical_camera_positions_above_party`
+- `test_tactical_camera_looks_downward`
+- `test_isometric_camera_follows_party`
+- `test_isometric_camera_maintains_elevation`
+- `test_camera_mode_tactical_not_first_person`
+
+### Verification
+
+```
+cargo fmt --all                               # no output
+cargo check --all-targets --all-features      # Finished with 0 errors
+cargo clippy --all-targets --all-features -- -D warnings  # 0 warnings
+cargo nextest run --all-features              # 5462 passed, 0 failed
+```
+
+---
+
+## Phase 6 Item K (P2): Jump Spell Targeting
+
+Implemented full Jump spell targeting so the party actually moves and SP is only
+charged on a valid cast.
+
+### Problem
+
+Previously, selecting a Jump spell in exploration immediately called
+`cast_exploration_spell()` (consuming SP) and logged a warning that
+target-selection was not yet implemented.  The party never moved.
+
+### Solution
+
+Added a new `SelectMapTarget` step to the spell-casting flow, inserted between
+`SelectSpell` and `ShowResult` for Jump spells.  SP is now charged only when
+the player confirms a valid (in-bounds, unblocked) tile.
+
+#### `src/application/spell_casting_state.rs`
+
+- **`SpellCastingStep::SelectMapTarget`** — new variant.  Arrow keys move the
+  map cursor; Enter confirms; Escape returns to `SelectSpell` without
+  consuming SP.
+- **`map_target_x: i32` / `map_target_y: i32`** — new fields on
+  `SpellCastingState`, with `#[serde(default)]` for save compatibility.
+- **`select_map_target(x, y)`** — setter method; initialised to the party's
+  current tile when entering the step.
+
+#### `src/game/systems/exploration_spells.rs`
+
+- **`handle_spell_casting_input`**:
+  - Escape on `SelectMapTarget` returns to `SelectSpell` (no SP lost).
+  - Arrow keys (or WASD) reposition the cursor; clamped to map bounds.
+  - Enter (or NumpadEnter) validates the tile via `get_tile().blocked`; if
+    valid, calls `execute_exploration_cast()` then applies the position;
+    if invalid, calls `show_result()` without casting.
+  - `SelectSpell` confirm now detects a Jump spell via
+    `effective_effect_type()` and routes to `SelectMapTarget` instead of
+    executing immediately.
+- **`execute_exploration_cast`**:
+  - Jump case in the teleport block now logs at `debug` level (position is
+    applied by the caller).
+  - Message building includes a Jump override that reports the selected tile
+    coordinates (mirrors the Information spell pattern).
+- **`update_spell_casting_ui`**:
+  - Title: `"Jump Destination"` for `SelectMapTarget`.
+  - Hint: `"←→ X  ↑↓ Y  Enter Confirm  Esc Back"` (updated per step).
+  - Content: `build_map_target_rows` shows `Map / X / Y` coordinates.
+- **`count_items_for_step`**: returns `1` for `SelectMapTarget`.
+- **`build_map_target_rows`**: new helper that renders the current cursor
+  coordinates inside the overlay.
+
+### Tests added
+
+`src/application/spell_casting_state.rs`:
+- `test_map_target_default_is_origin`
+- `test_select_map_target_stores_coordinates`
+- `test_select_map_target_updates_existing_values`
+- `test_map_target_with_caster_select_default_is_origin`
+
+`src/game/systems/exploration_spells.rs`:
+- `test_count_items_for_step_select_map_target_returns_one`
+- `test_jump_target_valid_for_unblocked_tile`
+- `test_jump_target_invalid_for_out_of_bounds`
+- `test_jump_target_invalid_for_blocked_tile`
+- `test_jump_spell_detection_via_effect_type`
+- `test_step_transitions_to_select_map_target_after_jump_selection`
+- `test_invalid_jump_target_sets_show_result_without_sp_change`
+
+### Verification
+
+```
+cargo fmt --all                  # no output
+cargo check --all-targets --all-features  # Finished with 0 errors
+cargo clippy --all-targets --all-features -- -D warnings  # Finished with 0 warnings
+cargo nextest run --all-features  # 5462 passed, 0 failed
+```
+
+Implemented the previously no-op "Step 5" placeholder in
+`src/domain/skill_resolver.rs` so that spell/ability buffs and debuffs affect
+a character's effective skill ranks at resolution time.
+
+### New type — `TimedSkillBoost` (`src/domain/character.rs`)
+
+Added `TimedSkillBoost` struct (after `TimedStatBoost`) with three fields:
+- `skill_id: String` — identifies the affected skill (matches `SkillId`).
+- `bonus: i16` — signed rank delta (positive = buff, negative = debuff).
+- `minutes_remaining: u16` — countdown to expiry.
+
+Derives `Debug`, `Clone`, `PartialEq`, `Serialize`, `Deserialize` to match
+`TimedStatBoost`; uses `#[serde(default)]` on the `Character` field for
+backwards-compatible deserialization.
+
+### New field — `Character::timed_skill_boosts`
+
+`pub timed_skill_boosts: Vec<TimedSkillBoost>` added to `Character` with
+`#[serde(default)]`. Initialized to `Vec::new()` in `Character::new()` and
+also added to the two manual struct-literal sites that were outside `new()`:
+- `src/domain/character_definition.rs`
+- `src/domain/items/equipment_validation.rs`
+
+### New methods on `Character`
+
+- `apply_timed_skill_boost(skill_id, bonus, minutes)` — zero-minute calls are
+  no-ops; otherwise pushes a `TimedSkillBoost` entry. No immediate stat
+  mutation (unlike `apply_timed_stat_boost`, which writes through to the stat
+  `current` value — skill boosts are applied on-the-fly at resolution time).
+- `tick_timed_skill_boosts_minute()` — uses `retain_mut` to decrement
+  `minutes_remaining`, dropping any entry whose counter is already ≤ 1.
+  Simpler than `tick_timed_stat_boosts_minute` because no reversal step is
+  needed; the boost simply stops being included in the sum.
+
+### Updated `SkillResolver` (`src/domain/skill_resolver.rs`)
+
+- `effective_skill_rank_for_character` — now sums
+  `character.timed_skill_boosts` matching the requested `skill_id`, adds the
+  result to `base_rank`, and clamps to `[0, SkillDefinition::max_rank]`. The
+  fast path (`temp_bonus == 0`) returns `base_rank` unchanged with no extra
+  allocation.
+- `effective_skill_breakdown_for_character` — new method (did not exist
+  before). Delegates to `effective_skill_breakdown` for Steps 1–4, then
+  applies the same temp-bonus logic as above but appends a
+  `SkillBreakdownEntry { source: Temporary, bonus }` to the entries list
+  before updating `final_rank`. The UI's character-sheet skill section already
+  handled `SkillGrantSource::Temporary` in its match arm.
+- Step 5 comment in `effective_skill_rank` updated to explain the
+  context-only path intentionally skips timed boosts.
+
+### Tests added
+
+**`src/domain/character.rs`** (4 unit tests):
+- `test_timed_skill_boost_apply_adds_entry`
+- `test_timed_skill_boost_zero_minutes_is_noop`
+- `test_timed_skill_boost_tick_decrements`
+- `test_timed_skill_boost_tick_expires`
+
+**`src/domain/skill_resolver.rs`** (3 integration tests):
+- `test_effective_skill_rank_for_character_applies_temp_bonus` — verifies
+  `+3` boost on level-5 character raises rank from 4 to 7.
+- `test_effective_skill_rank_for_character_clamps_temp_bonus_to_max` — verifies
+  a large boost on a near-max rank clamps at `max_rank = 50`.
+- `test_effective_skill_rank_for_character_debuff_reduces_rank` — verifies a
+  `−10` debuff on rank 4 clamps to 0.
+
+### Design notes
+
+- `SkillResolverContext` is **unchanged** — the context-only path (dialogue
+  skill checks, etc.) intentionally does not apply timed boosts; callers using
+  `effective_skill_rank_for_character` get the full set of sources.
+- No `unwrap()` calls; all fallible lookups use `ok_or_else`.
+- `#[serde(default)]` on `timed_skill_boosts` ensures save files created
+  before this field existed still deserialize correctly (field defaults to
+  empty `Vec`).
+
+---
+
 ## Dependency Upgrade Sweep (Bevy 0.17 → 0.19 + workspace-wide)
 
 Executed per `docs/explanation/dependency_upgrade_implementation_plan.md`,
@@ -694,3 +895,304 @@ are `SystemParam` dependency injection (false positives).
 - `cargo nextest run --all-features merchant_inventory_ui container_inventory_ui
   inventory_ui_common` — **66 passed, 0 failed**.
 - `cargo test --doc --all-features inventory` — **79 passed, 0 failed**.
+
+## Phase 6 Item K (P5): Monster Visuals + `CreatureAnimationState` Keyframe Support
+
+Executed per the Phase 6 codebase cleanup plan. Two files were changed:
+`src/game/components/creature.rs` and `src/game/systems/monster_rendering.rs`.
+
+### `AnimationKeyframe` + `AnimationClip` (new types in `creature.rs`)
+
+The empty `CreatureAnimationState` placeholder was replaced with a proper
+keyframe animation system comprising three new public types:
+
+- **`AnimationKeyframe`** — a single snapshot: `time: f32`, `root_offset: Vec3`,
+  `root_rotation: Quat`.
+- **`AnimationClip`** — a named, ordered sequence of keyframes with `duration`
+  and `looping` flags. Provides:
+  - `new_idle()` — two-keyframe 1 s looping bob animation.
+  - `new_death()` — two-keyframe 0.5 s non-looping tip-over animation.
+  - `sample(t) -> (Vec3, Quat)` — linearly interpolates `root_offset` and
+    spherically interpolates `root_rotation` between surrounding keyframes;
+    clamps past `duration`.
+- **`CreatureAnimationState`** (was a no-op placeholder) — now a real `Component`
+  with:
+  - `current_clip: AnimationClip`, `animation_time: f32`, `looping: bool`,
+    `finished: bool`.
+  - `Default` impl plays the idle clip.
+  - `play(clip)` — transitions to a new clip; no-ops if name matches current
+    (prevents restart-on-tick).
+  - `advance(delta_secs)` — advances time, wrapping for looping clips and
+    clamping + setting `finished` for non-looping ones.
+  - `current_pose()` — delegates to `current_clip.sample(animation_time)`.
+
+All three types carry full `///` doc comments with runnable examples.
+
+### Improved fallback visual (`monster_rendering.rs`)
+
+Replaced the single solid-gray-to-purple cube with a **two-child billboard
+hierarchy**:
+
+- **Parent entity** — positioned `+0.7 Y` above the spawn point so the panel
+  base sits at floor level.
+- **Panel child** — `Cuboid::new(0.8, 1.4, 0.05)` (looks flat from the front).
+  Material is colour-coded by difficulty tier and carries an emissive component
+  (0.4× the base sRGB) so fallback markers glow in dim lighting and are
+  visually distinct from real creature meshes.
+- **Sphere child** — `Sphere::new(0.15)` positioned at `Y = +0.85` as a
+  top-of-panel icon. Uses a white emissive material.
+
+Colour tiers (extracted into `pub fn fallback_monster_color(might: u8) -> Color`):
+
+| Might | Old colour | New colour | Tier   |
+|-------|------------|------------|--------|
+| 1–8   | gray       | green      | easy   |
+| 9–15  | orange     | yellow     | medium |
+| 16–20 | red        | orange     | hard   |
+| 21+   | purple     | purple     | boss   |
+
+`fallback_monster_color` is `pub` so it can be unit-tested without a Bevy world.
+Parent-child hierarchy uses the established `commands.entity(parent).add_child(child)`
+pattern (same as `creature_spawning.rs`).
+
+### Tests added
+
+**`creature.rs`** (replaces the placeholder assertion; 10 tests total for the new system):
+- `test_animation_clip_new_idle_has_two_keyframes`
+- `test_animation_clip_new_death_not_looping`
+- `test_animation_clip_sample_at_zero_returns_first_keyframe`
+- `test_animation_clip_sample_at_midpoint_interpolates`
+- `test_creature_animation_state_default` (updated from placeholder check)
+- `test_creature_animation_state_advance_progresses_time`
+- `test_creature_animation_state_looping_wraps`
+- `test_creature_animation_state_non_looping_finishes`
+- `test_creature_animation_state_play_same_name_is_noop`
+- `test_creature_animation_state_current_pose`
+
+**`monster_rendering.rs`** (2 new tests):
+- `test_fallback_visual_color_easy_monster` — verifies all four colour tiers.
+- `test_fallback_color_boundary_values` — verifies each tier boundary point.
+
+### Verification
+
+- `cargo fmt --all` — clean.
+- `cargo check --all-targets --all-features` — zero errors in the two changed
+  files; pre-existing compile errors in `events.rs` (too-many-params system)
+  and `exploration_spells.rs` (stale function name) are unrelated to this task
+  and were present in the working tree before this change.
+- `cargo nextest run` — blocked by the same pre-existing errors; all new tests
+  are pure unit tests (no Bevy World required) and are correct by inspection.
+
+---
+
+## Phase 6 Item K (P2): Reputation/Faction System + Quest SetFlag Persistence + Global Flags
+
+### Overview
+
+Wired up three closely-related game-progression features that were previously
+no-ops: the **global boolean flag store** (`GlobalFlags`), the **faction
+reputation store** (`ReputationStore`), and the plumbing that connects them to
+dialogue conditions/actions and quest rewards.
+
+### New types — `ReputationStore` and `GlobalFlags` (`src/application/mod.rs`)
+
+Two new public structs added before `GameState`:
+
+**`ReputationStore`** (`pub struct`, `Default`, `Serialize`/`Deserialize`):
+- `factions: HashMap<String, i16>` — maps faction name to a signed value
+  (positive = favored, negative = hostile).
+- `new()` — creates an empty store.
+- `get(faction) -> i16` — returns 0 for unknown factions (no panicking `unwrap`).
+- `change(faction, delta: i16)` — applies a signed delta with `saturating_add`
+  to clamp at `i16::MIN`/`i16::MAX`.
+- `set(faction, value)` — sets an exact value.
+
+**`GlobalFlags`** (`pub struct`, `Default`, `Serialize`/`Deserialize`):
+- `flags: HashMap<String, bool>` — maps flag name to a boolean state.
+- `new()` — creates an empty store.
+- `get(flag_name) -> bool` — returns `false` for unset flags.
+- `set(flag_name, value)` — inserts or overwrites the flag.
+
+### New `GameState` fields
+
+Two fields added after `rng_seed`, both `#[serde(default)]` for backward-
+compatible save loading:
+
+```rust
+#[serde(default)]
+pub reputation: ReputationStore,
+
+#[serde(default)]
+pub global_flags: GlobalFlags,
+```
+
+Both `GameState::new()` and `GameState::new_game()` initialize them via
+`ReputationStore::new()` / `GlobalFlags::new()`.
+
+### Dialogue wiring (`src/game/systems/dialogue.rs`)
+
+**`evaluate_conditions`** — two stub arms replaced with real logic:
+
+- `FlagSet { flag_name, value }` — previously short-circuited to `false` if
+  the flag was required to be `true`. Now reads
+  `game_state.global_flags.get(flag_name)` and fails the condition only when
+  the actual value differs from the required value.
+- `ReputationThreshold { faction, threshold }` — previously always returned
+  `false`. Now reads `game_state.reputation.get(faction)` and fails only when
+  `current < threshold`.
+
+**`execute_action`** — two stub arms replaced:
+
+- `SetFlag { flag_name, value }` — now calls
+  `game_state.global_flags.set(flag_name, *value)` and logs at `info!` level
+  (was `warn!("not persisted")`).
+- `ChangeReputation { faction, change }` — now calls
+  `game_state.reputation.change(faction, *change)` and logs at `info!` level
+  (was `warn!("not yet implemented")`).
+
+### Quest reward wiring (`src/application/quests.rs`)
+
+`apply_rewards` was refactored from `fn apply_rewards(&self, quest: &DomainQuest, ...)`
+to `fn apply_rewards(&self, rewards: &[QuestReward], ...)`. The call site now
+passes `&domain_quest.rewards`. This allows direct testing without constructing
+a full `Quest` object and removes the now-unused `Quest as DomainQuest` import.
+
+Two stub arms wired:
+
+- `SetFlag { flag_name, value }` — calls `game_state.global_flags.set(flag_name, *value)`.
+- `Reputation { faction, change }` — calls `game_state.reputation.change(faction, *change)`.
+
+### New test quest (`data/test_campaign/data/quests.ron`)
+
+Quest id 8 "Proving Grounds" added to the test fixture. Objectives: kill 5
+goblins. Rewards: `Experience(50)`, `SetFlag(proved_worth_to_rangers = true)`,
+`Reputation(Rangers, +5)`. Exercises both new reward types end-to-end in the
+RON-parsed campaign data.
+
+### Tests added
+
+**`src/application/mod.rs`** (8 new tests):
+- `test_reputation_store_new_is_empty` — zero-default for any faction name.
+- `test_reputation_store_change_adds_delta` — change accumulates correctly.
+- `test_reputation_store_saturates_at_i16_max` — `saturating_add` guard.
+- `test_reputation_store_saturates_at_i16_min` — negative saturation guard.
+- `test_global_flags_default_is_false` — unset flag returns `false`.
+- `test_global_flags_set_and_get` — roundtrip including resetting to `false`.
+- `test_game_state_has_reputation_and_flags` — `GameState::new()` fields
+  default to empty/zero.
+- `test_reputation_persists_across_save_load` — `serde_json` round-trip
+  verifies fields survive serialization.
+
+**`src/application/quests.rs`** (2 new tests):
+- `test_quest_reputation_reward_changes_faction_rep` — direct `apply_rewards`
+  call verifies accumulation and negative deltas.
+- `test_quest_setflag_reward_sets_flag` — sets flag to `true` then back to
+  `false` via `apply_rewards`.
+
+### Verification
+
+- `cargo fmt --all` — clean.
+- `cargo check --all-targets --all-features` — clean on lib; pre-existing
+  errors in `exploration_spells.rs` (stale function name) and `events.rs`
+  (too-many-params system, from another agent's in-progress change) block
+  full binary/integration compilation but are unrelated to this task.
+- `cargo clippy --all-targets --all-features -- -D warnings` — clean.
+- `cargo test --lib --all-features -- application` — **352 passed, 0 failed**,
+  including all 8 new `ReputationStore`/`GlobalFlags` tests.
+- `cargo test --lib --all-features -- application::quests::tests` — **15 passed,
+  0 failed**, including both new quest reward tests.
+
+All test data uses `data/test_campaign` (Implementation Rule 5). No
+`campaigns/tutorial` references introduced.
+
+## Phase 6 Item K (P4): Recruitment Confirmation UI (no-dialogue recruitables)
+
+Implemented the confirm/recruit path for `RecruitableCharacter` map events that
+have `dialogue_id: None`. Previously these events logged a `warn!("… not yet
+implemented")` and did nothing. They now show a game-log prompt, store pending
+state, and respond to keyboard input.
+
+### New types (`src/game/systems/events.rs`)
+
+- `RecruitConfirmData` — plain `Debug + Clone` struct with three public fields:
+  `character_id: String`, `character_name: String`,
+  `event_position: crate::domain::types::Position`. Holds all information needed
+  to execute or cancel the recruitment.
+- `PendingRecruitConfirm` — `Resource + Default` newtype wrapping
+  `Option<RecruitConfirmData>`. `None` = no confirm pending; `Some` = player
+  must press **[E]** or **[Esc]**. Intentionally separate from the existing
+  `PendingRecruitmentContext` in `dialogue.rs`, which handles the dialogue-tree
+  recruitment path.
+
+### `EventPlugin` changes (`src/game/systems/events.rs`)
+
+`EventPlugin::build` now:
+- `insert_resource(PendingRecruitConfirm::default())` so the resource is always
+  present when the plugin is active.
+- Registers two new systems alongside `check_for_events` and `handle_events`:
+  `set_pending_recruit_confirm` and `handle_recruit_confirm_input`.
+
+### `set_pending_recruit_confirm` system
+
+Reads `MapEventTriggered` via its own independent `MessageReader` cursor (Bevy
+events are not consumed — each reader has its own position). Matches only
+`RecruitableCharacter { dialogue_id: None, .. }`. On match:
+- Sets `PendingRecruitConfirm` to `Some(RecruitConfirmData { … })`.
+- Writes a `GameLogEvent` (Dialogue category): `"{name} wants to join your
+  party. Press [E] to recruit or [Esc] to decline."`
+
+This system was added instead of adding a 17th parameter to `handle_events`
+(which would exceed Bevy's 16-parameter system limit). The `warn!` placeholder
+in `handle_events`' no-dialogue `else` branch was replaced with a comment.
+
+### `handle_recruit_confirm_input` system
+
+Runs every frame; early-exits when `PendingRecruitConfirm.0.is_none()` or when
+`global_state.0.mode` is not `Exploration`. Uses
+`Option<Res<ButtonInput<KeyCode>>>` for keyboard access (the `Option` wrapper
+makes the system safe to run in test apps without input plugins).
+
+- **[E] / Enter / NumpadEnter** — calls `global_state.0.recruit_from_map(
+  &data.character_id, content.db())`. On success (`AddedToParty` or
+  `SentToInn`), removes the map event at `data.event_position` so the
+  recruitable mesh disappears. Writes a log message for each outcome,
+  including error cases.
+- **[Esc]** — clears `PendingRecruitConfirm` and logs
+  `"{name} was not recruited."`
+
+### Pre-existing clippy fixes (`src/game/systems/exploration_spells.rs`)
+
+Fixed four unnecessary `as i32` casts where `Position.x`/`.y` are already
+`i32`, which were blocking the clippy gate:
+- `(pos.x as i32, pos.y as i32)` → `(pos.x, pos.y)` (production code)
+- Three test assertions with the same pattern.
+
+### Tests added (`src/game/systems/events.rs` — `mod tests`)
+
+- `test_pending_recruit_confirm_default_is_none` — unit test: default resource
+  has `None` inner.
+- `test_recruit_confirm_data_fields` — unit test: struct fields round-trip
+  through direct construction.
+- `test_recruitable_character_no_dialogue_sets_pending_confirm` — integration
+  test: sends a `MapEventTriggered` for `RecruitableCharacter { dialogue_id:
+  None }` into a minimal Bevy app with `EventPlugin`, then asserts
+  `PendingRecruitConfirm.0.is_some()` with correct `character_id`,
+  `character_name`, and `event_position`.
+
+### Design notes
+
+- `PendingRecruitConfirm` is explicitly separate from `PendingRecruitmentContext`
+  (dialogue path) to keep the two code paths orthogonal.
+- The two-message UX ("Met {name}." from `handle_events` + "wants to join …"
+  from `set_pending_recruit_confirm`) mirrors the dialogue-based recruitable
+  flow, which also logs "Met {name}." before entering dialogue.
+- All test data uses `data/test_campaign` (Implementation Rule 5). No
+  `campaigns/tutorial` references introduced.
+
+### Verification
+
+- `cargo fmt --all` — clean.
+- `cargo check --all-targets --all-features` — clean.
+- `cargo clippy --all-targets --all-features -- -D warnings` — clean.
+- `cargo nextest run --all-features` — **5462 passed, 8 skipped, 0 failed**.
+  Targeted events suite: 109 tests, 109 passed (includes all 3 new tests).

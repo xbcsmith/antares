@@ -195,21 +195,63 @@ pub fn spawn_monster_with_visual(
     }
 }
 
-/// Spawns a fallback visual representation for a monster
+/// Returns the fallback visual color for a monster based on its might value.
 ///
-/// Used when a monster has no `creature_id` or the creature_id is invalid.
-/// Creates a simple colored cube as a placeholder.
+/// Used to colour-code fallback billboard markers by difficulty tier.
+///
+/// | Might | Colour | Tier   |
+/// |-------|--------|--------|
+/// | 1–8   | green  | easy   |
+/// | 9–15  | yellow | medium |
+/// | 16–20 | orange | hard   |
+/// | 21+   | purple | boss   |
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::systems::monster_rendering::fallback_monster_color;
+/// use bevy::prelude::Color;
+///
+/// assert_eq!(fallback_monster_color(5),  Color::srgb(0.3, 0.8, 0.3));
+/// assert_eq!(fallback_monster_color(12), Color::srgb(0.9, 0.7, 0.1));
+/// assert_eq!(fallback_monster_color(18), Color::srgb(0.9, 0.3, 0.1));
+/// assert_eq!(fallback_monster_color(25), Color::srgb(0.7, 0.1, 0.9));
+/// ```
+pub fn fallback_monster_color(might: u8) -> Color {
+    match might {
+        1..=8 => Color::srgb(0.3, 0.8, 0.3),
+        9..=15 => Color::srgb(0.9, 0.7, 0.1),
+        16..=20 => Color::srgb(0.9, 0.3, 0.1),
+        _ => Color::srgb(0.7, 0.1, 0.9),
+    }
+}
+
+/// Spawns an improved fallback visual for a monster without a creature definition.
+///
+/// Creates a vertically-oriented thin cuboid panel (billboard-style) with a
+/// colour-coded material based on the monster's power level, plus a small sphere
+/// "icon" at the top to distinguish it from world geometry.
+///
+/// Colour tiers (by `stats.might`):
+/// - Green  (1–8):  easy monster
+/// - Yellow (9–15): medium monster
+/// - Orange (16–20): hard monster
+/// - Purple (21+):  boss-tier monster
+///
+/// The material has an emissive component so fallback markers are visually
+/// distinct from real creature meshes even in dim lighting.
 ///
 /// # Arguments
 ///
-/// * `commands` - Bevy commands for entity creation
-/// * `monster` - The monster to create a fallback visual for
+/// * `commands`  - Bevy commands for entity creation
+/// * `monster`   - The monster to create a fallback visual for
 /// * `materials` - Material asset storage
-/// * `position` - World position to spawn at
+/// * `meshes`    - Mesh asset storage
+/// * `position`  - World position to spawn at
 ///
 /// # Returns
 ///
-/// Entity ID of the fallback visual
+/// Entity ID of the fallback visual parent
 fn spawn_fallback_visual(
     commands: &mut Commands,
     monster: &Monster,
@@ -217,37 +259,80 @@ fn spawn_fallback_visual(
     meshes: &mut Assets<Mesh>,
     position: Vec3,
 ) -> Entity {
-    // Create a simple colored material based on monster stats
-    // Use stats.might as a proxy for level/danger
-    let color = match monster.stats.might.base {
-        1..=8 => Color::srgb(0.5, 0.5, 0.5),   // Gray for low-level
-        9..=15 => Color::srgb(0.8, 0.6, 0.2),  // Orange for mid-level
-        16..=20 => Color::srgb(0.8, 0.2, 0.2), // Red for high-level
-        _ => Color::srgb(0.5, 0.2, 0.8),       // Purple for very high-level
+    let base_color = fallback_monster_color(monster.stats.might.base);
+
+    // Emissive values are 0.4× the base colour's sRGB components so the
+    // billboard glows distinctly without blowing out.
+    let emissive = match monster.stats.might.base {
+        1..=8 => LinearRgba::new(0.12, 0.32, 0.12, 1.0),
+        9..=15 => LinearRgba::new(0.36, 0.28, 0.04, 1.0),
+        16..=20 => LinearRgba::new(0.36, 0.12, 0.04, 1.0),
+        _ => LinearRgba::new(0.28, 0.04, 0.36, 1.0),
     };
 
-    let material = materials.add(StandardMaterial {
-        base_color: color,
-        perceptual_roughness: 0.8,
+    let panel_mat = materials.add(StandardMaterial {
+        base_color,
+        emissive,
+        perceptual_roughness: 0.6,
         metallic: 0.0,
+        double_sided: true,
+        cull_mode: None,
         ..Default::default()
     });
 
-    // Create a simple cube mesh
-    let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
+    // Thin cuboid panel facing +Z (looks flat from the front).
+    let panel_mesh = meshes.add(Cuboid::new(0.8, 1.4, 0.05));
 
-    // Spawn a simple cube as placeholder
-    commands
+    // Small sphere accent at the top to act as an "icon".
+    let sphere_mesh = meshes.add(Sphere::new(0.15));
+    let sphere_mat = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        emissive: LinearRgba::new(0.6, 0.6, 0.6, 1.0),
+        ..Default::default()
+    });
+
+    // Parent entity positioned slightly above the floor so the panel base
+    // sits at ground level.
+    let parent = commands
         .spawn((
-            Mesh3d(cube_mesh),
-            MeshMaterial3d(material),
-            Transform::from_translation(position),
+            Transform::from_translation(position + Vec3::new(0.0, 0.7, 0.0)),
             GlobalTransform::default(),
             Visibility::default(),
             InheritedVisibility::default(),
             ViewVisibility::default(),
         ))
-        .id()
+        .id();
+
+    // Panel child.
+    let panel = commands
+        .spawn((
+            Mesh3d(panel_mesh),
+            MeshMaterial3d(panel_mat),
+            Transform::default(),
+            GlobalTransform::default(),
+            Visibility::default(),
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+        ))
+        .id();
+
+    // Sphere child at the top of the panel.
+    let sphere = commands
+        .spawn((
+            Mesh3d(sphere_mesh),
+            MeshMaterial3d(sphere_mat),
+            Transform::from_xyz(0.0, 0.85, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+        ))
+        .id();
+
+    commands.entity(parent).add_child(panel);
+    commands.entity(parent).add_child(sphere);
+
+    parent
 }
 
 #[cfg(test)]
@@ -271,7 +356,24 @@ mod tests {
         assert_eq!(marker1.monster_entity, marker2.monster_entity);
     }
 
-    // Integration tests with full Bevy app context are complex due to borrow checker
-    // requirements. Full integration testing should be done via manual testing or
-    // end-to-end tests that run the actual game systems.
+    #[test]
+    fn test_fallback_visual_color_easy_monster() {
+        assert_eq!(fallback_monster_color(5), Color::srgb(0.3, 0.8, 0.3));
+        assert_eq!(fallback_monster_color(12), Color::srgb(0.9, 0.7, 0.1));
+        assert_eq!(fallback_monster_color(18), Color::srgb(0.9, 0.3, 0.1));
+        assert_eq!(fallback_monster_color(25), Color::srgb(0.7, 0.1, 0.9));
+    }
+
+    #[test]
+    fn test_fallback_color_boundary_values() {
+        // Boundary between easy and medium
+        assert_eq!(fallback_monster_color(8), Color::srgb(0.3, 0.8, 0.3));
+        assert_eq!(fallback_monster_color(9), Color::srgb(0.9, 0.7, 0.1));
+        // Boundary between medium and hard
+        assert_eq!(fallback_monster_color(15), Color::srgb(0.9, 0.7, 0.1));
+        assert_eq!(fallback_monster_color(16), Color::srgb(0.9, 0.3, 0.1));
+        // Boundary between hard and boss
+        assert_eq!(fallback_monster_color(20), Color::srgb(0.9, 0.3, 0.1));
+        assert_eq!(fallback_monster_color(21), Color::srgb(0.7, 0.1, 0.9));
+    }
 }

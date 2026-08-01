@@ -147,6 +147,10 @@ impl SkillResolver {
 
     /// Computes a character's effective skill rank using the loaded class/race databases.
     ///
+    /// Includes **Step 5**: temporary skill-rank modifiers from
+    /// [`Character::timed_skill_boosts`] are summed and applied after the base
+    /// rank is resolved, then clamped to `[0, SkillDefinition::max_rank]`.
+    ///
     /// # Errors
     ///
     /// Returns [`SkillError::SkillNotFound`] when the skill is missing,
@@ -160,7 +164,26 @@ impl SkillResolver {
         races: &RaceDatabase,
     ) -> Result<SkillRank, SkillError> {
         let ctx = Self::context_for_character(character, classes, races)?;
-        Self::effective_skill_rank(&ctx, skill_id, skills)
+        let base_rank = Self::effective_skill_rank(&ctx, skill_id, skills)?;
+
+        // Step 5: Apply temporary skill-rank modifiers from timed boosts.
+        let temp_bonus: i32 = character
+            .timed_skill_boosts
+            .iter()
+            .filter(|b| &b.skill_id == skill_id)
+            .map(|b| b.bonus as i32)
+            .sum();
+
+        if temp_bonus == 0 {
+            return Ok(base_rank);
+        }
+
+        let definition = skills
+            .get(skill_id)
+            .ok_or_else(|| SkillError::SkillNotFound(skill_id.clone()))?;
+        let final_rank =
+            (base_rank as i32 + temp_bonus).clamp(0, definition.max_rank as i32) as SkillRank;
+        Ok(final_rank)
     }
 
     /// Computes the effective skill rank for `skill_id`.
@@ -240,7 +263,10 @@ impl SkillResolver {
             additive += char_rank as i32;
         }
 
-        // Step 5: (Temporary modifiers — not yet implemented)
+        // Step 5: (Temporary modifiers — applied by effective_skill_rank_for_character
+        // when the caller has direct access to character.timed_skill_boosts.
+        // Callers using the context-only path (e.g. dialogue skill checks) do not
+        // have timed boosts applied; this is intentional for that simplified path.)
 
         // Step 6: Clamp to [0, max_rank]
         let global_max = definition.max_rank as i32;
@@ -388,6 +414,88 @@ impl SkillResolver {
             applied_minimum_rank: min_rank,
             applied_maximum_rank_override: max_rank_override,
         })
+    }
+
+    /// Returns the full rank breakdown for a character, including temporary modifiers.
+    ///
+    /// Extends [`effective_skill_breakdown`] with Step 5: timed skill boosts from
+    /// [`Character::timed_skill_boosts`]. The `temp_bonus` entry (if non-zero) is
+    /// appended with [`SkillGrantSource::Temporary`] and the final rank is re-clamped
+    /// to `[0, SkillDefinition::max_rank]`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SkillError`] variants if skill/class/race lookups fail.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Character, Sex, Alignment};
+    /// use antares::domain::skill_resolver::SkillResolver;
+    /// use antares::domain::skills::{SkillDatabase, SkillGrantSource};
+    /// use antares::domain::classes::ClassDatabase;
+    /// use antares::domain::races::RaceDatabase;
+    ///
+    /// let skill_ron = r#"[
+    ///     (id: "perception", name: "Perception", category: Exploration,
+    ///      description: "", scaling: Linear(base: 0, per_level: 1),
+    ///      max_rank: 50, is_trainable: true),
+    /// ]"#;
+    /// let skills = SkillDatabase::load_from_string(skill_ron).unwrap();
+    /// let class_ron = r#"[
+    ///     (id: "knight", name: "Knight",
+    ///      hp_die: (count: 1, sides: 10, bonus: 0),
+    ///      spell_school: None, is_pure_caster: false, spell_stat: None,
+    ///      special_abilities: [], starting_weapon_id: None, starting_armor_id: None,
+    ///      starting_items: [], proficiencies: [], skill_grants: []),
+    /// ]"#;
+    /// let race_ron = r#"[(id: "human", name: "Human",)]"#;
+    /// let classes = ClassDatabase::load_from_string(class_ron).unwrap();
+    /// let races = RaceDatabase::load_from_string(race_ron).unwrap();
+    ///
+    /// let mut ch = Character::new(
+    ///     "Hero".to_string(), "human".to_string(), "knight".to_string(),
+    ///     Sex::Male, Alignment::Good,
+    /// );
+    /// ch.apply_timed_skill_boost("perception".to_string(), 3, 30);
+    ///
+    /// let bd = SkillResolver::effective_skill_breakdown_for_character(
+    ///     &ch, &"perception".to_string(), &skills, &classes, &races,
+    /// ).unwrap();
+    /// assert!(bd.entries.iter().any(|e| e.source == SkillGrantSource::Temporary));
+    /// ```
+    pub fn effective_skill_breakdown_for_character(
+        character: &Character,
+        skill_id: &SkillId,
+        skills: &SkillDatabase,
+        classes: &ClassDatabase,
+        races: &RaceDatabase,
+    ) -> Result<SkillBreakdown, SkillError> {
+        let ctx = Self::context_for_character(character, classes, races)?;
+        let mut breakdown = Self::effective_skill_breakdown(&ctx, skill_id, skills)?;
+
+        // Step 5: Apply temporary modifiers
+        let temp_bonus: i32 = character
+            .timed_skill_boosts
+            .iter()
+            .filter(|b| &b.skill_id == skill_id)
+            .map(|b| b.bonus as i32)
+            .sum();
+
+        if temp_bonus != 0 {
+            let definition = skills
+                .get(skill_id)
+                .ok_or_else(|| SkillError::SkillNotFound(skill_id.clone()))?;
+            let new_rank = (breakdown.final_rank as i32 + temp_bonus)
+                .clamp(0, definition.max_rank as i32) as SkillRank;
+            breakdown.entries.push(SkillBreakdownEntry {
+                source: SkillGrantSource::Temporary,
+                bonus: temp_bonus,
+            });
+            breakdown.final_rank = new_rank;
+        }
+
+        Ok(breakdown)
     }
 }
 
@@ -785,5 +893,140 @@ mod tests {
             "at least two classes must have skill_grants; got {}",
             classes_with_grants.len()
         );
+    }
+
+    // ── Timed-boost integration tests ──────────────────────────────────────────
+
+    fn make_char_dbs() -> (
+        crate::domain::classes::ClassDatabase,
+        crate::domain::races::RaceDatabase,
+    ) {
+        use crate::domain::classes::ClassDatabase;
+        use crate::domain::races::RaceDatabase;
+        let class_ron = r#"[
+            (id: "knight", name: "Knight",
+             hp_die: (count: 1, sides: 10, bonus: 0),
+             spell_school: None, is_pure_caster: false, spell_stat: None,
+             special_abilities: [], starting_weapon_id: None, starting_armor_id: None,
+             starting_items: [], proficiencies: [], skill_grants: []),
+        ]"#;
+        let race_ron = r#"[(id: "human", name: "Human",)]"#;
+        let classes = ClassDatabase::load_from_string(class_ron).expect("class fixture must parse");
+        let races = RaceDatabase::load_from_string(race_ron).expect("race fixture must parse");
+        (classes, races)
+    }
+
+    #[test]
+    fn test_effective_skill_rank_for_character_applies_temp_bonus() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let skill_ron = r#"[
+            (id: "perception", name: "Perception", category: Exploration,
+             description: "", scaling: Linear(base: 0, per_level: 1),
+             max_rank: 50, is_trainable: true),
+        ]"#;
+        let skills = SkillDatabase::load_from_string(skill_ron).unwrap();
+        let (classes, races) = make_char_dbs();
+
+        let mut ch = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.level = 5; // auto_rank = 0 + 1*(5-1) = 4 with Linear(base:0, per_level:1)
+
+        let base_rank = SkillResolver::effective_skill_rank_for_character(
+            &ch,
+            &"perception".to_string(),
+            &skills,
+            &classes,
+            &races,
+        )
+        .unwrap();
+        assert_eq!(base_rank, 4, "base rank at level 5");
+
+        // Apply a +3 timed boost
+        ch.apply_timed_skill_boost("perception".to_string(), 3, 30);
+
+        let boosted_rank = SkillResolver::effective_skill_rank_for_character(
+            &ch,
+            &"perception".to_string(),
+            &skills,
+            &classes,
+            &races,
+        )
+        .unwrap();
+        assert_eq!(boosted_rank, 7, "rank must be 4 + 3 = 7 with active boost");
+    }
+
+    #[test]
+    fn test_effective_skill_rank_for_character_clamps_temp_bonus_to_max() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        // Linear(base: 48, per_level: 0) gives auto rank 48 at any level
+        let skill_ron = r#"[
+            (id: "perception", name: "Perception", category: Exploration,
+             description: "", scaling: Linear(base: 48, per_level: 0),
+             max_rank: 50, is_trainable: true),
+        ]"#;
+        let skills = SkillDatabase::load_from_string(skill_ron).unwrap();
+        let (classes, races) = make_char_dbs();
+
+        let mut ch = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        // base rank = 48, max_rank = 50; +10 boost must clamp to 50
+        ch.apply_timed_skill_boost("perception".to_string(), 10, 30);
+
+        let rank = SkillResolver::effective_skill_rank_for_character(
+            &ch,
+            &"perception".to_string(),
+            &skills,
+            &classes,
+            &races,
+        )
+        .unwrap();
+        assert_eq!(rank, 50, "rank must be clamped to max_rank");
+    }
+
+    #[test]
+    fn test_effective_skill_rank_for_character_debuff_reduces_rank() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let skill_ron = r#"[
+            (id: "perception", name: "Perception", category: Exploration,
+             description: "", scaling: Linear(base: 0, per_level: 1),
+             max_rank: 50, is_trainable: true),
+        ]"#;
+        let skills = SkillDatabase::load_from_string(skill_ron).unwrap();
+        let (classes, races) = make_char_dbs();
+
+        let mut ch = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        ch.level = 5; // base rank = 4
+
+        // Apply a -10 debuff (should clamp to 0)
+        ch.apply_timed_skill_boost("perception".to_string(), -10, 30);
+
+        let rank = SkillResolver::effective_skill_rank_for_character(
+            &ch,
+            &"perception".to_string(),
+            &skills,
+            &classes,
+            &races,
+        )
+        .unwrap();
+        assert_eq!(rank, 0, "debuffed rank must clamp to 0");
     }
 }

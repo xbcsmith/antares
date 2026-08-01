@@ -21,9 +21,40 @@ pub struct EventPlugin;
 impl Plugin for EventPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<MapEventTriggered>()
-            .add_systems(Update, (check_for_events, handle_events));
+            .insert_resource(PendingRecruitConfirm::default())
+            .add_systems(
+                Update,
+                (
+                    check_for_events,
+                    handle_events,
+                    set_pending_recruit_confirm,
+                    handle_recruit_confirm_input,
+                ),
+            );
     }
 }
+
+/// Data for a pending recruitment confirmation (no dialogue tree).
+///
+/// Set when a [`crate::domain::world::MapEvent::RecruitableCharacter`] event
+/// fires with `dialogue_id: None`. Cleared when the player confirms or declines.
+#[derive(Debug, Clone)]
+pub struct RecruitConfirmData {
+    /// Character definition ID to recruit.
+    pub character_id: String,
+    /// Display name for UI prompts.
+    pub character_name: String,
+    /// Map tile where the event lives (used to remove the event on success).
+    pub event_position: crate::domain::types::Position,
+}
+
+/// Bevy resource holding a pending recruitment confirmation, if any.
+///
+/// `None` means no confirmation is pending.
+/// Set to `Some` when a no-dialogue recruitable is encountered.
+/// Cleared after the player confirms or declines.
+#[derive(Resource, Default)]
+pub struct PendingRecruitConfirm(pub Option<RecruitConfirmData>);
 
 /// Event triggered when the party steps on a tile with an event
 #[derive(Message)]
@@ -614,12 +645,8 @@ fn handle_events(
                         );
                     }
                 } else {
-                    // No dialogue specified, simple log message
-                    warn!(
-                        "RecruitableCharacter event for '{}' has no dialogue_id. \
-                         Simple confirmation UI not yet implemented.",
-                        character_id
-                    );
+                    // No dialogue: handled by `set_pending_recruit_confirm`,
+                    // which reads `MapEventTriggered` with its own cursor.
                 }
             }
 
@@ -1073,6 +1100,142 @@ fn handle_events(
                     }
                 }
             }
+        }
+    }
+}
+
+/// Watches [`MapEventTriggered`] events for [`crate::domain::world::MapEvent::RecruitableCharacter`]
+/// events that have no associated dialogue tree.
+///
+/// When such an event is seen this system:
+/// - Sets [`PendingRecruitConfirm`] so `handle_recruit_confirm_input` can act on
+///   the player's choice in the following frames.
+/// - Writes a game-log hint asking the player to press **[E]** or **[Esc]**.
+///
+/// Intentionally runs as a *separate system* from `handle_events` to keep
+/// `handle_events` within Bevy's 16-parameter system limit.
+fn set_pending_recruit_confirm(
+    mut event_reader: MessageReader<MapEventTriggered>,
+    mut pending: ResMut<PendingRecruitConfirm>,
+    mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
+) {
+    for trigger in event_reader.read() {
+        if let MapEvent::RecruitableCharacter {
+            character_id,
+            name,
+            dialogue_id: None,
+            ..
+        } = &trigger.event
+        {
+            pending.0 = Some(RecruitConfirmData {
+                character_id: character_id.clone(),
+                character_name: name.clone(),
+                event_position: trigger.position,
+            });
+
+            let msg = format!(
+                "{} wants to join your party. Press [E] to recruit or [Esc] to decline.",
+                name
+            );
+            tracing::info!("{}", msg);
+            if let Some(ref mut writer) = game_log_writer {
+                writer.write(GameLogEvent {
+                    text: msg,
+                    category: LogCategory::Dialogue,
+                });
+            }
+        }
+    }
+}
+
+/// Handles keyboard input for recruitment confirmation when a
+/// [`PendingRecruitConfirm`] is pending.
+///
+/// - **E / Enter** → execute recruitment and clear pending state.
+/// - **Escape** → decline and clear pending state.
+///
+/// This system runs every frame but is a no-op when no confirmation is pending.
+fn handle_recruit_confirm_input(
+    mut pending: ResMut<PendingRecruitConfirm>,
+    mut global_state: ResMut<GlobalState>,
+    keys: Option<Res<ButtonInput<KeyCode>>>,
+    mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
+    content: Res<GameContent>,
+) {
+    let data = match pending.0.as_ref() {
+        Some(d) => d.clone(),
+        None => return,
+    };
+
+    // Only process input while in Exploration mode.
+    if !matches!(
+        global_state.0.mode,
+        crate::application::GameMode::Exploration
+    ) {
+        return;
+    }
+
+    let Some(ref keys) = keys else {
+        return;
+    };
+
+    if keys.just_pressed(KeyCode::KeyE)
+        || keys.just_pressed(KeyCode::Enter)
+        || keys.just_pressed(KeyCode::NumpadEnter)
+    {
+        // Confirm: attempt recruitment.
+        pending.0 = None;
+
+        let result = global_state
+            .0
+            .recruit_from_map(&data.character_id, content.db());
+
+        // Remove the map event on successful recruitment.
+        if matches!(
+            result,
+            Ok(crate::application::RecruitResult::AddedToParty)
+                | Ok(crate::application::RecruitResult::SentToInn(_))
+        ) {
+            if let Some(map) = global_state.0.world.get_current_map_mut() {
+                let _ = map.remove_event(data.event_position);
+            }
+        }
+
+        let msg = match result {
+            Ok(crate::application::RecruitResult::AddedToParty) => {
+                format!("{} has joined your party!", data.character_name)
+            }
+            Ok(crate::application::RecruitResult::SentToInn(_)) => {
+                format!(
+                    "{} has been sent to the inn (party is full).",
+                    data.character_name
+                )
+            }
+            Ok(crate::application::RecruitResult::Declined) => {
+                format!("{} has been declined.", data.character_name)
+            }
+            Err(e) => {
+                format!("Could not recruit {}: {:?}", data.character_name, e)
+            }
+        };
+
+        tracing::info!("{}", msg);
+        if let Some(ref mut writer) = game_log_writer {
+            writer.write(GameLogEvent {
+                text: msg,
+                category: LogCategory::Dialogue,
+            });
+        }
+    } else if keys.just_pressed(KeyCode::Escape) {
+        // Decline.
+        pending.0 = None;
+        let msg = format!("{} was not recruited.", data.character_name);
+        tracing::info!("{}", msg);
+        if let Some(ref mut writer) = game_log_writer {
+            writer.write(GameLogEvent {
+                text: msg,
+                category: LogCategory::Dialogue,
+            });
         }
     }
 }
@@ -2636,6 +2799,98 @@ mod tests {
         assert!((scale - 1.3).abs() < f32::EPSILON);
         assert!(resolved_flags.locked);
         assert_eq!(tint, Some([0.7, 0.7, 0.7]));
+    }
+
+    #[test]
+    fn test_pending_recruit_confirm_default_is_none() {
+        let pending = PendingRecruitConfirm::default();
+        assert!(pending.0.is_none());
+    }
+
+    #[test]
+    fn test_recruit_confirm_data_fields() {
+        use crate::domain::types::Position;
+
+        let data = RecruitConfirmData {
+            character_id: "warrior_01".to_string(),
+            character_name: "Sir Warrior".to_string(),
+            event_position: Position::new(5, 5),
+        };
+        assert_eq!(data.character_id, "warrior_01");
+        assert_eq!(data.character_name, "Sir Warrior");
+        assert_eq!(data.event_position, Position::new(5, 5));
+    }
+
+    #[test]
+    fn test_recruitable_character_no_dialogue_sets_pending_confirm() {
+        use crate::application::resources::GameContent;
+        use crate::domain::types::Position;
+        use crate::domain::world::{Map, MapEvent};
+        use crate::game::resources::GlobalState;
+        use crate::sdk::database::ContentDatabase;
+        use bevy::prelude::App;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<MapChangeEvent>();
+        app.add_message::<StartDialogue>();
+        app.add_message::<crate::game::systems::dialogue::SimpleDialogue>();
+        app.add_plugins(EventPlugin);
+
+        let event_pos = Position::new(3, 3);
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        map.add_event(
+            event_pos,
+            MapEvent::RecruitableCharacter {
+                name: "Test Warrior".to_string(),
+                description: "A warrior without dialogue.".to_string(),
+                character_id: "test_warrior".to_string(),
+                dialogue_id: None,
+                time_condition: None,
+                facing: None,
+                face_on_dialogue: false,
+            },
+        );
+
+        let mut game_state = crate::application::GameState::default();
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state.world.set_party_position(event_pos);
+
+        app.insert_resource(GlobalState(game_state));
+        app.insert_resource(GameContent::new(ContentDatabase::new()));
+
+        // Send the event directly (RecruitableCharacter does not auto-trigger).
+        {
+            let mut messages = app
+                .world_mut()
+                .resource_mut::<Messages<MapEventTriggered>>();
+            messages.write(MapEventTriggered {
+                event: MapEvent::RecruitableCharacter {
+                    name: "Test Warrior".to_string(),
+                    description: "A warrior without dialogue.".to_string(),
+                    character_id: "test_warrior".to_string(),
+                    dialogue_id: None,
+                    time_condition: None,
+                    facing: None,
+                    face_on_dialogue: false,
+                },
+                position: event_pos,
+            });
+        }
+
+        app.update();
+
+        let pending = app.world().resource::<PendingRecruitConfirm>();
+        assert!(
+            pending.0.is_some(),
+            "PendingRecruitConfirm must be set for no-dialogue recruitable"
+        );
+        if let Some(ref data) = pending.0 {
+            assert_eq!(data.character_id, "test_warrior");
+            assert_eq!(data.character_name, "Test Warrior");
+            assert_eq!(data.event_position, event_pos);
+        }
     }
 }
 

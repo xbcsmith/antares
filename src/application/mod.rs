@@ -990,6 +990,88 @@ impl QuestLog {
 /// Uses the OS entropy source once at game-creation time; the resulting seed is
 /// then persisted in the save file so the run can be reproduced deterministically
 /// via [`crate::game::resources::GameRng`].
+/// Stores the party's reputation values with named factions.
+///
+/// Each faction maps to an `i16` value. Positive = favorable, negative = hostile.
+/// Missing factions default to 0.
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::ReputationStore;
+///
+/// let mut rep = ReputationStore::new();
+/// assert_eq!(rep.get("Rangers"), 0);
+/// rep.change("Rangers", 10);
+/// assert_eq!(rep.get("Rangers"), 10);
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReputationStore {
+    /// Maps faction name → reputation value
+    pub factions: std::collections::HashMap<String, i16>,
+}
+
+impl ReputationStore {
+    /// Creates a new empty reputation store.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns the current reputation with `faction` (0 if unknown).
+    pub fn get(&self, faction: &str) -> i16 {
+        self.factions.get(faction).copied().unwrap_or(0)
+    }
+
+    /// Applies a signed delta to `faction`'s reputation, saturating at i16 bounds.
+    pub fn change(&mut self, faction: &str, delta: i16) {
+        let entry = self.factions.entry(faction.to_string()).or_insert(0);
+        *entry = entry.saturating_add(delta);
+    }
+
+    /// Sets `faction`'s reputation to an exact value.
+    pub fn set(&mut self, faction: &str, value: i16) {
+        self.factions.insert(faction.to_string(), value);
+    }
+}
+
+/// Stores named boolean flags for quest and story progression tracking.
+///
+/// Flags are initially `false` (unset). Used by dialogue conditions
+/// (`FlagSet`) and quest rewards (`SetFlag`).
+///
+/// # Examples
+///
+/// ```
+/// use antares::application::GlobalFlags;
+///
+/// let mut flags = GlobalFlags::new();
+/// assert!(!flags.get("met_elder"));
+/// flags.set("met_elder", true);
+/// assert!(flags.get("met_elder"));
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GlobalFlags {
+    /// Maps flag name → boolean value
+    pub flags: std::collections::HashMap<String, bool>,
+}
+
+impl GlobalFlags {
+    /// Creates a new empty flag store.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns the current value of `flag_name` (false if unset).
+    pub fn get(&self, flag_name: &str) -> bool {
+        self.flags.get(flag_name).copied().unwrap_or(false)
+    }
+
+    /// Sets `flag_name` to `value`.
+    pub fn set(&mut self, flag_name: &str, value: bool) {
+        self.flags.insert(flag_name.to_string(), value);
+    }
+}
+
 fn generate_rng_seed() -> u64 {
     use rand::RngExt;
     let mut seed = rand::rng().random::<u64>();
@@ -1066,6 +1148,16 @@ pub struct GameState {
     /// with a fresh random seed on load).
     #[serde(default)]
     pub rng_seed: u64,
+
+    /// Party reputation with named factions.
+    /// Uses `#[serde(default)]` so saves without this field load cleanly.
+    #[serde(default)]
+    pub reputation: ReputationStore,
+
+    /// Named boolean flags for quest/story progression.
+    /// Uses `#[serde(default)]` so saves without this field load cleanly.
+    #[serde(default)]
+    pub global_flags: GlobalFlags,
 }
 
 /// Errors returned by `GameState::initialize_roster`.
@@ -1196,6 +1288,8 @@ impl GameState {
             campaign_config: CampaignConfig::default(),
             game_log_entries: Vec::new(),
             rng_seed: generate_rng_seed(),
+            reputation: ReputationStore::new(),
+            global_flags: GlobalFlags::new(),
         }
     }
 
@@ -1300,6 +1394,8 @@ impl GameState {
             },
             game_log_entries: Vec::new(),
             rng_seed: generate_rng_seed(),
+            reputation: ReputationStore::new(),
+            global_flags: GlobalFlags::new(),
         };
 
         // Initialize roster from content database (premade characters)
@@ -2875,6 +2971,7 @@ impl GameState {
             self.active_spells.tick();
             for member in &mut self.party.members {
                 member.tick_timed_stat_boosts_minute();
+                member.tick_timed_skill_boosts_minute();
             }
         }
 
@@ -6992,6 +7089,76 @@ mod tests {
             matches!(state.mode, GameMode::Exploration),
             "exit_skill_training is a no-op outside SkillTraining mode"
         );
+    }
+
+    // ── Reputation / GlobalFlags tests ─────────────────────────────────────
+
+    #[test]
+    fn test_reputation_store_new_is_empty() {
+        let rep = ReputationStore::new();
+        assert_eq!(rep.get("Rangers"), 0);
+        assert_eq!(rep.get("Mages"), 0);
+    }
+
+    #[test]
+    fn test_reputation_store_change_adds_delta() {
+        let mut rep = ReputationStore::new();
+        rep.change("Rangers", 10);
+        assert_eq!(rep.get("Rangers"), 10);
+        rep.change("Rangers", -3);
+        assert_eq!(rep.get("Rangers"), 7);
+    }
+
+    #[test]
+    fn test_reputation_store_saturates_at_i16_max() {
+        let mut rep = ReputationStore::new();
+        rep.set("Rangers", i16::MAX);
+        rep.change("Rangers", 1);
+        assert_eq!(rep.get("Rangers"), i16::MAX);
+    }
+
+    #[test]
+    fn test_reputation_store_saturates_at_i16_min() {
+        let mut rep = ReputationStore::new();
+        rep.set("Rangers", i16::MIN);
+        rep.change("Rangers", -1);
+        assert_eq!(rep.get("Rangers"), i16::MIN);
+    }
+
+    #[test]
+    fn test_global_flags_default_is_false() {
+        let flags = GlobalFlags::new();
+        assert!(!flags.get("met_elder"));
+        assert!(!flags.get("any_flag"));
+    }
+
+    #[test]
+    fn test_global_flags_set_and_get() {
+        let mut flags = GlobalFlags::new();
+        flags.set("met_elder", true);
+        assert!(flags.get("met_elder"));
+        flags.set("met_elder", false);
+        assert!(!flags.get("met_elder"));
+    }
+
+    #[test]
+    fn test_game_state_has_reputation_and_flags() {
+        let state = GameState::new();
+        assert_eq!(state.reputation.get("Rangers"), 0);
+        assert!(!state.global_flags.get("any_flag"));
+    }
+
+    #[test]
+    fn test_reputation_persists_across_save_load() {
+        let mut state = GameState::new();
+        state.reputation.change("Rangers", 15);
+        state.global_flags.set("quest_done", true);
+
+        let save_json = serde_json::to_string(&state).expect("serialize");
+        let loaded: GameState = serde_json::from_str(&save_json).expect("deserialize");
+
+        assert_eq!(loaded.reputation.get("Rangers"), 15);
+        assert!(loaded.global_flags.get("quest_done"));
     }
 
     #[test]

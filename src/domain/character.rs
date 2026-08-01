@@ -1067,6 +1067,35 @@ pub struct TimedStatBoost {
     pub minutes_remaining: u16,
 }
 
+/// A reversible timed skill-rank modifier applied by a spell or ability.
+///
+/// Stored on a character as part of `timed_skill_boosts`. Processed by
+/// [`crate::domain::skill_resolver::SkillResolver::effective_skill_rank_for_character`].
+/// Modifiers expire after `minutes_remaining` reaches zero.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::TimedSkillBoost;
+///
+/// let boost = TimedSkillBoost {
+///     skill_id: "perception".to_string(),
+///     bonus: 3,
+///     minutes_remaining: 60,
+/// };
+/// assert_eq!(boost.bonus, 3);
+/// assert_eq!(boost.minutes_remaining, 60);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TimedSkillBoost {
+    /// Which skill this modifier affects (matches `SkillId`).
+    pub skill_id: String,
+    /// Signed rank delta (positive = boost, negative = debuff).
+    pub bonus: i16,
+    /// Minutes remaining before this modifier expires.
+    pub minutes_remaining: u16,
+}
+
 // ===== Character =====
 
 /// Represents a single character (party member or roster character)
@@ -1131,6 +1160,13 @@ pub struct Character {
     /// Each entry is reversed when `minutes_remaining` reaches zero.
     #[serde(default)]
     pub timed_stat_boosts: Vec<TimedStatBoost>,
+    /// Timed skill-rank modifiers (buffs/debuffs from spells or abilities).
+    ///
+    /// Processed during skill resolution to adjust effective ranks.
+    /// Each entry is removed when `minutes_remaining` reaches zero via
+    /// [`Character::tick_timed_skill_boosts_minute`].
+    #[serde(default)]
+    pub timed_skill_boosts: Vec<TimedSkillBoost>,
     /// Damage resistances
     pub resistances: Resistances,
     /// Per-character quest/event tracking
@@ -1208,6 +1244,7 @@ impl Character {
             conditions: Condition::new(),
             active_conditions: Vec::new(),
             timed_stat_boosts: Vec::new(),
+            timed_skill_boosts: Vec::new(),
             resistances: Resistances::new(),
             quest_flags: QuestFlags::new(),
             portrait_id: String::new(),
@@ -1421,6 +1458,78 @@ impl Character {
         for boost in expired {
             self.apply_attribute_delta(boost.attribute, -(boost.amount as i16));
         }
+    }
+
+    /// Applies a timed skill-rank modifier.
+    ///
+    /// If `minutes` is zero the call is a no-op; zero-duration boosts are never
+    /// stored.
+    ///
+    /// # Arguments
+    ///
+    /// * `skill_id` — The skill to modify.
+    /// * `bonus` — Signed rank delta (positive = boost, negative = debuff).
+    /// * `minutes` — Duration in minutes (0 = no-op).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Character, Sex, Alignment};
+    ///
+    /// let mut hero = Character::new(
+    ///     "Hero".to_string(),
+    ///     "human".to_string(),
+    ///     "knight".to_string(),
+    ///     Sex::Male,
+    ///     Alignment::Good,
+    /// );
+    /// hero.apply_timed_skill_boost("perception".to_string(), 5, 30);
+    /// assert_eq!(hero.timed_skill_boosts.len(), 1);
+    /// assert_eq!(hero.timed_skill_boosts[0].bonus, 5);
+    /// ```
+    pub fn apply_timed_skill_boost(&mut self, skill_id: String, bonus: i16, minutes: u16) {
+        if minutes == 0 {
+            return;
+        }
+        self.timed_skill_boosts.push(TimedSkillBoost {
+            skill_id,
+            bonus,
+            minutes_remaining: minutes,
+        });
+    }
+
+    /// Ticks all timed skill boosts by one minute, removing expired entries.
+    ///
+    /// Called by game state advance-time logic alongside
+    /// [`Character::tick_timed_stat_boosts_minute`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Character, Sex, Alignment};
+    ///
+    /// let mut hero = Character::new(
+    ///     "Hero".to_string(),
+    ///     "human".to_string(),
+    ///     "knight".to_string(),
+    ///     Sex::Male,
+    ///     Alignment::Good,
+    /// );
+    /// hero.apply_timed_skill_boost("perception".to_string(), 3, 1);
+    /// assert_eq!(hero.timed_skill_boosts.len(), 1);
+    ///
+    /// hero.tick_timed_skill_boosts_minute();
+    /// assert!(hero.timed_skill_boosts.is_empty(), "boost must expire after 1 minute");
+    /// ```
+    pub fn tick_timed_skill_boosts_minute(&mut self) {
+        self.timed_skill_boosts.retain_mut(|boost| {
+            if boost.minutes_remaining <= 1 {
+                false
+            } else {
+                boost.minutes_remaining -= 1;
+                true
+            }
+        });
     }
 
     /// Applies a signed delta to the `current` value of the named attribute.
@@ -1934,6 +2043,47 @@ mod tests {
         assert!(
             deserialized.timed_stat_boosts.is_empty(),
             "missing timed_stat_boosts field must default to empty Vec"
+        );
+    }
+
+    // ===== TimedSkillBoost tests =====
+
+    #[test]
+    fn test_timed_skill_boost_apply_adds_entry() {
+        let mut ch = make_hero();
+        ch.apply_timed_skill_boost("perception".to_string(), 5, 30);
+        assert_eq!(ch.timed_skill_boosts.len(), 1);
+        assert_eq!(ch.timed_skill_boosts[0].skill_id, "perception");
+        assert_eq!(ch.timed_skill_boosts[0].bonus, 5);
+        assert_eq!(ch.timed_skill_boosts[0].minutes_remaining, 30);
+    }
+
+    #[test]
+    fn test_timed_skill_boost_zero_minutes_is_noop() {
+        let mut ch = make_hero();
+        ch.apply_timed_skill_boost("perception".to_string(), 5, 0);
+        assert!(
+            ch.timed_skill_boosts.is_empty(),
+            "zero-minute boost must not be added"
+        );
+    }
+
+    #[test]
+    fn test_timed_skill_boost_tick_decrements() {
+        let mut ch = make_hero();
+        ch.apply_timed_skill_boost("perception".to_string(), 3, 5);
+        ch.tick_timed_skill_boosts_minute();
+        assert_eq!(ch.timed_skill_boosts[0].minutes_remaining, 4);
+    }
+
+    #[test]
+    fn test_timed_skill_boost_tick_expires() {
+        let mut ch = make_hero();
+        ch.apply_timed_skill_boost("perception".to_string(), 3, 1);
+        ch.tick_timed_skill_boosts_minute();
+        assert!(
+            ch.timed_skill_boosts.is_empty(),
+            "boost must expire after last tick"
         );
     }
 

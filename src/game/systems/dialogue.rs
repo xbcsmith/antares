@@ -633,22 +633,17 @@ fn evaluate_conditions(
                     return false;
                 }
             }
-            DialogueCondition::FlagSet {
-                flag_name: _,
-                value,
-            } => {
-                // Flag system isn't implemented in GameState yet; assume flags are unset.
-                // If the condition requires the flag to be true, treat as not satisfied.
-                if *value {
+            DialogueCondition::FlagSet { flag_name, value } => {
+                let actual = game_state.global_flags.get(flag_name);
+                if actual != *value {
                     return false;
                 }
             }
-            DialogueCondition::ReputationThreshold {
-                faction: _,
-                threshold: _,
-            } => {
-                // Reputation system not implemented; conservatively fail the condition.
-                return false;
+            DialogueCondition::ReputationThreshold { faction, threshold } => {
+                let current = game_state.reputation.get(faction);
+                if current < *threshold {
+                    return false;
+                }
             }
             DialogueCondition::And(inner) => {
                 if !evaluate_conditions(inner.as_slice(), game_state, db) {
@@ -1123,14 +1118,12 @@ fn execute_action(
             game_state.party.gold = game_state.party.gold.saturating_sub(*amount);
         }
         DialogueAction::SetFlag { flag_name, value } => {
-            tracing::warn!("SetFlag '{}' = {} (not persisted)", flag_name, value);
+            game_state.global_flags.set(flag_name, *value);
+            tracing::info!("SetFlag '{}' = {}", flag_name, value);
         }
         DialogueAction::ChangeReputation { faction, change } => {
-            tracing::warn!(
-                "ChangeReputation {} by {} (not yet implemented)",
-                faction,
-                change
-            );
+            game_state.reputation.change(faction, *change);
+            tracing::info!("ChangeReputation '{}' by {}", faction, change);
         }
         DialogueAction::TriggerEvent { event_name } => {
             // Special-case handling for opening the inn party management UI via

@@ -28,9 +28,7 @@ use std::collections::HashMap;
 
 use crate::application::resources::GameContent;
 
-use crate::domain::quest::{
-    Quest as DomainQuest, QuestId as DomainQuestId, QuestObjective, QuestProgress, QuestReward,
-};
+use crate::domain::quest::{QuestId as DomainQuestId, QuestObjective, QuestProgress, QuestReward};
 use crate::domain::types::{ItemId, MapId, MonsterId, Position};
 use crate::game::resources::GlobalState;
 use crate::sdk::database::ContentDatabase;
@@ -257,7 +255,7 @@ impl QuestSystem {
                             progress.complete();
 
                             // Apply rewards
-                            self.apply_rewards(domain_quest, game_state, content_db);
+                            self.apply_rewards(&domain_quest.rewards, game_state, content_db);
 
                             // Move quest from active -> completed in game_state.quests
                             let qid_str = qid.to_string();
@@ -290,14 +288,16 @@ impl QuestSystem {
     /// - `Gold` → added to party gold
     /// - `Items` → added to the first party member's inventory (single slot with charges)
     /// - `LearnSpell` → taught to the first eligible party member via `learn_spell`
-    /// - `SetFlag`/`Reputation`/`UnlockQuest` are handled conservatively
+    /// - `SetFlag` → sets a named boolean flag on `GameState::global_flags`
+    /// - `Reputation` → changes a faction's reputation on `GameState::reputation`
+    /// - `UnlockQuest` → makes a quest available for future pickup
     fn apply_rewards(
         &self,
-        quest: &DomainQuest,
+        rewards: &[QuestReward],
         game_state: &mut crate::application::GameState,
         content_db: &ContentDatabase,
     ) {
-        for reward in &quest.rewards {
+        for reward in rewards {
             match reward {
                 QuestReward::Experience(amount) => {
                     // Scale by the campaign experience_rate so that a doubled XP
@@ -334,17 +334,13 @@ impl QuestSystem {
                     );
                 }
                 QuestReward::SetFlag { flag_name, value } => {
-                    // Simple global flag handling is not implemented in GameState yet.
-                    // We log a message for visibility (tests don't rely on flags).
-                    tracing::warn!(
-                        "Quest reward sets flag '{}' = {} (not yet persisted)",
-                        flag_name,
-                        value
-                    );
+                    game_state.global_flags.set(flag_name, *value);
+                    tracing::info!("Quest reward: flag '{}' set to {}", flag_name, value);
                 }
                 QuestReward::Reputation { faction, change } => {
-                    tracing::warn!(
-                        "Quest reward changes reputation with {} by {} (not yet implemented)",
+                    game_state.reputation.change(faction, *change);
+                    tracing::info!(
+                        "Quest reward: reputation with '{}' changed by {}",
                         faction,
                         change
                     );
@@ -1014,6 +1010,60 @@ mod tests {
             gs.party.members[0].experience, 50,
             "experience_rate = 0.5 must halve quest XP (100 → 50)"
         );
+    }
+
+    #[test]
+    fn test_quest_reputation_reward_changes_faction_rep() {
+        let db = ContentDatabase::new();
+        let system = QuestSystem::new();
+        let mut game_state = crate::application::GameState::new();
+
+        let rewards = vec![QuestReward::Reputation {
+            faction: "Rangers".to_string(),
+            change: 10,
+        }];
+        assert_eq!(game_state.reputation.get("Rangers"), 0);
+        system.apply_rewards(&rewards, &mut game_state, &db);
+        assert_eq!(game_state.reputation.get("Rangers"), 10);
+
+        // Applying again accumulates
+        system.apply_rewards(&rewards, &mut game_state, &db);
+        assert_eq!(game_state.reputation.get("Rangers"), 20);
+
+        // Negative change works
+        let neg_rewards = vec![QuestReward::Reputation {
+            faction: "Rangers".to_string(),
+            change: -5,
+        }];
+        system.apply_rewards(&neg_rewards, &mut game_state, &db);
+        assert_eq!(game_state.reputation.get("Rangers"), 15);
+
+        // Suppress unused-variable warning for db
+        let _ = &db;
+    }
+
+    #[test]
+    fn test_quest_setflag_reward_sets_flag() {
+        let db = ContentDatabase::new();
+        let system = QuestSystem::new();
+        let mut game_state = crate::application::GameState::new();
+
+        assert!(!game_state.global_flags.get("test_flag"));
+
+        let rewards = vec![QuestReward::SetFlag {
+            flag_name: "test_flag".to_string(),
+            value: true,
+        }];
+        system.apply_rewards(&rewards, &mut game_state, &db);
+        assert!(game_state.global_flags.get("test_flag"));
+
+        // Setting to false also works
+        let unset_rewards = vec![QuestReward::SetFlag {
+            flag_name: "test_flag".to_string(),
+            value: false,
+        }];
+        system.apply_rewards(&unset_rewards, &mut game_state, &db);
+        assert!(!game_state.global_flags.get("test_flag"));
     }
 
     #[test]

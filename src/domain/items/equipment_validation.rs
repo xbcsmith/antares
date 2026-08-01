@@ -692,6 +692,7 @@ mod tests {
             conditions: crate::domain::character::Condition::new(),
             active_conditions: vec![],
             timed_stat_boosts: vec![],
+            timed_skill_boosts: vec![],
             resistances: crate::domain::character::Resistances::default(),
             quest_flags: crate::domain::character::QuestFlags::new(),
             portrait_id: "0".to_string(),

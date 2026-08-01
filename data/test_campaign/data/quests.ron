@@ -391,4 +391,42 @@
             y: 16,
         )),
     ),
+    (
+        id: 8,
+        name: "Proving Grounds",
+        description: "Prove your worth to the Rangers",
+        stages: [
+            (
+                stage_number: 1,
+                name: "Kill 5 Goblins",
+                description: "Kill 5 goblins to prove yourself to the Rangers",
+                objectives: [
+                    KillMonsters(
+                        monster_id: 1,
+                        quantity: 5,
+                    ),
+                ],
+                require_all_objectives: true,
+            ),
+        ],
+        rewards: [
+            Experience(50),
+            SetFlag(
+                flag_name: "proved_worth_to_rangers",
+                value: true,
+            ),
+            Reputation(
+                faction: "Rangers",
+                change: 5,
+            ),
+        ],
+        min_level: Some(1),
+        max_level: Some(30),
+        required_quests: [],
+        repeatable: false,
+        is_main_quest: false,
+        quest_giver_npc: None,
+        quest_giver_map: None,
+        quest_giver_position: None,
+    ),
 ]
