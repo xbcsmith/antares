@@ -822,7 +822,7 @@ impl SkillDatabase {
 ///
 /// This is the contribution from the skill's [`SkillScalingMode`] alone.
 /// Class grants, race grants, and trained ranks are added on top by the
-/// resolver in Phase 2.
+/// resolver.
 ///
 /// The result is clamped to `0..=definition.max_rank`.
 ///
@@ -1515,7 +1515,7 @@ mod tests {
             "Test campaign fixture must contain at least one skill"
         );
 
-        // Verify the five canonical Phase 1 skills are present.
+        // Verify the five canonical starter skills are present.
         assert!(db.has("perception"), "perception must be in test fixture");
         assert!(
             db.has("disarm_traps"),

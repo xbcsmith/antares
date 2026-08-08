@@ -27,32 +27,6 @@ use crate::sdk::database::ContentDatabase;
 use rand::Rng;
 use thiserror::Error;
 
-/// Action to cast a spell in combat
-///
-/// This simple struct mirrors the data produced by UI systems when the player
-/// chooses to cast a spell. It is small and serializable-friendly so UI
-/// layers can pass it through message buses if needed.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SpellCastAction {
-    pub spell_id: SpellId,
-    pub caster: CombatantId,
-    pub target: CombatantId,
-    /// An optimization so callers can avoid looking the spell up again
-    /// (set by UI when building buttons). Not required for execution.
-    pub sp_cost: u16,
-    /// Gem cost carried for convenience
-    pub gem_cost: u16,
-}
-
-/// Result of attempting to cast a spell in combat
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SpellCastResult {
-    /// Spell cast succeeded and produced an effect result
-    Success { effect: SpellResult },
-    /// Spell casting failed with a reason
-    Failed { reason: SpellCastError },
-}
-
 /// Errors that can happen when validating or executing a spell cast
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum SpellCastError {
@@ -249,7 +223,7 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
                 .into_iter()
                 .filter_map(|id| content.conditions.get_condition(id).cloned())
                 .collect();
-            let _round_effects = combat_state.advance_turn(&cond_defs_fizzle);
+            let _round_effects = combat_state.advance_turn(&cond_defs_fizzle, rng);
             combat_state.check_combat_end();
             return Ok(SpellResult::failure("Spell fizzled!".to_string()));
         }
@@ -512,7 +486,7 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
     // ── NEW: Utility dispatch ───────────────────────────────────────────────
     // Utility spells return a UtilityResult describing the effect; the
     // application / exploration layer is responsible for applying the
-    // side-effects (e.g. adding food items to inventories in Phase 3).
+    // side-effects (e.g. adding food items to inventories).
     if let SpellEffectType::Utility { utility_type } = spell.effective_effect_type() {
         let _util = spell_dispatch::apply_utility_spell(utility_type);
         // Food creation and teleport are handled by the exploration layer.
@@ -535,7 +509,8 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
                     spell_dispatch::apply_buff_spell(*buff_field, *duration, active_spells);
                 }
                 SpellEffectType::Utility { utility_type } => {
-                    let _ = spell_dispatch::apply_utility_spell(*utility_type);
+                    let result = spell_dispatch::apply_utility_spell(*utility_type);
+                    tracing::debug!(?result, "utility spell applied");
                 }
                 _ => {}
             }
@@ -620,7 +595,7 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
         .filter_map(|id| content.conditions.get_condition(id).cloned())
         .collect();
 
-    let _round_effects = combat_state.advance_turn(&cond_defs);
+    let _round_effects = combat_state.advance_turn(&cond_defs, rng);
 
     // Check end-of-combat conditions
     combat_state.check_combat_end();
@@ -761,7 +736,7 @@ pub fn execute_charged_item_spell<R: Rng>(
             .into_iter()
             .filter_map(|id| content.conditions.get_condition(id).cloned())
             .collect();
-        let _round_effects = combat_state.advance_turn(&cond_defs);
+        let _round_effects = combat_state.advance_turn(&cond_defs, rng);
         combat_state.check_combat_end();
         return Ok(SpellResult::failure("Item spell fizzled!".to_string()));
     }
@@ -1246,7 +1221,7 @@ mod tests {
         );
     }
 
-    // ── Phase 1: Healing dispatch in combat ───────────────────────────────────
+    // ── Healing dispatch in combat ──────────────────────────────────────────
 
     /// A healing spell targeting a single party member restores HP via the
     /// effect dispatcher and reports the healing in the returned SpellResult.
@@ -1385,7 +1360,7 @@ mod tests {
         assert!(res.healing.is_some(), "SpellResult must report healing");
     }
 
-    // ── Phase 1: Buff dispatch in combat ──────────────────────────────────────
+    // ── Buff dispatch in combat ────────────────────────────────────────────
 
     /// A buff spell writes the correct duration into active_spells.
     #[test]
@@ -1434,7 +1409,7 @@ mod tests {
         );
     }
 
-    // ── Phase 1: Cure condition dispatch in combat ────────────────────────────
+    // ── Cure condition dispatch in combat ───────────────────────────────
 
     /// A cure condition spell removes the named condition from the target character.
     #[test]
@@ -1512,7 +1487,7 @@ mod tests {
         }
     }
 
-    // ── Phase 1: Composite dispatch in combat ─────────────────────────────────
+    // ── Composite dispatch in combat ─────────────────────────────────────
 
     // ===== Fizzle tests =====
 

@@ -32172,7 +32172,7 @@
             description: "To Mountain Pass",
             destination: (
                 x: 19,
-                y: 6,
+                y: 14,
             ),
             map_id: 5,
         ),

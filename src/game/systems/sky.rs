@@ -19,10 +19,6 @@
 //! always up-to-date) and **before** `update_ambient_light` (so both sky
 //! colour and ambient brightness are driven by the same time value in the same
 //! frame).
-//!
-//! # Architecture Reference
-//!
-//! See `docs/explanation/sky_system_implementation_plan.md` Phase 2.
 
 use crate::domain::types::TimeOfDay;
 use crate::domain::world::SkyConfig;

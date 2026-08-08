@@ -3,7 +3,7 @@
 
 //! Unified object mesh registry — `ObjectMeshDatabase`.
 //!
-//! `ObjectMeshDatabase` is the Phase 4 replacement for the split
+//! `ObjectMeshDatabase` is the replacement for the split
 //! `LandscapeMeshDatabase` / `FurnitureMeshDatabase` lookup used by rendering
 //! code. It holds mesh assets keyed by an arbitrary **string** identifier so
 //! that map-event `mesh_id` values can be human-readable names like
@@ -47,6 +47,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::domain::path_security::validate_campaign_relative_path;
 use crate::domain::visual::creature_database::CreatureDatabaseError;
 use crate::domain::visual::CreatureDefinition;
 use crate::domain::world::furniture::FurnitureMeshDatabase;
@@ -377,7 +378,15 @@ impl ObjectMeshDatabase {
         let mut db = Self::new();
 
         for (key, filepath) in registry.meshes {
-            let asset_path = campaign_root.join(&filepath);
+            // Reject untrusted registry paths that are empty, absolute, or
+            // attempt `..` traversal (or symlink escape) out of the campaign.
+            let asset_path =
+                validate_campaign_relative_path(campaign_root, &filepath).map_err(|e| {
+                    ObjectMeshError::AssetReadError {
+                        path: filepath.clone(),
+                        reason: e.to_string(),
+                    }
+                })?;
             let asset_content = std::fs::read_to_string(&asset_path).map_err(|e| {
                 ObjectMeshError::AssetReadError {
                     path: filepath.clone(),
@@ -653,6 +662,36 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("ghost.ron") || msg.contains("ghost_mesh"));
+    }
+
+    #[test]
+    fn test_load_from_registry_rejects_parent_traversal_filepath() {
+        use std::io::Write;
+
+        // Registry whose asset filepath attempts `..` traversal out of the
+        // campaign root must be rejected before any asset read is attempted.
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("data")).unwrap();
+        let registry_path = tmp.path().join("data/object_mesh_registry.ron");
+        std::fs::File::create(&registry_path)
+            .unwrap()
+            .write_all(
+                br#"ObjectMeshRegistry(
+    meshes: {
+        "escape": "../../etc/passwd",
+    }
+)"#,
+            )
+            .unwrap();
+
+        let result = ObjectMeshDatabase::load_from_registry(&registry_path, tmp.path());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ObjectMeshError::AssetReadError { .. }));
+        assert!(
+            err.to_string().contains("../../etc/passwd"),
+            "expected rejected path in error, got: {err}"
+        );
     }
 
     #[test]

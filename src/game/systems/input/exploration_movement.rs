@@ -143,11 +143,12 @@ pub fn handle_exploration_movement(
     current_time: f32,
     last_move_time: &mut f32,
     victory_roots: &Query<Entity, With<VictorySummaryRoot>>,
+    rng: &mut impl rand::Rng,
 ) -> bool {
     let moved = if frame_input.move_forward {
-        handle_move_forward(game_state, game_content, door_entity_query, game_log)
+        handle_move_forward(game_state, game_content, door_entity_query, game_log, rng)
     } else if frame_input.move_back {
-        handle_move_back(game_state, game_content, game_log)
+        handle_move_back(game_state, game_content, game_log, rng)
     } else if frame_input.turn_left {
         handle_turn_left(game_state)
     } else if frame_input.turn_right {
@@ -228,6 +229,7 @@ fn handle_move_forward(
         &TileCoord,
     )>,
     game_log: &mut GameLog,
+    rng: &mut impl rand::Rng,
 ) -> bool {
     let target = game_state.world.position_ahead();
     let facing = game_state.world.party_facing;
@@ -245,7 +247,7 @@ fn handle_move_forward(
 
     let mut attempt = |gs: &mut GameState| {
         if let Some(content) = game_content {
-            match gs.move_party_and_handle_events(facing, content.db()) {
+            match gs.move_party_and_handle_events(facing, content.db(), rng) {
                 Ok(()) => true,
                 Err(MoveHandleError::Movement(MovementError::DoorLocked(_, _))) => {
                     log_locked_door(game_log);
@@ -289,6 +291,7 @@ fn handle_move_back(
     game_state: &mut GameState,
     game_content: Option<&GameContent>,
     game_log: &mut GameLog,
+    rng: &mut impl rand::Rng,
 ) -> bool {
     let back_facing = game_state.world.party_facing.turn_left().turn_left();
     let target = back_facing.forward(game_state.world.party_position);
@@ -296,7 +299,7 @@ fn handle_move_back(
 
     let mut attempt = |gs: &mut GameState| {
         if let Some(content) = game_content {
-            match gs.move_party_and_handle_events(back_facing, content.db()) {
+            match gs.move_party_and_handle_events(back_facing, content.db(), rng) {
                 Ok(()) => true,
                 Err(MoveHandleError::Movement(MovementError::DoorLocked(_, _))) => {
                     log_locked_door(game_log);

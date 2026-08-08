@@ -154,8 +154,9 @@ where
         };
 
         if text_response.changed()
-            || (state.selected_index.is_some()
-                && state.selected_index.unwrap() >= match_results.len())
+            || state
+                .selected_index
+                .is_some_and(|idx| idx >= match_results.len())
         {
             state.selected_index = None;
         }

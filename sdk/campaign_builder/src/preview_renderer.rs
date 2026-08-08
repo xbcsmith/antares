@@ -475,6 +475,8 @@ impl PreviewRenderer {
     ///
     /// This renders a basic wireframe representation of the creature.
     /// Future phases will integrate full Bevy rendering.
+    // Both unwraps are guarded by the preceding is_err()/is_none() early returns, so they cannot panic.
+    #[allow(clippy::unwrap_used)]
     fn render_preview(&self, painter: &egui::Painter, rect: egui::Rect) {
         let creature_guard = self.creature.lock();
         if creature_guard.is_err() {

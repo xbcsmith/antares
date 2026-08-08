@@ -28,6 +28,7 @@
 //! # }
 //! ```
 
+use crate::domain::path_security::validate_identifier;
 use crate::sdk::campaign_loader::Campaign;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
@@ -67,7 +68,25 @@ pub enum PackageError {
 
     #[error("Metadata error: {0}")]
     MetadataError(String),
+
+    #[error("Unsafe campaign id: {0}")]
+    UnsafeCampaignId(String),
+
+    #[error("Archive too large: uncompressed size exceeds {limit} bytes")]
+    ArchiveTooLarge {
+        /// The cumulative uncompressed-size cap (in bytes) that was exceeded.
+        limit: u64,
+    },
 }
+
+/// Maximum cumulative uncompressed size permitted when extracting a package.
+///
+/// Guards against decompression-bomb archives: a small `.tar.gz` can inflate to
+/// many gigabytes and exhaust disk space. Extraction is aborted with
+/// [`PackageError::ArchiveTooLarge`] once the summed uncompressed entry sizes
+/// exceed this cap (512 MiB), which is comfortably larger than any legitimate
+/// campaign package.
+const MAX_UNCOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
 
 // ===== Package Metadata =====
 
@@ -331,7 +350,7 @@ impl CampaignPackager {
         // Create campaigns directory if it doesn't exist
         fs::create_dir_all(campaigns_dir)?;
 
-        // Open and extract archive
+        // Open the archive for streaming extraction.
         let tar_gz = File::open(package_path)?;
         let dec = GzDecoder::new(tar_gz);
         let mut archive = Archive::new(dec);
@@ -343,10 +362,34 @@ impl CampaignPackager {
         }
         fs::create_dir(&temp_dir)?;
 
-        // Extract all files
-        archive
-            .unpack(&temp_dir)
-            .map_err(|e| PackageError::ArchiveError(format!("Failed to extract archive: {}", e)))?;
+        // Extract entries one at a time, enforcing a cumulative uncompressed-size
+        // cap. This prevents a crafted "decompression bomb" from filling the disk:
+        // the running total is checked from each entry's header *before* the entry
+        // is written, so an oversized archive is never fully extracted.
+        let entries = archive
+            .entries()
+            .map_err(|e| PackageError::ArchiveError(format!("Failed to read archive: {}", e)))?;
+        let mut total_uncompressed: u64 = 0;
+        for entry in entries {
+            let mut entry = entry.map_err(|e| {
+                PackageError::ArchiveError(format!("Failed to read archive entry: {}", e))
+            })?;
+            let entry_size = entry.header().size().map_err(|e| {
+                PackageError::ArchiveError(format!("Failed to read entry header: {}", e))
+            })?;
+            total_uncompressed = total_uncompressed.saturating_add(entry_size);
+            if total_uncompressed > MAX_UNCOMPRESSED_BYTES {
+                fs::remove_dir_all(&temp_dir).ok();
+                return Err(PackageError::ArchiveTooLarge {
+                    limit: MAX_UNCOMPRESSED_BYTES,
+                });
+            }
+            // `unpack_in` refuses to write outside `temp_dir` (it rejects absolute
+            // and `..` entry paths), so it is safe against tar-path traversal.
+            entry.unpack_in(&temp_dir).map_err(|e| {
+                PackageError::ArchiveError(format!("Failed to extract archive: {}", e))
+            })?;
+        }
 
         // Load and validate manifest
         let manifest_path = temp_dir.join("MANIFEST.json");
@@ -376,8 +419,28 @@ impl CampaignPackager {
             }
         }
 
+        // Validate the campaign_id from the (untrusted) manifest before using it
+        // as a directory name. This rejects path traversal (e.g. "../evil"),
+        // absolute paths, and embedded separators ("a/b") that could redirect the
+        // install outside the campaigns directory.
+        if let Err(e) = validate_identifier(&manifest.campaign_id) {
+            fs::remove_dir_all(&temp_dir).ok();
+            return Err(PackageError::UnsafeCampaignId(format!(
+                "'{}': {}",
+                manifest.campaign_id, e
+            )));
+        }
+
         // Determine installation path
         let install_path = campaigns_dir.join(&manifest.campaign_id);
+
+        // Defense-in-depth: ensure the resolved install path is a direct child of
+        // the campaigns directory. `validate_identifier` already guarantees this,
+        // but re-checking the computed path guards against any future regression.
+        if install_path.parent() != Some(campaigns_dir) {
+            fs::remove_dir_all(&temp_dir).ok();
+            return Err(PackageError::UnsafeCampaignId(manifest.campaign_id.clone()));
+        }
 
         // Check if campaign already exists
         if install_path.exists() {
@@ -455,6 +518,50 @@ impl Default for CampaignPackager {
 }
 
 // ===== Helper Functions =====
+
+/// Computes the cumulative uncompressed size declared by a `.tar.gz` package's
+/// tar entry headers.
+///
+/// This reads only the tar entry *headers* (the declared per-entry size), not
+/// the entry bodies, and sums them. It underpins the decompression-bomb guard in
+/// [`CampaignPackager::install_package`], and is exposed as a standalone helper
+/// so the size-summing logic can be unit-tested directly against a fixture
+/// archive.
+///
+/// # Arguments
+///
+/// * `package_path` - Path to the `.tar.gz` package file to inspect
+///
+/// # Returns
+///
+/// The sum of all entry header sizes, saturating at [`u64::MAX`].
+///
+/// # Errors
+///
+/// Returns [`PackageError::IoError`] if the package cannot be opened, and
+/// [`PackageError::ArchiveError`] if the archive or an entry header cannot be
+/// read.
+#[cfg(test)]
+fn total_uncompressed_size(package_path: &Path) -> Result<u64, PackageError> {
+    let tar_gz = File::open(package_path)?;
+    let dec = GzDecoder::new(tar_gz);
+    let mut archive = Archive::new(dec);
+
+    let entries = archive
+        .entries()
+        .map_err(|e| PackageError::ArchiveError(e.to_string()))?;
+
+    let mut total: u64 = 0;
+    for entry in entries {
+        let entry = entry.map_err(|e| PackageError::ArchiveError(e.to_string()))?;
+        let size = entry
+            .header()
+            .size()
+            .map_err(|e| PackageError::ArchiveError(e.to_string()))?;
+        total = total.saturating_add(size);
+    }
+    Ok(total)
+}
 
 /// Calculate SHA-256 checksum of a file
 fn calculate_checksum<P: AsRef<Path>>(path: P) -> Result<String, PackageError> {
@@ -603,6 +710,169 @@ mod tests {
             "Encounter with non-empty monster_group not found after pack/install"
         );
 
+        Ok(())
+    }
+
+    /// Builds a minimal valid `.tar.gz` package containing only a `MANIFEST.json`
+    /// whose `campaign_id` is set to `campaign_id` (and no data files, so
+    /// checksum validation is trivially satisfied). Used to exercise
+    /// `install_package`'s campaign_id validation.
+    fn build_package_with_campaign_id(
+        out_path: &std::path::Path,
+        campaign_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let manifest = PackageManifest {
+            version: "1.0".to_string(),
+            campaign_id: campaign_id.to_string(),
+            campaign_name: "Malicious".to_string(),
+            campaign_version: "1.0.0".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            files: Vec::new(),
+            total_size: 0,
+        };
+
+        let tar_gz = File::create(out_path)?;
+        let enc = GzEncoder::new(tar_gz, Compression::new(6));
+        let mut tar = Builder::new(enc);
+
+        let manifest_json = serde_json::to_string_pretty(&manifest)?;
+        let manifest_bytes = manifest_json.as_bytes();
+        let mut header = tar::Header::new_gnu();
+        header.set_size(manifest_bytes.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        tar.append_data(&mut header, "MANIFEST.json", manifest_bytes)?;
+        tar.finish()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_install_rejects_malicious_campaign_id() -> Result<(), Box<dyn std::error::Error>> {
+        use tempfile::tempdir;
+
+        let tmp = tempdir()?;
+        let campaigns_dir = tmp.path().join("campaigns");
+        std::fs::create_dir_all(&campaigns_dir)?;
+        let packager = CampaignPackager::new();
+
+        // Traversal, absolute path, and embedded-separator ids must all be rejected.
+        for bad in ["../evil", "/abs/evil", "a/b"] {
+            let pkg = tmp.path().join("bad.tar.gz");
+            build_package_with_campaign_id(&pkg, bad)?;
+
+            let result = packager.install_package(&pkg, &campaigns_dir);
+            assert!(
+                matches!(result, Err(PackageError::UnsafeCampaignId(_))),
+                "expected UnsafeCampaignId for {:?}, got {:?}",
+                bad,
+                result
+            );
+
+            // The temp extraction dir must be cleaned up and nothing installed.
+            assert!(
+                !campaigns_dir.join(".tmp_install").exists(),
+                "temp install dir left behind for {:?}",
+                bad
+            );
+            std::fs::remove_file(&pkg).ok();
+        }
+
+        // No campaign directory (or anything else) should have been written under
+        // the campaigns directory.
+        let entries: Vec<_> = std::fs::read_dir(&campaigns_dir)?.collect::<Result<_, _>>()?;
+        assert!(
+            entries.is_empty(),
+            "campaigns_dir should be empty, found {} entries",
+            entries.len()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_total_uncompressed_size_sums_entry_headers() -> Result<(), Box<dyn std::error::Error>> {
+        use tempfile::tempdir;
+
+        let tmp = tempdir()?;
+        let pkg = tmp.path().join("sized.tar.gz");
+
+        let tar_gz = File::create(&pkg)?;
+        let enc = GzEncoder::new(tar_gz, Compression::new(6));
+        let mut tar = Builder::new(enc);
+
+        let a: &[u8] = b"hello world"; // 11 bytes
+        let b = vec![0u8; 1000]; // 1000 bytes
+        for (name, data) in [("a.txt", a), ("b.bin", b.as_slice())] {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tar.append_data(&mut header, name, data)?;
+        }
+        tar.finish()?;
+        // Finalize the gzip stream explicitly: dropping the encoder without
+        // finishing can truncate the gzip footer, causing an "unexpected end of
+        // file" when the archive is read back.
+        let enc = tar.into_inner()?;
+        enc.finish()?;
+
+        let total = total_uncompressed_size(&pkg)?;
+        assert_eq!(total, 11 + 1000);
+        Ok(())
+    }
+
+    /// Builds a tiny archive whose single entry header *claims* `claimed_size`
+    /// uncompressed bytes but is followed immediately by the end-of-archive
+    /// marker (no body). This models a decompression bomb: the declared
+    /// uncompressed size is enormous while the archive itself is a few hundred
+    /// bytes.
+    fn build_bomb_header_archive(
+        out_path: &std::path::Path,
+        claimed_size: u64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::io::Write;
+
+        let mut header = tar::Header::new_gnu();
+        header.set_path("MANIFEST.json")?;
+        header.set_size(claimed_size);
+        header.set_mode(0o644);
+        header.set_cksum();
+
+        let tar_gz = File::create(out_path)?;
+        let mut enc = GzEncoder::new(tar_gz, Compression::new(6));
+        enc.write_all(header.as_bytes())?;
+        // Two zero blocks terminate the tar archive.
+        enc.write_all(&[0u8; 512])?;
+        enc.write_all(&[0u8; 512])?;
+        enc.finish()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_install_rejects_decompression_bomb() -> Result<(), Box<dyn std::error::Error>> {
+        use tempfile::tempdir;
+
+        let tmp = tempdir()?;
+        let campaigns_dir = tmp.path().join("campaigns");
+        std::fs::create_dir_all(&campaigns_dir)?;
+        let pkg = tmp.path().join("bomb.tar.gz");
+
+        // Claim a size just over the 512 MiB cap; the running total is checked
+        // from the header before the (nonexistent) body is read.
+        build_bomb_header_archive(&pkg, MAX_UNCOMPRESSED_BYTES + 1)?;
+
+        let packager = CampaignPackager::new();
+        let result = packager.install_package(&pkg, &campaigns_dir);
+        assert!(
+            matches!(
+                result,
+                Err(PackageError::ArchiveTooLarge { limit }) if limit == MAX_UNCOMPRESSED_BYTES
+            ),
+            "expected ArchiveTooLarge, got {:?}",
+            result
+        );
+
+        // The temp extraction dir must be cleaned up.
+        assert!(!campaigns_dir.join(".tmp_install").exists());
         Ok(())
     }
 }

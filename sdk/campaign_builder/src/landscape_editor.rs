@@ -572,7 +572,11 @@ impl LandscapeEditorState {
                         .struct_names(false)
                         .enumerate_arrays(false);
                     if let Ok(contents) = ron::ser::to_string_pretty(&defs, ron_config) {
-                        let _ = fs::write(&landscape_path, contents);
+                        // Immediate best-effort persist; surface write failures so the
+                        // user knows their edits did not reach disk before Save Campaign.
+                        if let Err(e) = fs::write(&landscape_path, contents) {
+                            eprintln!("Failed to write landscape.ron: {e}");
+                        }
                     }
 
                     // Write the updated mesh scale to the linked mesh .ron file.

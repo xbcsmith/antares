@@ -435,6 +435,8 @@ impl MeshIndexEditor {
         let mut edge_map: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
 
         for triangle_idx in 0..self.triangle_count() {
+            // triangle_idx is bounded by triangle_count(), so get_triangle always returns Some.
+            #[allow(clippy::unwrap_used)]
             let triangle = self.get_triangle(triangle_idx).unwrap();
             let v = triangle.vertices();
 

@@ -225,6 +225,9 @@ impl NpcEditorState {
 
                                         // Create image button or placeholder
                                         let button_response = if has_texture {
+                                            // has_texture is true only when the entry is present and Some,
+                                            // so this expect cannot fire.
+                                            #[allow(clippy::expect_used)]
                                             let texture = self
                                                 .portrait_textures
                                                 .get(portrait_id)

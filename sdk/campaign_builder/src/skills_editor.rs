@@ -184,6 +184,50 @@ impl SkillsEditorState {
         }
     }
 
+    /// Returns the skills matching the current search query and category filter.
+    ///
+    /// The search is a case-insensitive substring test against the skill `id`
+    /// and `name`. The active `filter_category` is applied first. An empty query
+    /// with the `All` category filter returns every skill (paired with its
+    /// original index).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::skills_editor::SkillsEditorState;
+    ///
+    /// let mut fire = SkillsEditorState::default_skill();
+    /// fire.id = "fire_magic".to_string();
+    /// fire.name = "Fire Magic".to_string();
+    /// let mut lock = SkillsEditorState::default_skill();
+    /// lock.id = "lockpicking".to_string();
+    /// lock.name = "Lockpicking".to_string();
+    /// let skills = vec![fire, lock];
+    ///
+    /// let mut state = SkillsEditorState::new();
+    /// state.search_query = "fire".to_string();
+    /// let filtered = state.filtered_skills(&skills);
+    /// assert_eq!(filtered.len(), 1);
+    /// assert_eq!(filtered[0].1.id, "fire_magic");
+    /// ```
+    pub fn filtered_skills<'a>(
+        &self,
+        skills: &'a [SkillDefinition],
+    ) -> Vec<(usize, &'a SkillDefinition)> {
+        let search = self.search_query.to_lowercase();
+        let filter = self.filter_category;
+        skills
+            .iter()
+            .enumerate()
+            .filter(|(_, skill)| {
+                filter.matches(skill)
+                    && (search.is_empty()
+                        || skill.id.to_lowercase().contains(&search)
+                        || skill.name.to_lowercase().contains(&search))
+            })
+            .collect()
+    }
+
     /// Suggests a lowercase snake_case skill ID from a display name.
     pub fn suggest_skill_id(name: &str, skills: &[SkillDefinition]) -> String {
         let slug = name
@@ -398,18 +442,10 @@ impl SkillsEditorState {
         unsaved_changes: &mut bool,
         status_message: &mut String,
     ) {
-        let search = self.search_query.to_lowercase();
-        let filter = self.filter_category;
         let selected = self.selected_skill;
-        let filtered: Vec<(usize, SkillDefinition)> = skills
-            .iter()
-            .enumerate()
-            .filter(|(_, skill)| {
-                filter.matches(skill)
-                    && (search.is_empty()
-                        || skill.id.to_lowercase().contains(&search)
-                        || skill.name.to_lowercase().contains(&search))
-            })
+        let filtered: Vec<(usize, SkillDefinition)> = self
+            .filtered_skills(skills)
+            .into_iter()
             .map(|(idx, skill)| (idx, skill.clone()))
             .collect();
         let usage_snapshot = self.usage_cache.clone();
@@ -1001,6 +1037,63 @@ mod tests {
         assert_eq!(state.mode, SkillsEditorMode::List);
         assert_eq!(state.selected_skill, None);
         assert_eq!(state.filter_category, SkillCategoryFilter::All);
+    }
+
+    #[test]
+    fn test_filtered_skills_search_behavior() {
+        let skills = vec![
+            skill(
+                "fire_magic",
+                SkillCategory::Knowledge,
+                SkillScalingMode::Flat,
+            ),
+            skill(
+                "fire_resistance",
+                SkillCategory::Knowledge,
+                SkillScalingMode::Flat,
+            ),
+            skill(
+                "lockpicking",
+                SkillCategory::Utility,
+                SkillScalingMode::Flat,
+            ),
+        ];
+
+        let mut state = SkillsEditorState::new();
+
+        // Empty query with All category returns every skill.
+        assert_eq!(
+            state
+                .filtered_skills(&skills)
+                .iter()
+                .map(|(_, s)| s.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["fire_magic", "fire_resistance", "lockpicking"]
+        );
+
+        // Case-insensitive substring keeps both fire skills (matches id/name).
+        state.search_query = "FIRE".to_string();
+        assert_eq!(
+            state
+                .filtered_skills(&skills)
+                .iter()
+                .map(|(_, s)| s.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["fire_magic", "fire_resistance"]
+        );
+
+        // Narrower query isolates a single survivor.
+        state.search_query = "lock".to_string();
+        let survivors: Vec<String> = state
+            .filtered_skills(&skills)
+            .iter()
+            .map(|(_, s)| s.id.clone())
+            .collect();
+        assert_eq!(survivors, vec!["lockpicking"]);
+
+        // A non-matching query returns nothing.
+        state.search_query = "alchemy".to_string();
+        assert!(state.filtered_skills(&skills).is_empty());
     }
 
     #[test]

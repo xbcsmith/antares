@@ -28,6 +28,24 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// Read-only data slices passed to the characters editor `show()` method.
+///
+/// Bundling these five fields into one struct keeps `show()` and
+/// `show_character_form()` under the Clippy `too_many_arguments` threshold
+/// (replacing five individual parameters with one `&CharactersEditorData`).
+pub struct CharactersEditorData<'a> {
+    /// Available race definitions for race-selection dropdowns.
+    pub races: &'a [RaceDefinition],
+    /// Available class definitions for class-selection dropdowns.
+    pub classes: &'a [ClassDefinition],
+    /// Available items for equipment and starting-item selection.
+    pub items: &'a [Item],
+    /// Available spells for starting-spell selection.
+    pub spells: &'a [Spell],
+    /// Optional creature asset manager for visual asset binding.
+    pub creature_manager: Option<&'a CreatureAssetManager>,
+}
+
 /// Errors produced by character editor operations.
 #[derive(Debug, thiserror::Error)]
 pub enum CharacterEditorError {
@@ -147,6 +165,12 @@ pub struct CharactersEditorState {
     /// Whether the creature picker popup is open
     #[serde(skip)]
     pub creature_picker_open: bool,
+
+    /// Search string used by the creature picker popup.
+    ///
+    /// Reset to empty each time the picker opens. Never persisted to disk.
+    #[serde(skip)]
+    pub creature_picker_search: String,
 
     /// Available creature candidates (id, name) cached for autocomplete (rebuilt when campaign dir changes)
     #[serde(skip)]
@@ -315,6 +339,7 @@ impl Default for CharactersEditorState {
             has_unsaved_changes: false,
             portrait_picker_open: false,
             creature_picker_open: false,
+            creature_picker_search: String::new(),
             available_creatures: Vec::new(),
             portrait_textures: HashMap::new(),
             available_portraits: Vec::new(),
@@ -1035,6 +1060,9 @@ impl CharactersEditorState {
 
                                         // Create image button or placeholder
                                         let button_response = if has_texture {
+                                            // has_texture is true only when the entry is present and Some,
+                                            // so this expect cannot fire.
+                                            #[allow(clippy::expect_used)]
                                             let texture = self
                                                 .portrait_textures
                                                 .get(portrait_id)
@@ -1154,23 +1182,12 @@ impl CharactersEditorState {
     /// # Arguments
     ///
     /// * `ui` - The egui UI context
-    /// * `races` - Available races for dropdown selection
-    /// * `classes` - Available classes for dropdown selection
-    /// * `items` - Available items for equipment/item selection
-    /// * `creature_manager` - Optional creature asset manager for visual asset binding
+    /// * `data` - Read-only data slices (races, classes, items, spells, creature_manager)
     /// * `ctx` - Shared editor context (campaign dir, data file, unsaved flag, status, merge mode)
-    // 8 parameters (including self) is one over the default clippy limit of 7.
-    // This function predates the `EditorContext` parameter-bundle pattern and
-    // is tracked for refactoring in Phase 5 of the codebase cleanup plan.
-    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
-        races: &[RaceDefinition],
-        classes: &[ClassDefinition],
-        items: &[Item],
-        spells: &[Spell],
-        creature_manager: Option<&CreatureAssetManager>,
+        data: &CharactersEditorData<'_>,
         ctx: &mut EditorContext<'_>,
     ) {
         // Scan portraits if campaign directory changed
@@ -1185,7 +1202,8 @@ impl CharactersEditorState {
             self.available_portraits = extract_portrait_candidates(ctx.campaign_dir);
             // Rebuild creature candidates from the manager whenever the campaign dir changes
             // or when invalidate_creature_cache() has been called.
-            self.available_creatures = creature_manager
+            self.available_creatures = data
+                .creature_manager
                 .and_then(|m| m.load_all_creatures().ok())
                 .map(|creatures| {
                     creatures
@@ -1235,17 +1253,17 @@ impl CharactersEditorState {
         }
 
         // Show filters
-        self.show_filters(ui, races, classes);
+        self.show_filters(ui, data.races, data.classes);
 
         ui.separator();
 
         // Main content - use TwoColumnLayout for list mode
         match self.mode {
             CharactersEditorMode::List => {
-                self.show_list(ui, items, spells, ctx);
+                self.show_list(ui, data.items, data.spells, ctx);
             }
             CharactersEditorMode::Add | CharactersEditorMode::Edit => {
-                self.show_character_form(ui, races, classes, items, spells, creature_manager, ctx);
+                self.show_character_form(ui, data, ctx);
             }
         }
 
@@ -1264,58 +1282,110 @@ impl CharactersEditorState {
             }
         }
 
-        // Show creature picker modal if open
+        // Show creature picker modal.
+        //
+        // Uses the pre-built `available_creatures` cache so no disk I/O happens
+        // per frame.  Only the visible rows are rendered via `show_rows`.
         if self.creature_picker_open {
-            if let Some(manager) = creature_manager {
-                let creatures = manager.load_all_creatures().unwrap_or_default();
-                let mut picked_id: Option<String> = None;
-                let mut should_close = false;
-                egui::Window::new("Select Creature")
-                    .id(egui::Id::new("character_creature_picker"))
-                    .resizable(true)
-                    .show(ui.ctx(), |ui| {
+            // Build filtered list once per frame (cheap — strings already in memory).
+            let search_lower = self.creature_picker_search.to_lowercase();
+            let matched: Vec<(u32, String)> = self
+                .available_creatures
+                .iter()
+                .filter(|(id, name)| {
+                    search_lower.is_empty()
+                        || name.to_lowercase().contains(&search_lower)
+                        || id.to_string().contains(&search_lower)
+                })
+                .map(|(id, name)| (*id, name.clone()))
+                .collect();
+
+            // Pre-extract the current selection so the closure only needs an owned
+            // value (avoids a split-borrow conflict with `&mut creature_picker_search`).
+            let current_id = self.buffer.creature_id.clone();
+            let mut picked_id: Option<String> = None;
+            let mut should_close = false;
+
+            egui::Window::new("Select Creature")
+                .id(egui::Id::new("character_creature_picker"))
+                .resizable(true)
+                .default_size([420.0, 420.0])
+                .show(ui.ctx(), |ui| {
+                    // ── Search bar ───────────────────────────────────────────────
+                    ui.horizontal(|ui| {
+                        ui.label("🔍");
+                        if ui
+                            .text_edit_singleline(&mut self.creature_picker_search)
+                            .changed()
+                        {
+                            ui.ctx().request_repaint();
+                        }
+                        if ui.button("✕").on_hover_text("Clear search").clicked() {
+                            self.creature_picker_search.clear();
+                        }
+                    });
+                    ui.label(format!(
+                        "{} of {} creatures",
+                        matched.len(),
+                        self.available_creatures.len()
+                    ));
+                    ui.separator();
+
+                    // ── Virtualised list ───────────────────────────────────────
+                    // Reserve space for the separator + Close button below.
+                    let list_h = (ui.available_height() - 40.0).max(100.0);
+                    let row_h = ui.spacing().interact_size.y;
+
+                    if matched.is_empty() {
+                        ui.label(if self.creature_picker_search.is_empty() {
+                            "No creatures in campaign."
+                        } else {
+                            "No creatures match the search."
+                        });
+                    } else {
+                        let total = matched.len();
                         egui::ScrollArea::vertical()
                             .id_salt("character_creature_picker_scroll")
-                            .max_height(300.0)
-                            .show(ui, |ui| {
-                                for creature in &creatures {
-                                    ui.push_id(creature.id, |ui| {
-                                        let selected =
-                                            self.buffer.creature_id == creature.id.to_string();
+                            .max_height(list_h)
+                            .auto_shrink([false, false])
+                            .show_rows(ui, row_h, total, |ui, row_range| {
+                                for i in row_range {
+                                    let (id, ref name) = matched[i];
+                                    let label = format!("{id} — {name}");
+                                    ui.push_id(id, |ui| {
                                         if ui
-                                            .selectable_label(
-                                                selected,
-                                                format!("{} — {}", creature.id, creature.name),
-                                            )
+                                            .selectable_label(current_id == id.to_string(), &label)
                                             .clicked()
                                         {
-                                            picked_id = Some(creature.id.to_string());
+                                            picked_id = Some(id.to_string());
                                         }
                                     });
                                 }
                             });
-                        if ui.button("Close").clicked() {
-                            should_close = true;
-                        }
-                    });
-                if let Some(id) = picked_id {
-                    self.apply_selected_creature_id(Some(id.clone()));
-                    // Sync the autocomplete buffer so the text field shows the
-                    // resolved "id — name" display string immediately.
-                    let display = creatures
-                        .iter()
-                        .find(|c| c.id.to_string() == id)
-                        .map(|c| format!("{} — {}", c.id, c.name))
-                        .unwrap_or_else(|| id.clone());
-                    crate::ui_helpers::store_autocomplete_buffer(
-                        ui.ctx(),
-                        egui::Id::new("autocomplete:creature:character_creature".to_string()),
-                        &display,
-                    );
-                } else if should_close {
-                    self.creature_picker_open = false;
-                }
-            } else {
+                    }
+
+                    ui.separator();
+                    if ui.button("Close").clicked() {
+                        should_close = true;
+                    }
+                });
+
+            if let Some(ref id) = picked_id {
+                // Sync the autocomplete buffer so the text field reflects
+                // the selection immediately.
+                let display = self
+                    .available_creatures
+                    .iter()
+                    .find(|(cid, _)| cid.to_string() == *id)
+                    .map(|(cid, n)| format!("{cid} — {n}"))
+                    .unwrap_or_else(|| id.clone());
+                self.apply_selected_creature_id(Some(id.clone()));
+                crate::ui_helpers::store_autocomplete_buffer(
+                    ui.ctx(),
+                    egui::Id::new("autocomplete:creature:character_creature".to_string()),
+                    &display,
+                );
+            } else if should_close {
                 self.creature_picker_open = false;
             }
         }
@@ -1798,17 +1868,10 @@ impl CharactersEditorState {
     }
 
     /// Show character edit/create form
-    // 8 parameters (including self) — same pre-existing situation as `show`.
-    // Tracked for Phase 5 refactor.
-    #[allow(clippy::too_many_arguments)]
     fn show_character_form(
         &mut self,
         ui: &mut egui::Ui,
-        races: &[RaceDefinition],
-        classes: &[ClassDefinition],
-        items: &[Item],
-        spells: &[Spell],
-        creature_manager: Option<&CreatureAssetManager>,
+        data: &CharactersEditorData<'_>,
         ctx: &mut EditorContext<'_>,
     ) {
         let title = if self.mode == CharactersEditorMode::Add {
@@ -1876,7 +1939,7 @@ impl CharactersEditorState {
                             "race_select",
                             "",
                             &mut self.buffer.race_id,
-                            races,
+                            data.races,
                         ) {
                             // Selection changed
                         }
@@ -1888,7 +1951,7 @@ impl CharactersEditorState {
                             "class_select",
                             "",
                             &mut self.buffer.class_id,
-                            classes,
+                            data.classes,
                         ) {
                             // Selection changed
                         }
@@ -1970,9 +2033,10 @@ impl CharactersEditorState {
                                 .button("🦎")
                                 .on_hover_text("Browse creature assets")
                                 .clicked()
-                                && creature_manager.is_some()
+                                && data.creature_manager.is_some()
                             {
                                 self.creature_picker_open = true;
+                                self.creature_picker_search.clear();
                             }
                             ui.label("ℹ").on_hover_text(
                                 "Links this character to a procedural mesh creature definition. \
@@ -2142,7 +2206,7 @@ impl CharactersEditorState {
                 ui.add_space(10.0);
                 ui.heading("Starting Equipment");
 
-                self.show_equipment_editor(ui, items);
+                self.show_equipment_editor(ui, data.items);
 
                 ui.add_space(10.0);
                 ui.heading("Starting Items");
@@ -2152,7 +2216,7 @@ impl CharactersEditorState {
                     "character_starting_items",
                     "Starting Items",
                     &mut self.buffer.starting_items,
-                    items,
+                    data.items,
                 ) {
                     self.has_unsaved_changes = true;
                 }
@@ -2160,7 +2224,7 @@ impl CharactersEditorState {
                 ui.add_space(10.0);
                 ui.heading("Starting Spells");
 
-                self.show_starting_spells_editor(ui, spells, classes);
+                self.show_starting_spells_editor(ui, data.spells, data.classes);
 
                 ui.add_space(10.0);
                 ui.heading("Description");
@@ -2553,6 +2617,7 @@ fn item_name_by_id(items: &[Item], id: ItemId) -> String {
 ///     starting_armor_id: None,
 ///     starting_items: vec![],
 ///     proficiencies: vec![],
+///     skill_grants: vec![],
 /// };
 /// ```
 fn filter_spells_for_class(
@@ -3689,7 +3754,14 @@ mod tests {
                     &mut status,
                     &mut merge,
                 );
-                state.show_character_form(ui, &races, &classes, &items, &[], None, &mut editor_ctx);
+                let data = CharactersEditorData {
+                    races: &races,
+                    classes: &classes,
+                    items: &items,
+                    spells: &[],
+                    creature_manager: None,
+                };
+                state.show_character_form(ui, &data, &mut editor_ctx);
             });
         });
 

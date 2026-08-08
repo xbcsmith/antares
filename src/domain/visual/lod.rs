@@ -317,6 +317,8 @@ fn calculate_triangle_area(mesh: &MeshDefinition, triangle_index: usize) -> f32 
 }
 
 /// Builds a simplified mesh from selected triangles
+// new_normals/new_uvs are Some exactly when mesh.normals/mesh.uvs are Some (built via `.map`), so unwrap inside the matching `if let Some` is unreachable.
+#[allow(clippy::unwrap_used)]
 fn build_simplified_mesh(mesh: &MeshDefinition, triangle_indices: &[usize]) -> MeshDefinition {
     // Collect unique vertices used by selected triangles
     let mut used_vertices = HashSet::new();

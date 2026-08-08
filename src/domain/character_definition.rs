@@ -884,6 +884,7 @@ impl CharacterDefinition {
             conditions: Condition::new(),
             active_conditions: Vec::new(),
             timed_stat_boosts: Vec::new(),
+            timed_skill_boosts: Vec::new(),
             resistances,
             quest_flags: QuestFlags::new(),
             portrait_id: self.portrait_id.clone(),

@@ -144,6 +144,68 @@ impl ItemsEditorState {
         }
     }
 
+    /// Returns the items matching the current search query and active filters.
+    ///
+    /// The search is a case-insensitive substring test against the item name.
+    /// The type, magical, cursed and quest filters are applied when set. An
+    /// empty query with no active filters returns every item (paired with its
+    /// original index).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::items_editor::ItemsEditorState;
+    ///
+    /// let mut sword = ItemsEditorState::default_item();
+    /// sword.id = 1;
+    /// sword.name = "Iron Sword".to_string();
+    /// let mut shield = ItemsEditorState::default_item();
+    /// shield.id = 2;
+    /// shield.name = "Iron Shield".to_string();
+    /// let mut potion = ItemsEditorState::default_item();
+    /// potion.id = 3;
+    /// potion.name = "Healing Potion".to_string();
+    /// let items = vec![sword, shield, potion];
+    ///
+    /// let mut state = ItemsEditorState::new();
+    /// state.search_query = "iron".to_string();
+    /// let filtered = state.filtered_items(&items);
+    /// assert_eq!(filtered.len(), 2);
+    /// ```
+    pub fn filtered_items<'a>(&self, items: &'a [Item]) -> Vec<(usize, &'a Item)> {
+        let search_lower = self.search_query.to_lowercase();
+        items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| {
+                if !search_lower.is_empty() && !item.name.to_lowercase().contains(&search_lower) {
+                    return false;
+                }
+                if let Some(type_filter) = self.filter_type {
+                    if !type_filter.matches(item) {
+                        return false;
+                    }
+                }
+                if let Some(magical) = self.filter_magical {
+                    if item.is_magical() != magical {
+                        return false;
+                    }
+                }
+                if let Some(cursed) = self.filter_cursed {
+                    if item.is_cursed != cursed {
+                        return false;
+                    }
+                }
+                if let Some(quest) = self.filter_quest {
+                    if item.is_quest_item() != quest {
+                        return false;
+                    }
+                }
+                true
+            })
+            .collect()
+    }
+
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -344,38 +406,10 @@ impl ItemsEditorState {
         classes: &[ClassDefinition],
         ctx: &mut EditorContext<'_>,
     ) {
-        let search_lower = self.search_query.to_lowercase();
-
         // Build filtered list snapshot to avoid borrow conflicts in closures
-        let filtered_items: Vec<(usize, Item)> = items
-            .iter()
-            .enumerate()
-            .filter(|(_, item)| {
-                if !search_lower.is_empty() && !item.name.to_lowercase().contains(&search_lower) {
-                    return false;
-                }
-                if let Some(type_filter) = self.filter_type {
-                    if !type_filter.matches(item) {
-                        return false;
-                    }
-                }
-                if let Some(magical) = self.filter_magical {
-                    if item.is_magical() != magical {
-                        return false;
-                    }
-                }
-                if let Some(cursed) = self.filter_cursed {
-                    if item.is_cursed != cursed {
-                        return false;
-                    }
-                }
-                if let Some(quest) = self.filter_quest {
-                    if item.is_quest_item() != quest {
-                        return false;
-                    }
-                }
-                true
-            })
+        let filtered_items: Vec<(usize, Item)> = self
+            .filtered_items(items)
+            .into_iter()
             .map(|(idx, item)| (idx, item.clone()))
             .collect();
 
@@ -1586,6 +1620,58 @@ mod tests {
         assert!(state.selected_item.is_none());
         assert!(!state.show_import_dialog);
         assert!(state.import_export_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_filtered_items_search_behavior() {
+        let items = {
+            let mut sword = ItemsEditorState::default_item();
+            sword.id = 1;
+            sword.name = "Iron Sword".to_string();
+            let mut shield = ItemsEditorState::default_item();
+            shield.id = 2;
+            shield.name = "Iron Shield".to_string();
+            let mut potion = ItemsEditorState::default_item();
+            potion.id = 3;
+            potion.name = "Healing Potion".to_string();
+            vec![sword, shield, potion]
+        };
+
+        let mut state = ItemsEditorState::new();
+
+        // Empty query returns every item.
+        assert_eq!(
+            state
+                .filtered_items(&items)
+                .iter()
+                .map(|(_, i)| i.id)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+
+        // Case-insensitive substring keeps the iron equipment only.
+        state.search_query = "IRON".to_string();
+        assert_eq!(
+            state
+                .filtered_items(&items)
+                .iter()
+                .map(|(_, i)| i.id)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+
+        // Narrower query isolates a single survivor.
+        state.search_query = "potion".to_string();
+        let survivors: Vec<u8> = state
+            .filtered_items(&items)
+            .iter()
+            .map(|(_, i)| i.id)
+            .collect();
+        assert_eq!(survivors, vec![3]);
+
+        // A non-matching query returns nothing.
+        state.search_query = "wand".to_string();
+        assert!(state.filtered_items(&items).is_empty());
     }
 
     #[test]

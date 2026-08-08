@@ -745,24 +745,282 @@ impl Default for FacingComponent {
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct TextureLoaded;
 
-/// Placeholder component for future animation support
+/// A named keyframe in a creature animation sequence.
 ///
-/// This component will eventually track animation state for creatures
-/// with keyframe animations defined. Currently a placeholder.
+/// Each keyframe defines a snapshot of the creature's pose at a given time.
 ///
-/// # Future Fields
+/// # Examples
 ///
-/// * `current_animation` - Name of the currently playing animation
-/// * `animation_time` - Current playback time
-/// * `looping` - Whether animation should loop
-#[derive(Component, Debug, Clone, Default)]
+/// ```
+/// use antares::game::components::creature::AnimationKeyframe;
+///
+/// let frame = AnimationKeyframe {
+///     time: 0.0,
+///     root_offset: bevy::math::Vec3::ZERO,
+///     root_rotation: bevy::math::Quat::IDENTITY,
+/// };
+/// assert_eq!(frame.time, 0.0);
+/// ```
+#[derive(Debug, Clone)]
+pub struct AnimationKeyframe {
+    /// Time in seconds from the start of the animation clip.
+    pub time: f32,
+    /// Translation offset applied to the creature root at this keyframe.
+    pub root_offset: Vec3,
+    /// Rotation applied to the creature root at this keyframe.
+    pub root_rotation: Quat,
+}
+
+/// A named animation clip composed of keyframes.
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::components::creature::{AnimationClip, AnimationKeyframe};
+///
+/// let idle = AnimationClip::new_idle();
+/// assert_eq!(idle.name, "idle");
+/// assert!(idle.looping);
+/// ```
+#[derive(Debug, Clone)]
+pub struct AnimationClip {
+    /// Identifier for this animation (e.g., "idle", "walk", "attack", "death").
+    pub name: String,
+    /// Ordered keyframes — must have at least one entry for the clip to play.
+    pub keyframes: Vec<AnimationKeyframe>,
+    /// Total duration in seconds. Computed from the last keyframe's time.
+    pub duration: f32,
+    /// Whether the animation loops when it reaches the end.
+    pub looping: bool,
+}
+
+impl AnimationClip {
+    /// Creates a default two-keyframe idle animation that subtly bobs the creature.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::creature::AnimationClip;
+    ///
+    /// let idle = AnimationClip::new_idle();
+    /// assert_eq!(idle.name, "idle");
+    /// assert_eq!(idle.keyframes.len(), 2);
+    /// assert!(idle.looping);
+    /// ```
+    pub fn new_idle() -> Self {
+        Self {
+            name: "idle".to_string(),
+            keyframes: vec![
+                AnimationKeyframe {
+                    time: 0.0,
+                    root_offset: Vec3::ZERO,
+                    root_rotation: Quat::IDENTITY,
+                },
+                AnimationKeyframe {
+                    time: 1.0,
+                    root_offset: Vec3::new(0.0, 0.05, 0.0),
+                    root_rotation: Quat::IDENTITY,
+                },
+            ],
+            duration: 1.0,
+            looping: true,
+        }
+    }
+
+    /// Creates a simple death animation (creature tips over).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::creature::AnimationClip;
+    ///
+    /// let death = AnimationClip::new_death();
+    /// assert_eq!(death.name, "death");
+    /// assert!(!death.looping);
+    /// ```
+    pub fn new_death() -> Self {
+        Self {
+            name: "death".to_string(),
+            keyframes: vec![
+                AnimationKeyframe {
+                    time: 0.0,
+                    root_offset: Vec3::ZERO,
+                    root_rotation: Quat::IDENTITY,
+                },
+                AnimationKeyframe {
+                    time: 0.5,
+                    root_offset: Vec3::new(0.0, -0.3, 0.0),
+                    root_rotation: Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+                },
+            ],
+            duration: 0.5,
+            looping: false,
+        }
+    }
+
+    /// Returns the interpolated `root_offset` and `root_rotation` at `time_secs`.
+    ///
+    /// Clamps to the last keyframe if `time_secs` exceeds `duration`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::creature::AnimationClip;
+    ///
+    /// let clip = AnimationClip::new_idle();
+    /// let (offset, _rotation) = clip.sample(0.5);
+    /// assert!((offset.y - 0.025).abs() < 0.001, "midpoint should be halfway up");
+    /// ```
+    pub fn sample(&self, time_secs: f32) -> (Vec3, Quat) {
+        if self.keyframes.is_empty() {
+            return (Vec3::ZERO, Quat::IDENTITY);
+        }
+        if self.keyframes.len() == 1 {
+            let kf = &self.keyframes[0];
+            return (kf.root_offset, kf.root_rotation);
+        }
+
+        let t = time_secs.clamp(0.0, self.duration);
+        let mut prev = &self.keyframes[0];
+        let mut next = &self.keyframes[self.keyframes.len() - 1];
+        for i in 0..self.keyframes.len() - 1 {
+            if t >= self.keyframes[i].time && t <= self.keyframes[i + 1].time {
+                prev = &self.keyframes[i];
+                next = &self.keyframes[i + 1];
+                break;
+            }
+        }
+
+        let span = next.time - prev.time;
+        let alpha = if span > 0.0 {
+            (t - prev.time) / span
+        } else {
+            0.0
+        };
+
+        let offset = prev.root_offset.lerp(next.root_offset, alpha);
+        let rotation = prev.root_rotation.slerp(next.root_rotation, alpha);
+        (offset, rotation)
+    }
+}
+
+/// Tracks the current animation state of a creature entity.
+///
+/// Supports named clips, playback time, looping, and per-frame transform
+/// interpolation via [`AnimationClip::sample`].
+///
+/// # Examples
+///
+/// ```
+/// use antares::game::components::creature::{CreatureAnimationState, AnimationClip};
+///
+/// let mut state = CreatureAnimationState::default();
+/// // Default state plays the idle animation
+/// assert_eq!(state.current_clip.name, "idle");
+/// assert!(state.looping);
+///
+/// // Advance by 0.5 seconds
+/// state.advance(0.5);
+/// assert!((state.animation_time - 0.5).abs() < 0.001);
+/// ```
+#[derive(Component, Debug, Clone)]
 pub struct CreatureAnimationState {
-    // Placeholder for animation keyframes
-    // Will include:
-    // - current_animation: String
-    // - animation_time: f32
-    // - looping: bool
-    // - keyframe_index: usize
+    /// The currently-playing animation clip.
+    pub current_clip: AnimationClip,
+    /// Playback position within the current clip, in seconds.
+    pub animation_time: f32,
+    /// Whether the current animation loops.
+    pub looping: bool,
+    /// Whether the animation has completed (only meaningful for non-looping clips).
+    pub finished: bool,
+}
+
+impl Default for CreatureAnimationState {
+    /// Default state plays the idle animation.
+    fn default() -> Self {
+        let clip = AnimationClip::new_idle();
+        let looping = clip.looping;
+        Self {
+            current_clip: clip,
+            animation_time: 0.0,
+            looping,
+            finished: false,
+        }
+    }
+}
+
+impl CreatureAnimationState {
+    /// Transitions to the named animation clip.
+    ///
+    /// Resets playback time to 0. If `clip` is the same as the current
+    /// animation, the transition is a no-op (avoids restarting loops).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::creature::{CreatureAnimationState, AnimationClip};
+    ///
+    /// let mut state = CreatureAnimationState::default();
+    /// state.play(AnimationClip::new_death());
+    /// assert_eq!(state.current_clip.name, "death");
+    /// assert_eq!(state.animation_time, 0.0);
+    /// ```
+    pub fn play(&mut self, clip: AnimationClip) {
+        if self.current_clip.name == clip.name {
+            return;
+        }
+        self.looping = clip.looping;
+        self.current_clip = clip;
+        self.animation_time = 0.0;
+        self.finished = false;
+    }
+
+    /// Advances the animation by `delta_secs` seconds.
+    ///
+    /// If the clip is looping, wraps the playback time; otherwise clamps
+    /// and marks the animation as `finished`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::creature::CreatureAnimationState;
+    ///
+    /// let mut state = CreatureAnimationState::default(); // idle clip: 1 s
+    /// state.advance(1.5); // looping: wraps to 0.5
+    /// assert!((state.animation_time - 0.5).abs() < 0.001);
+    /// ```
+    pub fn advance(&mut self, delta_secs: f32) {
+        if self.finished {
+            return;
+        }
+        self.animation_time += delta_secs;
+        let dur = self.current_clip.duration;
+        if dur <= 0.0 {
+            return;
+        }
+        if self.looping {
+            self.animation_time %= dur;
+        } else if self.animation_time >= dur {
+            self.animation_time = dur;
+            self.finished = true;
+        }
+    }
+
+    /// Returns the current `(root_offset, root_rotation)` for the animation state.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::game::components::creature::CreatureAnimationState;
+    ///
+    /// let state = CreatureAnimationState::default();
+    /// let (offset, _rotation) = state.current_pose();
+    /// // At time 0 the idle clip's offset is (0, 0, 0)
+    /// assert_eq!(offset, bevy::math::Vec3::ZERO);
+    /// ```
+    pub fn current_pose(&self) -> (Vec3, Quat) {
+        self.current_clip.sample(self.animation_time)
+    }
 }
 
 #[cfg(test)]
@@ -874,8 +1132,96 @@ mod tests {
     #[test]
     fn test_creature_animation_state_default() {
         let state = CreatureAnimationState::default();
-        // Currently just a placeholder, ensure it can be constructed
-        assert!(format!("{:?}", state).contains("CreatureAnimationState"));
+        assert_eq!(state.current_clip.name, "idle");
+        assert!(state.looping);
+        assert!(!state.finished);
+        assert_eq!(state.animation_time, 0.0);
+    }
+
+    // ===== AnimationKeyframe / AnimationClip tests =====
+
+    #[test]
+    fn test_animation_clip_new_idle_has_two_keyframes() {
+        let clip = AnimationClip::new_idle();
+        assert_eq!(clip.name, "idle");
+        assert_eq!(clip.keyframes.len(), 2);
+        assert!(clip.looping);
+        assert_eq!(clip.duration, 1.0);
+    }
+
+    #[test]
+    fn test_animation_clip_new_death_not_looping() {
+        let clip = AnimationClip::new_death();
+        assert_eq!(clip.name, "death");
+        assert!(!clip.looping);
+    }
+
+    #[test]
+    fn test_animation_clip_sample_at_zero_returns_first_keyframe() {
+        let clip = AnimationClip::new_idle();
+        let (offset, _rot) = clip.sample(0.0);
+        assert_eq!(offset, Vec3::ZERO);
+    }
+
+    #[test]
+    fn test_animation_clip_sample_at_midpoint_interpolates() {
+        let clip = AnimationClip::new_idle();
+        let (offset, _rot) = clip.sample(0.5);
+        // Midpoint between Y=0 and Y=0.05 is Y=0.025
+        assert!(
+            (offset.y - 0.025).abs() < 0.001,
+            "midpoint Y should be ~0.025, got {}",
+            offset.y
+        );
+    }
+
+    #[test]
+    fn test_creature_animation_state_advance_progresses_time() {
+        let mut state = CreatureAnimationState::default();
+        state.advance(0.3);
+        assert!((state.animation_time - 0.3).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_creature_animation_state_looping_wraps() {
+        let mut state = CreatureAnimationState::default(); // idle: 1s loop
+        state.advance(1.5); // should wrap to 0.5
+        assert!(
+            (state.animation_time - 0.5).abs() < 0.001,
+            "looping animation must wrap, got {}",
+            state.animation_time
+        );
+    }
+
+    #[test]
+    fn test_creature_animation_state_non_looping_finishes() {
+        let mut state = CreatureAnimationState::default();
+        state.play(AnimationClip::new_death()); // 0.5s, not looping
+        state.advance(1.0);
+        assert!(state.finished, "death animation should finish");
+        assert!(
+            (state.animation_time - 0.5).abs() < 0.001,
+            "time should clamp to duration"
+        );
+    }
+
+    #[test]
+    fn test_creature_animation_state_play_same_name_is_noop() {
+        let mut state = CreatureAnimationState::default();
+        state.advance(0.3);
+        state.play(AnimationClip::new_idle()); // same name — no-op
+        assert!(
+            (state.animation_time - 0.3).abs() < 0.001,
+            "replaying same clip should not reset time"
+        );
+    }
+
+    #[test]
+    fn test_creature_animation_state_current_pose() {
+        let state = CreatureAnimationState::default();
+        let (offset, rot) = state.current_pose();
+        assert_eq!(offset, Vec3::ZERO);
+        assert!((rot.w - 1.0).abs() < 0.001, "identity quaternion");
     }
 
     #[test]

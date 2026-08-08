@@ -26,7 +26,7 @@
 //! # Render modes
 //!
 //! The [`GrassRenderMode`] resource gates which path is active:
-//! - [`GrassRenderMode::PerEntity`]: Phase-6 `ExtendedMaterial` path — each
+//! - [`GrassRenderMode::PerEntity`]: the `ExtendedMaterial` per-entity path — each
 //!   clump is a distinct `Mesh3d`/`MeshMaterial3d` entity.
 //! - [`GrassRenderMode::Instanced`] (default): this module — batch entities
 //!   without per-clump render components; `GrassInstanceBatch` entities carry
@@ -90,9 +90,9 @@ pub struct GrassRenderWorldAvailable;
 
 /// Controls which grass render path is active.
 ///
-/// Set to [`GrassRenderMode::Instanced`] (the default) to enable the Phase-7
-/// GPU instancing pipeline.  Set to [`GrassRenderMode::PerEntity`] to fall
-/// back to the Phase-6 `ExtendedMaterial` path where each clump is a separate
+/// Set to [`GrassRenderMode::Instanced`] (the default) to enable the GPU-instanced
+/// pipeline.  Set to [`GrassRenderMode::PerEntity`] to fall
+/// back to the `ExtendedMaterial` per-entity path where each clump is a separate
 /// `Mesh3d`/`MeshMaterial3d` entity.
 ///
 /// Both paths MUST NOT run simultaneously — the resource gate enforces this.
@@ -106,9 +106,9 @@ pub struct GrassRenderWorldAvailable;
 /// ```
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum GrassRenderMode {
-    /// Phase-6 path: each grass clump is a separate `Mesh3d` entity.
+    /// `ExtendedMaterial` per-entity path: each grass clump is a separate `Mesh3d` entity.
     PerEntity,
-    /// Phase-7 path (default): GPU instancing via `GrassInstanceBatch`.
+    /// GPU-instanced path (default): instancing via `GrassInstanceBatch`.
     #[default]
     Instanced,
 }

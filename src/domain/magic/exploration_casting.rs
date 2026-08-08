@@ -17,7 +17,8 @@
 //!
 //! # Architecture Reference
 //!
-//! Phase 3 of `docs/explanation/spell_system_updates_implementation_plan.md`.
+//! Exploration-mode casting resolves party-targeted spells and rejects
+//! monster-targeted spells with `SpellError::CombatOnly`.
 
 use crate::application::GameState;
 use crate::domain::character::Party;

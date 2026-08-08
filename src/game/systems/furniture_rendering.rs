@@ -13,14 +13,13 @@
 use bevy::prelude::*;
 
 use crate::domain::types::{self, FurnitureId};
-use crate::domain::visual::CreatureDefinition;
 use crate::domain::world::furniture::FurnitureDatabase;
 use crate::domain::world::{DoorFrameConfig, FurnitureFlags, FurnitureMaterial, FurnitureType};
 use crate::game::components::{DoorState, FurnitureEntity, Interactable, InteractionType};
 use crate::game::systems::procedural_meshes::{
     spawn_bench, spawn_chair, spawn_chest, spawn_door_with_frame, spawn_table, spawn_throne,
     spawn_torch, BenchConfig, ChairConfig, ChestConfig, DoorConfig, FurnitureSpawnParams,
-    MeshSpawnContext, ProceduralMeshCache, TableConfig, ThroneConfig, TorchConfig,
+    MeshSpawnContext, TableConfig, ThroneConfig, TorchConfig,
 };
 
 /// Resolves effective furniture properties by merging a [`FurnitureDatabase`]
@@ -126,123 +125,6 @@ pub fn resolve_furniture_fields(
         def.flags.clone(),
         resolved_color,
     )
-}
-
-/// Spawns a custom registered furniture mesh using the creature-mesh pipeline.
-///
-/// The furniture mesh registry stores mesh assets in the same `CreatureDefinition`
-/// RON format used by imported creature and item meshes. This helper converts the
-/// first mesh in that definition into a Bevy `Mesh`, applies furniture PBR
-/// properties, and spawns it as the furniture entity root.
-///
-/// # Arguments
-///
-/// * `commands` - Bevy Commands for entity spawning
-/// * `materials` - Material asset storage
-/// * `meshes` - Mesh asset storage
-/// * `position` - Tile position for furniture
-/// * `map_id` - Map identifier for cleanup
-/// * `furniture_type` - Resolved furniture type for interaction and blocking metadata
-/// * `creature_def` - Imported mesh definition loaded from the furniture mesh registry
-/// * `rotation_y` - Optional Y-axis rotation in degrees
-/// * `scale` - Size multiplier for the furniture
-/// * `material` - Furniture material that provides base color and PBR defaults
-/// * `flags` - Furniture flags (lit, locked, blocking)
-/// * `color_tint` - Optional RGB color tint [0.0..1.0]
-/// * `cache` - Mutable reference to procedural mesh cache
-///
-/// # Returns
-///
-/// `Some(entity)` when a custom mesh was spawned, or `None` when the definition
-/// had no meshes and the caller should fall back to procedural rendering.
-#[allow(clippy::too_many_arguments)]
-pub fn spawn_custom_furniture_mesh_with_rendering(
-    commands: &mut Commands,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    position: types::Position,
-    map_id: types::MapId,
-    furniture_type: FurnitureType,
-    creature_def: &CreatureDefinition,
-    rotation_y: Option<f32>,
-    scale: f32,
-    material: FurnitureMaterial,
-    flags: FurnitureFlags,
-    color_tint: Option<[f32; 3]>,
-    cache: &mut ProceduralMeshCache,
-) -> Option<Entity> {
-    let mesh_def = creature_def.meshes.first()?;
-
-    let base_color_rgb = material.base_color();
-    let final_color = if let Some([r, g, b]) = color_tint {
-        [
-            (base_color_rgb[0] * r).min(1.0),
-            (base_color_rgb[1] * g).min(1.0),
-            (base_color_rgb[2] * b).min(1.0),
-            1.0,
-        ]
-    } else {
-        [base_color_rgb[0], base_color_rgb[1], base_color_rgb[2], 1.0]
-    };
-
-    let mesh_handle = cache.get_or_create_creature_mesh(creature_def.id, 0, mesh_def, meshes);
-
-    let mut standard_material = StandardMaterial {
-        base_color: Color::srgba(
-            final_color[0],
-            final_color[1],
-            final_color[2],
-            final_color[3],
-        ),
-        metallic: material.metallic(),
-        perceptual_roughness: material.roughness(),
-        ..default()
-    };
-
-    if flags.lit {
-        standard_material.emissive = Color::srgb(
-            final_color[0] * 0.8,
-            final_color[1] * 0.8,
-            final_color[2] * 0.8,
-        )
-        .into();
-    }
-
-    let material_handle = materials.add(standard_material);
-
-    let translation = Vec3::new(position.x as f32, 0.0, position.y as f32);
-    let rotation = Quat::from_rotation_y(rotation_y.unwrap_or(0.0).to_radians());
-    let mesh_scale = Vec3::splat(creature_def.scale * scale);
-
-    let furniture_entity = commands
-        .spawn((
-            Mesh3d(mesh_handle),
-            MeshMaterial3d(material_handle),
-            Transform {
-                translation,
-                rotation,
-                scale: mesh_scale,
-            },
-            Visibility::default(),
-            InheritedVisibility::default(),
-            ViewVisibility::default(),
-            crate::game::systems::map::MapEntity(map_id),
-            Name::new(creature_def.name.clone()),
-        ))
-        .id();
-
-    commands
-        .entity(furniture_entity)
-        .insert(FurnitureEntity::new(furniture_type, flags.blocking));
-
-    if let Some(interaction_type) = get_interaction_type(furniture_type) {
-        let distance = get_interaction_distance(furniture_type);
-        commands
-            .entity(furniture_entity)
-            .insert(Interactable::with_distance(interaction_type, distance));
-    }
-
-    Some(furniture_entity)
 }
 
 /// Enhanced furniture spawning with material and interaction support

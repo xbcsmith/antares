@@ -523,6 +523,8 @@ impl RaceEditor {
     ///
     /// RON serialization is normalized to match the class editor:
     /// `struct_names(true)` for consistency across all editor outputs.
+    // Flushing stdout cannot meaningfully fail in an interactive CLI save prompt.
+    #[allow(clippy::unwrap_used)]
     fn save(&mut self) -> bool {
         print!("Saving to {}... ", self.file_path.display());
         io::stdout().flush().unwrap();

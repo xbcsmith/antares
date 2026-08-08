@@ -66,7 +66,7 @@ use thiserror::Error;
 
 /// Errors that can occur when working with tool configuration
 #[derive(Error, Debug)]
-pub enum ConfigError {
+pub enum ToolConfigError {
     #[error("Failed to read config file: {0}")]
     ReadError(String),
 
@@ -226,61 +226,63 @@ impl ToolConfig {
     ///
     /// Returns `~/.config/antares/tools.ron` on Unix-like systems,
     /// `%APPDATA%\antares\tools.ron` on Windows.
-    pub fn default_path() -> Result<PathBuf, ConfigError> {
+    pub fn default_path() -> Result<PathBuf, ToolConfigError> {
         let config_dir = dirs::config_dir().ok_or_else(|| {
-            ConfigError::DirectoryError("Could not determine config directory".to_string())
+            ToolConfigError::DirectoryError("Could not determine config directory".to_string())
         })?;
 
         Ok(config_dir.join("antares").join("tools.ron"))
     }
 
     /// Loads configuration from the default location
-    pub fn load() -> Result<Self, ConfigError> {
+    pub fn load() -> Result<Self, ToolConfigError> {
         let path = Self::default_path()?;
         Self::load_from_file(&path)
     }
 
     /// Loads configuration from a specific file
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
-        let contents =
-            fs::read_to_string(path.as_ref()).map_err(|e| ConfigError::ReadError(e.to_string()))?;
+    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, ToolConfigError> {
+        let contents = fs::read_to_string(path.as_ref())
+            .map_err(|e| ToolConfigError::ReadError(e.to_string()))?;
 
         let config: Self =
-            ron::from_str(&contents).map_err(|e| ConfigError::ParseError(e.to_string()))?;
+            ron::from_str(&contents).map_err(|e| ToolConfigError::ParseError(e.to_string()))?;
 
         Ok(config)
     }
 
     /// Loads configuration, or returns default if file doesn't exist
-    pub fn load_or_default() -> Result<Self, ConfigError> {
+    pub fn load_or_default() -> Result<Self, ToolConfigError> {
         match Self::load() {
             Ok(config) => Ok(config),
             // If the file is missing or invalid/unparseable, fall back to a default
             // configuration instead of failing — this ensures older configs or
             // partial configs do not break the application at startup.
-            Err(ConfigError::ReadError(_)) => Ok(Self::default()),
-            Err(ConfigError::ParseError(_)) => Ok(Self::default()),
+            Err(ToolConfigError::ReadError(_)) => Ok(Self::default()),
+            Err(ToolConfigError::ParseError(_)) => Ok(Self::default()),
             Err(e) => Err(e),
         }
     }
 
     /// Saves configuration to the default location
-    pub fn save(&self) -> Result<(), ConfigError> {
+    pub fn save(&self) -> Result<(), ToolConfigError> {
         let path = Self::default_path()?;
         self.save_to_file(&path)
     }
 
     /// Saves configuration to a specific file
-    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), ConfigError> {
+    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), ToolConfigError> {
         // Ensure parent directory exists
         if let Some(parent) = path.as_ref().parent() {
-            fs::create_dir_all(parent).map_err(|e| ConfigError::DirectoryError(e.to_string()))?;
+            fs::create_dir_all(parent)
+                .map_err(|e| ToolConfigError::DirectoryError(e.to_string()))?;
         }
 
         let ron_string = ron::ser::to_string_pretty(self, Default::default())
-            .map_err(|e| ConfigError::WriteError(e.to_string()))?;
+            .map_err(|e| ToolConfigError::WriteError(e.to_string()))?;
 
-        fs::write(path.as_ref(), ron_string).map_err(|e| ConfigError::WriteError(e.to_string()))?;
+        fs::write(path.as_ref(), ron_string)
+            .map_err(|e| ToolConfigError::WriteError(e.to_string()))?;
 
         Ok(())
     }
@@ -317,7 +319,7 @@ impl ToolConfig {
 // ===== Helper Functions =====
 
 /// Creates a default config file if it doesn't exist
-pub fn ensure_config_exists() -> Result<PathBuf, ConfigError> {
+pub fn ensure_config_exists() -> Result<PathBuf, ToolConfigError> {
     let path = ToolConfig::default_path()?;
 
     if !path.exists() {
@@ -421,6 +423,6 @@ mod tests {
         writeln!(temp, "invalid ron content").unwrap();
 
         let result = ToolConfig::load_from_file(temp.path());
-        assert!(matches!(result, Err(ConfigError::ParseError(_))));
+        assert!(matches!(result, Err(ToolConfigError::ParseError(_))));
     }
 }

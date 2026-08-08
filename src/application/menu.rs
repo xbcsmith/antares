@@ -38,6 +38,11 @@ pub struct MenuState {
     /// Cached list of save files (populated when SaveLoad submenu opens)
     #[serde(default)]
     pub save_list: Vec<SaveGameInfo>,
+
+    /// One-shot status message shown in the menu after a save/load operation.
+    /// Cleared when a new operation starts. Never persisted.
+    #[serde(skip, default)]
+    pub status_message: Option<String>,
 }
 
 /// Menu screen types
@@ -94,6 +99,7 @@ impl MenuState {
             current_submenu: MenuType::Main,
             selected_index: 0,
             save_list: Vec::new(),
+            status_message: None,
         }
     }
 
@@ -157,6 +163,7 @@ impl Default for MenuState {
             current_submenu: MenuType::Main,
             selected_index: 0,
             save_list: Vec::new(),
+            status_message: None,
         }
     }
 }

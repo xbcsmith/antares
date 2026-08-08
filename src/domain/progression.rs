@@ -1738,7 +1738,7 @@ mod tests {
         assert!(check_level_up_with_db(&knight, Some(&db)));
     }
 
-    // ===== Phase 2: experience_for_level_with_config tests =====
+    // ===== experience_for_level_with_config tests =====
 
     #[test]
     fn test_experience_for_level_with_config_default_matches_formula() {

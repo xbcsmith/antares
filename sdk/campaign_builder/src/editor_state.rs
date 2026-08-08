@@ -141,21 +141,6 @@ pub struct EditorRegistry {
 
     /// Characters editor state.
     pub characters_editor_state: characters_editor::CharactersEditorState,
-
-    // ── Quest editor transient buffers ──────────────────────────────────────
-    /// Search / filter text for the quest list (not yet wired to a dedicated
-    /// `QuestEditorState` field; kept here for future use).
-    pub _quests_search_filter: String,
-    /// Whether the quest preview panel is expanded.
-    pub _quests_show_preview: bool,
-    /// Clipboard buffer for quest import/export.
-    pub _quests_import_buffer: String,
-    /// Whether the quest import dialog is visible.
-    pub _quests_show_import_dialog: bool,
-
-    // ── Stock templates transient state ─────────────────────────────────────
-    /// Filename for `npc_stock_templates.ron` relative to the campaign data dir.
-    pub _stock_templates_file: String,
 }
 
 impl Default for EditorRegistry {
@@ -182,11 +167,6 @@ impl Default for EditorRegistry {
             levels_editor_state: levels_editor::LevelsEditorState::new(),
             races_editor_state: races_editor::RacesEditorState::default(),
             characters_editor_state: characters_editor::CharactersEditorState::default(),
-            _quests_search_filter: String::new(),
-            _quests_show_preview: true,
-            _quests_import_buffer: String::new(),
-            _quests_show_import_dialog: false,
-            _stock_templates_file: "data/npc_stock_templates.ron".to_string(),
         }
     }
 }

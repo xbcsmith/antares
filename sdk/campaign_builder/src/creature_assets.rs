@@ -414,6 +414,7 @@ impl CreatureAssetManager {
                     let full_path = self.campaign_dir.join(texture_path);
                     if full_path.exists() {
                         // Best-effort: individual texture deletion errors are not fatal.
+                        #[allow(clippy::let_underscore_must_use)]
                         let _ = fs::remove_file(&full_path);
                     }
                 }

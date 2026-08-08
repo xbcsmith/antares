@@ -299,7 +299,14 @@ pub fn execute_monster_spell_cast<R: Rng>(
             if let Some(pidx) = first_player_idx {
                 if let Some(Combatant::Player(pc)) = combat_state.participants.get_mut(pidx) {
                     for cond_id in &cond_ids {
-                        let _ = apply_condition_to_character_by_id(pc.as_mut(), cond_id, content);
+                        if let Err(e) =
+                            apply_condition_to_character_by_id(pc.as_mut(), cond_id, content)
+                        {
+                            tracing::warn!(
+                                ?e,
+                                "failed to apply condition to character during monster spell"
+                            );
+                        }
                     }
                 }
             }

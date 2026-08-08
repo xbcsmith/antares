@@ -112,6 +112,8 @@ pub fn filter_valid_tags(candidates: &[String]) -> Vec<String> {
 ///
 /// Panics if writing to stdout or reading from stdin fails — both of which
 /// are unrecoverable errors in an interactive CLI tool.
+// stdout flush and stdin read failures are unrecoverable in an interactive CLI.
+#[allow(clippy::expect_used)]
 pub fn read_line(prompt: &str) -> String {
     print!("{}", prompt);
     io::stdout().flush().expect("failed to flush stdout");

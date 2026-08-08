@@ -84,6 +84,56 @@ impl SpellsEditorState {
         }
     }
 
+    /// Returns the spells that match the current search query and active filters.
+    ///
+    /// The search is case-insensitive and matches against the spell name. When
+    /// `filter_school` and/or `filter_level` are set they are also applied. An
+    /// empty query with no active filters returns every spell (paired with its
+    /// original index).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::spells_editor::SpellsEditorState;
+    ///
+    /// let mut fireball = SpellsEditorState::default_spell();
+    /// fireball.id = 1;
+    /// fireball.name = "Fireball".to_string();
+    /// let mut heal = SpellsEditorState::default_spell();
+    /// heal.id = 2;
+    /// heal.name = "Heal".to_string();
+    /// let spells = vec![fireball, heal];
+    ///
+    /// let mut state = SpellsEditorState::new();
+    /// state.search_query = "fire".to_string();
+    /// let filtered = state.filtered_spells(&spells);
+    /// assert_eq!(filtered.len(), 1);
+    /// assert_eq!(filtered[0].1.name, "Fireball");
+    /// ```
+    pub fn filtered_spells<'a>(&self, spells: &'a [Spell]) -> Vec<(usize, &'a Spell)> {
+        let search_lower = self.search_query.to_lowercase();
+        spells
+            .iter()
+            .enumerate()
+            .filter(|(_, spell)| {
+                if !search_lower.is_empty() && !spell.name.to_lowercase().contains(&search_lower) {
+                    return false;
+                }
+                if let Some(school) = self.filter_school {
+                    if spell.school != school {
+                        return false;
+                    }
+                }
+                if let Some(level) = self.filter_level {
+                    if spell.level != level {
+                        return false;
+                    }
+                }
+                true
+            })
+            .collect()
+    }
+
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -273,28 +323,10 @@ impl SpellsEditorState {
         spells: &mut Vec<Spell>,
         ctx: &mut EditorContext<'_>,
     ) {
-        let search_lower = self.search_query.to_lowercase();
-
         // Build filtered list snapshot to avoid borrow conflicts in closures
-        let filtered_spells: Vec<(usize, Spell)> = spells
-            .iter()
-            .enumerate()
-            .filter(|(_, spell)| {
-                if !search_lower.is_empty() && !spell.name.to_lowercase().contains(&search_lower) {
-                    return false;
-                }
-                if let Some(school) = self.filter_school {
-                    if spell.school != school {
-                        return false;
-                    }
-                }
-                if let Some(level) = self.filter_level {
-                    if spell.level != level {
-                        return false;
-                    }
-                }
-                true
-            })
+        let filtered_spells: Vec<(usize, Spell)> = self
+            .filtered_spells(spells)
+            .into_iter()
             .map(|(idx, spell)| (idx, spell.clone()))
             .collect();
 
@@ -1177,6 +1209,60 @@ mod tests {
         assert_eq!(state.mode, SpellsEditorMode::List);
         assert!(state.filter_school.is_none());
         assert!(state.filter_level.is_none());
+    }
+
+    #[test]
+    fn test_filtered_spells_search_behavior() {
+        // Three spells with distinct names; a query should keep only the
+        // matching subset by identity, not by a hard-coded count.
+        let spells = {
+            let mut fireball = SpellsEditorState::default_spell();
+            fireball.id = 1;
+            fireball.name = "Fireball".to_string();
+            let mut firestorm = SpellsEditorState::default_spell();
+            firestorm.id = 2;
+            firestorm.name = "Fire Storm".to_string();
+            let mut heal = SpellsEditorState::default_spell();
+            heal.id = 3;
+            heal.name = "Heal".to_string();
+            vec![fireball, firestorm, heal]
+        };
+
+        let mut state = SpellsEditorState::new();
+
+        // Empty query returns every spell.
+        assert_eq!(
+            state
+                .filtered_spells(&spells)
+                .iter()
+                .map(|(_, s)| s.id)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+
+        // A matching substring keeps exactly the fire-themed spells.
+        state.search_query = "fire".to_string();
+        assert_eq!(
+            state
+                .filtered_spells(&spells)
+                .iter()
+                .map(|(_, s)| s.id)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+
+        // Case-insensitive, and narrows to a single survivor.
+        state.search_query = "HEAL".to_string();
+        let survivors: Vec<u16> = state
+            .filtered_spells(&spells)
+            .iter()
+            .map(|(_, s)| s.id)
+            .collect();
+        assert_eq!(survivors, vec![3]);
+
+        // A non-matching query returns nothing.
+        state.search_query = "lightning".to_string();
+        assert!(state.filtered_spells(&spells).is_empty());
     }
 
     #[test]

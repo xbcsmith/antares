@@ -104,7 +104,7 @@ use crate::domain::dialogue::DialogueId;
 use crate::domain::types::{ItemId, MapId, MonsterId, Position, SpellId};
 use crate::domain::world::{Map, MapEvent};
 use crate::sdk::database::ContentDatabase;
-use crate::sdk::validation::{ValidationError, Validator};
+use crate::sdk::validation::{CampaignValidationError, Validator};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
@@ -354,7 +354,7 @@ pub fn suggest_map_ids(db: &ContentDatabase, partial: &str) -> Vec<MapId> {
 ///
 /// # Returns
 ///
-/// Returns `Ok(Vec<ValidationError>)` with all validation issues found.
+/// Returns `Ok(Vec<CampaignValidationError>)` with all validation issues found.
 /// An empty vector means the map is valid.
 ///
 /// # Examples
@@ -376,7 +376,7 @@ pub fn suggest_map_ids(db: &ContentDatabase, partial: &str) -> Vec<MapId> {
 pub fn validate_map(
     db: &ContentDatabase,
     map: &Map,
-) -> Result<Vec<ValidationError>, Box<dyn std::error::Error>> {
+) -> Result<Vec<CampaignValidationError>, Box<dyn std::error::Error>> {
     let validator = Validator::new(db);
     validator.validate_map(map)
 }

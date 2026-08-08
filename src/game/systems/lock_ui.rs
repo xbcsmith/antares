@@ -376,7 +376,9 @@ fn lock_action_system(
     game_content: Option<Res<GameContent>>,
     mut game_log_writer: Option<MessageWriter<GameLogEvent>>,
     mut lock_pending: ResMut<LockInteractionPending>,
+    mut game_rng: Option<ResMut<crate::game::resources::GameRng>>,
 ) {
+    let mut fallback_rng = crate::game::resources::GameRng::fallback_std_rng();
     for msg in reader.read() {
         let LockActionChosen {
             lock_id,
@@ -439,14 +441,19 @@ fn lock_action_system(
             .map(|c| c.has_ability("pick_lock"))
             .unwrap_or(false);
 
-        // Run the domain function with thread_rng.
+        // Run the domain function with the deterministic game RNG (falling
+        // back to a fresh StdRng when the resource is absent, e.g. in tests).
+        let rng: &mut rand::rngs::StdRng = match game_rng.as_deref_mut() {
+            Some(gr) => gr.rng(),
+            None => &mut fallback_rng,
+        };
         let outcome = handle_lock_action(
             *action,
             &mut lock_state,
             &character,
             *party_index,
             class_db,
-            &mut rand::rng(),
+            rng,
         );
 
         // Write the updated LockState back to the map.

@@ -1563,7 +1563,7 @@ fn test_save_campaign_no_path() {
     let mut app = CampaignBuilderApp::default();
     let result = app.save_campaign();
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), CampaignError::NoPath));
+    assert!(matches!(result.unwrap_err(), CampaignBuilderError::NoPath));
 }
 
 // ── Stock-template wipe-prevention regression test ────────────────────────

@@ -443,8 +443,9 @@ fn test_full_combat_round_all_combatants_act() {
     // Use an empty condition definitions vector (no DOT/HoT effects for this test)
     let cond_defs: Vec<ConditionDefinition> = vec![];
 
+    let mut rng = rand::rng();
     for _ in 0..participants {
-        let _ = combat.advance_turn(&cond_defs);
+        let _ = combat.advance_turn(&cond_defs, &mut rng);
     }
 
     // After a full cycle, we should be back at the first actor and the round should have advanced

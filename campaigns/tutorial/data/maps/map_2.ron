@@ -166,7 +166,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -186,7 +186,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -506,7 +506,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -566,7 +566,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -626,7 +626,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -686,7 +686,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -746,7 +746,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -826,7 +826,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -886,7 +886,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -946,7 +946,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1066,7 +1066,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1266,7 +1266,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1326,7 +1326,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1386,7 +1386,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1446,7 +1446,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1506,7 +1506,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1566,7 +1566,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1706,7 +1706,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -1766,7 +1766,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2026,7 +2026,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2146,7 +2146,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2206,7 +2206,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2266,7 +2266,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2326,7 +2326,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2466,7 +2466,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -2766,7 +2766,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3146,7 +3146,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3186,7 +3186,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3586,7 +3586,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -3666,7 +3666,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4346,7 +4346,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4426,7 +4426,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -4866,7 +4866,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5166,7 +5166,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -5246,7 +5246,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6126,7 +6126,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6186,7 +6186,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6366,7 +6366,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6446,7 +6446,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6506,7 +6506,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6626,7 +6626,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6686,7 +6686,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -6826,7 +6826,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7006,7 +7006,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7066,7 +7066,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7266,7 +7266,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7326,7 +7326,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7386,7 +7386,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -7506,7 +7506,7 @@
             ),
         ),
         (
-            terrain: Forest,
+            terrain: Grass,
             wall_type: r#None,
             blocked: false,
             is_special: false,
@@ -8014,7 +8014,7 @@
             name: "Starting Town Portal",
             description: "Portal leading back to the Starting Town",
             destination: (
-                x: 18,
+                x: 19,
                 y: 11,
             ),
             map_id: 1,
@@ -8039,7 +8039,7 @@
         ),
         (
             x: 3,
-            y: 11,
+            y: 16,
         ): Encounter(
             name: "Forest Ambush",
             description: "A hidden ambush by hostile creatures in the forest.",
@@ -8060,8 +8060,8 @@
             name: "Bandit Patrol",
             description: "A small band of foes patrolling this area.",
             monster_group: [
-                6,
-                12,
+                136,
+                136,
             ],
             time_condition: None,
             facing: Some(South),
@@ -8085,8 +8085,8 @@
             name: "Mountain Pass Gate",
             description: "A gate that transports the party to Mountain Pass (map 5) at (18,6).",
             destination: (
-                x: 18,
-                y: 6,
+                x: 9,
+                y: 0,
             ),
             map_id: 5,
         ),
@@ -8145,8 +8145,8 @@
             name: "Ancient Portal",
             description: "An ancient portal that transports travelers to Ancient Ruins (map 3) at (1,7).",
             destination: (
-                x: 1,
-                y: 7,
+                x: 0,
+                y: 6,
             ),
             map_id: 3,
         ),
@@ -8173,8 +8173,9 @@
             name: "Hidden Supplies",
             description: "A stash of supplies tucked away among the rocks.",
             loot: [
-                14,
-                24,
+                109,
+                4,
+                50,
             ],
         ),
         (
@@ -8198,9 +8199,9 @@
             y: 10,
         ): Teleport(
             name: "Arcturus Cave Portal",
-            description: "A portal that teleports the party to Arcturus\'s Cave (map 2) at (18,17).",
+            description: "A portal that teleports the party to Arcturus\'s Cave (map 4) at (16,17).",
             destination: (
-                x: 18,
+                x: 16,
                 y: 17,
             ),
             map_id: 4,
@@ -8224,8 +8225,318 @@
                 x: 2,
                 y: 2,
             ),
-            facing: Some(South),
+            facing: Some(North),
             dialogue_override: None,
+        ),
+    ],
+    landscape_placements: [
+        (
+            landscape_id: 2,
+            position: (
+                x: 1,
+                y: 11,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 2,
+                y: 12,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 3,
+                y: 13,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 2,
+                y: 15,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 2,
+                y: 16,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 3,
+                y: 15,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 6,
+                y: 18,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 5,
+                y: 17,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 12,
+                y: 18,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 13,
+                y: 17,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 11,
+                y: 15,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 10,
+                y: 17,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 9,
+                y: 15,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 15,
+                y: 18,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 16,
+                y: 16,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 17,
+                y: 15,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 16,
+                y: 15,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 17,
+                y: 12,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 16,
+                y: 10,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 15,
+                y: 8,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 16,
+                y: 6,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 17,
+                y: 5,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 17,
+                y: 3,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 17,
+                y: 2,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 16,
+                y: 3,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 14,
+                y: 3,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 15,
+                y: 3,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 13,
+                y: 3,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 13,
+                y: 4,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 6,
+                y: 4,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 5,
+                y: 4,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 6,
+                y: 3,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 4,
+                y: 3,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 1,
+                y: 5,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 1,
+                y: 3,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 2,
+                y: 8,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 1,
+                y: 8,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 7,
+                y: 1,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 10,
+                y: 1,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 10,
+                y: 3,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 9,
+                y: 4,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 14,
+                y: 1,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 18,
+                y: 7,
+            ),
+        ),
+        (
+            landscape_id: 2,
+            position: (
+                x: 1,
+                y: 18,
+            ),
         ),
     ],
     is_outdoor: false,

@@ -44,6 +44,18 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
+/// Mutable references to the four mesh attribute buffers that all foliage
+/// geometry helpers write into.
+///
+/// Passing this single struct instead of four separate `&mut Vec<…>` parameters
+/// keeps every `append_*` helper under the Clippy `too_many_arguments` threshold.
+struct MeshBuffers<'a> {
+    positions: &'a mut Vec<[f32; 3]>,
+    normals: &'a mut Vec<[f32; 3]>,
+    uvs: &'a mut Vec<[f32; 2]>,
+    indices: &'a mut Vec<u32>,
+}
+
 /// Default first tree LOD switch distance in world units.
 pub const DEFAULT_TREE_LOD_DISTANCE_1: f32 = 18.0;
 
@@ -1063,16 +1075,6 @@ fn make_trunk(config: &TreeConfig) -> Branch {
     }
 }
 
-/// Generates a reusable deterministic mesh cache key for a tree placement.
-pub fn tree_mesh_cache_key(
-    tree_type: TreeType,
-    foliage_density: f32,
-    quality_level: u8,
-    generation_seed: TreeGenerationSeed,
-) -> TreeMeshCacheKey {
-    TreeMeshCacheKey::new(tree_type, foliage_density, quality_level, generation_seed.0)
-}
-
 // ==================== Mesh Generation ====================
 
 /// Generates a tree mesh from a branch graph
@@ -1355,12 +1357,8 @@ fn generate_branch_mesh_for_lod(
 /// function on two perpendicular planes with the same `up` vector.
 /// [`TreeType::Pine`] and [`TreeType::Dead`] are excluded from this helper —
 /// Pine uses a dedicated single-pass path and Dead has no foliage.
-#[allow(clippy::too_many_arguments)]
 fn append_leaf_shape(
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-    uvs: &mut Vec<[f32; 2]>,
-    indices: &mut Vec<u32>,
+    buffers: &mut MeshBuffers<'_>,
     origin: Vec3,
     side: Vec3,
     up: Vec3,
@@ -1368,28 +1366,11 @@ fn append_leaf_shape(
     preset: &TreeSpeciesPreset,
 ) {
     match preset.tree_type {
-        TreeType::Oak => {
-            append_lobed_leaf_cluster(positions, normals, uvs, indices, origin, side, up, size)
-        }
-        TreeType::Birch => append_diamond_leaf(
-            positions,
-            normals,
-            uvs,
-            indices,
-            origin,
-            side,
-            up,
-            size * 0.72,
-        ),
-        TreeType::Willow => {
-            append_willow_hanging_strip(positions, normals, uvs, indices, origin, side, up, size)
-        }
-        TreeType::Palm => {
-            append_palm_frond(positions, normals, uvs, indices, origin, side, up, size)
-        }
-        TreeType::Shrub => {
-            append_clustered_shrub_leaf(positions, normals, uvs, indices, origin, side, up, size)
-        }
+        TreeType::Oak => append_lobed_leaf_cluster(buffers, origin, side, up, size),
+        TreeType::Birch => append_diamond_leaf(buffers, origin, side, up, size * 0.72),
+        TreeType::Willow => append_willow_hanging_strip(buffers, origin, side, up, size),
+        TreeType::Palm => append_palm_frond(buffers, origin, side, up, size),
+        TreeType::Shrub => append_clustered_shrub_leaf(buffers, origin, side, up, size),
         _ => {}
     }
 }
@@ -1403,31 +1384,23 @@ fn append_leaf_shape(
 /// (`up = Y.lerp(direction, 0.35)`), which would collapse a direction-based
 /// second pass to near-zero area.
 ///
-/// `double_sided: true` on the foliage material (Phase 1) covers both winding
+/// `double_sided: true` on the foliage material covers both winding
 /// orders without needing reversed indices for the second pass.
 ///
 /// Used by Oak, Birch, Willow, Palm, and Shrub. Pine uses a single pass
 /// because its triangular needle clusters read well from all angles and
 /// skipping the cross pass avoids overdraw on dense conifer canopy.
-#[allow(clippy::too_many_arguments)]
 fn append_leaf_card_cross(
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-    uvs: &mut Vec<[f32; 2]>,
-    indices: &mut Vec<u32>,
+    buffers: &mut MeshBuffers<'_>,
     origin: Vec3,
     side: Vec3,
     up: Vec3,
     size: f32,
     preset: &TreeSpeciesPreset,
 ) {
-    append_leaf_shape(
-        positions, normals, uvs, indices, origin, side, up, size, preset,
-    );
+    append_leaf_shape(buffers, origin, side, up, size, preset);
     let side2 = side.cross(up).normalize_or_zero();
-    append_leaf_shape(
-        positions, normals, uvs, indices, origin, side2, up, size, preset,
-    );
+    append_leaf_shape(buffers, origin, side2, up, size, preset);
 }
 
 /// Appends species-shaped leaf/frond geometry to mesh attribute buffers.
@@ -1436,12 +1409,8 @@ fn append_leaf_card_cross(
 /// canopy appears volumetric from all camera angles. Pine uses a single pass
 /// because its triangular needle cluster already reads well from every angle,
 /// and a cross pass would add needless overdraw on dense conifer canopy.
-#[allow(clippy::too_many_arguments)]
 fn append_leaf_card(
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-    uvs: &mut Vec<[f32; 2]>,
-    indices: &mut Vec<u32>,
+    buffers: &mut MeshBuffers<'_>,
     origin: Vec3,
     direction: Vec3,
     size: f32,
@@ -1458,30 +1427,23 @@ fn append_leaf_card(
         .normalize_or_zero();
 
     match preset.tree_type {
-        TreeType::Pine => {
-            append_pine_needle_cluster(positions, normals, uvs, indices, origin, side, up, size)
-        }
+        TreeType::Pine => append_pine_needle_cluster(buffers, origin, side, up, size),
         TreeType::Dead => {}
-        _ => append_leaf_card_cross(
-            positions, normals, uvs, indices, origin, side, up, size, preset,
-        ),
+        _ => append_leaf_card_cross(buffers, origin, side, up, size, preset),
     }
 }
 
-fn append_quad(
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-    uvs: &mut Vec<[f32; 2]>,
-    indices: &mut Vec<u32>,
-    corners: [Vec3; 4],
-    normal: Vec3,
-) {
-    let index_start = positions.len() as u32;
+fn append_quad(buffers: &mut MeshBuffers<'_>, corners: [Vec3; 4], normal: Vec3) {
+    let index_start = buffers.positions.len() as u32;
 
-    positions.extend(corners.map(|corner| corner.to_array()));
-    normals.extend([normal.to_array(); 4]);
-    uvs.extend([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
-    indices.extend_from_slice(&[
+    buffers
+        .positions
+        .extend(corners.map(|corner| corner.to_array()));
+    buffers.normals.extend([normal.to_array(); 4]);
+    buffers
+        .uvs
+        .extend([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+    buffers.indices.extend_from_slice(&[
         index_start,
         index_start + 1,
         index_start + 2,
@@ -1491,19 +1453,15 @@ fn append_quad(
     ]);
 }
 
-#[allow(clippy::too_many_arguments)]
 fn append_diamond(
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-    uvs: &mut Vec<[f32; 2]>,
-    indices: &mut Vec<u32>,
+    buffers: &mut MeshBuffers<'_>,
     center: Vec3,
     side: Vec3,
     up: Vec3,
     width: f32,
     height: f32,
 ) {
-    let index_start = positions.len() as u32;
+    let index_start = buffers.positions.len() as u32;
     let normal = side.cross(up).normalize_or_zero();
 
     let corners = [
@@ -1513,10 +1471,14 @@ fn append_diamond(
         center - side * width * 0.5,
     ];
 
-    positions.extend(corners.map(|corner| corner.to_array()));
-    normals.extend([normal.to_array(); 4]);
-    uvs.extend([[0.5, 0.0], [1.0, 0.5], [0.5, 1.0], [0.0, 0.5]]);
-    indices.extend_from_slice(&[
+    buffers
+        .positions
+        .extend(corners.map(|corner| corner.to_array()));
+    buffers.normals.extend([normal.to_array(); 4]);
+    buffers
+        .uvs
+        .extend([[0.5, 0.0], [1.0, 0.5], [0.5, 1.0], [0.0, 0.5]]);
+    buffers.indices.extend_from_slice(&[
         index_start,
         index_start + 1,
         index_start + 2,
@@ -1526,28 +1488,21 @@ fn append_diamond(
     ]);
 }
 
-fn append_triangle(
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-    uvs: &mut Vec<[f32; 2]>,
-    indices: &mut Vec<u32>,
-    corners: [Vec3; 3],
-    normal: Vec3,
-) {
-    let index_start = positions.len() as u32;
+fn append_triangle(buffers: &mut MeshBuffers<'_>, corners: [Vec3; 3], normal: Vec3) {
+    let index_start = buffers.positions.len() as u32;
 
-    positions.extend(corners.map(|corner| corner.to_array()));
-    normals.extend([normal.to_array(); 3]);
-    uvs.extend([[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]);
-    indices.extend_from_slice(&[index_start, index_start + 1, index_start + 2]);
+    buffers
+        .positions
+        .extend(corners.map(|corner| corner.to_array()));
+    buffers.normals.extend([normal.to_array(); 3]);
+    buffers.uvs.extend([[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]);
+    buffers
+        .indices
+        .extend_from_slice(&[index_start, index_start + 1, index_start + 2]);
 }
 
-#[allow(clippy::too_many_arguments)]
 fn append_lobed_leaf_cluster(
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-    uvs: &mut Vec<[f32; 2]>,
-    indices: &mut Vec<u32>,
+    buffers: &mut MeshBuffers<'_>,
     origin: Vec3,
     side: Vec3,
     up: Vec3,
@@ -1559,10 +1514,7 @@ fn append_lobed_leaf_cluster(
 
     for offset in [-0.28_f32, 0.0, 0.28] {
         append_diamond(
-            positions,
-            normals,
-            uvs,
-            indices,
+            buffers,
             origin + side * size * offset,
             side,
             up,
@@ -1572,10 +1524,7 @@ fn append_lobed_leaf_cluster(
     }
 
     append_quad(
-        positions,
-        normals,
-        uvs,
-        indices,
+        buffers,
         [
             origin - side * size * 0.34 - up * size * 0.10,
             origin + side * size * 0.34 - up * size * 0.10,
@@ -1586,12 +1535,8 @@ fn append_lobed_leaf_cluster(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 fn append_pine_needle_cluster(
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-    uvs: &mut Vec<[f32; 2]>,
-    indices: &mut Vec<u32>,
+    buffers: &mut MeshBuffers<'_>,
     origin: Vec3,
     side: Vec3,
     up: Vec3,
@@ -1602,10 +1547,7 @@ fn append_pine_needle_cluster(
     let half_width = size * 0.18;
 
     append_triangle(
-        positions,
-        normals,
-        uvs,
-        indices,
+        buffers,
         [
             origin - side * half_width - up * height * 0.45,
             origin + side * half_width - up * height * 0.45,
@@ -1615,10 +1557,7 @@ fn append_pine_needle_cluster(
     );
 
     append_triangle(
-        positions,
-        normals,
-        uvs,
-        indices,
+        buffers,
         [
             origin - side * half_width * 0.75 - up * height * 0.10,
             origin + side * half_width * 0.75 - up * height * 0.10,
@@ -1628,12 +1567,8 @@ fn append_pine_needle_cluster(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 fn append_willow_hanging_strip(
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-    uvs: &mut Vec<[f32; 2]>,
-    indices: &mut Vec<u32>,
+    buffers: &mut MeshBuffers<'_>,
     origin: Vec3,
     side: Vec3,
     up: Vec3,
@@ -1646,10 +1581,7 @@ fn append_willow_hanging_strip(
 
     for offset in [-0.18_f32, 0.0, 0.18] {
         append_quad(
-            positions,
-            normals,
-            uvs,
-            indices,
+            buffers,
             [
                 origin + side * size * offset - side * strip_width * 0.5,
                 origin + side * size * offset + side * strip_width * 0.5,
@@ -1661,26 +1593,13 @@ fn append_willow_hanging_strip(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn append_palm_frond(
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-    uvs: &mut Vec<[f32; 2]>,
-    indices: &mut Vec<u32>,
-    origin: Vec3,
-    side: Vec3,
-    up: Vec3,
-    size: f32,
-) {
+fn append_palm_frond(buffers: &mut MeshBuffers<'_>, origin: Vec3, side: Vec3, up: Vec3, size: f32) {
     let normal = side.cross(up).normalize_or_zero();
     let length = size * 2.0;
     let base_width = size * 0.16;
 
     append_triangle(
-        positions,
-        normals,
-        uvs,
-        indices,
+        buffers,
         [
             origin - side * base_width,
             origin + side * base_width,
@@ -1690,10 +1609,7 @@ fn append_palm_frond(
     );
 
     append_triangle(
-        positions,
-        normals,
-        uvs,
-        indices,
+        buffers,
         [
             origin - side * base_width,
             origin + side * base_width,
@@ -1703,71 +1619,26 @@ fn append_palm_frond(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 fn append_diamond_leaf(
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-    uvs: &mut Vec<[f32; 2]>,
-    indices: &mut Vec<u32>,
+    buffers: &mut MeshBuffers<'_>,
     origin: Vec3,
     side: Vec3,
     up: Vec3,
     size: f32,
 ) {
-    append_diamond(
-        positions,
-        normals,
-        uvs,
-        indices,
-        origin,
-        side,
-        up,
-        size * 0.45,
-        size * 0.75,
-    );
+    append_diamond(buffers, origin, side, up, size * 0.45, size * 0.75);
 }
 
-#[allow(clippy::too_many_arguments)]
 fn append_clustered_shrub_leaf(
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-    uvs: &mut Vec<[f32; 2]>,
-    indices: &mut Vec<u32>,
+    buffers: &mut MeshBuffers<'_>,
     origin: Vec3,
     side: Vec3,
     up: Vec3,
     size: f32,
 ) {
-    append_diamond_leaf(
-        positions,
-        normals,
-        uvs,
-        indices,
-        origin - side * size * 0.18,
-        side,
-        up,
-        size * 0.78,
-    );
-    append_diamond_leaf(
-        positions,
-        normals,
-        uvs,
-        indices,
-        origin + side * size * 0.18,
-        side,
-        up,
-        size * 0.78,
-    );
-    append_diamond_leaf(
-        positions,
-        normals,
-        uvs,
-        indices,
-        origin + up * size * 0.20,
-        side,
-        up,
-        size * 0.70,
-    );
+    append_diamond_leaf(buffers, origin - side * size * 0.18, side, up, size * 0.78);
+    append_diamond_leaf(buffers, origin + side * size * 0.18, side, up, size * 0.78);
+    append_diamond_leaf(buffers, origin + up * size * 0.20, side, up, size * 0.70);
 }
 
 /// Generates a separate leaf/frond mesh for the provided species graph.
@@ -1802,33 +1673,33 @@ pub fn generate_leaf_mesh(
         .round()
         .max(1.0) as u32;
 
-    for leaf_idx in leaf_indices {
-        let branch = &graph.branches[leaf_idx];
-        let branch_dir = (branch.end - branch.start).normalize_or_zero();
+    {
+        let mut buffers = MeshBuffers {
+            positions: &mut positions,
+            normals: &mut normals,
+            uvs: &mut uvs,
+            indices: &mut indices,
+        };
 
-        for _ in 0..density_count {
-            let size_variation =
-                1.0 + rng.random_range(-preset.leaves.size_variance..=preset.leaves.size_variance);
-            let size = preset.leaves.size * size_variation.max(0.2);
-            let angle = rng.random_range(0.0..std::f32::consts::TAU);
-            let offset_radius = rng.random_range(0.02..=0.18) * size;
-            let origin = branch.end
-                + Vec3::new(
-                    offset_radius * angle.cos(),
-                    rng.random_range(-0.05_f32..0.08_f32),
-                    offset_radius * angle.sin(),
-                );
+        for leaf_idx in leaf_indices {
+            let branch = &graph.branches[leaf_idx];
+            let branch_dir = (branch.end - branch.start).normalize_or_zero();
 
-            append_leaf_card(
-                &mut positions,
-                &mut normals,
-                &mut uvs,
-                &mut indices,
-                origin,
-                branch_dir,
-                size,
-                preset,
-            );
+            for _ in 0..density_count {
+                let size_variation = 1.0
+                    + rng.random_range(-preset.leaves.size_variance..=preset.leaves.size_variance);
+                let size = preset.leaves.size * size_variation.max(0.2);
+                let angle = rng.random_range(0.0..std::f32::consts::TAU);
+                let offset_radius = rng.random_range(0.02..=0.18) * size;
+                let origin = branch.end
+                    + Vec3::new(
+                        offset_radius * angle.cos(),
+                        rng.random_range(-0.05_f32..0.08_f32),
+                        offset_radius * angle.sin(),
+                    );
+
+                append_leaf_card(&mut buffers, origin, branch_dir, size, preset);
+            }
         }
     }
 
@@ -3838,7 +3709,7 @@ mod tests {
         }
     }
 
-    // ==================== Phase 2: Cross-Pattern Leaf Volume Tests ====================
+    // ==================== Cross-Pattern Leaf Volume Tests ====================
 
     /// Tests that `append_leaf_card_cross` produces exactly twice the vertices
     /// of a single `append_leaf_shape` call for Oak.
@@ -3855,7 +3726,17 @@ mod tests {
         let mut u1 = Vec::new();
         let mut i1 = Vec::new();
         append_leaf_shape(
-            &mut p1, &mut n1, &mut u1, &mut i1, origin, side, up, size, &preset,
+            &mut MeshBuffers {
+                positions: &mut p1,
+                normals: &mut n1,
+                uvs: &mut u1,
+                indices: &mut i1,
+            },
+            origin,
+            side,
+            up,
+            size,
+            &preset,
         );
         let single_verts = p1.len();
 
@@ -3864,7 +3745,17 @@ mod tests {
         let mut u2 = Vec::new();
         let mut i2 = Vec::new();
         append_leaf_card_cross(
-            &mut p2, &mut n2, &mut u2, &mut i2, origin, side, up, size, &preset,
+            &mut MeshBuffers {
+                positions: &mut p2,
+                normals: &mut n2,
+                uvs: &mut u2,
+                indices: &mut i2,
+            },
+            origin,
+            side,
+            up,
+            size,
+            &preset,
         );
         let cross_verts = p2.len();
 
@@ -3892,10 +3783,12 @@ mod tests {
         let mut u_card = Vec::new();
         let mut i_card = Vec::new();
         append_leaf_card(
-            &mut p_card,
-            &mut n_card,
-            &mut u_card,
-            &mut i_card,
+            &mut MeshBuffers {
+                positions: &mut p_card,
+                normals: &mut n_card,
+                uvs: &mut u_card,
+                indices: &mut i_card,
+            },
             origin,
             direction,
             size,
@@ -3936,7 +3829,17 @@ mod tests {
             let side = Vec3::X;
             let up = Vec3::Y;
             append_leaf_shape(
-                &mut p1, &mut n1, &mut u1, &mut i1, origin, side, up, size, &preset,
+                &mut MeshBuffers {
+                    positions: &mut p1,
+                    normals: &mut n1,
+                    uvs: &mut u1,
+                    indices: &mut i1,
+                },
+                origin,
+                side,
+                up,
+                size,
+                &preset,
             );
 
             // Cross-pattern via append_leaf_card (which calls append_leaf_card_cross)
@@ -3945,7 +3848,16 @@ mod tests {
             let mut u2 = Vec::new();
             let mut i2 = Vec::new();
             append_leaf_card(
-                &mut p2, &mut n2, &mut u2, &mut i2, origin, direction, size, &preset,
+                &mut MeshBuffers {
+                    positions: &mut p2,
+                    normals: &mut n2,
+                    uvs: &mut u2,
+                    indices: &mut i2,
+                },
+                origin,
+                direction,
+                size,
+                &preset,
             );
 
             assert!(
@@ -3978,11 +3890,11 @@ mod tests {
     }
 
     /// Tests that `LeafPreset.count` for cross-pattern species is 30–40% lower
-    /// than the pre-Phase-2 values (budget compensation for doubled polygon count).
+    /// than the earlier values (budget compensation for doubled polygon count).
     #[test]
     fn test_leaf_preset_count_reduced_for_cross_pattern_species() {
-        // Pre-Phase-2 counts: Oak=5, Birch=3, Willow=6, Palm=8, Shrub=6
-        // Post-Phase-2 target: each reduced 30–40%
+        // Earlier counts: Oak=5, Birch=3, Willow=6, Palm=8, Shrub=6
+        // Target after the cross-pattern leaf change: each reduced 30–40%
         let cases = [
             (TreeType::Oak, 5u32),
             (TreeType::Birch, 3),

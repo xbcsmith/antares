@@ -4,7 +4,7 @@
 //! Skill check API — deterministic skill rank comparisons used by game mechanics.
 //!
 //! Skill checks compare a character's effective skill rank against a numeric
-//! difficulty threshold. All Phase 3 integrations use deterministic checks
+//! difficulty threshold. All integrations use deterministic checks
 //! (`evaluate_skill_check_without_roll`) unless a specific mechanic requires
 //! a randomized outcome.
 //!
@@ -153,7 +153,7 @@ pub struct SkillCheckResult {
 /// Compares `rank` against `difficulty` without any dice roll.
 ///
 /// Succeeds when `rank >= difficulty`. This is the default check for all
-/// Phase 3 integrations. Use randomized checks only when a specific game
+/// integrations. Use randomized checks only when a specific game
 /// mechanic explicitly requires non-determinism.
 ///
 /// # Arguments

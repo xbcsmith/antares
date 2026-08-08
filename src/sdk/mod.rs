@@ -62,7 +62,7 @@ pub mod validation;
 // Re-export commonly used types
 pub use cache::{CacheConfig, CacheStats, ContentCache, ValidationCache};
 pub use campaign_loader::{
-    Campaign, CampaignConfig, CampaignError, CampaignInfo, CampaignLoader, ValidationReport,
+    Campaign, CampaignConfig, CampaignInfo, CampaignLoadError, CampaignLoader, ValidationReport,
 };
 pub use campaign_packager::{CampaignPackager, PackageError, PackageManifest};
 pub use database::{ContentDatabase, ContentStats, DatabaseError};
@@ -72,8 +72,8 @@ pub use dialogue_editor::{
 };
 pub use error_formatter::{ErrorContext, ErrorFormatter, ProgressReporter};
 pub use game_config::{
-    AudioConfig, CameraConfig, CameraMode, ConfigError, ControlsConfig, GameConfig, GraphicsConfig,
-    ShadowQuality,
+    AudioConfig, CameraConfig, CameraMode, ControlsConfig, GameConfig, GameConfigError,
+    GraphicsConfig, ShadowQuality,
 };
 pub use map_editor::{
     browse_items, browse_maps, browse_monsters, browse_spells, is_valid_item_id, is_valid_map_id,
@@ -87,4 +87,4 @@ pub use quest_editor::{
 pub use serialization::{format_ron, merge_ron_data, validate_ron_syntax, SerializationError};
 pub use templates::{basic_armor, basic_weapon, dungeon_map, town_map};
 pub use tool_config::{DisplayConfig, EditorPreferences, PathConfig, ToolConfig, ValidationConfig};
-pub use validation::{Severity, ValidationError, Validator};
+pub use validation::{CampaignValidationError, Severity, Validator};

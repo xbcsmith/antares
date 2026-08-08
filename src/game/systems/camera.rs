@@ -9,8 +9,8 @@
 //! # Camera Modes
 //!
 //! - **FirstPerson**: Classic Might and Magic 1 style first-person view
-//! - **Tactical**: Overhead tactical view (future implementation)
-//! - **Isometric**: Isometric view (future implementation)
+//! - **Tactical**: Overhead orthographic top-down view for tactical RPG play
+//! - **Isometric**: Classic 45° / ~35° elevation perspective view
 //!
 //! # Configuration
 //!
@@ -96,14 +96,10 @@ fn setup_camera(mut commands: Commands, config: Res<CameraConfigResource>) {
             setup_first_person_camera(&mut commands, camera_config);
         }
         CameraMode::Tactical => {
-            // Future implementation: tactical overhead view
-            warn!("Tactical camera mode not yet implemented, falling back to first-person");
-            setup_first_person_camera(&mut commands, camera_config);
+            setup_tactical_camera(&mut commands, camera_config);
         }
         CameraMode::Isometric => {
-            // Future implementation: isometric view
-            warn!("Isometric camera mode not yet implemented, falling back to first-person");
-            setup_first_person_camera(&mut commands, camera_config);
+            setup_isometric_camera(&mut commands, camera_config);
         }
     }
 
@@ -157,6 +153,52 @@ fn setup_first_person_camera(commands: &mut Commands, config: &CameraConfig) {
     ));
 }
 
+/// Sets up a tactical overhead camera
+///
+/// Camera is positioned above the party looking straight down.
+/// Uses orthographic projection for a flat tactical view.
+fn setup_tactical_camera(commands: &mut Commands, _config: &CameraConfig) {
+    // Overhead tactical view: orthographic projection, looking straight down.
+    // The camera is placed directly above tile (0, 0) at startup; it is moved
+    // each frame by update_tactical_camera to track the party.
+    commands.spawn((
+        Camera3d::default(),
+        Projection::Orthographic(OrthographicProjection {
+            scale: 0.05, // tiles per pixel; smaller = more zoomed in
+            ..OrthographicProjection::default_3d()
+        }),
+        Transform::from_xyz(0.5, 30.0, 0.5).looking_at(Vec3::new(0.5, 0.0, 0.5), Vec3::NEG_Z),
+        MainCamera,
+    ));
+}
+
+/// Sets up an isometric camera
+///
+/// Camera is positioned at a 45° azimuth angle and ~35° elevation above the map.
+/// Uses perspective projection for depth cues.
+fn setup_isometric_camera(commands: &mut Commands, config: &CameraConfig) {
+    // Isometric perspective: camera offset at 45° from the front-right,
+    // elevated to give a classic isometric RPG view.
+    let iso_distance = 20.0_f32;
+    let iso_height = 14.0_f32; // ~35° elevation angle
+    let iso_lateral = iso_distance; // equal X and Z offset for 45° azimuth
+
+    let projection = Projection::Perspective(PerspectiveProjection {
+        fov: config.fov.to_radians(),
+        near: config.near_clip,
+        far: config.far_clip,
+        ..default()
+    });
+
+    commands.spawn((
+        Camera3d::default(),
+        projection,
+        Tonemapping::None,
+        Transform::from_xyz(iso_lateral, iso_height, iso_lateral).looking_at(Vec3::ZERO, Vec3::Y),
+        MainCamera,
+    ));
+}
+
 /// Updates camera position and rotation based on party state
 ///
 /// Synchronizes camera with party position and facing direction from game state.
@@ -185,21 +227,12 @@ fn update_camera(
                 );
             }
             CameraMode::Tactical => {
-                // Future: tactical camera update
-                update_first_person_camera(
-                    &mut camera_transform,
-                    party_pos,
-                    party_facing,
-                    camera_config,
-                    time.delta_secs(),
-                );
+                update_tactical_camera(&mut camera_transform, party_pos, camera_config);
             }
             CameraMode::Isometric => {
-                // Future: isometric camera update
-                update_first_person_camera(
+                update_isometric_camera(
                     &mut camera_transform,
                     party_pos,
-                    party_facing,
                     camera_config,
                     time.delta_secs(),
                 );
@@ -287,6 +320,44 @@ fn update_first_person_camera(
         // Instant rotation
         transform.rotation = Quat::from_rotation_y(target_y_rotation);
     }
+}
+
+/// Updates tactical overhead camera position to follow the party.
+///
+/// Camera stays directly above the party, looking straight down.
+fn update_tactical_camera(
+    transform: &mut Transform,
+    party_pos: crate::domain::types::Position,
+    _config: &CameraConfig,
+) {
+    let center_x = party_pos.x as f32 + 0.5;
+    let center_z = party_pos.y as f32 + 0.5;
+    let height = 30.0_f32;
+    transform.translation = Vec3::new(center_x, height, center_z);
+    // Look straight down, using NEG_Z as the "up" direction so the view
+    // faces north (world -Z = map north) when the camera points down.
+    transform.look_at(Vec3::new(center_x, 0.0, center_z), Vec3::NEG_Z);
+}
+
+/// Updates isometric camera position to follow the party.
+///
+/// Camera maintains a fixed offset relative to the party while always looking
+/// at the party's world position.
+fn update_isometric_camera(
+    transform: &mut Transform,
+    party_pos: crate::domain::types::Position,
+    _config: &CameraConfig,
+    _delta_time: f32,
+) {
+    let center_x = party_pos.x as f32 + 0.5;
+    let center_z = party_pos.y as f32 + 0.5;
+
+    let iso_distance = 20.0_f32;
+    let iso_height = 14.0_f32;
+
+    // Camera is always at a 45° azimuth (NE diagonal) offset from party
+    transform.translation = Vec3::new(center_x + iso_distance, iso_height, center_z + iso_distance);
+    transform.look_at(Vec3::new(center_x, 0.0, center_z), Vec3::Y);
 }
 
 #[cfg(test)]
@@ -501,6 +572,102 @@ mod tests {
         );
 
         assert_eq!(transform.translation.y, 1.5);
+    }
+
+    #[test]
+    fn test_tactical_camera_positions_above_party() {
+        let mut transform = Transform::default();
+        let config = CameraConfig::default();
+
+        update_tactical_camera(&mut transform, Position { x: 5, y: 3 }, &config);
+
+        // Camera should be directly above party tile center
+        assert!(
+            (transform.translation.x - 5.5).abs() < 0.01,
+            "Camera X should be centered on tile 5"
+        );
+        assert!(
+            (transform.translation.z - 3.5).abs() < 0.01,
+            "Camera Z should be centered on tile 3"
+        );
+        assert!(
+            transform.translation.y > 0.0,
+            "Camera should be elevated above the map"
+        );
+    }
+
+    #[test]
+    fn test_tactical_camera_looks_downward() {
+        let mut transform = Transform::default();
+        let config = CameraConfig::default();
+
+        update_tactical_camera(&mut transform, Position { x: 0, y: 0 }, &config);
+
+        // Camera forward direction should be mostly downward (Y < 0 after look_at)
+        let forward = transform.forward();
+        assert!(
+            forward.y < -0.5,
+            "Tactical camera forward should have strong downward component"
+        );
+    }
+
+    #[test]
+    fn test_isometric_camera_follows_party() {
+        let mut transform = Transform::default();
+        let config = CameraConfig::default();
+
+        update_isometric_camera(&mut transform, Position { x: 10, y: 5 }, &config, 0.016);
+        let pos1 = transform.translation;
+
+        update_isometric_camera(&mut transform, Position { x: 11, y: 5 }, &config, 0.016);
+        let pos2 = transform.translation;
+
+        // Moving party by 1 tile in X should move camera by exactly 1 unit in X
+        assert!(
+            (pos2.x - pos1.x - 1.0).abs() < 0.01,
+            "Isometric camera should track party X movement"
+        );
+    }
+
+    #[test]
+    fn test_isometric_camera_maintains_elevation() {
+        let mut transform = Transform::default();
+        let config = CameraConfig::default();
+
+        update_isometric_camera(&mut transform, Position { x: 5, y: 5 }, &config, 0.016);
+
+        // Camera should be elevated (not on the ground)
+        assert!(
+            transform.translation.y > 5.0,
+            "Isometric camera should be elevated above ground"
+        );
+    }
+
+    #[test]
+    fn test_camera_mode_tactical_not_first_person() {
+        // Tactical mode places the camera much higher than first-person.
+        // We verify by comparing the Y translation produced by each update fn.
+        let mut fp_transform = Transform::default();
+        let mut tactical_transform = Transform::default();
+        let config = CameraConfig {
+            smooth_rotation: false,
+            ..Default::default()
+        };
+
+        update_first_person_camera(
+            &mut fp_transform,
+            Position { x: 5, y: 5 },
+            crate::domain::types::Direction::North,
+            &config,
+            0.016,
+        );
+        update_tactical_camera(&mut tactical_transform, Position { x: 5, y: 5 }, &config);
+
+        // Tactical camera should be much higher than first-person
+        assert!(
+            tactical_transform.translation.y > fp_transform.translation.y + 10.0,
+            "Tactical camera should be much higher than first-person"
+        );
     }
 
     #[test]

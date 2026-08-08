@@ -147,6 +147,45 @@ impl MonstersEditorState {
         }
     }
 
+    /// Returns the monsters whose name matches the current search query.
+    ///
+    /// The match is case-insensitive and performed as a substring test against
+    /// the monster name. An empty query returns every monster (paired with its
+    /// original index).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::monsters_editor::MonstersEditorState;
+    ///
+    /// let mut goblin = MonstersEditorState::default_monster();
+    /// goblin.id = 1;
+    /// goblin.name = "Goblin".to_string();
+    /// let mut dragon = MonstersEditorState::default_monster();
+    /// dragon.id = 2;
+    /// dragon.name = "Dragon".to_string();
+    /// let monsters = vec![goblin, dragon];
+    ///
+    /// let mut state = MonstersEditorState::new();
+    /// state.search_query = "drag".to_string();
+    /// let filtered = state.filtered_monsters(&monsters);
+    /// assert_eq!(filtered.len(), 1);
+    /// assert_eq!(filtered[0].1.name, "Dragon");
+    /// ```
+    pub fn filtered_monsters<'a>(
+        &self,
+        monsters: &'a [MonsterDefinition],
+    ) -> Vec<(usize, &'a MonsterDefinition)> {
+        let search_lower = self.search_query.to_lowercase();
+        monsters
+            .iter()
+            .enumerate()
+            .filter(|(_, monster)| {
+                search_lower.is_empty() || monster.name.to_lowercase().contains(&search_lower)
+            })
+            .collect()
+    }
+
     /// Shows the monsters editor UI
     ///
     /// # Arguments
@@ -329,15 +368,10 @@ impl MonstersEditorState {
         monsters: &mut Vec<MonsterDefinition>,
         ctx: &mut EditorContext<'_>,
     ) {
-        let search_lower = self.search_query.to_lowercase();
-
         // Build filtered list snapshot to avoid borrow conflicts in closures
-        let filtered_monsters: Vec<(usize, MonsterDefinition)> = monsters
-            .iter()
-            .enumerate()
-            .filter(|(_, monster)| {
-                search_lower.is_empty() || monster.name.to_lowercase().contains(&search_lower)
-            })
+        let filtered_monsters: Vec<(usize, MonsterDefinition)> = self
+            .filtered_monsters(monsters)
+            .into_iter()
             .map(|(idx, monster)| (idx, monster.clone()))
             .collect();
 
@@ -1517,6 +1551,58 @@ mod tests {
             !state.edit_session_initialized,
             "edit_session_initialized must start false"
         );
+    }
+
+    #[test]
+    fn test_filtered_monsters_search_behavior() {
+        let monsters = {
+            let mut goblin = MonstersEditorState::default_monster();
+            goblin.id = 1;
+            goblin.name = "Goblin".to_string();
+            let mut hobgoblin = MonstersEditorState::default_monster();
+            hobgoblin.id = 2;
+            hobgoblin.name = "Hobgoblin".to_string();
+            let mut dragon = MonstersEditorState::default_monster();
+            dragon.id = 3;
+            dragon.name = "Dragon".to_string();
+            vec![goblin, hobgoblin, dragon]
+        };
+
+        let mut state = MonstersEditorState::new();
+
+        // Empty query returns every monster.
+        assert_eq!(
+            state
+                .filtered_monsters(&monsters)
+                .iter()
+                .map(|(_, m)| m.id)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+
+        // Substring "goblin" keeps both goblin variants (case-insensitive).
+        state.search_query = "GOBLIN".to_string();
+        assert_eq!(
+            state
+                .filtered_monsters(&monsters)
+                .iter()
+                .map(|(_, m)| m.id)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+
+        // Narrower query isolates a single survivor.
+        state.search_query = "dragon".to_string();
+        let survivors: Vec<u8> = state
+            .filtered_monsters(&monsters)
+            .iter()
+            .map(|(_, m)| m.id)
+            .collect();
+        assert_eq!(survivors, vec![3]);
+
+        // A non-matching query returns nothing.
+        state.search_query = "kobold".to_string();
+        assert!(state.filtered_monsters(&monsters).is_empty());
     }
 
     #[test]

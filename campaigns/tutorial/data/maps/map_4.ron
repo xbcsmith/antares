@@ -7201,7 +7201,7 @@
                 color_tint: None,
                 scale: None,
                 y_offset: None,
-                rotation_y: None,
+                rotation_y: Some(90.0),
                 sprite: None,
             ),
         ),
@@ -8067,10 +8067,10 @@
             y: 17,
         ): Teleport(
             name: "Dungeon Portal",
-            description: "A portal that teleports the party to Dark Forrest (map 4) at (19,10).",
+            description: "A portal that teleports the party to Dark Forest (map 2) at (16,10).",
             destination: (
-                x: 18,
-                y: 10,
+                x: 19,
+                y: 8,
             ),
             map_id: 2,
         ),

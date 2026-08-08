@@ -102,7 +102,7 @@ impl Plugin for DialoguePlugin {
             .add_systems(
                 Update,
                 (
-                    dialogue_input_system,
+                    dialogue_input_system.run_if(crate::game::run_conditions::in_dialogue_mode),
                     handle_start_dialogue,
                     handle_simple_dialogue,
                     handle_select_choice.before(crate::game::systems::ui::consume_game_log_events),
@@ -110,7 +110,8 @@ impl Plugin for DialoguePlugin {
                     crate::game::systems::dialogue_visuals::update_dialogue_text,
                     crate::game::systems::dialogue_choices::spawn_choice_ui,
                     crate::game::systems::dialogue_choices::update_choice_visuals,
-                    crate::game::systems::dialogue_choices::choice_input_system,
+                    crate::game::systems::dialogue_choices::choice_input_system
+                        .run_if(crate::game::run_conditions::in_dialogue_mode),
                 ),
             )
             .add_systems(
@@ -138,13 +139,8 @@ fn dialogue_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
     dialogue_panel_query: Query<(&Interaction, Ref<Interaction>), With<DialoguePanelRoot>>,
-    global_state: Res<GlobalState>,
     mut advance_writer: MessageWriter<AdvanceDialogue>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Dialogue(_)) {
-        return;
-    }
-
     let keyboard_advance =
         keyboard.just_pressed(KeyCode::Space) || keyboard.just_pressed(KeyCode::KeyE);
     let mouse_just_pressed = mouse_input::mouse_just_pressed(mouse_buttons.as_deref());
@@ -376,16 +372,12 @@ fn handle_select_choice(
         // --- Read-only phase: inspect mode and capture identifiers ---
         let speaker_entity = match &global_state.0.mode {
             GameMode::Dialogue(state) => {
-                if state.active_tree_id.is_none() {
+                let Some(active_tree_id) = state.active_tree_id else {
                     // Simple dialogue: any choice (like "Goodbye") ends it
                     global_state.0.return_to_exploration();
                     continue;
-                }
-                (
-                    state.active_tree_id.unwrap(),
-                    state.current_node_id,
-                    state.speaker_entity,
-                )
+                };
+                (active_tree_id, state.current_node_id, state.speaker_entity)
             }
             _ => {
                 // Not in dialogue mode - ignore the choice
@@ -562,11 +554,6 @@ fn handle_select_choice(
 /// - `HasItem` sums the party's inventories
 /// - `HasGold` reads party gold
 /// - `MinLevel` checks first party member's level (simplified)
-// NOTE: `db` is intentionally kept for forward compatibility. Future condition types
-// (e.g. HasItem, CheckSkill) will need to consult the content database for validation.
-// The suppression is correct — removing `db` would require adding it back when those
-// conditions are implemented, breaking the API.
-#[allow(clippy::only_used_in_recursion)]
 fn evaluate_conditions(
     conds: &[DialogueCondition],
     game_state: &crate::application::GameState,
@@ -642,22 +629,17 @@ fn evaluate_conditions(
                     return false;
                 }
             }
-            DialogueCondition::FlagSet {
-                flag_name: _,
-                value,
-            } => {
-                // Flag system isn't implemented in GameState yet; assume flags are unset.
-                // If the condition requires the flag to be true, treat as not satisfied.
-                if *value {
+            DialogueCondition::FlagSet { flag_name, value } => {
+                let actual = game_state.global_flags.get(flag_name);
+                if actual != *value {
                     return false;
                 }
             }
-            DialogueCondition::ReputationThreshold {
-                faction: _,
-                threshold: _,
-            } => {
-                // Reputation system not implemented; conservatively fail the condition.
-                return false;
+            DialogueCondition::ReputationThreshold { faction, threshold } => {
+                let current = game_state.reputation.get(faction);
+                if current < *threshold {
+                    return false;
+                }
             }
             DialogueCondition::And(inner) => {
                 if !evaluate_conditions(inner.as_slice(), game_state, db) {
@@ -1028,8 +1010,8 @@ fn execute_recruit_to_inn(
 /// | `TakeItems { items }` | Removes items from the first party member (best-effort) |
 /// | `GiveGold { amount }` | Adds gold to shared party pool (saturating) |
 /// | `TakeGold { amount }` | Subtracts gold from shared party pool (saturating) |
-/// | `SetFlag { flag_name, value }` | Logs a warning — not yet persisted |
-/// | `ChangeReputation { faction, change }` | Logs a warning — not yet implemented |
+/// | `SetFlag { flag_name, value }` | Persists the flag via `game_state.global_flags.set`; logs the change at `info!` level |
+/// | `ChangeReputation { faction, change }` | Applies the delta via `game_state.reputation.change`; logs the change at `info!` level |
 /// | `GrantExperience { amount }` | Adds XP to the first party member |
 /// | `RecruitToParty { character_id }` | Directly recruits the character to the active party |
 /// | `RecruitToInn { character_id, innkeeper_id }` | Routes the character to the specified inn |
@@ -1132,14 +1114,12 @@ fn execute_action(
             game_state.party.gold = game_state.party.gold.saturating_sub(*amount);
         }
         DialogueAction::SetFlag { flag_name, value } => {
-            tracing::warn!("SetFlag '{}' = {} (not persisted)", flag_name, value);
+            game_state.global_flags.set(flag_name, *value);
+            tracing::info!("SetFlag '{}' = {}", flag_name, value);
         }
         DialogueAction::ChangeReputation { faction, change } => {
-            tracing::warn!(
-                "ChangeReputation {} by {} (not yet implemented)",
-                faction,
-                change
-            );
+            game_state.reputation.change(faction, *change);
+            tracing::info!("ChangeReputation '{}' by {}", faction, change);
         }
         DialogueAction::TriggerEvent { event_name } => {
             // Special-case handling for opening the inn party management UI via
@@ -1780,13 +1760,11 @@ fn execute_action(
                 }
                 Err(e) => {
                     // On failure nothing was mutated: no commit needed
-                    warn!("BuyItem failed: {}", e);
-                    if let Some(writer) = game_log_writer.as_mut() {
-                        writer.write(crate::game::systems::ui::GameLogEvent {
-                            text: format!("Cannot buy item: {}", e),
-                            category: crate::game::systems::ui::LogCategory::System,
-                        });
-                    }
+                    crate::report_err!(
+                        game_log_writer,
+                        crate::game::systems::ui::LogCategory::System,
+                        format!("Cannot buy item: {}", e)
+                    );
                 }
             }
         }
@@ -1918,13 +1896,11 @@ fn execute_action(
                     }
                 }
                 Err(e) => {
-                    warn!("SellItem failed: {}", e);
-                    if let Some(writer) = game_log_writer.as_mut() {
-                        writer.write(crate::game::systems::ui::GameLogEvent {
-                            text: format!("Cannot sell item: {}", e),
-                            category: crate::game::systems::ui::LogCategory::System,
-                        });
-                    }
+                    crate::report_err!(
+                        game_log_writer,
+                        crate::game::systems::ui::LogCategory::System,
+                        format!("Cannot sell item: {}", e)
+                    );
                 }
             }
         }

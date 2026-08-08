@@ -12,6 +12,23 @@
 //! The Z channel always encodes the un-scaled surface normal pointing out of the
 //! page, giving the classic blue-ish tint associated with normal maps.
 
+// Error-handling regression gate (Phase 4): forbid new panicking `unwrap`/
+// `expect` and ignored `#[must_use]` results in non-test code. Test code is
+// exempt.
+#![warn(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::let_underscore_must_use
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::let_underscore_must_use
+    )
+)]
+
 use image::{DynamicImage, ImageBuffer, Rgb};
 use std::path::Path;
 use thiserror::Error;
@@ -20,7 +37,7 @@ use thiserror::Error;
 
 /// Errors that can occur while generating or saving the normal map.
 #[derive(Error, Debug)]
-pub enum GeneratorError {
+pub enum NormalMapGeneratorError {
     /// An I/O error occurred (e.g. directory creation or file copy).
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
@@ -150,7 +167,7 @@ pub fn generate_normal_map(img: &DynamicImage) -> ImageBuffer<Rgb<u8>, Vec<u8>> 
 
 // ── main ──────────────────────────────────────────────────────────────────────
 
-fn main() -> Result<(), GeneratorError> {
+fn main() -> Result<(), NormalMapGeneratorError> {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
 
     // Load the source bark texture.

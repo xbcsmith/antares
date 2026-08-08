@@ -50,10 +50,6 @@
 //!
 //! Clouds are visible whenever `is_outdoor == true` (ambient light darkens
 //! them at night automatically).
-//!
-//! # Architecture Reference
-//!
-//! See `docs/explanation/sky_system_implementation_plan.md` Phase 4 and Phase 5.
 
 use crate::domain::types::{MapId, TimeOfDay};
 use crate::domain::world::{Map, SkyConfig};
@@ -430,10 +426,9 @@ impl SkyBodyRenderState {
 
 /// Returns the full sun/star render state for the given outdoor flag and time.
 ///
-/// This free function mirrors the Phase 6 contract and delegates to
-/// [`SkyBodyRenderState::for_time`] so callers do not need to know whether the
-/// render contract is implemented as an associated function or a standalone
-/// helper.
+/// This free function mirrors [`SkyBodyRenderState::for_time`] and delegates to
+/// it so callers do not need to know whether the render state is produced by an
+/// associated function or a standalone helper.
 ///
 /// # Examples
 ///

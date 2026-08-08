@@ -22,6 +22,23 @@
 //! antares-sdk item  --campaign data/test_campaign
 //! ```
 
+// Error-handling regression gate (Phase 4): forbid new panicking `unwrap`/
+// `expect` and ignored `#[must_use]` results in non-test code. Test code is
+// exempt.
+#![warn(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::let_underscore_must_use
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::let_underscore_must_use
+    )
+)]
+
 use antares::sdk::cli;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
@@ -100,6 +117,9 @@ fn init_tracing(verbose: bool, quiet: bool) {
     };
 
     let filter = EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new("info"));
+    // Best-effort logging init: a global subscriber may already be installed
+    // (e.g. when a subcommand re-enters), in which case the error is ignored.
+    #[allow(clippy::let_underscore_must_use)]
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }
 
@@ -495,7 +515,7 @@ mod tests {
         }
     }
 
-    // ── Phase 4: --verbose / --quiet / --campaign tests ──────────────────────
+    // ── --verbose / --quiet / --campaign tests ──────────────────────
 
     /// `antares-sdk --verbose campaign validate --all` must set the top-level
     /// `verbose` flag to `true` while leaving `quiet` at its default (`false`).

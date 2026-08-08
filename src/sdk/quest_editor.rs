@@ -211,75 +211,48 @@ pub fn suggest_quest_ids(db: &ContentDatabase, partial_name: &str) -> Vec<(Quest
 // ===== Quest Validation =====
 
 /// Validation error for quests
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 pub enum QuestValidationError {
     /// Quest has no stages
+    #[error("Quest has no stages")]
     NoStages,
 
     /// Quest stage has no objectives
+    #[error("Stage {stage_number} has no objectives")]
     StageHasNoObjectives { stage_number: u8 },
 
     /// Referenced monster ID doesn't exist
+    #[error("Invalid monster ID: {monster_id}")]
     InvalidMonsterId { monster_id: MonsterId },
 
     /// Referenced item ID doesn't exist
+    #[error("Invalid item ID: {item_id}")]
     InvalidItemId { item_id: ItemId },
 
     /// Referenced map ID doesn't exist
+    #[error("Invalid map ID: {map_id}")]
     InvalidMapId { map_id: MapId },
 
     /// Referenced quest ID doesn't exist (for prerequisites or rewards)
+    #[error("Invalid quest ID: {quest_id}")]
     InvalidQuestId { quest_id: QuestId },
 
     /// Invalid level requirements (min > max)
+    #[error("Invalid level requirements: min {min} > max {max}")]
     InvalidLevelRequirements { min: u8, max: u8 },
 
     /// Circular quest dependency
+    #[error("Circular quest dependency detected: {quest_id}")]
     CircularDependency { quest_id: QuestId },
 
     /// Stage numbers are not sequential
+    #[error("Quest stages are not sequential")]
     NonSequentialStages,
 
     /// Duplicate stage numbers
+    #[error("Duplicate stage number: {stage_number}")]
     DuplicateStageNumber { stage_number: u8 },
 }
-
-impl std::fmt::Display for QuestValidationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            QuestValidationError::NoStages => write!(f, "Quest has no stages"),
-            QuestValidationError::StageHasNoObjectives { stage_number } => {
-                write!(f, "Stage {} has no objectives", stage_number)
-            }
-            QuestValidationError::InvalidMonsterId { monster_id } => {
-                write!(f, "Invalid monster ID: {}", monster_id)
-            }
-            QuestValidationError::InvalidItemId { item_id } => {
-                write!(f, "Invalid item ID: {}", item_id)
-            }
-            QuestValidationError::InvalidMapId { map_id } => {
-                write!(f, "Invalid map ID: {}", map_id)
-            }
-            QuestValidationError::InvalidQuestId { quest_id } => {
-                write!(f, "Invalid quest ID: {}", quest_id)
-            }
-            QuestValidationError::InvalidLevelRequirements { min, max } => {
-                write!(f, "Invalid level requirements: min {} > max {}", min, max)
-            }
-            QuestValidationError::CircularDependency { quest_id } => {
-                write!(f, "Circular quest dependency detected: {}", quest_id)
-            }
-            QuestValidationError::NonSequentialStages => {
-                write!(f, "Quest stages are not sequential")
-            }
-            QuestValidationError::DuplicateStageNumber { stage_number } => {
-                write!(f, "Duplicate stage number: {}", stage_number)
-            }
-        }
-    }
-}
-
-impl std::error::Error for QuestValidationError {}
 
 /// Validate a quest against the content database
 ///

@@ -219,10 +219,6 @@ pub fn choice_input_system(
     mut ev_select: MessageWriter<SelectDialogueChoice>,
     interaction_query: Query<(&Interaction, Ref<Interaction>, &ChoiceButton), With<Button>>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Dialogue(_)) {
-        return;
-    }
-
     // Handle Escape to close dialogue.
     // Also handle Space/Enter if there are no choices (terminal node).
     let is_terminal = choice_state.choice_count == 0;

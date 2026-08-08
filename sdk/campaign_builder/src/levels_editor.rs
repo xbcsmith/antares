@@ -384,6 +384,39 @@ impl LevelsEditorState {
         // base_xp / xp_multiplier — refreshed from caller on next show().
     }
 
+    /// Returns the level-threshold entries whose class ID matches the current
+    /// search filter.
+    ///
+    /// The match is a case-insensitive substring test against `class_id`. An
+    /// empty filter returns every entry (paired with its original index).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::levels::ClassLevelThresholds;
+    /// use campaign_builder::levels_editor::LevelsEditorState;
+    ///
+    /// let mut state = LevelsEditorState::default();
+    /// state.levels = vec![
+    ///     ClassLevelThresholds { class_id: "knight".to_string(), thresholds: vec![0] },
+    ///     ClassLevelThresholds { class_id: "sorcerer".to_string(), thresholds: vec![0] },
+    /// ];
+    /// state.search_filter = "knight".to_string();
+    /// let filtered = state.filtered_levels();
+    /// assert_eq!(filtered.len(), 1);
+    /// assert_eq!(filtered[0].1.class_id, "knight");
+    /// ```
+    pub fn filtered_levels(&self) -> Vec<(usize, &ClassLevelThresholds)> {
+        let filter_lower = self.search_filter.to_lowercase();
+        self.levels
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| {
+                filter_lower.is_empty() || e.class_id.to_lowercase().contains(&filter_lower)
+            })
+            .collect()
+    }
+
     // ------------------------------------------------------------------ fill helpers
 
     /// Fill `edit_buffer_thresholds` using the campaign XP formula:
@@ -688,14 +721,9 @@ impl LevelsEditorState {
         // Pre-compute everything the left closure needs so that we avoid any
         // conflicting borrow when both closures are constructed simultaneously
         // (Rule 10).
-        let filter_lower = self.search_filter.to_lowercase();
         let filtered: Vec<(usize, ClassLevelThresholds)> = self
-            .levels
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| {
-                filter_lower.is_empty() || e.class_id.to_lowercase().contains(&filter_lower)
-            })
+            .filtered_levels()
+            .into_iter()
             .map(|(idx, e)| (idx, e.clone()))
             .collect();
 
@@ -1369,6 +1397,53 @@ mod tests {
             class_id: class_id.to_string(),
             thresholds: vec![0, 1200, 3000, 6000, 10000],
         }
+    }
+
+    /// `filtered_levels` narrows entries by a case-insensitive `class_id` match.
+    #[test]
+    fn test_filtered_levels_search_behavior() {
+        let mut state = LevelsEditorState {
+            levels: vec![
+                make_entry("knight"),
+                make_entry("knight_errant"),
+                make_entry("sorcerer"),
+            ],
+            ..Default::default()
+        };
+
+        // Empty filter returns every entry.
+        assert_eq!(
+            state
+                .filtered_levels()
+                .iter()
+                .map(|(_, e)| e.class_id.clone())
+                .collect::<Vec<_>>(),
+            vec!["knight", "knight_errant", "sorcerer"]
+        );
+
+        // Case-insensitive substring keeps both knight entries.
+        state.search_filter = "KNIGHT".to_string();
+        assert_eq!(
+            state
+                .filtered_levels()
+                .iter()
+                .map(|(_, e)| e.class_id.clone())
+                .collect::<Vec<_>>(),
+            vec!["knight", "knight_errant"]
+        );
+
+        // Narrower query isolates a single survivor.
+        state.search_filter = "sorc".to_string();
+        let survivors: Vec<String> = state
+            .filtered_levels()
+            .iter()
+            .map(|(_, e)| e.class_id.clone())
+            .collect();
+        assert_eq!(survivors, vec!["sorcerer"]);
+
+        // A non-matching query returns nothing.
+        state.search_filter = "paladin".to_string();
+        assert!(state.filtered_levels().is_empty());
     }
 
     // ── default state ─────────────────────────────────────────────────────────

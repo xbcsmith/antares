@@ -1,0 +1,20 @@
+# Workspace-level Cargo configuration.
+
+# ── macOS linker ──────────────────────────────────────────────────────────────
+# Apple ld emits a warning when the __eh_frame (DWARF CFI / unwind-table)
+# section of a binary exceeds its 16 MB compact-unwind encoding limit:
+#
+#   ld: __eh_frame section too large (max 16MB) to encode dwarf unwind offsets
+#       in compact unwind table, performance of exception handling might be affected
+#
+# For a Bevy game binary with hundreds of source files this is expected in dev
+# builds.  The practical effect is that the OS falls back to DWARF-based stack
+# unwinding instead of the faster compact-unwind path; this is fine during
+# development and does NOT affect release builds (which are LTO-optimised and
+# stay well within the limit).
+#
+# The warning is surfaced through Rust's `linker_messages` lint (stable since
+# Rust 1.84).  Allowing it here silences the noise without hiding any real
+# problem.
+[target.'cfg(target_os = "macos")']
+rustflags = ["-A", "linker_messages"]

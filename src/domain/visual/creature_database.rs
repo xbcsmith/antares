@@ -47,6 +47,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::domain::database_common::load_ron_entries;
+use crate::domain::path_security::validate_campaign_relative_path;
 use crate::domain::types::CreatureId;
 use crate::domain::visual::CreatureDefinition;
 
@@ -370,8 +371,16 @@ impl CreatureDatabase {
 
         // 3. For each reference, resolve filepath and load creature
         for reference in references {
-            // Resolve filepath relative to campaign_root
-            let creature_path = campaign_root.join(&reference.filepath);
+            // Resolve filepath relative to campaign_root, rejecting untrusted
+            // registry paths that are empty, absolute, or attempt `..`
+            // traversal (or symlink escape) out of the campaign directory.
+            let creature_path = validate_campaign_relative_path(campaign_root, &reference.filepath)
+                .map_err(|e| {
+                    CreatureDatabaseError::ReadError(format!(
+                        "Unsafe creature filepath '{}': {}",
+                        reference.filepath, e
+                    ))
+                })?;
 
             // Load full CreatureDefinition from resolved path
             let creature_contents = std::fs::read_to_string(&creature_path).map_err(|e| {
@@ -940,6 +949,69 @@ mod tests {
             result.unwrap_err(),
             CreatureDatabaseError::ReadError(_)
         ));
+    }
+
+    #[test]
+    fn test_load_from_registry_rejects_parent_traversal_filepath() {
+        use tempfile::TempDir;
+
+        // Build a tiny campaign_root with a registry whose reference filepath
+        // attempts to escape the campaign directory via `..` traversal.
+        let temp_dir = TempDir::new().unwrap();
+        let campaign_root = temp_dir.path();
+        let data_dir = campaign_root.join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        let registry_content = r#"[
+    CreatureReference(
+        id: 666,
+        name: "Malicious",
+        filepath: "../../etc/passwd",
+    ),
+]"#;
+
+        let registry_path = data_dir.join("creatures.ron");
+        std::fs::write(&registry_path, registry_content).unwrap();
+
+        // The unsafe path must be rejected before any read is attempted.
+        let result = CreatureDatabase::load_from_registry(&registry_path, campaign_root);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, CreatureDatabaseError::ReadError(_)));
+        assert!(
+            err.to_string().contains("Unsafe creature filepath"),
+            "expected unsafe-path rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_load_from_registry_rejects_absolute_filepath() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let campaign_root = temp_dir.path();
+        let data_dir = campaign_root.join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        let registry_content = r#"[
+    CreatureReference(
+        id: 667,
+        name: "Absolute",
+        filepath: "/etc/passwd",
+    ),
+]"#;
+
+        let registry_path = data_dir.join("creatures.ron");
+        std::fs::write(&registry_path, registry_content).unwrap();
+
+        let result = CreatureDatabase::load_from_registry(&registry_path, campaign_root);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, CreatureDatabaseError::ReadError(_)));
+        assert!(
+            err.to_string().contains("Unsafe creature filepath"),
+            "expected unsafe-path rejection, got: {err}"
+        );
     }
 
     #[test]

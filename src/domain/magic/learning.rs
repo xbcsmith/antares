@@ -255,6 +255,9 @@ pub fn can_learn_spell(
 /// learn_spell(&mut cleric, 257, &spell_db, &class_db).unwrap();
 /// assert!(cleric.spells.cleric_spells[0].contains(&257));
 /// ```
+// `can_learn_spell` (called with `?` above) already verified the spell exists
+// in `spell_db`, so `get_spell` cannot return `None` here.
+#[allow(clippy::expect_used)]
 pub fn learn_spell(
     character: &mut Character,
     spell_id: SpellId,

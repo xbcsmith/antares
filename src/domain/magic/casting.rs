@@ -685,6 +685,7 @@ pub fn cast_spell_by_id_in_combat<R: rand::Rng>(
                             monster,
                             &cond_defs,
                             spell.saving_throw,
+                            rng,
                         );
                     }
                 }
@@ -707,6 +708,7 @@ pub fn cast_spell_by_id_in_combat<R: rand::Rng>(
                             monster,
                             &cond_defs,
                             spell.saving_throw,
+                            rng,
                         );
                     }
                 }
