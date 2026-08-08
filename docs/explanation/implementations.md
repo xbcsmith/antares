@@ -1,3 +1,34 @@
+## Phase 4: Remove Dead Breadcrumb Helper
+
+### Summary
+
+Removed the `enter_mesh_editor` breadcrumb-extension helper from
+`creatures_workflow.rs`. The function had zero production call sites — it was
+called only from its own `#[cfg(test)]` block and one integration test.
+Removing it eliminates dead API surface with no behavioural change.
+
+### Files modified
+
+**`sdk/campaign_builder/src/creatures_workflow.rs`**
+- Removed `pub fn enter_mesh_editor` (function body + full doc comment +
+  `# Examples` doctest block, L342–L372)
+- Removed internal unit test `fn test_enter_mesh_editor_extends_breadcrumbs`
+- Removed internal unit test `fn test_breadcrumb_string_mesh_editor`
+
+**`sdk/campaign_builder/tests/creature_workflow_tests.rs`**
+- Removed three lines from `fn test_registry_to_asset_navigation`:
+  the `workflow.enter_mesh_editor(...)` call and the two
+  `breadcrumb_labels` assertions that followed it
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check -p campaign_builder --all-targets --all-features` — 0 errors, 0 warnings
+- `cargo clippy -p campaign_builder --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run -p campaign_builder --all-features` — 2474/2474 passed
+
+---
+
 ## Phase 3: Remove Orphaned Raw Mesh-Editing Modules
 
 ### Summary
