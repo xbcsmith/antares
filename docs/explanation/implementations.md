@@ -1,4 +1,54 @@
-## Phase 2: Remove the Embedded Creature Mesh Editor
+## Phase 3: Remove Orphaned Raw Mesh-Editing Modules
+
+### Summary
+
+Removed the three orphaned raw mesh-editing modules (`mesh_vertex_editor`,
+`mesh_normal_editor`, `mesh_index_editor`) that had no callers anywhere in the
+crate outside their own source and the now-deleted integration test file. The
+kept modules (`mesh_obj_io`, `mesh_validation`) retain full test coverage via
+the new `obj_importer_tests.rs`.
+
+### Files deleted
+
+- `sdk/campaign_builder/src/mesh_vertex_editor.rs` — vertex selection and
+  manipulation editor
+- `sdk/campaign_builder/src/mesh_normal_editor.rs` — normal calculation and
+  editing
+- `sdk/campaign_builder/src/mesh_index_editor.rs` — triangle index editor
+- `sdk/campaign_builder/tests/mesh_editing_tests.rs` — mixed test file
+  covering both deleted and kept modules (~938 lines)
+
+### Files modified
+
+**`sdk/campaign_builder/src/lib.rs`**
+- Removed three `pub mod` declarations: `mesh_index_editor`, `mesh_normal_editor`,
+  `mesh_vertex_editor`
+
+**`sdk/campaign_builder/src/linear_history.rs`**
+- Updated module-level doc comment to remove stale cross-references to
+  `crate::mesh_vertex_editor::VertexOperation` and
+  `crate::mesh_index_editor::IndexOperation`; replaced with a generic
+  description: "operations (each carrying 'before' and 'after' state)"
+
+### Files created
+
+**`sdk/campaign_builder/tests/obj_importer_tests.rs`**
+- SPDX header added
+- Ported all `mesh_obj_io` and `mesh_validation` tests from the deleted
+  `mesh_editing_tests.rs`: 9 validation tests, 6 OBJ import/export tests,
+  1 edge-case test (17 total)
+- Ported the two helper functions used by ported tests: `create_simple_triangle`,
+  `create_quad_mesh`
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check -p campaign_builder --all-targets --all-features` — 0 errors, 0 warnings
+- `cargo clippy -p campaign_builder --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run -p campaign_builder --all-features` — 2476/2476 passed
+
+---
+
 
 ### Summary
 
