@@ -1,3 +1,61 @@
+## Phase 5: Documentation and Final Verification
+
+### Summary
+
+Completed the mesh editor removal by updating all documentation to reflect the
+current codebase state, verifying zero stale symbol references remain in any
+`.rs` source file, and confirming the full workspace test suite passes.
+
+### Files modified
+
+**`sdk/campaign_builder/README.md`**
+- Removed `### Item Mesh Editor` feature section (the tab and its backing files
+  were deleted in Phase 1)
+- Updated `### Creature Asset Editor` description: replaced the stale
+  "Three-Panel Edit Mode" bullet (mesh list + mesh properties) with an accurate
+  "Edit Mode" bullet describing the read-only 3D preview and creature properties
+  panel that remain
+- Removed `item_mesh_editor.rs` entry from the Source Layout architecture tree
+- Replaced `mesh_editing_tests.rs` in the tests list with `obj_importer_tests.rs`
+  (the replacement file created in Phase 3)
+
+### Stale symbol audit
+
+Repo-wide grep across all `*.rs` files for all removed symbols confirmed **zero**
+remaining references:
+
+| Symbol set | `.rs` matches |
+|---|---|
+| `item_mesh_editor`, `ItemMeshEditor`, `ItemMeshEditorState`, `ItemMeshEditorSignal` | 0 |
+| `mesh_ui`, `mesh_vertex_editor`, `mesh_normal_editor`, `mesh_index_editor` | 0 |
+| `enter_mesh_editor`, `PrimitiveType`, `PRIMITIVE_SEGMENTS_MAX` | 0 |
+
+References in `docs/explanation/finished/` (archived plans and implementation
+records) and `docs/explanation/mesh_editor_removal_implementation_plan.md` are
+legitimate historical context, not stale code — they were not modified.
+
+### Quality gates (full workspace)
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --all-features` — **5462/5462 passed**, 8 skipped
+
+### Manual SDK smoke test checklist
+
+The following items require a running SDK and are left for human verification:
+
+1. The "Item Meshes" tab is absent from the sidebar
+2. Opening any creature shows only the read-only 3D preview and creature
+   properties (no mesh list, no mesh properties panel)
+3. The 3D preview controls (grid, wireframe, normals, axes, background colour,
+   camera distance) still function
+4. The Importer tab successfully imports a `.glb` file and a `.obj` file
+   end-to-end
+5. Opening `campaigns/tutorial` completes without error
+
+---
+
 ## Phase 4: Remove Dead Breadcrumb Helper
 
 ### Summary
