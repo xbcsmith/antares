@@ -90,83 +90,103 @@
         filepath: "assets/creatures/dying_goblin.ron",
     ),
     /*[18]*/ (
+        id: 19,
+        name: "green_bandit",
+        filepath: "assets/creatures/green_bandit.ron",
+    ),
+    /*[19]*/ (
+        id: 20,
+        name: "purple_bandit",
+        filepath: "assets/creatures/purple_bandit.ron",
+    ),
+    /*[20]*/ (
         id: 1000,
         name: "mountain_village_elder",
         filepath: "assets/creatures/mountain_village_elder.ron",
     ),
-    /*[19]*/ (
+    /*[21]*/ (
         id: 1001,
         name: "town_village_elder",
         filepath: "assets/creatures/town_village_elder.ron",
     ),
-    /*[20]*/ (
+    /*[22]*/ (
         id: 1002,
         name: "elf_priestess",
         filepath: "assets/creatures/elf_priestess.ron",
     ),
-    /*[21]*/ (
+    /*[23]*/ (
         id: 1003,
         name: "town_merchant",
         filepath: "assets/creatures/town_merchant.ron",
     ),
-    /*[22]*/ (
+    /*[24]*/ (
         id: 1004,
         name: "mountain_merchant",
         filepath: "assets/creatures/mountain_merchant.ron",
     ),
-    /*[23]*/ (
+    /*[25]*/ (
         id: 1005,
         name: "town_innkeeper",
         filepath: "assets/creatures/town_innkeeper.ron",
     ),
-    /*[24]*/ (
+    /*[26]*/ (
         id: 1006,
         name: "mountain_innkeeper",
         filepath: "assets/creatures/mountain_innkeeper.ron",
     ),
-    /*[25]*/ (
+    /*[27]*/ (
         id: 1007,
         name: "arcturus",
         filepath: "assets/creatures/arcturus.ron",
     ),
-    /*[26]*/ (
+    /*[28]*/ (
         id: 1008,
         name: "arcturus_brother",
         filepath: "assets/creatures/arcturus_brother.ron",
     ),
-    /*[27]*/ (
+    /*[29]*/ (
         id: 1009,
         name: "astronomer",
         filepath: "assets/creatures/astronomer.ron",
     ),
-    /*[28]*/ (
+    /*[30]*/ (
         id: 1010,
         name: "zara",
         filepath: "assets/creatures/zara.ron",
     ),
-    /*[29]*/ (
+    /*[31]*/ (
         id: 1011,
         name: "whisper",
         filepath: "assets/creatures/whisper.ron",
     ),
-    /*[30]*/ (
+    /*[32]*/ (
         id: 1012,
         name: "old_gareth",
         filepath: "assets/creatures/old_gareth.ron",
     ),
-    /*[31]*/ (
+    /*[33]*/ (
         id: 1013,
         name: "kira",
         filepath: "assets/creatures/kira.ron",
     ),
-    /*[32]*/ (
+    /*[34]*/ (
         id: 1014,
         name: "mira",
         filepath: "assets/creatures/mira.ron",
     ),
-    /*[33]*/ (
+    /*[35]*/ (
         id: 1015,
         name: "zhaya",
         filepath: "assets/creatures/zhaya.ron",
+    ),
+    /*[36]*/ (
+        id: 1016,
+        name: "lost_ranger",
+        filepath: "assets/creatures/lost_ranger.ron",
+    ),
+    /*[37]*/ (
+        id: 1017,
+        name: "ranger",
+        filepath: "assets/creatures/ranger.ron",
     ),
 ]

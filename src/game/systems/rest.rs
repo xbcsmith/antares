@@ -662,6 +662,9 @@ pub fn update_rest_ui(
 ///      [`handle_rest_complete`]).
 ///    - On normal completion: writes [`RestCompleteEvent`] and returns to
 ///      `Exploration`.
+// `consume_food` only fails when the party lacks enough food, but the
+// `available < needed` check above already guarantees sufficient rations.
+#[allow(clippy::expect_used)]
 pub fn process_rest(
     global_state: Option<ResMut<GlobalState>>,
     mut initiate_reader: MessageReader<InitiateRestEvent>,
@@ -669,6 +672,7 @@ pub fn process_rest(
     mut tick_timer: Option<ResMut<RestTickTimer>>,
     time: Option<Res<Time>>,
     content: Option<Res<crate::application::resources::GameContent>>,
+    mut game_rng: Option<ResMut<crate::game::resources::GameRng>>,
 ) {
     let mut global_state = match global_state {
         Some(gs) => gs,
@@ -844,17 +848,21 @@ pub fn process_rest(
         // Multiplier is zero — skip the RNG roll entirely.
         None
     } else {
-        let mut rng = rand::rng();
+        let mut fallback_rng = crate::game::resources::GameRng::fallback_std_rng();
+        let rng: &mut rand::rngs::StdRng = match game_rng.as_deref_mut() {
+            Some(gr) => gr.rng(),
+            None => &mut fallback_rng,
+        };
         if multiplier >= 1.0 {
             // Normal or elevated rate: roll once (or use the result directly
             // for multiplier == 1.0; for values > 1.0 we keep the single roll
             // since `random_encounter` already encodes terrain probability).
-            random_encounter(&game_state.world, &mut rng)
+            random_encounter(&game_state.world, rng)
         } else {
             // Reduced rate: roll and then apply the multiplier as an extra
             // probability gate.  If the base roll returns a group, accept it
             // only with probability == multiplier.
-            random_encounter(&game_state.world, &mut rng).and_then(|group| {
+            random_encounter(&game_state.world, rng).and_then(|group| {
                 use rand::RngExt as _;
                 if rng.random::<f32>() < multiplier {
                     Some(group)

@@ -35,7 +35,6 @@ use crate::domain::character_definition::CharacterDatabase;
 use crate::domain::classes::ClassDatabase;
 use crate::domain::combat::monster::Monster;
 use crate::domain::conditions::{ConditionDefinition, ConditionId};
-use crate::domain::database_common::load_ron_entries;
 use crate::domain::dialogue::{DialogueCondition, DialogueId, DialogueTree, NodeId};
 use crate::domain::items::ItemDatabase;
 use crate::domain::magic::types::Spell;
@@ -163,53 +162,6 @@ impl SpellDatabase {
         Ok(())
     }
 
-    /// Loads spells from a RON file
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the RON file containing spell definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(SpellDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `DatabaseError::SpellLoadError` if file cannot be read or parsed
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::sdk::database::SpellDatabase;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = SpellDatabase::load_from_file("data/test_campaign/data/spells.ron")?;
-    /// println!("Loaded {} spells", db.count());
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, DatabaseError> {
-        let path = path.as_ref();
-
-        // Return empty database if file doesn't exist
-        if !path.exists() {
-            return Ok(Self::new());
-        }
-
-        // Read and parse RON file
-        let contents = std::fs::read_to_string(path)
-            .map_err(|e| DatabaseError::SpellLoadError(format!("Failed to read file: {}", e)))?;
-
-        let spells = load_ron_entries(
-            &contents,
-            |s: &Spell| s.id,
-            |id| DatabaseError::SpellLoadError(format!("Duplicate spell ID: {}", id)),
-            |e| DatabaseError::SpellLoadError(format!("Failed to parse RON: {}", e)),
-        )?;
-
-        Ok(Self { spells })
-    }
-
     /// Gets a spell by ID
     pub fn get_spell(&self, id: SpellId) -> Option<&Spell> {
         self.spells.get(&id)
@@ -229,30 +181,6 @@ impl SpellDatabase {
     pub fn has_spell(&self, id: &SpellId) -> bool {
         self.spells.contains_key(id)
     }
-
-    /// Gets a spell by name (case-insensitive)
-    pub fn get_spell_by_name(&self, name: &str) -> Option<&Spell> {
-        let name_lower = name.to_lowercase();
-        self.spells
-            .values()
-            .find(|s| s.name.to_lowercase() == name_lower)
-    }
-
-    /// Returns all spells for a given school
-    pub fn spells_by_school(
-        &self,
-        school: crate::domain::magic::types::SpellSchool,
-    ) -> Vec<&Spell> {
-        self.spells
-            .values()
-            .filter(|s| s.school == school)
-            .collect()
-    }
-
-    /// Returns all spells of a given level
-    pub fn spells_by_level(&self, level: u8) -> Vec<&Spell> {
-        self.spells.values().filter(|s| s.level == level).collect()
-    }
 }
 
 // ===== Monster System =====
@@ -269,53 +197,6 @@ impl MonsterDatabase {
         Self {
             monsters: HashMap::new(),
         }
-    }
-
-    /// Loads monsters from a RON file
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the RON file containing monster definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(MonsterDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `DatabaseError::MonsterLoadError` if file cannot be read or parsed
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::sdk::database::MonsterDatabase;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = MonsterDatabase::load_from_file("data/test_campaign/data/monsters.ron")?;
-    /// println!("Loaded {} monsters", db.count());
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, DatabaseError> {
-        let path = path.as_ref();
-
-        // Return empty database if file doesn't exist
-        if !path.exists() {
-            return Ok(Self::new());
-        }
-
-        // Read and parse RON file
-        let contents = std::fs::read_to_string(path)
-            .map_err(|e| DatabaseError::MonsterLoadError(format!("Failed to read file: {}", e)))?;
-
-        let monsters = load_ron_entries(
-            &contents,
-            |m: &Monster| m.id,
-            |id| DatabaseError::MonsterLoadError(format!("Duplicate monster ID: {}", id)),
-            |e| DatabaseError::MonsterLoadError(format!("Failed to parse RON: {}", e)),
-        )?;
-
-        Ok(Self { monsters })
     }
 
     /// Gets a monster by ID
@@ -347,27 +228,6 @@ impl MonsterDatabase {
     ) -> Result<(), DatabaseError> {
         self.monsters.insert(def.id, def.to_monster());
         Ok(())
-    }
-
-    /// Gets a monster by name (case-insensitive)
-    pub fn get_monster_by_name(&self, name: &str) -> Option<&Monster> {
-        let name_lower = name.to_lowercase();
-        self.monsters
-            .values()
-            .find(|m| m.name.to_lowercase() == name_lower)
-    }
-
-    /// Returns all undead monsters
-    pub fn undead_monsters(&self) -> Vec<&Monster> {
-        self.monsters.values().filter(|m| m.is_undead).collect()
-    }
-
-    /// Returns monsters within an experience value range
-    pub fn monsters_by_experience_range(&self, min_xp: u32, max_xp: u32) -> Vec<&Monster> {
-        self.monsters
-            .values()
-            .filter(|m| m.loot.experience >= min_xp && m.loot.experience <= max_xp)
-            .collect()
     }
 }
 
@@ -477,53 +337,6 @@ impl QuestDatabase {
         }
     }
 
-    /// Loads quests from a RON file
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the RON file containing quest definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(QuestDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `DatabaseError::QuestLoadError` if file cannot be read or parsed
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::sdk::database::QuestDatabase;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = QuestDatabase::load_from_file("data/test_campaign/data/quests.ron")?;
-    /// println!("Loaded {} quests", db.count());
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, DatabaseError> {
-        let path = path.as_ref();
-
-        // Return empty database if file doesn't exist
-        if !path.exists() {
-            return Ok(Self::new());
-        }
-
-        // Read and parse RON file
-        let contents = std::fs::read_to_string(path)
-            .map_err(|e| DatabaseError::QuestLoadError(format!("Failed to read file: {}", e)))?;
-
-        let quests = load_ron_entries(
-            &contents,
-            |q: &Quest| q.id,
-            |id| DatabaseError::QuestLoadError(format!("Duplicate quest ID: {}", id)),
-            |e| DatabaseError::QuestLoadError(format!("Failed to parse RON: {}", e)),
-        )?;
-
-        Ok(Self { quests })
-    }
-
     /// Gets a quest by ID
     pub fn get_quest(&self, id: QuestId) -> Option<&Quest> {
         self.quests.get(&id)
@@ -547,36 +360,6 @@ impl QuestDatabase {
     /// Adds a quest to the database
     pub fn add_quest(&mut self, quest: Quest) {
         self.quests.insert(quest.id, quest);
-    }
-
-    /// Gets a quest by name (case-insensitive)
-    pub fn get_quest_by_name(&self, name: &str) -> Option<&Quest> {
-        let name_lower = name.to_lowercase();
-        self.quests
-            .values()
-            .find(|q| q.name.to_lowercase() == name_lower)
-    }
-
-    /// Returns all main quests
-    pub fn main_quests(&self) -> Vec<&Quest> {
-        self.quests.values().filter(|q| q.is_main_quest).collect()
-    }
-
-    /// Returns all repeatable quests
-    pub fn repeatable_quests(&self) -> Vec<&Quest> {
-        self.quests.values().filter(|q| q.repeatable).collect()
-    }
-
-    /// Returns quests available at a given level
-    pub fn quests_for_level(&self, level: u8) -> Vec<&Quest> {
-        self.quests
-            .values()
-            .filter(|q| {
-                let min_ok = q.min_level.is_none_or(|min| level >= min);
-                let max_ok = q.max_level.is_none_or(|max| level <= max);
-                min_ok && max_ok
-            })
-            .collect()
     }
 }
 
@@ -651,60 +434,6 @@ impl ConditionDatabase {
         db
     }
 
-    /// Loads conditions from a RON file
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the RON file containing condition definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(ConditionDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `DatabaseError::ConditionLoadError` if file cannot be read or parsed
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::sdk::database::ConditionDatabase;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = ConditionDatabase::load_from_file("data/test_campaign/data/conditions.ron")?;
-    /// println!("Loaded {} conditions", db.count());
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, DatabaseError> {
-        let path = path.as_ref();
-
-        // Return a truly empty database if the file doesn't exist.
-        // We intentionally do NOT call Self::new() here so that the
-        // pre-populated system conditions are absent — callers can then
-        // detect the missing file via ContentDatabase::validate() rather
-        // than silently operating with stale defaults.
-        if !path.exists() {
-            return Ok(Self {
-                conditions: HashMap::new(),
-            });
-        }
-
-        // Read and parse RON file
-        let contents = std::fs::read_to_string(path).map_err(|e| {
-            DatabaseError::ConditionLoadError(format!("Failed to read file: {}", e))
-        })?;
-
-        let conditions = load_ron_entries(
-            &contents,
-            |c: &ConditionDefinition| c.id.clone(),
-            |id| DatabaseError::ConditionLoadError(format!("Duplicate condition ID: {}", id)),
-            |e| DatabaseError::ConditionLoadError(format!("Failed to parse RON: {}", e)),
-        )?;
-
-        Ok(Self { conditions })
-    }
-
     /// Gets a condition by ID
     pub fn get_condition(&self, id: &ConditionId) -> Option<&ConditionDefinition> {
         self.conditions.get(id)
@@ -755,53 +484,6 @@ impl DialogueDatabase {
         }
     }
 
-    /// Loads dialogues from a RON file
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the RON file containing dialogue definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(DialogueDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `DatabaseError::DialogueLoadError` if file cannot be read or parsed
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::sdk::database::DialogueDatabase;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = DialogueDatabase::load_from_file("data/test_campaign/data/dialogues.ron")?;
-    /// println!("Loaded {} dialogues", db.count());
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, DatabaseError> {
-        let path = path.as_ref();
-
-        // Return empty database if file doesn't exist
-        if !path.exists() {
-            return Ok(Self::new());
-        }
-
-        // Read and parse RON file
-        let contents = std::fs::read_to_string(path)
-            .map_err(|e| DatabaseError::DialogueLoadError(format!("Failed to read file: {}", e)))?;
-
-        let dialogues = load_ron_entries(
-            &contents,
-            |d: &DialogueTree| d.id,
-            |id| DatabaseError::DialogueLoadError(format!("Duplicate dialogue ID: {}", id)),
-            |e| DatabaseError::DialogueLoadError(format!("Failed to parse RON: {}", e)),
-        )?;
-
-        Ok(Self { dialogues })
-    }
-
     /// Gets a dialogue by ID
     pub fn get_dialogue(&self, id: DialogueId) -> Option<&DialogueTree> {
         self.dialogues.get(&id)
@@ -833,27 +515,6 @@ impl DialogueDatabase {
             dialogue.validate()?;
         }
         Ok(())
-    }
-
-    /// Gets a dialogue by name (case-insensitive)
-    pub fn get_dialogue_by_name(&self, name: &str) -> Option<&DialogueTree> {
-        let name_lower = name.to_lowercase();
-        self.dialogues
-            .values()
-            .find(|d| d.name.to_lowercase() == name_lower)
-    }
-
-    /// Returns all repeatable dialogues
-    pub fn repeatable_dialogues(&self) -> Vec<&DialogueTree> {
-        self.dialogues.values().filter(|d| d.repeatable).collect()
-    }
-
-    /// Returns dialogues associated with a specific quest
-    pub fn dialogues_for_quest(&self, quest_id: QuestId) -> Vec<&DialogueTree> {
-        self.dialogues
-            .values()
-            .filter(|d| d.associated_quest == Some(quest_id))
-            .collect()
     }
 }
 
@@ -904,53 +565,6 @@ impl NpcDatabase {
         Ok(())
     }
 
-    /// Loads NPCs from a RON file
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path to the RON file containing NPC definitions
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(NpcDatabase)` on success
-    ///
-    /// # Errors
-    ///
-    /// Returns `DatabaseError::NpcLoadError` if file cannot be read or parsed
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use antares::sdk::database::NpcDatabase;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let db = NpcDatabase::load_from_file("data/test_campaign/data/npcs.ron")?;
-    /// println!("Loaded {} NPCs", db.count());
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, DatabaseError> {
-        let path = path.as_ref();
-
-        // Return empty database if file doesn't exist
-        if !path.exists() {
-            return Ok(Self::new());
-        }
-
-        // Read and parse RON file
-        let contents = std::fs::read_to_string(path)
-            .map_err(|e| DatabaseError::NpcLoadError(format!("Failed to read file: {}", e)))?;
-
-        let npcs = load_ron_entries(
-            &contents,
-            |n: &crate::domain::world::NpcDefinition| n.id.clone(),
-            |id| DatabaseError::NpcLoadError(format!("Duplicate NPC ID: {}", id)),
-            |e| DatabaseError::NpcLoadError(format!("Failed to parse RON: {}", e)),
-        )?;
-
-        Ok(Self { npcs })
-    }
-
     /// Gets an NPC by ID
     pub fn get_npc(&self, id: &str) -> Option<&crate::domain::world::NpcDefinition> {
         self.npcs.get(id)
@@ -969,14 +583,6 @@ impl NpcDatabase {
     /// Checks if an NPC exists in the database
     pub fn has_npc(&self, id: &str) -> bool {
         self.npcs.contains_key(id)
-    }
-
-    /// Gets an NPC by name (case-insensitive)
-    pub fn get_npc_by_name(&self, name: &str) -> Option<&crate::domain::world::NpcDefinition> {
-        let name_lower = name.to_lowercase();
-        self.npcs
-            .values()
-            .find(|n| n.name.to_lowercase() == name_lower)
     }
 
     /// Returns all merchant NPCs
@@ -2128,6 +1734,92 @@ impl ContentStats {
     }
 }
 
+// ── Macro-generated RON loaders ──────────────────────────────────────────────
+// `load_from_string` / `load_from_file` for the single-`HashMap` RON databases
+// are generated by `impl_ron_database!` (see `crate::domain::database_common`).
+// The `missing_ok:` arm preserves the historical "a missing file yields an empty
+// database" behavior these SDK databases rely on (and that their tests assert).
+
+crate::impl_ron_database!(
+    SpellDatabase,
+    entity: Spell,
+    key: SpellId,
+    error: DatabaseError,
+    field: spells,
+    id_of: |s: &Spell| s.id,
+    dup_err: |id| DatabaseError::SpellLoadError(format!("Duplicate spell ID: {}", id)),
+    read_err: |e| DatabaseError::SpellLoadError(format!("Failed to read file: {}", e)),
+    parse_err: |e| DatabaseError::SpellLoadError(format!("Failed to parse RON: {}", e)),
+    missing_ok: Self::new(),
+);
+
+crate::impl_ron_database!(
+    MonsterDatabase,
+    entity: Monster,
+    key: MonsterId,
+    error: DatabaseError,
+    field: monsters,
+    id_of: |m: &Monster| m.id,
+    dup_err: |id| DatabaseError::MonsterLoadError(format!("Duplicate monster ID: {}", id)),
+    read_err: |e| DatabaseError::MonsterLoadError(format!("Failed to read file: {}", e)),
+    parse_err: |e| DatabaseError::MonsterLoadError(format!("Failed to parse RON: {}", e)),
+    missing_ok: Self::new(),
+);
+
+crate::impl_ron_database!(
+    QuestDatabase,
+    entity: Quest,
+    key: QuestId,
+    error: DatabaseError,
+    field: quests,
+    id_of: |q: &Quest| q.id,
+    dup_err: |id| DatabaseError::QuestLoadError(format!("Duplicate quest ID: {}", id)),
+    read_err: |e| DatabaseError::QuestLoadError(format!("Failed to read file: {}", e)),
+    parse_err: |e| DatabaseError::QuestLoadError(format!("Failed to parse RON: {}", e)),
+    missing_ok: Self::new(),
+);
+
+crate::impl_ron_database!(
+    ConditionDatabase,
+    entity: ConditionDefinition,
+    key: ConditionId,
+    error: DatabaseError,
+    field: conditions,
+    id_of: |c: &ConditionDefinition| c.id.clone(),
+    dup_err: |id| DatabaseError::ConditionLoadError(format!("Duplicate condition ID: {}", id)),
+    read_err: |e| DatabaseError::ConditionLoadError(format!("Failed to read file: {}", e)),
+    parse_err: |e| DatabaseError::ConditionLoadError(format!("Failed to parse RON: {}", e)),
+    missing_ok: Self {
+        conditions: HashMap::new(),
+    },
+);
+
+crate::impl_ron_database!(
+    DialogueDatabase,
+    entity: DialogueTree,
+    key: DialogueId,
+    error: DatabaseError,
+    field: dialogues,
+    id_of: |d: &DialogueTree| d.id,
+    dup_err: |id| DatabaseError::DialogueLoadError(format!("Duplicate dialogue ID: {}", id)),
+    read_err: |e| DatabaseError::DialogueLoadError(format!("Failed to read file: {}", e)),
+    parse_err: |e| DatabaseError::DialogueLoadError(format!("Failed to parse RON: {}", e)),
+    missing_ok: Self::new(),
+);
+
+crate::impl_ron_database!(
+    NpcDatabase,
+    entity: crate::domain::world::NpcDefinition,
+    key: crate::domain::world::NpcId,
+    error: DatabaseError,
+    field: npcs,
+    id_of: |n: &crate::domain::world::NpcDefinition| n.id.clone(),
+    dup_err: |id| DatabaseError::NpcLoadError(format!("Duplicate NPC ID: {}", id)),
+    read_err: |e| DatabaseError::NpcLoadError(format!("Failed to read file: {}", e)),
+    parse_err: |e| DatabaseError::NpcLoadError(format!("Failed to parse RON: {}", e)),
+    missing_ok: Self::new(),
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2343,7 +2035,7 @@ mod tests {
 
         let stats = db.stats();
 
-        // The test campaign fixture defines 5 Phase 1 skills.
+        // The test campaign fixture defines 5 starter skills.
         assert_eq!(
             stats.skill_count,
             db.skills.len(),
@@ -3338,23 +3030,6 @@ mod tests {
     fn test_npc_database_get_npc_not_found() {
         let db = NpcDatabase::new();
         assert!(db.get_npc("nonexistent").is_none());
-    }
-
-    #[test]
-    fn test_npc_database_get_npc_by_name() {
-        let mut db = NpcDatabase::new();
-
-        let npc =
-            crate::domain::world::NpcDefinition::new("merchant_1", "Merchant Bob", "merchant.png");
-
-        db.add_npc(npc).expect("Failed to add NPC");
-
-        let retrieved = db.get_npc_by_name("Merchant Bob").expect("NPC not found");
-        assert_eq!(retrieved.id, "merchant_1");
-
-        // Case insensitive
-        let retrieved = db.get_npc_by_name("merchant bob").expect("NPC not found");
-        assert_eq!(retrieved.id, "merchant_1");
     }
 
     #[test]
@@ -4429,7 +4104,7 @@ mod tests {
         );
     }
 
-    // ===== Phase 4: Object Mesh Registry Integration Tests =====
+    // ===== Object Mesh Registry Integration Tests =====
 
     /// P4-OM1: Loading a campaign that has `object_mesh_registry.ron` populates
     /// `object_meshes` with the primary entries and verifies string-keyed lookup.

@@ -18,10 +18,8 @@
 
 use bevy::prelude::*;
 
-use crate::application::GameMode;
 use crate::domain::combat::types::CombatantId;
 use crate::game::components::combat::TurnIndicator;
-use crate::game::resources::GlobalState;
 use crate::game::systems::combat::{
     ActionMenuPanel, CombatResource, CombatTurnState, CombatTurnStateResource, EnemyCard,
     TURN_INDICATOR_COLOR,
@@ -53,21 +51,14 @@ type EnemyCardQuery<'w, 's> = Query<'w, 's, (Entity, &'static EnemyCard)>;
 /// # Examples
 ///
 /// Called as a regular Bevy system in the `Update` schedule.
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_turn_indicator(
     mut commands: Commands,
-    global_state: Res<GlobalState>,
     combat_res: Res<CombatResource>,
     existing: Query<Entity, With<TurnIndicator>>,
     enemy_cards: Query<(Entity, &EnemyCard)>,
     action_panels: Query<Entity, With<ActionMenuPanel>>,
     turn_state: Option<Res<CombatTurnStateResource>>,
 ) {
-    // Only operate when in combat mode
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     // If an indicator already exists, do nothing
     if !existing.is_empty() {
         return;
@@ -167,18 +158,12 @@ pub fn spawn_turn_indicator(
 ///   re-parent/state mutation while remaining clear.)
 pub fn update_turn_indicator(
     mut commands: Commands,
-    global_state: Res<GlobalState>,
     combat_res: Res<CombatResource>,
     existing: TurnIndicatorQuery,
     enemy_cards: EnemyCardQuery,
     action_panels: Query<Entity, With<ActionMenuPanel>>,
     turn_state: Option<Res<CombatTurnStateResource>>,
 ) {
-    // Only operate when in combat mode
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     // Determine current combatant
     let current = match combat_res
         .state

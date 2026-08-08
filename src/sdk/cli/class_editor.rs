@@ -453,6 +453,8 @@ impl ClassEditor {
     }
 
     /// Saves classes to file.
+    // Flushing stdout cannot meaningfully fail in an interactive CLI save prompt.
+    #[allow(clippy::unwrap_used)]
     fn save(&mut self) -> bool {
         print!("💾 Saving to {}... ", self.file_path.display());
         io::stdout().flush().unwrap();

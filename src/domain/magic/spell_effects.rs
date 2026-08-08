@@ -46,6 +46,7 @@ pub fn apply_spell_conditions_to_character(
     target: &mut Character,
     condition_defs: &[ConditionDefinition],
     allow_saving_throw: bool,
+    rng: &mut impl rand::Rng,
 ) {
     for condition_id in &spell.applied_conditions {
         if let Some(def) = condition_defs.iter().find(|d| &d.id == condition_id) {
@@ -65,7 +66,7 @@ pub fn apply_spell_conditions_to_character(
 
                 // Roll d100 (1-100)
                 // If roll <= resistance, the character resists the effect
-                let roll = rand::rng().random_range(1..=100);
+                let roll = rng.random_range(1..=100);
                 if roll <= resistance {
                     continue; // Saved
                 }
@@ -92,6 +93,7 @@ pub fn apply_spell_conditions_to_monster(
     target: &mut Monster,
     condition_defs: &[ConditionDefinition],
     allow_saving_throw: bool,
+    rng: &mut impl rand::Rng,
 ) {
     for condition_id in &spell.applied_conditions {
         if let Some(def) = condition_defs.iter().find(|d| &d.id == condition_id) {
@@ -118,7 +120,7 @@ pub fn apply_spell_conditions_to_monster(
 
                 // Check magic resistance
                 // Monster magic resistance is a percentage chance to resist
-                let roll = rand::rng().random_range(1..=100);
+                let roll = rng.random_range(1..=100);
                 if roll <= target.magic_resistance {
                     continue;
                 }
@@ -139,9 +141,9 @@ pub fn apply_spell_conditions_to_monster(
 pub fn apply_condition_dot_effects(
     active_conditions: &[ActiveCondition],
     condition_defs: &[ConditionDefinition],
+    rng: &mut impl rand::Rng,
 ) -> i16 {
     let mut total_damage = 0i16;
-    let mut rng = rand::rng();
 
     for active in active_conditions {
         if let Some(def) = condition_defs.iter().find(|d| d.id == active.condition_id) {
@@ -150,12 +152,12 @@ pub fn apply_condition_dot_effects(
                     crate::domain::conditions::ConditionEffect::DamageOverTime {
                         damage, ..
                     } => {
-                        let roll_result = damage.roll(&mut rng) as i16;
+                        let roll_result = damage.roll(rng) as i16;
                         let scaled = (roll_result as f32 * active.magnitude).round() as i16;
                         total_damage = total_damage.saturating_add(scaled);
                     }
                     crate::domain::conditions::ConditionEffect::HealOverTime { amount } => {
-                        let roll_result = amount.roll(&mut rng) as i16;
+                        let roll_result = amount.roll(rng) as i16;
                         let scaled = (roll_result as f32 * active.magnitude).round() as i16;
                         total_damage = total_damage.saturating_sub(scaled); // Negative damage = healing
                     }
@@ -210,7 +212,13 @@ mod tests {
         );
         spell.applied_conditions = vec!["test_condition".to_string()];
 
-        apply_spell_conditions_to_character(&spell, &mut character, &[condition_def], false);
+        apply_spell_conditions_to_character(
+            &spell,
+            &mut character,
+            &[condition_def],
+            false,
+            &mut rand::rng(),
+        );
 
         assert_eq!(character.active_conditions.len(), 1);
         assert_eq!(
@@ -257,7 +265,13 @@ mod tests {
         spell.applied_conditions = vec!["curse".to_string()];
 
         // Should be resisted
-        apply_spell_conditions_to_character(&spell, &mut character, &[condition_def], true);
+        apply_spell_conditions_to_character(
+            &spell,
+            &mut character,
+            &[condition_def],
+            true,
+            &mut rand::rng(),
+        );
 
         assert_eq!(character.active_conditions.len(), 0);
     }

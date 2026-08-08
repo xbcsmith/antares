@@ -33,6 +33,7 @@ pub mod items;
 pub mod levels;
 pub mod magic;
 pub mod party_manager;
+pub mod path_security;
 pub mod proficiency;
 pub mod progression;
 pub mod quest;
@@ -64,7 +65,13 @@ pub use types::{
 };
 pub use types::{DiceRoll, Direction, GameTime, Position};
 
-// Re-export skill types (Phase 1 + Phase 2 + Phase 3)
+// Re-export path-security helpers for untrusted campaign/asset paths
+pub use path_security::{
+    validate_campaign_relative_path, validate_filename_component, validate_identifier,
+    PathSecurityError,
+};
+
+// Re-export skill types
 pub use skills::{
     rank_for_level, rank_for_level_with_bonus, validate_skill_id, validate_skill_rank,
     CharacterSkillRanks, PartySkillScope, SkillBreakdown, SkillBreakdownEntry, SkillCategory,
@@ -75,7 +82,7 @@ pub use skills::{
 // Re-export skill resolver
 pub use skill_resolver::{SkillResolver, SkillResolverContext};
 
-// Re-export skill check types (Phase 3)
+// Re-export skill check types
 pub use skill_checks::{
     evaluate_party_skill_scope, evaluate_skill_check_without_roll, skill_check_for_character,
     SkillCheckDifficulty, SkillCheckError, SkillCheckRequest, SkillCheckResult,

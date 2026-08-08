@@ -5269,9 +5269,9 @@
             ),
         ),
         (
-            terrain: Stone,
-            wall_type: Door,
-            blocked: true,
+            terrain: Ground,
+            wall_type: r#None,
+            blocked: false,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -8384,6 +8384,17 @@
             face_on_dialogue: false,
         ),
         (
+            x: 11,
+            y: 18,
+        ): LockedDoor(
+            name: "Barred Passage",
+            lock_id: "2000",
+            key_item_id: Some(200),
+            initial_trap_chance: 25,
+            mesh_id: Some("barred_passage"),
+            dialogue_id: Some(9),
+        ),
+        (
             x: 13,
             y: 3,
         ): Sign(
@@ -8434,22 +8445,17 @@
             face_on_dialogue: false,
         ),
         (
-            x: 17,
-            y: 12,
-        ): Treasure(
-            name: "Barred Passage",
-            description: "A heavy iron bar blocks the passage.",
-            loot: [],
-            mesh_id: Some("barred_passage"),
-            dialogue_id: Some(500),
-        ),
-        (
             x: 18,
             y: 1,
         ): Treasure(
             name: "Locked Chest",
             description: "",
-            loot: [],
+            loot: [
+                50,
+                51,
+                52,
+                109,
+            ],
         ),
         (
             x: 18,
@@ -8468,8 +8474,8 @@
             name: "Dark Forrest Portal",
             description: "This is a portal to the Dark Forrest",
             destination: (
-                x: 1,
-                y: 12,
+                x: 0,
+                y: 10,
             ),
             map_id: 2,
         ),

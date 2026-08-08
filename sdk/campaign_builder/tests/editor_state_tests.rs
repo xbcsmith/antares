@@ -2422,7 +2422,6 @@ fn test_quest_editor_state_initialization() {
         app.editor_registry.quest_editor_state.mode,
         quest_editor::QuestEditorMode::List
     );
-    assert!(app.editor_registry._quests_show_preview);
     assert!(app
         .editor_registry
         .quest_editor_state
@@ -2526,20 +2525,6 @@ fn test_quest_level_requirements() {
 }
 
 #[test]
-fn test_quest_preview_toggle() {
-    let mut app = CampaignBuilderApp::default();
-
-    // Default is true
-    assert!(app.editor_registry._quests_show_preview);
-
-    app.editor_registry._quests_show_preview = false;
-    assert!(!app.editor_registry._quests_show_preview);
-
-    app.editor_registry._quests_show_preview = true;
-    assert!(app.editor_registry._quests_show_preview);
-}
-
-#[test]
 fn test_quest_with_giver_location() {
     let mut quest = Quest::new(1, "NPC Quest", "Quest from an NPC");
     quest.quest_giver_npc = Some("100".to_string());
@@ -2573,13 +2558,6 @@ fn test_quest_main_quest_flag() {
 
     assert!(quest1.is_main_quest);
     assert!(!quest2.is_main_quest);
-}
-
-#[test]
-fn test_quest_import_buffer() {
-    let app = CampaignBuilderApp::default();
-    assert!(app.editor_registry._quests_import_buffer.is_empty());
-    assert!(!app.editor_registry._quests_show_import_dialog);
 }
 
 #[test]

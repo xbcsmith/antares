@@ -206,7 +206,6 @@ impl ItemEditor {
     }
 
     /// Adds a new item.
-    #[allow(deprecated)]
     fn add_item(&mut self) {
         println!("\n════════════════════════════════════════");
         println!("  ADD NEW ITEM");
@@ -1377,7 +1376,6 @@ mod tests {
         assert_eq!(editor.next_item_id(), 1);
     }
 
-    #[allow(deprecated)]
     #[test]
     fn test_next_item_id_with_items() {
         let editor = ItemEditor {
@@ -1606,7 +1604,6 @@ mod tests {
 
     /// When editing a consumable and choosing effect "5" (Food), the updated
     /// item must have `is_combat_usable = false` regardless of its prior value.
-    #[allow(deprecated)]
     #[test]
     fn test_edit_consumable_is_food_clears_combat_usable() {
         // Simulate an item that was previously a healing potion (combat-usable).
@@ -1652,7 +1649,6 @@ mod tests {
         }
     }
 
-    #[allow(deprecated)]
     #[test]
     fn test_item_with_alignment_restriction() {
         let item = Item {
@@ -1685,7 +1681,6 @@ mod tests {
         assert_eq!(item.name, "Holy Sword");
     }
 
-    #[allow(deprecated)]
     #[test]
     fn test_item_with_tags() {
         let item = Item {
@@ -1716,7 +1711,6 @@ mod tests {
         assert!(item.tags.contains(&"large_weapon".to_string()));
     }
 
-    #[allow(deprecated)]
     #[test]
     fn test_item_cursed() {
         let item = Item {
@@ -1744,7 +1738,6 @@ mod tests {
         assert!(item.is_accessory());
     }
 
-    #[allow(deprecated)]
     #[test]
     fn test_item_with_charges() {
         let item = Item {

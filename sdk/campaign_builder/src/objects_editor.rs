@@ -554,6 +554,9 @@ impl ObjectsEditorState {
                             // unenterable.
                             mesh.material
                                 .get_or_insert_with(MaterialDefinition::default);
+                            // `get_or_insert_with` on the line above guarantees
+                            // `material` is `Some`, so this cannot panic.
+                            #[allow(clippy::expect_used)]
                             let material = mesh.material.as_mut().expect("just inserted above");
 
                             ui.horizontal_wrapped(|ui| {
@@ -766,6 +769,9 @@ fn load_object_entries_from_registry(campaign_dir: &Path) -> Vec<ObjectEntry> {
 /// Errors are intentionally swallowed — a write failure here must never block
 /// the in-memory edit from applying or crash the editor, matching the
 /// established convention in `landscape_editor.rs`'s `save_mesh_scale`.
+// Directory-create and file-write failures are intentionally swallowed (see
+// doc comment); the discards must never block the in-memory edit or crash.
+#[allow(clippy::let_underscore_must_use)]
 fn write_object_definition(campaign_dir: &Path, file_path: &str, definition: &CreatureDefinition) {
     let full_path = campaign_dir.join(file_path);
     if let Some(parent) = full_path.parent() {
@@ -806,6 +812,9 @@ fn sync_object_mesh_registry_entry(
         }
     }
     registry.upsert(new_key, file_path);
+    // Registry save failure is self-healing: `save_objects` rewrites the whole
+    // registry on the next campaign save, so this discard is intentional.
+    #[allow(clippy::let_underscore_must_use)]
     let _ = registry.save(&registry_path);
 }
 

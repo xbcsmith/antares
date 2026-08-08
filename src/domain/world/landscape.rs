@@ -1171,6 +1171,22 @@ impl LandscapeMeshDatabase {
                         ));
                     }
 
+                    // Reject `..` traversal even when the path is under
+                    // `assets/`, e.g. "assets/../../secret.png": a parent-dir
+                    // component would escape the campaign root when joined.
+                    if Path::new(texture_path)
+                        .components()
+                        .any(|c| matches!(c, std::path::Component::ParentDir))
+                    {
+                        return Err(CreatureDatabaseError::ValidationError(
+                            creature.id,
+                            format!(
+                                "Landscape mesh '{}' (ID {}, part '{}') texture path '{}' must not contain '..'",
+                                creature.name, creature.id, mesh_name, texture_path
+                            ),
+                        ));
+                    }
+
                     if let Some(root) = campaign_root {
                         let absolute = root.join(texture_path);
                         if !absolute.exists() {
@@ -1793,6 +1809,27 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_texture_paths_rejects_parent_traversal() {
+        // A texture path that starts with `assets/` but embeds `..` would
+        // escape the campaign root when joined; it must be rejected.
+        let temp = TempDir::new().unwrap();
+        let registry_path = write_mesh_registry_fixture(temp.path(), "assets/../../secret.png");
+        let db = LandscapeMeshDatabase::load_from_registry(&registry_path, temp.path()).unwrap();
+
+        // Validate without campaign_root so the `..` check fires before any
+        // exists() check.
+        let error = db.validate_texture_paths(None).unwrap_err().to_string();
+
+        assert!(error.contains("Fixture Landscape Mesh"));
+        assert!(error.contains("leaf_card"));
+        assert!(error.contains("assets/../../secret.png"));
+        assert!(
+            error.contains(".."),
+            "expected '..' rejection message, got: {error}"
+        );
+    }
+
+    #[test]
     fn test_validate_texture_paths_accepts_valid_assets_texture() {
         let temp = TempDir::new().unwrap();
         let texture_path = temp.path().join("assets/textures/trees/leaf.png");
@@ -1806,7 +1843,7 @@ mod tests {
     }
 
     #[test]
-    fn test_test_campaign_phase1_landscape_mesh_fixture_integrity() {
+    fn test_test_campaign_landscape_mesh_fixture_integrity() {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data/test_campaign");
         let registry_path = root.join("data/landscape_mesh_registry.ron");
         let db = LandscapeMeshDatabase::load_from_registry(&registry_path, &root).unwrap();

@@ -379,7 +379,15 @@ pub struct Monster {
 }
 
 impl Monster {
-    /// Creates a new monster with the given parameters
+    /// Creates a new monster with the given parameters.
+    //
+    // `Monster::new` has 7 parameters which is at the Clippy `too_many_arguments`
+    // threshold. Refactoring to a `MonsterInit` builder struct was considered but
+    // rejected: there are 30+ call sites spread across tests and the domain layer,
+    // all of which use positional construction. A refactor would produce a large
+    // diff with no functional benefit. The parameter set is stable and each field
+    // is required (no optional defaults), so the current constructor is the
+    // clearest API.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: MonsterId,

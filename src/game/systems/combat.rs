@@ -1206,13 +1206,6 @@ impl CombatLogState {
     }
 }
 
-/// Marker component placed on the currently highlighted `ActionButton` entity.
-///
-/// Used by `update_action_highlight` to apply the hover background colour to
-/// the active button while restoring the default colour on all others.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct ActiveActionHighlight;
-
 /// One-shot timer that gates [`execute_monster_turn`].
 ///
 /// When the turn transitions to [`CombatTurnState::EnemyTurn`] the timer is
@@ -1252,6 +1245,10 @@ impl Plugin for CombatPlugin {
             .add_message::<CombatFeedbackEvent>()
             .insert_resource(CombatResource::new())
             .insert_resource(CombatTurnStateResource::default())
+            // Ensure the shared deterministic RNG resource exists even when the
+            // main game has not inserted a seeded one (e.g. minimal test apps).
+            // `init_resource` is a no-op if a seeded `GameRng` was already added.
+            .init_resource::<crate::game::resources::GameRng>()
             .insert_resource(TargetSelection::default())
             .insert_resource(ActionMenuState::default())
             .insert_resource(CombatLogState::default())
@@ -1280,6 +1277,7 @@ impl Plugin for CombatPlugin {
             .add_systems(
                 Update,
                 sync_party_hp_during_combat
+                    .run_if(crate::game::run_conditions::in_combat_mode)
                     .after(handle_attack_action)
                     .after(handle_ranged_attack_action)
                     .after(handle_cast_spell_action)
@@ -1290,7 +1288,10 @@ impl Plugin for CombatPlugin {
             // Sync back to party when combat ends
             .add_systems(Update, sync_combat_to_party_on_exit)
             // Player Action Systems
-            .add_systems(Update, combat_input_system)
+            .add_systems(
+                Update,
+                combat_input_system.run_if(crate::game::run_conditions::in_combat_mode),
+            )
             .add_systems(Update, update_action_highlight.after(combat_input_system))
             .add_systems(Update, enter_target_selection)
             .add_systems(
@@ -1350,6 +1351,7 @@ impl Plugin for CombatPlugin {
             .add_systems(
                 Update,
                 collect_combat_feedback_log_lines
+                    .run_if(crate::game::run_conditions::in_combat_mode)
                     .after(handle_attack_action)
                     .after(handle_ranged_attack_action)
                     .after(handle_cast_spell_action)
@@ -1359,6 +1361,7 @@ impl Plugin for CombatPlugin {
             .add_systems(
                 Update,
                 mirror_combat_feedback_to_game_log
+                    .run_if(crate::game::run_conditions::in_combat_mode)
                     .after(collect_combat_feedback_log_lines)
                     .after(handle_attack_action)
                     .after(handle_ranged_attack_action)
@@ -1368,7 +1371,9 @@ impl Plugin for CombatPlugin {
             )
             .add_systems(
                 Update,
-                update_combat_log_typewriter.after(collect_combat_feedback_log_lines),
+                update_combat_log_typewriter
+                    .run_if(crate::game::run_conditions::in_combat_mode)
+                    .after(collect_combat_feedback_log_lines),
             )
             .add_systems(
                 Update,
@@ -1381,24 +1386,49 @@ impl Plugin for CombatPlugin {
             .add_systems(Update, reset_combat_log_on_exit)
             .add_systems(Update, reset_combat_log_colors_on_exit)
             // Monster HP hover bars
-            .add_systems(Update, spawn_monster_hp_hover_bars.after(setup_combat_ui))
             .add_systems(
                 Update,
-                update_monster_hp_hover_bars.after(spawn_monster_hp_hover_bars),
+                spawn_monster_hp_hover_bars
+                    .run_if(crate::game::run_conditions::in_combat_mode)
+                    .after(setup_combat_ui),
+            )
+            .add_systems(
+                Update,
+                update_monster_hp_hover_bars
+                    .run_if(crate::game::run_conditions::in_combat_mode)
+                    .after(spawn_monster_hp_hover_bars),
             )
             .add_systems(Update, cleanup_monster_hp_hover_bars)
             // Combat resolution & rewards
-            .add_systems(Update, check_combat_resolution)
+            .add_systems(
+                Update,
+                check_combat_resolution.run_if(crate::game::run_conditions::in_combat_mode),
+            )
             .add_systems(Update, handle_combat_victory)
             .add_systems(Update, handle_combat_defeat)
             // Combat UI systems
             // Must run after handle_combat_started so combat_event_type is
             // already set when we decide which buttons to spawn.
-            .add_systems(Update, setup_combat_ui.after(handle_combat_started))
+            .add_systems(
+                Update,
+                setup_combat_ui
+                    .run_if(crate::game::run_conditions::in_combat_mode)
+                    .after(handle_combat_started),
+            )
             // Spawn the turn indicator after UI is created
-            .add_systems(Update, spawn_turn_indicator.after(setup_combat_ui))
+            .add_systems(
+                Update,
+                spawn_turn_indicator
+                    .run_if(crate::game::run_conditions::in_combat_mode)
+                    .after(setup_combat_ui),
+            )
             // Update/move the indicator when the current actor changes
-            .add_systems(Update, update_turn_indicator.after(spawn_turn_indicator))
+            .add_systems(
+                Update,
+                update_turn_indicator
+                    .run_if(crate::game::run_conditions::in_combat_mode)
+                    .after(spawn_turn_indicator),
+            )
             // Hide indicator during animations and ensure visibility is updated before the main UI update
             .add_systems(
                 Update,
@@ -1451,7 +1481,10 @@ impl Plugin for CombatPlugin {
                 handle_item_button_interaction.after(update_item_selection_panel),
             )
             .add_systems(Update, cleanup_item_panel_on_combat_exit)
-            .add_systems(Update, update_combat_ui)
+            .add_systems(
+                Update,
+                update_combat_ui.run_if(crate::game::run_conditions::in_combat_mode),
+            )
             .add_systems(
                 Update,
                 update_ranged_button_color
@@ -1469,6 +1502,7 @@ impl Plugin for CombatPlugin {
             .add_systems(
                 Update,
                 tick_combat_time
+                    .run_if(crate::game::run_conditions::in_combat_mode)
                     .after(handle_attack_action)
                     .after(handle_ranged_attack_action)
                     .after(handle_cast_spell_action)
@@ -1784,11 +1818,6 @@ pub(crate) fn sync_party_hp_during_combat(
     mut global_state: ResMut<GlobalState>,
     combat_res: Res<CombatResource>,
 ) {
-    // Only run while in combat.
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     for (participant_idx, participant) in combat_res.state.participants.iter().enumerate() {
         if let Combatant::Player(pc) = participant {
             // Resolve which party slot this participant maps to.
@@ -1822,6 +1851,10 @@ pub(crate) fn sync_party_hp_during_combat(
 /// `Fled`). While the status is still `InProgress` the party is merely
 /// suspended behind a UI overlay (character sheet, HUD portrait click) and the
 /// live combat state must be preserved untouched for when the overlay closes.
+// Stat values are 0..=255, so any current-value delta lies in -255..=255 and
+// always fits in i16; the `try_into().expect(...)` conversions therefore cannot
+// fail. This guards an unreachable arithmetic invariant, not a runtime error.
+#[allow(clippy::expect_used)]
 fn sync_combat_to_party_on_exit(
     mut global_state: ResMut<GlobalState>,
     mut combat_res: ResMut<CombatResource>,
@@ -2081,15 +2114,9 @@ type MonsterHpHoverBarQueries<'w, 's> = ParamSet<
 /// This system runs every frame but only acts when combat UI needs to be created.
 fn setup_combat_ui(
     mut commands: Commands,
-    global_state: Res<GlobalState>,
     combat_res: Res<CombatResource>,
     existing_ui: Query<Entity, With<crate::game::components::combat::CombatHudRoot>>,
 ) {
-    // Only setup UI when in combat mode
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     // If UI already exists, don't recreate it
     if !existing_ui.is_empty() {
         return;
@@ -2524,20 +2551,43 @@ fn setup_combat_ui(
 /// System: Cleanup combat UI when exiting combat mode
 ///
 /// Despawns all combat HUD entities when combat ends.
+/// Despawns every entity yielded by a marker-component query.
+///
+/// Used by the combat-exit cleanup systems to tear down mode-scoped UI
+/// entities. Despawning a parent also despawns its children.
+fn despawn_all<T: Component>(commands: &mut Commands, query: &Query<Entity, With<T>>) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn();
+    }
+}
+
+/// Returns `true` when the game is no longer in combat (combat has been exited),
+/// i.e. the mode is not `GameMode::Combat(_)`.
+fn combat_exited(mode: &GameMode) -> bool {
+    !matches!(mode, GameMode::Combat(_))
+}
+
+/// Resets a `Default`-able resource to its default value when combat has been
+/// exited. Used by combat-exit cleanup systems whose reset is exactly
+/// `*res = R::default()`.
+fn reset_on_combat_exit<R: Resource + Default>(mode: &GameMode, res: &mut R) {
+    if combat_exited(mode) {
+        *res = R::default();
+    }
+}
+
 fn cleanup_combat_ui(
     mut commands: Commands,
     global_state: Res<GlobalState>,
     combat_ui: Query<Entity, With<crate::game::components::combat::CombatHudRoot>>,
 ) {
     // Only cleanup when not in combat mode
-    if matches!(global_state.0.mode, GameMode::Combat(_)) {
+    if !combat_exited(&global_state.0.mode) {
         return;
     }
 
     // Despawn combat UI if it exists (despawn will automatically handle children)
-    for entity in combat_ui.iter() {
-        commands.entity(entity).despawn();
-    }
+    despawn_all(&mut commands, &combat_ui);
 }
 
 /// System: Spawn or despawn the spell selection panel based on `SpellPanelState`.
@@ -3063,7 +3113,7 @@ fn cleanup_spell_panel_on_combat_exit(
     mut spell_panel_state: ResMut<SpellPanelState>,
     mut pending_spell: ResMut<PendingSpellCast>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+    if combat_exited(&global_state.0.mode) {
         spell_panel_state.caster = None;
         spell_panel_state.focused_index = 0;
         spell_panel_state.confirm_requested = false;
@@ -3477,9 +3527,7 @@ fn cleanup_party_target_on_combat_exit(
     global_state: Res<GlobalState>,
     mut state: ResMut<PartyTargetPanelState>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        *state = PartyTargetPanelState::default();
-    }
+    reset_on_combat_exit(&global_state.0.mode, state.as_mut());
 }
 
 /// System: Spawn or despawn the group-spell confirm prompt based on
@@ -3575,11 +3623,9 @@ fn cleanup_group_target_on_combat_exit(
     mut commands: Commands,
     existing_prompt: Query<Entity, With<GroupTargetPrompt>>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+    if combat_exited(&global_state.0.mode) {
         group_target.data = None;
-        for entity in existing_prompt.iter() {
-            commands.entity(entity).despawn();
-        }
+        despawn_all(&mut commands, &existing_prompt);
     }
 }
 
@@ -3834,6 +3880,25 @@ fn item_dispatch_route(
     }
 }
 
+/// Mutable combat state threaded into [`dispatch_item_button`].
+///
+/// Groups the resource references the dispatcher mutates so the function stays
+/// under clippy's argument-count threshold. The `UseItemAction` message writer
+/// is kept as a separate parameter because bundling `&mut MessageWriter` behind
+/// a shared borrow fights the borrow checker.
+struct ItemDispatchState<'a> {
+    /// Item selection panel state; closed by the dispatcher.
+    item_panel_state: &'a mut ItemPanelState,
+    /// Pending item-use record for monster-target items.
+    pending_item: &'a mut PendingItemUse,
+    /// Party target panel state for beneficial consumables.
+    party_target_state: &'a mut PartyTargetPanelState,
+    /// Monster target selection state.
+    target_sel: &'a mut TargetSelection,
+    /// Keyboard action/target menu state.
+    action_menu_state: &'a mut ActionMenuState,
+}
+
 /// Internal helper: given a chosen item button (from mouse or keyboard), decide
 /// whether to enter monster target-selection mode (offensive spell_effect
 /// items), open the party target panel (beneficial consumables — potion,
@@ -3842,19 +3907,21 @@ fn item_dispatch_route(
 ///
 /// Closes the item panel in all cases. When the party target panel opens, the
 /// user's own row receives initial focus so self-use stays one confirm away.
-#[allow(clippy::too_many_arguments)]
 fn dispatch_item_button(
     user: CombatantId,
     inventory_index: usize,
     item_id: crate::domain::types::ItemId,
     content: &GameContent,
-    item_panel_state: &mut ItemPanelState,
-    pending_item: &mut PendingItemUse,
-    party_target_state: &mut PartyTargetPanelState,
-    target_sel: &mut TargetSelection,
-    action_menu_state: &mut ActionMenuState,
+    state: ItemDispatchState<'_>,
     use_item_writer: &mut Option<MessageWriter<UseItemAction>>,
 ) {
+    let ItemDispatchState {
+        item_panel_state,
+        pending_item,
+        party_target_state,
+        target_sel,
+        action_menu_state,
+    } = state;
     let route = item_dispatch_route(item_id, content);
 
     // Close the item panel regardless of path.
@@ -3982,11 +4049,13 @@ fn handle_item_button_interaction(
                     inv_idx,
                     item_id,
                     content_ref,
-                    &mut item_panel_state,
-                    &mut pending_item,
-                    &mut party_target_state,
-                    &mut target_sel,
-                    &mut action_menu_state,
+                    ItemDispatchState {
+                        item_panel_state: &mut item_panel_state,
+                        pending_item: &mut pending_item,
+                        party_target_state: &mut party_target_state,
+                        target_sel: &mut target_sel,
+                        action_menu_state: &mut action_menu_state,
+                    },
                     &mut use_item_writer,
                 );
             }
@@ -4005,11 +4074,13 @@ fn handle_item_button_interaction(
             item_btn.inventory_index,
             item_btn.item_id,
             content_ref,
-            &mut item_panel_state,
-            &mut pending_item,
-            &mut party_target_state,
-            &mut target_sel,
-            &mut action_menu_state,
+            ItemDispatchState {
+                item_panel_state: &mut item_panel_state,
+                pending_item: &mut pending_item,
+                party_target_state: &mut party_target_state,
+                target_sel: &mut target_sel,
+                action_menu_state: &mut action_menu_state,
+            },
             &mut use_item_writer,
         );
 
@@ -4026,7 +4097,7 @@ fn cleanup_item_panel_on_combat_exit(
     mut item_panel_state: ResMut<ItemPanelState>,
     mut pending_item: ResMut<PendingItemUse>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
+    if combat_exited(&global_state.0.mode) {
         item_panel_state.user = None;
         item_panel_state.focused_index = 0;
         item_panel_state.usable_slot_indices.clear();
@@ -4042,7 +4113,6 @@ fn cleanup_item_panel_on_combat_exit(
 #[allow(clippy::too_many_arguments)]
 fn update_combat_ui(
     combat_res: Res<CombatResource>,
-    global_state: Res<GlobalState>,
     mut enemy_hp_bars: EnemyHpBarQuery,
     mut enemy_hp_texts: EnemyHpTextQuery,
     mut enemy_condition_texts: EnemyConditionTextQuery,
@@ -4053,11 +4123,6 @@ fn update_combat_ui(
     mut boss_hp_fills: BossHpBarQuery,
     mut boss_hp_texts: BossHpBarTextQuery,
 ) {
-    // Only update when in combat mode
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     // Update enemy HP bars
     for (hp_bar, mut node, mut bg_color) in enemy_hp_bars.iter_mut() {
         if let Some(Combatant::Monster(monster)) =
@@ -4281,6 +4346,25 @@ fn update_ranged_button_color(
 /// so that any future private callers have a short, stable name.
 const ACTION_BUTTON_ORDER: [ActionButtonType; COMBAT_ACTION_COUNT] = COMBAT_ACTION_ORDER;
 
+/// Mutable combat state threaded into [`dispatch_combat_action`].
+///
+/// Groups the resource references the dispatcher mutates so the function stays
+/// under clippy's argument-count threshold. Message writers are kept as
+/// separate parameters because bundling `&mut MessageWriter` behind a shared
+/// borrow fights the borrow checker.
+struct CombatActionState<'a> {
+    /// Monster target selection state.
+    target_sel: &'a mut TargetSelection,
+    /// Keyboard action/target menu state.
+    action_menu_state: &'a mut ActionMenuState,
+    /// Ranged-attack pending flag.
+    ranged_pending: &'a mut RangedAttackPending,
+    /// Spell selection panel state.
+    spell_panel_state: &'a mut SpellPanelState,
+    /// Item selection panel state.
+    item_panel_state: &'a mut ItemPanelState,
+}
+
 /// Unified combat action dispatcher.
 ///
 /// Both mouse (`Interaction::Pressed`) and keyboard (`Enter`) routes call this
@@ -4312,18 +4396,20 @@ const ACTION_BUTTON_ORDER: [ActionButtonType; COMBAT_ACTION_COUNT] = COMBAT_ACTI
 /// | Cast             | Open `SpellPanelState` for spell selection      |
 /// | Item             | Open `ItemPanelState` for item selection        |
 /// | Flee             | Write `FleeAction` immediately                  |
-#[allow(clippy::too_many_arguments)]
 fn dispatch_combat_action(
     button_type: ActionButtonType,
     actor: CombatantId,
-    target_sel: &mut TargetSelection,
-    action_menu_state: &mut ActionMenuState,
-    ranged_pending: &mut RangedAttackPending,
-    spell_panel_state: &mut SpellPanelState,
-    item_panel_state: &mut ItemPanelState,
+    state: CombatActionState<'_>,
     defend_writer: &mut Option<MessageWriter<DefendAction>>,
     flee_writer: &mut Option<MessageWriter<FleeAction>>,
 ) {
+    let CombatActionState {
+        target_sel,
+        action_menu_state,
+        ranged_pending,
+        spell_panel_state,
+        item_panel_state,
+    } = state;
     match button_type {
         ActionButtonType::Attack => {
             target_sel.0 = Some(actor);
@@ -4359,6 +4445,19 @@ fn dispatch_combat_action(
     }
 }
 
+/// Mutable target-selection state threaded into [`confirm_attack_target`].
+///
+/// Groups the resource references the confirm path clears so the function stays
+/// under clippy's argument-count threshold.
+struct TargetConfirmState<'a> {
+    /// Monster target selection state; cleared to `None`.
+    target_sel: &'a mut TargetSelection,
+    /// Keyboard action/target menu state; `active_target_index` cleared.
+    action_menu_state: &'a mut ActionMenuState,
+    /// Ranged-attack pending flag; consumed and reset.
+    ranged_pending: &'a mut RangedAttackPending,
+}
+
 /// Write an `AttackAction` or `RangedAttackAction` and clear both
 /// `TargetSelection` and the keyboard target index.
 ///
@@ -4379,16 +4478,22 @@ fn dispatch_combat_action(
 ///   and reset to `false` when a ranged action is confirmed.
 /// * `attack_writer` - Optional message writer for `AttackAction`.
 /// * `ranged_writer` - Optional message writer for `RangedAttackAction`.
-#[allow(clippy::too_many_arguments)]
+///
+/// `state` bundles the mutable target-selection resources; the two message
+/// writers stay separate because bundling `&mut MessageWriter` behind a shared
+/// borrow fights the borrow checker.
 fn confirm_attack_target(
     attacker: CombatantId,
     target_monster_idx: usize,
-    target_sel: &mut TargetSelection,
-    action_menu_state: &mut ActionMenuState,
-    ranged_pending: &mut RangedAttackPending,
+    state: TargetConfirmState<'_>,
     attack_writer: &mut Option<MessageWriter<AttackAction>>,
     ranged_writer: &mut Option<MessageWriter<RangedAttackAction>>,
 ) {
+    let TargetConfirmState {
+        target_sel,
+        action_menu_state,
+        ranged_pending,
+    } = state;
     if ranged_pending.0 {
         if let Some(ref mut w) = ranged_writer {
             w.write(RangedAttackAction {
@@ -4471,7 +4576,6 @@ fn combat_input_system(
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
     mut interactions: ActionButtonQuery,
-    global_state: Res<GlobalState>,
     combat_res: Res<CombatResource>,
     mut target_sel: ResMut<TargetSelection>,
     mut defend_writer: Option<MessageWriter<DefendAction>>,
@@ -4485,10 +4589,6 @@ fn combat_input_system(
     mut spell_state: SpellCombatState<'_>,
     mut item_state: ItemCombatState<'_>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     // During an ambush round the party is surprised and cannot act.
     // `handle_combat_started` already sets `CombatTurnState::EnemyTurn` for
     // ambush round 1, so this guard provides defence-in-depth: even if a
@@ -4548,11 +4648,13 @@ fn combat_input_system(
                 dispatch_combat_action(
                     button.button_type,
                     actor,
-                    &mut target_sel,
-                    &mut action_menu_state,
-                    &mut ranged_pending,
-                    &mut spell_state.panel,
-                    &mut item_state.panel,
+                    CombatActionState {
+                        target_sel: &mut target_sel,
+                        action_menu_state: &mut action_menu_state,
+                        ranged_pending: &mut ranged_pending,
+                        spell_panel_state: &mut spell_state.panel,
+                        item_panel_state: &mut item_state.panel,
+                    },
                     &mut defend_writer,
                     &mut flee_writer,
                 );
@@ -4621,9 +4723,11 @@ fn combat_input_system(
                             confirm_attack_target(
                                 attacker,
                                 pidx,
-                                &mut target_sel,
-                                &mut action_menu_state,
-                                &mut ranged_pending,
+                                TargetConfirmState {
+                                    target_sel: &mut target_sel,
+                                    action_menu_state: &mut action_menu_state,
+                                    ranged_pending: &mut ranged_pending,
+                                },
                                 &mut attack_writer,
                                 &mut ranged_writer,
                             );
@@ -4810,9 +4914,11 @@ fn combat_input_system(
                     confirm_attack_target(
                         actor,
                         pidx,
-                        &mut target_sel,
-                        &mut action_menu_state,
-                        &mut ranged_pending,
+                        TargetConfirmState {
+                            target_sel: &mut target_sel,
+                            action_menu_state: &mut action_menu_state,
+                            ranged_pending: &mut ranged_pending,
+                        },
                         &mut attack_writer,
                         &mut ranged_writer,
                     );
@@ -4821,11 +4927,13 @@ fn combat_input_system(
                     dispatch_combat_action(
                         selected_type,
                         actor,
-                        &mut target_sel,
-                        &mut action_menu_state,
-                        &mut ranged_pending,
-                        &mut spell_state.panel,
-                        &mut item_state.panel,
+                        CombatActionState {
+                            target_sel: &mut target_sel,
+                            action_menu_state: &mut action_menu_state,
+                            ranged_pending: &mut ranged_pending,
+                            spell_panel_state: &mut spell_state.panel,
+                            item_panel_state: &mut item_state.panel,
+                        },
                         &mut defend_writer,
                         &mut flee_writer,
                     );
@@ -4834,11 +4942,13 @@ fn combat_input_system(
                 dispatch_combat_action(
                     selected_type,
                     actor,
-                    &mut target_sel,
-                    &mut action_menu_state,
-                    &mut ranged_pending,
-                    &mut spell_state.panel,
-                    &mut item_state.panel,
+                    CombatActionState {
+                        target_sel: &mut target_sel,
+                        action_menu_state: &mut action_menu_state,
+                        ranged_pending: &mut ranged_pending,
+                        spell_panel_state: &mut spell_state.panel,
+                        item_panel_state: &mut item_state.panel,
+                    },
                     &mut defend_writer,
                     &mut flee_writer,
                 );
@@ -5163,9 +5273,11 @@ fn select_target(
                 confirm_attack_target(
                     attacker,
                     enemy_card.participant_index,
-                    &mut target_sel,
-                    &mut action_menu_state,
-                    &mut ranged_pending,
+                    TargetConfirmState {
+                        target_sel: &mut target_sel,
+                        action_menu_state: &mut action_menu_state,
+                        ranged_pending: &mut ranged_pending,
+                    },
                     &mut attack_writer,
                     &mut ranged_writer,
                 );
@@ -5303,7 +5415,7 @@ pub fn perform_attack_action_with_rng(
         .filter_map(|id| content.db().conditions.get_condition(id).cloned())
         .collect();
 
-    let _round_effects = combat_res.state.advance_turn(&cond_defs);
+    let _round_effects = combat_res.state.advance_turn(&cond_defs, rng);
 
     // Update turn state based on next actor
     if let Some(next) = combat_res
@@ -5500,7 +5612,7 @@ pub fn perform_ranged_attack_action_with_rng(
         .filter_map(|id| content.db().conditions.get_condition(id).cloned())
         .collect();
 
-    let _round_effects = combat_res.state.advance_turn(&cond_defs);
+    let _round_effects = combat_res.state.advance_turn(&cond_defs, rng);
 
     // Update turn state.
     if let Some(next) = combat_res
@@ -5694,12 +5806,17 @@ pub fn perform_use_item_action_with_rng(
 }
 
 /// System wrapper: handle `AttackAction` messages and route to the attack performer.
+// Bevy system: the parameter count is inherent to the resources/queries this
+// system needs (including the shared `GameRng`); splitting it would not improve
+// clarity.
+#[allow(clippy::too_many_arguments)]
 fn handle_attack_action(
     mut reader: MessageReader<AttackAction>,
     mut combat_res: ResMut<CombatResource>,
     content: Option<Res<GameContent>>,
     mut global_state: ResMut<GlobalState>,
     mut turn_state: ResMut<CombatTurnStateResource>,
+    mut game_rng: ResMut<crate::game::resources::GameRng>,
     mut feedback_writer: Option<MessageWriter<CombatFeedbackEvent>>,
     mut sfx_writer: Option<MessageWriter<crate::game::systems::audio::PlaySfx>>,
 ) {
@@ -5736,7 +5853,7 @@ fn handle_attack_action(
         let prior_turn_state = turn_state.0;
         turn_state.0 = CombatTurnState::Animating;
 
-        let mut rng = rand::rng();
+        let mut rng = game_rng.rng();
         if let Err(e) = perform_attack_action_with_rng(
             &mut combat_res,
             action,
@@ -5810,12 +5927,17 @@ fn handle_attack_action(
 ///
 /// This is analogous to the spell handler: it captures pre-use HP/SP for the
 /// target so we can spawn UI feedback (floating numbers), performs the domain
+// Bevy system: the parameter count is inherent to the resources/queries this
+// system needs (including the shared `GameRng`); splitting it would not improve
+// clarity.
+#[allow(clippy::too_many_arguments)]
 fn handle_use_item_action(
     mut reader: MessageReader<UseItemAction>,
     mut combat_res: ResMut<CombatResource>,
     content: Option<Res<GameContent>>,
     mut global_state: ResMut<GlobalState>,
     mut turn_state: ResMut<CombatTurnStateResource>,
+    mut game_rng: ResMut<crate::game::resources::GameRng>,
     mut feedback_writer: Option<MessageWriter<CombatFeedbackEvent>>,
     mut sfx_writer: Option<MessageWriter<crate::game::systems::audio::PlaySfx>>,
 ) {
@@ -5852,7 +5974,7 @@ fn handle_use_item_action(
         let prior_turn_state = turn_state.0;
         turn_state.0 = CombatTurnState::Animating;
 
-        let mut rng = rand::rng();
+        let mut rng = game_rng.rng();
 
         // Perform the use (domain-level). This consumes inventory charges and applies effects.
         if let Err(e) = perform_use_item_action_with_rng(
@@ -6317,6 +6439,7 @@ pub fn perform_defend_action(
     content: &GameContent,
     _global_state: &mut GlobalState,
     turn_state: &mut CombatTurnStateResource,
+    rng: &mut impl rand::Rng,
 ) -> Result<(), CombatError> {
     // Ensure it's the actor's turn
     if let Some(current) = combat_res
@@ -6361,7 +6484,7 @@ pub fn perform_defend_action(
         .filter_map(|id| content.db().conditions.get_condition(id).cloned())
         .collect();
 
-    let turn_effects = combat_res.state.advance_turn(&cond_defs);
+    let turn_effects = combat_res.state.advance_turn(&cond_defs, rng);
     if !turn_effects.is_empty() {
         tracing::debug!("Turn advance effects: {:?}", turn_effects);
     }
@@ -6388,6 +6511,7 @@ fn handle_defend_action(
     content: Option<Res<GameContent>>,
     mut global_state: ResMut<GlobalState>,
     mut turn_state: ResMut<CombatTurnStateResource>,
+    mut game_rng: ResMut<crate::game::resources::GameRng>,
     mut feedback_writer: Option<MessageWriter<CombatFeedbackEvent>>,
 ) {
     let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
@@ -6401,6 +6525,7 @@ fn handle_defend_action(
             content_ref,
             &mut global_state,
             &mut turn_state,
+            game_rng.rng(),
         ) {
             Ok(()) => {
                 // Emit defensive-stance feedback so the combat log shows the action.
@@ -6424,6 +6549,7 @@ pub fn perform_flee_action(
     content: &GameContent,
     global_state: &mut GlobalState,
     turn_state: &mut CombatTurnStateResource,
+    rng: &mut impl rand::Rng,
 ) -> Result<bool, crate::domain::combat::engine::CombatError> {
     // Determine current actor
     let attacker = match combat_res
@@ -6445,7 +6571,7 @@ pub fn perform_flee_action(
             .into_iter()
             .filter_map(|id| content.db().conditions.get_condition(id).cloned())
             .collect();
-        let turn_effects = combat_res.state.advance_turn(&cond_defs);
+        let turn_effects = combat_res.state.advance_turn(&cond_defs, rng);
         if !turn_effects.is_empty() {
             tracing::debug!("Turn advance effects: {:?}", turn_effects);
         }
@@ -6511,7 +6637,7 @@ pub fn perform_flee_action(
         .into_iter()
         .filter_map(|id| content.db().conditions.get_condition(id).cloned())
         .collect();
-    let turn_effects = combat_res.state.advance_turn(&cond_defs);
+    let turn_effects = combat_res.state.advance_turn(&cond_defs, rng);
     if !turn_effects.is_empty() {
         tracing::debug!("Turn advance effects: {:?}", turn_effects);
     }
@@ -6536,6 +6662,7 @@ fn handle_flee_action(
     content: Option<Res<GameContent>>,
     mut global_state: ResMut<GlobalState>,
     mut turn_state: ResMut<CombatTurnStateResource>,
+    mut game_rng: ResMut<crate::game::resources::GameRng>,
 ) {
     let default_content = GameContent::new(crate::sdk::database::ContentDatabase::new());
 
@@ -6547,6 +6674,7 @@ fn handle_flee_action(
             content_ref,
             &mut global_state,
             &mut turn_state,
+            game_rng.rng(),
         ) {
             tracing::warn!("Flee action failed: {}", e);
         }
@@ -6559,6 +6687,10 @@ fn handle_flee_action(
 /// - Aggressive: choose the lowest HP living player
 /// - Defensive: choose the player with the highest 'threat' (might + accuracy)
 /// - Random: choose a random living player
+// The `is_empty()` guard above returns early when there are no candidates, so
+// `min_by_key`/`max_by_key` always yield `Some`; these `expect`s guard an
+// unreachable state rather than a recoverable failure.
+#[allow(clippy::expect_used)]
 fn select_monster_target(
     combat_state: &CombatState,
     behavior: crate::domain::combat::monster::AiBehavior,
@@ -6697,7 +6829,7 @@ pub fn perform_monster_turn_with_rng(
             .into_iter()
             .filter_map(|id| content.db().conditions.get_condition(id).cloned())
             .collect();
-        let turn_effects = combat_res.state.advance_turn(&cond_defs);
+        let turn_effects = combat_res.state.advance_turn(&cond_defs, rng);
         if !turn_effects.is_empty() {
             tracing::debug!("Turn advance effects: {:?}", turn_effects);
         }
@@ -6789,7 +6921,7 @@ pub fn perform_monster_turn_with_rng(
         .filter_map(|id| content.db().conditions.get_condition(id).cloned())
         .collect();
 
-    let turn_effects = combat_res.state.advance_turn(&cond_defs);
+    let turn_effects = combat_res.state.advance_turn(&cond_defs, rng);
     if !turn_effects.is_empty() {
         tracing::debug!("Turn advance effects: {:?}", turn_effects);
     }
@@ -6846,6 +6978,7 @@ fn execute_monster_turn(
     content: Option<Res<GameContent>>,
     mut global_state: ResMut<GlobalState>,
     mut turn_state: ResMut<CombatTurnStateResource>,
+    mut game_rng: ResMut<crate::game::resources::GameRng>,
     mut feedback_writer: Option<MessageWriter<CombatFeedbackEvent>>,
     mut combat_log: ResMut<CombatLogState>,
     mut monster_turn_timer: Option<ResMut<MonsterTurnTimer>>,
@@ -6880,7 +7013,7 @@ fn execute_monster_turn(
                 .filter_map(|id| content_ref.db().conditions.get_condition(id).cloned())
                 .collect();
 
-            let turn_effects = combat_res.state.advance_turn(&cond_defs);
+            let turn_effects = combat_res.state.advance_turn(&cond_defs, game_rng.rng());
             if !turn_effects.is_empty() {
                 tracing::debug!("Turn advance effects: {:?}", turn_effects);
             }
@@ -6954,7 +7087,7 @@ fn execute_monster_turn(
             // the round wraps; we pass an empty condition list here because the
             // full DoT tick already happened in perform_monster_turn_with_rng on
             // earlier turns this round).
-            let turn_effects = combat_res.state.advance_turn(&[]);
+            let turn_effects = combat_res.state.advance_turn(&[], game_rng.rng());
             if !turn_effects.is_empty() {
                 tracing::debug!("Turn advance effects (skip): {:?}", turn_effects);
             }
@@ -7099,11 +7232,6 @@ fn execute_monster_turn(
 /// This system is a no-op outside of combat, ensuring that the clock is never
 /// advanced by stale combat data.
 fn tick_combat_time(mut combat_res: ResMut<CombatResource>, mut global_state: ResMut<GlobalState>) {
-    // Only run while the global state is in combat mode.
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     let current_round = combat_res.state.round;
     let current_turn = combat_res.state.current_turn;
 
@@ -7121,13 +7249,7 @@ fn check_combat_resolution(
     mut victory_writer: Option<MessageWriter<CombatVictory>>,
     mut defeat_writer: Option<MessageWriter<CombatDefeat>>,
     mut combat_res: ResMut<CombatResource>,
-    global_state: Res<GlobalState>,
 ) {
-    // Only consider when in combat
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     if combat_res.resolution_handled {
         return;
     }
@@ -7890,15 +8012,10 @@ fn format_combat_log_line(
 /// Consume combat feedback events and append them to the persistent combat log.
 fn collect_combat_feedback_log_lines(
     mut reader: MessageReader<CombatFeedbackEvent>,
-    global_state: Res<GlobalState>,
     combat_res: Res<CombatResource>,
     mut combat_log_state: ResMut<CombatLogState>,
     mut color_state: ResMut<CombatLogColorState>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     let mut rng = rand::rng();
     for event in reader.read() {
         let line = format_combat_log_line(&combat_res, event, &mut color_state, &mut rng);
@@ -7913,15 +8030,10 @@ fn collect_combat_feedback_log_lines(
 /// combat events after the combat bubble is cleaned up.
 fn mirror_combat_feedback_to_game_log(
     mut reader: MessageReader<CombatFeedbackEvent>,
-    global_state: Res<GlobalState>,
     combat_res: Res<CombatResource>,
     mut color_state: ResMut<CombatLogColorState>,
     mut game_log_writer: Option<MessageWriter<crate::game::systems::ui::GameLogEvent>>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     let Some(ref mut game_log_writer) = game_log_writer else {
         for _ in reader.read() {}
         return;
@@ -7939,15 +8051,7 @@ fn mirror_combat_feedback_to_game_log(
 }
 
 /// Advance typewriter reveal for the newest combat log line.
-fn update_combat_log_typewriter(
-    time: Res<Time>,
-    global_state: Res<GlobalState>,
-    mut combat_log_state: ResMut<CombatLogState>,
-) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
+fn update_combat_log_typewriter(time: Res<Time>, mut combat_log_state: ResMut<CombatLogState>) {
     let Some(latest) = combat_log_state.lines.last() else {
         return;
     };
@@ -8046,7 +8150,7 @@ fn reset_combat_log_colors_on_exit(
     global_state: Res<GlobalState>,
     mut color_state: ResMut<CombatLogColorState>,
 ) {
-    if matches!(global_state.0.mode, GameMode::Combat(_)) {
+    if !combat_exited(&global_state.0.mode) {
         return;
     }
 
@@ -8267,7 +8371,7 @@ fn reset_combat_log_on_exit(
     global_state: Res<GlobalState>,
     mut combat_log_state: ResMut<CombatLogState>,
 ) {
-    if matches!(global_state.0.mode, GameMode::Combat(_)) {
+    if !combat_exited(&global_state.0.mode) {
         return;
     }
 
@@ -8495,11 +8599,6 @@ fn spawn_monster_hp_hover_bars(
     combat_res: Res<CombatResource>,
     existing_bars: Query<&MonsterHpHoverBar>,
 ) {
-    // Only run in combat
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     // Respect runtime graphics setting.
     if !global_state.0.config.graphics.show_combat_monster_hp_bars {
         return;
@@ -8631,10 +8730,6 @@ fn update_monster_hp_hover_bars(
     mut hp_text_query: MonsterHpHoverTextQuery,
     mut hover_bar_queries: MonsterHpHoverBarQueries,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     let bars_enabled = global_state.0.config.graphics.show_combat_monster_hp_bars;
 
     // Keep the bars world-projected above the active encounter marker while combat is active.
@@ -8734,15 +8829,13 @@ fn cleanup_monster_hp_hover_bars(
     bars: Query<Entity, With<MonsterHpHoverBar>>,
 ) {
     // Leave bars in place only while in combat and setting is enabled.
-    if matches!(global_state.0.mode, GameMode::Combat(_))
+    if !combat_exited(&global_state.0.mode)
         && global_state.0.config.graphics.show_combat_monster_hp_bars
     {
         return;
     }
 
-    for entity in bars.iter() {
-        commands.entity(entity).despawn();
-    }
+    despawn_all(&mut commands, &bars);
 }
 
 /// Animates and despawns floating damage/heal/miss numbers.
@@ -8845,11 +8938,13 @@ mod tests {
         dispatch_combat_action(
             ActionButtonType::Cast,
             actor,
-            &mut target_sel,
-            &mut action_menu_state,
-            &mut ranged_pending,
-            &mut spell_panel_state,
-            &mut item_panel_state,
+            CombatActionState {
+                target_sel: &mut target_sel,
+                action_menu_state: &mut action_menu_state,
+                ranged_pending: &mut ranged_pending,
+                spell_panel_state: &mut spell_panel_state,
+                item_panel_state: &mut item_panel_state,
+            },
             &mut defend_writer,
             &mut flee_writer,
         );
@@ -8882,11 +8977,13 @@ mod tests {
         dispatch_combat_action(
             ActionButtonType::Item,
             actor,
-            &mut target_sel,
-            &mut action_menu_state,
-            &mut ranged_pending,
-            &mut spell_panel_state,
-            &mut item_panel_state,
+            CombatActionState {
+                target_sel: &mut target_sel,
+                action_menu_state: &mut action_menu_state,
+                ranged_pending: &mut ranged_pending,
+                spell_panel_state: &mut spell_panel_state,
+                item_panel_state: &mut item_panel_state,
+            },
             &mut defend_writer,
             &mut flee_writer,
         );
@@ -9527,7 +9624,7 @@ mod tests {
             // Exhaust all slots in round 1 to trigger advance_round.
             // With only one combatant (player), a single advance_turn call
             // wraps the turn order and fires advance_round (round -> 2).
-            let _ = cs.advance_turn(&[]);
+            let _ = cs.advance_turn(&[], &mut rand::rng());
 
             assert!(
                 !cs.ambush_round_active,
@@ -9565,7 +9662,7 @@ mod tests {
         start_encounter(&mut gs, &content, &[], CombatEventType::Ambush).unwrap();
 
         if let crate::application::GameMode::Combat(ref mut cs) = gs.mode {
-            let _ = cs.advance_turn(&[]);
+            let _ = cs.advance_turn(&[], &mut rand::rng());
             assert_eq!(cs.handicap, Handicap::Even);
         } else {
             panic!("Expected Combat mode");
@@ -9895,7 +9992,7 @@ mod tests {
         // Advance past round 1 so `advance_round` fires and clears the flag.
         if let crate::application::GameMode::Combat(ref mut cs) = gs.mode {
             assert!(cs.ambush_round_active, "pre-condition: flag must be set");
-            let _ = cs.advance_turn(&[]);
+            let _ = cs.advance_turn(&[], &mut rand::rng());
             assert!(
                 !cs.ambush_round_active,
                 "pre-condition: ambush_round_active must be cleared after advance_turn into round 2"
@@ -10947,6 +11044,7 @@ mod tests {
             &content,
             &mut gs_local,
             &mut turn_state_local,
+            &mut rand::rng(),
         )
         .expect("defend failed");
 
@@ -11020,6 +11118,7 @@ mod tests {
             &content,
             &mut gs_local,
             &mut turn_state_local,
+            &mut rand::rng(),
         )
         .expect("first defend failed");
 
@@ -11044,6 +11143,7 @@ mod tests {
             &content,
             &mut gs_local,
             &mut turn_state_local,
+            &mut rand::rng(),
         )
         .expect("second defend failed");
 
@@ -11095,6 +11195,7 @@ mod tests {
             &content,
             &mut gs_local,
             &mut turn_state_local,
+            &mut rand::rng(),
         );
 
         assert!(
@@ -11168,6 +11269,7 @@ mod tests {
                 &content,
                 &mut gs_owned,
                 &mut turn_state_owned,
+                &mut rand::rng(),
             )
             .expect("flee action failed");
 
@@ -11244,6 +11346,7 @@ mod tests {
                 &content,
                 &mut gs_owned,
                 &mut turn_state_owned,
+                &mut rand::rng(),
             )
             .expect("flee action execution failed");
 
@@ -16113,7 +16216,7 @@ mod tests {
         // Advance turns until a new round starts.
         // With one monster and no players, the turn_order has 1 entry,
         // so advancing once triggers advance_round.
-        let _ = cr.state.advance_turn(&[]);
+        let _ = cr.state.advance_turn(&[], &mut rand::rng());
 
         // Apply the boss bonus regeneration (simulating what perform_monster_turn_with_rng does)
         if cr.combat_event_type == CombatEventType::Boss && cr.state.monsters_regenerate {
@@ -16410,7 +16513,7 @@ mod tests {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Phase 2: Item Selection Panel tests
+    // Item Selection Panel tests
     // ─────────────────────────────────────────────────────────────────────────
 
     /// `dispatch_combat_action(Item)` sets `item_panel_state.user = Some(actor)`.
@@ -16431,11 +16534,13 @@ mod tests {
         dispatch_combat_action(
             ActionButtonType::Item,
             actor,
-            &mut target_sel,
-            &mut action_menu_state,
-            &mut ranged_pending,
-            &mut spell_panel_state,
-            &mut item_panel_state,
+            CombatActionState {
+                target_sel: &mut target_sel,
+                action_menu_state: &mut action_menu_state,
+                ranged_pending: &mut ranged_pending,
+                spell_panel_state: &mut spell_panel_state,
+                item_panel_state: &mut item_panel_state,
+            },
             &mut defend_writer,
             &mut flee_writer,
         );
@@ -17987,7 +18092,7 @@ mod tests {
         );
     }
 
-    /// Phase 3 (3.4): selecting a `MonsterGroup` spell must not cast
+    /// Selecting a `MonsterGroup` spell must not cast
     /// immediately — it must enter `GroupTargetPending` (side = `Monsters`)
     /// and highlight every *living* `EnemyCard` with
     /// `ENEMY_CARD_HIGHLIGHT_COLOR`, leaving a dead monster's card
@@ -18152,7 +18257,7 @@ mod tests {
         );
     }
 
-    /// Phase 3 (3.4): `Enter` while `GroupTargetPending` holds a `Monsters`-side
+    /// `Enter` while `GroupTargetPending` holds a `Monsters`-side
     /// spell must emit `CastSpellAction` with the first-alive-monster
     /// placeholder target and clear the pending state.
     #[test]
@@ -18234,7 +18339,7 @@ mod tests {
         );
     }
 
-    /// Phase 3 (3.4): `Escape` while `GroupTargetPending` holds data must
+    /// `Escape` while `GroupTargetPending` holds data must
     /// cancel without emitting `CastSpellAction` (no SP loss) and reopen the
     /// spell panel for the same caster.
     #[test]
@@ -18309,7 +18414,7 @@ mod tests {
         }
     }
 
-    /// Phase 3 (3.4): selecting an `AllCharacters` spell must enter
+    /// Selecting an `AllCharacters` spell must enter
     /// `GroupTargetPending` with `GroupTargetSide::Characters`, and confirming
     /// with `Enter` must emit `CastSpellAction` with the caster as the
     /// placeholder target (the domain layer applies the spell to every living

@@ -15,6 +15,7 @@ use std::fmt;
 
 use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 // Re-export GameMode from application layer for convenience
 pub use crate::application::GameMode;
@@ -349,6 +350,27 @@ impl Direction {
 /// let result = roll.roll(&mut rng);
 /// assert!(result >= 5 && result <= 15); // Min: 2+3, Max: 12+3
 /// ```
+/// Errors that can occur when validating a [`DiceRoll`] specification.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::types::{DiceRoll, DiceRollError};
+///
+/// let invalid = DiceRoll::new(1, 0, 0); // a die with 0 sides is nonsensical
+/// assert_eq!(invalid.validate(), Err(DiceRollError::ZeroSides));
+/// ```
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DiceRollError {
+    /// The die has zero sides, which is not a valid die specification.
+    ///
+    /// A 0-sided die contributes no random value, so `roll` treats it as a
+    /// no-op, but such a specification almost always indicates a content
+    /// authoring mistake and is rejected by [`DiceRoll::validate`].
+    #[error("dice roll has 0 sides (die must have at least 1 side)")]
+    ZeroSides,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiceRoll {
     /// Number of dice to roll
@@ -381,6 +403,11 @@ impl DiceRoll {
     ///
     /// The result is clamped to a minimum of 0 (negative results become 0).
     ///
+    /// When `sides == 0` the dice loop is skipped entirely (a 0-sided die
+    /// contributes nothing) and only `bonus` is returned, clamped to a minimum
+    /// of 0. This guards against a panic from `random_range(1..=0)`, which
+    /// would otherwise be given an empty range.
+    ///
     /// # Examples
     ///
     /// ```
@@ -391,13 +418,47 @@ impl DiceRoll {
     /// let mut rng = rng();
     /// let result = roll.roll(&mut rng);
     /// assert!(result >= 3 && result <= 18);
+    ///
+    /// // A 0-sided die never panics; it simply yields the bonus.
+    /// let zero = DiceRoll::new(1, 0, 4);
+    /// assert_eq!(zero.roll(&mut rng), 4);
     /// ```
     pub fn roll(&self, rng: &mut impl Rng) -> i32 {
         let mut total = self.bonus as i32;
+        if self.sides == 0 {
+            // A 0-sided die contributes no random value. Returning here avoids
+            // `random_range(1..=0)`, which panics on an empty range.
+            return total.max(0);
+        }
         for _ in 0..self.count {
             total += rng.random_range(1..=self.sides as i32);
         }
         total.max(0)
+    }
+
+    /// Validates that this dice roll is a sensible specification.
+    ///
+    /// A die must have at least one side. A `sides` value of 0 is rejected
+    /// with [`DiceRollError::ZeroSides`]; all other values are accepted
+    /// (`count` and `bonus` of 0 are legitimate).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DiceRollError::ZeroSides`] when `self.sides == 0`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::types::{DiceRoll, DiceRollError};
+    ///
+    /// assert!(DiceRoll::new(1, 6, 0).validate().is_ok());
+    /// assert_eq!(DiceRoll::new(1, 0, 0).validate(), Err(DiceRollError::ZeroSides));
+    /// ```
+    pub fn validate(&self) -> Result<(), DiceRollError> {
+        if self.sides == 0 {
+            return Err(DiceRollError::ZeroSides);
+        }
+        Ok(())
     }
 
     /// Returns the minimum possible result
@@ -1240,6 +1301,23 @@ mod tests {
         let mut rng = rng();
         let result = roll.roll(&mut rng);
         assert_eq!(result, 0); // Clamped to minimum of 0
+    }
+
+    #[test]
+    fn test_roll_with_zero_sides_does_not_panic() {
+        let roll = DiceRoll::new(1, 0, 3);
+        let mut rng = rng();
+        // A 0-sided die must not panic; it contributes only the bonus.
+        assert_eq!(roll.roll(&mut rng), 3);
+    }
+
+    #[test]
+    fn test_dice_roll_validate_rejects_zero_sides() {
+        assert_eq!(
+            DiceRoll::new(1, 0, 0).validate(),
+            Err(DiceRollError::ZeroSides)
+        );
+        assert!(DiceRoll::new(1, 6, 0).validate().is_ok());
     }
 
     #[test]

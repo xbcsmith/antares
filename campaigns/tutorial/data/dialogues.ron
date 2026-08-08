@@ -2684,4 +2684,72 @@
             managed_content: [],
         ),
     ),
+    (
+        id: 1002,
+        name: "Lost Ranger (Copy) Skill Trainer Dialogue",
+        root_node: 1,
+        nodes: {
+            1: (
+                id: 1,
+                text: "Greetings, adventurer. Lost Ranger (Copy) can help you hone your skills.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "I seek skill training.",
+                        target_node: Some(2),
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: false,
+                        sdk_metadata: (
+                            managed_content: [
+                                SkillTrainerChoice,
+                            ],
+                        ),
+                    ),
+                    (
+                        text: "Farewell.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+            2: (
+                id: 2,
+                text: "Very well. Lost Ranger (Copy) shall assess your abilities.",
+                speaker_override: None,
+                choices: [],
+                conditions: [],
+                actions: [
+                    OpenSkillTraining(
+                        npc_id: "npc_1",
+                    ),
+                ],
+                is_terminal: true,
+                sdk_metadata: (
+                    managed_content: [
+                        SkillTrainerOpenNode,
+                    ],
+                ),
+            ),
+        },
+        speaker_name: Some("Lost Ranger (Copy)"),
+        repeatable: true,
+        associated_quest: None,
+        sdk_metadata: (
+            managed_content: [
+                SkillTrainerTemplateTree,
+            ],
+        ),
+    ),
 ]

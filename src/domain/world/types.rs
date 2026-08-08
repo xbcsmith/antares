@@ -2087,7 +2087,7 @@ pub enum MapEvent {
         loot: Vec<u8>,
         /// Optional mesh reference for a visible 3-D object on the event tile.
         ///
-        /// References an entry in the shared object mesh registry (Phase 4).
+        /// References an entry in the shared object mesh registry.
         /// `None` means the event has no visual representation beyond tile art.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mesh_id: Option<String>,
@@ -2148,7 +2148,7 @@ pub enum MapEvent {
         facing: Option<Direction>,
         /// Optional mesh reference for a visible 3-D object on the event tile.
         ///
-        /// References an entry in the shared object mesh registry (Phase 4).
+        /// References an entry in the shared object mesh registry.
         /// `None` means the event has no visual representation beyond tile art.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mesh_id: Option<String>,
@@ -2332,7 +2332,7 @@ pub enum MapEvent {
         gems: u32,
         /// Optional mesh reference for a visible 3-D object on the event tile.
         ///
-        /// References an entry in the shared object mesh registry (Phase 4).
+        /// References an entry in the shared object mesh registry.
         /// `None` means the event has no visual representation beyond tile art.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mesh_id: Option<String>,
@@ -2396,7 +2396,7 @@ pub enum MapEvent {
         initial_trap_chance: u8,
         /// Optional mesh reference for a visible 3-D object on the event tile.
         ///
-        /// References an entry in the shared object mesh registry (Phase 4).
+        /// References an entry in the shared object mesh registry.
         /// `None` means the event has no visual representation beyond tile art.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mesh_id: Option<String>,
@@ -2437,7 +2437,7 @@ pub enum MapEvent {
         initial_trap_chance: u8,
         /// Optional mesh reference for a visible 3-D object on the event tile.
         ///
-        /// References an entry in the shared object mesh registry (Phase 4).
+        /// References an entry in the shared object mesh registry.
         /// `None` means the event has no visual representation beyond tile art.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mesh_id: Option<String>,
@@ -6839,7 +6839,7 @@ mod tests {
         assert_eq!(sky.day_sky_color, [0.1, 0.2, 0.3, 1.0]);
     }
 
-    // ===== Phase 1: mesh_id / dialogue_id round-trip tests =====
+    // ===== mesh_id / dialogue_id round-trip tests =====
 
     #[test]
     fn test_treasure_mesh_id_dialogue_id_nil_roundtrip() {

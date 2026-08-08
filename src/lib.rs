@@ -13,6 +13,25 @@
 //! - **Application Layer**: Game state management and orchestration
 //! - **Infrastructure Layer**: I/O, rendering, and persistence (future phases)
 //!
+
+// Error-handling regression gate (Phase 4): forbid new panicking `unwrap`/
+// `expect` and ignored `#[must_use]` results in non-test library code. Existing
+// justified sites carry targeted `#[allow(...)]` attributes with rationale.
+// Test code is exempt: assertions and fixtures legitimately use `unwrap`.
+#![warn(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::let_underscore_must_use
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::let_underscore_must_use
+    )
+)]
+
 /// # Example
 ///
 /// ```
@@ -25,6 +44,7 @@
 /// ```
 pub mod application;
 pub mod domain;
+pub mod error;
 pub mod game;
 pub mod sdk;
 
@@ -34,3 +54,4 @@ pub mod test_helpers;
 // Re-export commonly used types for convenience
 pub use domain::types::{CharacterId, EventId, InnkeeperId, ItemId, MapId, MonsterId, SpellId};
 pub use domain::types::{DiceRoll, Direction, GameTime, Position, TimeOfDay};
+pub use error::GameError;

@@ -129,13 +129,17 @@ impl NameGenerator {
     /// let name = generator.generate_with_title(NameTheme::Antares);
     /// assert!(!name.is_empty());
     /// ```
+    // Justification: the static TITLES table is a compile-time constant and never empty, so `expect` here cannot fail.
+    #[allow(clippy::expect_used)]
     pub fn generate_with_title(&self, theme: NameTheme) -> String {
         let mut rng = rand::rng();
         let base_name = self.generate(theme);
 
         // 40% chance to add a title
         if rng.random_bool(0.4) {
-            let title = TITLES.choose(&mut rng).unwrap();
+            let title = TITLES
+                .choose(&mut rng)
+                .expect("static name table is non-empty");
             format!("{} {}", base_name, title)
         } else {
             base_name
@@ -228,21 +232,39 @@ impl NameGenerator {
 
     // Private generation methods
 
+    // Justification: static name tables are compile-time constants and never empty, so `expect` here cannot fail.
+    #[allow(clippy::expect_used)]
     fn generate_star_name(rng: &mut impl Rng) -> String {
-        let prefix = STAR_PREFIXES.choose(rng).unwrap();
-        let suffix = STAR_SUFFIXES.choose(rng).unwrap();
+        let prefix = STAR_PREFIXES
+            .choose(rng)
+            .expect("static name table is non-empty");
+        let suffix = STAR_SUFFIXES
+            .choose(rng)
+            .expect("static name table is non-empty");
         format!("{}{}", prefix, suffix)
     }
 
+    // Justification: static name tables are compile-time constants and never empty, so `expect` here cannot fail.
+    #[allow(clippy::expect_used)]
     fn generate_fantasy_name(rng: &mut impl Rng) -> String {
-        let prefix = FANTASY_PREFIXES.choose(rng).unwrap();
-        let suffix = FANTASY_SUFFIXES.choose(rng).unwrap();
+        let prefix = FANTASY_PREFIXES
+            .choose(rng)
+            .expect("static name table is non-empty");
+        let suffix = FANTASY_SUFFIXES
+            .choose(rng)
+            .expect("static name table is non-empty");
         format!("{}{}", prefix, suffix)
     }
 
+    // Justification: static name tables are compile-time constants and never empty, so `expect` here cannot fail.
+    #[allow(clippy::expect_used)]
     fn generate_antares_name(rng: &mut impl Rng) -> String {
-        let theme = ANTARES_THEMES.choose(rng).unwrap();
-        let suffix = STAR_SUFFIXES.choose(rng).unwrap();
+        let theme = ANTARES_THEMES
+            .choose(rng)
+            .expect("static name table is non-empty");
+        let suffix = STAR_SUFFIXES
+            .choose(rng)
+            .expect("static name table is non-empty");
 
         // Create compound names with Antares lore
         let patterns = [
@@ -250,19 +272,30 @@ impl NameGenerator {
             format!(
                 "{}{}",
                 theme,
-                ["ion", "us", "is", "as"].choose(rng).unwrap()
+                ["ion", "us", "is", "as"]
+                    .choose(rng)
+                    .expect("static name table is non-empty")
             ),
             format!("Red{}", theme),
             format!("{}heart", theme),
             format!("Scorpi{}", suffix),
         ];
 
-        patterns.choose(rng).unwrap().clone()
+        patterns
+            .choose(rng)
+            .expect("static name table is non-empty")
+            .clone()
     }
 
+    // Justification: static name tables are compile-time constants and never empty, so `expect` here cannot fail.
+    #[allow(clippy::expect_used)]
     fn generate_arcturus_name(rng: &mut impl Rng) -> String {
-        let theme = ARCTURUS_THEMES.choose(rng).unwrap();
-        let suffix = STAR_SUFFIXES.choose(rng).unwrap();
+        let theme = ARCTURUS_THEMES
+            .choose(rng)
+            .expect("static name table is non-empty");
+        let suffix = STAR_SUFFIXES
+            .choose(rng)
+            .expect("static name table is non-empty");
 
         // Create compound names with Arcturus lore
         let patterns = [
@@ -270,16 +303,23 @@ impl NameGenerator {
             format!(
                 "{}{}",
                 theme,
-                ["ion", "us", "is", "ar"].choose(rng).unwrap()
+                ["ion", "us", "is", "ar"]
+                    .choose(rng)
+                    .expect("static name table is non-empty")
             ),
             format!("Bear{}", theme),
             format!("{}star", theme),
             format!("North{}", suffix),
         ];
 
-        patterns.choose(rng).unwrap().clone()
+        patterns
+            .choose(rng)
+            .expect("static name table is non-empty")
+            .clone()
     }
 
+    // Justification: static lore-template tables are compile-time constants and never empty, so `expect` here cannot fail.
+    #[allow(clippy::expect_used)]
     fn generate_lore(name: &str, theme: NameTheme) -> String {
         let mut rng = rand::rng();
 
@@ -290,7 +330,9 @@ impl NameGenerator {
             NameTheme::Fantasy => FANTASY_LORE_TEMPLATES,
         };
 
-        let template = templates.choose(&mut rng).unwrap();
+        let template = templates
+            .choose(&mut rng)
+            .expect("static name table is non-empty");
         template.replace("{name}", name)
     }
 }

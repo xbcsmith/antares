@@ -284,6 +284,8 @@ impl SkeletalAnimation {
     /// let sample = animation.sample_bone(0, 0.5);
     /// assert!(sample.is_some());
     /// ```
+    // track is guaranteed non-empty here (early `return None` on `track.is_empty()`), so `track.last().unwrap()` cannot panic.
+    #[allow(clippy::unwrap_used)]
     pub fn sample_bone(&self, bone_id: BoneId, time: f32) -> Option<BoneKeyframe> {
         let track = self.bone_tracks.get(&bone_id)?;
 

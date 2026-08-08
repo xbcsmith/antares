@@ -225,26 +225,6 @@ impl ProceduralMeshCache {
         super::advanced_trees::TreeMeshPair { branches, leaves }
     }
 
-    /// Gets or creates a branch mesh handle for a specific tree type.
-    ///
-    /// This compatibility helper uses the default foliage-density, quality, and
-    /// variant buckets. New tree rendering should prefer
-    /// [`get_or_create_tree_mesh_pair`](Self::get_or_create_tree_mesh_pair).
-    pub fn get_or_create_tree_mesh(
-        &mut self,
-        tree_type: TreeType,
-        meshes: &mut Assets<Mesh>,
-    ) -> Handle<Mesh> {
-        let key = super::advanced_trees::TreeMeshCacheKey::new(
-            tree_type,
-            tree_type.config().foliage_density,
-            0,
-            0,
-        );
-        self.get_or_create_tree_mesh_pair(tree_type, key, meshes)
-            .branches
-    }
-
     /// Gets or creates a mesh handle for a specific creature mesh part
     ///
     /// # Arguments
@@ -1460,40 +1440,6 @@ pub fn spawn_tree_with_offset_with_quality(
     }
 
     parent
-}
-
-/// Spawns a procedurally generated shrub
-///
-/// Uses the species tree mesh pair pipeline (`TreeType::Shrub`) so shrubs share
-/// the same branch/leaf mesh caching and foliage-density behavior as other
-/// tree variants.
-///
-/// # Arguments
-///
-/// * `ctx` - Mutable reference to [`MeshSpawnContext`] (commands, materials, meshes, cache)
-/// * `asset_server` - Asset server used to resolve shrub bark textures; foliage uses generated materials
-/// * `position` - Tile position in world coordinates
-/// * `map_id` - Map identifier for cleanup
-/// * `visual_metadata` - Optional per-tile customization (height controls shrub size, scale affects foliage density)
-///
-/// # Returns
-///
-/// Entity ID of the shrub entity
-pub fn spawn_shrub(
-    ctx: &mut MeshSpawnContext<'_, '_, '_>,
-    asset_server: &AssetServer,
-    position: types::Position,
-    map_id: types::MapId,
-    visual_metadata: Option<&TileVisualMetadata>,
-) -> Entity {
-    spawn_shrub_with_offset(
-        ctx,
-        asset_server,
-        position,
-        map_id,
-        visual_metadata,
-        Vec2::ZERO,
-    )
 }
 
 /// Spawns a procedurally generated shrub at a deterministic offset inside its tile.

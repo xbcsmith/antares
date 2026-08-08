@@ -495,6 +495,14 @@ impl Spell {
     /// assert_eq!(spell.name, "Fireball");
     /// assert_eq!(spell.level, 3);
     /// ```
+    // `Spell::new` has 12 parameters, well above the Clippy threshold.
+    // Refactoring to a `SpellInit` struct was considered and rejected:
+    // there are 40+ call sites across tests, the domain layer, and the SDK,
+    // all using positional construction with inline literal values. Every
+    // parameter is required (no optional defaults). A builder refactor would
+    // produce a very large diff with no functional benefit and would obscure
+    // the intentional one-to-one mapping between constructor args and RON
+    // data fields.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: SpellId,

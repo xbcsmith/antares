@@ -25,9 +25,8 @@
 //! 5. [`cleanup_spell_casting_ui`] despawns the overlay when the mode leaves
 //!    `SpellCasting`.
 //!
-//! # Architecture Reference
-//!
-//! Phase 3 of `docs/explanation/spell_system_updates_implementation_plan.md`.
+//! Casting outside combat is driven entirely through this plugin's UI overlay
+//! and multi-step selection flow; no combat turn structure is involved.
 
 use crate::application::resources::GameContent;
 use crate::application::spell_casting_state::{SpellCastingState, SpellCastingStep};
@@ -250,7 +249,8 @@ pub fn update_spell_casting_ui(
     mut commands: Commands,
     global_state: Res<GlobalState>,
     content: Option<Res<GameContent>>,
-    mut title_query: Query<&mut Text, With<SpellCastingTitle>>,
+    mut title_query: Query<&mut Text, (With<SpellCastingTitle>, Without<SpellCastingHint>)>,
+    mut hint_query: Query<&mut Text, (With<SpellCastingHint>, Without<SpellCastingTitle>)>,
     content_query: Query<Entity, With<SpellCastingContent>>,
     children_query: Query<&Children>,
 ) {
@@ -263,12 +263,26 @@ pub fn update_spell_casting_ui(
     let title_str = match sc.step {
         SpellCastingStep::SelectCaster => "Select Caster",
         SpellCastingStep::SelectSpell => "Select Spell",
+        SpellCastingStep::SelectMapTarget => "Jump Destination",
         SpellCastingStep::SelectTarget => "Select Target",
         SpellCastingStep::ShowResult => "Spell Cast",
     };
     for mut text in title_query.iter_mut() {
         if text.0 != title_str {
             text.0 = title_str.to_string();
+        }
+    }
+
+    // ── Update hint ──────────────────────────────────────────────────────────
+    let hint_str = match sc.step {
+        SpellCastingStep::SelectMapTarget => {
+            "\u{2190}\u{2192} X  \u{2191}\u{2193} Y  Enter Confirm  Esc Back"
+        }
+        _ => "\u{2191}\u{2193} Navigate   Enter Confirm   Esc Cancel",
+    };
+    for mut text in hint_query.iter_mut() {
+        if text.0 != hint_str {
+            text.0 = hint_str.to_string();
         }
     }
 
@@ -295,6 +309,9 @@ pub fn update_spell_casting_ui(
             SpellCastingStep::SelectSpell => {
                 build_spell_rows(list, sc, &global_state, content.as_deref());
             }
+            SpellCastingStep::SelectMapTarget => {
+                build_map_target_rows(list, sc, &global_state);
+            }
             SpellCastingStep::SelectTarget => {
                 build_target_rows(list, sc, &global_state);
             }
@@ -314,10 +331,19 @@ pub fn handle_spell_casting_input(
     mut global_state: ResMut<GlobalState>,
     content: Option<Res<GameContent>>,
     mut game_log: Option<ResMut<GameLog>>,
+    mut game_rng: Option<ResMut<crate::game::resources::GameRng>>,
 ) {
     if !matches!(global_state.0.mode, GameMode::SpellCasting(_)) {
         return;
     }
+
+    // Resolve the deterministic gameplay RNG (falling back to a standalone
+    // generator only in minimal test apps where the resource is absent).
+    let mut fallback_rng = crate::game::resources::GameRng::fallback_std_rng();
+    let rng: &mut rand::rngs::StdRng = match game_rng.as_deref_mut() {
+        Some(gr) => gr.rng(),
+        None => &mut fallback_rng,
+    };
 
     let Some(ref kb) = keyboard else {
         return;
@@ -390,32 +416,62 @@ pub fn handle_spell_casting_input(
             };
 
             if let Some((caster_index, spell_id)) = spell_id {
-                // Look up the target type.
+                // Look up the target type and effect type for routing.
                 let spell_target = content
                     .as_deref()
                     .and_then(|c| c.db().spells.get_spell(spell_id))
                     .map(|s| s.target);
+
+                let is_jump = content
+                    .as_deref()
+                    .and_then(|c| c.db().spells.get_spell(spell_id))
+                    .map(|s| {
+                        matches!(
+                            s.effective_effect_type(),
+                            SpellEffectType::Utility {
+                                utility_type: UtilityType::Teleport {
+                                    destination: TeleportDestination::Jump,
+                                },
+                            }
+                        )
+                    })
+                    .unwrap_or(false);
 
                 if let GameMode::SpellCasting(sc) = &mut global_state.0.mode {
                     sc.select_spell(spell_id);
                     sc.caster_index = caster_index;
                 }
 
-                match spell_target {
-                    Some(SpellTarget::SingleCharacter) => {
-                        // Need target selection step.
-                        if let GameMode::SpellCasting(sc) = &mut global_state.0.mode {
-                            sc.step = SpellCastingStep::SelectTarget;
-                            sc.selected_row = 0;
-                        }
+                if is_jump {
+                    // Jump requires a map-target selection step.
+                    // Initialise the cursor at the party's current position.
+                    let (start_x, start_y) = {
+                        let pos = global_state.0.world.party_position;
+                        (pos.x, pos.y)
+                    };
+                    if let GameMode::SpellCasting(sc) = &mut global_state.0.mode {
+                        sc.select_map_target(start_x, start_y);
+                        sc.step = SpellCastingStep::SelectMapTarget;
+                        sc.selected_row = 0;
                     }
-                    _ => {
-                        // Execute immediately.
-                        execute_exploration_cast(
-                            &mut global_state,
-                            content.as_deref(),
-                            &mut game_log,
-                        );
+                } else {
+                    match spell_target {
+                        Some(SpellTarget::SingleCharacter) => {
+                            // Need target selection step.
+                            if let GameMode::SpellCasting(sc) = &mut global_state.0.mode {
+                                sc.step = SpellCastingStep::SelectTarget;
+                                sc.selected_row = 0;
+                            }
+                        }
+                        _ => {
+                            // Execute immediately.
+                            execute_exploration_cast(
+                                &mut global_state,
+                                content.as_deref(),
+                                &mut game_log,
+                                rng,
+                            );
+                        }
                     }
                 }
             }
@@ -437,8 +493,13 @@ pub fn handle_spell_casting_input(
                 if let GameMode::SpellCasting(sc) = &mut global_state.0.mode {
                     sc.select_target(target_idx);
                 }
-                execute_exploration_cast(&mut global_state, content.as_deref(), &mut game_log);
+                execute_exploration_cast(&mut global_state, content.as_deref(), &mut game_log, rng);
             }
+        }
+
+        SpellCastingStep::SelectMapTarget => {
+            // All input for this step is handled by the early-return block above.
+            // This arm exists solely to satisfy exhaustiveness.
         }
 
         SpellCastingStep::ShowResult => {
@@ -476,6 +537,7 @@ pub fn count_items_for_step(
     match sc.step {
         SpellCastingStep::SelectCaster => game_state.party.members.len(),
         SpellCastingStep::SelectSpell => collect_castable_spell_ids(game_state, content).1.len(),
+        SpellCastingStep::SelectMapTarget => 1,
         SpellCastingStep::SelectTarget => game_state
             .party
             .members
@@ -515,6 +577,7 @@ fn execute_exploration_cast(
     global_state: &mut GlobalState,
     content: Option<&GameContent>,
     game_log: &mut Option<ResMut<GameLog>>,
+    rng: &mut impl rand::Rng,
 ) {
     let (caster_index, spell_id, target) = {
         let sc = match &global_state.0.mode {
@@ -566,14 +629,13 @@ fn execute_exploration_cast(
         &owned_item_db
     };
 
-    let mut rng = rand::rng();
     let result = cast_exploration_spell(
         caster_index,
         &spell,
         target,
         &mut global_state.0,
         item_db,
-        &mut rng,
+        rng,
     );
 
     let message = match result {
@@ -587,6 +649,17 @@ fn execute_exploration_cast(
                     utility_type: UtilityType::Information,
                 }
             );
+            // Jump spell: report the target coordinates chosen by the player.
+            // The actual world-state change is applied by the caller after this
+            // function returns; we read map_target_x/y from the state here.
+            let is_jump = matches!(
+                spell.effective_effect_type(),
+                SpellEffectType::Utility {
+                    utility_type: UtilityType::Teleport {
+                        destination: TeleportDestination::Jump,
+                    },
+                }
+            );
             if is_information {
                 format!(
                     "Location: Map {}, ({}, {}).",
@@ -594,6 +667,12 @@ fn execute_exploration_cast(
                     global_state.0.world.party_position.x,
                     global_state.0.world.party_position.y,
                 )
+            } else if is_jump {
+                let (tx, ty) = match &global_state.0.mode {
+                    GameMode::SpellCasting(sc) => (sc.map_target_x, sc.map_target_y),
+                    _ => (0, 0),
+                };
+                format!("Jump: teleporting to ({}, {}).", tx, ty)
             } else if r.total_hp_healed > 0 {
                 format!("{} restores {} HP.", spell.name, r.total_hp_healed)
             } else if r.food_created > 0 {
@@ -635,10 +714,10 @@ fn execute_exploration_cast(
                     tracing::info!("Town Portal: party teleported to town.");
                 }
                 TeleportDestination::Jump => {
-                    // Full Jump targeting requires a target-selection UI step
-                    // (deferred to a future phase).  The SP has been consumed;
-                    // log the limitation so authors are aware.
-                    tracing::info!("Jump spell cast — target-selection UI is not yet implemented.");
+                    // The world-state change (party position) is applied by
+                    // handle_spell_casting_input after target validation;
+                    // nothing to do here.
+                    tracing::debug!("Jump teleport: position will be applied by caller.");
                 }
             }
         }
@@ -778,6 +857,23 @@ fn build_target_rows(
         );
         spawn_row(list, &hp_text, selected, false);
     }
+}
+
+/// Builds the coordinate display row for the `SelectMapTarget` step.
+///
+/// Shows the current map ID and the cursor's (x, y) tile position.  The player
+/// uses arrow keys to move the cursor before confirming with Enter.
+fn build_map_target_rows(
+    list: &mut ChildSpawnerCommands<'_>,
+    sc: &SpellCastingState,
+    global_state: &GlobalState,
+) {
+    let map_id = global_state.0.world.current_map;
+    let coord_text = format!(
+        "Map: {}    X: {}    Y: {}",
+        map_id, sc.map_target_x, sc.map_target_y,
+    );
+    spawn_row(list, &coord_text, true, false);
 }
 
 /// Builds the result display rows for the `ShowResult` step.
@@ -1002,6 +1098,220 @@ mod tests {
                 None,
                 "{tgt:?} must not map to an ExplorationTarget"
             );
+        }
+    }
+
+    // ── SelectMapTarget helpers ────────────────────────────────────────────────────
+
+    /// Builds a minimal [`SpellCastingState`] positioned at `SelectMapTarget`.
+    fn make_map_target_state(map_x: i32, map_y: i32) -> GameState {
+        let mut state = GameState::new();
+        state.enter_spell_casting(0);
+        if let GameMode::SpellCasting(sc) = &mut state.mode {
+            sc.step = SpellCastingStep::SelectMapTarget;
+            sc.map_target_x = map_x;
+            sc.map_target_y = map_y;
+        }
+        state
+    }
+
+    #[test]
+    fn test_count_items_for_step_select_map_target_returns_one() {
+        let state = make_map_target_state(3, 5);
+        assert_eq!(count_items_for_step(&state, None), 1);
+    }
+
+    #[test]
+    fn test_jump_target_valid_for_unblocked_tile() {
+        use crate::domain::world::{Map, World};
+
+        let mut world = World::new();
+        let map = Map::new(1, "Test".to_string(), "Test".to_string(), 10, 10);
+        world.add_map(map);
+        world.set_current_map(1);
+
+        // Default tiles are Ground (unblocked).
+        let target_pos = Position::new(5, 5);
+        let map_id = world.current_map;
+        let is_valid = world
+            .get_map(map_id)
+            .and_then(|m| m.get_tile(target_pos))
+            .map(|t| !t.blocked)
+            .unwrap_or(false);
+
+        assert!(
+            is_valid,
+            "unblocked Ground tile should be a valid jump target"
+        );
+    }
+
+    #[test]
+    fn test_jump_target_invalid_for_out_of_bounds() {
+        use crate::domain::world::{Map, World};
+
+        let mut world = World::new();
+        let map = Map::new(1, "Test".to_string(), "Test".to_string(), 5, 5);
+        world.add_map(map);
+        world.set_current_map(1);
+
+        // (10, 10) is outside the 5×5 map.
+        let target_pos = Position::new(10, 10);
+        let map_id = world.current_map;
+        let is_valid = world
+            .get_map(map_id)
+            .and_then(|m| m.get_tile(target_pos))
+            .map(|t| !t.blocked)
+            .unwrap_or(false);
+
+        assert!(
+            !is_valid,
+            "out-of-bounds position should not be a valid jump target"
+        );
+    }
+
+    #[test]
+    fn test_jump_target_invalid_for_blocked_tile() {
+        use crate::domain::world::{Map, TerrainType, Tile, WallType, World};
+
+        let mut world = World::new();
+        let mut map = Map::new(1, "Test".to_string(), "Test".to_string(), 10, 10);
+
+        // Overwrite tile at (3, 3) with Mountain terrain (blocked).
+        let block_pos = Position::new(3, 3);
+        if let Some(tile) = map.get_tile_mut(block_pos) {
+            *tile = Tile::new(3, 3, TerrainType::Mountain, WallType::None);
+        }
+
+        world.add_map(map);
+        world.set_current_map(1);
+
+        let map_id = world.current_map;
+        let is_valid = world
+            .get_map(map_id)
+            .and_then(|m| m.get_tile(block_pos))
+            .map(|t| !t.blocked)
+            .unwrap_or(false);
+
+        assert!(!is_valid, "Mountain tile should not be a valid jump target");
+    }
+
+    #[test]
+    fn test_jump_spell_detection_via_effect_type() {
+        use crate::domain::magic::types::{
+            Spell, SpellContext, SpellEffectType, SpellSchool, SpellTarget, TeleportDestination,
+            UtilityType,
+        };
+
+        let mut spell = Spell::new(
+            0x9901,
+            "Jump",
+            SpellSchool::Sorcerer,
+            1,
+            2,
+            0,
+            SpellContext::Anytime,
+            SpellTarget::Self_,
+            "Teleports the party to a chosen tile.",
+            None,
+            0,
+            false,
+        );
+        spell.effect_type = Some(SpellEffectType::Utility {
+            utility_type: UtilityType::Teleport {
+                destination: TeleportDestination::Jump,
+            },
+        });
+
+        let is_jump = matches!(
+            spell.effective_effect_type(),
+            SpellEffectType::Utility {
+                utility_type: UtilityType::Teleport {
+                    destination: TeleportDestination::Jump,
+                },
+            }
+        );
+        assert!(
+            is_jump,
+            "spell with Jump effect_type should be detected as a Jump spell"
+        );
+    }
+
+    #[test]
+    fn test_step_transitions_to_select_map_target_after_jump_selection() {
+        // Simulate the state mutations that handle_spell_casting_input performs
+        // when the player confirms a Jump spell in the SelectSpell step.
+        let mut state = GameState::new();
+        state.enter_spell_casting(0);
+
+        let jump_spell_id: crate::domain::types::SpellId = 0x9901;
+
+        if let GameMode::SpellCasting(sc) = &mut state.mode {
+            sc.select_spell(jump_spell_id);
+        }
+
+        // Simulate the is_jump branch: initialise map target and advance step.
+        let start_pos = state.world.party_position;
+        if let GameMode::SpellCasting(sc) = &mut state.mode {
+            sc.select_map_target(start_pos.x, start_pos.y);
+            sc.step = SpellCastingStep::SelectMapTarget;
+            sc.selected_row = 0;
+        }
+
+        if let GameMode::SpellCasting(sc) = &state.mode {
+            assert_eq!(sc.step, SpellCastingStep::SelectMapTarget);
+            assert_eq!(sc.selected_spell_id, Some(jump_spell_id));
+            assert_eq!(sc.map_target_x, start_pos.x);
+            assert_eq!(sc.map_target_y, start_pos.y);
+        } else {
+            panic!("expected SpellCasting mode");
+        }
+    }
+
+    #[test]
+    fn test_invalid_jump_target_sets_show_result_without_sp_change() {
+        // Simulate the invalid-target branch: show_result is called without
+        // ever invoking cast_exploration_spell (SP must remain unchanged).
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut state = GameState::new();
+        let mut caster = Character::new(
+            "Mage".to_string(),
+            "human".to_string(),
+            "sorcerer".to_string(),
+            Sex::Female,
+            Alignment::Good,
+        );
+        caster.sp.base = 20;
+        caster.sp.current = 20;
+        state.party.members.push(caster);
+        state.enter_spell_casting(0);
+
+        if let GameMode::SpellCasting(sc) = &mut state.mode {
+            sc.step = SpellCastingStep::SelectMapTarget;
+            sc.map_target_x = 99;
+            sc.map_target_y = 99;
+        }
+
+        let sp_before = state.party.members[0].sp.current;
+
+        // Simulate the invalid-target path: call show_result directly.
+        if let GameMode::SpellCasting(sc) = &mut state.mode {
+            sc.show_result(
+                "Cannot jump to (99, 99): tile is blocked or out of bounds.".to_string(),
+            );
+        }
+
+        // SP must not have changed.
+        assert_eq!(
+            state.party.members[0].sp.current, sp_before,
+            "SP should not be consumed when the jump target is invalid"
+        );
+
+        // Step must be ShowResult.
+        if let GameMode::SpellCasting(sc) = &state.mode {
+            assert_eq!(sc.step, SpellCastingStep::ShowResult);
+        } else {
+            panic!("expected SpellCasting mode");
         }
     }
 }

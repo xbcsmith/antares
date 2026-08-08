@@ -327,6 +327,7 @@ impl CombatState {
     pub fn advance_turn(
         &mut self,
         condition_defs: &[crate::domain::conditions::ConditionDefinition],
+        rng: &mut impl rand::Rng,
     ) -> Vec<(CombatantId, i16)> {
         if self.turn_order.is_empty() {
             return Vec::new();
@@ -337,7 +338,7 @@ impl CombatState {
         let effects = if self.current_turn >= self.turn_order.len() {
             self.current_turn = 0;
             // advance_round recalculates turn_order and resets current_turn = 0.
-            self.advance_round(condition_defs)
+            self.advance_round(condition_defs, rng)
         } else {
             Vec::new()
         };
@@ -385,6 +386,7 @@ impl CombatState {
     fn advance_round(
         &mut self,
         condition_defs: &[crate::domain::conditions::ConditionDefinition],
+        rng: &mut impl rand::Rng,
     ) -> Vec<(CombatantId, i16)> {
         self.round += 1;
 
@@ -432,7 +434,7 @@ impl CombatState {
         }
 
         // Apply DoT/HoT effects
-        effects.extend(self.apply_dot_effects(condition_defs));
+        effects.extend(self.apply_dot_effects(condition_defs, rng));
 
         // Clear defending flags and reverse the +2 AC bonus that was applied
         // when each player chose Defend this round.  The bonus is bounded to
@@ -465,6 +467,7 @@ impl CombatState {
     pub fn apply_dot_effects(
         &mut self,
         condition_defs: &[crate::domain::conditions::ConditionDefinition],
+        rng: &mut impl rand::Rng,
     ) -> Vec<(CombatantId, i16)> {
         use crate::domain::magic::apply_condition_dot_effects;
 
@@ -478,10 +481,10 @@ impl CombatState {
 
             let damage = match participant {
                 Combatant::Player(character) => {
-                    apply_condition_dot_effects(&character.active_conditions, condition_defs)
+                    apply_condition_dot_effects(&character.active_conditions, condition_defs, rng)
                 }
                 Combatant::Monster(monster) => {
-                    apply_condition_dot_effects(&monster.active_conditions, condition_defs)
+                    apply_condition_dot_effects(&monster.active_conditions, condition_defs, rng)
                 }
             };
 
@@ -2015,7 +2018,7 @@ mod tests {
 
         // With one combatant the turn order has one slot; a single advance_turn
         // exhausts the turn order and triggers advance_round (round -> 2).
-        let _ = cs.advance_turn(&[]);
+        let _ = cs.advance_turn(&[], &mut rand::rng());
 
         assert!(
             !cs.ambush_round_active,
@@ -2043,7 +2046,7 @@ mod tests {
         cs.add_player(char);
         start_combat(&mut cs);
 
-        let _ = cs.advance_turn(&[]);
+        let _ = cs.advance_turn(&[], &mut rand::rng());
 
         assert_eq!(
             cs.handicap,
@@ -2541,7 +2544,7 @@ mod tests {
 
         // Advance one full round
         for _ in 0..combat.turn_order.len() {
-            combat.advance_turn(&[]);
+            combat.advance_turn(&[], &mut rand::rng());
         }
 
         if let Some(Combatant::Monster(m)) = combat.participants.first() {
@@ -2785,11 +2788,11 @@ mod tests {
         assert_eq!(combat.current_turn, 0);
         assert_eq!(combat.round, 1);
 
-        combat.advance_turn(&[]);
+        combat.advance_turn(&[], &mut rand::rng());
         assert_eq!(combat.current_turn, 1);
         assert_eq!(combat.round, 1);
 
-        combat.advance_turn(&[]);
+        combat.advance_turn(&[], &mut rand::rng());
         assert_eq!(combat.current_turn, 0);
         assert_eq!(combat.round, 2); // New round
     }
@@ -2829,7 +2832,7 @@ mod tests {
         start_combat(&mut combat);
 
         // Apply DoT effects
-        let effects = combat.apply_dot_effects(&[poison_def]);
+        let effects = combat.apply_dot_effects(&[poison_def], &mut rand::rng());
 
         // Should have one effect entry
         assert_eq!(effects.len(), 1);
@@ -2881,7 +2884,7 @@ mod tests {
         start_combat(&mut combat);
 
         // Apply HoT effects
-        let effects = combat.apply_dot_effects(&[regen_def]);
+        let effects = combat.apply_dot_effects(&[regen_def], &mut rand::rng());
 
         // Should have one effect entry
         assert_eq!(effects.len(), 1);
@@ -3534,7 +3537,7 @@ mod tests {
         }
 
         // Advance turn for the player (turn 0 → 1): round NOT yet over.
-        combat.advance_turn(&[]);
+        combat.advance_turn(&[], &mut rand::rng());
         assert_eq!(combat.current_turn, 1);
         assert!(
             combat.defending_combatants.contains(&0),
@@ -3545,7 +3548,7 @@ mod tests {
         }
 
         // Advance turn for the monster (turn 1 → 2 >= 2): triggers advance_round.
-        combat.advance_turn(&[]);
+        combat.advance_turn(&[], &mut rand::rng());
         assert_eq!(
             combat.current_turn, 0,
             "current_turn resets to 0 on new round"
@@ -3879,7 +3882,7 @@ mod tests {
 
         // Advance from whoever goes first. After the advance, the unconscious
         // player must NOT be current_turn; the monster (who can act) should be.
-        let _effects = combat.advance_turn(&[]);
+        let _effects = combat.advance_turn(&[], &mut rand::rng());
 
         let current = combat
             .turn_order
@@ -3931,8 +3934,8 @@ mod tests {
 
         // Advance past the end of the round to trigger advance_round.
         // With 2 combatants we need 2 advance_turn calls to wrap.
-        let _ = combat.advance_turn(&[]);
-        let _ = combat.advance_turn(&[]);
+        let _ = combat.advance_turn(&[], &mut rand::rng());
+        let _ = combat.advance_turn(&[], &mut rand::rng());
 
         // The new round's turn_order must only contain the living monster.
         assert_eq!(

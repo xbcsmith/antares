@@ -121,7 +121,7 @@ pub struct GameData {
     pub landscape_meshes: LandscapeMeshDatabase,
     /// Unified object mesh database — string-keyed registry merging landscape,
     /// furniture, and `object_mesh_registry.ron` entries.  This is the primary
-    /// lookup used by rendering code from Phase 4 onwards.
+    /// lookup used by rendering code.
     pub object_meshes: ObjectMeshDatabase,
     /// Optional per-class XP threshold tables loaded from `data/levels.ron`.
     ///
@@ -306,6 +306,62 @@ impl CampaignLoader {
         Ok(game_data)
     }
 
+    /// Loads and deserializes an optional RON file from the campaign directory.
+    ///
+    /// `rel` is resolved relative to the campaign path. Returns `Ok(None)` when
+    /// the file is absent (a missing optional file is not an error),
+    /// `Ok(Some(value))` when present and parseable, and a [`CampaignError`]
+    /// describing the file when reading or parsing fails.
+    ///
+    /// This covers the pure single-file deserialize case only. Loaders whose
+    /// `load_from_file`/`load_from_string` do extra work beyond `ron::from_str`
+    /// (index rebuilds, duplicate-ID detection, `post_load` validation, or
+    /// asset-resolving registries) are intentionally *not* routed through this
+    /// helper — see [`Self::load_optional_registry`] and the per-loader notes.
+    fn load_optional_ron<T: serde::de::DeserializeOwned>(
+        &self,
+        rel: &str,
+    ) -> Result<Option<T>, CampaignError> {
+        let path = self.campaign_path.join(rel);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|e| CampaignError::ReadError(format!("{}: {}", path.display(), e)))?;
+        let value = ron::from_str::<T>(&contents)
+            .map_err(|e| CampaignError::ParseError(format!("{}: {}", path.display(), e)))?;
+        Ok(Some(value))
+    }
+
+    /// Loads an optional registry-backed database from the campaign directory.
+    ///
+    /// Registry databases resolve referenced asset files relative to the
+    /// campaign root, so — unlike [`Self::load_optional_ron`] — the loader
+    /// closure receives both the registry file path and the campaign root.
+    ///
+    /// Returns `empty()` when `rel` is absent (a missing optional registry is
+    /// not an error) and otherwise the loaded database. Any loader error is
+    /// wrapped in [`CampaignError::ReadError`], prefixed with `label` and the
+    /// registry path so the message matches the previous per-loader format
+    /// (`"<label> '<path>': <error>"`).
+    fn load_optional_registry<T, E>(
+        &self,
+        rel: &str,
+        label: &str,
+        load: impl FnOnce(&std::path::Path, &std::path::Path) -> Result<T, E>,
+        empty: impl FnOnce() -> T,
+    ) -> Result<T, CampaignError>
+    where
+        E: std::fmt::Display,
+    {
+        let path = self.campaign_path.join(rel);
+        if !path.exists() {
+            return Ok(empty());
+        }
+        load(&path, &self.campaign_path)
+            .map_err(|e| CampaignError::ReadError(format!("{} '{}': {}", label, path.display(), e)))
+    }
+
     /// Loads per-class XP threshold tables from `data/levels.ron` inside the
     /// campaign directory.
     ///
@@ -324,6 +380,9 @@ impl CampaignLoader {
             return Ok(None);
         }
 
+        // NOTE: not routed through `load_optional_ron` — `LevelDatabase::load_from_file`
+        // rebuilds the class lookup index after deserializing, which a plain
+        // `ron::from_str` would skip (breaking `threshold_for_class`).
         LevelDatabase::load_from_file(&levels_path)
             .map(Some)
             .map_err(|e| {
@@ -405,6 +464,9 @@ impl CampaignLoader {
             return Ok(FurnitureDatabase::new());
         }
 
+        // NOTE: not routed through `load_optional_ron` — the macro-generated
+        // `load_from_file` parses a RON *list* into `items` with duplicate-ID
+        // detection, which a plain `ron::from_str::<FurnitureDatabase>` cannot do.
         FurnitureDatabase::load_from_file(&furniture_path).map_err(|e| {
             CampaignError::ReadError(format!(
                 "furniture.ron '{}': {}",
@@ -426,20 +488,12 @@ impl CampaignLoader {
     /// Returns `CampaignError::ReadError` if the registry file exists but
     /// cannot be read, or `CampaignError::ParseError` if it cannot be parsed.
     fn load_item_meshes(&self) -> Result<ItemMeshDatabase, CampaignError> {
-        let registry_path = self.campaign_path.join("data/item_mesh_registry.ron");
-
-        if !registry_path.exists() {
-            // Missing registry is not an error — campaign simply has no item meshes
-            return Ok(ItemMeshDatabase::new());
-        }
-
-        ItemMeshDatabase::load_from_registry(&registry_path, &self.campaign_path).map_err(|e| {
-            CampaignError::ReadError(format!(
-                "Item mesh registry '{}': {}",
-                registry_path.display(),
-                e
-            ))
-        })
+        self.load_optional_registry(
+            "data/item_mesh_registry.ron",
+            "Item mesh registry",
+            ItemMeshDatabase::load_from_registry,
+            ItemMeshDatabase::new,
+        )
     }
 
     /// Loads furniture mesh database from campaign.
@@ -454,21 +508,11 @@ impl CampaignLoader {
     /// Returns `CampaignError::ReadError` if the registry file exists but
     /// cannot be read, or `CampaignError::ParseError` if it cannot be parsed.
     fn load_furniture_meshes(&self) -> Result<FurnitureMeshDatabase, CampaignError> {
-        let registry_path = self.campaign_path.join("data/furniture_mesh_registry.ron");
-
-        if !registry_path.exists() {
-            // Missing registry is not an error — campaign simply has no furniture meshes
-            return Ok(FurnitureMeshDatabase::new());
-        }
-
-        FurnitureMeshDatabase::load_from_registry(&registry_path, &self.campaign_path).map_err(
-            |e| {
-                CampaignError::ReadError(format!(
-                    "Furniture mesh registry '{}': {}",
-                    registry_path.display(),
-                    e
-                ))
-            },
+        self.load_optional_registry(
+            "data/furniture_mesh_registry.ron",
+            "Furniture mesh registry",
+            FurnitureMeshDatabase::load_from_registry,
+            FurnitureMeshDatabase::new,
         )
     }
 
@@ -488,6 +532,10 @@ impl CampaignLoader {
             return Ok(LandscapeDatabase::new());
         }
 
+        // NOTE: not routed through `load_optional_ron` — the macro-generated
+        // `load_from_file` parses a RON *list* into `items` with duplicate-ID
+        // detection and a `post_load` `validate_definition_ids` hook, neither of
+        // which a plain `ron::from_str::<LandscapeDatabase>` performs.
         LandscapeDatabase::load_from_file(&landscape_path).map_err(|e| {
             CampaignError::ReadError(format!(
                 "landscape.ron '{}': {}",
@@ -508,20 +556,12 @@ impl CampaignLoader {
     /// Returns `CampaignError::ReadError` if the registry or any referenced mesh
     /// asset cannot be read, parsed, or validated.
     fn load_landscape_meshes(&self) -> Result<LandscapeMeshDatabase, CampaignError> {
-        let registry_path = self.campaign_path.join("data/landscape_mesh_registry.ron");
-
-        if !registry_path.exists() {
-            return Ok(LandscapeMeshDatabase::new());
-        }
-
-        let db = LandscapeMeshDatabase::load_from_registry(&registry_path, &self.campaign_path)
-            .map_err(|e| {
-                CampaignError::ReadError(format!(
-                    "Landscape mesh registry '{}': {}",
-                    registry_path.display(),
-                    e
-                ))
-            })?;
+        let db = self.load_optional_registry(
+            "data/landscape_mesh_registry.ron",
+            "Landscape mesh registry",
+            LandscapeMeshDatabase::load_from_registry,
+            LandscapeMeshDatabase::new,
+        )?;
 
         db.validate_texture_paths(Some(&self.campaign_path))
             .map_err(|e| {
@@ -550,21 +590,12 @@ impl CampaignLoader {
         landscape_meshes: &LandscapeMeshDatabase,
         furniture_meshes: &FurnitureMeshDatabase,
     ) -> Result<ObjectMeshDatabase, CampaignError> {
-        let registry_path = self.campaign_path.join("data/object_mesh_registry.ron");
-
-        let mut db = if registry_path.exists() {
-            ObjectMeshDatabase::load_from_registry(&registry_path, &self.campaign_path).map_err(
-                |e| {
-                    CampaignError::ReadError(format!(
-                        "Object mesh registry '{}': {}",
-                        registry_path.display(),
-                        e
-                    ))
-                },
-            )?
-        } else {
-            ObjectMeshDatabase::new()
-        };
+        let mut db = self.load_optional_registry(
+            "data/object_mesh_registry.ron",
+            "Object mesh registry",
+            ObjectMeshDatabase::load_from_registry,
+            ObjectMeshDatabase::new,
+        )?;
 
         db.merge_landscape(landscape_meshes);
         db.merge_furniture(furniture_meshes);
@@ -582,19 +613,9 @@ impl CampaignLoader {
     /// Returns `CampaignError::ParseError` if the file exists but cannot be
     /// parsed.
     fn load_wind_config(&self) -> Result<CampaignWindConfig, CampaignError> {
-        let wind_path = self.campaign_path.join("data/wind.ron");
-
-        if !wind_path.exists() {
-            return Ok(CampaignWindConfig::default());
-        }
-
-        let content = std::fs::read_to_string(&wind_path).map_err(|e| {
-            CampaignError::ReadError(format!("wind.ron '{}': {}", wind_path.display(), e))
-        })?;
-
-        ron::from_str(&content).map_err(|e| {
-            CampaignError::ParseError(format!("wind.ron '{}': {}", wind_path.display(), e))
-        })
+        Ok(self
+            .load_optional_ron::<CampaignWindConfig>("data/wind.ron")?
+            .unwrap_or_default())
     }
 
     /// Gets the campaign path
@@ -784,7 +805,7 @@ mod tests {
         assert!(meshes.unwrap().is_empty());
     }
 
-    /// Phase 1 — a campaign without `levels.ron` loads without error and
+    /// A campaign without `levels.ron` loads without error and
     /// returns `None` (formula fallback).
     #[test]
     fn test_levels_missing_is_ok() {
@@ -805,7 +826,7 @@ mod tests {
         );
     }
 
-    /// Phase 1 — loads `data/test_campaign` and asserts `levels` is `Some`
+    /// Loads `data/test_campaign` and asserts `levels` is `Some`
     /// with the expected knight and sorcerer entries.
     #[test]
     fn test_campaign_loader_loads_levels_from_fixture() {

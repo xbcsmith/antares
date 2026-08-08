@@ -817,6 +817,9 @@ impl CreaturesEditorState {
                         // Ignore errors — the creature may not have been saved to disk yet.
                         if let Some(ref dir) = *campaign_dir {
                             let asset_manager = CreatureAssetManager::new(dir.clone());
+                            // Delete is best-effort: the creature may not have
+                            // been saved to disk yet, so a failure is expected.
+                            #[allow(clippy::let_underscore_must_use)]
                             let _ = asset_manager.delete_creature(creature_id);
                         }
                         creatures.remove(idx);
@@ -1173,6 +1176,9 @@ impl CreaturesEditorState {
             let validation_result =
                 Self::validate_creature_asset_file(full_path, existing_creatures);
 
+            // Send failure only occurs if the UI dropped the receiver (editor
+            // closed the register dialog); the discard is intentional.
+            #[allow(clippy::let_underscore_must_use)]
             let _ = tx.send(RegisterAssetValidationResult {
                 request_path,
                 result: validation_result,
@@ -1504,6 +1510,55 @@ impl CreaturesEditorState {
         hasher.finish()
     }
 
+    /// Returns the creatures matching the current search query and category
+    /// filter used by the registry list.
+    ///
+    /// The search is a case-insensitive substring test against the creature
+    /// `name` and `id`. When `category_filter` is set, only creatures whose ID
+    /// maps to that [`CreatureCategory`] are kept. An empty query with no
+    /// category filter returns every creature (paired with its original index).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::creatures_editor::CreaturesEditorState;
+    ///
+    /// let mut goblin = CreaturesEditorState::default_creature();
+    /// goblin.id = 1;
+    /// goblin.name = "Goblin".to_string();
+    /// let mut dragon = CreaturesEditorState::default_creature();
+    /// dragon.id = 2;
+    /// dragon.name = "Dragon".to_string();
+    /// let creatures = vec![goblin, dragon];
+    ///
+    /// let mut state = CreaturesEditorState::new();
+    /// state.search_query = "drag".to_string();
+    /// let filtered = state.filtered_creatures(&creatures);
+    /// assert_eq!(filtered.len(), 1);
+    /// assert_eq!(filtered[0].1.name, "Dragon");
+    /// ```
+    pub fn filtered_creatures<'a>(
+        &self,
+        creatures: &'a [CreatureDefinition],
+    ) -> Vec<(usize, &'a CreatureDefinition)> {
+        let query = self.search_query.to_lowercase();
+        creatures
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| {
+                if let Some(cat) = self.category_filter {
+                    if CreatureCategory::from_id(c.id) != cat {
+                        return false;
+                    }
+                }
+
+                query.is_empty()
+                    || c.name.to_lowercase().contains(&query)
+                    || c.id.to_string().contains(&query)
+            })
+            .collect()
+    }
+
     fn refresh_registry_view_cache(&mut self, creatures: &[CreatureDefinition]) {
         let signature = self.registry_view_signature(creatures);
         if self.registry_view_cache.initialized && self.registry_view_cache.signature == signature {
@@ -1525,21 +1580,9 @@ impl CreaturesEditorState {
 
         let counts = self.count_by_category(creatures);
 
-        let query = self.search_query.to_lowercase();
-        let mut pairs: Vec<(usize, u32, String)> = creatures
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| {
-                if let Some(cat) = self.category_filter {
-                    if CreatureCategory::from_id(c.id) != cat {
-                        return false;
-                    }
-                }
-
-                query.is_empty()
-                    || c.name.to_lowercase().contains(&query)
-                    || c.id.to_string().contains(&query)
-            })
+        let mut pairs: Vec<(usize, u32, String)> = self
+            .filtered_creatures(creatures)
+            .into_iter()
             .map(|(i, c)| (i, c.id, c.name.clone()))
             .collect();
 
@@ -1624,6 +1667,9 @@ impl CreaturesEditorState {
                         // Ignore errors — the creature may not have been saved to disk yet.
                         if let Some(ref dir) = *campaign_dir {
                             let asset_manager = CreatureAssetManager::new(dir.clone());
+                            // Delete is best-effort: the creature may not have
+                            // been saved to disk yet, so a failure is expected.
+                            #[allow(clippy::let_underscore_must_use)]
                             let _ = asset_manager.delete_creature(creature_id);
                         }
                         creatures.remove(idx);
@@ -3735,6 +3781,51 @@ mod tests {
             .previewed_creature_for_tests()
             .expect("preview creature should be available");
         assert_eq!(previewed.mesh_transforms[0].translation, [1.5, -0.5, 0.25]);
+    }
+
+    #[test]
+    fn test_filtered_creatures_search_behavior() {
+        let creatures = vec![
+            make_creature(1, "Goblin"),
+            make_creature(2, "Hobgoblin"),
+            make_creature(3, "Dragon"),
+        ];
+
+        let mut state = CreaturesEditorState::new();
+
+        // Empty query with no category filter returns every creature.
+        assert_eq!(
+            state
+                .filtered_creatures(&creatures)
+                .iter()
+                .map(|(_, c)| c.id)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+
+        // Case-insensitive substring keeps both goblin variants.
+        state.search_query = "GOBLIN".to_string();
+        assert_eq!(
+            state
+                .filtered_creatures(&creatures)
+                .iter()
+                .map(|(_, c)| c.id)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+
+        // The id is searchable and isolates a single survivor.
+        state.search_query = "3".to_string();
+        let survivors: Vec<u32> = state
+            .filtered_creatures(&creatures)
+            .iter()
+            .map(|(_, c)| c.id)
+            .collect();
+        assert_eq!(survivors, vec![3]);
+
+        // A non-matching query returns nothing.
+        state.search_query = "wolf".to_string();
+        assert!(state.filtered_creatures(&creatures).is_empty());
     }
 
     #[test]

@@ -272,9 +272,6 @@ pub struct CampaignMetadataEditorState {
     /// Edit buffer that mirrors `metadata` while editing
     pub buffer: CampaignMetadataEditBuffer,
 
-    /// Search filter (future)
-    pub search_filter: String,
-
     /// Search filter for the Starting Innkeeper ComboBox (case-insensitive)
     pub innkeeper_search: String,
 
@@ -298,7 +295,6 @@ impl Default for CampaignMetadataEditorState {
             mode: CampaignEditorMode::List,
             metadata: crate::CampaignMetadata::default(),
             buffer: CampaignMetadataEditBuffer::default(),
-            search_filter: String::new(),
             innkeeper_search: String::new(),
             selected_section: Some(CampaignSection::Overview),
             has_unsaved_changes: false,
@@ -421,6 +417,11 @@ impl CampaignMetadataEditorState {
     ///     economy: None,
     ///     training_fee_base: None,
     ///     training_fee_multiplier: None,
+    ///     is_skill_trainer: false,
+    ///     trainable_skill_ids: vec![],
+    ///     skill_training_fee_base: None,
+    ///     skill_training_fee_multiplier: None,
+    ///     skill_training_max_rank: None,
     /// };
     /// let npcs = [npc];
     /// let filtered = state.visible_innkeepers(&npcs);
@@ -463,7 +464,7 @@ impl CampaignMetadataEditorState {
 
     /// Save the current authoritative metadata to the given path using RON.
     ///
-    /// Returns `crate::CampaignError` on error.
+    /// Returns `crate::CampaignBuilderError` on error.
     ///
     /// # Examples
     ///
@@ -475,7 +476,7 @@ impl CampaignMetadataEditorState {
     /// let path = tmpdir.path().join("campaign_save.ron");
     /// let _ = state.save_to_file(path.as_path());
     /// ```
-    pub fn save_to_file(&self, path: &Path) -> Result<(), crate::CampaignError> {
+    pub fn save_to_file(&self, path: &Path) -> Result<(), crate::CampaignBuilderError> {
         let s = ron::ser::to_string_pretty(&self.metadata, ron::ser::PrettyConfig::default())?;
         fs::write(path, s)?;
         Ok(())
@@ -494,7 +495,7 @@ impl CampaignMetadataEditorState {
     /// // If a valid RON file exists at `path`, the following loads the metadata.
     /// let _ = state.load_from_file(path.as_path());
     /// ```
-    pub fn load_from_file(&mut self, path: &Path) -> Result<(), crate::CampaignError> {
+    pub fn load_from_file(&mut self, path: &Path) -> Result<(), crate::CampaignBuilderError> {
         let contents = fs::read_to_string(path)?;
         let parsed: crate::CampaignMetadata = ron::from_str(&contents)?;
         self.metadata = parsed;
@@ -542,10 +543,7 @@ impl CampaignMetadataEditorState {
         ui.separator();
 
         // Toolbar (basic) - supports Search / Save / Load / Import / Export
-        let toolbar_action = EditorToolbar::new("Campaign")
-            .with_total_count(1)
-            .with_search(&mut self.search_filter)
-            .show(ui);
+        let toolbar_action = EditorToolbar::new("Campaign").with_total_count(1).show(ui);
 
         match toolbar_action {
             ToolbarAction::Save => {

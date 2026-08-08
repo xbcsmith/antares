@@ -226,6 +226,9 @@ where
 /// * `parse_err: $parse_err` — A closure/constructor that wraps a `ron::error::SpannedError`
 /// * `post_load: $post_load` — (optional) A function `&Self -> Result<(), $error>` called after
 ///   construction (e.g. `ClassDatabase::validate`)
+/// * `missing_ok: $missing` — (optional, mutually exclusive with `post_load`) An expression
+///   producing an empty `Self` when the file is absent, so `load_from_file` treats a missing
+///   file as `Ok(empty)` rather than an I/O error (e.g. `Self::new()`)
 ///
 /// # Examples
 ///
@@ -371,6 +374,69 @@ macro_rules! impl_ron_database {
             /// ```
             pub fn load_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, $error> {
                 let contents = std::fs::read_to_string(path.as_ref()).map_err($read_err)?;
+                Self::load_from_string(&contents)
+            }
+        }
+    };
+    // Arm with an "empty on missing file" policy: a missing file is not an error,
+    // it yields the caller-supplied empty database (`missing_ok`) instead.
+    (
+        $db:ty,
+        entity: $entity:ty,
+        key: $key:ty,
+        error: $error:ty,
+        field: $field:ident,
+        id_of: $id_of:expr,
+        dup_err: $dup_err:expr,
+        read_err: $read_err:expr,
+        parse_err: $parse_err:expr,
+        missing_ok: $missing:expr $(,)?
+    ) => {
+        impl $db {
+            /// Load the database from a RON string.
+            ///
+            /// # Errors
+            ///
+            /// Returns an error if parsing fails or a duplicate ID is found.
+            ///
+            /// # Examples
+            ///
+            /// ```ignore
+            /// let db = DatabaseType::load_from_string("[]")?;
+            /// assert!(db.is_empty());
+            /// # Ok::<(), Box<dyn std::error::Error>>(())
+            /// ```
+            pub fn load_from_string(data: &str) -> Result<Self, $error> {
+                Ok(Self {
+                    $field: $crate::domain::database_common::load_ron_entries(
+                        data, $id_of, $dup_err, $parse_err,
+                    )?,
+                })
+            }
+
+            /// Load the database from a RON file on disk.
+            ///
+            /// A missing file is **not** an error: it returns the empty database
+            /// declared via the macro's `missing_ok` expression.
+            ///
+            /// # Errors
+            ///
+            /// Returns an error if the file exists but cannot be read, parsing
+            /// fails, or a duplicate ID is found.
+            ///
+            /// # Examples
+            ///
+            /// ```ignore
+            /// let db = DatabaseType::load_from_file("missing.ron")?; // Ok(empty)
+            /// assert!(db.is_empty());
+            /// # Ok::<(), Box<dyn std::error::Error>>(())
+            /// ```
+            pub fn load_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, $error> {
+                let path = path.as_ref();
+                if !path.exists() {
+                    return Ok($missing);
+                }
+                let contents = std::fs::read_to_string(path).map_err($read_err)?;
                 Self::load_from_string(&contents)
             }
         }

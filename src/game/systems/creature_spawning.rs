@@ -39,12 +39,11 @@
 //! }
 //! ```
 
-use crate::application::resources::GameContent;
 use crate::domain::types::Direction;
 use crate::domain::visual::animation::AnimationDefinition;
 use crate::domain::visual::CreatureDefinition;
 use crate::game::components::creature::{
-    CreatureAnimation, CreatureVisual, FacingComponent, LodState, MeshPart, SpawnCreatureRequest,
+    CreatureAnimation, CreatureVisual, FacingComponent, LodState, MeshPart,
 };
 use crate::game::systems::creature_meshes::{
     create_material_from_color, material_definition_to_bevy, mesh_definition_to_bevy,
@@ -234,86 +233,12 @@ pub fn spawn_creature(
     parent
 }
 
-/// Bevy system that processes spawn requests
-///
-/// This system:
-/// 1. Queries for entities with `SpawnCreatureRequest` component
-/// 2. Looks up the creature definition from the content database
-/// 3. Spawns the creature visual hierarchy
-/// 4. Removes the spawn request component
-///
-/// # System Parameters
-///
-/// * `commands` - Entity commands
-/// * `query` - Query for spawn requests
-/// * `creatures` - Content database resource
-/// * `meshes` - Mesh asset storage
-/// * `materials` - Material asset storage
-///
-/// # Examples
-///
-/// To trigger a spawn, create an entity with `SpawnCreatureRequest`:
-///
-/// ```
-/// use antares::game::components::creature::SpawnCreatureRequest;
-/// use bevy::prelude::*;
-///
-/// fn request_spawn(mut commands: Commands) {
-///     commands.spawn(SpawnCreatureRequest {
-///         creature_id: 42,
-///         position: Vec3::new(10.0, 0.0, 5.0),
-///         scale_override: None,
-///     });
-/// }
-/// ```
-pub fn creature_spawning_system(
-    mut commands: Commands,
-    query: Query<(Entity, &SpawnCreatureRequest)>,
-    creatures: Res<GameContent>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    for (request_entity, request) in query.iter() {
-        // Look up creature definition
-        if let Some(creature_def) = creatures.0.creatures.get_creature(request.creature_id) {
-            // Spawn the creature
-            let creature_entity = spawn_creature(
-                &mut commands,
-                creature_def,
-                meshes.as_mut(),
-                materials.as_mut(),
-                request.position,
-                request.scale_override,
-                None, // No animation on basic spawn
-                None, // No facing override from SpawnCreatureRequest (uses North default)
-            );
-
-            // Update the spawned creature's CreatureVisual component with correct ID
-            commands.entity(creature_entity).insert(CreatureVisual {
-                creature_id: request.creature_id,
-                scale_override: request.scale_override,
-            });
-
-            // Update child entities with correct creature_id
-            // Note: We can't easily query children here, so the creature_id
-            // is set to 0 initially in spawn_creature and updated if needed
-        } else {
-            warn!(
-                "Creature spawn request failed: CreatureId {} not found in database",
-                request.creature_id
-            );
-        }
-
-        // Remove the spawn request component
-        commands.entity(request_entity).despawn();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::types::Direction;
     use crate::domain::visual::MeshDefinition;
+    use crate::game::components::creature::SpawnCreatureRequest;
 
     #[test]
     fn test_creature_visual_component_creation() {

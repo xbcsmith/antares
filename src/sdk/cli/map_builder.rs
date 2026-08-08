@@ -251,7 +251,13 @@ impl MapBuilder {
             print!("{:2} ", y);
             for x in 0..map.width {
                 let pos = Position::new(x as i32, y as i32);
-                let tile = map.get_tile(pos).unwrap();
+                let Some(tile) = map.get_tile(pos) else {
+                    // Defensive: get_tile only returns None for out-of-bounds
+                    // positions, which shouldn't occur while iterating the map's
+                    // own dimensions. Render a placeholder instead of panicking.
+                    print!("?");
+                    continue;
+                };
 
                 let c = if tile.wall_type != WallType::None {
                     match tile.wall_type {
@@ -667,6 +673,10 @@ pub fn print_help() {
 ///
 /// Returns `Err` only if `rustyline` fails to initialise (which is not
 /// expected in normal operation).
+// Command-history load/save/append are best-effort convenience features; a
+// failure (e.g. missing history file on first run) is intentionally ignored so
+// the interactive builder still works.
+#[allow(clippy::let_underscore_must_use)]
 pub fn run_build() -> Result<(), Box<dyn std::error::Error>> {
     println!("╔═══════════════════════════════════════╗");
     println!("║   Antares RPG - Map Builder v1.0     ║");
@@ -746,6 +756,36 @@ mod tests {
         assert_eq!(map.id, 1);
         assert_eq!(map.width, 10);
         assert_eq!(map.height, 10);
+    }
+
+    #[test]
+    fn test_get_tile_out_of_bounds_returns_none_without_panic() {
+        // show_map now uses `let Some(tile) = map.get_tile(pos) else { .. }`
+        // instead of `.unwrap()`. Verify get_tile returns None (rather than
+        // panicking) for positions outside the map bounds.
+        let mut builder = MapBuilder::new();
+        builder.create_map(1, 3, 3);
+        let map = builder.map.as_ref().unwrap();
+
+        // In-bounds positions still resolve to a tile.
+        assert!(map.get_tile(Position::new(0, 0)).is_some());
+        assert!(map.get_tile(Position::new(2, 2)).is_some());
+
+        // Out-of-bounds positions are handled gracefully.
+        assert!(map.get_tile(Position::new(3, 0)).is_none());
+        assert!(map.get_tile(Position::new(0, 3)).is_none());
+        assert!(map.get_tile(Position::new(-1, 0)).is_none());
+        assert!(map.get_tile(Position::new(100, 100)).is_none());
+    }
+
+    #[test]
+    fn test_show_map_does_not_panic() {
+        // Regression guard for the show_map tile-rendering change: displaying a
+        // freshly created map must not panic.
+        let mut builder = MapBuilder::new();
+        builder.auto_show = false;
+        builder.create_map(1, 4, 4);
+        builder.show_map();
     }
 
     #[test]

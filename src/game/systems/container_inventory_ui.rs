@@ -52,9 +52,9 @@ use crate::domain::world::MapEvent;
 use crate::game::resources::GlobalState;
 use crate::game::systems::input::GlobalInputSet;
 use crate::game::systems::inventory_ui_common::{
-    NavigationPhase, ACTION_FOCUSED_COLOR, FOCUSED_BORDER_COLOR, GRID_LINE_COLOR, HEADER_BG_COLOR,
-    PANEL_ACTION_H, PANEL_BG_COLOR, PANEL_HEADER_H, SELECT_HIGHLIGHT_COLOR, SLOT_COLS,
-    UNFOCUSED_BORDER_COLOR,
+    render_character_strip, split_panel, NavigationPhase, ACTION_FOCUSED_COLOR,
+    FOCUSED_BORDER_COLOR, GRID_LINE_COLOR, HEADER_BG_COLOR, PANEL_ACTION_H, PANEL_BG_COLOR,
+    PANEL_HEADER_H, SELECT_HIGHLIGHT_COLOR, SLOT_COLS, SLOT_NAV_HINT, UNFOCUSED_BORDER_COLOR,
 };
 
 use bevy::prelude::*;
@@ -601,39 +601,9 @@ fn render_container_top_bar(ui: &mut egui::Ui, container_name: &str) {
 /// Returns the hint text for the current navigation phase.
 fn container_hint_text(phase: &NavigationPhase) -> &'static str {
     match phase {
-        NavigationPhase::SlotNavigation => {
-            "Tab: switch panel   1-6: change character   ←→↑↓: navigate   Enter: select   Esc: close"
-        }
+        NavigationPhase::SlotNavigation => SLOT_NAV_HINT,
         NavigationPhase::ActionNavigation => "←→: cycle actions   Enter: execute   Esc: cancel",
     }
-}
-
-/// Renders the active-character selector strip (number-key buttons).
-fn render_container_character_strip(
-    ui: &mut egui::Ui,
-    party: &crate::domain::character::Party,
-    active_char_idx: usize,
-) {
-    let party_len = party.members.len();
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Character:").strong());
-        for i in 0..party_len {
-            ui.push_id(format!("cont_char_btn_{}", i), |ui| {
-                let member = &party.members[i];
-                let is_active = i == active_char_idx;
-                let label = egui::RichText::new(format!("[{}] {}", i + 1, member.name))
-                    .color(if is_active {
-                        egui::Color32::YELLOW
-                    } else {
-                        egui::Color32::LIGHT_GRAY
-                    })
-                    .small();
-                // Mouse clicks on character buttons are informational only;
-                // switching is handled via number keys in the input system.
-                let _ = ui.button(label);
-            });
-        }
-    });
 }
 
 // ===== UI system =====
@@ -675,95 +645,101 @@ fn container_inventory_ui_system(
                 .weak(),
         );
         ui.separator();
-        render_container_character_strip(ui, &global_state.0.party, char_idx);
+        render_character_strip(ui, &global_state.0.party, char_idx, "cont_char_btn");
         ui.add_space(4.0);
 
         // ── Split panel layout ───────────────────────────────────────────
-        let available = ui.available_size();
-        let half_w = (available.x - 8.0) / 2.0;
-        let panel_h = available.y;
+        // Sample the full remaining height *before* entering the horizontal
+        // split; `split_panel` samples the same UI state for the half-width.
+        let panel_h = ui.available_size().y;
 
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-
+        split_panel(
+            ui,
             // ── LEFT: Character inventory panel ──────────────────────────
-            ui.push_id("cont_char_panel", |ui| {
-                let panel_result = render_character_stash_panel(
-                    ui,
-                    char_idx,
-                    char_focused,
-                    container_state.character_selected_slot,
-                    if char_focused && nav_state.phase == NavigationPhase::ActionNavigation {
-                        Some(nav_state.focused_action_index)
-                    } else {
-                        None
-                    },
-                    egui::vec2(half_w, panel_h),
-                    &global_state,
-                    game_content.as_deref(),
-                );
-                if let Some(ref r) = panel_result {
-                    match r {
-                        CharacterStashPanelResult::Stash(action) => {
-                            stash_writer.write(StashItemAction {
-                                character_index: action.character_index,
-                                character_slot_index: action.slot_index,
+            |ui, half_w| {
+                ui.push_id("cont_char_panel", |ui| {
+                    let panel_result = render_character_stash_panel(CharacterStashPanelParams {
+                        ui,
+                        party_index: char_idx,
+                        is_focused: char_focused,
+                        selected_slot: container_state.character_selected_slot,
+                        focused_action_index: if char_focused
+                            && nav_state.phase == NavigationPhase::ActionNavigation
+                        {
+                            Some(nav_state.focused_action_index)
+                        } else {
+                            None
+                        },
+                        size: egui::vec2(half_w, panel_h),
+                        global_state: &global_state,
+                        game_content: game_content.as_deref(),
+                    });
+                    if let Some(ref r) = panel_result {
+                        match r {
+                            CharacterStashPanelResult::Stash(action) => {
+                                stash_writer.write(StashItemAction {
+                                    character_index: action.character_index,
+                                    character_slot_index: action.slot_index,
+                                });
+                            }
+                            CharacterStashPanelResult::SelectSlot {
+                                slot_index,
+                                has_item,
+                            } => {
+                                select_char_writer.write(SelectContainerCharacterSlotAction {
+                                    slot_index: *slot_index,
+                                    has_item: *has_item,
+                                });
+                            }
+                        }
+                    }
+                });
+            },
+            // ── RIGHT: Container item list panel ────────────────────────
+            |ui, half_w| {
+                ui.push_id("cont_container_panel", |ui| {
+                    let panel_result = render_container_items_panel(ContainerItemsPanelParams {
+                        ui,
+                        container_state: &container_state,
+                        is_focused: cont_focused,
+                        selected_slot: container_state.container_selected_slot,
+                        focused_action_index: if cont_focused
+                            && nav_state.phase == NavigationPhase::ActionNavigation
+                        {
+                            Some(nav_state.focused_action_index)
+                        } else {
+                            None
+                        },
+                        size: egui::vec2(half_w, panel_h),
+                        global_state: &global_state,
+                        game_content: game_content.as_deref(),
+                    });
+                    match panel_result {
+                        ContainerPanelResult::Take { slot_index } => {
+                            take_writer.write(TakeItemAction {
+                                container_slot_index: slot_index,
+                                character_index: char_idx,
                             });
                         }
-                        CharacterStashPanelResult::SelectSlot {
-                            slot_index,
-                            has_item,
-                        } => {
-                            select_char_writer.write(SelectContainerCharacterSlotAction {
-                                slot_index: *slot_index,
-                                has_item: *has_item,
+                        ContainerPanelResult::TakeAll => {
+                            take_all_writer.write(TakeAllAction {
+                                character_index: char_idx,
                             });
                         }
+                        ContainerPanelResult::TakeCurrency { gold, gems } => {
+                            take_currency_writer.write(TakeCurrencyAction { gold, gems });
+                        }
+                        ContainerPanelResult::SelectSlot(slot_idx, has_item) => {
+                            select_container_writer.write(SelectContainerSlotAction {
+                                slot_index: slot_idx,
+                                has_item,
+                            });
+                        }
+                        ContainerPanelResult::None => {}
                     }
-                }
-            });
-
-            // ── RIGHT: Container item list panel ─────────────────────────
-            ui.push_id("cont_container_panel", |ui| {
-                let panel_result = render_container_items_panel(
-                    ui,
-                    &container_state,
-                    cont_focused,
-                    container_state.container_selected_slot,
-                    if cont_focused && nav_state.phase == NavigationPhase::ActionNavigation {
-                        Some(nav_state.focused_action_index)
-                    } else {
-                        None
-                    },
-                    egui::vec2(half_w, panel_h),
-                    &global_state,
-                    game_content.as_deref(),
-                );
-                match panel_result {
-                    ContainerPanelResult::Take { slot_index } => {
-                        take_writer.write(TakeItemAction {
-                            container_slot_index: slot_index,
-                            character_index: char_idx,
-                        });
-                    }
-                    ContainerPanelResult::TakeAll => {
-                        take_all_writer.write(TakeAllAction {
-                            character_index: char_idx,
-                        });
-                    }
-                    ContainerPanelResult::TakeCurrency { gold, gems } => {
-                        take_currency_writer.write(TakeCurrencyAction { gold, gems });
-                    }
-                    ContainerPanelResult::SelectSlot(slot_idx, has_item) => {
-                        select_container_writer.write(SelectContainerSlotAction {
-                            slot_index: slot_idx,
-                            has_item,
-                        });
-                    }
-                    ContainerPanelResult::None => {}
-                }
-            });
-        });
+                });
+            },
+        );
     });
 }
 
@@ -893,18 +869,44 @@ pub fn write_container_items_back(
     }
 }
 
-/// Render the character inventory panel (left side) with a Stash action button.
-#[allow(clippy::too_many_arguments)]
-fn render_character_stash_panel(
-    ui: &mut egui::Ui,
+/// Parameters for [`render_character_stash_panel`].
+///
+/// Grouping these into a struct keeps the render helper down to a single
+/// argument (satisfying `clippy::too_many_arguments` without an allow).
+struct CharacterStashPanelParams<'a> {
+    /// UI to draw the panel into.
+    ui: &'a mut egui::Ui,
+    /// Index of the character whose inventory is shown.
     party_index: usize,
+    /// Whether this panel currently has keyboard focus.
     is_focused: bool,
+    /// Currently highlighted slot, if any.
     selected_slot: Option<usize>,
+    /// Focused action-button index when in action-navigation mode.
     focused_action_index: Option<usize>,
+    /// Allocated panel size (`half_w` × `panel_h`).
     size: egui::Vec2,
-    global_state: &GlobalState,
-    game_content: Option<&GameContent>,
+    /// Global game state (party, inventories).
+    global_state: &'a GlobalState,
+    /// Loaded game content for item lookups, if available.
+    game_content: Option<&'a GameContent>,
+}
+
+/// Render the character inventory panel (left side) with a Stash action button.
+fn render_character_stash_panel(
+    params: CharacterStashPanelParams,
 ) -> Option<CharacterStashPanelResult> {
+    let CharacterStashPanelParams {
+        ui,
+        party_index,
+        is_focused,
+        selected_slot,
+        focused_action_index,
+        size,
+        global_state,
+        game_content,
+    } = params;
+
     if party_index >= global_state.0.party.members.len() {
         return None;
     }
@@ -1140,20 +1142,44 @@ enum ContainerPanelResult {
     None,
 }
 
+/// Parameters for [`render_container_items_panel`].
+///
+/// Grouping these into a struct keeps the render helper down to a single
+/// argument (satisfying `clippy::too_many_arguments` without an allow).
+struct ContainerItemsPanelParams<'a> {
+    /// UI to draw the panel into.
+    ui: &'a mut egui::Ui,
+    /// Current container inventory state (items, gold, gems).
+    container_state: &'a ContainerInventoryState,
+    /// Whether this panel currently has keyboard focus.
+    is_focused: bool,
+    /// Currently highlighted row, if any.
+    selected_slot: Option<usize>,
+    /// Focused action-button index when in action-navigation mode.
+    focused_action_index: Option<usize>,
+    /// Allocated panel size (`half_w` × `panel_h`).
+    size: egui::Vec2,
+    /// Global game state (party inventories for capacity checks).
+    global_state: &'a GlobalState,
+    /// Loaded game content for item lookups, if available.
+    game_content: Option<&'a GameContent>,
+}
+
 /// Render the container items panel (right side).
 ///
 /// Returns the action chosen by mouse click, if any.
-#[allow(clippy::too_many_arguments)]
-fn render_container_items_panel(
-    ui: &mut egui::Ui,
-    container_state: &ContainerInventoryState,
-    is_focused: bool,
-    selected_slot: Option<usize>,
-    focused_action_index: Option<usize>,
-    size: egui::Vec2,
-    global_state: &GlobalState,
-    game_content: Option<&GameContent>,
-) -> ContainerPanelResult {
+fn render_container_items_panel(params: ContainerItemsPanelParams) -> ContainerPanelResult {
+    let ContainerItemsPanelParams {
+        ui,
+        container_state,
+        is_focused,
+        selected_slot,
+        focused_action_index,
+        size,
+        global_state,
+        game_content,
+    } = params;
+
     let mut result = ContainerPanelResult::None;
 
     let items = &container_state.items;
@@ -2710,5 +2736,135 @@ mod tests {
             );
             assert_eq!(cs.items[0].item_id, 77);
         }
+    }
+
+    // ── Keyboard navigation flow ────────────────────────────────────────────
+
+    /// Drives `container_inventory_input_system` through a full keyboard
+    /// navigation flow: Enter starts slot nav, a second Enter enters action
+    /// mode, action buttons cycle with the arrows, Esc cancels, Tab switches
+    /// panels, and a number key resets to a character. This locks in the
+    /// two-phase [`NavigationPhase`] transitions after the split-screen
+    /// consolidation.
+    #[test]
+    fn test_container_keyboard_navigation_phase_transitions() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        fn press(app: &mut App, key: KeyCode) {
+            {
+                let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+                input.reset_all();
+                input.press(key);
+            }
+            app.update();
+        }
+
+        let mut game_state = GameState::new();
+        let mut character = Character::new(
+            "Hero".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        character.inventory.add_item(1, 0).expect("add item");
+        character.inventory.add_item(2, 0).expect("add item");
+        game_state
+            .party
+            .add_member(character)
+            .expect("add_member should succeed");
+        game_state.enter_container_inventory(
+            "chest_nav".to_string(),
+            "Nav Chest".to_string(),
+            vec![make_slot(10), make_slot(20)],
+            0,
+            0,
+        );
+
+        let mut app = App::new();
+        app.insert_resource(GlobalState(game_state));
+        app.init_resource::<ContainerNavState>();
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_message::<TakeItemAction>();
+        app.add_message::<TakeAllAction>();
+        app.add_message::<StashItemAction>();
+        app.add_systems(Update, container_inventory_input_system);
+
+        // Focus defaults to the character (left) panel. Enter with no slot
+        // highlighted starts navigation at slot 0.
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.world()
+                .resource::<ContainerNavState>()
+                .selected_slot_index,
+            Some(0)
+        );
+
+        // Enter again on a slot holding an item advances to ActionNavigation.
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.world().resource::<ContainerNavState>().phase,
+            NavigationPhase::ActionNavigation
+        );
+
+        // Esc cancels back to SlotNavigation.
+        press(&mut app, KeyCode::Escape);
+        assert_eq!(
+            app.world().resource::<ContainerNavState>().phase,
+            NavigationPhase::SlotNavigation
+        );
+
+        // Tab toggles focus to the container (right) panel and clears selection.
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(
+            app.world()
+                .resource::<ContainerNavState>()
+                .selected_slot_index,
+            None
+        );
+        if let GameMode::ContainerInventory(ref cs) = app.world().resource::<GlobalState>().0.mode {
+            assert!(matches!(cs.focus, ContainerFocus::Right));
+        } else {
+            panic!("expected ContainerInventory mode");
+        }
+
+        // Enter starts container navigation at row 0; ArrowDown advances to 1.
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::ArrowDown);
+        assert_eq!(
+            app.world()
+                .resource::<ContainerNavState>()
+                .selected_slot_index,
+            Some(1)
+        );
+
+        // Enter action mode on the container row; the right-panel action list is
+        // [Take, TakeAll], so ArrowRight cycles to action index 1 and ArrowLeft
+        // returns to 0.
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.world().resource::<ContainerNavState>().phase,
+            NavigationPhase::ActionNavigation
+        );
+        press(&mut app, KeyCode::ArrowRight);
+        assert_eq!(
+            app.world()
+                .resource::<ContainerNavState>()
+                .focused_action_index,
+            1
+        );
+        press(&mut app, KeyCode::ArrowLeft);
+        assert_eq!(
+            app.world()
+                .resource::<ContainerNavState>()
+                .focused_action_index,
+            0
+        );
+
+        // Number key 1 resets to character 0 and SlotNavigation.
+        press(&mut app, KeyCode::Digit1);
+        let nav = app.world().resource::<ContainerNavState>();
+        assert_eq!(nav.phase, NavigationPhase::SlotNavigation);
+        assert_eq!(nav.selected_slot_index, None);
     }
 }

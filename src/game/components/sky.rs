@@ -6,10 +6,6 @@
 //! Provides marker components used by [`crate::game::systems::sky_bodies`] to
 //! identify, query, toggle visibility of, and animate sun disc, star-field,
 //! and cloud layer entities.
-//!
-//! # Architecture Reference
-//!
-//! See `docs/explanation/sky_system_implementation_plan.md` Phase 4 and Phase 5.
 
 use bevy::prelude::*;
 

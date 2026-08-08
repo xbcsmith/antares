@@ -396,6 +396,8 @@ fn print_report(report: &ValidationReport, errors_only: bool) {
 }
 
 /// Serialise a validation report as pretty-printed JSON to stdout.
+// The Value is built from primitives (bool, Vec<String>, usize) that always serialise.
+#[allow(clippy::expect_used)]
 fn print_json_report(report: &ValidationReport) {
     let json = serde_json::json!({
         "is_valid": report.is_valid,

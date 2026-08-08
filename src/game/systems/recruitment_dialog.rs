@@ -36,12 +36,6 @@ pub enum RecruitmentResponseMessage {
     Decline(String), // character_id
 }
 
-/// Tracks active recruitment dialog state
-#[derive(Resource, Default)]
-pub struct RecruitmentDialogState {
-    pub active_dialog: Option<RecruitmentDialogMessage>,
-}
-
 /// System that displays the recruitment dialog UI
 fn show_recruitment_dialog(
     mut contexts: EguiContexts,

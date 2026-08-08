@@ -417,7 +417,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -517,7 +517,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -577,7 +577,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -897,7 +897,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1057,7 +1057,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1317,7 +1317,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1337,7 +1337,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1357,7 +1357,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1377,7 +1377,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1397,7 +1397,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1417,7 +1417,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1437,7 +1437,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1457,7 +1457,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1497,7 +1497,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1517,7 +1517,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1537,7 +1537,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1557,7 +1557,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1577,7 +1577,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1606,9 +1606,9 @@
             ),
         ),
         (
-            terrain: Stone,
-            wall_type: Normal,
-            blocked: true,
+            terrain: Ground,
+            wall_type: r#None,
+            blocked: false,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -1626,9 +1626,9 @@
             ),
         ),
         (
-            terrain: Stone,
-            wall_type: Normal,
-            blocked: true,
+            terrain: Ground,
+            wall_type: r#None,
+            blocked: false,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -1697,7 +1697,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -1926,9 +1926,9 @@
             ),
         ),
         (
-            terrain: Stone,
-            wall_type: Normal,
-            blocked: true,
+            terrain: Ground,
+            wall_type: r#None,
+            blocked: false,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -2077,7 +2077,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -2197,7 +2197,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -2397,7 +2397,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -2717,7 +2717,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -3237,7 +3237,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -3257,7 +3257,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -3297,7 +3297,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -3317,7 +3317,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -3337,7 +3337,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -3357,7 +3357,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -3377,7 +3377,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -3397,7 +3397,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -3417,7 +3417,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -3457,7 +3457,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -3477,7 +3477,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -3497,7 +3497,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -3826,9 +3826,9 @@
             ),
         ),
         (
-            terrain: Stone,
-            wall_type: Normal,
-            blocked: true,
+            terrain: Ground,
+            wall_type: r#None,
+            blocked: false,
             is_special: false,
             is_dark: false,
             visited: false,
@@ -4137,7 +4137,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -4237,7 +4237,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -4277,7 +4277,7 @@
             visual: (
                 height: None,
                 width_x: None,
-                width_z: None,
+                width_z: Some(0.2),
                 color_tint: None,
                 scale: None,
                 y_offset: None,
@@ -5128,18 +5128,6 @@
     ],
     events: {
         (
-            x: 0,
-            y: 7,
-        ): Teleport(
-            name: "Forest Portal",
-            description: "A portal that teleports the party to Dark Forrest (map 4) at (12,0).",
-            destination: (
-                x: 12,
-                y: 1,
-            ),
-            map_id: 2,
-        ),
-        (
             x: 1,
             y: 8,
         ): Sign(
@@ -5366,6 +5354,18 @@
             proximity_facing: false,
             rotation_speed: None,
             combat_event_type: Normal,
+        ),
+        (
+            x: 15,
+            y: 11,
+        ): Teleport(
+            name: "Forest Portal",
+            description: "A portal that teleports the party to Dark Forrest (map 4) at (12,0).",
+            destination: (
+                x: 8,
+                y: 0,
+            ),
+            map_id: 2,
         ),
     },
     allow_random_encounters: true,

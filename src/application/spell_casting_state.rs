@@ -5,11 +5,15 @@
 //!
 //! Tracks the multi-step UI flow when a player casts a spell outside of combat:
 //!
-//! 1. **`SelectCaster`** — player selects which party member will cast.
-//! 2. **`SelectSpell`**  — player selects a spell from the caster's book.
-//! 3. **`SelectTarget`** — for `SingleCharacter` spells: player selects a target
-//!    party member.  Skipped for `Self_` and `AllCharacters` spells.
-//! 4. **`ShowResult`**   — the result message is displayed until dismissed.
+//! 1. **`SelectCaster`**    — player selects which party member will cast.
+//! 2. **`SelectSpell`**     — player selects a spell from the caster's book.
+//! 3. **`SelectMapTarget`** — for Jump/Teleport spells: player positions the
+//!    cursor on the map tile to jump to.  Arrow keys move the cursor;
+//!    Enter confirms; Escape returns to spell selection without consuming SP.
+//!    SP is only charged when a valid (in-bounds, unblocked) tile is confirmed.
+//! 4. **`SelectTarget`**    — for `SingleCharacter` spells: player selects a
+//!    target party member.  Skipped for `Self_` and `AllCharacters` spells.
+//! 5. **`ShowResult`**      — the result message is displayed until dismissed.
 //!
 //! `SpellCastingState` is stored inside [`crate::application::GameMode::SpellCasting`].
 //! It uses a `Box<GameMode>` for the previous mode (same pattern as
@@ -36,8 +40,10 @@ use serde::{Deserialize, Serialize};
 
 /// Steps in the exploration spell-casting flow.
 ///
-/// The UI advances through these steps in order (skipping `SelectTarget` when
-/// the spell doesn't need a specific party member target).
+/// The UI advances through these steps in order, skipping steps that do not
+/// apply to the chosen spell:
+/// - `SelectTarget` is skipped for non-`SingleCharacter` spells.
+/// - `SelectMapTarget` is used only for Jump/Teleport spells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SpellCastingStep {
     /// Player is selecting which party member should cast the spell.
@@ -47,6 +53,12 @@ pub enum SpellCastingStep {
     SelectCaster,
     /// Player is browsing and selecting a spell from the caster's spell book.
     SelectSpell,
+    /// Player is selecting a map tile position for a Jump/Teleport spell.
+    ///
+    /// Arrow keys move the cursor on the map; Enter confirms the destination;
+    /// Escape returns to `SelectSpell` without consuming any SP.
+    /// SP is only charged when a valid (in-bounds, unblocked) tile is confirmed.
+    SelectMapTarget,
     /// Player is selecting a target party member for a `SingleCharacter` spell.
     SelectTarget,
     /// The cast has completed and the result message is being shown.
@@ -99,6 +111,22 @@ pub struct SpellCastingState {
     /// Selected row in the current step's list (used for keyboard navigation).
     pub selected_row: usize,
 
+    /// X coordinate of the selected map target (used by Jump/Teleport spells).
+    ///
+    /// Initialised to the party's current X position when `SelectMapTarget` is
+    /// entered.  Serialised with a default of 0 so existing saves deserialise
+    /// without errors.
+    #[serde(default)]
+    pub map_target_x: i32,
+
+    /// Y coordinate of the selected map target (used by Jump/Teleport spells).
+    ///
+    /// Initialised to the party's current Y position when `SelectMapTarget` is
+    /// entered.  Serialised with a default of 0 so existing saves deserialise
+    /// without errors.
+    #[serde(default)]
+    pub map_target_y: i32,
+
     /// Result message to display in `ShowResult` step.
     pub feedback_message: Option<String>,
 
@@ -143,6 +171,8 @@ impl SpellCastingState {
             selected_spell_id: None,
             target_index: None,
             selected_row: 0,
+            map_target_x: 0,
+            map_target_y: 0,
             feedback_message: None,
             previous_mode: Box::new(previous_mode),
         }
@@ -174,6 +204,8 @@ impl SpellCastingState {
             selected_spell_id: None,
             target_index: None,
             selected_row: 0,
+            map_target_x: 0,
+            map_target_y: 0,
             feedback_message: None,
             previous_mode: Box::new(previous_mode),
         }
@@ -213,6 +245,28 @@ impl SpellCastingState {
     pub fn select_spell(&mut self, spell_id: SpellId) {
         self.selected_spell_id = Some(spell_id);
         self.selected_row = 0;
+    }
+
+    /// Sets the map target coordinates for a Jump/Teleport spell.
+    ///
+    /// Called when entering the `SelectMapTarget` step to initialise the cursor
+    /// at the party's current position.  The player then moves the cursor with
+    /// arrow keys before confirming with Enter.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::spell_casting_state::SpellCastingState;
+    /// use antares::application::GameMode;
+    ///
+    /// let mut state = SpellCastingState::new(GameMode::Exploration, 0);
+    /// state.select_map_target(5, 7);
+    /// assert_eq!(state.map_target_x, 5);
+    /// assert_eq!(state.map_target_y, 7);
+    /// ```
+    pub fn select_map_target(&mut self, x: i32, y: i32) {
+        self.map_target_x = x;
+        self.map_target_y = y;
     }
 
     /// Records the selected target party-member index.
@@ -407,5 +461,36 @@ mod tests {
         let d = SpellCastingState::default();
         assert_eq!(d.step, SpellCastingStep::SelectSpell);
         assert_eq!(d.caster_index, 0);
+    }
+
+    #[test]
+    fn test_map_target_default_is_origin() {
+        let state = SpellCastingState::new(GameMode::Exploration, 0);
+        assert_eq!(state.map_target_x, 0);
+        assert_eq!(state.map_target_y, 0);
+    }
+
+    #[test]
+    fn test_select_map_target_stores_coordinates() {
+        let mut state = SpellCastingState::new(GameMode::Exploration, 0);
+        state.select_map_target(5, 7);
+        assert_eq!(state.map_target_x, 5);
+        assert_eq!(state.map_target_y, 7);
+    }
+
+    #[test]
+    fn test_select_map_target_updates_existing_values() {
+        let mut state = SpellCastingState::new(GameMode::Exploration, 0);
+        state.select_map_target(3, 4);
+        state.select_map_target(10, 12);
+        assert_eq!(state.map_target_x, 10);
+        assert_eq!(state.map_target_y, 12);
+    }
+
+    #[test]
+    fn test_map_target_with_caster_select_default_is_origin() {
+        let state = SpellCastingState::new_with_caster_select(GameMode::Exploration);
+        assert_eq!(state.map_target_x, 0);
+        assert_eq!(state.map_target_y, 0);
     }
 }

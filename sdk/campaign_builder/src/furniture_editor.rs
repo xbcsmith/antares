@@ -211,6 +211,59 @@ impl FurnitureEditorState {
         }
     }
 
+    /// Returns the furniture definitions matching the current search query and
+    /// active category / base-type filters.
+    ///
+    /// The search is a case-insensitive substring test against the definition
+    /// name. `filter_category` and `filter_base_type` are applied when set. An
+    /// empty query with no active filters returns every definition (paired with
+    /// its original index).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use campaign_builder::furniture_editor::FurnitureEditorState;
+    ///
+    /// let mut throne = FurnitureEditorState::default_furniture();
+    /// throne.id = 1;
+    /// throne.name = "Royal Throne".to_string();
+    /// let mut chair = FurnitureEditorState::default_furniture();
+    /// chair.id = 2;
+    /// chair.name = "Wooden Chair".to_string();
+    /// let defs = vec![throne, chair];
+    ///
+    /// let mut state = FurnitureEditorState::new();
+    /// state.search_query = "throne".to_string();
+    /// let filtered = state.filtered_furniture(&defs);
+    /// assert_eq!(filtered.len(), 1);
+    /// assert_eq!(filtered[0].1.name, "Royal Throne");
+    /// ```
+    pub fn filtered_furniture<'a>(
+        &self,
+        defs: &'a [FurnitureDefinition],
+    ) -> Vec<(usize, &'a FurnitureDefinition)> {
+        let search_lower = self.search_query.to_lowercase();
+        defs.iter()
+            .enumerate()
+            .filter(|(_, d)| {
+                if !search_lower.is_empty() && !d.name.to_lowercase().contains(&search_lower) {
+                    return false;
+                }
+                if let Some(cat) = self.filter_category {
+                    if !cat.matches(d) {
+                        return false;
+                    }
+                }
+                if let Some(bt) = self.filter_base_type {
+                    if d.base_type != bt {
+                        return false;
+                    }
+                }
+                true
+            })
+            .collect()
+    }
+
     // =========================================================================
     // Top-level show
     // =========================================================================
@@ -410,28 +463,10 @@ impl FurnitureEditorState {
         defs: &mut Vec<FurnitureDefinition>,
         ctx: &mut EditorContext<'_>,
     ) {
-        let search_lower = self.search_query.to_lowercase();
-
         // SDK Rule 10: pre-compute shared state before multi-closure calls
-        let filtered: Vec<(usize, FurnitureDefinition)> = defs
-            .iter()
-            .enumerate()
-            .filter(|(_, d)| {
-                if !search_lower.is_empty() && !d.name.to_lowercase().contains(&search_lower) {
-                    return false;
-                }
-                if let Some(cat) = self.filter_category {
-                    if !cat.matches(d) {
-                        return false;
-                    }
-                }
-                if let Some(bt) = self.filter_base_type {
-                    if d.base_type != bt {
-                        return false;
-                    }
-                }
-                true
-            })
+        let filtered: Vec<(usize, FurnitureDefinition)> = self
+            .filtered_furniture(defs)
+            .into_iter()
             .map(|(idx, d)| (idx, d.clone()))
             .collect();
 
@@ -1251,6 +1286,51 @@ mod tests {
     fn test_state_new_returns_list_mode() {
         let state = FurnitureEditorState::new();
         assert_eq!(state.mode, FurnitureEditorMode::List);
+    }
+
+    #[test]
+    fn test_filtered_furniture_search_behavior() {
+        let mut throne = make_def(1, "Royal Throne");
+        throne.name = "Royal Throne".to_string();
+        let stool = make_def(2, "Wooden Stool");
+        let table = make_def(3, "Round Table");
+        let defs = vec![throne, stool, table];
+
+        let mut state = FurnitureEditorState::new();
+
+        // Empty query returns every definition.
+        assert_eq!(
+            state
+                .filtered_furniture(&defs)
+                .iter()
+                .map(|(_, d)| d.id)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+
+        // Case-insensitive substring isolates the matching definition.
+        state.search_query = "THRONE".to_string();
+        let survivors: Vec<u32> = state
+            .filtered_furniture(&defs)
+            .iter()
+            .map(|(_, d)| d.id)
+            .collect();
+        assert_eq!(survivors, vec![1]);
+
+        // Shared substring keeps the expected subset by identity.
+        state.search_query = "wooden".to_string();
+        assert_eq!(
+            state
+                .filtered_furniture(&defs)
+                .iter()
+                .map(|(_, d)| d.id)
+                .collect::<Vec<_>>(),
+            vec![2]
+        );
+
+        // A non-matching query returns nothing.
+        state.search_query = "chandelier".to_string();
+        assert!(state.filtered_furniture(&defs).is_empty());
     }
 
     #[test]

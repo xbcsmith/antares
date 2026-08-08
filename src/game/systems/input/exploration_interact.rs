@@ -559,6 +559,10 @@ pub fn try_interact_locked_container_event(
 /// Tries to interact with adjacent NPCs or recruitable characters.
 ///
 /// Returns `true` when an NPC or recruitable interaction was found and routed.
+// Both expects re-fetch `map.get_event(pos)` for a position whose event was
+// already matched by the `if let Some(...)` guard immediately above; `map` is
+// immutable here so the lookup cannot become `None`.
+#[allow(clippy::expect_used)]
 pub fn try_interact_npc_or_recruitable(
     game_state: &mut GameState,
     party_position: Position,
@@ -667,7 +671,6 @@ pub fn try_interact_npc_or_recruitable(
 ///
 /// Returns `true` when a dropped item was found and the interaction was consumed,
 /// regardless of whether the pickup succeeded.
-#[allow(clippy::needless_pass_by_value)]
 pub fn try_pickup_adjacent_dropped_item(
     game_state: &mut GameState,
     party_position: Position,

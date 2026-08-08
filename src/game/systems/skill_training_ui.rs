@@ -56,6 +56,7 @@ use crate::domain::skill_resolver::SkillResolver;
 use crate::domain::skills::{SkillId, SkillRank};
 use crate::game::resources::GlobalState;
 use crate::game::systems::ui::GameLog;
+use crate::game::systems::ui_helpers::{three_column, title_bar_with_hints, UI_HINT_COLOR};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -66,9 +67,6 @@ pub const SKILL_TRAINING_LEFT_COL_W: f32 = 180.0;
 
 /// Right column width: training detail panel.
 pub const SKILL_TRAINING_RIGHT_COL_W: f32 = 250.0;
-
-/// Colour for hint labels in the title bar.
-pub const SKILL_TRAINING_HINT_COLOR: egui::Color32 = egui::Color32::from_rgb(160, 160, 120);
 
 /// Colour for gold amounts.
 pub const SKILL_TRAINING_GOLD_COLOR: egui::Color32 = egui::Color32::YELLOW;
@@ -709,14 +707,14 @@ fn render_detail_column(
             ui.label(
                 egui::RichText::new("\u{2190} Select a party member")
                     .italics()
-                    .color(SKILL_TRAINING_HINT_COLOR),
+                    .color(UI_HINT_COLOR),
             );
         }
         (Some(_), None) => {
             ui.label(
                 egui::RichText::new("\u{2191} Select a skill to train")
                     .italics()
-                    .color(SKILL_TRAINING_HINT_COLOR),
+                    .color(UI_HINT_COLOR),
             );
         }
     }
@@ -754,7 +752,7 @@ fn render_detail_column(
         egui::RichText::new("(or press ESC)")
             .small()
             .weak()
-            .color(SKILL_TRAINING_HINT_COLOR),
+            .color(UI_HINT_COLOR),
     );
 
     (train_clicked, leave_clicked)
@@ -809,25 +807,16 @@ fn skill_training_ui_system(
     egui::CentralPanel::default().show(&mut root, |ui| {
         // ── Title bar — hints right-aligned so columns get the full remaining
         //   height without bottom reservation needed ──────────────────────────
-        ui.horizontal(|ui| {
-            ui.heading(format!("\u{1F393} Skill Training \u{2014} {}", npc_name)); // 🎓
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new("[ESC] Leave").color(SKILL_TRAINING_HINT_COLOR));
-                ui.separator();
-                ui.label(egui::RichText::new("[Enter] Train").color(SKILL_TRAINING_HINT_COLOR));
-                ui.separator();
-                ui.label(
-                    egui::RichText::new("[Tab] Switch Column").color(SKILL_TRAINING_HINT_COLOR),
-                );
-                ui.separator();
-                ui.label(
-                    egui::RichText::new("[\u{2191}\u{2193}] Navigate")
-                        .color(SKILL_TRAINING_HINT_COLOR),
-                );
-            });
-        });
-
-        ui.separator();
+        title_bar_with_hints(
+            ui,
+            format!("\u{1F393} Skill Training \u{2014} {}", npc_name), // 🎓
+            &[
+                "[ESC] Leave",
+                "[Enter] Train",
+                "[Tab] Switch Column",
+                "[\u{2191}\u{2193}] Navigate",
+            ],
+        );
 
         // Party gold display below the header.
         ui.horizontal(|ui| {
@@ -840,21 +829,14 @@ fn skill_training_ui_system(
         ui.separator();
         ui.add_space(4.0);
 
-        // Pre-compute column geometry from available_size() BEFORE entering
-        // ui.horizontal.  ui.allocate_ui gives each column an explicit rect so
-        // the ScrollAreas fill the full column height.
-        let available = ui.available_size();
-        let col_h = available.y;
-        // 2 separators: 1 px line + item_spacing.x on each side, times two.
-        let sep_total = (1.0 + 2.0 * ui.spacing().item_spacing.x) * 2.0;
-        let center_w =
-            (available.x - SKILL_TRAINING_LEFT_COL_W - SKILL_TRAINING_RIGHT_COL_W - sep_total)
-                .max(160.0);
-
         // ── Three-column body — each column owns an explicit rect ─────────────
-        ui.horizontal(|ui| {
+        three_column(
+            ui,
+            SKILL_TRAINING_LEFT_COL_W,
+            SKILL_TRAINING_RIGHT_COL_W,
+            160.0,
             // ── Left column: party member list ────────────────────────────────
-            ui.allocate_ui(egui::vec2(SKILL_TRAINING_LEFT_COL_W, col_h), |ui| {
+            |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("skill_training_member_list")
                     .auto_shrink([true, false])
@@ -867,12 +849,9 @@ fn skill_training_ui_system(
                             });
                         }
                     });
-            });
-
-            ui.separator();
-
+            },
             // ── Centre column: available skill list ───────────────────────────
-            ui.allocate_ui(egui::vec2(center_w, col_h), |ui| {
+            |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("skill_training_skill_list")
                     .auto_shrink([true, false])
@@ -885,12 +864,9 @@ fn skill_training_ui_system(
                             });
                         }
                     });
-            });
-
-            ui.separator();
-
+            },
             // ── Right column: training detail, fee, actions, status ───────────
-            ui.allocate_ui(egui::vec2(SKILL_TRAINING_RIGHT_COL_W, col_h), |ui| {
+            |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("skill_training_detail_panel")
                     .auto_shrink([true, false])
@@ -926,8 +902,8 @@ fn skill_training_ui_system(
                             exit_events.write(ExitSkillTraining);
                         }
                     });
-            });
-        });
+            },
+        );
     });
 }
 

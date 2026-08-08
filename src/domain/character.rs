@@ -13,7 +13,7 @@
 
 use crate::domain::classes::{ClassDatabase, ClassId, SpellSchool as ClassSpellSchool};
 use crate::domain::skills::CharacterSkillRanks;
-use crate::domain::types::{CharacterId, InnkeeperId, ItemId, MapId, RaceId, SpellId};
+use crate::domain::types::{InnkeeperId, ItemId, MapId, RaceId, SpellId};
 use bevy::prelude::Component;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -1067,6 +1067,35 @@ pub struct TimedStatBoost {
     pub minutes_remaining: u16,
 }
 
+/// A reversible timed skill-rank modifier applied by a spell or ability.
+///
+/// Stored on a character as part of `timed_skill_boosts`. Processed by
+/// [`crate::domain::skill_resolver::SkillResolver::effective_skill_rank_for_character`].
+/// Modifiers expire after `minutes_remaining` reaches zero.
+///
+/// # Examples
+///
+/// ```
+/// use antares::domain::character::TimedSkillBoost;
+///
+/// let boost = TimedSkillBoost {
+///     skill_id: "perception".to_string(),
+///     bonus: 3,
+///     minutes_remaining: 60,
+/// };
+/// assert_eq!(boost.bonus, 3);
+/// assert_eq!(boost.minutes_remaining, 60);
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TimedSkillBoost {
+    /// Which skill this modifier affects (matches `SkillId`).
+    pub skill_id: String,
+    /// Signed rank delta (positive = boost, negative = debuff).
+    pub bonus: i16,
+    /// Minutes remaining before this modifier expires.
+    pub minutes_remaining: u16,
+}
+
 // ===== Character =====
 
 /// Represents a single character (party member or roster character)
@@ -1131,6 +1160,13 @@ pub struct Character {
     /// Each entry is reversed when `minutes_remaining` reaches zero.
     #[serde(default)]
     pub timed_stat_boosts: Vec<TimedStatBoost>,
+    /// Timed skill-rank modifiers (buffs/debuffs from spells or abilities).
+    ///
+    /// Processed during skill resolution to adjust effective ranks.
+    /// Each entry is removed when `minutes_remaining` reaches zero via
+    /// [`Character::tick_timed_skill_boosts_minute`].
+    #[serde(default)]
+    pub timed_skill_boosts: Vec<TimedSkillBoost>,
     /// Damage resistances
     pub resistances: Resistances,
     /// Per-character quest/event tracking
@@ -1208,6 +1244,7 @@ impl Character {
             conditions: Condition::new(),
             active_conditions: Vec::new(),
             timed_stat_boosts: Vec::new(),
+            timed_skill_boosts: Vec::new(),
             resistances: Resistances::new(),
             quest_flags: QuestFlags::new(),
             portrait_id: String::new(),
@@ -1423,6 +1460,78 @@ impl Character {
         }
     }
 
+    /// Applies a timed skill-rank modifier.
+    ///
+    /// If `minutes` is zero the call is a no-op; zero-duration boosts are never
+    /// stored.
+    ///
+    /// # Arguments
+    ///
+    /// * `skill_id` — The skill to modify.
+    /// * `bonus` — Signed rank delta (positive = boost, negative = debuff).
+    /// * `minutes` — Duration in minutes (0 = no-op).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Character, Sex, Alignment};
+    ///
+    /// let mut hero = Character::new(
+    ///     "Hero".to_string(),
+    ///     "human".to_string(),
+    ///     "knight".to_string(),
+    ///     Sex::Male,
+    ///     Alignment::Good,
+    /// );
+    /// hero.apply_timed_skill_boost("perception".to_string(), 5, 30);
+    /// assert_eq!(hero.timed_skill_boosts.len(), 1);
+    /// assert_eq!(hero.timed_skill_boosts[0].bonus, 5);
+    /// ```
+    pub fn apply_timed_skill_boost(&mut self, skill_id: String, bonus: i16, minutes: u16) {
+        if minutes == 0 {
+            return;
+        }
+        self.timed_skill_boosts.push(TimedSkillBoost {
+            skill_id,
+            bonus,
+            minutes_remaining: minutes,
+        });
+    }
+
+    /// Ticks all timed skill boosts by one minute, removing expired entries.
+    ///
+    /// Called by game state advance-time logic alongside
+    /// [`Character::tick_timed_stat_boosts_minute`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::domain::character::{Character, Sex, Alignment};
+    ///
+    /// let mut hero = Character::new(
+    ///     "Hero".to_string(),
+    ///     "human".to_string(),
+    ///     "knight".to_string(),
+    ///     Sex::Male,
+    ///     Alignment::Good,
+    /// );
+    /// hero.apply_timed_skill_boost("perception".to_string(), 3, 1);
+    /// assert_eq!(hero.timed_skill_boosts.len(), 1);
+    ///
+    /// hero.tick_timed_skill_boosts_minute();
+    /// assert!(hero.timed_skill_boosts.is_empty(), "boost must expire after 1 minute");
+    /// ```
+    pub fn tick_timed_skill_boosts_minute(&mut self) {
+        self.timed_skill_boosts.retain_mut(|boost| {
+            if boost.minutes_remaining <= 1 {
+                false
+            } else {
+                boost.minutes_remaining -= 1;
+                true
+            }
+        });
+    }
+
     /// Applies a signed delta to the `current` value of the named attribute.
     ///
     /// This is the single authoritative mapping from [`crate::domain::items::types::AttributeType`]
@@ -1486,55 +1595,6 @@ impl Character {
             AttributeType::Accuracy => self.stats.accuracy.modify(delta),
             AttributeType::Luck => self.stats.luck.modify(delta),
         }
-    }
-
-    /// Calculates the total modifier from active conditions for a given attribute
-    pub fn get_condition_modifier(
-        &self,
-        attribute: &str,
-        condition_defs: &[crate::domain::conditions::ConditionDefinition],
-    ) -> i16 {
-        let mut total_modifier = 0i16;
-
-        for active in &self.active_conditions {
-            // Find the definition
-            if let Some(def) = condition_defs.iter().find(|d| d.id == active.condition_id) {
-                for effect in &def.effects {
-                    if let crate::domain::conditions::ConditionEffect::AttributeModifier {
-                        attribute: attr,
-                        value,
-                    } = effect
-                    {
-                        if attr == attribute {
-                            let modified = (*value as f32 * active.magnitude).round() as i16;
-                            total_modifier = total_modifier.saturating_add(modified);
-                        }
-                    }
-                }
-            }
-        }
-
-        total_modifier
-    }
-
-    /// Returns true if character has a specific status effect from conditions
-    pub fn has_status_effect(
-        &self,
-        status: &str,
-        condition_defs: &[crate::domain::conditions::ConditionDefinition],
-    ) -> bool {
-        for active in &self.active_conditions {
-            if let Some(def) = condition_defs.iter().find(|d| d.id == active.condition_id) {
-                for effect in &def.effects {
-                    if let crate::domain::conditions::ConditionEffect::StatusEffect(s) = effect {
-                        if s == status {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        false
     }
 }
 
@@ -1669,26 +1729,6 @@ impl Roster {
         self.characters.push(character);
         self.character_locations.push(location);
         Ok(())
-    }
-
-    /// Finds a character in the roster by character ID
-    ///
-    /// Returns the roster index if found.
-    ///
-    /// # Arguments
-    ///
-    /// * `id` - Character ID to search for
-    ///
-    /// # Returns
-    ///
-    /// Returns `Some(index)` if character found, `None` otherwise
-    pub fn find_character_by_id(&self, id: CharacterId) -> Option<usize> {
-        // Character ID is the roster index in the current implementation
-        if id < self.characters.len() {
-            Some(id)
-        } else {
-            None
-        }
     }
 
     /// Gets a reference to a character by roster index
@@ -2003,6 +2043,47 @@ mod tests {
         assert!(
             deserialized.timed_stat_boosts.is_empty(),
             "missing timed_stat_boosts field must default to empty Vec"
+        );
+    }
+
+    // ===== TimedSkillBoost tests =====
+
+    #[test]
+    fn test_timed_skill_boost_apply_adds_entry() {
+        let mut ch = make_hero();
+        ch.apply_timed_skill_boost("perception".to_string(), 5, 30);
+        assert_eq!(ch.timed_skill_boosts.len(), 1);
+        assert_eq!(ch.timed_skill_boosts[0].skill_id, "perception");
+        assert_eq!(ch.timed_skill_boosts[0].bonus, 5);
+        assert_eq!(ch.timed_skill_boosts[0].minutes_remaining, 30);
+    }
+
+    #[test]
+    fn test_timed_skill_boost_zero_minutes_is_noop() {
+        let mut ch = make_hero();
+        ch.apply_timed_skill_boost("perception".to_string(), 5, 0);
+        assert!(
+            ch.timed_skill_boosts.is_empty(),
+            "zero-minute boost must not be added"
+        );
+    }
+
+    #[test]
+    fn test_timed_skill_boost_tick_decrements() {
+        let mut ch = make_hero();
+        ch.apply_timed_skill_boost("perception".to_string(), 3, 5);
+        ch.tick_timed_skill_boosts_minute();
+        assert_eq!(ch.timed_skill_boosts[0].minutes_remaining, 4);
+    }
+
+    #[test]
+    fn test_timed_skill_boost_tick_expires() {
+        let mut ch = make_hero();
+        ch.apply_timed_skill_boost("perception".to_string(), 3, 1);
+        ch.tick_timed_skill_boosts_minute();
+        assert!(
+            ch.timed_skill_boosts.is_empty(),
+            "boost must expire after last tick"
         );
     }
 

@@ -56,3 +56,20 @@ path = "src/bin/generate_normal_map.rs"
 
 [dev-dependencies]
 tempfile = "3.27"
+
+# ── Build profiles ────────────────────────────────────────────────────────────
+
+[profile.dev]
+# Move DWARF debug info to a .dSYM bundle instead of embedding it in the
+# binary.  This is the standard macOS dev workflow and reduces the size of
+# debug-info sections linked into the binary itself.
+split-debuginfo = "unpacked"
+
+[profile.release]
+opt-level = 3
+# Thin LTO: cross-crate dead-code elimination without full-program link cost.
+lto = "thin"
+# Single codegen unit maximises optimisation quality.
+codegen-units = 1
+# Strip DWARF from release builds; a .dSYM can be generated separately.
+strip = "debuginfo"

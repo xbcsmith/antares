@@ -4123,15 +4123,17 @@ impl<'a> Widget for MapGridWidget<'a> {
                                     landscape_id,
                                     pos,
                                 ));
-                                self.state.landscape_placement_editor =
-                                    Some(LandscapePlacementEditorState::from_placement(
-                                        self.state.map.landscape_placements.len() - 1,
-                                        self.state
-                                            .map
-                                            .landscape_placements
-                                            .last()
-                                            .expect("just-added landscape placement must exist"),
-                                    ));
+                                // The last() expect cannot fail: a placement was just pushed above.
+                                #[allow(clippy::expect_used)]
+                                {
+                                    self.state.landscape_placement_editor =
+                                        Some(LandscapePlacementEditorState::from_placement(
+                                            self.state.map.landscape_placements.len() - 1,
+                                            self.state.map.landscape_placements.last().expect(
+                                                "just-added landscape placement must exist",
+                                            ),
+                                        ));
+                                }
                             }
                         }
                         EditorTool::Fill => {
@@ -4182,22 +4184,20 @@ impl<'a> Widget for MapPreviewWidget<'a> {
         let map_width_px = self.map.width as f32 * tile_size;
         let map_height_px = self.map.height as f32 * tile_size;
 
-        let avail = ui.clip_rect().size();
-        let width = map_width_px.max(avail.x).max(1.0);
-        let height = map_height_px.max(avail.y).max(1.0);
-
-        let (response, painter) = ui.allocate_painter(Vec2::new(width, height), Sense::click());
-
-        let grid_offset = Vec2::new(
-            ((width - map_width_px) / 2.0).max(0.0),
-            ((height - map_height_px) / 2.0).max(0.0),
+        // Allocate exactly the map size, left-aligned.  Do NOT expand to fill
+        // the clip rect and do NOT center — that causes a positive grid_offset
+        // that shifts the map right and makes click coordinates incorrect when
+        // placed inside a narrower inspector panel.
+        let (response, painter) = ui.allocate_painter(
+            Vec2::new(map_width_px.max(1.0), map_height_px.max(1.0)),
+            Sense::click(),
         );
 
         let to_screen = |x: i32, y: i32| -> Pos2 {
-            response.rect.min + grid_offset + Vec2::new(x as f32 * tile_size, y as f32 * tile_size)
+            response.rect.min + Vec2::new(x as f32 * tile_size, y as f32 * tile_size)
         };
 
-        let map_origin = response.rect.min + grid_offset;
+        let map_origin = response.rect.min;
         let map_rect = Rect::from_min_size(map_origin, Vec2::new(map_width_px, map_height_px));
         let visible_rect = painter
             .clip_rect()
@@ -4278,7 +4278,8 @@ impl<'a> Widget for MapPreviewWidget<'a> {
 
         if response.clicked() {
             if let Some(click_pos) = response.interact_pointer_pos() {
-                let local_pos = click_pos - response.rect.min - grid_offset;
+                // No grid_offset: the map starts at response.rect.min.
+                let local_pos = click_pos - response.rect.min;
                 let x = (local_pos.x / tile_size) as i32;
                 let y = (local_pos.y / tile_size) as i32;
                 let pos = Position::new(x, y);
@@ -4291,8 +4292,6 @@ impl<'a> Widget for MapPreviewWidget<'a> {
         response
     }
 }
-
-// ===== Main Maps Editor State =====
 
 // ===== Main Maps Editor State =====
 
@@ -4902,6 +4901,8 @@ impl MapsEditorState {
                         if let Some(dir) = campaign_dir {
                             let map_path = dir.join(maps_dir).join(format!("map_{}.ron", map.id));
                             if map_path.exists() {
+                                // Best-effort cleanup of the map file being deleted; failure is not fatal.
+                                #[allow(clippy::let_underscore_must_use)]
                                 let _ = fs::remove_file(&map_path);
                             }
                         }
@@ -7185,11 +7186,16 @@ impl MapsEditorState {
                                     target_map.id, target_map.name
                                 ));
 
-                                // Draw interactive preview so the user can click to pick destination tile
+                                // Draw interactive preview so the user can click to pick destination tile.
+                                // Scale the tile size to fit the available inspector width so the map is
+                                // never wider than the panel and never needs horizontal clipping.
+                                let avail_w = ui.available_width().max(1.0);
+                                let tile_size =
+                                    (avail_w / target_map.width as f32).min(18.0).max(6.0);
                                 let selected_pos_ref = &mut event_editor.teleport_selected_pos;
                                 let preview_widget =
                                     MapPreviewWidget::new(target_map, selected_pos_ref)
-                                        .tile_size(18.0);
+                                        .tile_size(tile_size);
                                 let resp = ui.add(preview_widget);
                                 if resp.clicked() {
                                     if let Some(pos) = event_editor.teleport_selected_pos {
@@ -11567,6 +11573,36 @@ mod tests {
         assert!(state.search_filter.is_empty());
         assert!(state.selected_map_idx.is_none());
         assert!(state.active_editor.is_none());
+    }
+
+    #[test]
+    fn test_build_filtered_maps_snapshot_search_behavior() {
+        let maps = vec![
+            Map::new(1, "Forest Cave".to_string(), "Desc".to_string(), 10, 10),
+            Map::new(2, "Forest Town".to_string(), "Desc".to_string(), 10, 10),
+            Map::new(3, "Desert Ruins".to_string(), "Desc".to_string(), 10, 10),
+        ];
+
+        // Empty query returns every map (sorted by id).
+        let all = MapsEditorState::build_filtered_maps_snapshot(&maps, "");
+        assert_eq!(all.iter().map(|t| t.1).collect::<Vec<_>>(), vec![1, 2, 3]);
+
+        // Case-insensitive name substring keeps both forest maps.
+        let forests = MapsEditorState::build_filtered_maps_snapshot(&maps, "FOREST");
+        assert_eq!(forests.iter().map(|t| t.1).collect::<Vec<_>>(), vec![1, 2]);
+
+        // A narrower name query isolates a single survivor.
+        let desert = MapsEditorState::build_filtered_maps_snapshot(&maps, "desert");
+        let survivors: Vec<u16> = desert.iter().map(|t| t.1).collect();
+        assert_eq!(survivors, vec![3]);
+
+        // The id is also searchable.
+        let by_id = MapsEditorState::build_filtered_maps_snapshot(&maps, "3");
+        assert_eq!(by_id.iter().map(|t| t.1).collect::<Vec<_>>(), vec![3]);
+
+        // A non-matching query returns nothing.
+        let none = MapsEditorState::build_filtered_maps_snapshot(&maps, "ocean");
+        assert!(none.is_empty());
     }
 
     #[test]
