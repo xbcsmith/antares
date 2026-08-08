@@ -15,7 +15,7 @@
 //!
 //! ```no_run
 //! use bevy::prelude::*;
-//! use antares::game::systems::actor::spawn_actor_sprite;
+//! use antares::game::systems::actor::{spawn_actor_sprite, ActorSpawnParams};
 //! use antares::game::components::sprite::ActorType;
 //! use antares::domain::world::SpriteReference;
 //! use antares::game::resources::sprite_assets::SpriteAssets;
@@ -39,9 +39,11 @@
 //!         &asset_server,
 //!         &mut materials,
 //!         &mut meshes,
-//!         &sprite_ref,
-//!         Vec3::new(10.0, 0.5, 10.0),
-//!         ActorType::Npc,
+//!         &ActorSpawnParams {
+//!             sprite_ref: &sprite_ref,
+//!             position: Vec3::new(10.0, 0.5, 10.0),
+//!             actor_type: ActorType::Npc,
+//!         },
 //!     );
 //! }
 //! ```
@@ -52,6 +54,20 @@ use crate::game::components::sprite::{ActorSprite, ActorType, AnimatedSprite};
 use crate::game::resources::sprite_assets::SpriteAssets;
 use bevy::prelude::*;
 
+/// Parameter bundle for [`spawn_actor_sprite`].
+///
+/// Bundles the three per-actor descriptor fields so that the function stays
+/// under the Clippy `too_many_arguments` threshold while keeping the five
+/// Bevy asset-management handles as individual parameters.
+pub struct ActorSpawnParams<'a> {
+    /// Sprite sheet reference with path, index, and optional animation.
+    pub sprite_ref: &'a SpriteReference,
+    /// World-space position for the spawned entity.
+    pub position: Vec3,
+    /// Semantic actor type (NPC, Monster, or Recruitable).
+    pub actor_type: ActorType,
+}
+
 /// Spawns an actor (NPC/Monster/Recruitable) with sprite visual and billboard
 ///
 /// # Arguments
@@ -61,9 +77,7 @@ use bevy::prelude::*;
 /// * `asset_server` - Asset server for loading textures
 /// * `materials` - Material asset storage (mutable)
 /// * `meshes` - Mesh asset storage (mutable)
-/// * `sprite_ref` - Sprite reference with sheet path and index
-/// * `position` - World position for the actor
-/// * `actor_type` - Type of actor (NPC, Monster, Recruitable)
+/// * `params` - Per-actor descriptor (sprite reference, world position, actor type)
 ///
 /// # Returns
 ///
@@ -71,7 +85,7 @@ use bevy::prelude::*;
 ///
 /// # Behavior
 ///
-/// - Loads sprite texture from `sprite_ref.sheet_path`
+/// - Loads sprite texture from `params.sprite_ref.sheet_path`
 /// - Creates entity with Mesh and StandardMaterial components
 /// - Attaches `ActorSprite` component with sheet path and index
 /// - Attaches `Billboard` component (Y-locked, faces camera)
@@ -81,7 +95,7 @@ use bevy::prelude::*;
 ///
 /// ```no_run
 /// use bevy::prelude::*;
-/// use antares::game::systems::actor::spawn_actor_sprite;
+/// use antares::game::systems::actor::{spawn_actor_sprite, ActorSpawnParams};
 /// use antares::game::components::sprite::ActorType;
 /// use antares::domain::world::SpriteReference;
 /// use antares::game::resources::sprite_assets::SpriteAssets;
@@ -105,29 +119,28 @@ use bevy::prelude::*;
 ///         &asset_server,
 ///         &mut materials,
 ///         &mut meshes,
-///         &sprite_ref,
-///         Vec3::new(10.0, 0.5, 10.0),
-///         ActorType::Npc,
+///         &ActorSpawnParams {
+///             sprite_ref: &sprite_ref,
+///             position: Vec3::new(10.0, 0.5, 10.0),
+///             actor_type: ActorType::Npc,
+///         },
 ///     );
 /// }
 /// ```
-#[allow(clippy::too_many_arguments)]
 pub fn spawn_actor_sprite(
     commands: &mut Commands,
     sprite_assets: &mut SpriteAssets,
     asset_server: &AssetServer,
     materials: &mut Assets<StandardMaterial>,
     meshes: &mut Assets<Mesh>,
-    sprite_ref: &SpriteReference,
-    position: Vec3,
-    actor_type: ActorType,
+    params: &ActorSpawnParams<'_>,
 ) -> Entity {
     // Get or load material for sprite sheet (caches per sheet path)
     let material = sprite_assets.get_or_load_material(
-        &sprite_ref.sheet_path,
+        &params.sprite_ref.sheet_path,
         asset_server,
         materials,
-        sprite_ref.material_properties.as_ref(),
+        params.sprite_ref.material_properties.as_ref(),
     );
 
     // Get or load mesh for actor sprites (1.0 x 2.0 tall quad)
@@ -137,18 +150,18 @@ pub fn spawn_actor_sprite(
     let mut entity_commands = commands.spawn((
         Mesh3d(mesh),
         MeshMaterial3d(material),
-        Transform::from_translation(position),
+        Transform::from_translation(params.position),
         GlobalTransform::default(),
         ActorSprite {
-            sheet_path: sprite_ref.sheet_path.clone(),
-            sprite_index: sprite_ref.sprite_index,
-            actor_type,
+            sheet_path: params.sprite_ref.sheet_path.clone(),
+            sprite_index: params.sprite_ref.sprite_index,
+            actor_type: params.actor_type,
         },
         Billboard { lock_y: true }, // Actors stay upright and face camera
     ));
 
     // Add animation if specified
-    if let Some(anim) = &sprite_ref.animation {
+    if let Some(anim) = &params.sprite_ref.animation {
         entity_commands.insert(AnimatedSprite::new(
             anim.frames.clone(),
             anim.fps,

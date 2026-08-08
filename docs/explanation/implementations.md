@@ -1,4 +1,536 @@
-# Implementations
+## Bug Fix: Save files written to project root instead of campaign folder
+
+### Root cause
+
+`init_save_manager()` is called once during `MenuPlugin::build()` — before any campaign
+loads — and hardcodes the path as `"saves"`, a directory relative to wherever
+`cargo run` is invoked (the project root). Nothing in the code ever updated the manager
+after a campaign became active, so all saves landed in `antares/saves/` regardless of
+which campaign was being played.
+
+### Fix
+
+**`src/application/save_game.rs`** — `SaveGameManager`:
+- Added `pub fn saves_dir(&self) -> &Path` accessor so callers can inspect the current
+  save directory without reaching into the private field.
+
+**`src/game/systems/menu.rs`** — `MenuPlugin` + new system `sync_save_manager_to_campaign`:
+- Registered `sync_save_manager_to_campaign` in `MenuPlugin::build()`.
+- The system runs every frame. When `global_state.0.campaign` is `Some`, it compares
+  `campaign.root_path.join("saves")` against `save_manager.saves_dir()`. If they differ
+  (first frame after campaign load, or after a campaign switch), it creates a new
+  `SaveGameManager` pointing at the campaign directory and re-inserts it as the Bevy
+  resource. It also clears `menu_state.save_list` so `populate_save_list` re-queries
+  the new directory on the next frame. On subsequent frames the paths match and the
+  system exits after one comparison.
+
+Save files will now be written to `campaigns/tutorial/saves/` (or whichever campaign
+is active) rather than `antares/saves/`. Existing saves in `antares/saves/` can be
+moved manually if needed.
+
+### Validation
+
+```
+cargo fmt --all                                           → no output
+cargo check --all-targets --all-features                 → 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → 0 warnings
+cargo nextest run --all-features                         → 5462 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Bug Fix: Save/Load — wrong save selected, map not re-drawn, campaign lost, timestamps missing
+
+### Root causes
+
+**Bug 1 (Critical) — Saves sorted oldest-first; default slot 0 loaded an old save**
+`SaveGameManager::list_saves()` sorted filenames alphabetically (`saves.sort()`), which
+places the oldest save at index 0. After any submenu transition `selected_index` resets to 0,
+so pressing Load always loaded the oldest save, making it appear as if the game had reset.
+
+**Bug 2 (Critical) — Map not re-drawn after loading when `current_map` is unchanged**
+`spawn_map_markers` caches the last rendered map id in a `Local<Option<MapId>>` and skips
+re-rendering when the id matches. If the loaded save contained the same `current_map` as
+the active session, the 3D world stayed stale (old tile positions, stale events).
+
+**Bug 3 (Significant) — `campaign` field lost after load**
+`GameState.campaign` is annotated `#[serde(skip)]`, so `save_manager.load()` returns a
+`GameState` with `campaign: None`. The old code replaced `global_state.0` with the
+loaded state without re-attaching the campaign, breaking `MenuButton::NewGame`, font
+loading, and any system that checks `game_state.campaign`.
+
+**Bug 4 (UX) — No feedback on save/load success or error**
+Both `save_game_operation` and `load_game_operation` logged with `debug!/error!` but showed
+nothing in the UI.
+
+**Bug 5 (UX) — Timestamps showed "Unknown" in the save list**
+`populate_save_list` hardcoded `timestamp: String::from("Unknown")` instead of parsing the
+filename (`save_YYYYMMDD_HHMMSS`).
+
+### Fix
+
+**`src/application/save_game.rs`** — `list_saves()`:
+- `saves.sort()` → `saves.sort_by(|a, b| b.cmp(a))` — newest-first so index 0 is always
+  the most recent save.
+
+**`src/application/mod.rs`** — `GameState`:
+- Added `#[serde(skip, default)] pub needs_map_refresh: bool` field; set to `false` in
+  both `GameState::new()` and `GameState::new_game()`.
+
+**`src/application/menu.rs`** — `MenuState`:
+- Added `#[serde(skip, default)] pub status_message: Option<String>` field.
+- Updated `MenuState::new()` and `Default` impl to include `status_message: None`.
+
+**`src/game/systems/map.rs`** — `spawn_map` / `spawn_map_markers`:
+- Changed `spawn_map`'s `global_state` parameter from `Res<GlobalState>` to
+  `&GlobalState` so the function can be called from both a `Res` and a `ResMut` context.
+- Changed `spawn_map_markers` to take `mut global_state: ResMut<GlobalState>`.
+- Added `needs_map_refresh` check at the top of `spawn_map_markers`: when the flag is
+  set, it is cleared and `*last_map = None` is forced so the full despawn+respawn path
+  runs regardless of whether `current_map` changed.
+- Updated both `spawn_map_system` and `spawn_map_markers` call sites to pass `&global_state`.
+
+**`src/game/systems/menu.rs`** — multiple functions:
+- Added `parse_save_timestamp(filename)` helper that converts `save_YYYYMMDD_HHMMSS` →
+  `"YYYY-MM-DD HH:MM:SS"` with a safe fallback of `"Unknown"`.
+- `populate_save_list`: replaced hardcoded `"Unknown"` with `parse_save_timestamp(&filename)`.
+- `save_game_operation`: sets `menu_state.status_message = Some("Saved: …")` on success
+  and `"Save failed: …"` on error.
+- `load_game_operation`:
+  - Takes `campaign` from the old state before replacing it, then re-attaches it after
+    `global_state.0 = loaded_state`.
+  - Sets `global_state.0.needs_map_refresh = true` to trigger a forced re-render.
+  - Sets `menu_state.status_message = Some("Load failed: …")` on error.
+- `spawn_main_menu`: displays `menu_state.status_message` in green below the buttons
+  (save confirmation).
+- `spawn_save_load_menu`: displays `menu_state.status_message` in green (success) or red
+  (error) below the action buttons.
+
+### Save file location (Mac)
+
+Save files are written to `antares/saves/` relative to the working directory where
+`cargo run` is invoked (i.e. the project root). To list them:
+
+```bash
+ls saves/
+```
+
+Files are named `save_YYYYMMDD_HHMMSS.ron` and are plain RON text. To delete one:
+
+```bash
+rm saves/save_20260717_134557.ron
+```
+
+### Validation
+
+```
+cargo fmt --all                                           → no output
+cargo check --all-targets --all-features                 → 0 errors
+cargo clippy --all-targets --all-features -- -D warnings → 0 warnings
+cargo nextest run --all-features                         → 5462 passed, 0 failed, 8 skipped
+```
+
+---
+
+## Bug Fix: Map 4 to Map 2 portal loop, blocked exit, bandit bleed-through, and SDK preview offset
+
+### Root causes
+
+Three separate bugs combined to produce the reported symptoms.
+
+**1. Portal destination too close to the return portal (the loop)**
+
+The Dungeon Portal in map_4.ron (Arcturus Cave, tile 19,17) teleports the party to
+map 2 (Dark Forest) at tile (18,10). The return portal, Arcturus Cave Portal, sits
+at (19,10) on map 2, one tile east of the landing spot. A player arriving facing east
+immediately stepped onto the return portal and was sent back to map 4 at (18,17),
+where the outbound portal is one tile east at (19,17). This created an inescapable
+teleport loop that appeared as: going back to map 4, can not go two tiles straight
+ahead, and because each cycle briefly loaded map 2 the map-2 Bandit Patrol at (17,16)
+occasionally resolved before the second bounce returned the party.
+
+**2. Wrong map number in the Dungeon Portal description**
+
+The description read Dark Forrest (map 4) at (19,10) - map number and coordinates
+were both wrong. Should be Dark Forest (map 2) at (16,10).
+
+**3. Wrong map number in the Arcturus Cave Portal description**
+
+The description read Arcturus Cave (map 2) at (18,17) - map 2 is the Dark Forest;
+Arcturus Cave is map 4. Should be Arcturus Cave (map 4) at (16,17).
+
+**4. SDK Campaign Builder - teleport destination map preview was offset and cut off**
+
+MapPreviewWidget::ui used the same fill clip rect, then center logic as the main map
+grid editor. Inside the inspector vertical-only ScrollArea, the clip-rect width was
+the full inspector panel width (often wider than the 360 px map preview). This
+produced a positive grid_offset.x, shifting the map right by half the surplus and
+making click coordinates visually misaligned. When the inspector was narrower than
+360 px the map was clipped on the right with no horizontal scrollbar. Making the SDK
+window wider increased the offset rather than fixing the cut-off.
+
+### Fix
+
+campaigns/tutorial/data/maps/map_4.ron - Dungeon Portal at (19,17):
+- destination.x: 18 to 16 (3 tiles from the return portal instead of 1)
+- description corrected to Dark Forest (map 2) at (16,10)
+
+campaigns/tutorial/data/maps/map_2.ron - Arcturus Cave Portal at (19,10):
+- destination.x: 18 to 16
+- description corrected to Arcturus Cave (map 4) at (16,17)
+
+data/test_campaign/data/maps/map_4.ron - same portal:
+- map_id: 4 to 2 (was pointing back to itself)
+- destination: (19,10) to (16,10)
+- description corrected
+
+data/test_campaign/data/maps/map_2.ron - same portal:
+- destination.x: 18 to 16
+- description corrected
+
+sdk/campaign_builder/src/map_editor.rs - MapPreviewWidget::ui:
+- Removed the avail = ui.clip_rect().size() expansion and centering grid_offset.
+- The widget now allocates exactly map_width_px x map_height_px, left-aligned.
+- Click handler updated to subtract only response.rect.min (no offset).
+
+sdk/campaign_builder/src/map_editor.rs - show_event_editor, Teleport branch:
+- Changed tile_size from hard-coded 18.0 to (avail_w / map.width).min(18.0).max(6.0)
+  so the preview always fits the available inspector width without overflow.
+
+---
+
+## Bug Fix: First Aid (and other non-damage spells) had no effect in combat
+
+### Root cause
+
+`campaigns/tutorial/data/spells.ron` was generated before the `effect_type`
+field existed on the `Spell` RON schema. Every spell in that file had
+`effect_type: None`.
+
+The combat spell dispatcher in `execute_spell_cast_with_spell`
+(`src/domain/combat/spell_casting.rs`) routes healing, cure, buff, utility, and
+resurrection effects by checking `spell.effective_effect_type()`. When
+`effect_type` is `None`, `effective_effect_type()` calls `infer_effect_type()`,
+which only recognises damage dice (`damage: Some(...)`) and applied conditions
+(`applied_conditions: [...]`). A heal-only spell like First Aid — no damage
+dice, no conditions — fell through to the default:
+
+```rust
+SpellEffectType::Utility { utility_type: UtilityType::Information }
+```
+
+The `Healing` dispatch block never matched, so SP was consumed, the cast
+animation played, and zero HP was restored. "Always no effect" is correct
+because the data was consistently wrong for the entire campaign.
+
+### Fix
+
+**`campaigns/tutorial/data/spells.ron`** — 7 spells corrected:
+
+| Spell ID | Name | `effect_type` added |
+|----------|------|---------------------|
+| 257 | Awaken (Cleric) | `Some(CureCondition(condition_id: "asleep"))` |
+| 260 | First Aid | `Some(Healing(amount: (count: 0, sides: 0, bonus: 8)))` |
+| 262 | Power Cure | `Some(Healing(amount: (count: 0, sides: 0, bonus: 15)))` |
+| 513 | Cure Wounds | `Some(Healing(amount: (count: 0, sides: 0, bonus: 25)))` |
+| 770 | Cure Blindness | `Some(CureCondition(condition_id: "blinded"))` |
+| 771 | Cure Paralysis | `Some(CureCondition(condition_id: "paralyzed"))` |
+| 1025 | Awaken (Sorcerer) | `Some(CureCondition(condition_id: "asleep"))` |
+
+The remaining `effect_type: None` entries in the tutorial file are correct:
+those spells carry `damage: Some(...)` or non-empty `applied_conditions`, so
+`infer_effect_type()` handles them correctly without an explicit tag.
+
+`data/test_campaign/data/spells.ron` already had all `effect_type` values
+correctly set — no changes needed there.
+
+### Why tests didn't catch this
+
+The existing combat heal tests (`test_party_target_confirm_spell_heals_ally`,
+etc.) construct spells in-code with `spell.effect_type` set explicitly. They do
+not load from `campaigns/tutorial/data/spells.ron`. Test data lives in
+`data/test_campaign/data/spells.ron`, which was already correct.
+
+### Validation
+
+```
+cargo check --all-targets --all-features   → 0 errors
+cargo nextest run --all-features           → 5462 passed, 0 failed, 8 skipped
+```
+
+
+### Root cause
+
+In both `NpcEditorState::show_edit_view` (`npc_editor/mod.rs`) and
+`CharactersEditorState::show` (`characters_editor.rs`), the creature picker
+popup called `manager.load_all_creatures()` **on every rendered frame** while
+the window was open. `load_all_creatures` reads the registry RON file from
+disk, then reads every individual creature `.ron` file in sequence — easily
+50–100 disk reads per frame at 60 fps. Combined with egui laying out every
+row in the list regardless of visibility, this made the picker
+unusable on campaigns with a large creature database.
+
+### Fix
+
+**`sdk/campaign_builder/src/npc_editor/mod.rs`**
+**`sdk/campaign_builder/src/characters_editor.rs`**
+
+Three changes per file:
+
+1. **Cache, don't reload.** Both editor states already maintain
+   `available_creatures: Vec<(u32, String)>` — a list of `(id, name)` pairs
+   rebuilt only when the campaign directory changes or the cache-dirty flag is
+   set. The picker now reads this in-memory list instead of calling
+   `load_all_creatures()`.
+
+2. **Search filter.** Added `creature_picker_search: String` field
+   (`#[serde(skip)]`, reset to empty each time the picker opens). A search bar
+   at the top of the popup filters the list to matching IDs and names in one
+   `O(n)` pass over the in-memory cache. The result count is shown as
+   `"N of M creatures"`.
+
+3. **Virtualised rendering.** Replaced `ScrollArea::show(…)` (renders all
+   rows) with `ScrollArea::show_rows(…, row_h, total, …)` (renders only the
+   rows currently visible in the viewport). On a list of 500 creatures only
+   ~20 rows are rendered per frame instead of 500.
+
+The `creature_manager` parameter was removed from `NpcEditorState::show_edit_view`
+(it was only passed to the now-replaced picker block). One internal test call
+site was updated accordingly.
+
+### Performance improvement
+
+| Before | After |
+|--------|-------|
+| ~50–100 disk reads per frame while picker is open | 0 disk reads per frame |
+| All `N` rows laid out and rendered every frame | Only visible rows (~20) rendered |
+| No search — must scroll entire list | Instant substring filter |
+
+### Validation
+
+```
+cargo fmt --all                                                   # no output
+cargo clippy --manifest-path sdk/campaign_builder/Cargo.toml
+             --all-targets --all-features -- -D warnings          # 0 warnings
+cargo nextest run --manifest-path sdk/campaign_builder/Cargo.toml # 2631 passed
+```
+
+## Phase 5.8: `#[allow(clippy::too_many_arguments)]` Refactor — Params/Context Structs
+
+Refactored non-Bevy helper functions that had `#[allow(clippy::too_many_arguments)]`
+suppressors by bundling their repeated parameters into purpose-built structs.
+Constructors with 30+ call sites were kept with the allow-attribute but given
+explanatory comments instead of silent suppression.
+
+### `src/game/systems/advanced_trees.rs` — `MeshBuffers<'a>`
+
+Introduced `MeshBuffers<'a>` struct bundling the four mesh attribute buffers
+(`positions`, `normals`, `uvs`, `indices`) that every foliage geometry helper
+writes into. Removed `#[allow(clippy::too_many_arguments)]` from all 10 `append_*`
+functions:
+
+`append_leaf_shape`, `append_leaf_card_cross`, `append_leaf_card`, `append_diamond`,
+`append_lobed_leaf_cluster`, `append_pine_needle_cluster`, `append_willow_hanging_strip`,
+`append_palm_frond`, `append_diamond_leaf`, `append_clustered_shrub_leaf`
+
+Also updated `append_quad` and `append_triangle` (below the clippy threshold but using
+the same 4-buffer pattern) for consistency. `generate_leaf_mesh` creates a scoped
+`MeshBuffers` instance and drops it before reading back `positions`.
+
+Test call sites in the `tests` module updated to construct inline `MeshBuffers` literals.
+
+### `src/game/systems/advanced_grass.rs` — `GrassClumpArgs<'a>`
+
+Introduced `GrassClumpArgs<'a>` bundling the 10 per-clump non-resource parameters
+(center, blade dimensions, appearance, lod index, parent entity, render mode) of the
+private `spawn_grass_clump` helper. Function reduced from 16 parameters to 7 (5 Bevy
+resource handles + `args` struct + `rng`).
+
+The three public helpers `spawn_grass`, `spawn_grass_cached`, and
+`spawn_grass_cached_with_exclusions` retain their `#[allow]` because their heavy
+parameter counts reflect unavoidable Bevy resource handles that cannot be bundled
+without naming Bevy's internal world-lifetime parameters. Comments now explain this
+rationale explicitly. `build_grass_chunks_system` is a Bevy system proper —
+its `#[allow]` is unchanged and idiomatic.
+
+### `src/domain/combat/monster.rs` — `Monster::new`
+
+Kept `#[allow(clippy::too_many_arguments)]` but replaced the implicit suppression
+with an explanatory block comment: 30+ call sites, all required fields, no
+natural sub-grouping, stable API.
+
+### `src/domain/magic/types.rs` — `Spell::new`
+
+Same treatment as `Monster::new`: 40+ call sites across tests, the domain layer,
+and the SDK. Comment documents the rationale.
+
+### `src/game/systems/actor.rs` — `ActorSpawnParams<'a>`
+
+New public struct bundling the three per-actor descriptor fields (`sprite_ref`,
+`position`, `actor_type`). `spawn_actor_sprite` reduced from 8 parameters to 6.
+Module-level doc example and function doc example updated. Two call sites in
+`src/game/systems/map.rs` updated to pass `&ActorSpawnParams { … }` literals.
+`map.rs` import updated to bring `ActorSpawnParams` into scope.
+
+### `src/bin/generate_foliage_textures.rs` — `EllipseGeometry`
+
+New public struct bundling the five ellipse geometry fields (`cx`, `cy`, `semi_a`,
+`semi_b`, `angle`). `draw_ellipse` reduced from 8 parameters to 4. All 10 call
+sites in `stamp_oak`, `stamp_pine`, `stamp_birch`, `stamp_willow`, `stamp_palm`,
+and `stamp_shrub` updated to pass inline `EllipseGeometry { … }` literals.
+
+### `sdk/campaign_builder/src/characters_editor.rs` — `CharactersEditorData<'a>`
+
+New public struct bundling the five data-slice parameters (`races`, `classes`,
+`items`, `spells`, `creature_manager`) shared by `show()` and
+`show_character_form()`. Both functions reduced from 8 parameters (including
+`self`) to 4, removing their `#[allow(clippy::too_many_arguments)]` suppressors.
+
+Call sites updated:
+- `sdk/campaign_builder/src/lib.rs`: constructs a `CharactersEditorData` before
+  the `show()` call.
+- Internal call from `show()` to `show_character_form()` updated.
+- Test at `characters_editor.rs:3696` updated to construct `CharactersEditorData`
+  before calling `show_character_form()`.
+
+Extracted per-system `GameMode` prologues into shared Bevy run-condition
+functions so that system bodies stay focused and the plugin registrations
+declaratively express when each system should run.
+
+### New file — `src/game/run_conditions.rs`
+
+Public run-condition helpers gated on `GameMode`:
+
+| Function | Returns `true` when… |
+|---|---|
+| `in_combat_mode` | `GameMode::Combat(_)` |
+| `in_dialogue_mode` | `GameMode::Dialogue(_)` |
+| `in_character_sheet_mode` | `GameMode::CharacterSheet(_)` |
+| `in_automap_mode` | `GameMode::Automap` |
+
+Registered as `pub mod run_conditions;` in `src/game/mod.rs`.
+
+### `src/game/systems/combat.rs` — `CombatPlugin`
+
+Removed simple `if !matches!(…GameMode::Combat…) { return; }` guard from
+11 systems and added `.run_if(crate::game::run_conditions::in_combat_mode)`
+to each system's `add_systems` call:
+
+`sync_party_hp_during_combat`, `setup_combat_ui`, `update_combat_ui`,
+`combat_input_system`, `tick_combat_time`, `check_combat_resolution`,
+`collect_combat_feedback_log_lines`, `mirror_combat_feedback_to_game_log`,
+`update_combat_log_typewriter`, `spawn_monster_hp_hover_bars`,
+`update_monster_hp_hover_bars`.
+
+The `global_state: Res<GlobalState>` parameter was **removed** from the seven
+functions that used it only for the guard: `setup_combat_ui`,
+`update_combat_ui`, `combat_input_system`, `check_combat_resolution`,
+`collect_combat_feedback_log_lines`, `mirror_combat_feedback_to_game_log`,
+`update_combat_log_typewriter`.
+
+`execute_monster_turn` was **skipped** — its guard branch sets
+`*was_enemy_turn = false` (side effect) and cannot be a simple run condition.
+
+### `src/game/systems/combat_visual.rs`
+
+Removed combat-mode guard and `global_state`/`GameMode` imports from
+`spawn_turn_indicator` and `update_turn_indicator`. The `.run_if(…)` calls
+were added in `CombatPlugin::build` (where these systems are registered).
+
+### `src/game/systems/dialogue.rs` — `DialoguePlugin`
+
+Removed guard and `global_state` parameter from `dialogue_input_system`;
+added `.run_if(crate::game::run_conditions::in_dialogue_mode)` in the plugin.
+
+### `src/game/systems/dialogue_choices.rs`
+
+Removed guard from `choice_input_system` (kept `global_state` — mutates
+`global_state.0.mode` to exit dialogue on Escape). `.run_if(…)` added in
+`DialoguePlugin::build`.
+
+`cleanup_choice_ui` was **skipped** — it performs cleanup (resetting
+`choice_state`) when NOT in dialogue mode, which is intentional side-effect
+behaviour.
+
+### `src/game/systems/character_sheet_ui.rs` — `CharacterSheetPlugin`
+
+Removed guard from `character_sheet_input_system` (kept `global_state` —
+used for mode mutations throughout the function body); added
+`.run_if(crate::game::run_conditions::in_character_sheet_mode)` in the
+plugin.
+
+### `src/game/systems/hud.rs`
+
+Left the private `not_in_combat` and `in_automap_mode` helpers unchanged —
+they are private, already working, and breaking them would require touching
+test-verified hud plugin logic.
+
+### Verification (run_conditions + full cleanup pass)
+
+After all Batch 1 and Phase 5.6/5.8 changes merged:
+
+```
+cargo fmt --all                                              # no output
+cargo check --all-targets --all-features                    # Finished — 0 errors
+cargo clippy --all-targets --all-features -- -D warnings    # Finished — 0 warnings
+cargo nextest run --all-features                            # 5462 passed, 8 skipped
+cargo nextest run --manifest-path sdk/campaign_builder/…    # 2631 passed, 0 skipped
+```
+
+---
+
+## Codebase Cleanup — Missed-Deliverable Remediation Pass
+
+Audit of the six-phase cleanup plan revealed that Phases 1–4 had three
+partial deliverables and that Phases 5–6 had six items still outstanding.
+All were resolved in a single remediation pass.
+
+### Phase 1.7 residue — two remaining `let _ =` sites
+
+**`src/game/systems/inventory_ui.rs`** (~lines 2774, 2887):
+`let _ = character.inventory.remove_item(slot_index)` → now logs a `warn!` if
+`remove_item` returns `None` (unexpected slot-not-found), using the existing
+`bevy::prelude::warn!` import. No logic changed.
+
+**`src/domain/combat/spell_casting.rs`** (~line 512):
+`let _ = spell_dispatch::apply_utility_spell(*utility_type)` → now binds the
+`UtilityResult` and logs it at `tracing::debug!` level. No logic changed.
+
+### Phase 4.1 residue — `CampaignError` name collision
+
+`sdk/campaign_builder/src/lib.rs` defined `pub enum CampaignError` while the
+domain crate defines its own `CampaignError`. Pure rename: the SDK enum is now
+`CampaignBuilderError`. Updated across 4 files:
+- `sdk/campaign_builder/src/lib.rs` (definition)
+- `sdk/campaign_builder/src/campaign_io.rs` (14 occurrences)
+- `sdk/campaign_builder/src/campaign_editor.rs` (2 signatures + 1 doc comment)
+- `sdk/campaign_builder/tests/campaign_io_tests.rs` (1 `matches!` assertion)
+
+### Stale doc comment — `src/game/systems/dialogue.rs` ~L1017
+
+The doc table for `execute_action` claimed `SetFlag` was "not yet persisted"
+and `ChangeReputation` was "not yet implemented" — both are fully wired.
+Updated both rows to reflect actual behavior.
+
+### Phase N plan-referencing comments in `sdk/campaign_builder/`
+
+Three comments in the SDK crate explicitly referenced "Phase 5 of the codebase
+cleanup plan":
+- `sdk/campaign_builder/src/characters_editor.rs` (~L1167, ~L1805)
+- `sdk/campaign_builder/src/quest_editor.rs` (~L1147)
+
+All three reworded to describe the actual technical situation (pre-dates the
+`EditorContext` parameter-bundle pattern; should be refactored to a context
+struct) without referring to the plan document.
+
+### `docs/explanation/codebase_cleanup_plan.md` updated
+
+- Phase 5 deliverables: 6 of 8 flipped `[ ]` → `[x]`; 2 remaining marked as
+  in-progress
+- Phase 6 deliverables: all 7 flipped `[ ]` → `[x]`
+- Phase 6.6 Success Criteria: added status note confirming all gates pass
+
+---
 
 ## Phase 6 Item K (P3): CameraMode::Tactical and ::Isometric
 

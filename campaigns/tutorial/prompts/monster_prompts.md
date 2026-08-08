@@ -87,3 +87,17 @@ Prompt: Create a clean, high-resolution, photorealistic reference image of an og
 
 ### Mummy
 Prompt: Create a clean, high-resolution, photorealistic reference image of a mummy, a wrapped undead figure with ancient bandages, a weathered and eerie silhouette, and a haunting presence. The creature should be centered, isolated, with realistic fantasy detail, a clean background, no shadows, no text, no watermark, and a crisp silhouette suitable for 3D modeling.
+
+### Frog Man
+
+- DnD-style fantasy aesthetic
+- realistic anatomy, texture, and material detail
+- strong silhouette for game-ready 3D reference
+- centered composition
+- clean, uncluttered background
+- no text, logos, or watermarks
+- high resolution and crisp detail
+- suitable for concept art and 3D reference
+
+
+Prompt: Create a clean, high-resolution, photorealistic reference image of a Blue Slaad, a frog like amphibian with dull blue body coloration with dark blue markings, pale blue underbelly, black claws. mouth open, sharp white and yellow teeth showing, and a red tongue. The creature should be centered, isolated, with realistic fantasy detail, a clean background, no shadows, no text, no watermark, and a crisp silhouette suitable for 3D modeling.

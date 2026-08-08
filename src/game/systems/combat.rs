@@ -1277,6 +1277,7 @@ impl Plugin for CombatPlugin {
             .add_systems(
                 Update,
                 sync_party_hp_during_combat
+                    .run_if(crate::game::run_conditions::in_combat_mode)
                     .after(handle_attack_action)
                     .after(handle_ranged_attack_action)
                     .after(handle_cast_spell_action)
@@ -1287,7 +1288,10 @@ impl Plugin for CombatPlugin {
             // Sync back to party when combat ends
             .add_systems(Update, sync_combat_to_party_on_exit)
             // Player Action Systems
-            .add_systems(Update, combat_input_system)
+            .add_systems(
+                Update,
+                combat_input_system.run_if(crate::game::run_conditions::in_combat_mode),
+            )
             .add_systems(Update, update_action_highlight.after(combat_input_system))
             .add_systems(Update, enter_target_selection)
             .add_systems(
@@ -1347,6 +1351,7 @@ impl Plugin for CombatPlugin {
             .add_systems(
                 Update,
                 collect_combat_feedback_log_lines
+                    .run_if(crate::game::run_conditions::in_combat_mode)
                     .after(handle_attack_action)
                     .after(handle_ranged_attack_action)
                     .after(handle_cast_spell_action)
@@ -1356,6 +1361,7 @@ impl Plugin for CombatPlugin {
             .add_systems(
                 Update,
                 mirror_combat_feedback_to_game_log
+                    .run_if(crate::game::run_conditions::in_combat_mode)
                     .after(collect_combat_feedback_log_lines)
                     .after(handle_attack_action)
                     .after(handle_ranged_attack_action)
@@ -1365,7 +1371,9 @@ impl Plugin for CombatPlugin {
             )
             .add_systems(
                 Update,
-                update_combat_log_typewriter.after(collect_combat_feedback_log_lines),
+                update_combat_log_typewriter
+                    .run_if(crate::game::run_conditions::in_combat_mode)
+                    .after(collect_combat_feedback_log_lines),
             )
             .add_systems(
                 Update,
@@ -1378,24 +1386,49 @@ impl Plugin for CombatPlugin {
             .add_systems(Update, reset_combat_log_on_exit)
             .add_systems(Update, reset_combat_log_colors_on_exit)
             // Monster HP hover bars
-            .add_systems(Update, spawn_monster_hp_hover_bars.after(setup_combat_ui))
             .add_systems(
                 Update,
-                update_monster_hp_hover_bars.after(spawn_monster_hp_hover_bars),
+                spawn_monster_hp_hover_bars
+                    .run_if(crate::game::run_conditions::in_combat_mode)
+                    .after(setup_combat_ui),
+            )
+            .add_systems(
+                Update,
+                update_monster_hp_hover_bars
+                    .run_if(crate::game::run_conditions::in_combat_mode)
+                    .after(spawn_monster_hp_hover_bars),
             )
             .add_systems(Update, cleanup_monster_hp_hover_bars)
             // Combat resolution & rewards
-            .add_systems(Update, check_combat_resolution)
+            .add_systems(
+                Update,
+                check_combat_resolution.run_if(crate::game::run_conditions::in_combat_mode),
+            )
             .add_systems(Update, handle_combat_victory)
             .add_systems(Update, handle_combat_defeat)
             // Combat UI systems
             // Must run after handle_combat_started so combat_event_type is
             // already set when we decide which buttons to spawn.
-            .add_systems(Update, setup_combat_ui.after(handle_combat_started))
+            .add_systems(
+                Update,
+                setup_combat_ui
+                    .run_if(crate::game::run_conditions::in_combat_mode)
+                    .after(handle_combat_started),
+            )
             // Spawn the turn indicator after UI is created
-            .add_systems(Update, spawn_turn_indicator.after(setup_combat_ui))
+            .add_systems(
+                Update,
+                spawn_turn_indicator
+                    .run_if(crate::game::run_conditions::in_combat_mode)
+                    .after(setup_combat_ui),
+            )
             // Update/move the indicator when the current actor changes
-            .add_systems(Update, update_turn_indicator.after(spawn_turn_indicator))
+            .add_systems(
+                Update,
+                update_turn_indicator
+                    .run_if(crate::game::run_conditions::in_combat_mode)
+                    .after(spawn_turn_indicator),
+            )
             // Hide indicator during animations and ensure visibility is updated before the main UI update
             .add_systems(
                 Update,
@@ -1448,7 +1481,10 @@ impl Plugin for CombatPlugin {
                 handle_item_button_interaction.after(update_item_selection_panel),
             )
             .add_systems(Update, cleanup_item_panel_on_combat_exit)
-            .add_systems(Update, update_combat_ui)
+            .add_systems(
+                Update,
+                update_combat_ui.run_if(crate::game::run_conditions::in_combat_mode),
+            )
             .add_systems(
                 Update,
                 update_ranged_button_color
@@ -1466,6 +1502,7 @@ impl Plugin for CombatPlugin {
             .add_systems(
                 Update,
                 tick_combat_time
+                    .run_if(crate::game::run_conditions::in_combat_mode)
                     .after(handle_attack_action)
                     .after(handle_ranged_attack_action)
                     .after(handle_cast_spell_action)
@@ -1781,11 +1818,6 @@ pub(crate) fn sync_party_hp_during_combat(
     mut global_state: ResMut<GlobalState>,
     combat_res: Res<CombatResource>,
 ) {
-    // Only run while in combat.
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     for (participant_idx, participant) in combat_res.state.participants.iter().enumerate() {
         if let Combatant::Player(pc) = participant {
             // Resolve which party slot this participant maps to.
@@ -2082,15 +2114,9 @@ type MonsterHpHoverBarQueries<'w, 's> = ParamSet<
 /// This system runs every frame but only acts when combat UI needs to be created.
 fn setup_combat_ui(
     mut commands: Commands,
-    global_state: Res<GlobalState>,
     combat_res: Res<CombatResource>,
     existing_ui: Query<Entity, With<crate::game::components::combat::CombatHudRoot>>,
 ) {
-    // Only setup UI when in combat mode
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     // If UI already exists, don't recreate it
     if !existing_ui.is_empty() {
         return;
@@ -4087,7 +4113,6 @@ fn cleanup_item_panel_on_combat_exit(
 #[allow(clippy::too_many_arguments)]
 fn update_combat_ui(
     combat_res: Res<CombatResource>,
-    global_state: Res<GlobalState>,
     mut enemy_hp_bars: EnemyHpBarQuery,
     mut enemy_hp_texts: EnemyHpTextQuery,
     mut enemy_condition_texts: EnemyConditionTextQuery,
@@ -4098,11 +4123,6 @@ fn update_combat_ui(
     mut boss_hp_fills: BossHpBarQuery,
     mut boss_hp_texts: BossHpBarTextQuery,
 ) {
-    // Only update when in combat mode
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     // Update enemy HP bars
     for (hp_bar, mut node, mut bg_color) in enemy_hp_bars.iter_mut() {
         if let Some(Combatant::Monster(monster)) =
@@ -4556,7 +4576,6 @@ fn combat_input_system(
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
     mut interactions: ActionButtonQuery,
-    global_state: Res<GlobalState>,
     combat_res: Res<CombatResource>,
     mut target_sel: ResMut<TargetSelection>,
     mut defend_writer: Option<MessageWriter<DefendAction>>,
@@ -4570,10 +4589,6 @@ fn combat_input_system(
     mut spell_state: SpellCombatState<'_>,
     mut item_state: ItemCombatState<'_>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     // During an ambush round the party is surprised and cannot act.
     // `handle_combat_started` already sets `CombatTurnState::EnemyTurn` for
     // ambush round 1, so this guard provides defence-in-depth: even if a
@@ -7217,11 +7232,6 @@ fn execute_monster_turn(
 /// This system is a no-op outside of combat, ensuring that the clock is never
 /// advanced by stale combat data.
 fn tick_combat_time(mut combat_res: ResMut<CombatResource>, mut global_state: ResMut<GlobalState>) {
-    // Only run while the global state is in combat mode.
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     let current_round = combat_res.state.round;
     let current_turn = combat_res.state.current_turn;
 
@@ -7239,13 +7249,7 @@ fn check_combat_resolution(
     mut victory_writer: Option<MessageWriter<CombatVictory>>,
     mut defeat_writer: Option<MessageWriter<CombatDefeat>>,
     mut combat_res: ResMut<CombatResource>,
-    global_state: Res<GlobalState>,
 ) {
-    // Only consider when in combat
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     if combat_res.resolution_handled {
         return;
     }
@@ -8008,15 +8012,10 @@ fn format_combat_log_line(
 /// Consume combat feedback events and append them to the persistent combat log.
 fn collect_combat_feedback_log_lines(
     mut reader: MessageReader<CombatFeedbackEvent>,
-    global_state: Res<GlobalState>,
     combat_res: Res<CombatResource>,
     mut combat_log_state: ResMut<CombatLogState>,
     mut color_state: ResMut<CombatLogColorState>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     let mut rng = rand::rng();
     for event in reader.read() {
         let line = format_combat_log_line(&combat_res, event, &mut color_state, &mut rng);
@@ -8031,15 +8030,10 @@ fn collect_combat_feedback_log_lines(
 /// combat events after the combat bubble is cleaned up.
 fn mirror_combat_feedback_to_game_log(
     mut reader: MessageReader<CombatFeedbackEvent>,
-    global_state: Res<GlobalState>,
     combat_res: Res<CombatResource>,
     mut color_state: ResMut<CombatLogColorState>,
     mut game_log_writer: Option<MessageWriter<crate::game::systems::ui::GameLogEvent>>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     let Some(ref mut game_log_writer) = game_log_writer else {
         for _ in reader.read() {}
         return;
@@ -8057,15 +8051,7 @@ fn mirror_combat_feedback_to_game_log(
 }
 
 /// Advance typewriter reveal for the newest combat log line.
-fn update_combat_log_typewriter(
-    time: Res<Time>,
-    global_state: Res<GlobalState>,
-    mut combat_log_state: ResMut<CombatLogState>,
-) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
+fn update_combat_log_typewriter(time: Res<Time>, mut combat_log_state: ResMut<CombatLogState>) {
     let Some(latest) = combat_log_state.lines.last() else {
         return;
     };
@@ -8613,11 +8599,6 @@ fn spawn_monster_hp_hover_bars(
     combat_res: Res<CombatResource>,
     existing_bars: Query<&MonsterHpHoverBar>,
 ) {
-    // Only run in combat
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     // Respect runtime graphics setting.
     if !global_state.0.config.graphics.show_combat_monster_hp_bars {
         return;
@@ -8749,10 +8730,6 @@ fn update_monster_hp_hover_bars(
     mut hp_text_query: MonsterHpHoverTextQuery,
     mut hover_bar_queries: MonsterHpHoverBarQueries,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Combat(_)) {
-        return;
-    }
-
     let bars_enabled = global_state.0.config.graphics.show_combat_monster_hp_bars;
 
     // Keep the bars world-projected above the active encounter marker while combat is active.

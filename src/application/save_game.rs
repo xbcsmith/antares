@@ -322,6 +322,11 @@ pub struct SaveGameManager {
 }
 
 impl SaveGameManager {
+    /// Returns the directory where save files are stored.
+    pub fn saves_dir(&self) -> &Path {
+        &self.saves_dir
+    }
+
     /// Creates a new save game manager
     ///
     /// # Arguments
@@ -476,7 +481,9 @@ impl SaveGameManager {
             }
         }
 
-        saves.sort();
+        // Newest-first: filenames are save_YYYYMMDD_HHMMSS so reverse-alphabetical
+        // order puts the most recent save at index 0, which is the default selection.
+        saves.sort_by(|a, b| b.cmp(a));
         Ok(saves)
     }
 

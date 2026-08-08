@@ -102,7 +102,7 @@ impl Plugin for DialoguePlugin {
             .add_systems(
                 Update,
                 (
-                    dialogue_input_system,
+                    dialogue_input_system.run_if(crate::game::run_conditions::in_dialogue_mode),
                     handle_start_dialogue,
                     handle_simple_dialogue,
                     handle_select_choice.before(crate::game::systems::ui::consume_game_log_events),
@@ -110,7 +110,8 @@ impl Plugin for DialoguePlugin {
                     crate::game::systems::dialogue_visuals::update_dialogue_text,
                     crate::game::systems::dialogue_choices::spawn_choice_ui,
                     crate::game::systems::dialogue_choices::update_choice_visuals,
-                    crate::game::systems::dialogue_choices::choice_input_system,
+                    crate::game::systems::dialogue_choices::choice_input_system
+                        .run_if(crate::game::run_conditions::in_dialogue_mode),
                 ),
             )
             .add_systems(
@@ -138,13 +139,8 @@ fn dialogue_input_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
     dialogue_panel_query: Query<(&Interaction, Ref<Interaction>), With<DialoguePanelRoot>>,
-    global_state: Res<GlobalState>,
     mut advance_writer: MessageWriter<AdvanceDialogue>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::Dialogue(_)) {
-        return;
-    }
-
     let keyboard_advance =
         keyboard.just_pressed(KeyCode::Space) || keyboard.just_pressed(KeyCode::KeyE);
     let mouse_just_pressed = mouse_input::mouse_just_pressed(mouse_buttons.as_deref());
@@ -1014,8 +1010,8 @@ fn execute_recruit_to_inn(
 /// | `TakeItems { items }` | Removes items from the first party member (best-effort) |
 /// | `GiveGold { amount }` | Adds gold to shared party pool (saturating) |
 /// | `TakeGold { amount }` | Subtracts gold from shared party pool (saturating) |
-/// | `SetFlag { flag_name, value }` | Logs a warning — not yet persisted |
-/// | `ChangeReputation { faction, change }` | Logs a warning — not yet implemented |
+/// | `SetFlag { flag_name, value }` | Persists the flag via `game_state.global_flags.set`; logs the change at `info!` level |
+/// | `ChangeReputation { faction, change }` | Applies the delta via `game_state.reputation.change`; logs the change at `info!` level |
 /// | `GrantExperience { amount }` | Adds XP to the first party member |
 /// | `RecruitToParty { character_id }` | Directly recruits the character to the active party |
 /// | `RecruitToInn { character_id, innkeeper_id }` | Routes the character to the specified inn |

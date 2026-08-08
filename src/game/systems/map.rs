@@ -13,7 +13,7 @@ use crate::game::resources::sprite_assets::SpriteAssets;
 use crate::game::resources::GlobalState;
 use crate::game::resources::TerrainMaterialCache;
 use crate::game::resources::WindConfig;
-use crate::game::systems::actor::spawn_actor_sprite;
+use crate::game::systems::actor::{spawn_actor_sprite, ActorSpawnParams};
 use crate::game::systems::creature_meshes::{
     create_material_from_color, create_material_with_texture, material_definition_to_bevy,
     mesh_definition_to_bevy,
@@ -724,7 +724,7 @@ fn spawn_map_system(
         Some(grass_materials),
         sprite_assets,
         asset_server,
-        global_state,
+        &global_state,
         content,
         vegetation_quality.grass_quality_settings(),
         *vegetation_quality,
@@ -920,7 +920,7 @@ fn spawn_map_markers(
     grass_materials: Option<ResMut<Assets<GrassMaterial>>>,
     sprite_assets: ResMut<SpriteAssets>,
     asset_server: Res<AssetServer>,
-    global_state: Res<GlobalState>,
+    mut global_state: ResMut<GlobalState>,
     content: Res<crate::application::resources::GameContent>,
     vegetation_quality: Option<Res<crate::game::resources::VegetationQualitySettings>>,
     terrain_cache: Option<Res<TerrainMaterialCache>>,
@@ -931,6 +931,13 @@ fn spawn_map_markers(
     render_mode: Option<Res<super::grass_instancing::GrassRenderMode>>,
 ) {
     let current = global_state.0.world.current_map;
+
+    // A game load may land on the same map that was already active. Clear the
+    // cached map id so we always do a full despawn+respawn in that case.
+    if global_state.0.needs_map_refresh {
+        global_state.0.needs_map_refresh = false;
+        *last_map = None;
+    }
 
     // If map hasn't changed, nothing to do
     if Some(current) == *last_map {
@@ -1001,7 +1008,7 @@ fn spawn_map_markers(
             grass_materials,
             sprite_assets,
             asset_server,
-            global_state,
+            &global_state,
             content,
             vegetation_quality
                 .as_deref()
@@ -1620,7 +1627,7 @@ fn spawn_map(
     mut grass_materials: Option<ResMut<Assets<GrassMaterial>>>,
     mut sprite_assets: ResMut<SpriteAssets>,
     asset_server: Res<AssetServer>,
-    global_state: Res<crate::game::resources::GlobalState>,
+    global_state: &crate::game::resources::GlobalState,
     content: Res<crate::application::resources::GameContent>,
     quality_settings: crate::game::resources::GrassQualitySettings,
     vegetation_quality: crate::game::resources::VegetationQualitySettings,
@@ -2304,9 +2311,11 @@ fn spawn_map(
                 &asset_server,
                 &mut materials,
                 &mut meshes,
-                &sprite_ref,
-                Vec3::new(x + TILE_CENTER_OFFSET, 0.9, y + TILE_CENTER_OFFSET),
-                ActorType::Npc,
+                &ActorSpawnParams {
+                    sprite_ref: &sprite_ref,
+                    position: Vec3::new(x + TILE_CENTER_OFFSET, 0.9, y + TILE_CENTER_OFFSET),
+                    actor_type: ActorType::Npc,
+                },
             );
 
             // Apply facing rotation to the sprite fallback entity and
@@ -2581,9 +2590,15 @@ fn spawn_map(
                         &asset_server,
                         &mut materials,
                         &mut meshes,
-                        &sprite_ref,
-                        Vec3::new(x + TILE_CENTER_OFFSET, 0.9, y + TILE_CENTER_OFFSET),
-                        ActorType::Npc,
+                        &ActorSpawnParams {
+                            sprite_ref: &sprite_ref,
+                            position: Vec3::new(
+                                x + TILE_CENTER_OFFSET,
+                                0.9,
+                                y + TILE_CENTER_OFFSET,
+                            ),
+                            actor_type: ActorType::Npc,
+                        },
                     );
 
                     commands.entity(entity).insert((

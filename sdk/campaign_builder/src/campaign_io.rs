@@ -1681,15 +1681,16 @@ impl CampaignBuilderApp {
     }
 
     /// Load NPCs from campaign file
-    pub fn load_npcs(&mut self) -> Result<(), CampaignError> {
+    pub fn load_npcs(&mut self) -> Result<(), CampaignBuilderError> {
         if let Some(dir) = &self.campaign_dir {
             let npcs_path = dir.join(&self.campaign.npcs_file);
 
             if npcs_path.exists() {
-                let contents = std::fs::read_to_string(&npcs_path).map_err(CampaignError::Io)?;
+                let contents =
+                    std::fs::read_to_string(&npcs_path).map_err(CampaignBuilderError::Io)?;
 
                 let npcs: Vec<antares::domain::world::npc::NpcDefinition> =
-                    ron::from_str(&contents).map_err(CampaignError::Deserialization)?;
+                    ron::from_str(&contents).map_err(CampaignBuilderError::Deserialization)?;
 
                 let count = npcs.len();
                 self.editor_registry.npc_editor_state.npcs = npcs;
@@ -3041,17 +3042,20 @@ impl CampaignBuilderApp {
     }
 
     /// Save campaign to file
-    pub fn save_campaign(&mut self) -> Result<(), CampaignError> {
+    pub fn save_campaign(&mut self) -> Result<(), CampaignBuilderError> {
         if self.campaign_path.is_none() {
-            return Err(CampaignError::NoPath);
+            return Err(CampaignBuilderError::NoPath);
         }
 
         self.do_save_campaign()
     }
 
-    pub fn do_save_campaign(&mut self) -> Result<(), CampaignError> {
+    pub fn do_save_campaign(&mut self) -> Result<(), CampaignBuilderError> {
         // Clone path early to avoid borrow checker issues with mutable save methods
-        let path = self.campaign_path.clone().ok_or(CampaignError::NoPath)?;
+        let path = self
+            .campaign_path
+            .clone()
+            .ok_or(CampaignBuilderError::NoPath)?;
 
         // CRITICAL FIX: Save all data files BEFORE saving campaign metadata
         // This ensures all content is persisted when user clicks "Save Campaign"
@@ -3434,7 +3438,7 @@ impl CampaignBuilderApp {
         }
     }
 
-    pub fn load_campaign_file(&mut self, path: &PathBuf) -> Result<(), CampaignError> {
+    pub fn load_campaign_file(&mut self, path: &PathBuf) -> Result<(), CampaignBuilderError> {
         let contents = fs::read_to_string(path)?;
         self.campaign = ron::from_str(&contents)?;
         Ok(())
@@ -3542,7 +3546,7 @@ impl CampaignBuilderApp {
 
 impl CampaignBuilderApp {
     /// Load quests from file
-    pub fn load_quests(&mut self) -> Result<(), CampaignError> {
+    pub fn load_quests(&mut self) -> Result<(), CampaignBuilderError> {
         if let Some(dir) = &self.campaign_dir {
             let quests_path = dir.join(&self.campaign.quests_file);
             if quests_path.exists() {
@@ -3562,7 +3566,7 @@ impl CampaignBuilderApp {
                                         quests_path, e
                                     ),
                                 );
-                                return Err(CampaignError::Deserialization(e));
+                                return Err(CampaignBuilderError::Deserialization(e));
                             }
                         }
                     }
@@ -3571,7 +3575,7 @@ impl CampaignBuilderApp {
                             category::FILE_IO,
                             &format!("Failed to read quests file {:?}: {}", quests_path, e),
                         );
-                        return Err(CampaignError::Io(e));
+                        return Err(CampaignBuilderError::Io(e));
                     }
                 }
             } else {
@@ -3590,12 +3594,12 @@ impl CampaignBuilderApp {
     }
 
     /// Save quests to file
-    pub fn save_quests(&self) -> Result<(), CampaignError> {
+    pub fn save_quests(&self) -> Result<(), CampaignBuilderError> {
         if let Some(dir) = &self.campaign_dir {
             let quests_path = dir.join(&self.campaign.quests_file);
             // Create quests directory if it doesn't exist
             if let Some(parent) = quests_path.parent() {
-                fs::create_dir_all(parent).map_err(CampaignError::Io)?;
+                fs::create_dir_all(parent).map_err(CampaignBuilderError::Io)?;
             }
 
             // Sort by ID before serializing for stable file order.
@@ -3737,7 +3741,7 @@ impl CampaignBuilderApp {
     }
 
     /// Load dialogues from campaign file
-    pub fn load_dialogues(&mut self) -> Result<(), CampaignError> {
+    pub fn load_dialogues(&mut self) -> Result<(), CampaignBuilderError> {
         if let Some(dir) = &self.campaign_dir {
             let dialogue_path = dir.join(&self.campaign.dialogue_file);
             if dialogue_path.exists() {
@@ -3759,7 +3763,7 @@ impl CampaignBuilderApp {
                                     dialogue_path, e
                                 ),
                             );
-                            return Err(CampaignError::Deserialization(e));
+                            return Err(CampaignBuilderError::Deserialization(e));
                         }
                     },
                     Err(e) => {
@@ -3767,7 +3771,7 @@ impl CampaignBuilderApp {
                             category::FILE_IO,
                             &format!("Failed to read dialogues file {:?}: {}", dialogue_path, e),
                         );
-                        return Err(CampaignError::Io(e));
+                        return Err(CampaignBuilderError::Io(e));
                     }
                 }
             }

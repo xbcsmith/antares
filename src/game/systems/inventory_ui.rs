@@ -2771,7 +2771,9 @@ fn handle_use_item_action_exploration(
                 if slot_charges > 1 {
                     character.inventory.items[slot_index].charges -= 1;
                 } else {
-                    let _ = character.inventory.remove_item(slot_index);
+                    if character.inventory.remove_item(slot_index).is_none() {
+                        warn!("remove_item: slot {} not found in inventory", slot_index);
+                    }
                 }
             }
 
@@ -2882,7 +2884,9 @@ fn handle_use_item_action_exploration(
                 character.inventory.items[slot_index].charges -= 1;
             } else {
                 // charges == 1: remove the slot entirely.
-                let _ = character.inventory.remove_item(slot_index);
+                if character.inventory.remove_item(slot_index).is_none() {
+                    warn!("remove_item: slot {} not found in inventory", slot_index);
+                }
             }
         }
 

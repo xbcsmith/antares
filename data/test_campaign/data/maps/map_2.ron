@@ -8125,9 +8125,9 @@
             y: 10,
         ): Teleport(
             name: "Arcturus Cave Portal",
-            description: "A portal that teleports the party to Arcturus\'s Cave (map 2) at (18,17).",
+            description: "A portal that teleports the party to Arcturus\'s Cave (map 4) at (16,17).",
             destination: (
-                x: 18,
+                x: 16,
                 y: 17,
             ),
             map_id: 4,

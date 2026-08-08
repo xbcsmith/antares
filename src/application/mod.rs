@@ -1158,6 +1158,14 @@ pub struct GameState {
     /// Uses `#[serde(default)]` so saves without this field load cleanly.
     #[serde(default)]
     pub global_flags: GlobalFlags,
+
+    /// Signals the map renderer to force a full re-draw after a game load,
+    /// even when `current_map` hasn't changed between sessions.
+    ///
+    /// Set to `true` by `load_game_operation` and cleared immediately by
+    /// `spawn_map_markers`. Never persisted — uses `#[serde(skip, default)]`.
+    #[serde(skip, default)]
+    pub needs_map_refresh: bool,
 }
 
 /// Errors returned by `GameState::initialize_roster`.
@@ -1290,6 +1298,7 @@ impl GameState {
             rng_seed: generate_rng_seed(),
             reputation: ReputationStore::new(),
             global_flags: GlobalFlags::new(),
+            needs_map_refresh: false,
         }
     }
 
@@ -1396,6 +1405,7 @@ impl GameState {
             rng_seed: generate_rng_seed(),
             reputation: ReputationStore::new(),
             global_flags: GlobalFlags::new(),
+            needs_map_refresh: false,
         };
 
         // Initialize roster from content database (premade characters)

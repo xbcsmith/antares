@@ -110,7 +110,8 @@ impl Plugin for CharacterSheetPlugin {
         app.add_systems(
             Update,
             (
-                character_sheet_input_system,
+                character_sheet_input_system
+                    .run_if(crate::game::run_conditions::in_character_sheet_mode),
                 character_sheet_ui_system,
                 character_sheet_cleanup_system,
             )
@@ -133,10 +134,6 @@ pub fn character_sheet_input_system(
     input_config: Option<Res<InputConfigResource>>,
     mut global_state: ResMut<GlobalState>,
 ) {
-    if !matches!(global_state.0.mode, GameMode::CharacterSheet(_)) {
-        return;
-    }
-
     let Some(ref kb) = keyboard else {
         return;
     };

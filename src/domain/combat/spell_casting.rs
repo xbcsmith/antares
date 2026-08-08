@@ -509,7 +509,8 @@ pub fn execute_spell_cast_with_spell<R: Rng>(
                     spell_dispatch::apply_buff_spell(*buff_field, *duration, active_spells);
                 }
                 SpellEffectType::Utility { utility_type } => {
-                    let _ = spell_dispatch::apply_utility_spell(*utility_type);
+                    let result = spell_dispatch::apply_utility_spell(*utility_type);
+                    tracing::debug!(?result, "utility spell applied");
                 }
                 _ => {}
             }

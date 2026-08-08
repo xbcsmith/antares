@@ -722,7 +722,7 @@ pub enum ValidationFilter {
 
 /// File I/O errors
 #[derive(Debug, Error)]
-pub enum CampaignError {
+pub enum CampaignBuilderError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -1630,13 +1630,16 @@ impl eframe::App for CampaignBuilderApp {
                     status_message: &mut self.ui_state.status_message,
                     file_load_merge_mode: &mut self.ui_state.file_load_merge_mode,
                 };
+                let chars_data = crate::characters_editor::CharactersEditorData {
+                    races: &self.editor_registry.races_editor_state.races,
+                    classes: &self.editor_registry.classes_editor_state.classes,
+                    items: &self.campaign_data.items,
+                    spells: &self.campaign_data.spells,
+                    creature_manager: char_creature_manager.as_ref(),
+                };
                 self.editor_registry.characters_editor_state.show(
                     ui,
-                    &self.editor_registry.races_editor_state.races,
-                    &self.editor_registry.classes_editor_state.classes,
-                    &self.campaign_data.items,
-                    &self.campaign_data.spells,
-                    char_creature_manager.as_ref(),
+                    &chars_data,
                     &mut chars_ctx,
                 )
             }

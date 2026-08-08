@@ -464,7 +464,7 @@ impl CampaignMetadataEditorState {
 
     /// Save the current authoritative metadata to the given path using RON.
     ///
-    /// Returns `crate::CampaignError` on error.
+    /// Returns `crate::CampaignBuilderError` on error.
     ///
     /// # Examples
     ///
@@ -476,7 +476,7 @@ impl CampaignMetadataEditorState {
     /// let path = tmpdir.path().join("campaign_save.ron");
     /// let _ = state.save_to_file(path.as_path());
     /// ```
-    pub fn save_to_file(&self, path: &Path) -> Result<(), crate::CampaignError> {
+    pub fn save_to_file(&self, path: &Path) -> Result<(), crate::CampaignBuilderError> {
         let s = ron::ser::to_string_pretty(&self.metadata, ron::ser::PrettyConfig::default())?;
         fs::write(path, s)?;
         Ok(())
@@ -495,7 +495,7 @@ impl CampaignMetadataEditorState {
     /// // If a valid RON file exists at `path`, the following loads the metadata.
     /// let _ = state.load_from_file(path.as_path());
     /// ```
-    pub fn load_from_file(&mut self, path: &Path) -> Result<(), crate::CampaignError> {
+    pub fn load_from_file(&mut self, path: &Path) -> Result<(), crate::CampaignBuilderError> {
         let contents = fs::read_to_string(path)?;
         let parsed: crate::CampaignMetadata = ron::from_str(&contents)?;
         self.metadata = parsed;

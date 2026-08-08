@@ -1298,44 +1298,59 @@ fn clump_count_for_blade_count(blade_count: u32) -> u32 {
 
 // ==================== Grass Spawning ====================
 
-#[allow(clippy::too_many_arguments)]
+/// Non-resource arguments for a single grass clump spawn.
+///
+/// Bundles the per-clump appearance and placement fields so that
+/// [`spawn_grass_clump`] stays under the `clippy::too_many_arguments`
+/// threshold while keeping its five Bevy resource handles as individual
+/// parameters (they cannot be captured into a struct without complex
+/// Bevy world-lifetime annotations).
+struct GrassClumpArgs<'a> {
+    clump_center: Vec2,
+    blade_height: f32,
+    blade_config: &'a BladeConfig,
+    color_scheme: &'a GrassColorScheme,
+    material_key: GrassMaterialKey,
+    quality: GrassMeshQuality,
+    card_count: u32,
+    lod_index: u32,
+    parent_entity: Entity,
+    render_mode: GrassRenderMode,
+}
+
 fn spawn_grass_clump(
     commands: &mut Commands,
     grass_materials: &mut ResMut<Assets<GrassMaterial>>,
     meshes: &mut ResMut<Assets<Mesh>>,
     asset_server: &Res<AssetServer>,
     grass_cache: &mut GrassAssetCache,
-    clump_center: Vec2,
-    blade_height: f32,
-    blade_config: &BladeConfig,
-    color_scheme: &GrassColorScheme,
-    material_key: GrassMaterialKey,
-    quality: GrassMeshQuality,
-    card_count: u32,
-    lod_index: u32,
+    args: &GrassClumpArgs<'_>,
     rng: &mut StdRng,
-    parent_entity: Entity,
-    render_mode: GrassRenderMode,
 ) {
     let height_variation = rng.random_range(MIN_HEIGHT_VARIATION..=MAX_HEIGHT_VARIATION);
     let width_variation = rng.random_range(MIN_WIDTH_VARIATION..=MAX_WIDTH_VARIATION);
 
-    let mesh_key = grass_mesh_key(quality, blade_config, card_count);
-    let clump_mesh =
-        get_or_create_grass_mesh(meshes, grass_cache, mesh_key, blade_height, blade_config);
+    let mesh_key = grass_mesh_key(args.quality, args.blade_config, args.card_count);
+    let clump_mesh = get_or_create_grass_mesh(
+        meshes,
+        grass_cache,
+        mesh_key,
+        args.blade_height,
+        args.blade_config,
+    );
     let clump_material = get_or_create_grass_material(
         grass_materials,
         asset_server,
         grass_cache,
-        material_key,
-        color_scheme,
+        args.material_key,
+        args.color_scheme,
     );
 
     let rotation_y = rng.random_range(0.0..std::f32::consts::TAU);
     let lean_angle = rng.random_range(0.0..std::f32::consts::TAU);
     let lean_dir = Vec3::new(lean_angle.cos(), 0.0, lean_angle.sin());
     let tilt_axis = Vec3::new(-lean_dir.z, 0.0, lean_dir.x).normalize_or_zero();
-    let tilt_amount = rng.random_range(0.0..=blade_config.tilt);
+    let tilt_amount = rng.random_range(0.0..=args.blade_config.tilt);
     let tilt_rotation = if tilt_axis == Vec3::ZERO {
         Quat::IDENTITY
     } else {
@@ -1349,9 +1364,9 @@ fn spawn_grass_clump(
     // In PerEntity mode the ExtendedMaterial path renders each clump
     // directly with Mesh3d + MeshMaterial3d.
     let clump_transform = Transform::from_xyz(
-        clump_center.x,
+        args.clump_center.x,
         GRASS_BLADE_Y_OFFSET + GRASS_GROUND_CLEARANCE,
-        clump_center.y,
+        args.clump_center.y,
     )
     .with_rotation(final_rotation)
     .with_scale(Vec3::new(
@@ -1360,7 +1375,7 @@ fn spawn_grass_clump(
         width_variation,
     ));
 
-    let clump = if render_mode == GrassRenderMode::PerEntity {
+    let clump = if args.render_mode == GrassRenderMode::PerEntity {
         commands
             .spawn((
                 Mesh3d(clump_mesh.clone()),
@@ -1372,8 +1387,12 @@ fn spawn_grass_clump(
                 // heavy shadow-map cost and dark first-person self-shadowing.
                 bevy::light::NotShadowCaster,
                 bevy::light::NotShadowReceiver,
-                GrassClump { card_count },
-                GrassBlade { lod_index },
+                GrassClump {
+                    card_count: args.card_count,
+                },
+                GrassBlade {
+                    lod_index: args.lod_index,
+                },
                 GrassBladeInstance {
                     mesh: clump_mesh.clone(),
                     material: clump_material.clone(),
@@ -1387,8 +1406,12 @@ fn spawn_grass_clump(
                 clump_transform,
                 GlobalTransform::default(),
                 Visibility::default(),
-                GrassClump { card_count },
-                GrassBlade { lod_index },
+                GrassClump {
+                    card_count: args.card_count,
+                },
+                GrassBlade {
+                    lod_index: args.lod_index,
+                },
                 GrassBladeInstance {
                     mesh: clump_mesh.clone(),
                     material: clump_material.clone(),
@@ -1397,7 +1420,7 @@ fn spawn_grass_clump(
             .id()
     };
 
-    commands.entity(parent_entity).add_child(clump);
+    commands.entity(args.parent_entity).add_child(clump);
 }
 
 /// Spawns grass clusters for a terrain tile
@@ -1460,6 +1483,13 @@ fn spawn_grass_clump(
 ///     );
 /// }
 /// ```
+// Five Bevy resource handles (commands, grass_materials, meshes, asset_server,
+// grass_cache) cannot be collapsed into a context struct without naming Bevy's
+// internal world-lifetime parameters, which would make the API significantly
+// more complex. The remaining parameters (position, map_id, visual_metadata,
+// tile_tint, quality_settings, render_mode) are all semantically distinct and
+// there is no natural sub-grouping that would reduce the count below the
+// Clippy threshold without sacrificing caller clarity.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_grass_cached(
     commands: &mut Commands,
@@ -1515,6 +1545,10 @@ pub fn spawn_grass_cached(
 /// # Returns
 ///
 /// Entity ID of the parent grass patch entity.
+// Same rationale as `spawn_grass_cached`: five Bevy resource handles plus
+// per-tile arguments cannot be cleanly bundled without Bevy world-lifetime
+// complexity. The additional `grass_exclusion_zones` slice makes this
+// function one parameter wider than `spawn_grass_cached`.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_grass_cached_with_exclusions(
     commands: &mut Commands,
@@ -1666,17 +1700,19 @@ pub fn spawn_grass_cached_with_exclusions(
             meshes,
             asset_server,
             grass_cache,
-            clump_center,
-            blade_height,
-            &blade_config,
-            &color_scheme,
-            material_key,
-            mesh_quality,
-            card_count,
-            clump_index,
+            &GrassClumpArgs {
+                clump_center,
+                blade_height,
+                blade_config: &blade_config,
+                color_scheme: &color_scheme,
+                material_key,
+                quality: mesh_quality,
+                card_count,
+                lod_index: clump_index,
+                parent_entity: parent,
+                render_mode,
+            },
             &mut rng,
-            parent,
-            render_mode,
         );
     }
 
@@ -1742,6 +1778,10 @@ pub fn spawn_grass_cached_with_exclusions(
 ///     );
 /// }
 /// ```
+// Compatibility wrapper that creates a throwaway `GrassAssetCache` so callers
+// that do not own a persistent cache can still spawn grass. The parameter
+// count mirrors `spawn_grass_cached` minus `grass_cache` but still exceeds
+// the Clippy threshold for the same Bevy-resource-handle reasons.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_grass(
     commands: &mut Commands,

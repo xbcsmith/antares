@@ -262,6 +262,12 @@ pub struct NpcEditorState {
     #[serde(skip)]
     pub creature_picker_open: bool,
 
+    /// Search string used by the creature picker popup.
+    ///
+    /// Reset to empty each time the picker opens. Never persisted to disk.
+    #[serde(skip)]
+    pub creature_picker_search: String,
+
     /// Available creature candidates (id, name) cached for autocomplete (rebuilt when campaign dir changes)
     #[serde(skip)]
     pub available_creatures: Vec<(u32, String)>,
@@ -409,6 +415,7 @@ impl Default for NpcEditorState {
             available_sprite_sheets: Vec::new(),
             sprite_picker_open: false,
             creature_picker_open: false,
+            creature_picker_search: String::new(),
             available_creatures: Vec::new(),
             portrait_textures: HashMap::new(),
             last_campaign_dir: None,
@@ -652,12 +659,7 @@ impl NpcEditorState {
                 );
             }
             NpcEditorMode::Add | NpcEditorMode::Edit => {
-                needs_save |= self.show_edit_view(
-                    ui,
-                    npc_ctx.campaign_dir,
-                    npc_ctx.npcs_file,
-                    npc_ctx.creature_manager,
-                );
+                needs_save |= self.show_edit_view(ui, npc_ctx.campaign_dir, npc_ctx.npcs_file);
             }
         }
 
@@ -999,7 +1001,6 @@ impl NpcEditorState {
         ui: &mut egui::Ui,
         campaign_dir: Option<&PathBuf>,
         npcs_file: &str,
-        creature_manager: Option<&CreatureAssetManager>,
     ) -> bool {
         let mut needs_save = false;
         let is_add = self.mode == NpcEditorMode::Add;
@@ -1141,6 +1142,7 @@ impl NpcEditorState {
                             .clicked()
                         {
                             self.creature_picker_open = true;
+                            self.creature_picker_search.clear();
                         }
                         ui.label("ℹ").on_hover_text(
                             "Links this NPC to a procedural mesh creature definition. When set, \
@@ -1150,62 +1152,119 @@ impl NpcEditorState {
                     });
                 });
 
-                // Creature picker modal
+                // Creature picker modal.
+                //
+                // Uses the pre-built `available_creatures` cache so no disk I/O happens
+                // per frame.  Only the visible rows are rendered via `show_rows`.
                 if self.creature_picker_open {
-                    if let Some(manager) = creature_manager {
-                        let creatures = manager.load_all_creatures().unwrap_or_default();
-                        let mut picked_id: Option<String> = None;
-                        let mut should_close = false;
-                        egui::Window::new("Select Creature")
-                            .id(egui::Id::new("npc_creature_picker"))
-                            .resizable(true)
-                            .show(ui.ctx(), |ui| {
+                    // Build filtered list once per frame (cheap — strings already in memory).
+                    let search_lower = self.creature_picker_search.to_lowercase();
+                    let matched: Vec<(u32, String)> = self
+                        .available_creatures
+                        .iter()
+                        .filter(|(id, name)| {
+                            search_lower.is_empty()
+                                || name.to_lowercase().contains(&search_lower)
+                                || id.to_string().contains(&search_lower)
+                        })
+                        .map(|(id, name)| (*id, name.clone()))
+                        .collect();
+
+                    // Pre-extract the current selection so the closure only needs an owned
+                    // value (avoids a split-borrow conflict with `&mut creature_picker_search`).
+                    let current_id = self.edit_buffer.creature_id.clone();
+                    let mut picked_id: Option<String> = None;
+                    let mut should_close = false;
+
+                    egui::Window::new("Select Creature")
+                        .id(egui::Id::new("npc_creature_picker"))
+                        .resizable(true)
+                        .default_size([420.0, 420.0])
+                        .show(ui.ctx(), |ui| {
+                            // ── Search bar ───────────────────────────────────────────────
+                            ui.horizontal(|ui| {
+                                ui.label("🔍");
+                                if ui
+                                    .text_edit_singleline(
+                                        &mut self.creature_picker_search,
+                                    )
+                                    .changed()
+                                {
+                                    ui.ctx().request_repaint();
+                                }
+                                if ui
+                                    .button("✕")
+                                    .on_hover_text("Clear search")
+                                    .clicked()
+                                {
+                                    self.creature_picker_search.clear();
+                                }
+                            });
+                            ui.label(format!(
+                                "{} of {} creatures",
+                                matched.len(),
+                                self.available_creatures.len()
+                            ));
+                            ui.separator();
+
+                            // ── Virtualised list ───────────────────────────────────────
+                            // Reserve space for the separator + Close button below.
+                            let list_h = (ui.available_height() - 40.0).max(100.0);
+                            let row_h = ui.spacing().interact_size.y;
+
+                            if matched.is_empty() {
+                                ui.label(if self.creature_picker_search.is_empty() {
+                                    "No creatures in campaign."
+                                } else {
+                                    "No creatures match the search."
+                                });
+                            } else {
+                                let total = matched.len();
                                 egui::ScrollArea::vertical()
                                     .id_salt("npc_creature_picker_scroll")
-                                    .max_height(300.0)
-                                    .show(ui, |ui| {
-                                        for creature in &creatures {
-                                            ui.push_id(creature.id, |ui| {
-                                                let selected = self.edit_buffer.creature_id
-                                                    == creature.id.to_string();
+                                    .max_height(list_h)
+                                    .auto_shrink([false, false])
+                                    .show_rows(ui, row_h, total, |ui, row_range| {
+                                        for i in row_range {
+                                            let (id, ref name) = matched[i];
+                                            let label = format!("{id} — {name}");
+                                            ui.push_id(id, |ui| {
                                                 if ui
                                                     .selectable_label(
-                                                        selected,
-                                                        format!(
-                                                            "{} — {}",
-                                                            creature.id, creature.name
-                                                        ),
+                                                        current_id == id.to_string(),
+                                                        &label,
                                                     )
                                                     .clicked()
                                                 {
-                                                    picked_id =
-                                                        Some(creature.id.to_string());
+                                                    picked_id = Some(id.to_string());
                                                 }
                                             });
                                         }
                                     });
-                                if ui.button("Close").clicked() {
-                                    should_close = true;
-                                }
-                            });
-                        if let Some(id) = picked_id {
-                            self.apply_selected_creature_id(id.clone());
-                            // Sync the autocomplete buffer so the text field shows the
-                            // resolved "id — name" display string immediately.
-                            let display = creatures
-                                .iter()
-                                .find(|c| c.id.to_string() == id)
-                                .map(|c| format!("{} — {}", c.id, c.name))
-                                .unwrap_or_else(|| id.clone());
-                            crate::ui_helpers::store_autocomplete_buffer(
-                                ui.ctx(),
-                                egui::Id::new("autocomplete:creature:npc_creature".to_string()),
-                                &display,
-                            );
-                        } else if should_close {
-                            self.creature_picker_open = false;
-                        }
-                    } else {
+                            }
+
+                            ui.separator();
+                            if ui.button("Close").clicked() {
+                                should_close = true;
+                            }
+                        });
+
+                    if let Some(ref id) = picked_id {
+                        // Sync the autocomplete buffer so the text field reflects
+                        // the selection immediately.
+                        let display = self
+                            .available_creatures
+                            .iter()
+                            .find(|(cid, _)| cid.to_string() == *id)
+                            .map(|(cid, n)| format!("{cid} — {n}"))
+                            .unwrap_or_else(|| id.clone());
+                        self.apply_selected_creature_id(id.clone());
+                        crate::ui_helpers::store_autocomplete_buffer(
+                            ui.ctx(),
+                            egui::Id::new("autocomplete:creature:npc_creature".to_string()),
+                            &display,
+                        );
+                    } else if should_close {
                         self.creature_picker_open = false;
                     }
                 }
@@ -4738,7 +4797,7 @@ mod tests {
         // Render the form (this will clear previous buffer and store current value)
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                state.show_edit_view(ui, None, "data/npcs.ron", None);
+                state.show_edit_view(ui, None, "data/npcs.ron");
             });
         });
 

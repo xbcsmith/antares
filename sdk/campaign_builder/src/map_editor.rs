@@ -4184,22 +4184,20 @@ impl<'a> Widget for MapPreviewWidget<'a> {
         let map_width_px = self.map.width as f32 * tile_size;
         let map_height_px = self.map.height as f32 * tile_size;
 
-        let avail = ui.clip_rect().size();
-        let width = map_width_px.max(avail.x).max(1.0);
-        let height = map_height_px.max(avail.y).max(1.0);
-
-        let (response, painter) = ui.allocate_painter(Vec2::new(width, height), Sense::click());
-
-        let grid_offset = Vec2::new(
-            ((width - map_width_px) / 2.0).max(0.0),
-            ((height - map_height_px) / 2.0).max(0.0),
+        // Allocate exactly the map size, left-aligned.  Do NOT expand to fill
+        // the clip rect and do NOT center — that causes a positive grid_offset
+        // that shifts the map right and makes click coordinates incorrect when
+        // placed inside a narrower inspector panel.
+        let (response, painter) = ui.allocate_painter(
+            Vec2::new(map_width_px.max(1.0), map_height_px.max(1.0)),
+            Sense::click(),
         );
 
         let to_screen = |x: i32, y: i32| -> Pos2 {
-            response.rect.min + grid_offset + Vec2::new(x as f32 * tile_size, y as f32 * tile_size)
+            response.rect.min + Vec2::new(x as f32 * tile_size, y as f32 * tile_size)
         };
 
-        let map_origin = response.rect.min + grid_offset;
+        let map_origin = response.rect.min;
         let map_rect = Rect::from_min_size(map_origin, Vec2::new(map_width_px, map_height_px));
         let visible_rect = painter
             .clip_rect()
@@ -4280,7 +4278,8 @@ impl<'a> Widget for MapPreviewWidget<'a> {
 
         if response.clicked() {
             if let Some(click_pos) = response.interact_pointer_pos() {
-                let local_pos = click_pos - response.rect.min - grid_offset;
+                // No grid_offset: the map starts at response.rect.min.
+                let local_pos = click_pos - response.rect.min;
                 let x = (local_pos.x / tile_size) as i32;
                 let y = (local_pos.y / tile_size) as i32;
                 let pos = Position::new(x, y);
@@ -4293,8 +4292,6 @@ impl<'a> Widget for MapPreviewWidget<'a> {
         response
     }
 }
-
-// ===== Main Maps Editor State =====
 
 // ===== Main Maps Editor State =====
 
@@ -7189,11 +7186,16 @@ impl MapsEditorState {
                                     target_map.id, target_map.name
                                 ));
 
-                                // Draw interactive preview so the user can click to pick destination tile
+                                // Draw interactive preview so the user can click to pick destination tile.
+                                // Scale the tile size to fit the available inspector width so the map is
+                                // never wider than the panel and never needs horizontal clipping.
+                                let avail_w = ui.available_width().max(1.0);
+                                let tile_size =
+                                    (avail_w / target_map.width as f32).min(18.0).max(6.0);
                                 let selected_pos_ref = &mut event_editor.teleport_selected_pos;
                                 let preview_widget =
                                     MapPreviewWidget::new(target_map, selected_pos_ref)
-                                        .tile_size(18.0);
+                                        .tile_size(tile_size);
                                 let resp = ui.add(preview_widget);
                                 if resp.clicked() {
                                     if let Some(pos) = event_editor.teleport_selected_pos {

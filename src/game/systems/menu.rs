@@ -89,6 +89,7 @@ impl Plugin for MenuPlugin {
                 apply_settings,
                 menu_cleanup,
                 sync_game_rng_seed,
+                sync_save_manager_to_campaign,
             ),
         );
     }
@@ -115,6 +116,54 @@ fn sync_game_rng_seed(
     let target_seed = global_state.0.rng_seed;
     if game_rng.seed() != target_seed {
         game_rng.reseed(target_seed);
+    }
+}
+
+/// Keeps the [`SaveGameManager`] resource pointed at the active campaign\'s
+/// `saves/` subdirectory.
+///
+/// On startup the manager is initialised with a bare `"saves"` path before any
+/// campaign is loaded. Once a campaign becomes active its `root_path` is known,
+/// so this system re-inserts the resource with `<campaign_root>/saves/` to
+/// ensure save files land next to the campaign data instead of in the engine\'s
+/// working directory.
+///
+/// The system is a no-op on frames where the path hasn\'t changed and exits
+/// in one comparison per frame during normal play.
+fn sync_save_manager_to_campaign(
+    mut global_state: ResMut<GlobalState>,
+    save_manager: Option<Res<SaveGameManager>>,
+    mut commands: Commands,
+) {
+    let Some(campaign) = global_state.0.campaign.as_ref() else {
+        return; // No campaign loaded; leave the default manager in place.
+    };
+
+    let campaign_saves_dir = campaign.root_path.join("saves");
+
+    // Skip if the manager already points to the right directory.
+    if let Some(ref sm) = save_manager {
+        if sm.saves_dir() == campaign_saves_dir {
+            return;
+        }
+    }
+
+    match SaveGameManager::new(&campaign_saves_dir) {
+        Ok(manager) => {
+            debug!("Save manager relocated to {:?}", campaign_saves_dir);
+            commands.insert_resource(manager);
+            // Clear the cached save list so populate_save_list re-queries the
+            // new directory on the next frame.
+            if let GameMode::Menu(ref mut menu_state) = global_state.0.mode {
+                menu_state.save_list.clear();
+            }
+        }
+        Err(e) => {
+            error!(
+                "Failed to create campaign saves directory {:?}: {}",
+                campaign_saves_dir, e
+            );
+        }
     }
 }
 
@@ -420,6 +469,29 @@ fn spawn_main_menu(
                                     });
                             });
                     }
+
+                    // Status message (e.g. "Saved: save_20260717_134557")
+                    if let Some(ref msg) = menu_state.status_message {
+                        panel
+                            .spawn(Node {
+                                width: Val::Percent(90.0),
+                                height: Val::Auto,
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                margin: UiRect::top(Val::Px(8.0)),
+                                ..default()
+                            })
+                            .with_children(|wrapper| {
+                                wrapper.spawn((
+                                    Text::new(msg.clone()),
+                                    text_style_with_font(
+                                        font.clone(),
+                                        14.0,
+                                        Color::srgb(0.4, 0.9, 0.4),
+                                    ),
+                                ));
+                            });
+                    }
                 });
         });
 
@@ -719,6 +791,31 @@ fn spawn_save_load_menu(
                                     ));
                                 });
                         });
+
+                    // Status message (save confirmation or error)
+                    if let Some(ref msg) = menu_state.status_message {
+                        let msg_color =
+                            if msg.starts_with("Load failed") || msg.starts_with("Save failed") {
+                                Color::srgb(0.9, 0.3, 0.3)
+                            } else {
+                                Color::srgb(0.4, 0.9, 0.4)
+                            };
+                        panel
+                            .spawn(Node {
+                                width: Val::Percent(90.0),
+                                height: Val::Auto,
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                margin: UiRect::top(Val::Px(8.0)),
+                                ..default()
+                            })
+                            .with_children(|wrapper| {
+                                wrapper.spawn((
+                                    Text::new(msg.clone()),
+                                    text_style_with_font(font.clone(), 14.0, msg_color),
+                                ));
+                            });
+                    }
                 });
         });
 
@@ -1298,6 +1395,29 @@ fn spawn_settings_menu(
     debug!("Spawned settings menu UI");
 }
 
+/// Parses a save filename like `save_20260717_134557` into `"2026-07-17 13:45:57"`.
+/// Returns `"Unknown"` when the filename doesn\'t match the expected pattern.
+fn parse_save_timestamp(filename: &str) -> String {
+    // Expected format: save_YYYYMMDD_HHMMSS  (5 + 8 + 1 + 6 = 20 chars minimum)
+    if filename.len() < 20 || !filename.starts_with("save_") || filename.as_bytes()[13] != b'_' {
+        return String::from("Unknown");
+    }
+    let date = &filename[5..13]; // "YYYYMMDD"
+    let time = &filename[14..20]; // "HHMMSS"
+    if !date.chars().all(|c| c.is_ascii_digit()) || !time.chars().all(|c| c.is_ascii_digit()) {
+        return String::from("Unknown");
+    }
+    format!(
+        "{}-{}-{} {}:{}:{}",
+        &date[0..4],
+        &date[4..6],
+        &date[6..8],
+        &time[0..2],
+        &time[2..4],
+        &time[4..6],
+    )
+}
+
 /// Populate the save list from the filesystem
 fn populate_save_list(
     mut global_state: ResMut<GlobalState>,
@@ -1341,7 +1461,7 @@ fn populate_save_list(
 
                         save_list.push(SaveGameInfo {
                             filename: filename.clone(),
-                            timestamp: String::from("Unknown"),
+                            timestamp: parse_save_timestamp(&filename),
                             character_names,
                             location,
                             game_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -1645,12 +1765,16 @@ fn save_game_operation(
         Ok(_) => {
             debug!("Game saved successfully: {}", filename);
             if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
+                menu_state.status_message = Some(format!("Saved: {}", filename));
                 menu_state.save_list.clear(); // Clear to force repopulation on next SaveLoad entry
                 menu_state.set_submenu(MenuType::Main);
             }
         }
         Err(e) => {
             error!("Failed to save game: {}", e);
+            if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
+                menu_state.status_message = Some(format!("Save failed: {}", e));
+            }
         }
     }
 }
@@ -1667,8 +1791,20 @@ fn load_game_operation(
         Ok(loaded_state) => {
             debug!("Game loaded successfully: {}", selected_filename);
 
+            // `campaign` is #[serde(skip)] so it is absent in the loaded state.
+            // Take it from the current state before replacing it so post-load
+            // systems (NewGame, font loading, etc.) still have access to it.
+            let campaign = global_state.0.campaign.take();
+
             // Replace game state
             global_state.0 = loaded_state;
+
+            // Re-attach the campaign reference that was skipped by serde.
+            global_state.0.campaign = campaign;
+
+            // Force the map renderer to re-draw even when current_map is the
+            // same as the map that was active before loading.
+            global_state.0.needs_map_refresh = true;
 
             // Return to exploration mode
             global_state.0.mode = GameMode::Exploration;
@@ -1687,6 +1823,10 @@ fn load_game_operation(
         }
         Err(e) => {
             error!("Failed to load game: {}", e);
+            // Keep the user on the save/load screen and surface the error.
+            if let GameMode::Menu(menu_state) = &mut global_state.0.mode {
+                menu_state.status_message = Some(format!("Load failed: {}", e));
+            }
         }
     }
 }
