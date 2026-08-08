@@ -7191,7 +7191,7 @@ impl MapsEditorState {
                                 // never wider than the panel and never needs horizontal clipping.
                                 let avail_w = ui.available_width().max(1.0);
                                 let tile_size =
-                                    (avail_w / target_map.width as f32).min(18.0).max(6.0);
+                                    (avail_w / target_map.width as f32).clamp(6.0, 18.0);
                                 let selected_pos_ref = &mut event_editor.teleport_selected_pos;
                                 let preview_widget =
                                     MapPreviewWidget::new(target_map, selected_pos_ref)

@@ -1,4 +1,140 @@
-## Bug Fix: Save files written to project root instead of campaign folder
+## Phase 2: Remove the Embedded Creature Mesh Editor
+
+### Summary
+
+Removed the interactive mesh-list / mesh-properties panels from every creature
+edit screen in the Campaign Builder SDK, along with the primitive-replacement
+dialog and all associated dead state. The read-only 3D preview panel
+(`show_preview_panel`) and creature-level properties panel
+(`show_creature_level_properties`) are fully preserved and unchanged.
+
+### Files deleted
+
+- `sdk/campaign_builder/src/creatures_editor/mesh_ui.rs` — `show_mesh_properties_panel` (327 lines)
+
+### Files modified
+
+**`sdk/campaign_builder/src/creatures_editor/mod.rs`**
+- Removed `mod mesh_ui;` declaration and `use crate::mesh_validation;` import
+- Removed constants `PRIMITIVE_SEGMENTS_MAX`, `PRIMITIVE_RINGS_MAX`,
+  `PRIMITIVE_SOFT_TRIANGLE_BUDGET`
+- Removed `PrimitiveType` enum
+- Removed 16 editing-only struct fields from `CreaturesEditorState`:
+  `show_mesh_list`, `show_mesh_editor`, `selected_mesh_index`,
+  `mesh_edit_buffer`, `mesh_transform_buffer`, `mesh_visibility`,
+  `show_primitive_dialog`, `primitive_type`, `primitive_size`,
+  `primitive_segments`, `primitive_rings`, `primitive_use_current_color`,
+  `primitive_custom_color`, `primitive_preserve_transform`,
+  `primitive_keep_name`, `uniform_scale`
+- Removed all corresponding `Default` initializers
+- In `show_edit_mode`: replaced the four-panel layout (left mesh-list,
+  right mesh-properties, central preview, primitive dialog) with just the
+  `CentralPanel` preview + `Panel::bottom` creature-properties (both kept)
+- Cleaned up 3-field reset lines from Back-to-List, Cancel,
+  `revert_edit_buffer_from_registry` (both arms), `perform_save_as_with_path`,
+  and `back_to_registry`
+- Removed 6 functions: `show_mesh_list_panel`, `validate_selected_mesh`,
+  `estimate_primitive_geometry`, `show_primitive_replacement_dialog`,
+  `apply_primitive_replacement`, `_legacy_show_mesh_list_and_editor`
+- Removed `refresh_validation_state` per-mesh validation loop (orphaned after
+  `validate_selected_mesh` removal)
+- Removed test helpers `preview_selected_mesh_for_tests`,
+  `preview_visibility_for_tests`
+- Removed tests: `test_mesh_selection_state`,
+  `test_preview_sync_reflects_color_changes_and_visibility`,
+  `test_validate_selected_mesh_reports_invalid_mesh_errors`
+- Repaired tests: `test_preview_sync_clears_dirty_and_updates_statistics`
+  (removed deleted-field refs, updated `selected_meshes` assertion 1→0),
+  `test_preview_sync_reflects_transform_changes` (removed deleted-field refs)
+
+**`sdk/campaign_builder/src/creatures_editor/preview_panel.rs`**
+- `sync_preview_renderer_from_edit_buffer`: removed `selected_mesh_index`
+  variable, `set_selected_mesh_index` call, and `mesh_visibility`-based
+  visibility logic; now always renders all meshes
+- `current_mesh_visibility`: simplified to `vec![true; mesh_count]`
+- `build_preview_statistics`: removed `visible` parameter, iterates all meshes
+  unconditionally, `selected_meshes` hardcoded to `0`
+
+**`sdk/campaign_builder/tests/creature_asset_editor_tests.rs`**
+- Fixed import: removed `PrimitiveType` from the `use` statement
+- Removed 5 tests: `test_replace_mesh_with_primitive_cube`,
+  `test_replace_mesh_with_primitive_sphere`, `test_mesh_visibility_tracking`,
+  `test_primitive_type_enum`, `test_uniform_scale_toggle`
+
+**`sdk/campaign_builder/tests/creature_preview_integration_test.rs`**
+- Removed two deleted field assignments (`mesh_visibility`, `selected_mesh_index`)
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check -p campaign_builder --all-targets --all-features` — 0 errors, 0 warnings
+- `cargo clippy -p campaign_builder --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run -p campaign_builder --all-features` — 2572/2572 passed
+
+---
+
+
+### Summary
+
+Removed the interactive "Item Meshes" tab and its entire backing implementation
+from the Campaign Builder SDK. The user's workflow authors 3D models in Blender
+and imports them via the existing Importer tab; the in-SDK mesh editor was
+unused dead weight.
+
+### Files deleted
+
+- `sdk/campaign_builder/src/item_mesh_editor.rs` — full interactive mesh
+  editor (~3 071 lines)
+- `sdk/campaign_builder/src/item_mesh_workflow.rs` — workflow state (~472
+  lines)
+- `sdk/campaign_builder/src/item_mesh_undo_redo.rs` — undo/redo history
+
+### Files modified
+
+**`sdk/campaign_builder/src/lib.rs`**
+- Removed three `pub mod` declarations (`item_mesh_editor`,
+  `item_mesh_undo_redo`, `item_mesh_workflow`)
+- Removed `EditorTab::ItemMeshes` variant and its `name()` arm
+- Removed `item_mesh_editor_state` field from `CampaignBuilderApp` and its
+  `Default` initializer
+- Removed the `EditorTab::ItemMeshes` central-panel match arm (including the
+  `ItemMeshEditorSignal::OpenInItemsEditor` signal handler)
+- Removed cross-tab navigation guard inside the `EditorTab::Items` arm that
+  drained `requested_open_item_mesh` and switched to the now-deleted tab
+- Removed `item_mesh_editor_state.load_from_campaign()` call inside the
+  `ObjImporterUiSignal::Item` handler
+- Removed `EditorTab::ItemMeshes` from the sidebar tabs array
+
+**`sdk/campaign_builder/src/campaign_io.rs`**
+- Removed the item mesh asset load block in `do_open_campaign` (the
+  `load_from_campaign` call and surrounding log messages)
+
+**`sdk/campaign_builder/src/items_editor.rs`**
+- Removed `requested_open_item_mesh: Option<ItemId>` field and its doc
+  comment from `ItemsEditorState`
+- Removed corresponding `Default` initializer
+- Removed "✏️ Open in Item Mesh Editor" button and handler from `show_form`
+- Removed `ItemId` import (now unused)
+- Removed test `test_items_editor_requested_open_item_mesh_set_on_button`
+
+**`sdk/campaign_builder/src/objects_editor.rs`**
+- Updated module doc comment that referenced the now-deleted
+  `crate::item_mesh_editor`
+
+**`sdk/campaign_builder/src/map_editor.rs`**
+- Fixed pre-existing Clippy `manual_clamp` lint (`.min().max()` →
+  `.clamp()`) that blocked the `-D warnings` quality gate
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check -p campaign_builder --all-targets --all-features` — 0 errors,
+  0 warnings
+- `cargo clippy -p campaign_builder --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run -p campaign_builder --all-features` — 2580/2580 passed
+
+---
+
 
 ### Root cause
 

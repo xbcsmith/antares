@@ -7,7 +7,6 @@ use crate::creature_id_manager::{CreatureCategory, CreatureIdManager};
 use crate::creature_undo_redo::CreatureUndoRedoManager;
 use crate::creatures_workflow::CreatureWorkflowState;
 use crate::keyboard_shortcuts::ShortcutManager;
-use crate::mesh_validation;
 use crate::preview_features::PreviewState;
 use crate::preview_features::PreviewStatistics;
 use crate::preview_renderer::PreviewRenderer;
@@ -17,9 +16,7 @@ use crate::ui_helpers::{
     StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::types::CreatureId;
-use antares::domain::visual::{
-    CreatureDefinition, CreatureReference, MeshDefinition, MeshTransform,
-};
+use antares::domain::visual::{CreatureDefinition, CreatureReference};
 use eframe::egui;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -27,7 +24,6 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
-mod mesh_ui;
 mod preview_panel;
 
 /// Errors produced by creature editor operations.
@@ -101,21 +97,6 @@ pub const CREATURE_SCALE_MIN: f64 = 0.001;
 /// Maximum allowed value for the creature-level scale slider.
 pub const CREATURE_SCALE_MAX: f64 = 5.0;
 
-/// Maximum primitive segment count allowed by the creature editor UI.
-///
-/// Higher values can produce very dense meshes that make egui preview rendering
-/// expensive enough to stall the desktop compositor on Linux.
-const PRIMITIVE_SEGMENTS_MAX: u32 = 64;
-
-/// Maximum primitive ring count allowed by the creature editor UI.
-const PRIMITIVE_RINGS_MAX: u32 = 64;
-
-/// Soft triangle budget shown as a warning before primitive generation.
-///
-/// Generation is still allowed above this threshold, but the dialog warns the
-/// user that preview rendering may become expensive.
-const PRIMITIVE_SOFT_TRIANGLE_BUDGET: usize = 8_192;
-
 /// Editor mode for creatures
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CreaturesEditorMode {
@@ -133,15 +114,6 @@ pub struct CreaturesEditorState {
     pub show_import_dialog: bool,
     pub import_export_buffer: String,
     pub show_preview: bool,
-
-    // Editor toggles
-    pub show_mesh_list: bool,
-    pub show_mesh_editor: bool,
-    pub selected_mesh_index: Option<usize>,
-
-    // Mesh editing buffer
-    pub mesh_edit_buffer: Option<MeshDefinition>,
-    pub mesh_transform_buffer: Option<MeshTransform>,
 
     // Preview state
     pub preview_dirty: bool,
@@ -196,24 +168,13 @@ pub struct CreaturesEditorState {
     /// creature asset candidates cache should be refreshed.
     pub last_campaign_dir: Option<PathBuf>,
 
-    // Asset Editor UI
-    pub show_primitive_dialog: bool,
-    pub primitive_type: PrimitiveType,
-    pub primitive_size: f32,
-    pub primitive_segments: u32,
-    pub primitive_rings: u32,
-    pub primitive_use_current_color: bool,
-    pub primitive_custom_color: [f32; 4],
-    pub primitive_preserve_transform: bool,
-    pub primitive_keep_name: bool,
-    pub mesh_visibility: Vec<bool>,
+    // Preview Controls
     pub show_grid: bool,
     pub show_wireframe: bool,
     pub show_normals: bool,
     pub show_axes: bool,
     pub background_color: [f32; 4],
     pub camera_distance: f32,
-    pub uniform_scale: bool,
     pub show_save_as_dialog: bool,
     pub save_as_path_buffer: String,
 
@@ -232,16 +193,6 @@ pub struct CreaturesEditorState {
     preview_renderer: Option<PreviewRenderer>,
     /// Last preview subsystem error shown in fallback UI.
     preview_error: Option<String>,
-}
-
-/// Primitive type for mesh generation
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PrimitiveType {
-    Cube,
-    Sphere,
-    Cylinder,
-    Pyramid,
-    Cone,
 }
 
 /// Sort order for registry list
@@ -313,11 +264,6 @@ impl Default for CreaturesEditorState {
             show_import_dialog: false,
             import_export_buffer: String::new(),
             show_preview: true,
-            show_mesh_list: true,
-            show_mesh_editor: false,
-            selected_mesh_index: None,
-            mesh_edit_buffer: None,
-            mesh_transform_buffer: None,
             preview_dirty: false,
             validation_dirty: true,
             #[cfg(test)]
@@ -334,23 +280,12 @@ impl Default for CreaturesEditorState {
             validation_info: Vec::new(),
             last_validated_mesh_index: None,
             registry_view_cache: RegistryViewCache::default(),
-            show_primitive_dialog: false,
-            primitive_type: PrimitiveType::Cube,
-            primitive_size: 1.0,
-            primitive_segments: 16,
-            primitive_rings: 16,
-            primitive_use_current_color: true,
-            primitive_custom_color: [0.5, 0.5, 0.5, 1.0],
-            primitive_preserve_transform: true,
-            primitive_keep_name: true,
-            mesh_visibility: Vec::new(),
             show_grid: preview_state.options.show_grid,
             show_wireframe: preview_state.options.show_wireframe,
             show_normals: preview_state.options.show_normals,
             show_axes: preview_state.options.show_axes,
             background_color: preview_state.options.background_color,
             camera_distance: 5.0,
-            uniform_scale: true,
             show_save_as_dialog: false,
             save_as_path_buffer: String::new(),
 
@@ -1707,9 +1642,6 @@ impl CreaturesEditorState {
             ui.horizontal_wrapped(|ui| {
                 if ui.button("⬅ Back to List").clicked() {
                     self.mode = CreaturesEditorMode::List;
-                    self.selected_mesh_index = None;
-                    self.mesh_edit_buffer = None;
-                    self.mesh_transform_buffer = None;
                     self.preview_dirty = false;
                     ui.ctx().request_repaint();
                 }
@@ -1748,9 +1680,6 @@ impl CreaturesEditorState {
 
                 if ui.button("❌ Cancel").clicked() {
                     self.mode = CreaturesEditorMode::List;
-                    self.selected_mesh_index = None;
-                    self.mesh_edit_buffer = None;
-                    self.mesh_transform_buffer = None;
                     self.preview_dirty = false;
                 }
 
@@ -1772,35 +1701,9 @@ impl CreaturesEditorState {
 
         ui.separator();
 
-        // Three-panel layout: Mesh List | 3D Preview | Mesh Properties
-        egui::Panel::left("mesh_list_panel")
-            .resizable(true)
-            .default_size(250.0)
-            .min_size(200.0)
-            .max_size(400.0)
-            .show(ui, |ui| {
-                self.show_mesh_list_panel(ui, unsaved_changes);
-            });
-
-        egui::Panel::right("mesh_properties_panel")
-            .resizable(true)
-            .default_size(350.0)
-            .min_size(300.0)
-            .max_size(500.0)
-            .show(ui, |ui| {
-                if let Some(msg) = self.show_mesh_properties_panel(ui, unsaved_changes) {
-                    result_message = Some(msg);
-                }
-            });
-
         egui::CentralPanel::default().show(ui, |ui| {
             self.show_preview_panel(ui);
         });
-
-        // Show primitive replacement dialog if active
-        if self.show_primitive_dialog {
-            self.show_primitive_replacement_dialog(ui.ctx(), unsaved_changes);
-        }
 
         // Bottom panel for creature-level properties
         egui::Panel::bottom("creature_properties_bottom")
@@ -1841,112 +1744,6 @@ impl CreaturesEditorState {
         }
 
         result_message
-    }
-
-    /// Show mesh list panel (left, 250px)
-    fn show_mesh_list_panel(&mut self, ui: &mut egui::Ui, unsaved_changes: &mut bool) {
-        ui.heading("Meshes");
-
-        // Mesh list toolbar
-        ui.horizontal(|ui| {
-            if ui.button("➕ Add Primitive").clicked() {
-                self.show_primitive_dialog = true;
-                self.primitive_type = PrimitiveType::Cube;
-                self.primitive_size = 1.0;
-                self.primitive_use_current_color = true;
-                self.primitive_preserve_transform = false;
-                self.primitive_keep_name = false;
-            }
-
-            if let Some(mesh_idx) = self.selected_mesh_index {
-                if ui.button("📋 Duplicate").clicked() && mesh_idx < self.edit_buffer.meshes.len()
-                {
-                    let mesh = self.edit_buffer.meshes[mesh_idx].clone();
-                    let transform = self.edit_buffer.mesh_transforms[mesh_idx];
-                    self.edit_buffer.meshes.push(mesh);
-                    self.edit_buffer.mesh_transforms.push(transform);
-                    self.mesh_visibility.push(true);
-                    *unsaved_changes = true;
-                    self.preview_dirty = true;
-                    self.validation_dirty = true;
-                }
-
-                if ui.button("🗑 Delete").clicked() && mesh_idx < self.edit_buffer.meshes.len() {
-                    self.edit_buffer.meshes.remove(mesh_idx);
-                    self.edit_buffer.mesh_transforms.remove(mesh_idx);
-                    if mesh_idx < self.mesh_visibility.len() {
-                        self.mesh_visibility.remove(mesh_idx);
-                    }
-                    self.selected_mesh_index = None;
-                    self.mesh_edit_buffer = None;
-                    self.mesh_transform_buffer = None;
-                    *unsaved_changes = true;
-                    self.preview_dirty = true;
-                    self.validation_dirty = true;
-                }
-            }
-        });
-
-        ui.separator();
-
-        // Ensure mesh_visibility matches mesh count
-        while self.mesh_visibility.len() < self.edit_buffer.meshes.len() {
-            self.mesh_visibility.push(true);
-        }
-        self.mesh_visibility.truncate(self.edit_buffer.meshes.len());
-
-        // Mesh list
-        egui::ScrollArea::vertical()
-            .id_salt("creatures_mesh_list_panel_scroll")
-            .show(ui, |ui| {
-                if self.edit_buffer.meshes.is_empty() {
-                    ui.label("No meshes. Click 'Add Primitive' to get started.");
-                } else {
-                    for (idx, mesh) in self.edit_buffer.meshes.iter().enumerate() {
-                        ui.push_id(idx, |ui| {
-                            ui.horizontal(|ui| {
-                                // Visibility checkbox
-                                let mut visible =
-                                    self.mesh_visibility.get(idx).copied().unwrap_or(true);
-                                if ui.checkbox(&mut visible, "").changed() {
-                                    if idx < self.mesh_visibility.len() {
-                                        self.mesh_visibility[idx] = visible;
-                                    }
-                                    self.preview_dirty = true;
-                                    self.validation_dirty = true;
-                                    ui.ctx().request_repaint();
-                                }
-
-                                // Color indicator dot
-                                let color = egui::Color32::from_rgba_premultiplied(
-                                    (mesh.color[0] * 255.0) as u8,
-                                    (mesh.color[1] * 255.0) as u8,
-                                    (mesh.color[2] * 255.0) as u8,
-                                    (mesh.color[3] * 255.0) as u8,
-                                );
-                                ui.colored_label(color, "●");
-
-                                // Mesh name and info
-                                let is_selected = self.selected_mesh_index == Some(idx);
-                                let default_name = format!("unnamed_mesh_{}", idx);
-                                let name = mesh.name.as_deref().unwrap_or(&default_name);
-                                let label = format!("{} ({} verts)", name, mesh.vertices.len());
-
-                                if ui.selectable_label(is_selected, label).clicked() && !is_selected
-                                {
-                                    self.selected_mesh_index = Some(idx);
-                                    self.mesh_edit_buffer = Some(mesh.clone());
-                                    self.mesh_transform_buffer =
-                                        Some(self.edit_buffer.mesh_transforms[idx]);
-                                    self.preview_dirty = true;
-                                    self.validation_dirty = true;
-                                    ui.ctx().request_repaint();
-                                }
-                            });
-                        });
-                    }
-                }
-            });
     }
 
     /// Show creature-level properties (bottom panel)
@@ -2198,77 +1995,6 @@ impl CreaturesEditorState {
         if let Err(error) = self.edit_buffer.validate() {
             self.validation_errors.push(error.to_string());
         }
-
-        for (mesh_idx, mesh) in self.edit_buffer.meshes.iter().enumerate() {
-            let report = mesh_validation::validate_mesh(mesh);
-            for error in report.errors {
-                self.validation_errors
-                    .push(format!("Mesh {}: {}", mesh_idx, error));
-            }
-            for warning in report.warnings {
-                self.validation_warnings
-                    .push(format!("Mesh {}: {}", mesh_idx, warning));
-            }
-            for info in report.info {
-                self.validation_info
-                    .push(format!("Mesh {}: {}", mesh_idx, info));
-            }
-        }
-    }
-
-    fn validate_selected_mesh(&mut self, mesh_idx: usize) -> String {
-        if mesh_idx >= self.edit_buffer.meshes.len() {
-            return "Cannot validate mesh: invalid selection".to_string();
-        }
-
-        let report = mesh_validation::validate_mesh(&self.edit_buffer.meshes[mesh_idx]);
-        self.last_validated_mesh_index = Some(mesh_idx);
-        self.validation_errors = report
-            .error_messages()
-            .into_iter()
-            .map(|msg| format!("Mesh {}: {}", mesh_idx, msg))
-            .collect();
-        self.validation_warnings = report
-            .warning_messages()
-            .into_iter()
-            .map(|msg| format!("Mesh {}: {}", mesh_idx, msg))
-            .collect();
-        self.validation_info = report
-            .info_messages()
-            .into_iter()
-            .map(|msg| format!("Mesh {}: {}", mesh_idx, msg))
-            .collect();
-        self.show_validation_panel = true;
-
-        if report.is_valid() {
-            format!(
-                "Mesh {} is valid ({} warning{}).",
-                mesh_idx,
-                self.validation_warnings.len(),
-                if self.validation_warnings.len() == 1 {
-                    ""
-                } else {
-                    "s"
-                }
-            )
-        } else {
-            format!(
-                "Mesh {} validation failed: {} error{}, {} warning{}.",
-                mesh_idx,
-                self.validation_errors.len(),
-                if self.validation_errors.len() == 1 {
-                    ""
-                } else {
-                    "s"
-                },
-                self.validation_warnings.len(),
-                if self.validation_warnings.len() == 1 {
-                    ""
-                } else {
-                    "s"
-                }
-            )
-        }
     }
 
     fn export_current_creature_to_ron(&self) -> Result<String, String> {
@@ -2285,9 +2011,6 @@ impl CreaturesEditorState {
                 if let Some(idx) = self.selected_creature {
                     if let Some(creature) = creatures.get(idx) {
                         self.edit_buffer = creature.clone();
-                        self.selected_mesh_index = None;
-                        self.mesh_edit_buffer = None;
-                        self.mesh_transform_buffer = None;
                         self.preview_dirty = true;
                         self.validation_dirty = true;
                         self.show_validation_panel = false;
@@ -2300,9 +2023,6 @@ impl CreaturesEditorState {
             }
             CreaturesEditorMode::Add => {
                 self.edit_buffer = Self::default_creature();
-                self.selected_mesh_index = None;
-                self.mesh_edit_buffer = None;
-                self.mesh_transform_buffer = None;
                 self.preview_dirty = true;
                 self.validation_dirty = true;
                 self.show_validation_panel = false;
@@ -2376,9 +2096,6 @@ impl CreaturesEditorState {
         self.selected_creature = Some(new_idx);
         self.mode = CreaturesEditorMode::Edit;
         self.edit_buffer = new_creature.clone();
-        self.mesh_edit_buffer = None;
-        self.mesh_transform_buffer = None;
-        self.selected_mesh_index = None;
         self.preview_dirty = true;
         self.validation_dirty = true;
         self.workflow
@@ -2475,477 +2192,6 @@ impl CreaturesEditorState {
         result_message
     }
 
-    /// Estimate the vertex and triangle counts for the primitive currently configured in the dialog.
-    fn estimate_primitive_geometry(&self) -> (usize, usize) {
-        let segments = self.primitive_segments.clamp(3, PRIMITIVE_SEGMENTS_MAX) as usize;
-        let rings = self.primitive_rings.clamp(2, PRIMITIVE_RINGS_MAX) as usize;
-
-        match self.primitive_type {
-            PrimitiveType::Cube => (24, 12),
-            PrimitiveType::Sphere => ((rings + 1) * (segments + 1), rings * segments * 2),
-            PrimitiveType::Cylinder => ((segments * 4) + 6, segments * 4),
-            PrimitiveType::Pyramid => (5, 6),
-            PrimitiveType::Cone => ((segments * 2) + 3, segments * 2),
-        }
-    }
-
-    /// Show primitive replacement dialog
-    fn show_primitive_replacement_dialog(
-        &mut self,
-        ctx: &egui::Context,
-        unsaved_changes: &mut bool,
-    ) {
-        egui::Window::new("Replace with Primitive")
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.heading("Select Primitive Type");
-
-                ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.primitive_type, PrimitiveType::Cube, "Cube");
-                    ui.selectable_value(&mut self.primitive_type, PrimitiveType::Sphere, "Sphere");
-                    ui.selectable_value(
-                        &mut self.primitive_type,
-                        PrimitiveType::Cylinder,
-                        "Cylinder",
-                    );
-                    ui.selectable_value(
-                        &mut self.primitive_type,
-                        PrimitiveType::Pyramid,
-                        "Pyramid",
-                    );
-                    ui.selectable_value(&mut self.primitive_type, PrimitiveType::Cone, "Cone");
-                });
-
-                ui.separator();
-
-                // Primitive-specific settings
-                match self.primitive_type {
-                    PrimitiveType::Cube => {
-                        ui.label("Cube Settings:");
-                        ui.add(
-                            egui::Slider::new(&mut self.primitive_size, 0.1..=5.0)
-                                .text("Size")
-                                .logarithmic(true),
-                        );
-                    }
-                    PrimitiveType::Sphere => {
-                        ui.label("Sphere Settings:");
-                        ui.add(
-                            egui::Slider::new(&mut self.primitive_size, 0.1..=5.0)
-                                .text("Radius")
-                                .logarithmic(true),
-                        );
-                        ui.add(
-                            egui::Slider::new(
-                                &mut self.primitive_segments,
-                                3..=PRIMITIVE_SEGMENTS_MAX,
-                            )
-                            .text("Segments"),
-                        );
-                        ui.add(
-                            egui::Slider::new(&mut self.primitive_rings, 2..=PRIMITIVE_RINGS_MAX)
-                                .text("Rings"),
-                        );
-                    }
-                    PrimitiveType::Cylinder => {
-                        ui.label("Cylinder Settings:");
-                        ui.add(
-                            egui::Slider::new(&mut self.primitive_size, 0.1..=5.0)
-                                .text("Radius")
-                                .logarithmic(true),
-                        );
-                        ui.add(
-                            egui::Slider::new(
-                                &mut self.primitive_segments,
-                                3..=PRIMITIVE_SEGMENTS_MAX,
-                            )
-                            .text("Segments"),
-                        );
-                    }
-                    PrimitiveType::Pyramid => {
-                        ui.label("Pyramid Settings:");
-                        ui.add(
-                            egui::Slider::new(&mut self.primitive_size, 0.1..=5.0)
-                                .text("Base Size")
-                                .logarithmic(true),
-                        );
-                    }
-                    PrimitiveType::Cone => {
-                        ui.label("Cone Settings:");
-                        ui.add(
-                            egui::Slider::new(&mut self.primitive_size, 0.1..=5.0)
-                                .text("Base Radius")
-                                .logarithmic(true),
-                        );
-                        ui.add(
-                            egui::Slider::new(
-                                &mut self.primitive_segments,
-                                3..=PRIMITIVE_SEGMENTS_MAX,
-                            )
-                            .text("Segments"),
-                        );
-                    }
-                }
-
-                ui.separator();
-
-                ui.label("Color:");
-                ui.checkbox(
-                    &mut self.primitive_use_current_color,
-                    "Use current mesh color",
-                );
-                if !self.primitive_use_current_color {
-                    ui.horizontal(|ui| {
-                        ui.label("Custom:");
-                        ui.color_edit_button_rgba_unmultiplied(&mut self.primitive_custom_color);
-                    });
-                }
-
-                ui.separator();
-
-                ui.label("Options:");
-                ui.checkbox(&mut self.primitive_preserve_transform, "Preserve transform");
-                ui.checkbox(&mut self.primitive_keep_name, "Keep mesh name");
-
-                ui.separator();
-
-                let (estimated_vertices, estimated_triangles) = self.estimate_primitive_geometry();
-                ui.label(format!(
-                    "Estimated output: {} vertices, {} triangles",
-                    estimated_vertices, estimated_triangles
-                ));
-
-                if estimated_triangles > PRIMITIVE_SOFT_TRIANGLE_BUDGET {
-                    ui.colored_label(
-                        egui::Color32::YELLOW,
-                        format!(
-                            "⚠ Dense primitive: preview rendering may be slower above {} triangles.",
-                            PRIMITIVE_SOFT_TRIANGLE_BUDGET
-                        ),
-                    );
-                }
-
-                ui.horizontal(|ui| {
-                    if ui.button("✓ Generate").clicked() {
-                        self.apply_primitive_replacement(unsaved_changes);
-                        self.show_primitive_dialog = false;
-                    }
-
-                    if ui.button("✕ Cancel").clicked() {
-                        self.show_primitive_dialog = false;
-                    }
-                });
-            });
-    }
-
-    /// Apply primitive replacement to selected mesh or create new mesh
-    fn apply_primitive_replacement(&mut self, unsaved_changes: &mut bool) {
-        use crate::primitive_generators::*;
-
-        // Determine color
-        let color = if self.primitive_use_current_color {
-            if let Some(mesh_idx) = self.selected_mesh_index {
-                if mesh_idx < self.edit_buffer.meshes.len() {
-                    self.edit_buffer.meshes[mesh_idx].color
-                } else {
-                    self.primitive_custom_color
-                }
-            } else {
-                self.primitive_custom_color
-            }
-        } else {
-            self.primitive_custom_color
-        };
-
-        let primitive_segments = self.primitive_segments.clamp(3, PRIMITIVE_SEGMENTS_MAX);
-        let primitive_rings = self.primitive_rings.clamp(2, PRIMITIVE_RINGS_MAX);
-
-        // Generate primitive mesh
-        let mut new_mesh = match self.primitive_type {
-            PrimitiveType::Cube => generate_cube(self.primitive_size, color),
-            PrimitiveType::Sphere => generate_sphere(
-                self.primitive_size,
-                primitive_segments,
-                primitive_rings,
-                color,
-            ),
-            PrimitiveType::Cylinder => generate_cylinder(
-                self.primitive_size,
-                self.primitive_size * 2.0,
-                primitive_segments,
-                color,
-            ),
-            PrimitiveType::Pyramid => generate_pyramid(self.primitive_size, color),
-            PrimitiveType::Cone => generate_cone(
-                self.primitive_size,
-                self.primitive_size * 2.0,
-                primitive_segments,
-                color,
-            ),
-        };
-
-        // Handle name preservation
-        if let Some(mesh_idx) = self.selected_mesh_index {
-            if mesh_idx < self.edit_buffer.meshes.len() {
-                if self.primitive_keep_name {
-                    new_mesh.name = self.edit_buffer.meshes[mesh_idx].name.clone();
-                }
-
-                // Replace existing mesh
-                self.edit_buffer.meshes[mesh_idx] = new_mesh.clone();
-
-                if !self.primitive_preserve_transform {
-                    self.edit_buffer.mesh_transforms[mesh_idx] = MeshTransform::identity();
-                    self.mesh_transform_buffer = Some(MeshTransform::identity());
-                }
-
-                self.mesh_edit_buffer = Some(new_mesh);
-            }
-        } else {
-            // Add as new mesh
-            self.edit_buffer.meshes.push(new_mesh);
-            self.edit_buffer
-                .mesh_transforms
-                .push(MeshTransform::identity());
-            self.mesh_visibility.push(true);
-        }
-
-        *unsaved_changes = true;
-        self.preview_dirty = true;
-        self.validation_dirty = true;
-    }
-
-    fn _legacy_show_mesh_list_and_editor(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Meshes");
-
-        ui.horizontal(|ui| {
-            if ui.button("➕ Add Mesh").clicked() {
-                self.edit_buffer.meshes.push(MeshDefinition {
-                    name: None,
-                    vertices: vec![],
-                    indices: vec![],
-                    normals: None,
-                    uvs: None,
-                    color: [1.0, 1.0, 1.0, 1.0],
-                    lod_levels: None,
-                    lod_distances: None,
-                    material: None,
-                    texture_path: None,
-                });
-                self.edit_buffer
-                    .mesh_transforms
-                    .push(MeshTransform::identity());
-                self.preview_dirty = true;
-            }
-
-            if let Some(mesh_idx) = self.selected_mesh_index {
-                if ui.button("➖ Remove Mesh").clicked() && mesh_idx < self.edit_buffer.meshes.len()
-                {
-                    self.edit_buffer.meshes.remove(mesh_idx);
-                    self.edit_buffer.mesh_transforms.remove(mesh_idx);
-                    self.selected_mesh_index = None;
-                    self.mesh_edit_buffer = None;
-                    self.mesh_transform_buffer = None;
-                    self.preview_dirty = true;
-                }
-            }
-        });
-
-        ui.separator();
-
-        // Mesh list
-        egui::ScrollArea::vertical()
-            .max_height(150.0)
-            .show(ui, |ui| {
-                if self.edit_buffer.meshes.is_empty() {
-                    ui.label("No meshes. Add a mesh to get started.");
-                } else {
-                    for (idx, mesh) in self.edit_buffer.meshes.iter().enumerate() {
-                        let is_selected = self.selected_mesh_index == Some(idx);
-                        let label = format!(
-                            "Mesh {} ({} verts, {} tris)",
-                            idx,
-                            mesh.vertices.len(),
-                            mesh.indices.len() / 3
-                        );
-
-                        if ui.selectable_label(is_selected, label).clicked() {
-                            self.selected_mesh_index = Some(idx);
-                            self.mesh_edit_buffer = Some(mesh.clone());
-                            self.mesh_transform_buffer =
-                                Some(self.edit_buffer.mesh_transforms[idx]);
-                        }
-                    }
-                }
-            });
-
-        ui.separator();
-
-        // Mesh editor for selected mesh
-        if let Some(mesh_idx) = self.selected_mesh_index {
-            if mesh_idx < self.edit_buffer.meshes.len() {
-                ui.heading(format!("Mesh {} Properties", mesh_idx));
-
-                // Mesh transform
-                if let Some(transform) = self.mesh_transform_buffer.as_mut() {
-                    ui.collapsing("Transform", |ui| {
-                        egui::Grid::new("mesh_transform_grid")
-                            .num_columns(2)
-                            .spacing([10.0, 8.0])
-                            .show(ui, |ui| {
-                                ui.label("Position:");
-                                ui.horizontal(|ui| {
-                                    ui.label("X:");
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut transform.translation[2])
-                                                .speed(0.01),
-                                        )
-                                        .changed()
-                                    {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                        self.preview_dirty = true;
-                                    }
-                                    ui.label("Y:");
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut transform.translation[1])
-                                                .speed(0.01),
-                                        )
-                                        .changed()
-                                    {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                        self.preview_dirty = true;
-                                    }
-                                    ui.label("Z:");
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut transform.translation[2])
-                                                .speed(0.01),
-                                        )
-                                        .changed()
-                                    {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                        self.preview_dirty = true;
-                                    }
-                                });
-                                ui.end_row();
-
-                                ui.label("Rotation:");
-                                ui.horizontal(|ui| {
-                                    ui.label("X:");
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut transform.scale[0])
-                                                .speed(0.01)
-                                                .range(0.01..=100.0),
-                                        )
-                                        .changed()
-                                    {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                        self.preview_dirty = true;
-                                    }
-                                    ui.label("Y:");
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut transform.scale[1])
-                                                .speed(0.01)
-                                                .range(0.01..=100.0),
-                                        )
-                                        .changed()
-                                    {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                        self.preview_dirty = true;
-                                    }
-                                    ui.label("Z:");
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut transform.scale[2])
-                                                .speed(0.01)
-                                                .range(0.01..=100.0),
-                                        )
-                                        .changed()
-                                    {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                        self.preview_dirty = true;
-                                    }
-                                });
-                                ui.end_row();
-
-                                ui.label("Scale:");
-                                ui.horizontal(|ui| {
-                                    ui.label("X:");
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut transform.scale[0])
-                                                .speed(0.01)
-                                                .range(0.01..=100.0),
-                                        )
-                                        .changed()
-                                    {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                        self.preview_dirty = true;
-                                    }
-                                    ui.label("Y:");
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut transform.scale[1])
-                                                .speed(0.01)
-                                                .range(0.01..=100.0),
-                                        )
-                                        .changed()
-                                    {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                        self.preview_dirty = true;
-                                    }
-                                    ui.label("Z:");
-                                    if ui
-                                        .add(
-                                            egui::DragValue::new(&mut transform.scale[2])
-                                                .speed(0.01)
-                                                .range(0.01..=100.0),
-                                        )
-                                        .changed()
-                                    {
-                                        self.edit_buffer.mesh_transforms[mesh_idx] = *transform;
-                                        self.preview_dirty = true;
-                                    }
-                                });
-                                ui.end_row();
-                            });
-                    });
-                }
-
-                // Mesh properties
-                if let Some(mesh) = self.mesh_edit_buffer.as_mut() {
-                    ui.collapsing("Color", |ui| {
-                        if ui
-                            .color_edit_button_rgba_unmultiplied(&mut mesh.color)
-                            .changed()
-                        {
-                            self.edit_buffer.meshes[mesh_idx].color = mesh.color;
-                            self.preview_dirty = true;
-                        }
-                    });
-
-                    ui.collapsing("Geometry", |ui| {
-                        ui.label(format!("Vertices: {}", mesh.vertices.len()));
-                        ui.label(format!("Triangles: {}", mesh.indices.len() / 3));
-                        ui.label(format!(
-                            "Normals: {}",
-                            if mesh.normals.is_some() { "Yes" } else { "No" }
-                        ));
-                        ui.label(format!(
-                            "UVs: {}",
-                            if mesh.uvs.is_some() { "Yes" } else { "No" }
-                        ));
-                    });
-                }
-            }
-        }
-    }
-
     fn next_available_id(&self, creatures: &[CreatureDefinition]) -> CreatureId {
         creatures
             .iter()
@@ -3036,9 +2282,6 @@ impl CreaturesEditorState {
     pub fn back_to_registry(&mut self) {
         self.mode = CreaturesEditorMode::List;
         self.selected_creature = None;
-        self.selected_mesh_index = None;
-        self.mesh_edit_buffer = None;
-        self.mesh_transform_buffer = None;
         self.preview_dirty = false;
         self.preview_error = None;
         self.registry_delete_confirm_pending = false;
@@ -3160,26 +2403,12 @@ impl CreaturesEditorState {
             .as_ref()
             .and_then(PreviewRenderer::get_creature)
     }
-
-    #[cfg(test)]
-    fn preview_selected_mesh_for_tests(&self) -> Option<usize> {
-        self.preview_renderer
-            .as_ref()
-            .and_then(PreviewRenderer::selected_mesh_index)
-    }
-
-    #[cfg(test)]
-    fn preview_visibility_for_tests(&self) -> Vec<bool> {
-        self.preview_renderer
-            .as_ref()
-            .map(|renderer| renderer.mesh_visibility().to_vec())
-            .unwrap_or_default()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antares::domain::visual::{MeshDefinition, MeshTransform};
 
     // ── Reload sentinel tests ─────────────────────────────────────────────────
 
@@ -3709,18 +2938,6 @@ mod tests {
     }
 
     #[test]
-    fn test_mesh_selection_state() {
-        let mut state = CreaturesEditorState::new();
-        assert_eq!(state.selected_mesh_index, None);
-
-        state.selected_mesh_index = Some(0);
-        assert_eq!(state.selected_mesh_index, Some(0));
-
-        state.selected_mesh_index = None;
-        assert_eq!(state.selected_mesh_index, None);
-    }
-
-    #[test]
     fn test_preview_dirty_flag() {
         let mut state = CreaturesEditorState::new();
         assert!(!state.preview_dirty);
@@ -3744,8 +2961,6 @@ mod tests {
         creature.mesh_transforms = vec![MeshTransform::identity()];
 
         state.edit_buffer = creature;
-        state.mesh_visibility = vec![true];
-        state.selected_mesh_index = Some(0);
         state.preview_dirty = true;
 
         let result = state.sync_preview_renderer_from_edit_buffer();
@@ -3755,8 +2970,7 @@ mod tests {
         assert_eq!(state.preview_state.statistics.mesh_count, 1);
         assert_eq!(state.preview_state.statistics.vertex_count, 3);
         assert_eq!(state.preview_state.statistics.triangle_count, 1);
-        assert_eq!(state.preview_state.statistics.selected_meshes, 1);
-        assert_eq!(state.preview_selected_mesh_for_tests(), Some(0));
+        assert_eq!(state.preview_state.statistics.selected_meshes, 0);
     }
 
     #[test]
@@ -3767,8 +2981,6 @@ mod tests {
         creature.mesh_transforms = vec![MeshTransform::identity()];
 
         state.edit_buffer = creature;
-        state.mesh_visibility = vec![true];
-        state.selected_mesh_index = Some(0);
 
         state.preview_dirty = true;
         assert!(state.sync_preview_renderer_from_edit_buffer().is_ok());
@@ -3828,36 +3040,6 @@ mod tests {
         assert!(state.filtered_creatures(&creatures).is_empty());
     }
 
-    #[test]
-    fn test_preview_sync_reflects_color_changes_and_visibility() {
-        let mut state = CreaturesEditorState::new();
-        let mut creature = make_creature(9, "Color Goblin");
-        let mut mesh_a = make_mesh("body");
-        let mut mesh_b = make_mesh("eyes");
-        mesh_b.color = [0.0, 1.0, 0.0, 1.0];
-        mesh_a.color = [1.0, 0.0, 0.0, 1.0];
-        creature.meshes = vec![mesh_a, mesh_b];
-        creature.mesh_transforms = vec![MeshTransform::identity(), MeshTransform::identity()];
-
-        state.edit_buffer = creature;
-        state.mesh_visibility = vec![true, false];
-        state.selected_mesh_index = Some(1);
-        state.preview_dirty = true;
-
-        assert!(state.sync_preview_renderer_from_edit_buffer().is_ok());
-        assert_eq!(state.preview_visibility_for_tests(), vec![true, false]);
-
-        state.edit_buffer.meshes[1].color = [0.2, 0.4, 1.0, 0.8];
-        state.preview_dirty = true;
-        assert!(state.sync_preview_renderer_from_edit_buffer().is_ok());
-
-        let previewed = state
-            .previewed_creature_for_tests()
-            .expect("preview creature should be available");
-        assert_eq!(previewed.meshes[1].color, [0.2, 0.4, 1.0, 0.8]);
-        assert_eq!(state.preview_selected_mesh_for_tests(), Some(1));
-    }
-
     // -----------------------------------------------------------------------
     // Regression tests: Fix the Silent Data-Loss Bug in Edit Mode
     // -----------------------------------------------------------------------
@@ -3887,31 +3069,6 @@ mod tests {
             material: None,
             texture_path: None,
         }
-    }
-
-    #[test]
-    fn test_validate_selected_mesh_reports_invalid_mesh_errors() {
-        let mut state = CreaturesEditorState::new();
-        state.edit_buffer.meshes = vec![MeshDefinition {
-            name: Some("invalid".to_string()),
-            vertices: vec![],
-            indices: vec![],
-            normals: None,
-            uvs: None,
-            color: [1.0, 1.0, 1.0, 1.0],
-            lod_levels: None,
-            lod_distances: None,
-            material: None,
-            texture_path: None,
-        }];
-        state.edit_buffer.mesh_transforms = vec![MeshTransform::identity()];
-
-        let message = state.validate_selected_mesh(0);
-
-        assert!(message.contains("validation failed"));
-        assert!(!state.validation_errors.is_empty());
-        assert!(state.show_validation_panel);
-        assert_eq!(state.last_validated_mesh_index, Some(0));
     }
 
     #[test]

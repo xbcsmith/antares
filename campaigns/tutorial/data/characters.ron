@@ -438,7 +438,7 @@
             base: 4,
             current: 4,
         )),
-        portrait_id: "apprentice_zara",
+        portrait_id: "zara",
         starting_gold: 10,
         starting_gems: 2,
         starting_food: 5,

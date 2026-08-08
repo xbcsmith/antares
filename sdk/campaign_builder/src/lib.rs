@@ -54,9 +54,7 @@ pub mod editor_context;
 pub mod editor_state;
 pub mod furniture_editor;
 pub mod icon;
-pub mod item_mesh_editor;
-pub mod item_mesh_undo_redo;
-pub mod item_mesh_workflow;
+
 pub mod items_editor;
 pub mod keyboard_shortcuts;
 pub mod landscape_editor;
@@ -646,7 +644,6 @@ pub enum EditorTab {
     Metadata,
     Config,
     Items,
-    ItemMeshes,
     Spells,
     Conditions,
     Monsters,
@@ -676,7 +673,6 @@ impl EditorTab {
             EditorTab::Metadata => "Metadata",
             EditorTab::Config => "Config",
             EditorTab::Items => "Items",
-            EditorTab::ItemMeshes => "Item Meshes",
             EditorTab::Spells => "Spells",
             EditorTab::Conditions => "Conditions",
             EditorTab::Monsters => "Monsters",
@@ -752,7 +748,6 @@ pub struct CampaignBuilderApp {
     pending_action: Option<PendingAction>,
 
     // ─── Special editors ─────────────────────────────────────────────────
-    item_mesh_editor_state: item_mesh_editor::ItemMeshEditorState,
     obj_importer_state: obj_importer::ObjImporterState,
 
     // ─── Runtime services ────────────────────────────────────────────────
@@ -802,7 +797,6 @@ impl Default for CampaignBuilderApp {
             campaign_dir: None,
             unsaved_changes: false,
             pending_action: None,
-            item_mesh_editor_state: item_mesh_editor::ItemMeshEditorState::new(),
             obj_importer_state: obj_importer::ObjImporterState::new(),
             undo_redo_manager: undo_redo::UndoRedoManager::new(),
             asset_manager: None,
@@ -1134,7 +1128,6 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Metadata,
                     EditorTab::Config,
                     EditorTab::Items,
-                    EditorTab::ItemMeshes,
                     EditorTab::Spells,
                     EditorTab::Conditions,
                     EditorTab::Monsters,
@@ -1233,31 +1226,6 @@ impl eframe::App for CampaignBuilderApp {
         // Central panel with editor content
         egui::CentralPanel::default().show(ui, |ui| match self.ui_state.active_tab {
             EditorTab::Metadata => self.show_metadata_editor(ui),
-            EditorTab::ItemMeshes => {
-                if let Some(signal) = self
-                    .item_mesh_editor_state
-                    .show(ui, self.campaign_dir.as_ref())
-                {
-                    match signal {
-                        item_mesh_editor::ItemMeshEditorSignal::OpenInItemsEditor(item_id) => {
-                            if let Some(idx) = self.campaign_data.items.iter().position(|it| it.id == item_id) {
-                                self.ui_state.active_tab = EditorTab::Items;
-                                self.editor_registry.items_editor_state.selected_item = Some(idx);
-                                self.editor_registry.items_editor_state.mode = items_editor::ItemsEditorMode::Edit;
-                                self.editor_registry.items_editor_state.edit_buffer = self.campaign_data.items[idx].clone();
-                                self.ui_state.status_message = format!("Opening item #{}", item_id);
-                                ui.ctx().request_repaint();
-                            }
-                        }
-                    }
-                }
-                // Cross-tab: items editor wants to open item mesh editor
-                if let Some(item_id) = self.editor_registry.items_editor_state.requested_open_item_mesh.take() {
-                    self.ui_state.active_tab = EditorTab::ItemMeshes;
-                    self.ui_state.status_message = format!("Opening Item Mesh Editor for item #{}", item_id);
-                    ui.ctx().request_repaint();
-                }
-            }
             EditorTab::Config => self.editor_registry.config_editor_state.show(
                 ui,
                 self.campaign_dir.as_ref(),
@@ -1279,13 +1247,7 @@ impl eframe::App for CampaignBuilderApp {
                     &self.campaign_data.spells,
                     &mut items_ctx,
                 );
-                // Handle cross-tab navigation: items editor wants to open the
-                // Item Mesh Editor for a specific item.
-                if let Some(item_id) = self.editor_registry.items_editor_state.requested_open_item_mesh.take() {
-                    self.ui_state.active_tab = EditorTab::ItemMeshes;
-                    self.ui_state.status_message = format!("Opening Item Mesh Editor for item #{}", item_id);
-                    ui.ctx().request_repaint();
-                }
+
             }
             EditorTab::Spells => {
                 let mut spells_ctx = EditorContext {
@@ -1482,9 +1444,6 @@ impl eframe::App for CampaignBuilderApp {
                         }
                         obj_importer_ui::ObjImporterUiSignal::Item => {
                             let importer_status = self.obj_importer_state.status_message.clone();
-                            if let Some(ref dir) = self.campaign_dir.clone() {
-                                self.item_mesh_editor_state.load_from_campaign(dir);
-                            }
                             self.ui_state.status_message = importer_status;
                             ui.ctx().request_repaint();
                         }

@@ -14,7 +14,7 @@ use antares::domain::items::types::{
     ArmorData, AttributeType, ConsumableData, ConsumableEffect, Item, ItemType,
     MagicItemClassification, QuestData, ResistanceType, WeaponClassification, WeaponData,
 };
-use antares::domain::types::{DiceRoll, ItemId};
+use antares::domain::types::DiceRoll;
 use antares::domain::visual::item_mesh::ItemMeshDescriptor;
 use eframe::egui;
 use std::path::PathBuf;
@@ -88,12 +88,6 @@ pub struct ItemsEditorState {
     pub filter_magical: Option<bool>,
     pub filter_cursed: Option<bool>,
     pub filter_quest: Option<bool>,
-
-    /// Cross-tab navigation: set to `Some(item_id)` when the user clicks
-    /// "Open in Item Mesh Editor" for the currently-edited item. The host
-    /// `CampaignBuilderApp` drains this each frame and switches to the
-    /// `ItemMeshes` tab.
-    pub requested_open_item_mesh: Option<ItemId>,
 }
 
 impl Default for ItemsEditorState {
@@ -109,7 +103,6 @@ impl Default for ItemsEditorState {
             filter_magical: None,
             filter_cursed: None,
             filter_quest: None,
-            requested_open_item_mesh: None,
         }
     }
 }
@@ -1070,10 +1063,7 @@ impl ItemsEditorState {
                     } else {
                         ui.label("No mesh override (auto-generated from item type)");
                     }
-                    if ui.button("✏️ Open in Item Mesh Editor").clicked() {
-                        self.requested_open_item_mesh = Some(self.edit_buffer.id as ItemId);
-                        ui.ctx().request_repaint();
-                    }
+
                 });
 
                 ui.add_space(10.0);
@@ -1851,28 +1841,6 @@ mod tests {
 
         state.selected_item = None;
         assert!(state.selected_item.is_none());
-    }
-
-    /// Setting `requested_open_item_mesh` on an editor state in Edit mode
-    /// should store the item id correctly for the host app to drain.
-    #[test]
-    fn test_items_editor_requested_open_item_mesh_set_on_button() {
-        let mut state = ItemsEditorState::new();
-        state.mode = ItemsEditorMode::Edit;
-        // Simulate what happens when the button is clicked: the field is set.
-        state.requested_open_item_mesh = Some(42_u8);
-        assert_eq!(
-            state.requested_open_item_mesh,
-            Some(42_u8),
-            "requested_open_item_mesh should hold the item id after being set"
-        );
-        // Simulating the host draining the value:
-        let drained = state.requested_open_item_mesh.take();
-        assert_eq!(drained, Some(42_u8));
-        assert!(
-            state.requested_open_item_mesh.is_none(),
-            "field should be None after take()"
-        );
     }
 
     #[test]

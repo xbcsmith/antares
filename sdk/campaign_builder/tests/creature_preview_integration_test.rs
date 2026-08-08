@@ -51,8 +51,6 @@ fn test_preview_updates_after_transform_edit_in_ui_frame() {
     state.mode = CreaturesEditorMode::Edit;
     state.selected_creature = Some(0);
     state.edit_buffer = creatures[0].clone();
-    state.mesh_visibility = vec![true];
-    state.selected_mesh_index = Some(0);
 
     state.edit_buffer.mesh_transforms[0].translation = [2.0, 0.0, -1.0];
     state.preview_dirty = true;
@@ -79,7 +77,6 @@ fn test_preview_updates_after_color_edit_in_ui_frame() {
     state.mode = CreaturesEditorMode::Edit;
     state.selected_creature = Some(0);
     state.edit_buffer = creatures[0].clone();
-    state.mesh_visibility = vec![true];
 
     state.edit_buffer.meshes[0].color = [0.2, 0.8, 0.1, 1.0];
     state.preview_dirty = true;
