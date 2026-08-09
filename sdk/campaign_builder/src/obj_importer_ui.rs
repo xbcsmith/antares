@@ -42,7 +42,7 @@ use crate::obj_importer::{
 };
 use crate::ui_helpers::TwoColumnLayout;
 use antares::domain::types::{
-    LandscapeId, LandscapeMeshId, LANDSCAPE_ID_MIN, LANDSCAPE_MESH_ID_MIN,
+    FurnitureMeshId, LandscapeId, LandscapeMeshId, LANDSCAPE_ID_MIN, LANDSCAPE_MESH_ID_MIN,
 };
 use antares::domain::visual::item_mesh::ItemMeshCategory;
 use antares::domain::visual::{CreatureDefinition, CreatureReference, MeshTransform};
@@ -537,6 +537,38 @@ pub(crate) fn suggest_next_landscape_mesh_id_from_dir(
     }
 
     LANDSCAPE_MESH_ID_MIN
+}
+
+/// Returns the next available furniture mesh registry ID for importer exports.
+///
+/// The helper reads `data/furniture_mesh_registry.ron` when a campaign is open
+/// and returns the first unused ID starting at `10001`. Missing or unparsable
+/// registries fall back to `10001` so a new campaign can export its first
+/// furniture mesh without setup.
+pub(crate) fn suggest_next_furniture_id_from_dir(campaign_dir: Option<&Path>) -> FurnitureMeshId {
+    const FURNITURE_MESH_ID_MIN: FurnitureMeshId = 10001;
+
+    let Some(campaign_dir) = campaign_dir else {
+        return FURNITURE_MESH_ID_MIN;
+    };
+
+    let registry_path = campaign_dir.join("data/furniture_mesh_registry.ron");
+    let Ok(refs) = read_ron_vec_or_empty::<CreatureReference>(&registry_path) else {
+        return FURNITURE_MESH_ID_MIN;
+    };
+
+    let used_ids: std::collections::HashSet<FurnitureMeshId> = refs
+        .iter()
+        .filter_map(|entry| (entry.id >= FURNITURE_MESH_ID_MIN).then_some(entry.id))
+        .collect();
+
+    for id in FURNITURE_MESH_ID_MIN..=FurnitureMeshId::MAX {
+        if !used_ids.contains(&id) {
+            return id;
+        }
+    }
+
+    FURNITURE_MESH_ID_MIN
 }
 
 fn render_idle_mode(
@@ -2565,8 +2597,8 @@ mod tests {
         item_mesh_category_from_str, item_mesh_category_name, landscape_category_from_str,
         load_model_into_state, persist_custom_palette, preview_export_relative_path,
         show_obj_importer_tab, stage_imported_swatch_as_custom_draft,
-        suggest_next_creature_id_from_dir, suggest_next_landscape_mesh_id_from_dir, ObjImportError,
-        ObjImporterExportError,
+        suggest_next_creature_id_from_dir, suggest_next_furniture_id_from_dir,
+        suggest_next_landscape_mesh_id_from_dir, ObjImportError, ObjImporterExportError,
     };
     use crate::creature_id_manager::CreatureCategory;
     use crate::logging::Logger;
@@ -3625,6 +3657,72 @@ mod tests {
         assert_eq!(
             suggest_next_landscape_mesh_id_from_dir(Some(campaign_dir.path())),
             LANDSCAPE_MESH_ID_MIN
+        );
+    }
+
+    #[test]
+    fn test_suggest_next_furniture_id_uses_default_min_without_registry() {
+        let campaign_dir = tempdir().unwrap();
+
+        assert_eq!(
+            suggest_next_furniture_id_from_dir(Some(campaign_dir.path())),
+            10001
+        );
+    }
+
+    #[test]
+    fn test_suggest_next_furniture_id_skips_used_registry_ids() {
+        let campaign_dir = tempdir().unwrap();
+        fs::create_dir_all(campaign_dir.path().join("data")).unwrap();
+        let registry = vec![
+            CreatureReference {
+                id: 10001,
+                name: "Oak Table".to_string(),
+                filepath: "assets/meshes/furniture/oak_table.ron".to_string(),
+            },
+            CreatureReference {
+                id: 10002,
+                name: "Pine Chair".to_string(),
+                filepath: "assets/meshes/furniture/pine_chair.ron".to_string(),
+            },
+        ];
+        fs::write(
+            campaign_dir.path().join("data/furniture_mesh_registry.ron"),
+            ron::ser::to_string_pretty(&registry, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            suggest_next_furniture_id_from_dir(Some(campaign_dir.path())),
+            10003
+        );
+    }
+
+    #[test]
+    fn test_suggest_next_furniture_id_fills_first_hole() {
+        let campaign_dir = tempdir().unwrap();
+        fs::create_dir_all(campaign_dir.path().join("data")).unwrap();
+        let registry = vec![
+            CreatureReference {
+                id: 10001,
+                name: "Oak Table".to_string(),
+                filepath: "assets/meshes/furniture/oak_table.ron".to_string(),
+            },
+            CreatureReference {
+                id: 10003,
+                name: "Old Chair".to_string(),
+                filepath: "assets/meshes/furniture/old_chair.ron".to_string(),
+            },
+        ];
+        fs::write(
+            campaign_dir.path().join("data/furniture_mesh_registry.ron"),
+            ron::ser::to_string_pretty(&registry, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            suggest_next_furniture_id_from_dir(Some(campaign_dir.path())),
+            10002
         );
     }
 

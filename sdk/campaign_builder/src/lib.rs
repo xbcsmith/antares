@@ -1402,6 +1402,10 @@ impl eframe::App for CampaignBuilderApp {
                 {
                     self.ui_state.active_tab = EditorTab::Importer;
                     self.obj_importer_state.export_type = obj_importer::ExportType::Furniture;
+                    let next_furniture_id = obj_importer_ui::suggest_next_furniture_id_from_dir(
+                        self.campaign_dir.as_deref(),
+                    );
+                    self.obj_importer_state.set_next_furniture_id(next_furniture_id);
                     self.ui_state.status_message =
                         "Opening OBJ Importer for furniture mesh work".to_string();
                     ui.ctx().request_repaint();
@@ -1447,6 +1451,10 @@ impl eframe::App for CampaignBuilderApp {
                         obj_importer_ui::ObjImporterUiSignal::Furniture => {
                             let importer_status = self.obj_importer_state.status_message.clone();
                             self.load_furniture();
+                            let next_furniture_id = obj_importer_ui::suggest_next_furniture_id_from_dir(
+                                self.campaign_dir.as_deref(),
+                            );
+                            self.obj_importer_state.set_next_furniture_id(next_furniture_id);
                             self.ui_state.status_message = importer_status;
                             self.ui_state.active_tab = EditorTab::Furniture;
                             ui.ctx().request_repaint();
@@ -1600,6 +1608,8 @@ impl eframe::App for CampaignBuilderApp {
                 )
             }
             EditorTab::Dialogues => {
+                let dialogue_ids_before: Vec<u16> =
+                    self.campaign_data.dialogues.iter().map(|d| d.id).collect();
                 let mut dialogues_ctx = EditorContext {
                     campaign_dir: self.campaign_dir.as_ref(),
                     data_file: &self.campaign.dialogue_file,
@@ -1615,6 +1625,15 @@ impl eframe::App for CampaignBuilderApp {
                     &self.campaign_data.spells,
                     &mut dialogues_ctx,
                 );
+                // If the dialogue list changed (reload, new, delete) the map
+                // editor's autocomplete cache is now stale — mark it for rebuild.
+                let dialogue_ids_after: Vec<u16> =
+                    self.campaign_data.dialogues.iter().map(|d| d.id).collect();
+                if dialogue_ids_after != dialogue_ids_before {
+                    self.editor_registry
+                        .maps_editor_state
+                        .invalidate_dialogue_cache();
+                }
             }
             EditorTab::NPCs => {
                 // Always sync the stock_templates mirror from the editor state before

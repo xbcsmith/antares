@@ -600,35 +600,46 @@ pub fn try_interact_npc_or_recruitable(
         return true;
     }
 
-    if let Some(MapEvent::RecruitableCharacter { .. }) = map.get_event(party_position) {
-        let event = map
-            .get_event(party_position)
-            .expect("Recruitable character event must still exist at current position")
-            .clone();
+    if let Some(MapEvent::RecruitableCharacter { character_id, .. }) = map.get_event(party_position)
+    {
+        // A character already recruited (in the roster/party) must not be
+        // re-triggerable even if a stale event lingers on the map (event
+        // removal at recruit time is keyed off a single dialogue tile and can
+        // miss characters recruited via another NPC's dialogue tree).
+        if !game_state.encountered_characters.contains(character_id) {
+            let event = map
+                .get_event(party_position)
+                .expect("Recruitable character event must still exist at current position")
+                .clone();
 
-        if let MapEvent::RecruitableCharacter {
-            name, character_id, ..
-        } = &event
-        {
-            info!(
-                "Interacting with recruitable character '{}' (ID: {}) at current position {:?}",
-                name, character_id, party_position
-            );
-            recruitment_context.0 = Some(RecruitmentContext {
-                character_id: character_id.clone(),
-                event_position: party_position,
+            if let MapEvent::RecruitableCharacter {
+                name, character_id, ..
+            } = &event
+            {
+                info!(
+                    "Interacting with recruitable character '{}' (ID: {}) at current position {:?}",
+                    name, character_id, party_position
+                );
+                recruitment_context.0 = Some(RecruitmentContext {
+                    character_id: character_id.clone(),
+                    event_position: party_position,
+                });
+            }
+
+            map_event_messages.write(MapEventTriggered {
+                event,
+                position: party_position,
             });
+            return true;
         }
-
-        map_event_messages.write(MapEventTriggered {
-            event,
-            position: party_position,
-        });
-        return true;
     }
 
     for position in adjacent_tiles {
-        if let Some(MapEvent::RecruitableCharacter { .. }) = map.get_event(position) {
+        if let Some(MapEvent::RecruitableCharacter { character_id, .. }) = map.get_event(position) {
+            if game_state.encountered_characters.contains(character_id) {
+                continue;
+            }
+
             let event = map
                 .get_event(position)
                 .expect("Recruitable character event must still exist at adjacent position")

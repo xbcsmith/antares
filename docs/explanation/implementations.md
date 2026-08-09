@@ -43,16 +43,16 @@ legitimate historical context, not stale code — they were not modified.
 
 ### Manual SDK smoke test checklist
 
-The following items require a running SDK and are left for human verification:
+✅ **All items verified by human on 2026-08-08:**
 
-1. The "Item Meshes" tab is absent from the sidebar
-2. Opening any creature shows only the read-only 3D preview and creature
+1. ✅ The "Item Meshes" tab is absent from the sidebar
+2. ✅ Opening any creature shows only the read-only 3D preview and creature
    properties (no mesh list, no mesh properties panel)
-3. The 3D preview controls (grid, wireframe, normals, axes, background colour,
+3. ✅ The 3D preview controls (grid, wireframe, normals, axes, background colour,
    camera distance) still function
-4. The Importer tab successfully imports a `.glb` file and a `.obj` file
+4. ✅ The Importer tab successfully imports a `.glb` file and a `.obj` file
    end-to-end
-5. Opening `campaigns/tutorial` completes without error
+5. ✅ Opening `campaigns/tutorial` completes without error
 
 ---
 

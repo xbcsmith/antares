@@ -2883,11 +2883,8 @@ impl EventEditorState {
                     return Err("Character ID cannot be empty".to_string());
                 }
 
-                let dialogue_id = if self.recruitable_dialogue_id.is_empty() {
-                    None
-                } else {
-                    self.recruitable_dialogue_id.parse::<u16>().ok()
-                };
+                let dialogue_id =
+                    crate::ui_helpers::parse_dialogue_id_from_buf(&self.recruitable_dialogue_id);
 
                 let facing = Self::parse_facing(self.event_facing.as_deref());
                 Ok(MapEvent::RecruitableCharacter {
@@ -4353,13 +4350,19 @@ pub struct MapsEditorState {
     /// Rebuilt when `ctx.campaign_dir` changes or `mesh_cache_dirty` is set.
     pub available_mesh_ids: Vec<String>,
     /// Dialogue (id, title) pairs from the campaign dialogue database.
-    /// Rebuilt when `ctx.campaign_dir` changes. Never call the loader inside the render loop.
+    /// Rebuilt when `ctx.campaign_dir` changes or `dialogue_cache_dirty` is set.
+    /// Never call the loader inside the render loop.
     pub available_dialogue_ids: Vec<(u16, String)>,
     /// Last campaign directory seen, used to detect when caches need to be rebuilt.
     pub last_campaign_dir: Option<std::path::PathBuf>,
     /// When `true`, the mesh ID cache will be rebuilt on the next render tick
     /// regardless of whether the campaign directory changed.
     pub mesh_cache_dirty: bool,
+    /// When `true`, the dialogue ID cache will be rebuilt on the next render tick
+    /// regardless of whether the campaign directory changed.
+    /// Set by [`MapsEditorState::invalidate_dialogue_cache`] whenever the
+    /// dialogue list is reloaded or extended outside of the Maps editor.
+    pub dialogue_cache_dirty: bool,
 }
 
 /// Minimum zoom level (25%)
@@ -4417,6 +4420,7 @@ impl Default for MapsEditorState {
             available_dialogue_ids: Vec::new(),
             last_campaign_dir: None,
             mesh_cache_dirty: false,
+            dialogue_cache_dirty: false,
         }
     }
 }
@@ -4455,6 +4459,15 @@ impl MapsEditorState {
 
     pub fn invalidate_mesh_cache(&mut self) {
         self.mesh_cache_dirty = true;
+    }
+
+    /// Mark the dialogue ID autocomplete cache as stale.
+    ///
+    /// Call this whenever `campaign_data.dialogues` changes outside the Maps editor
+    /// (e.g. after a Reload or Save in the Dialogue editor). On the next render tick
+    /// the cache is rebuilt from disk before the autocomplete is drawn.
+    pub fn invalidate_dialogue_cache(&mut self) {
+        self.dialogue_cache_dirty = true;
     }
 
     /// Get the next available map ID
@@ -4522,7 +4535,7 @@ impl MapsEditorState {
             (Some(last), Some(current)) => last != current,
             (None, None) => false,
         };
-        if campaign_dir_changed || self.mesh_cache_dirty {
+        if campaign_dir_changed || self.mesh_cache_dirty || self.dialogue_cache_dirty {
             if let Some(dir) = ctx.campaign_dir {
                 // Load object mesh IDs
                 let registry_path = dir.join("data/object_mesh_registry.ron");
@@ -4547,11 +4560,13 @@ impl MapsEditorState {
                 } else {
                     self.available_dialogue_ids.clear();
                 }
+                self.dialogue_cache_dirty = false;
                 self.last_campaign_dir = Some(dir.to_path_buf());
             } else {
                 self.available_mesh_ids.clear();
                 self.available_dialogue_ids.clear();
                 self.mesh_cache_dirty = false;
+                self.dialogue_cache_dirty = false;
                 self.last_campaign_dir = None;
             }
         }
@@ -7424,18 +7439,28 @@ impl MapsEditorState {
                         }
                     });
 
-                    ui.horizontal(|ui| {
-                        ui.label("Dialogue ID (optional):");
-                        if ui
-                            .text_edit_singleline(&mut event_editor.recruitable_dialogue_id)
-                            .changed()
-                        {
+                    // Dialogue ID autocomplete — same widget used by all other event types
+                    {
+                        use crate::ui_helpers::{
+                            autocomplete_dialogue_selector, parse_dialogue_id_from_buf,
+                        };
+                        ui.label("Dialogue (optional):");
+                        if autocomplete_dialogue_selector(
+                            ui,
+                            "recruitable_evt_dialogue",
+                            "",
+                            &mut event_editor.recruitable_dialogue_id,
+                            available_dialogue_ids,
+                        ) {
+                            // parse_dialogue_id_from_buf handles both "1003" and
+                            // "1003 \u{2014} Isolde Dawnfang Recruitment" formats
+                            let _ =
+                                parse_dialogue_id_from_buf(&event_editor.recruitable_dialogue_id);
                             editor.has_changes = true;
                         }
-                    });
-
-                    if !event_editor.recruitable_dialogue_id.is_empty() {
-                        ui.label("💡 Leave empty for simple yes/no recruitment");
+                        if event_editor.recruitable_dialogue_id.is_empty() {
+                            ui.label("💡 Leave empty for simple yes/no recruitment");
+                        }
                     }
 
                     // Facing direction
@@ -15565,5 +15590,15 @@ mod tests {
         assert!(state.available_mesh_ids.is_empty());
         assert!(state.available_dialogue_ids.is_empty());
         assert!(state.last_campaign_dir.is_none());
+        assert!(!state.mesh_cache_dirty);
+        assert!(!state.dialogue_cache_dirty);
+    }
+
+    #[test]
+    fn test_invalidate_dialogue_cache_sets_dirty_flag() {
+        let mut state = MapsEditorState::default();
+        assert!(!state.dialogue_cache_dirty);
+        state.invalidate_dialogue_cache();
+        assert!(state.dialogue_cache_dirty);
     }
 }

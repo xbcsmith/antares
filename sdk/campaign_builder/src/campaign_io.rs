@@ -227,6 +227,13 @@ impl CampaignBuilderApp {
             self.obj_importer_state
                 .set_next_landscape_mesh_id(next_landscape_mesh_id);
         }
+
+        if self.obj_importer_state.export_type == obj_importer::ExportType::Furniture {
+            let next_furniture_id =
+                obj_importer_ui::suggest_next_furniture_id_from_dir(self.campaign_dir.as_deref());
+            self.obj_importer_state
+                .set_next_furniture_id(next_furniture_id);
+        }
     }
 
     /// Validate item IDs for uniqueness

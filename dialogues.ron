@@ -2940,7 +2940,7 @@
                         conditions: [],
                         actions: [
                             RecruitToParty(
-                                character_id: "isolde",
+                                character_id: "isolde_dawnfang",
                             ),
                         ],
                         ends_dialogue: false,

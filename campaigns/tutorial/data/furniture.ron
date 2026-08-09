@@ -259,4 +259,24 @@
         mesh_id: None,
         description: Some("A heavy iron-bound chest secured with a sturdy lock."),
     ),
+    (
+        id: 13,
+        name: "Ancient Treasure Chest",
+        category: Storage,
+        base_type: Chest,
+        material: Wood,
+        scale: 1.0,
+        color_tint: None,
+        flags: (
+            lit: false,
+            locked: false,
+            blocking: false,
+        ),
+        icon: None,
+        tags: [
+            "imported",
+        ],
+        mesh_id: Some(10001),
+        description: Some("Imported furniture mesh \'Ancient Treasure Chest\'"),
+    ),
 ]

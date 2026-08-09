@@ -8434,6 +8434,18 @@
         ),
         (
             x: 15,
+            y: 2,
+        ): RecruitableCharacter(
+            name: "Isolde",
+            description: "Isolde,  Princess of Sunspire, Holy Warrior of the Radiant Shield",
+            character_id: "isolde",
+            dialogue_id: Some(1003),
+            time_condition: None,
+            facing: Some(East),
+            face_on_dialogue: false,
+        ),
+        (
+            x: 15,
             y: 7,
         ): RecruitableCharacter(
             name: "Old Gareth",

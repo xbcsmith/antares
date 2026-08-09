@@ -1,1 +1,7 @@
-[]
+[
+    (
+        id: 10001,
+        name: "Ancient Treasure Chest",
+        filepath: "assets/furniture/storage/ancient_treasure_chest.ron",
+    ),
+]
