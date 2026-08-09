@@ -1486,6 +1486,31 @@ fn execute_action(
                             .unwrap_or(true);
 
                         if !is_locked {
+                            // Replace the LockedContainer event with an open
+                            // Container event before entering the inventory
+                            // UI, mirroring `lock_ui::apply_success`. Without
+                            // this, the map's source-of-truth event stays a
+                            // LockedContainer forever, so `write_container_items_back`
+                            // (called on every take and on Escape) can never
+                            // find a `MapEvent::Container` to persist into --
+                            // taken items vanish from the session state but
+                            // the pristine `initial_items` list reappears the
+                            // next time the container is opened.
+                            if let Some(map) = game_state.world.get_map_mut(ctx.map_id) {
+                                map.add_event(
+                                    ctx.event_position,
+                                    crate::domain::world::MapEvent::Container {
+                                        id: lock_id.clone(),
+                                        name: container_name.clone(),
+                                        description: String::new(),
+                                        items: initial_items.clone(),
+                                        gold: 0,
+                                        gems: 0,
+                                        mesh_id: None,
+                                        dialogue_id: None,
+                                    },
+                                );
+                            }
                             game_state.enter_container_inventory(
                                 lock_id,
                                 container_name,
@@ -1521,6 +1546,22 @@ fn execute_action(
                                     if let Some(ls) = map.lock_states.get_mut(&lock_id) {
                                         ls.unlock();
                                     }
+                                    // See the `!is_locked` branch above for why this
+                                    // conversion is required before entering the
+                                    // container inventory UI.
+                                    map.add_event(
+                                        ctx.event_position,
+                                        crate::domain::world::MapEvent::Container {
+                                            id: lock_id.clone(),
+                                            name: container_name.clone(),
+                                            description: String::new(),
+                                            items: initial_items.clone(),
+                                            gold: 0,
+                                            gems: 0,
+                                            mesh_id: None,
+                                            dialogue_id: None,
+                                        },
+                                    );
                                 }
                                 let msg = format!(
                                     "You unlock the {} with the {}.",
@@ -5277,6 +5318,110 @@ mod tests {
                 .is_none(),
             "Treasure event should be removed after collect_treasure"
         );
+    }
+
+    /// Regression test for the "chest respawns loot on Escape" bug: an
+    /// already-unlocked `LockedContainer` fired via `unlock_container` must
+    /// have its map event converted to `MapEvent::Container` (not left as
+    /// `LockedContainer`), or `write_container_items_back` can never find a
+    /// target to persist takes into and the pristine item list re-reads on
+    /// every reopen.
+    #[test]
+    fn test_trigger_event_unlock_container_converts_locked_container_to_open_container() {
+        use crate::application::dialogue::{DialogueState, EventInteractionContext};
+        use crate::domain::character::InventorySlot;
+        use crate::domain::world::MapEvent;
+
+        let mut game_state = crate::application::GameState::new();
+        let map_id = game_state.world.current_map;
+        let position = crate::domain::types::Position::new(4, 4);
+
+        let mut map = crate::domain::world::Map::new(
+            map_id,
+            "Test Map".to_string(),
+            "Desc".to_string(),
+            10,
+            10,
+        );
+        map.add_event(
+            position,
+            MapEvent::LockedContainer {
+                name: "Old Chest".to_string(),
+                lock_id: "chest_a".to_string(),
+                key_item_id: None,
+                items: vec![
+                    InventorySlot {
+                        item_id: 42,
+                        charges: 0,
+                    },
+                    InventorySlot {
+                        item_id: 7,
+                        charges: 3,
+                    },
+                ],
+                initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: Some(9),
+            },
+        );
+        let mut unlocked = crate::domain::world::lock::LockState::new("chest_a");
+        unlocked.unlock();
+        map.lock_states.insert("chest_a".to_string(), unlocked);
+        game_state.world.add_map(map);
+
+        let mut dlg_state = DialogueState::start(1, 1, None, None);
+        dlg_state.event_context = Some(EventInteractionContext {
+            event_position: position,
+            map_id,
+        });
+        game_state.mode = crate::application::GameMode::Dialogue(dlg_state.clone());
+
+        let db = crate::sdk::database::ContentDatabase::new();
+        let action = crate::domain::dialogue::DialogueAction::TriggerEvent {
+            event_name: "unlock_container".to_string(),
+        };
+        let mut none_recruitable: Option<
+            &mut MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
+        > = None;
+        let mut none_mesh: Option<&mut MessageWriter<crate::game::systems::map::DespawnEventMesh>> =
+            None;
+
+        execute_action(
+            &action,
+            &mut game_state,
+            &db,
+            Some(&dlg_state),
+            None,
+            None,
+            None,
+            &mut none_recruitable,
+            &mut none_mesh,
+        );
+
+        // The map's source-of-truth event must now be an open Container
+        // carrying the original items, not still a LockedContainer.
+        match game_state
+            .world
+            .get_current_map()
+            .and_then(|m| m.get_event(position))
+        {
+            Some(MapEvent::Container { items, .. }) => {
+                assert_eq!(
+                    items.len(),
+                    2,
+                    "open Container must keep the original items"
+                );
+            }
+            other => panic!("expected MapEvent::Container after unlock, got {:?}", other),
+        }
+
+        // The session UI state must also reflect those items.
+        match &game_state.mode {
+            crate::application::GameMode::ContainerInventory(state) => {
+                assert_eq!(state.items.len(), 2);
+            }
+            other => panic!("expected GameMode::ContainerInventory, got {:?}", other),
+        }
     }
 
     #[test]

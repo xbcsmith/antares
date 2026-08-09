@@ -2686,12 +2686,12 @@
     ),
     (
         id: 1002,
-        name: "Lost Ranger (Copy) Skill Trainer Dialogue",
+        name: "Lost Ranger Skill Trainer Dialogue",
         root_node: 1,
         nodes: {
             1: (
                 id: 1,
-                text: "Greetings, adventurer. Lost Ranger (Copy) can help you hone your skills.",
+                text: "Greetings, adventurer. Lost Ranger can help you hone your skills.",
                 speaker_override: None,
                 choices: [
                     (
@@ -2726,7 +2726,7 @@
             ),
             2: (
                 id: 2,
-                text: "Very well. Lost Ranger (Copy) shall assess your abilities.",
+                text: "Very well. Lost Ranger shall assess your abilities.",
                 speaker_override: None,
                 choices: [],
                 conditions: [],
@@ -2743,7 +2743,7 @@
                 ),
             ),
         },
-        speaker_name: Some("Lost Ranger (Copy)"),
+        speaker_name: Some("Lost Ranger"),
         repeatable: true,
         associated_quest: None,
         sdk_metadata: (

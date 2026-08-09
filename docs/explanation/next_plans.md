@@ -26,7 +26,7 @@ We need to add a tray icon for the game like the ones we added for the SDK.
 
 ### Barred Passage
 
-The barred passage dialog says you need to find a way to open it. Then we just walked through the gate.
+Fixed - The barred passage dialog says you need to find a way to open it. Then we just walked through the gate.
 
 Fixed - Game play issue. Casting First Aid always has no effect in combat.
 
@@ -41,8 +41,8 @@ FIXED - Clicking Save Game looks like it saves the game and then puts the charac
 
 Portraits should support jpg images.
 
-Player Overview in game should not try to rescale the length of the full length portrait image. Move the stats under the image to column 2 and let the portrait scale however it needs as long as it is 340 pixels wide. Resize the image to 340 pixels wide if it is not. Dwarfs and Halflings and Gnomes present problems of length so we rescale to 340 pixels wide and let the length scale however it needs.
+FIXED - Player Overview in game should not try to rescale the length of the full length portrait image. Move the stats under the image to column 2 and let the portrait scale however it needs as long as it is 340 pixels wide. Resize the image to 340 pixels wide if it is not. Dwarfs and Halflings and Gnomes present problems of length so we rescale to 340 pixels wide and let the length scale however it needs.
 
 FIXED - Save Game on map_2 in the middle of map. Load Game puts the party back at the first Inn. Recruitable NPC that were already recruited and are in your party are back to their starting points on the map. Creating duplicate versions of themselves.
 
-Campaign Builder --> Importer --> Furniture --> Furniture Mesh Imports are overwriting last imported mesh even after saving. I imported a mesh and it assigned it Furniture ID 13. Next mesh overwrote it as Furniture ID 13.
+FIXED - Campaign Builder --> Importer --> Furniture --> Furniture Mesh Imports are overwriting last imported mesh even after saving. I imported a mesh and it assigned it Furniture ID 13. Next mesh overwrote it as Furniture ID 13.

@@ -11,23 +11,29 @@
 //!
 //! # Layout — Single view
 //!
+//! Three columns: the portrait alone, identity + core stats, then
+//! equipment/resistances. The portrait is rendered at a fixed width
+//! ([`PORTRAIT_WIDTH`]) with its height following the source image's native
+//! aspect ratio, so it is never stretched -- important for full-length
+//! portraits of shorter races (Dwarves, Halflings, Gnomes) whose proportions
+//! differ a lot from human-sized ones.
+//!
 //! ```text
-//! ┌──────────────────────────────────────────────────────────┐
-//! │  Aldric — Level 3 Human Knight         [< Prev] [Next >] │
-//! │                                        [Party Overview]   │
-//! ├──────────────────────────────────────────────────────────┤
-//! │  Core Stats          │  Combat          │  Experience     │
-//! │  Might:  15/15       │  HP:  42 / 50    │  XP:  3,124     │
-//! │  Intell: 10/10       │  SP:   8 / 10    │  Next: 5,000    │
-//! │  Person: 12/12       │  AC:  14         │  ✅ Ready!      │
-//! │  Endur:  14/14       │  SpLvl: 3        │                 │
-//! │  Speed:  11/11       │                  │                 │
-//! │  Accur:  13/13       │  Conditions:     │  Equipment:     │
-//! │  Luck:   9/9         │  None            │  Weapon: Sword  │
-//! │                      │                  │  Armor: Chain   │
-//! ├──────────────────────────────────────────────────────────┤
-//! │  [Esc] Close   [Tab] Next   [Shift+Tab] Prev   [O] Overview │
-//! └──────────────────────────────────────────────────────────┘
+//! ┌──────────────────────────────────────────────────────────────────────┐
+//! │  Aldric — Level 3 Human Knight                [< Prev] [Next >]       │
+//! │                                                [Party Overview]       │
+//! ├───────────┬──────────────────────────┬────────────────────────────────┤
+//! │           │  Aldric                  │  Equipment:                    │
+//! │           │  Human Knight Lv 3        │  Weapon: Sword                 │
+//! │  [ portrait, scaled to    ]           │  Armor: Chain                  │
+//! │  [ PORTRAIT_WIDTH wide,   ]  About:   │                                 │
+//! │  [ native aspect ratio ]   Sex/Align  │  Resistances:                   │
+//! │           │  /Age/Gold/Gems           │  Proficiencies:                 │
+//! │           │  Core Stats / Combat /    │                                 │
+//! │           │  Conditions / Experience  │                                 │
+//! ├───────────┴──────────────────────────┴────────────────────────────────┤
+//! │  [Esc] Close   [Tab] Next   [Shift+Tab] Prev   [O] Overview            │
+//! └──────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
 //! # Flow
@@ -70,6 +76,19 @@ const STAT_EMPTY_COLOR: egui::Color32 = egui::Color32::from_rgb(128, 128, 128);
 const LEVEL_READY_COLOR: egui::Color32 = egui::Color32::from_rgb(80, 200, 120);
 /// Yellow used for "visit a trainer" message.
 const TRAINER_NEEDED_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 215, 0);
+
+// ── Portrait sizing constants ─────────────────────────────────────────────────
+
+/// Fixed render width, in points, for the full-length character portrait.
+/// The portrait's height always follows the source image's native aspect
+/// ratio at this width -- it is never stretched to a fixed height, since
+/// shorter races (Dwarves, Halflings, Gnomes) have very different portrait
+/// proportions than human-sized ones.
+const PORTRAIT_WIDTH: f32 = 340.0;
+/// Width of the portrait's containing column: [`PORTRAIT_WIDTH`] plus a
+/// small margin for the vertical scrollbar egui reserves when the portrait
+/// is taller than the visible area.
+const PORTRAIT_COLUMN_WIDTH: f32 = PORTRAIT_WIDTH + 10.0;
 /// Color for skill category subheadings.
 const SKILL_CATEGORY_COLOR: egui::Color32 = egui::Color32::from_rgb(180, 220, 180);
 /// Color for the trainable marker on skills.
@@ -220,6 +239,7 @@ fn character_sheet_ui_system(
     game_data: Option<Res<GameDataResource>>,
     content: Option<Res<GameContent>>,
     full_portraits: Option<Res<FullPortraitAssets>>,
+    images: Option<Res<Assets<Image>>>,
 ) {
     let GameMode::CharacterSheet(_) = &global_state.0.mode else {
         return;
@@ -256,10 +276,22 @@ fn character_sheet_ui_system(
 
     // Register the full-portrait handle with egui (idempotent) before calling ctx_mut().
     // add_image() and ctx_mut() both need &mut EguiContexts -- they must be sequential.
-    let full_portrait_id: Option<egui::TextureId> = full_portraits
+    let portrait_handle = full_portraits
         .as_ref()
-        .and_then(|fp| fp.handles_by_name.get(&portrait_key))
-        .map(|h| contexts.add_image(EguiTextureHandle::Weak(h.id())));
+        .and_then(|fp| fp.handles_by_name.get(&portrait_key));
+    let full_portrait_id: Option<egui::TextureId> =
+        portrait_handle.map(|h| contexts.add_image(EguiTextureHandle::Weak(h.id())));
+
+    // Native pixel dimensions of the source portrait image, used to scale the
+    // rendered portrait to a fixed width without distorting its aspect ratio
+    // (full-length portraits for shorter races like Dwarves, Halflings, and
+    // Gnomes have very different proportions than human-sized ones).
+    let portrait_natural_size: Option<(u32, u32)> = portrait_handle.and_then(|h| {
+        images
+            .as_ref()
+            .and_then(|imgs| imgs.get(h))
+            .map(|img| (img.width(), img.height()))
+    });
 
     let ctx = match contexts.ctx_mut() {
         Ok(ctx) => ctx,
@@ -273,13 +305,26 @@ fn character_sheet_ui_system(
     // Window pinned to the screen centre-top and sized to fill most of the
     // available client area so the character sheet can use a true two-column
     // layout instead of forcing scroll into multi-column density.
+    //
+    // `fixed_size` (rather than `default_width`/`default_height` +
+    // `max_width`/`max_height`) is recomputed from the current viewport every
+    // frame and re-applied every frame, so the window tracks both the width
+    // *and* height of the game window as it's resized. `default_*` only seeds
+    // egui's persisted window-size memory the very first time the window is
+    // shown; on every later frame that memory wins over `default_*`; and the
+    // old `max_*` clamp only ever shrinks an oversized persisted value, never
+    // grows an undersized one back up -- which is what made the window follow
+    // the game window's width (coincidentally still under the clamp) but not
+    // its height (already clamped and never re-grown).
+    let window_size = egui::vec2(
+        (screen_w - 40.0).max(640.0).min(screen_w - 20.0),
+        (screen_h - 40.0).max(480.0).min(screen_h - 20.0),
+    );
+
     egui::Window::new("Character Sheet")
         .collapsible(false)
-        .resizable(true)
-        .default_width((screen_w - 40.0).max(640.0))
-        .max_width(screen_w - 20.0)
-        .default_height((screen_h - 40.0).max(480.0))
-        .max_height(screen_h - 20.0)
+        .resizable(false)
+        .fixed_size(window_size)
         .anchor(egui::Align2::CENTER_TOP, [0.0, 20.0])
         .show(ctx, |ui| match current_view {
             CharacterSheetView::Single => {
@@ -294,6 +339,7 @@ fn character_sheet_ui_system(
                         content_db,
                         full_portrait_id,
                         portrait_key: &portrait_key,
+                        portrait_natural_size,
                     },
                 );
             }
@@ -303,11 +349,31 @@ fn character_sheet_ui_system(
         });
 }
 
+/// Computes the render size for the full-length portrait image.
+///
+/// The portrait is always rendered at [`PORTRAIT_WIDTH`] points wide; its
+/// height follows `natural_size`'s source aspect ratio so the image is
+/// resized (up or down) to the target width rather than stretched into a
+/// fixed box. This matters for full-length portraits of shorter races
+/// (Dwarves, Halflings, Gnomes), whose height:width proportions differ a lot
+/// from human-sized ones.
+///
+/// When `natural_size` is `None` (no texture loaded yet) or reports a zero
+/// width, falls back to the placeholder aspect ratio the screen used before
+/// portrait sizing became width-driven (170:280).
+fn portrait_render_size(natural_size: Option<(u32, u32)>) -> egui::Vec2 {
+    match natural_size {
+        Some((w, h)) if w > 0 => egui::vec2(PORTRAIT_WIDTH, PORTRAIT_WIDTH * (h as f32 / w as f32)),
+        _ => egui::vec2(PORTRAIT_WIDTH, PORTRAIT_WIDTH * (280.0 / 170.0)),
+    }
+}
+
 /// Renders the detailed single-character panel.
 ///
 /// Displays the character's full-length portrait (or a deterministic colour
-/// placeholder when no texture is loaded), a two-column layout with the
-/// portrait/identity on the left and the existing stats on the right.
+/// placeholder when no texture is loaded) alone in the left column, scaled
+/// to [`PORTRAIT_WIDTH`] with its native aspect ratio preserved, and the
+/// identity/stats/equipment columns to its right.
 ///
 /// # Parameters
 ///
@@ -336,6 +402,10 @@ struct SingleViewParams<'a> {
     full_portrait_id: Option<egui::TextureId>,
     /// Normalized portrait filename stem for placeholder colour derivation.
     portrait_key: &'a str,
+    /// Native pixel `(width, height)` of the source portrait image, if known.
+    /// Used to scale the rendered portrait to [`PORTRAIT_WIDTH`] wide while
+    /// preserving its original aspect ratio instead of stretching it.
+    portrait_natural_size: Option<(u32, u32)>,
 }
 
 /// Renders the detailed single-character panel from grouped [`SingleViewParams`].
@@ -352,6 +422,7 @@ fn render_single_view(
         content_db,
         full_portrait_id,
         portrait_key,
+        portrait_natural_size,
     } = params;
 
     if party_len == 0 {
@@ -428,59 +499,69 @@ fn render_single_view(
 
     let available = ui.available_size();
     let sep_total = (1.0 + 2.0 * ui.spacing().item_spacing.x) * 2.0;
-    let split_w = ((available.x - 180.0 - sep_total) / 2.0).max(320.0);
+    let split_w = ((available.x - PORTRAIT_COLUMN_WIDTH - sep_total) / 2.0).max(320.0);
+
+    let portrait_size = portrait_render_size(portrait_natural_size);
 
     three_column(
         ui,
-        180.0,
+        PORTRAIT_COLUMN_WIDTH,
         split_w,
         320.0,
-        // -- Left column: portrait + character identity
+        // -- Left column: portrait only, scaled to PORTRAIT_WIDTH with its
+        // native aspect ratio preserved.
         |ui| {
             egui::ScrollArea::vertical()
                 .id_salt("character_sheet_portrait_scroll")
                 .auto_shrink([true, false])
                 .show(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        let portrait_size = egui::vec2(170.0, 280.0);
-
-                        match full_portrait_id {
-                            Some(tid) => {
-                                ui.add(egui::Image::new(egui::load::SizedTexture::new(
-                                    tid,
-                                    portrait_size,
-                                )));
-                            }
-                            None => {
-                                let (portrait_rect, _) =
-                                    ui.allocate_exact_size(portrait_size, egui::Sense::hover());
-                                let bevy_color = get_portrait_color(portrait_key);
-                                let srgba = bevy_color.to_srgba();
-                                let fill_color = egui::Color32::from_rgb(
-                                    (srgba.red * 255.0) as u8,
-                                    (srgba.green * 255.0) as u8,
-                                    (srgba.blue * 255.0) as u8,
-                                );
-                                ui.painter().rect_filled(portrait_rect, 4.0, fill_color);
-
-                                let initials: String = character
-                                    .name
-                                    .split_whitespace()
-                                    .filter_map(|part| part.chars().next())
-                                    .take(2)
-                                    .flat_map(|c| c.to_uppercase())
-                                    .collect();
-                                ui.painter().text(
-                                    portrait_rect.center(),
-                                    egui::Align2::CENTER_CENTER,
-                                    &initials,
-                                    egui::FontId::proportional(48.0),
-                                    egui::Color32::WHITE,
-                                );
-                            }
+                    ui.vertical_centered(|ui| match full_portrait_id {
+                        Some(tid) => {
+                            ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                                tid,
+                                portrait_size,
+                            )));
                         }
+                        None => {
+                            let (portrait_rect, _) =
+                                ui.allocate_exact_size(portrait_size, egui::Sense::hover());
+                            let bevy_color = get_portrait_color(portrait_key);
+                            let srgba = bevy_color.to_srgba();
+                            let fill_color = egui::Color32::from_rgb(
+                                (srgba.red * 255.0) as u8,
+                                (srgba.green * 255.0) as u8,
+                                (srgba.blue * 255.0) as u8,
+                            );
+                            ui.painter().rect_filled(portrait_rect, 4.0, fill_color);
 
-                        ui.add_space(8.0);
+                            let initials: String = character
+                                .name
+                                .split_whitespace()
+                                .filter_map(|part| part.chars().next())
+                                .take(2)
+                                .flat_map(|c| c.to_uppercase())
+                                .collect();
+                            ui.painter().text(
+                                portrait_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                &initials,
+                                egui::FontId::proportional(48.0),
+                                egui::Color32::WHITE,
+                            );
+                        }
+                    });
+                });
+        },
+        // -- Middle column: character identity, stats, conditions, combat,
+        // experience. The identity fields that used to sit under the
+        // portrait now live here so the left column can be dedicated to the
+        // image alone.
+        |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("character_sheet_stats_scroll")
+                .auto_shrink([true, false])
+                .show(ui, |ui| {
+                    ui.vertical(|ui| {
                         ui.colored_label(
                             UI_TITLE_COLOR,
                             egui::RichText::new(&character.name).strong(),
@@ -513,16 +594,8 @@ fn render_single_view(
                             ui.label("Gems:");
                             ui.label(format!("{}", character.gems));
                         });
-                    });
-                });
-        },
-        // -- Middle column: stats, conditions, combat, experience
-        |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("character_sheet_stats_scroll")
-                .auto_shrink([true, false])
-                .show(ui, |ui| {
-                    ui.vertical(|ui| {
+
+                        ui.add_space(8.0);
                         ui.colored_label(UI_TITLE_COLOR, "Core Stats");
                         ui.separator();
                         render_stat_row(
@@ -1154,6 +1227,50 @@ mod tests {
     // ── Pure-logic tests (no Bevy App required) ───────────────────────────────
 
     #[test]
+    fn test_portrait_render_size_is_always_portrait_width_wide() {
+        assert_eq!(portrait_render_size(None).x, PORTRAIT_WIDTH);
+        assert_eq!(portrait_render_size(Some((512, 512))).x, PORTRAIT_WIDTH);
+        assert_eq!(portrait_render_size(Some((64, 900))).x, PORTRAIT_WIDTH);
+        assert_eq!(portrait_render_size(Some((0, 900))).x, PORTRAIT_WIDTH);
+    }
+
+    #[test]
+    fn test_portrait_render_size_preserves_aspect_ratio_for_tall_narrow_source() {
+        // A short/wide race portrait, e.g. a Dwarf or Halfling, is much
+        // narrower relative to its height than a human-proportioned one.
+        // The rendered size must scale height to match, not force a fixed
+        // box that would squash it.
+        let size = portrait_render_size(Some((100, 400)));
+        assert_eq!(size.x, PORTRAIT_WIDTH);
+        assert_eq!(size.y, PORTRAIT_WIDTH * 4.0);
+    }
+
+    #[test]
+    fn test_portrait_render_size_downscales_wider_than_target_source() {
+        // A source image wider than PORTRAIT_WIDTH must be shrunk down to
+        // PORTRAIT_WIDTH, not left at its native width.
+        let size = portrait_render_size(Some((680, 680)));
+        assert_eq!(size.x, PORTRAIT_WIDTH);
+        assert_eq!(size.y, PORTRAIT_WIDTH);
+    }
+
+    #[test]
+    fn test_portrait_render_size_falls_back_to_placeholder_ratio_without_texture() {
+        let size = portrait_render_size(None);
+        assert_eq!(size.x, PORTRAIT_WIDTH);
+        assert_eq!(size.y, PORTRAIT_WIDTH * (280.0 / 170.0));
+    }
+
+    #[test]
+    fn test_portrait_render_size_falls_back_when_natural_width_is_zero() {
+        // A malformed/degenerate source (zero width) must not divide by
+        // zero or produce a non-finite height.
+        let size = portrait_render_size(Some((0, 500)));
+        assert!(size.y.is_finite());
+        assert_eq!(size, portrait_render_size(None));
+    }
+
+    #[test]
     fn test_esc_closes_character_sheet() {
         let mut state = GameState::new();
         state.enter_character_sheet();
@@ -1432,6 +1549,7 @@ mod tests {
                         content_db: None,
                         full_portrait_id: None,
                         portrait_key: "aldric",
+                        portrait_natural_size: None,
                     },
                 );
             });
@@ -1475,6 +1593,7 @@ mod tests {
                         content_db: None,
                         full_portrait_id: None,
                         portrait_key: "mira_windwhisper",
+                        portrait_natural_size: None,
                     },
                 );
                 // Hint bar -- verify it renders without panic
@@ -1625,6 +1744,7 @@ mod tests {
                         content_db: None,
                         full_portrait_id: None,
                         portrait_key: "elara_silverveil",
+                        portrait_natural_size: None,
                     },
                 );
             });
@@ -1686,6 +1806,7 @@ mod tests {
                         content_db: Some(&content_db),
                         full_portrait_id: None,
                         portrait_key: "aldric",
+                        portrait_natural_size: None,
                     },
                 );
             });
@@ -1850,6 +1971,7 @@ mod tests {
                         content_db: None,
                         full_portrait_id: None,
                         portrait_key: "gareth",
+                        portrait_natural_size: None,
                     },
                 );
             });

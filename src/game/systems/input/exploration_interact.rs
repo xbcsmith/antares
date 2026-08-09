@@ -374,6 +374,16 @@ pub fn try_interact_locked_door_event(
     true
 }
 
+/// `(lock_id, name, key_item_id, dialogue_id, items)` extracted from a
+/// `MapEvent::LockedContainer`.
+type LockedContainerInfo = (
+    String,
+    String,
+    Option<ItemId>,
+    Option<DialogueId>,
+    Vec<crate::domain::character::InventorySlot>,
+);
+
 /// Tries to interact with a tile-based locked container event directly ahead.
 ///
 /// Returns `true` when a locked-container event was found and the interaction
@@ -389,27 +399,35 @@ pub fn try_interact_locked_container_event(
     start_dialogue_writer: &mut MessageWriter<StartDialogue>,
     pending_event_context: &mut PendingEventInteractionContext,
 ) -> bool {
-    let locked_container_info: Option<(String, String, Option<ItemId>, Option<DialogueId>)> =
-        game_state
-            .world
-            .get_current_map()
-            .and_then(|m| m.get_event(target))
-            .and_then(|e| {
-                if let MapEvent::LockedContainer {
-                    lock_id,
-                    name,
-                    key_item_id,
-                    dialogue_id,
-                    ..
-                } = e
-                {
-                    Some((lock_id.clone(), name.clone(), *key_item_id, *dialogue_id))
-                } else {
-                    None
-                }
-            });
+    let locked_container_info: Option<LockedContainerInfo> = game_state
+        .world
+        .get_current_map()
+        .and_then(|m| m.get_event(target))
+        .and_then(|e| {
+            if let MapEvent::LockedContainer {
+                lock_id,
+                name,
+                key_item_id,
+                dialogue_id,
+                items,
+                ..
+            } = e
+            {
+                Some((
+                    lock_id.clone(),
+                    name.clone(),
+                    *key_item_id,
+                    *dialogue_id,
+                    items.clone(),
+                ))
+            } else {
+                None
+            }
+        });
 
-    let Some((lock_id, container_name, key_item_id, dialogue_id)) = locked_container_info else {
+    let Some((lock_id, container_name, key_item_id, dialogue_id, container_items)) =
+        locked_container_info
+    else {
         return false;
     };
 
@@ -448,7 +466,7 @@ pub fn try_interact_locked_container_event(
                     id: id.clone(),
                     name: name.clone(),
                     description: String::new(),
-                    items: vec![],
+                    items: container_items.clone(),
                     gold: 0,
                     gems: 0,
                     mesh_id: None,
@@ -461,7 +479,7 @@ pub fn try_interact_locked_container_event(
                 id,
                 name,
                 description: String::new(),
-                items: vec![],
+                items: container_items,
                 gold: 0,
                 gems: 0,
                 mesh_id: None,
@@ -508,7 +526,7 @@ pub fn try_interact_locked_container_event(
                         id: id.clone(),
                         name: name.clone(),
                         description: String::new(),
-                        items: vec![],
+                        items: container_items.clone(),
                         gold: 0,
                         gems: 0,
                         mesh_id: None,
@@ -522,7 +540,7 @@ pub fn try_interact_locked_container_event(
                     id,
                     name: name.clone(),
                     description: String::new(),
-                    items: vec![],
+                    items: container_items,
                     gold: 0,
                     gems: 0,
                     mesh_id: None,
