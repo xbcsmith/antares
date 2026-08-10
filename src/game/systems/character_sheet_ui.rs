@@ -36,15 +36,42 @@
 //! └──────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
+//! # Layout — Party Overview
+//!
+//! A `(cols, rows)` grid of compact per-member cards
+//! ([`party_overview_grid_dimensions`]), fully keyboard-navigable: the
+//! keyboard-selected card (`CharacterSheetState::focused_index`, reused as
+//! the grid highlight) is drawn with a visible highlighted border.
+//!
+//! ```text
+//! ┌──────────────────────────────────────────────────────────────────────┐
+//! │                                              [Single View]  Party ... │
+//! │        [Esc/P] Close  [O] Single  [1-6] Select  [Enter] View  [↑↓←→]  │
+//! ├───────────────────┬───────────────────┬────────────────────────────┤
+//! │  Aldric  (card)    │  Mira    (card)    │  Borin   (card)             │
+//! ├───────────────────┴───────────────────┴────────────────────────────┤
+//! │  Selene  (card, highlighted border)                                   │
+//! └──────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
 //! # Flow
 //!
 //! 1. `P` key → `GameState::enter_character_sheet()` (in
 //!    `input/global_toggles.rs`).
-//! 2. [`character_sheet_input_system`] drives navigation:
-//!    - **Tab** / **→**       — focus next party member (Single view).
-//!    - **Shift+Tab** / **←** — focus previous party member (Single view).
-//!    - **O**                 — toggle between Single and Party Overview.
-//!    - **Esc**               — close and restore previous mode.
+//! 2. [`character_sheet_input_system`] drives navigation. Single view:
+//!    - **Tab** / **→**       — focus next party member.
+//!    - **Shift+Tab** / **←** — focus previous party member.
+//!    - **1–6**               — jump directly to that party member (configurable).
+//!
+//!    Party Overview:
+//!    - **↑ / ↓ / ← / →** — move the highlighted card through the grid,
+//!      wrapping at edges.
+//!    - **Enter** / **Space** — open Single view for the highlighted card.
+//!    - **1–6**               — jump-select a card without leaving Party Overview.
+//!
+//!    Both views:
+//!    - **O**   — toggle between Single and Party Overview.
+//!    - **Esc** — close and restore previous mode.
 //! 3. [`character_sheet_ui_system`] renders the egui panel every frame.
 //! 4. [`character_sheet_cleanup_system`] is a documented no-op: this is a
 //!    pure-egui UI with no Bevy entities to despawn.
@@ -61,6 +88,7 @@ use crate::game::resources::game_data::GameDataResource;
 use crate::game::resources::GlobalState;
 use crate::game::systems::hud::{get_portrait_color, FullPortraitAssets};
 use crate::game::systems::input::{GameAction, InputConfigResource};
+use crate::game::systems::inventory_ui_common::SELECT_HIGHLIGHT_COLOR;
 use crate::game::systems::ui_helpers::{three_column, UI_HINT_COLOR, UI_TITLE_COLOR};
 use crate::sdk::database::ContentDatabase;
 use bevy::prelude::*;
@@ -143,11 +171,23 @@ impl Plugin for CharacterSheetPlugin {
 
 /// Handles keyboard input while in `CharacterSheet` mode.
 ///
-/// - **Esc**           — close and restore previous mode.
-/// - **Tab** (no shift) / **→** — focus next party member (Single view).
-/// - **Shift+Tab** / **←**     — focus previous party member (Single view).
-/// - **O**             — toggle between Single and Party Overview.
-/// - **1–6**           — jump directly to that party member (Single view, configurable).
+/// **Single view:**
+/// - **Esc**                    — close and restore previous mode.
+/// - **Tab** (no shift) / **→** — focus next party member.
+/// - **Shift+Tab** / **←**      — focus previous party member.
+/// - **1–6**                    — jump directly to that party member (configurable).
+///
+/// **Party Overview:**
+/// - **↑ / ↓ / ← / →** — move the highlighted card through the grid, wrapping
+///   at edges (`←`/`→` reuse
+///   [`CharacterSheetState::focus_next`](crate::application::character_sheet_state::CharacterSheetState::focus_next)/`focus_prev`;
+///   `↑`/`↓` use
+///   [`CharacterSheetState::focus_up`](crate::application::character_sheet_state::CharacterSheetState::focus_up)/`focus_down`).
+/// - **Enter** / **Space**      — open Single view for the highlighted card.
+/// - **1–6**                    — jump-select a card without leaving Party Overview.
+///
+/// **Both views:**
+/// - **O**  — toggle between Single and Party Overview.
 pub fn character_sheet_input_system(
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
     input_config: Option<Res<InputConfigResource>>,
@@ -165,45 +205,76 @@ pub fn character_sheet_input_system(
         return;
     }
 
-    // Navigation only makes sense in Single view
+    // Single view uses Tab/Shift+Tab/Left/Right focus stepping; Party Overview
+    // uses full grid navigation (see below). Both branches also share the
+    // unconditional digit-key jump-select at the end of this function.
     let is_single = if let GameMode::CharacterSheet(ref cs) = global_state.0.mode {
         cs.view == CharacterSheetView::Single
     } else {
-        false
-    };
-    if !is_single {
         return;
-    }
+    };
 
     // Read party_size before any mutable mode borrows
     let party_size = global_state.0.party.members.len();
 
     let shift_held = kb.pressed(KeyCode::ShiftLeft) || kb.pressed(KeyCode::ShiftRight);
 
-    // ── Tab / Shift-Tab ──────────────────────────────────────────────────────
-    if kb.just_pressed(KeyCode::Tab) {
-        if shift_held {
+    if is_single {
+        // ── Tab / Shift-Tab ──────────────────────────────────────────────────
+        if kb.just_pressed(KeyCode::Tab) {
+            if shift_held {
+                if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                    cs.focus_prev(party_size);
+                }
+            } else if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                cs.focus_next(party_size);
+            }
+            return;
+        }
+
+        // ── Arrow keys ───────────────────────────────────────────────────────
+        if kb.just_pressed(KeyCode::ArrowRight) {
+            if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                cs.focus_next(party_size);
+            }
+        } else if kb.just_pressed(KeyCode::ArrowLeft) {
             if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
                 cs.focus_prev(party_size);
             }
-        } else if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
-            cs.focus_next(party_size);
         }
-        return;
-    }
-
-    // ── Arrow keys ───────────────────────────────────────────────────────────
-    if kb.just_pressed(KeyCode::ArrowRight) {
-        if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
-            cs.focus_next(party_size);
-        }
-    } else if kb.just_pressed(KeyCode::ArrowLeft) {
-        if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
-            cs.focus_prev(party_size);
+    } else {
+        // ── Party Overview: grid navigation ─────────────────────────────────
+        let (cols, _rows) = party_overview_grid_dimensions(party_size);
+        if kb.just_pressed(KeyCode::ArrowRight) {
+            if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                cs.focus_next(party_size);
+            }
+        } else if kb.just_pressed(KeyCode::ArrowLeft) {
+            if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                cs.focus_prev(party_size);
+            }
+        } else if kb.just_pressed(KeyCode::ArrowDown) {
+            if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                cs.focus_down(party_size, cols);
+            }
+        } else if kb.just_pressed(KeyCode::ArrowUp) {
+            if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                cs.focus_up(party_size, cols);
+            }
+        } else if kb.just_pressed(KeyCode::Enter)
+            || kb.just_pressed(KeyCode::NumpadEnter)
+            || kb.just_pressed(KeyCode::Space)
+        {
+            if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                cs.view = CharacterSheetView::Single;
+            }
+            return;
         }
     }
 
     // ── Digit keys (1–6): configurable character select while sheet is open ──
+    // Works in both views. Only jump-selects `focused_index`; never changes
+    // `cs.view` (unlike Enter/Space/card click, which also switch to Single).
     if let Some(ref icr) = input_config {
         for i in 0..6_usize {
             if icr
@@ -344,7 +415,7 @@ fn character_sheet_ui_system(
                 );
             }
             CharacterSheetView::PartyOverview => {
-                render_party_overview(ui, &mut global_state, party_len);
+                render_party_overview(ui, &mut global_state, party_len, focused_index);
             }
         });
 }
@@ -1023,9 +1094,15 @@ fn party_overview_grid_dimensions(party_len: usize) -> (usize, usize) {
 }
 
 /// Renders one compact party-overview character card.
+///
+/// `highlighted` marks the card as the current keyboard-selected grid cell
+/// (`CharacterSheetState::focused_index` while in Party Overview): it draws
+/// with [`SELECT_HIGHLIGHT_COLOR`] instead of the default border, giving a
+/// non-mouse user visible feedback for where grid navigation currently is.
 fn render_party_overview_card(
     ui: &mut egui::Ui,
     character: &crate::domain::character::Character,
+    highlighted: bool,
 ) -> bool {
     let hp_frac = if character.hp.base > 0 {
         character.hp.current as f32 / character.hp.base as f32
@@ -1040,9 +1117,15 @@ fn render_party_overview_card(
         egui::Color32::from_rgb(60, 200, 60)
     };
 
+    let border_stroke = if highlighted {
+        egui::Stroke::new(2.0_f32, SELECT_HIGHLIGHT_COLOR)
+    } else {
+        egui::Stroke::new(1.0_f32, egui::Color32::DARK_GRAY)
+    };
+
     egui::Frame::default()
         .inner_margin(egui::Margin::same(8))
-        .stroke(egui::Stroke::new(1.0_f32, egui::Color32::DARK_GRAY))
+        .stroke(border_stroke)
         .show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             ui.vertical(|ui| {
@@ -1109,7 +1192,16 @@ fn render_party_overview_card(
 }
 
 /// Renders the compact party overview as an all-member card grid.
-fn render_party_overview(ui: &mut egui::Ui, global_state: &mut GlobalState, party_len: usize) {
+///
+/// `focused_index` is `CharacterSheetState::focused_index`, reused as the
+/// keyboard grid-navigation highlight in this view -- see
+/// [`render_party_overview_card`]'s `highlighted` parameter.
+fn render_party_overview(
+    ui: &mut egui::Ui,
+    global_state: &mut GlobalState,
+    party_len: usize,
+    focused_index: usize,
+) {
     if party_len == 0 {
         ui.colored_label(STAT_EMPTY_COLOR, "No party members.");
         return;
@@ -1137,6 +1229,22 @@ fn render_party_overview(ui: &mut egui::Ui, global_state: &mut GlobalState, part
             );
         });
     });
+
+    // -- Hint line: keyboard shortcuts only, mirrors the Single-view hint row.
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.colored_label(UI_HINT_COLOR, "[Esc/P] Close");
+            ui.separator();
+            ui.colored_label(UI_HINT_COLOR, "[O] Single");
+            ui.separator();
+            ui.colored_label(UI_HINT_COLOR, "[1-6] Select");
+            ui.separator();
+            ui.colored_label(UI_HINT_COLOR, "[Enter] View");
+            ui.separator();
+            ui.colored_label(UI_HINT_COLOR, "[\u{2191}\u{2193}\u{2190}\u{2192}] Move");
+        });
+    });
+
     ui.separator();
 
     // Clone the whole active party, not just the focused member. The overview
@@ -1172,7 +1280,11 @@ fn render_party_overview(ui: &mut egui::Ui, global_state: &mut GlobalState, part
                             if let Some(character) = members.get(idx) {
                                 ui.push_id(idx, |ui| {
                                     ui.allocate_ui(egui::vec2(card_w, card_h), |ui| {
-                                        if render_party_overview_card(ui, character) {
+                                        if render_party_overview_card(
+                                            ui,
+                                            character,
+                                            idx == focused_index,
+                                        ) {
                                             pending_focus = Some(idx);
                                         }
                                     });
@@ -1394,7 +1506,7 @@ mod tests {
         let ctx = egui::Context::default();
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                render_party_overview(ui, &mut gs, 4);
+                render_party_overview(ui, &mut gs, 4, 2);
             });
         });
 
@@ -1440,8 +1552,8 @@ mod tests {
         let ctx = egui::Context::default();
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                render_party_overview_card(ui, &plain);
-                render_party_overview_card(ui, &poisoned);
+                render_party_overview_card(ui, &plain, false);
+                render_party_overview_card(ui, &poisoned, true);
             });
         });
         // No panic across both an empty-conditions and a conditioned
@@ -1508,6 +1620,146 @@ mod tests {
             assert_eq!(cs.focused_index, 2);
         } else {
             panic!("expected CharacterSheet mode");
+        }
+    }
+
+    // ── Party Overview keyboard navigation (real App-harness tests) ─────────
+    //
+    // Unlike the inline-simulation tests above, these actually run
+    // `character_sheet_input_system` through `App::update()` -- the pattern
+    // used by `skill_training_ui.rs`'s `test_skill_training_escape_key_exits_mode`.
+
+    /// Builds a minimal `App` with a party of `party_size` members in
+    /// `PartyOverview` view at `focused_index`, presses `key` for one frame,
+    /// runs `character_sheet_input_system`, and returns the resulting
+    /// `(focused_index, view)`.
+    fn run_party_overview_key_press(
+        party_size: usize,
+        focused_index: usize,
+        key: KeyCode,
+    ) -> (usize, CharacterSheetView) {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_systems(Update, character_sheet_input_system);
+
+        let mut state = GameState::new();
+        for i in 0..party_size {
+            let hero = Character::new(
+                format!("Member{i}"),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            state.party.add_member(hero).unwrap();
+        }
+        state.enter_character_sheet();
+        if let GameMode::CharacterSheet(ref mut cs) = state.mode {
+            cs.view = CharacterSheetView::PartyOverview;
+            cs.focused_index = focused_index;
+        }
+        app.insert_resource(GlobalState(state));
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(key);
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        if let GameMode::CharacterSheet(ref cs) = gs.0.mode {
+            (cs.focused_index, cs.view.clone())
+        } else {
+            panic!("expected CharacterSheet mode after update");
+        }
+    }
+
+    #[test]
+    fn test_character_sheet_input_party_overview_arrow_keys_move_focused_index() {
+        // 4-member party -> (cols, rows) = (3, 2) via party_overview_grid_dimensions.
+        // Right: focus_next wrap.
+        let (idx, view) = run_party_overview_key_press(4, 0, KeyCode::ArrowRight);
+        assert_eq!(idx, 1);
+        assert_eq!(view, CharacterSheetView::PartyOverview);
+
+        // Left: focus_prev wrap.
+        let (idx, _) = run_party_overview_key_press(4, 0, KeyCode::ArrowLeft);
+        assert_eq!(idx, 3);
+
+        // Down: row0,col0 -> row1,col0 (idx 3, which exists).
+        let (idx, _) = run_party_overview_key_press(4, 0, KeyCode::ArrowDown);
+        assert_eq!(idx, 3);
+
+        // Up: row1,col0 (idx 3) -> row0,col0 (idx 0).
+        let (idx, _) = run_party_overview_key_press(4, 3, KeyCode::ArrowUp);
+        assert_eq!(idx, 0);
+    }
+
+    #[test]
+    fn test_character_sheet_input_party_overview_enter_switches_to_single_view() {
+        let (idx, view) = run_party_overview_key_press(3, 1, KeyCode::Enter);
+        assert_eq!(idx, 1, "Enter must not change the highlighted index");
+        assert_eq!(view, CharacterSheetView::Single);
+    }
+
+    #[test]
+    fn test_character_sheet_input_party_overview_space_switches_to_single_view() {
+        let (idx, view) = run_party_overview_key_press(3, 2, KeyCode::Space);
+        assert_eq!(idx, 2, "Space must not change the highlighted index");
+        assert_eq!(view, CharacterSheetView::Single);
+    }
+
+    #[test]
+    fn test_character_sheet_input_party_overview_digit_key_selects_without_switching_view() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::sdk::game_config::ControlsConfig;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        let config = ControlsConfig::default();
+        let key_map = crate::game::systems::input::KeyMap::from_controls_config(&config);
+        app.insert_resource(InputConfigResource {
+            controls: config,
+            key_map,
+        });
+        app.add_systems(Update, character_sheet_input_system);
+
+        let mut state = GameState::new();
+        for name in ["Alpha", "Beta", "Gamma"] {
+            let hero = Character::new(
+                name.to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            state.party.add_member(hero).unwrap();
+        }
+        state.enter_character_sheet();
+        if let GameMode::CharacterSheet(ref mut cs) = state.mode {
+            cs.view = CharacterSheetView::PartyOverview;
+        }
+        app.insert_resource(GlobalState(state));
+
+        // Default config: "3" is bound to SelectCharacter(2).
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Digit3);
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        if let GameMode::CharacterSheet(ref cs) = gs.0.mode {
+            assert_eq!(cs.focused_index, 2);
+            assert_eq!(
+                cs.view,
+                CharacterSheetView::PartyOverview,
+                "digit-key select must not switch view away from PartyOverview"
+            );
+        } else {
+            panic!("expected CharacterSheet mode after update");
         }
     }
     /// Verifies `render_single_view` does not panic when no full-portrait

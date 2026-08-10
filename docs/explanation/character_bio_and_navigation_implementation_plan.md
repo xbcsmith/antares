@@ -166,12 +166,12 @@ non-mouse user); `render_party_overview` passes
 
 #### 1.5 Deliverables
 
-- [ ] Arrow-key grid navigation in Party Overview
-- [ ] Enter/Space opens Single view for the highlighted card
-- [ ] Digit keys 1-6 work in both views
-- [ ] Visible highlight on the keyboard-selected card
-- [ ] Updated hint bar for Party Overview (`[↑↓←→] Move  [Enter] View  [1-6] Select  [O] Single  [Esc/P] Close`)
-- [ ] Module doc comment (`character_sheet_ui.rs:21-51`) updated to match
+- [x] Arrow-key grid navigation in Party Overview
+- [x] Enter/Space opens Single view for the highlighted card
+- [x] Digit keys 1-6 work in both views
+- [x] Visible highlight on the keyboard-selected card
+- [x] Updated hint bar for Party Overview (`[↑↓←→] Move  [Enter] View  [1-6] Select  [O] Single  [Esc/P] Close`)
+- [x] Module doc comment (`character_sheet_ui.rs:21-51`) updated to match
 
 #### 1.6 Success Criteria
 

@@ -1,3 +1,61 @@
+## Character Bio & Navigation, Phase 1: Party Overview Keyboard Navigation
+
+### Summary
+
+Implemented Phase 1 of
+`docs/explanation/character_bio_and_navigation_implementation_plan.md`: full
+keyboard navigation for the Character Sheet's Party Overview grid, which
+previously had no keyboard support at all (`character_sheet_input_system`
+early-returned unless `view == Single`). Party Overview now supports arrow-key
+grid movement, Enter/Space to open Single view, digit-key jump-select in both
+views, a visible highlight on the keyboard-selected card, and an updated hint
+bar. `CharacterSheetState.focused_index` is reused as the Party Overview
+highlight index -- no new state field was introduced.
+
+### Files modified
+
+**`src/application/character_sheet_state.rs`**
+- Added `focus_up(&mut self, party_size: usize, cols: usize)` and
+  `focus_down(&mut self, party_size: usize, cols: usize)` -- row-step grid
+  navigation with wrapping, alongside the existing `focus_next`/`focus_prev`.
+  Handles the ragged-last-row case (party size not evenly divisible by `cols`)
+  and the single-row degenerate case (`focus_down` wraps to itself).
+- 7 new unit tests covering normal movement, top/bottom wrap, empty-party
+  no-op, the ragged-row case, and the single-row no-op.
+
+**`src/game/systems/character_sheet_ui.rs`**
+- `character_sheet_input_system`: restructured the `is_single` early-return
+  into an `if is_single {...} else {...}` branch. The Party Overview branch
+  handles `↑↓←→` (reusing `focus_next`/`focus_prev` for `←→`, new
+  `focus_up`/`focus_down` for `↑↓`) and `Enter`/`NumpadEnter`/`Space` (opens
+  Single view for the highlighted card). The digit-key (1-6) select loop now
+  runs unconditionally after the branch, so it works in both views; it only
+  changes `focused_index`, never `view`.
+- `render_party_overview_card` gained a `highlighted: bool` param; when set,
+  draws the card's border with the existing
+  `inventory_ui_common::SELECT_HIGHLIGHT_COLOR` (reused, no new color
+  constant) instead of the default grey stroke.
+- `render_party_overview` gained a `focused_index: usize` param (threaded from
+  `character_sheet_ui_system`, which already had it) to compute the
+  highlighted card, plus a new hint-bar row matching the Single-view style:
+  `[Esc/P] Close  [O] Single  [1-6] Select  [Enter] View  [↑↓←→] Move`.
+- Module doc comment (ASCII diagram + Flow section) updated to document the
+  Party Overview keyboard vocabulary alongside the existing Single-view one.
+- 5 new real `App`-harness tests (following the `skill_training_ui.rs`
+  `App::new()` + `MinimalPlugins` + `app.update()` pattern, which actually
+  runs `character_sheet_input_system` rather than simulating its logic
+  inline) covering arrow-key movement, Enter/Space view-switch, and
+  digit-key select without a view change.
+
+### Quality gates (full workspace)
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --all-features` — **5482/5482 passed**, 8 skipped
+
+---
+
 ## Phase 5: Documentation and Final Verification
 
 ### Summary

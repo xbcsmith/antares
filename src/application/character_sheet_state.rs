@@ -214,6 +214,119 @@ impl CharacterSheetState {
         }
     }
 
+    /// Move grid focus up one row in the Party Overview card grid, wrapping
+    /// to the bottom row.
+    ///
+    /// `focused_index` is reused as the grid highlight index: for a grid of
+    /// `cols` columns, `row = focused_index / cols` and
+    /// `col = focused_index % cols`. This is a no-op when `party_size == 0`
+    /// or `cols == 0`.
+    ///
+    /// Callers must always pass `cols <= party_size`; the only current
+    /// caller derives `cols` from `party_size.min(3)`. This precondition is
+    /// documented rather than defensively checked beyond the
+    /// `party_size == 0` / `cols == 0` no-op guards.
+    ///
+    /// If the row above is a ragged last row that is shorter than `col`
+    /// (i.e. wrapping from the top row to a bottom row that doesn't have a
+    /// member at `col`), focus falls back to the last valid party member
+    /// (`party_size - 1`) instead of landing past the end of the party.
+    ///
+    /// # Arguments
+    ///
+    /// * `party_size` – Number of members currently in the party (`1..=PARTY_MAX_SIZE`).
+    /// * `cols` – Number of columns in the card grid (`1..=party_size`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::character_sheet_state::CharacterSheetState;
+    /// use antares::application::GameMode;
+    ///
+    /// let mut state = CharacterSheetState::new(GameMode::Exploration);
+    /// state.focused_index = 4; // row 1, col 1 in a 3-column grid
+    /// state.focus_up(6, 3);
+    /// assert_eq!(state.focused_index, 1); // row 0, col 1
+    ///
+    /// state.focus_up(6, 3); // wraps from the top row to the bottom row
+    /// assert_eq!(state.focused_index, 4);
+    /// ```
+    pub fn focus_up(&mut self, party_size: usize, cols: usize) {
+        if party_size == 0 || cols == 0 {
+            return;
+        }
+        let row = self.focused_index / cols;
+        let col = self.focused_index % cols;
+        let rows = party_size.div_ceil(cols);
+        if row == 0 {
+            let candidate = (rows - 1) * cols + col;
+            self.focused_index = if candidate < party_size {
+                candidate
+            } else {
+                party_size - 1
+            };
+        } else {
+            self.focused_index = (row - 1) * cols + col;
+        }
+    }
+
+    /// Move grid focus down one row in the Party Overview card grid,
+    /// wrapping to the top row.
+    ///
+    /// `focused_index` is reused as the grid highlight index: for a grid of
+    /// `cols` columns, `row = focused_index / cols` and
+    /// `col = focused_index % cols`. This is a no-op when `party_size == 0`
+    /// or `cols == 0`.
+    ///
+    /// Callers must always pass `cols <= party_size`; the only current
+    /// caller derives `cols` from `party_size.min(3)`. This precondition is
+    /// documented rather than defensively checked beyond the
+    /// `party_size == 0` / `cols == 0` no-op guards.
+    ///
+    /// If the row below is a ragged last row that doesn't have a member at
+    /// `col`, focus wraps to the top row at `col` instead. When the grid has
+    /// only one row (`rows == 1`), the bottom-row check is always true and
+    /// `col == focused_index` already, so this deliberately wraps to
+    /// itself — a true no-op, not a bug.
+    ///
+    /// # Arguments
+    ///
+    /// * `party_size` – Number of members currently in the party (`1..=PARTY_MAX_SIZE`).
+    /// * `cols` – Number of columns in the card grid (`1..=party_size`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::character_sheet_state::CharacterSheetState;
+    /// use antares::application::GameMode;
+    ///
+    /// let mut state = CharacterSheetState::new(GameMode::Exploration);
+    /// state.focused_index = 1; // row 0, col 1 in a 3-column grid
+    /// state.focus_down(6, 3);
+    /// assert_eq!(state.focused_index, 4); // row 1, col 1
+    ///
+    /// state.focus_down(6, 3); // wraps from the bottom row to the top row
+    /// assert_eq!(state.focused_index, 1);
+    /// ```
+    pub fn focus_down(&mut self, party_size: usize, cols: usize) {
+        if party_size == 0 || cols == 0 {
+            return;
+        }
+        let row = self.focused_index / cols;
+        let col = self.focused_index % cols;
+        let rows = party_size.div_ceil(cols);
+        if row == rows - 1 {
+            self.focused_index = col;
+        } else {
+            let candidate = (row + 1) * cols + col;
+            self.focused_index = if candidate < party_size {
+                candidate
+            } else {
+                col
+            };
+        }
+    }
+
     /// Toggle between `Single` and `PartyOverview` view layouts.
     ///
     /// Flips `Single → PartyOverview` or `PartyOverview → Single` each call.
@@ -331,6 +444,92 @@ mod tests {
         state.focused_index = 0;
         state.focus_prev(0);
         assert_eq!(state.focused_index, 0);
+    }
+
+    // ── focus_up / focus_down ────────────────────────────────────────────────
+
+    #[test]
+    fn test_focus_up_moves_one_row_up() {
+        let mut state = CharacterSheetState::new(GameMode::Exploration);
+        state.focused_index = 4; // row 1, col 1
+        state.focus_up(6, 3);
+        assert_eq!(state.focused_index, 1); // row 0, col 1
+    }
+
+    #[test]
+    fn test_focus_up_wraps_from_top_row() {
+        let mut state = CharacterSheetState::new(GameMode::Exploration);
+        state.focused_index = 1; // row 0, col 1
+        state.focus_up(6, 3);
+        assert_eq!(state.focused_index, 4); // row 1 (bottom), col 1
+    }
+
+    #[test]
+    fn test_focus_down_moves_one_row_down() {
+        let mut state = CharacterSheetState::new(GameMode::Exploration);
+        state.focused_index = 1; // row 0, col 1
+        state.focus_down(6, 3);
+        assert_eq!(state.focused_index, 4); // row 1, col 1
+    }
+
+    #[test]
+    fn test_focus_down_wraps_from_bottom_row() {
+        let mut state = CharacterSheetState::new(GameMode::Exploration);
+        state.focused_index = 4; // row 1 (bottom), col 1
+        state.focus_down(6, 3);
+        assert_eq!(state.focused_index, 1); // row 0, col 1
+    }
+
+    #[test]
+    fn test_focus_up_down_noop_on_empty_party() {
+        let mut state = CharacterSheetState::new(GameMode::Exploration);
+        state.focused_index = 0;
+        state.focus_up(0, 3);
+        assert_eq!(state.focused_index, 0);
+        state.focus_down(0, 3);
+        assert_eq!(state.focused_index, 0);
+
+        // cols == 0 with party_size > 0 is also a no-op.
+        state.focused_index = 2;
+        state.focus_up(6, 0);
+        assert_eq!(state.focused_index, 2);
+        state.focus_down(6, 0);
+        assert_eq!(state.focused_index, 2);
+    }
+
+    #[test]
+    fn test_focus_up_down_ragged_last_row() {
+        // party_size = 4, cols = 3 -> rows = 2; row 1 only has col 0 (index 3).
+        let mut state = CharacterSheetState::new(GameMode::Exploration);
+
+        // From row 0, col 1 (index 1), focus_down: candidate row1,col1 = index
+        // 4 doesn't exist (>= party_size), so it wraps to col = 1.
+        state.focused_index = 1;
+        state.focus_down(4, 3);
+        assert_eq!(state.focused_index, 1);
+
+        // From row 0, col 0 (index 0), focus_down moves to row 1, col 0 =
+        // index 3, which does exist.
+        state.focused_index = 0;
+        state.focus_down(4, 3);
+        assert_eq!(state.focused_index, 3);
+
+        // From row 1, col 0 (index 3), focus_up moves back to row 0, col 0.
+        state.focused_index = 3;
+        state.focus_up(4, 3);
+        assert_eq!(state.focused_index, 0);
+    }
+
+    #[test]
+    fn test_focus_down_single_row_is_noop() {
+        // party_size = 3, cols = 3 -> rows = 1; every index is already in
+        // the only row, so focus_down deliberately wraps to itself.
+        let mut state = CharacterSheetState::new(GameMode::Exploration);
+        for idx in 0..3 {
+            state.focused_index = idx;
+            state.focus_down(3, 3);
+            assert_eq!(state.focused_index, idx);
+        }
     }
 
     // ── toggle_view ──────────────────────────────────────────────────────────
