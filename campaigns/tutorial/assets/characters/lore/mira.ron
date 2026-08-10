@@ -1,0 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+(
+    backstory: "Mira has served the local temple since she was old enough to carry a water basin between the sickbeds of the infirmary. She was an orphan taken in by the priests, and the kindness shown to her in those early years became the pattern for the rest of her life — she resolved, long before she could cast a single healing prayer, that she would spend her days easing the suffering of others the way hers had once been eased.\n\nHer gift for divine magic surfaced quietly rather than dramatically. There was no vision, no sudden calling, only steady years of prayer and study until the temple\'s elders recognized that wounds seemed to close faster and fevers broke sooner whenever Mira sat with the afflicted. She was formally inducted into the clergy not for grand deeds but for the simple, accumulated weight of a hundred small mercies.\n\nShe does not seek adventure for its own sake and has no taste for combat, but she has come to understand that the injuries she is best suited to heal are often found far from the temple\'s walls — on roads beset by bandits, in ruins where careless adventurers stumble into danger. Mira travels reluctantly into peril, not because she craves it, but because someone must be there to mend what battle breaks.",
+    profile: (
+        title: "The Gentle Light",
+        archetype: "Devoted Healer",
+        core_motivation: "To ease suffering wherever it is found, as she was once eased herself",
+        combat_style: "Support-focused divine magic; heals and protects from behind the front line",
+    ),
+)

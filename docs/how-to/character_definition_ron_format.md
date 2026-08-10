@@ -175,6 +175,7 @@ hp_override: Some((base: 50, current: 30)),  // Wounded: 30/50 HP
 | `starting_items` | Vec<ItemId> | `[]` | Item IDs from `items.ron` (inventory) |
 | `starting_equipment` | Equipment | empty | Equipped items (see below) |
 | `description` | String | `""` | Character backstory/description |
+| `lore_file` | Option<String> | None | Path (relative to campaign root) to an external RON file with long-form backstory/profile content |
 | `is_premade` | bool | false | True for pre-made characters, false for templates |
 | `starts_in_party` | bool | false | True if character joins starting party |
 

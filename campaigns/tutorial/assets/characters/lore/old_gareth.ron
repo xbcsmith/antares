@@ -1,0 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+(
+    backstory: "Long before he was the dwarf who keeps the town\'s forge running, Gareth was a name spoken with some respect in adventuring circles — a stout warrior who had cleared his share of goblin warrens and stood his ground in fights younger fighters still tell exaggerated versions of. He carries the dents and scars of that life honestly, and the townsfolk who know him only as the smith rarely guess how many of his old wounds came from something sharper than a hammer slipping.\n\nHe hung up his adventuring gear for reasons he does not discuss freely — a mission that cost him companions he could not save, and a tiredness in his bones that no amount of dwarven stubbornness could argue away. The smithy gave him a quieter purpose: shaping honest steel for honest folk, close enough to the road that he can still hear when trouble is stirring, far enough from it that he told himself he was done answering that call.\n\nBut old habits and older debts have a way of catching up with a man, even a dwarf who thought his fighting days were behind him. When a cause proves worthy enough — and few things move Old Gareth besides genuine need — he will set down the hammer, take up shield and blade once more, and remind whoever is watching exactly why his name once meant something on a battlefield.",
+    profile: (
+        title: "The Smith of Old Wars",
+        archetype: "Reluctant Veteran",
+        core_motivation: "To answer one more worthy cause before his fighting days are truly over",
+        combat_style: "Defensive, seasoned melee; heavy armor, shield discipline, and hard-earned patience",
+    ),
+)

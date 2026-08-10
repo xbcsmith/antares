@@ -1,0 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+(
+    backstory: "Zhaya was raised within a secluded monastic order that reads meaning in the turning of the stars, trained from childhood in the disciplined, unarmed forms her people have practiced for generations. She excelled at every trial her teachers set before her — breath control, stillness, the long meditations meant to align body and will — yet found herself increasingly troubled by a single unanswered question the order\'s teachings kept circling without ever resolving: the promised arrival of the one true Astrologer, a figure prophesied to read the final pattern in the heavens and reveal what it means for all who walk beneath them.\n\nHer masters counseled patience, insisting the answer would come to the order in its own time, as it always had. Zhaya could not accept waiting for a truth she felt compelled to seek out directly. After years of training that left her more than capable of surviving beyond the monastery\'s walls, she asked leave to go looking for the Astrologer herself, and when her elders would not grant it, she left anyway.\n\nShe has been wandering ever since, following rumors of stargazers, oracles, and forgotten observatories, testing each lead against the discipline drilled into her since childhood. She does not know if she will find what she is looking for, only that she could not remain still while the question went unanswered. Her training keeps her calm in danger and precise in a fight, but it is her restlessness, not her order, that now guides her path.",
+    profile: (
+        title: "Seeker of the True Star",
+        archetype: "Wandering Ascetic",
+        core_motivation: "To find the prophesied one true Astrologer and learn what the stars foretell",
+        combat_style: "Disciplined unarmed martial arts, evasive footwork, and precise counterstrikes",
+    ),
+)

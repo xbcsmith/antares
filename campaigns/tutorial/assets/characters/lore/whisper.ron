@@ -1,0 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+(
+    backstory: "Whisper introduces herself as a locksmith, and in a narrow, technical sense this is even true — there are very few locks she has met that stayed shut once she decided otherwise. What she declines to mention is which side of the transaction she was usually on when that skill was first sharpened, or why she left the city where she learned it in something of a hurry.\n\nHer past among the rooftops and back alleys of a larger elven settlement taught her more than lockpicking. She reads a room\'s exits before its conversation, disarms a trap the way other people shake hands, and has an instinct for when a job has gone from profitable to dangerous that has kept her alive longer than several former associates who lacked it. She rarely speaks of that life directly, preferring wry deflection to confession, though the occasional old contact still recognizes her on sight — usually with more alarm than warmth.\n\nWhat drew her toward honest company and open roads is a question she has not fully answered even to herself, though it likely has something to do with wanting to be more than the sum of what she took. She has not entirely left her old habits behind, and probably never will, but these days she is at least choosier about which locks deserve opening.",
+    profile: (
+        title: "The Silver-Fingered",
+        archetype: "Unreformed Rogue",
+        core_motivation: "To stay a step ahead of her past while deciding what she wants to become instead",
+        combat_style: "Stealth, traps, and quick opportunistic strikes; avoids prolonged direct confrontation",
+    ),
+)

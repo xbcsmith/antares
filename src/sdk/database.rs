@@ -909,9 +909,9 @@ impl ContentDatabase {
             ConditionDatabase::new()
         };
 
-        // Load characters
+        // Load characters, resolving each character's optional lore_file.
         let characters = if data_dir.join("characters.ron").exists() {
-            CharacterDatabase::load_from_file(data_dir.join("characters.ron"))
+            CharacterDatabase::load_from_campaign(&data_dir, campaign_path)
                 .map_err(|e| DatabaseError::CharacterLoadError(e.to_string()))?
         } else {
             CharacterDatabase::new()
@@ -1144,9 +1144,11 @@ impl ContentDatabase {
             ConditionDatabase::new()
         };
 
-        // Load characters
+        // Load characters, resolving each character's optional lore_file.
+        // asset_root is the campaign root (data_path's parent), matching how
+        // it's already used to resolve creature/landscape/furniture assets below.
         let characters = if data_path.join("characters.ron").exists() {
-            CharacterDatabase::load_from_file(data_path.join("characters.ron"))
+            CharacterDatabase::load_from_campaign(data_path, asset_root)
                 .map_err(|e| DatabaseError::CharacterLoadError(e.to_string()))?
         } else {
             CharacterDatabase::new()

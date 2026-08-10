@@ -63,6 +63,7 @@
         is_premade: true,
         starts_in_party: true,
         creature_id: Some(1013),
+        lore_file: Some("assets/characters/lore/kira.ron"),
     ),
     (
         id: "tutorial_elf_sorcerer",
@@ -127,6 +128,7 @@
         description: "A relentless elven mage who delights in using the arcane arts against others. Sirius is perfect for players who want to learn how spellcasting works.",
         is_premade: true,
         starts_in_party: true,
+        lore_file: Some("assets/characters/lore/sirius.ron"),
         starting_spells: [
             1027,
             1025,
@@ -196,6 +198,7 @@
         is_premade: true,
         starts_in_party: false,
         creature_id: Some(1019),
+        lore_file: Some("assets/characters/lore/isolde.ron"),
         starting_spells: [
             261,
             258,
@@ -265,6 +268,7 @@
         is_premade: true,
         starts_in_party: false,
         creature_id: Some(1014),
+        lore_file: Some("assets/characters/lore/mira.ron"),
         starting_spells: [
             261,
             258,
@@ -332,6 +336,7 @@
         is_premade: true,
         starts_in_party: false,
         creature_id: Some(1012),
+        lore_file: Some("assets/characters/lore/old_gareth.ron"),
     ),
     (
         id: "whisper",
@@ -397,6 +402,7 @@
         is_premade: true,
         starts_in_party: false,
         creature_id: Some(1011),
+        lore_file: Some("assets/characters/lore/whisper.ron"),
     ),
     (
         id: "apprentice_zara",
@@ -463,6 +469,7 @@
         is_premade: true,
         starts_in_party: false,
         creature_id: Some(1020),
+        lore_file: Some("assets/characters/lore/apprentice_zara.ron"),
         starting_spells: [
             1027,
             257,
@@ -704,5 +711,6 @@
         is_premade: true,
         starts_in_party: false,
         creature_id: Some(1015),
+        lore_file: Some("assets/characters/lore/zhaya.ron"),
     ),
 ]

@@ -1,0 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+(
+    backstory: "Zara joined the Mage\'s Guild younger than most gnomes are permitted to, having pestered the enrolling masters with enough demonstrated aptitude and sheer persistence that they relented ahead of schedule. She has approached her studies ever since with the same combination of enthusiasm and impatience — devouring every scroll and lecture she can reach, occasionally to the frustration of tutors who would prefer she master the basics before attempting the spectacular.\n\nHer mentor, a well-traveled battle-mage assigned to oversee her practical training, brought her out from the Guild\'s halls to learn spellcraft the way it is actually used: under pressure, in unfamiliar places, against real danger rather than practice dummies. It was during one such expedition that the two became separated amid confusion Zara still does not fully understand, leaving her alone in unfamiliar country with her spellbook, her nerve, and considerably more theory than field experience.\n\nRather than wait idly for rescue, Zara has resolved to treat the situation as an unplanned but valid continuation of her studies — find her mentor, prove she can handle herself in the meantime, and return to the Guild with a tale worth telling instead of one worth pitying. She is earnest to a fault, quick to volunteer her magic for any task, and only occasionally over her depth.",
+    profile: (
+        title: "The Guild's Lost Apprentice",
+        archetype: "Earnest Student",
+        core_motivation: "To reunite with her mentor and prove herself capable in the field",
+        combat_style: "Eager but still-developing spellcasting; leans on prepared cantrips and support magic",
+    ),
+)

@@ -1,0 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+(
+    backstory: "Kira was raised on the edge of the tutorial lands, the daughter of a militia sergeant who taught her to hold a shield before she could properly hold a spoon. She grew up watching caravans pass through on the road south, listening to the guards\' stories of monsters in the hills and ruins beneath the old watchtowers, and decided early on that she would rather live those stories than simply hear them told at the hearth.\n\nHer training was unglamorous but thorough. Years of drills in the village square, blunted blades and bruised knuckles, taught her the fundamentals other knights sometimes skip past in their hurry toward flourish and reputation: how to plant her feet, how to read an opponent\'s shoulders before their sword arm moves, how to keep a shield wall from breaking. She has no noble house behind her name and no grand prophecy pointing the way forward — only the conviction that competence, honestly earned, is its own kind of nobility.\n\nWhen word reached her village that adventurers were needed to look into troubles along the road, Kira did not hesitate. She sees it as her chance to prove that the discipline of her training was not wasted, and that a farmer\'s daughter with a sword can stand as tall as any highborn champion. She is plainspoken, a little too trusting of first impressions, and fiercely loyal to anyone who fights beside her.",
+    profile: (
+        title: "The Earnest Blade",
+        archetype: "Eager Novice",
+        core_motivation: "To prove that hard-won skill matters more than birthright",
+        combat_style: "Disciplined sword-and-shield melee, front line, straightforward and unflinching",
+    ),
+)

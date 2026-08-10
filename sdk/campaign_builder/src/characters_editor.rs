@@ -253,6 +253,9 @@ pub struct CharacterEditBuffer {
     pub starting_gems: String,
     pub starting_food: String,
     pub description: String,
+    /// Path to an external RON file (relative to campaign root) with this
+    /// character's long-form backstory/profile content.
+    pub lore_file: Option<String>,
     pub is_premade: bool,
     /// Whether this character should start in the active party when a new game begins.
     /// When false, the character is intended to be recruitable / managed via inns.
@@ -308,6 +311,7 @@ impl Default for CharacterEditBuffer {
             starting_gems: "0".to_string(),
             starting_food: "10".to_string(),
             description: String::new(),
+            lore_file: None,
             is_premade: false,
             starts_in_party: false,
             starting_items: Vec::new(),
@@ -431,6 +435,7 @@ impl CharactersEditorState {
                 starting_gems: character.starting_gems.to_string(),
                 starting_food: character.starting_food.to_string(),
                 description: character.description.clone(),
+                lore_file: character.lore_file.clone(),
                 is_premade: character.is_premade,
                 starts_in_party: character.starts_in_party,
                 starting_items: character.starting_items.clone(),
@@ -728,6 +733,8 @@ impl CharactersEditorState {
                 accessory2,
             },
             description: self.buffer.description.clone(),
+            lore_file: self.buffer.lore_file.clone(),
+            lore: None,
             is_premade: self.buffer.is_premade,
             starts_in_party: self.buffer.starts_in_party,
             creature_id: if self.buffer.creature_id.is_empty() {
@@ -3118,6 +3125,8 @@ mod tests {
                 accessory2: None,
             },
             description: String::new(),
+            lore_file: None,
+            lore: None,
             is_premade: true,
             starts_in_party: false,
             creature_id: None,

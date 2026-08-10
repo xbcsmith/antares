@@ -1,3 +1,101 @@
+## Character Bio & Navigation, Phase 2: Character Backstory & Profile Data Model
+
+### Summary
+
+Implemented Phase 2 of
+`docs/explanation/character_bio_and_navigation_implementation_plan.md`: a new
+optional, long-form lore content model for characters, layered on top of the
+existing short `description` field without touching it. A character's
+`lore_file` (relative to the campaign root) points to an external RON file
+holding a `CharacterLore` (`backstory` + a `CharacterProfile` of
+`title`/`archetype`/`core_motivation`/`combat_style`); `CharacterDatabase::
+load_from_campaign` resolves it, with warn-and-continue semantics for missing
+or invalid *referenced* files (only a `lore_file` value that fails
+path-security validation is a hard load error). All 8 premade tutorial
+characters now have authored lore content.
+
+### Files modified
+
+**`src/domain/character_definition.rs`**
+- Added `CharacterLore` and `CharacterProfile` structs (`Serialize`,
+  `Deserialize`, `Eq`), each with doc comments and a runnable doctest.
+- Added `lore_file: Option<String>` (serialized, `#[serde(default)]`,
+  `skip_serializing_if`) and `lore: Option<CharacterLore>` (`#[serde(skip)]`,
+  not authored directly) to `CharacterDefinition`, placed next to
+  `description`. Updated the `CharacterDefinitionDef` shadow struct, its
+  `From` impl, `CharacterDefinition::new()`, and the struct's top-of-file
+  doctest example accordingly.
+- Added `CharacterDatabase::load_from_campaign(data_dir, campaign_root)`,
+  mirroring `CreatureDatabase::load_from_registry` for
+  `validate_campaign_relative_path`-based resolution but *not* for error
+  handling: path-security failures are hard errors; a missing/unreadable/
+  unparseable referenced file only logs a warning and leaves that
+  character's `lore` as `None`, and loading continues.
+- `instantiate()` now copies `lore: self.lore.clone()` onto the runtime
+  `Character`, alongside `portrait_id`.
+- Fixed all 10 in-file `CharacterDefinition { ... }` struct-literal test call
+  sites (RON string literals were unaffected -- `lore_file` defaults via
+  `#[serde(default)]` on the shadow struct).
+- New tests: `CharacterLore` round-trip serialization; `load_from_campaign`
+  for no-`lore_file`, missing-file, invalid-RON, valid-lore, and
+  path-traversal-rejection cases (all via `tempfile::TempDir`, following the
+  existing `creature_database.rs` test template).
+
+**`src/domain/character.rs`**
+- Added `lore: Option<CharacterLore>` to `Character`, `#[serde(default)]` so
+  pre-existing save files without the field still deserialize. Updated
+  `Character::new()`.
+- New regression test `test_lore_field_serde_default_deserializes`, mirroring
+  the existing `test_timed_stat_boost_serde_default_deserializes` convention
+  (serialize, strip the field from the RON string, confirm it still
+  deserializes with the field defaulting to `None`).
+
+**`src/domain/items/equipment_validation.rs`**
+- Added `lore: None` to the one other `Character { ... }` struct literal in
+  the codebase (a test fixture).
+
+**`src/sdk/database.rs`**
+- Swapped `CharacterDatabase::load_from_file` → `load_from_campaign` at both
+  `ContentDatabase` call sites: `load_campaign_with_skills_file` (already had
+  `campaign_path`) and `load_core` (passes the already-derived `asset_root`
+  as the campaign root, the same value used for creature/landscape/furniture
+  asset resolution).
+
+**`sdk/campaign_builder/src/characters_editor.rs` / `asset_manager.rs`**
+- Threaded `lore_file` through `CharacterEditBuffer` (`start_edit_character`
+  populates it from the character being edited, `save_character` writes it
+  back), so editing/saving a character via the SDK no longer silently
+  discards its `lore_file` reference. Fixed the remaining struct-literal
+  sites (test code) with `lore_file: None, lore: None`. No lore-editing UI
+  was added -- that's a later phase; this only prevents a save-time
+  regression of Phase 2's own new field.
+
+**Content**: 8 `CharacterLore` RON files authored under
+`campaigns/tutorial/assets/characters/lore/` (Kira, Sirius, Isolde, Mira, Old
+Gareth, Whisper, Apprentice Zara, Zhaya), referenced via `lore_file` from
+`campaigns/tutorial/data/characters.ron`. The 3 non-premade template
+characters were left untouched.
+
+**Docs**: `docs/reference/campaign_content_format.md`,
+`docs/how-to/character_definition_ron_format.md`, and
+`docs/how-to/create_characters.md` each updated with the new `lore_file`
+field.
+
+### Quality gates (full workspace)
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --all-features` — **5489/5489 passed**, 8 skipped
+  (includes the tutorial campaign integration tests, which now load all 8
+  characters' lore content end-to-end through `load_from_campaign`)
+- `cargo test --doc -- character_definition` (targeted, not the full
+  workspace doctest suite) — **28/28 passed**, including the new
+  `CharacterLore`/`CharacterProfile`/`load_from_campaign` doctests
+- `cargo check -p campaign_builder --all-targets --all-features` — 0 errors
+
+---
+
 ## Character Bio & Navigation, Phase 1: Party Overview Keyboard Navigation
 
 ### Summary

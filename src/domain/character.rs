@@ -11,6 +11,7 @@
 //! See `docs/reference/architecture.md` Section 4.3 for complete specifications.
 //! See `docs/reference/stat_ranges.md` for detailed stat range documentation.
 
+use crate::domain::character_definition::CharacterLore;
 use crate::domain::classes::{ClassDatabase, ClassId, SpellSchool as ClassSpellSchool};
 use crate::domain::skills::CharacterSkillRanks;
 use crate::domain::types::{InnkeeperId, ItemId, MapId, RaceId, SpellId};
@@ -1185,6 +1186,14 @@ pub struct Character {
     /// computed on demand and are NOT stored here. Defaults to empty.
     #[serde(default)]
     pub skill_ranks: CharacterSkillRanks,
+    /// Resolved character lore/backstory, copied from
+    /// `CharacterDefinition.lore` at instantiation.
+    ///
+    /// `#[serde(default)]` so save files created before this field existed
+    /// still deserialize -- the same established pattern used by
+    /// `timed_stat_boosts` above.
+    #[serde(default)]
+    pub lore: Option<CharacterLore>,
 }
 
 impl Character {
@@ -1252,6 +1261,7 @@ impl Character {
             gold: 0,
             gems: 0,
             skill_ranks: CharacterSkillRanks::new(),
+            lore: None,
         }
     }
 
@@ -2043,6 +2053,35 @@ mod tests {
         assert!(
             deserialized.timed_stat_boosts.is_empty(),
             "missing timed_stat_boosts field must default to empty Vec"
+        );
+    }
+
+    #[test]
+    fn test_lore_field_serde_default_deserializes() {
+        // Same convention as test_timed_stat_boost_serde_default_deserializes
+        // above: serialise a character, strip the `lore` field to simulate a
+        // save file created before the field existed, and confirm
+        // #[serde(default)] causes it to deserialise as None rather than
+        // returning an error.
+        let hero = make_hero();
+        let serialized = ron::to_string(&hero).expect("serialization must succeed");
+
+        let stripped = serialized
+            .replace("lore: None,", "")
+            .replace("lore:None,", "")
+            .replace("lore: None", "")
+            .replace("lore:None", "");
+
+        assert!(
+            !stripped.contains("lore"),
+            "field must have been removed from the RON string; got: {stripped}"
+        );
+
+        let deserialized: Character =
+            ron::from_str(&stripped).expect("deserialization must succeed without lore");
+        assert!(
+            deserialized.lore.is_none(),
+            "missing lore field must default to None"
         );
     }
 

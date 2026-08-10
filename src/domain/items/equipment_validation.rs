@@ -700,6 +700,7 @@ mod tests {
             gold: 0,
             gems: 0,
             skill_ranks: crate::domain::CharacterSkillRanks::new(),
+            lore: None,
         };
 
         let mut items = ItemDatabase::new();

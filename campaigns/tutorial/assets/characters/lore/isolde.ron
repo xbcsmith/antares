@@ -1,0 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+(
+    backstory: "Isolde is the eldest daughter of the ruling house of Sunspire, born to a throne she has never wanted to simply inherit. From childhood she watched courtiers bow to her title rather than to anything she had actually done, and the hollowness of that deference settled into her early. When she came of age to join the Radiant Shield, the holy order sworn to defend Sunspire\'s people, she petitioned to train alongside its warrior-clerics rather than take the ceremonial post her family expected of her.\n\nHer training was not softened for her rank. The Shield\'s masters drilled her in blade and prayer alike, and Isolde bears the calluses and old training-yard scars to prove she asked for no exceptions. She earned her place in the order\'s ranks the same way any commoner recruit would have — through discipline, endurance, and a willingness to stand at the front line where the danger is greatest, healing hands ready the moment steel gives way to need.\n\nNow she travels beyond Sunspire\'s borders, seeking dangers worth facing and people worth protecting who have never heard her family name and never will need to. She does not renounce her birthright, but she refuses to let it define her worth. To Isolde, valor proven in the field is the only crown that means anything.",
+    profile: (
+        title: "Princess of Sunspire",
+        archetype: "Noble Renegade",
+        core_motivation: "To earn her own worth through valor rather than accept it by birthright",
+        combat_style: "Front-line holy warrior, blending disciplined swordplay with protective divine magic",
+    ),
+)

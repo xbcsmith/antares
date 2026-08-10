@@ -237,6 +237,7 @@ You can also edit character definitions directly in RON files.
 | `starting_items`     | Vec    | []      | Item IDs to add to inventory                                                                            |
 | `starting_equipment` | Struct | Empty   | Items to equip in slots                                                                                 |
 | `description`        | String | ""      | Character backstory/bio                                                                                 |
+| `lore_file`          | Option<String> | None    | Path to external RON file with long-form backstory/profile (relative to campaign root) |
 | `is_premade`         | bool   | false   | Player-selectable character                                                                             |
 
 ### Base Stats Structure

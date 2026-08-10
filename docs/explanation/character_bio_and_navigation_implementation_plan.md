@@ -257,14 +257,14 @@ sites in `src/sdk/database.rs`:
 
 #### 2.5 Deliverables
 
-- [ ] `CharacterLore`/`CharacterProfile` types + fields on `CharacterDefinition`/`Character`, with `Character.lore` marked `#[serde(default)]`
-- [ ] `CharacterDatabase::load_from_campaign` with lore resolution, warn-and-continue error handling
-- [ ] Both `ContentDatabase` loaders updated (including the `load_core` campaign-root derivation)
-- [ ] Old-save-fixture deserialization regression test
-- [ ] Lore RON files authored for tutorial characters under `campaigns/tutorial/assets/characters/lore/`, referenced from `campaigns/tutorial/data/characters.ron`. The full premade roster is 8 characters: Kira, Sirius, Isolde, Mira, Old Gareth, Whisper, Apprentice Zara, and Zhaya — author lore for all 8, or state an explicit inclusion criterion here if scoping down.
-- [ ] `docs/reference/campaign_content_format.md` — add `lore_file` to the characters.ron "Optional Fields" table (currently `:221-266`)
-- [ ] `docs/how-to/character_definition_ron_format.md` — document the new field(s) in the RON format walkthrough
-- [ ] `docs/how-to/create_characters.md` — add `lore_file` to the "Field Reference" table
+- [x] `CharacterLore`/`CharacterProfile` types + fields on `CharacterDefinition`/`Character`, with `Character.lore` marked `#[serde(default)]`
+- [x] `CharacterDatabase::load_from_campaign` with lore resolution, warn-and-continue error handling
+- [x] Both `ContentDatabase` loaders updated (including the `load_core` campaign-root derivation)
+- [x] Old-save-fixture deserialization regression test
+- [x] Lore RON files authored for tutorial characters under `campaigns/tutorial/assets/characters/lore/`, referenced from `campaigns/tutorial/data/characters.ron`. The full premade roster is 8 characters: Kira, Sirius, Isolde, Mira, Old Gareth, Whisper, Apprentice Zara, and Zhaya — author lore for all 8, or state an explicit inclusion criterion here if scoping down.
+- [x] `docs/reference/campaign_content_format.md` — add `lore_file` to the characters.ron "Optional Fields" table (currently `:221-266`)
+- [x] `docs/how-to/character_definition_ron_format.md` — document the new field(s) in the RON format walkthrough
+- [x] `docs/how-to/create_characters.md` — add `lore_file` to the "Field Reference" table
 
 #### 2.6 Success Criteria
 
