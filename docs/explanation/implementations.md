@@ -1,3 +1,77 @@
+## Character Bio & Navigation, Phase 3: Bio Panel UI + Keyboard Access
+
+### Summary
+
+Implemented Phase 3 of
+`docs/explanation/character_bio_and_navigation_implementation_plan.md`: a
+keyboard-accessible Bio panel in the Character Sheet's Single view, showing
+the long-form `CharacterLore` content added in Phase 2. The panel is an
+overlay flag on top of `CharacterSheetView::Single`, not a third view
+variant, so every existing `view` match, Esc/O toggling, and Tab/Arrow/digit
+navigation is untouched.
+
+### Files modified
+
+**`src/application/character_sheet_state.rs`**
+- Added `showing_bio: bool` to `CharacterSheetState` (next to `view`),
+  initialized to `false` in `new()`.
+- Added `toggle_bio()`, an unconditional flip mirroring `toggle_view()`'s
+  style, with a doctest.
+- New unit tests: flip false→true, flip back to false, and independence from
+  `view` (toggling one must not affect the other).
+
+**`src/game/systems/character_sheet_ui.rs`**
+- `character_sheet_input_system`: new `B` handler inside the `is_single`
+  branch, gated on the focused character's `lore.is_some()` (looked up via
+  `focused_index` read from `CharacterSheetState` before the mutable
+  re-borrow) -- a no-op (but still `return`s, mirroring the `O`/`Enter`
+  handlers) when the character has no lore.
+- `SingleViewParams` gained a `showing_bio: bool` field, threaded from
+  `character_sheet_ui_system` (which already reads `cs_state`).
+- `render_single_view`: when `showing_bio` and the focused character has
+  lore, renders `render_bio_panel(...)` and returns early instead of the
+  normal portrait/three-column stats layout.
+- New `render_bio_panel`: single-column `egui::ScrollArea` (not
+  `three_column` -- the content is one flowing column, so the multi-column
+  helper isn't needed here) showing `profile.title` (falls back to the
+  character's name when empty), `profile.archetype`, the wrapped
+  `backstory`, `profile.core_motivation`, and `profile.combat_style`.
+- Single-view hint bar: `[B] Bio` now renders between `[O] Overview` and
+  `[1-6] Select`, only when the focused character has lore.
+- Module doc comment: added a "Layout — Bio panel" section (ASCII diagram +
+  description) and a `B` bullet in the Flow section's Single-view key list,
+  matching the existing convention of keeping doc and rendered hints in
+  sync.
+- Fixed the 5 existing test-only `SingleViewParams { ... }` struct literals
+  with `showing_bio: false`.
+- New tests: 3 real `App`-harness tests for the `B` key (toggles on for a
+  character with lore, no-op without lore, toggles off on a second distinct
+  press -- the last one required `clear_just_pressed`, since `MinimalPlugins`
+  doesn't run the `InputPlugin` system that normally clears `just_pressed`
+  between frames, following the existing pattern in `combat.rs`'s Tab-wrap
+  test); 2 `render_single_view` smoke tests (Bio panel renders without panic
+  including the title-fallback-to-name path; `showing_bio: true` without
+  lore falls back to the normal stats layout, not a broken empty panel).
+
+### Quality gates (full workspace)
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --all-features` — **5497/5497 passed**, 8 skipped
+- `cargo test --doc -- character_sheet` (targeted, not the full workspace
+  doctest suite) — **15/15 passed**, including the new `toggle_bio` doctest
+- Manual verification: launched `./target/debug/antares --campaign
+  campaigns/tutorial`, confirmed it starts and runs without panicking for
+  12+ seconds with the (now lore-populated) tutorial campaign loaded.
+  Interactive keyboard-driven verification of the actual Bio panel toggle
+  in the live window was not possible in this sandbox (no Accessibility/
+  System Events permission to script keystrokes into the native app
+  window) -- covered instead by the real `App`-harness input tests above,
+  which exercise the actual `character_sheet_input_system` Bevy system.
+
+---
+
 ## Character Bio & Navigation, Phase 2: Character Backstory & Profile Data Model
 
 ### Summary

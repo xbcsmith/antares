@@ -107,6 +107,16 @@ pub struct CharacterSheetState {
     /// [`PartyOverview`](CharacterSheetView::PartyOverview) by
     /// [`toggle_view`](CharacterSheetState::toggle_view).
     pub view: CharacterSheetView,
+
+    /// Whether the Bio panel overlay is showing.
+    ///
+    /// This is deliberately a flag on top of [`Single`](CharacterSheetView::Single)
+    /// rather than a third [`CharacterSheetView`] variant -- the Bio panel is
+    /// an overlay on Single view, not a peer of Party Overview, so `view`
+    /// and every existing match on it are untouched. Toggled by
+    /// [`toggle_bio`](CharacterSheetState::toggle_bio); only rendered when
+    /// `view == Single` **and** the focused character has lore content.
+    pub showing_bio: bool,
 }
 
 impl CharacterSheetState {
@@ -135,6 +145,7 @@ impl CharacterSheetState {
             previous_mode: Box::new(previous_mode),
             focused_index: 0,
             view: CharacterSheetView::Single,
+            showing_bio: false,
         }
     }
 
@@ -352,6 +363,33 @@ impl CharacterSheetState {
             CharacterSheetView::PartyOverview => CharacterSheetView::Single,
         };
     }
+
+    /// Toggle the Bio panel overlay.
+    ///
+    /// Flips `showing_bio` unconditionally. Callers are responsible for only
+    /// invoking this when the Bio panel should actually be reachable (Single
+    /// view, focused character has lore content) -- this method itself does
+    /// not check either condition, matching [`toggle_view`](Self::toggle_view)'s
+    /// unconditional-flip style.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use antares::application::character_sheet_state::CharacterSheetState;
+    /// use antares::application::GameMode;
+    ///
+    /// let mut state = CharacterSheetState::new(GameMode::Exploration);
+    /// assert!(!state.showing_bio);
+    ///
+    /// state.toggle_bio();
+    /// assert!(state.showing_bio);
+    ///
+    /// state.toggle_bio();
+    /// assert!(!state.showing_bio);
+    /// ```
+    pub fn toggle_bio(&mut self) {
+        self.showing_bio = !self.showing_bio;
+    }
 }
 
 impl Default for CharacterSheetState {
@@ -376,6 +414,7 @@ mod tests {
         let state = CharacterSheetState::new(GameMode::Exploration);
         assert_eq!(state.focused_index, 0);
         assert_eq!(state.view, CharacterSheetView::Single);
+        assert!(!state.showing_bio);
         assert!(matches!(*state.previous_mode, GameMode::Exploration));
     }
 
@@ -554,6 +593,44 @@ mod tests {
         assert_eq!(state.view, CharacterSheetView::Single);
     }
 
+    // ── toggle_bio ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_toggle_bio_flips_from_false_to_true() {
+        let mut state = CharacterSheetState::new(GameMode::Exploration);
+        assert!(!state.showing_bio);
+
+        state.toggle_bio();
+        assert!(state.showing_bio);
+    }
+
+    #[test]
+    fn test_toggle_bio_flips_back_to_false() {
+        let mut state = CharacterSheetState::new(GameMode::Exploration);
+        state.toggle_bio();
+        state.toggle_bio();
+        assert!(!state.showing_bio);
+    }
+
+    #[test]
+    fn test_toggle_bio_is_independent_of_view() {
+        // Toggling the Bio overlay must not affect the underlying view, and
+        // toggling the view must not affect the Bio overlay flag -- they are
+        // deliberately independent (Bio is an overlay, not a peer variant).
+        let mut state = CharacterSheetState::new(GameMode::Exploration);
+
+        state.toggle_bio();
+        assert!(state.showing_bio);
+        assert_eq!(state.view, CharacterSheetView::Single);
+
+        state.toggle_view();
+        assert_eq!(state.view, CharacterSheetView::PartyOverview);
+        assert!(
+            state.showing_bio,
+            "toggling view must not reset showing_bio"
+        );
+    }
+
     // ── Default ──────────────────────────────────────────────────────────────
 
     #[test]
@@ -562,6 +639,7 @@ mod tests {
         let new_state = CharacterSheetState::new(GameMode::Exploration);
         assert_eq!(default_state.focused_index, new_state.focused_index);
         assert_eq!(default_state.view, new_state.view);
+        assert_eq!(default_state.showing_bio, new_state.showing_bio);
         assert_eq!(default_state.get_resume_mode(), new_state.get_resume_mode());
     }
 }

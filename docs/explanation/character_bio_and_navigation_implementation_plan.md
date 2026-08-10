@@ -314,10 +314,10 @@ match, per the existing convention of keeping doc and rendered hints in sync.
 
 #### 3.5 Deliverables
 
-- [ ] Bio panel state + toggle in `CharacterSheetState`
-- [ ] `B` keyboard shortcut, gated on lore presence
-- [ ] Bio panel rendering (title/archetype/backstory/motivation/combat style)
-- [ ] Hint bar + doc comment updated
+- [x] Bio panel state + toggle in `CharacterSheetState`
+- [x] `B` keyboard shortcut, gated on lore presence
+- [x] Bio panel rendering (title/archetype/backstory/motivation/combat style)
+- [x] Hint bar + doc comment updated
 
 #### 3.6 Success Criteria
 
