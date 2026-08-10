@@ -944,11 +944,9 @@ fn spawn_map_markers(
         return;
     }
 
-    let mut has_any_entities = false;
     let mut has_current_entities = false;
 
     for (_entity, map_entity) in query_existing.iter() {
-        has_any_entities = true;
         if map_entity.0 == current {
             has_current_entities = true;
         }
@@ -965,21 +963,19 @@ fn spawn_map_markers(
         return;
     }
 
-    // If this is the first time this system runs and there are already map
-    // entities present (spawned by `spawn_map` in `Startup`), don't
-    // despawn them and don't spawn duplicate markers either. Instead, just
-    // record the current map and exit.
-    if should_skip_marker_spawn(&last_map, has_any_entities) {
-        *last_map = Some(current);
-        debug!(
-            "spawn_map_markers: existing map entities present on first run; leaving visuals intact"
-        );
-        return;
-    } else {
-        // We have a previously recorded map and it changed; despawn old map entities
-        for (entity, _map_entity) in query_existing.iter() {
-            commands.entity(entity).despawn();
-        }
+    // Any entities present at this point belong to a stale map (not `current`):
+    // either the map genuinely changed, or a game load forced `last_map` back
+    // to `None` while a different map's visuals were still spawned from the
+    // previous session. Despawn them before spawning the current map so a
+    // load never leaves the old map's visuals on screen. (Previously this used
+    // a `last_map.is_none()` heuristic to skip despawning on what it assumed
+    // was the very first run, but that heuristic can't distinguish "never run
+    // yet" from "just reset by a load", so a load landing on a different map
+    // than the one already on screen would silently skip both the despawn and
+    // the respawn, leaving the old map's visuals in place while the game state
+    // pointed at the new map/position.)
+    for (entity, _map_entity) in query_existing.iter() {
+        commands.entity(entity).despawn();
     }
 
     // Spawn visuals (tiles + markers) for the new map (if it exists)
@@ -1027,13 +1023,6 @@ fn spawn_map_markers(
     }
 
     *last_map = Some(current);
-}
-
-fn should_skip_marker_spawn(
-    last_map: &Option<types::MapId>,
-    has_existing_map_entities: bool,
-) -> bool {
-    last_map.is_none() && has_existing_map_entities
 }
 
 /// Helper function to get or create a cached mesh with given dimensions
@@ -2237,6 +2226,16 @@ fn spawn_map(
         // For each resolved NPC, prefer creature mesh rendering when a creature_id
         // is configured; otherwise fall back to sprite rendering.
         for resolved_npc in resolved_npcs.iter() {
+            // Skip NPC placements for characters already recruited into the
+            // roster/party; see the matching guard on `RecruitableCharacter`
+            // events below for why this can't rely solely on event removal.
+            if game_state
+                .encountered_characters
+                .contains(&resolved_npc.npc_id)
+            {
+                continue;
+            }
+
             let x = resolved_npc.position.x as f32;
             let y = resolved_npc.position.y as f32;
 
@@ -2522,6 +2521,16 @@ fn spawn_map(
                     facing,
                     ..
                 } => {
+                    // A character already recruited (in the roster/party) must never be
+                    // spawned again from map data. Map events for a recruited character
+                    // are normally removed at recruit time, but that removal is keyed off
+                    // a single dialogue tile and can miss characters recruited via another
+                    // NPC's dialogue tree. Guarding on `encountered_characters` here closes
+                    // that gap regardless of whether the event removal ran correctly.
+                    if game_state.encountered_characters.contains(character_id) {
+                        continue;
+                    }
+
                     let x = position.x as f32;
                     let y = position.y as f32;
 
@@ -2879,22 +2888,6 @@ mod tests {
     use crate::domain::world::SpriteAnimation;
     use crate::game::components::dialogue::NpcDialogue;
     use crate::game::resources::GlobalState;
-
-    #[test]
-    fn test_should_skip_marker_spawn_first_run_with_entities() {
-        assert!(should_skip_marker_spawn(&None, true));
-    }
-
-    #[test]
-    fn test_should_skip_marker_spawn_first_run_without_entities() {
-        assert!(!should_skip_marker_spawn(&None, false));
-    }
-
-    #[test]
-    fn test_should_not_skip_when_last_map_some() {
-        let some_map: Option<types::MapId> = Some(1u16);
-        assert!(!should_skip_marker_spawn(&some_map, true));
-    }
 
     #[test]
     fn test_starting_tile_marked_on_map_load() {
@@ -4569,6 +4562,59 @@ mod tests {
         );
     }
 
+    /// Regression test for a load-game bug: loading a save that lands on a
+    /// *different* map than the one currently on screen must despawn the
+    /// stale map's visuals and spawn the loaded map's, not leave the old map
+    /// rendered while `world.current_map`/`party_position` silently point
+    /// elsewhere. `load_game_operation` only replaces `GlobalState` and sets
+    /// `needs_map_refresh`; it never emits a `MapChangeEvent`, so this must
+    /// go through the same `needs_map_refresh` path a real load uses.
+    #[test]
+    fn test_map_refresh_after_load_despawns_stale_map_and_spawns_loaded_map() {
+        let db = crate::sdk::database::ContentDatabase::new();
+        let mut app = make_spawn_app(db);
+        let mut game_state = crate::application::GameState::new();
+        let map_one = world::Map::new(1, "One".to_string(), "D".to_string(), 4, 4);
+        let map_two = world::Map::new(2, "Two".to_string(), "D".to_string(), 4, 4);
+        game_state.world.add_map(map_one);
+        game_state.world.add_map(map_two);
+        game_state.world.set_current_map(1);
+        app.insert_resource(GlobalState(game_state));
+
+        // First frame: spawn map 1's visuals, as if the player had been
+        // exploring it before saving.
+        app.update();
+        {
+            let world_ref = app.world_mut();
+            let mut query = world_ref.query::<&MapEntity>();
+            assert!(
+                query.iter(&*world_ref).any(|m| m.0 == 1),
+                "map 1 visuals should be spawned before the simulated load"
+            );
+        }
+
+        // Simulate `load_game_operation`: the loaded save lands on map 2 and
+        // sets `needs_map_refresh` — no `MapChangeEvent` is involved.
+        {
+            let mut global_state = app.world_mut().resource_mut::<GlobalState>();
+            global_state.0.world.set_current_map(2);
+            global_state.0.needs_map_refresh = true;
+        }
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<&MapEntity>();
+        let entities: Vec<_> = query.iter(&*world_ref).collect();
+        assert!(
+            entities.iter().all(|m| m.0 != 1),
+            "stale map 1 visuals must be despawned after loading into map 2"
+        );
+        assert!(
+            entities.iter().any(|m| m.0 == 2),
+            "map 2 visuals must be spawned after the simulated load"
+        );
+    }
+
     #[test]
     fn test_map_reload_despawns_imported_landscape_roots_and_children() {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
@@ -5102,6 +5148,72 @@ mod tests {
         assert_eq!(results.len(), 1, "expected one CreatureVisual spawned");
         assert_eq!(results[0].0.creature_id, 42);
         assert_eq!(results[0].1 .0, rc_pos);
+    }
+
+    /// Regression test for a load-game bug: a character already recruited
+    /// into the party must not be spawned again from their map's
+    /// `RecruitableCharacter` event. This can happen when a save/load (or any
+    /// map refresh) re-runs `spawn_map` while the event is still present on
+    /// the map (e.g. it was never removed because recruitment happened via a
+    /// different NPC's dialogue tree) — without this guard the character
+    /// shows up standing at their original spawn tile while also being in
+    /// the active party.
+    #[test]
+    fn test_recruitable_spawn_skipped_when_character_already_encountered() {
+        use crate::domain::types::Position;
+        use crate::game::components::creature::CreatureVisual;
+
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let mut char_def = crate::domain::character_definition::CharacterDefinition::new(
+            "already_recruited".to_string(),
+            "Already Recruited".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            crate::domain::character::Sex::Male,
+            crate::domain::character::Alignment::Good,
+        );
+        char_def.creature_id = Some(43);
+        char_def.is_premade = true;
+        db.characters.add_character(char_def).expect("add char");
+        db.creatures
+            .add_creature(make_creature_def(43))
+            .expect("add creature");
+
+        let mut app = make_spawn_app(db);
+
+        let mut game_state = crate::application::GameState::new();
+        let mut map = crate::domain::world::Map::new(1, "T".to_string(), "D".to_string(), 10, 10);
+
+        let rc_pos = Position::new(3, 3);
+        map.events.insert(
+            rc_pos,
+            crate::domain::world::MapEvent::RecruitableCharacter {
+                name: "Already Recruited".to_string(),
+                description: "desc".to_string(),
+                character_id: "already_recruited".to_string(),
+                dialogue_id: None,
+                time_condition: None,
+                facing: None,
+                face_on_dialogue: false,
+            },
+        );
+
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+        game_state
+            .encountered_characters
+            .insert("already_recruited".to_string());
+        app.insert_resource(crate::game::resources::GlobalState(game_state));
+        app.update();
+
+        let world_ref = app.world_mut();
+        let mut query = world_ref.query::<(&CreatureVisual, &TileCoord)>();
+        assert_eq!(
+            query.iter(&*world_ref).count(),
+            0,
+            "an already-recruited character must not be spawned from their map event"
+        );
     }
 
     #[test]

@@ -11,10 +11,9 @@
 //! form and the "📥 Import Object Mesh" button in the list view both hand off
 //! to the Importer tab for that work.
 //!
-//! Modeled on [`crate::landscape_editor`] for the List/Edit mode skeleton, and
-//! on [`crate::item_mesh_editor`] for the fact that an [`ObjectEntry`] *is* a
-//! mesh asset directly (a [`CreatureDefinition`]), not a wrapper around one
-//! with a separate category/tags/flags layer.
+//! Modeled on [`crate::landscape_editor`] for the List/Edit mode skeleton. An
+//! [`ObjectEntry`] *is* a mesh asset directly (a [`CreatureDefinition`]), not
+//! a wrapper around one with a separate category/tags/flags layer.
 //!
 //! Rule compliance (`sdk/AGENTS.md`): the list-row loop and the per-mesh
 //! material loop in the edit form both wrap their bodies in `push_id` (Rule

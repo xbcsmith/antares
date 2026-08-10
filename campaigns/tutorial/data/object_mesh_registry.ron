@@ -1,5 +1,8 @@
 (
     meshes: {
+        "ancient_treasure_chest": "assets/furniture/seating/ancient_treasure_chest.ron",
         "barred_passage": "assets/meshes/objects/barred_door.ron",
+        "ironbound_treasure_chest": "assets/furniture/storage/ironbound_treasure_chest.ron",
+        "weathered_wooden_hutch": "assets/furniture/storage/weathered_wooden_hutch.ron",
     },
 )

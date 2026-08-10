@@ -164,8 +164,9 @@ impl CampaignBuilderApp {
 
     /// Synchronize importer state that depends on the active campaign.
     ///
-    /// This refreshes importer palette data plus suggested creature, furniture,
-    /// and landscape mesh IDs from the currently open campaign directory.
+    /// This refreshes importer palette data plus suggested creature, item,
+    /// furniture, and landscape mesh IDs from the currently open campaign
+    /// directory.
     ///
     /// # Examples
     ///
@@ -226,6 +227,19 @@ impl CampaignBuilderApp {
             );
             self.obj_importer_state
                 .set_next_landscape_mesh_id(next_landscape_mesh_id);
+        }
+
+        if self.obj_importer_state.export_type == obj_importer::ExportType::Furniture {
+            let next_furniture_id =
+                obj_importer_ui::suggest_next_furniture_id_from_dir(self.campaign_dir.as_deref());
+            self.obj_importer_state
+                .set_next_furniture_id(next_furniture_id);
+        }
+
+        if self.obj_importer_state.export_type == obj_importer::ExportType::Item {
+            let next_item_id =
+                obj_importer_ui::suggest_next_item_mesh_id_from_dir(self.campaign_dir.as_deref());
+            self.obj_importer_state.set_next_creature_id(next_item_id);
         }
     }
 
@@ -3349,22 +3363,6 @@ impl CampaignBuilderApp {
                     }
 
                     self.sync_obj_importer_campaign_state();
-
-                    // Load item mesh assets into the Item Mesh Editor registry.
-                    // Must happen after campaign_dir is set (above) and after
-                    // load_items() so mesh IDs on items are already known.
-                    if let Some(ref dir) = self.campaign_dir.clone() {
-                        self.logger
-                            .debug(category::FILE_IO, "Loading item mesh assets...");
-                        self.item_mesh_editor_state.load_from_campaign(dir);
-                        self.logger.info(
-                            category::FILE_IO,
-                            &format!(
-                                "Loaded {} item mesh entries",
-                                self.item_mesh_editor_state.registry.len()
-                            ),
-                        );
-                    }
 
                     // Reset editor state before loading so stale data from any
                     // previously opened campaign is cleared first.  The explicit

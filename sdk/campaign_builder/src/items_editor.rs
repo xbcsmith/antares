@@ -14,10 +14,29 @@ use antares::domain::items::types::{
     ArmorData, AttributeType, ConsumableData, ConsumableEffect, Item, ItemType,
     MagicItemClassification, QuestData, ResistanceType, WeaponClassification, WeaponData,
 };
-use antares::domain::types::{DiceRoll, ItemId};
+use antares::domain::types::DiceRoll;
 use antares::domain::visual::item_mesh::ItemMeshDescriptor;
+use antares::domain::visual::CreatureReference;
 use eframe::egui;
 use std::path::PathBuf;
+
+/// Reads `data/item_mesh_registry.ron` (written by the OBJ Importer's Item
+/// export) so the mesh-ID picker below can list imported meshes by name
+/// instead of requiring the author to know the raw numeric ID.
+///
+/// Returns an empty list when no campaign is open or the registry is
+/// missing/unparsable -- callers fall back to a plain numeric input in that
+/// case.
+fn browse_item_mesh_entries(campaign_dir: Option<&PathBuf>) -> Vec<CreatureReference> {
+    let Some(dir) = campaign_dir else {
+        return Vec::new();
+    };
+    let path = dir.join("data/item_mesh_registry.ron");
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    ron::from_str::<Vec<CreatureReference>>(&contents).unwrap_or_default()
+}
 
 /// Editor mode for items
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,12 +107,6 @@ pub struct ItemsEditorState {
     pub filter_magical: Option<bool>,
     pub filter_cursed: Option<bool>,
     pub filter_quest: Option<bool>,
-
-    /// Cross-tab navigation: set to `Some(item_id)` when the user clicks
-    /// "Open in Item Mesh Editor" for the currently-edited item. The host
-    /// `CampaignBuilderApp` drains this each frame and switches to the
-    /// `ItemMeshes` tab.
-    pub requested_open_item_mesh: Option<ItemId>,
 }
 
 impl Default for ItemsEditorState {
@@ -109,7 +122,6 @@ impl Default for ItemsEditorState {
             filter_magical: None,
             filter_cursed: None,
             filter_quest: None,
-            requested_open_item_mesh: None,
         }
     }
 }
@@ -1052,6 +1064,62 @@ impl ItemsEditorState {
 
                 ui.add_space(10.0);
 
+                // ── Imported Mesh (links to an OBJ Importer Item export) ────
+                ui.group(|ui| {
+                    ui.heading("Imported Mesh");
+                    ui.add_space(4.0);
+
+                    let mesh_entries = browse_item_mesh_entries(ctx.campaign_dir);
+                    let mut use_custom_mesh = self.edit_buffer.mesh_id.is_some();
+
+                    if ui
+                        .checkbox(&mut use_custom_mesh, "Use custom OBJ-imported mesh")
+                        .changed()
+                    {
+                        self.edit_buffer.mesh_id = if use_custom_mesh {
+                            Some(mesh_entries.first().map(|e| e.id).unwrap_or(0))
+                        } else {
+                            None
+                        };
+                        ui.ctx().request_repaint();
+                    }
+
+                    if let Some(mesh_id) = self.edit_buffer.mesh_id.as_mut() {
+                        ui.horizontal(|ui| {
+                            ui.label("Mesh:");
+                            if mesh_entries.is_empty() {
+                                ui.add(egui::DragValue::new(mesh_id).speed(1.0));
+                            } else {
+                                let selected_text = mesh_entries
+                                    .iter()
+                                    .find(|entry| entry.id == *mesh_id)
+                                    .map(|entry| format!("{} — {}", entry.id, entry.name))
+                                    .unwrap_or_else(|| format!("{} (unknown)", mesh_id));
+                                egui::ComboBox::from_id_salt("item_mesh_id_selector")
+                                    .selected_text(selected_text)
+                                    .show_ui(ui, |ui| {
+                                        for entry in &mesh_entries {
+                                            ui.selectable_value(
+                                                mesh_id,
+                                                entry.id,
+                                                format!("{} — {}", entry.id, entry.name),
+                                            );
+                                        }
+                                    });
+                            }
+                        });
+                        ui.label(
+                            egui::RichText::new(
+                                "Links this item to a mesh exported via the OBJ Importer's Item export.",
+                            )
+                            .small()
+                            .weak(),
+                        );
+                    }
+                });
+
+                ui.add_space(10.0);
+
                 // ── Ground Mesh Preview (cross-tab navigation) ──────────────
                 ui.collapsing("🧊 Ground Mesh Preview", |ui| {
                     let descriptor = ItemMeshDescriptor::from_item(&self.edit_buffer);
@@ -1070,10 +1138,7 @@ impl ItemsEditorState {
                     } else {
                         ui.label("No mesh override (auto-generated from item type)");
                     }
-                    if ui.button("✏️ Open in Item Mesh Editor").clicked() {
-                        self.requested_open_item_mesh = Some(self.edit_buffer.id as ItemId);
-                        ui.ctx().request_repaint();
-                    }
+
                 });
 
                 ui.add_space(10.0);
@@ -1851,28 +1916,6 @@ mod tests {
 
         state.selected_item = None;
         assert!(state.selected_item.is_none());
-    }
-
-    /// Setting `requested_open_item_mesh` on an editor state in Edit mode
-    /// should store the item id correctly for the host app to drain.
-    #[test]
-    fn test_items_editor_requested_open_item_mesh_set_on_button() {
-        let mut state = ItemsEditorState::new();
-        state.mode = ItemsEditorMode::Edit;
-        // Simulate what happens when the button is clicked: the field is set.
-        state.requested_open_item_mesh = Some(42_u8);
-        assert_eq!(
-            state.requested_open_item_mesh,
-            Some(42_u8),
-            "requested_open_item_mesh should hold the item id after being set"
-        );
-        // Simulating the host draining the value:
-        let drained = state.requested_open_item_mesh.take();
-        assert_eq!(drained, Some(42_u8));
-        assert!(
-            state.requested_open_item_mesh.is_none(),
-            "field should be None after take()"
-        );
     }
 
     #[test]

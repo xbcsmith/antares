@@ -768,7 +768,6 @@ fn execute_recruit_to_party(
     character_id: &str,
     game_state: &mut crate::application::GameState,
     db: &crate::sdk::database::ContentDatabase,
-    dialogue_state: Option<&crate::application::dialogue::DialogueState>,
     game_log: &mut Option<&mut crate::game::systems::ui::GameLog>,
     despawn_recruitable_visuals: &mut Option<
         &mut MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
@@ -785,32 +784,41 @@ fn execute_recruit_to_party(
                 }
             }
 
-            // Remove recruitment event from map
-            if let Some(dlg_state) = dialogue_state {
-                if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
-                    if let Some(current_map) = game_state.world.get_current_map_mut() {
-                        let current_map_id = current_map.id;
-                        if let Some(_removed_event) =
-                            current_map.remove_event(recruitment_ctx.event_position)
-                        {
-                            info!(
-                                "Removed recruitment event at {:?}",
-                                recruitment_ctx.event_position
-                            );
-                            if let Some(writer) = despawn_recruitable_visuals.as_deref_mut() {
-                                writer.write(crate::game::systems::map::DespawnRecruitableVisual {
-                                    map_id: current_map_id,
-                                    position: recruitment_ctx.event_position,
-                                    character_id: character_id.to_string(),
-                                });
-                            }
-                        } else {
-                            warn!(
-                                "No event found at recruitment position {:?}",
-                                recruitment_ctx.event_position
-                            );
+            // Remove recruitment event from map. Look the event up by
+            // `character_id` rather than trusting `dialogue_state`'s stored
+            // `event_position`: that position is captured once, from whichever
+            // NPC's tile the conversation was opened on, but a single dialogue
+            // tree can recruit more than one character (e.g. a joint recruit
+            // scene). Keying removal off the position alone would remove the
+            // wrong (or already-removed) event for every character besides the
+            // one whose tile started the conversation, leaving their map event
+            // in place to respawn a duplicate on the next map refresh.
+            if let Some(current_map) = game_state.world.get_current_map_mut() {
+                let current_map_id = current_map.id;
+                let event_position = current_map.events.iter().find_map(|(pos, ev)| match ev {
+                    crate::domain::world::MapEvent::RecruitableCharacter {
+                        character_id: cid,
+                        ..
+                    } if cid == character_id => Some(*pos),
+                    _ => None,
+                });
+
+                if let Some(event_position) = event_position {
+                    if let Some(_removed_event) = current_map.remove_event(event_position) {
+                        info!("Removed recruitment event at {:?}", event_position);
+                        if let Some(writer) = despawn_recruitable_visuals.as_deref_mut() {
+                            writer.write(crate::game::systems::map::DespawnRecruitableVisual {
+                                map_id: current_map_id,
+                                position: event_position,
+                                character_id: character_id.to_string(),
+                            });
                         }
                     }
+                } else {
+                    warn!(
+                        "No recruitment event found on the map for character '{}'",
+                        character_id
+                    );
                 }
             }
 
@@ -834,25 +842,28 @@ fn execute_recruit_to_party(
                 }
             }
 
-            // Remove recruitment event from map
-            if let Some(dlg_state) = dialogue_state {
-                if let Some(ref recruitment_ctx) = dlg_state.recruitment_context {
-                    if let Some(current_map) = game_state.world.get_current_map_mut() {
-                        let current_map_id = current_map.id;
-                        if let Some(_removed_event) =
-                            current_map.remove_event(recruitment_ctx.event_position)
-                        {
-                            info!(
-                                "Removed recruitment event at {:?}",
-                                recruitment_ctx.event_position
-                            );
-                            if let Some(writer) = despawn_recruitable_visuals.as_deref_mut() {
-                                writer.write(crate::game::systems::map::DespawnRecruitableVisual {
-                                    map_id: current_map_id,
-                                    position: recruitment_ctx.event_position,
-                                    character_id: character_id.to_string(),
-                                });
-                            }
+            // Remove recruitment event from map (see the comment on the
+            // AddedToParty branch above for why this is keyed by character_id
+            // rather than the dialogue's stored event_position).
+            if let Some(current_map) = game_state.world.get_current_map_mut() {
+                let current_map_id = current_map.id;
+                let event_position = current_map.events.iter().find_map(|(pos, ev)| match ev {
+                    crate::domain::world::MapEvent::RecruitableCharacter {
+                        character_id: cid,
+                        ..
+                    } if cid == character_id => Some(*pos),
+                    _ => None,
+                });
+
+                if let Some(event_position) = event_position {
+                    if let Some(_removed_event) = current_map.remove_event(event_position) {
+                        info!("Removed recruitment event at {:?}", event_position);
+                        if let Some(writer) = despawn_recruitable_visuals.as_deref_mut() {
+                            writer.write(crate::game::systems::map::DespawnRecruitableVisual {
+                                map_id: current_map_id,
+                                position: event_position,
+                                character_id: character_id.to_string(),
+                            });
                         }
                     }
                 }
@@ -1170,7 +1181,6 @@ fn execute_action(
                         &character_id,
                         game_state,
                         db,
-                        dialogue_state,
                         &mut game_log,
                         despawn_recruitable_visuals,
                     );
@@ -1476,6 +1486,31 @@ fn execute_action(
                             .unwrap_or(true);
 
                         if !is_locked {
+                            // Replace the LockedContainer event with an open
+                            // Container event before entering the inventory
+                            // UI, mirroring `lock_ui::apply_success`. Without
+                            // this, the map's source-of-truth event stays a
+                            // LockedContainer forever, so `write_container_items_back`
+                            // (called on every take and on Escape) can never
+                            // find a `MapEvent::Container` to persist into --
+                            // taken items vanish from the session state but
+                            // the pristine `initial_items` list reappears the
+                            // next time the container is opened.
+                            if let Some(map) = game_state.world.get_map_mut(ctx.map_id) {
+                                map.add_event(
+                                    ctx.event_position,
+                                    crate::domain::world::MapEvent::Container {
+                                        id: lock_id.clone(),
+                                        name: container_name.clone(),
+                                        description: String::new(),
+                                        items: initial_items.clone(),
+                                        gold: 0,
+                                        gems: 0,
+                                        mesh_id: None,
+                                        dialogue_id: None,
+                                    },
+                                );
+                            }
                             game_state.enter_container_inventory(
                                 lock_id,
                                 container_name,
@@ -1511,6 +1546,22 @@ fn execute_action(
                                     if let Some(ls) = map.lock_states.get_mut(&lock_id) {
                                         ls.unlock();
                                     }
+                                    // See the `!is_locked` branch above for why this
+                                    // conversion is required before entering the
+                                    // container inventory UI.
+                                    map.add_event(
+                                        ctx.event_position,
+                                        crate::domain::world::MapEvent::Container {
+                                            id: lock_id.clone(),
+                                            name: container_name.clone(),
+                                            description: String::new(),
+                                            items: initial_items.clone(),
+                                            gold: 0,
+                                            gems: 0,
+                                            mesh_id: None,
+                                            dialogue_id: None,
+                                        },
+                                    );
                                 }
                                 let msg = format!(
                                     "You unlock the {} with the {}.",
@@ -1584,7 +1635,6 @@ fn execute_action(
                 character_id,
                 game_state,
                 db,
-                dialogue_state,
                 &mut game_log,
                 despawn_recruitable_visuals,
             );
@@ -2837,6 +2887,129 @@ mod tests {
         assert_eq!(game_state.party.size(), 6);
         assert_eq!(game_state.roster.characters.len(), 7); // 6 in party + 1 at inn
         assert!(game_state.encountered_characters.contains("test_mage"));
+    }
+
+    /// Regression test for a load-game bug: a single dialogue tree that
+    /// recruits two characters (e.g. talking to one NPC also recruits their
+    /// companion) must remove *each* character's own `RecruitableCharacter`
+    /// map event, not just the event at the tile the conversation started
+    /// on. Previously the removal was keyed off a single stored
+    /// `event_position`, so the second character's map event was never
+    /// removed and would respawn a duplicate of them on the next map
+    /// refresh (e.g. after a save/load) even though they were already in
+    /// the party.
+    #[test]
+    fn test_recruit_to_party_removes_each_characters_own_map_event() {
+        use crate::domain::character::{Alignment, Sex};
+        use crate::domain::character_definition::CharacterDefinition;
+        use crate::domain::types::Position;
+
+        let mut game_state = crate::application::GameState::new();
+        let mut db = crate::sdk::database::ContentDatabase::new();
+
+        let knight_class = crate::domain::classes::ClassDefinition::new(
+            "knight".to_string(),
+            "Knight".to_string(),
+        );
+        db.classes.add_class(knight_class).unwrap();
+
+        let human_race = crate::domain::races::RaceDefinition::new(
+            "human".to_string(),
+            "Human".to_string(),
+            "Human race".to_string(),
+        );
+        db.races.add_race(human_race).unwrap();
+
+        for (id, name) in [("zhaya", "Zhaya"), ("isolde", "Isolde")] {
+            let char_def = CharacterDefinition::new(
+                id.to_string(),
+                name.to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Female,
+                Alignment::Good,
+            );
+            db.characters.add_character(char_def).unwrap();
+        }
+
+        // Two distinct tiles, each with its own recruit event, as in a real
+        // map where two different NPCs are separately recruitable.
+        let zhaya_pos = Position::new(38, 36);
+        let isolde_pos = Position::new(15, 2);
+        let mut map =
+            crate::domain::world::Map::new(1, "Test".to_string(), "Test Map".to_string(), 50, 50);
+        map.add_event(
+            zhaya_pos,
+            crate::domain::world::MapEvent::RecruitableCharacter {
+                name: "Zhaya".to_string(),
+                description: "desc".to_string(),
+                character_id: "zhaya".to_string(),
+                dialogue_id: None,
+                time_condition: None,
+                facing: None,
+                face_on_dialogue: false,
+            },
+        );
+        map.add_event(
+            isolde_pos,
+            crate::domain::world::MapEvent::RecruitableCharacter {
+                name: "Isolde".to_string(),
+                description: "desc".to_string(),
+                character_id: "isolde".to_string(),
+                dialogue_id: None,
+                time_condition: None,
+                facing: None,
+                face_on_dialogue: false,
+            },
+        );
+        game_state.world.add_map(map);
+        game_state.world.set_current_map(1);
+
+        // Both recruits happen from the conversation opened at Zhaya's tile
+        // (as in the joint recruit-dialogue scenario), so the dialogue's
+        // stored recruitment context only ever points at Zhaya's position.
+        let mut dlg_state = crate::application::dialogue::DialogueState::start(
+            100,
+            1,
+            Some(zhaya_pos),
+            Some("npc_zhaya".to_string()),
+        );
+        dlg_state.recruitment_context = Some(crate::application::dialogue::RecruitmentContext {
+            character_id: "zhaya".to_string(),
+            event_position: zhaya_pos,
+        });
+
+        let mut despawn_recruitable_visuals = None;
+        for character_id in ["zhaya", "isolde"] {
+            execute_action(
+                &DialogueAction::RecruitToParty {
+                    character_id: character_id.to_string(),
+                },
+                &mut game_state,
+                &db,
+                Some(&dlg_state),
+                None,
+                None,
+                None,
+                &mut despawn_recruitable_visuals,
+                &mut None,
+            );
+        }
+
+        assert_eq!(game_state.party.size(), 2);
+        assert!(game_state.encountered_characters.contains("zhaya"));
+        assert!(game_state.encountered_characters.contains("isolde"));
+
+        let map = game_state.world.get_current_map().unwrap();
+        assert!(
+            map.get_event(zhaya_pos).is_none(),
+            "Zhaya's own recruit event must be removed"
+        );
+        assert!(
+            map.get_event(isolde_pos).is_none(),
+            "Isolde's own recruit event must be removed even though the dialogue's stored \
+             recruitment context pointed at Zhaya's tile"
+        );
     }
 
     #[test]
@@ -5145,6 +5318,110 @@ mod tests {
                 .is_none(),
             "Treasure event should be removed after collect_treasure"
         );
+    }
+
+    /// Regression test for the "chest respawns loot on Escape" bug: an
+    /// already-unlocked `LockedContainer` fired via `unlock_container` must
+    /// have its map event converted to `MapEvent::Container` (not left as
+    /// `LockedContainer`), or `write_container_items_back` can never find a
+    /// target to persist takes into and the pristine item list re-reads on
+    /// every reopen.
+    #[test]
+    fn test_trigger_event_unlock_container_converts_locked_container_to_open_container() {
+        use crate::application::dialogue::{DialogueState, EventInteractionContext};
+        use crate::domain::character::InventorySlot;
+        use crate::domain::world::MapEvent;
+
+        let mut game_state = crate::application::GameState::new();
+        let map_id = game_state.world.current_map;
+        let position = crate::domain::types::Position::new(4, 4);
+
+        let mut map = crate::domain::world::Map::new(
+            map_id,
+            "Test Map".to_string(),
+            "Desc".to_string(),
+            10,
+            10,
+        );
+        map.add_event(
+            position,
+            MapEvent::LockedContainer {
+                name: "Old Chest".to_string(),
+                lock_id: "chest_a".to_string(),
+                key_item_id: None,
+                items: vec![
+                    InventorySlot {
+                        item_id: 42,
+                        charges: 0,
+                    },
+                    InventorySlot {
+                        item_id: 7,
+                        charges: 3,
+                    },
+                ],
+                initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: Some(9),
+            },
+        );
+        let mut unlocked = crate::domain::world::lock::LockState::new("chest_a");
+        unlocked.unlock();
+        map.lock_states.insert("chest_a".to_string(), unlocked);
+        game_state.world.add_map(map);
+
+        let mut dlg_state = DialogueState::start(1, 1, None, None);
+        dlg_state.event_context = Some(EventInteractionContext {
+            event_position: position,
+            map_id,
+        });
+        game_state.mode = crate::application::GameMode::Dialogue(dlg_state.clone());
+
+        let db = crate::sdk::database::ContentDatabase::new();
+        let action = crate::domain::dialogue::DialogueAction::TriggerEvent {
+            event_name: "unlock_container".to_string(),
+        };
+        let mut none_recruitable: Option<
+            &mut MessageWriter<crate::game::systems::map::DespawnRecruitableVisual>,
+        > = None;
+        let mut none_mesh: Option<&mut MessageWriter<crate::game::systems::map::DespawnEventMesh>> =
+            None;
+
+        execute_action(
+            &action,
+            &mut game_state,
+            &db,
+            Some(&dlg_state),
+            None,
+            None,
+            None,
+            &mut none_recruitable,
+            &mut none_mesh,
+        );
+
+        // The map's source-of-truth event must now be an open Container
+        // carrying the original items, not still a LockedContainer.
+        match game_state
+            .world
+            .get_current_map()
+            .and_then(|m| m.get_event(position))
+        {
+            Some(MapEvent::Container { items, .. }) => {
+                assert_eq!(
+                    items.len(),
+                    2,
+                    "open Container must keep the original items"
+                );
+            }
+            other => panic!("expected MapEvent::Container after unlock, got {:?}", other),
+        }
+
+        // The session UI state must also reflect those items.
+        match &game_state.mode {
+            crate::application::GameMode::ContainerInventory(state) => {
+                assert_eq!(state.items.len(), 2);
+            }
+            other => panic!("expected GameMode::ContainerInventory, got {:?}", other),
+        }
     }
 
     #[test]

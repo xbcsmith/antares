@@ -8228,20 +8228,39 @@
         (
             x: 3,
             y: 7,
-        ): Furniture(
-            name: "Chest",
-            furniture_id: Some(13),
-            furniture_type: Chest,
-            rotation_y: Some(0.0),
-            scale: 1.0,
-            material: Wood,
-            flags: (
-                lit: false,
-                locked: false,
-                blocking: false,
-            ),
-            color_tint: None,
-            key_item_id: None,
+        ): Container(
+            id: "container_3007",
+            name: "Merchant Chest",
+            description: "Merchant Chest containing things he sells",
+            items: [
+                (
+                    item_id: 1,
+                    charges: 0,
+                ),
+                (
+                    item_id: 2,
+                    charges: 0,
+                ),
+                (
+                    item_id: 3,
+                    charges: 0,
+                ),
+                (
+                    item_id: 4,
+                    charges: 0,
+                ),
+                (
+                    item_id: 5,
+                    charges: 0,
+                ),
+                (
+                    item_id: 6,
+                    charges: 0,
+                ),
+            ],
+            gold: 1000,
+            gems: 100,
+            mesh_id: Some("ironbound_treasure_chest"),
         ),
         (
             x: 3,
@@ -8434,6 +8453,18 @@
         ),
         (
             x: 15,
+            y: 2,
+        ): RecruitableCharacter(
+            name: "Isolde",
+            description: "Isolde,  Princess of Sunspire, Holy Warrior of the Radiant Shield",
+            character_id: "isolde",
+            dialogue_id: Some(1003),
+            time_condition: None,
+            facing: Some(East),
+            face_on_dialogue: false,
+        ),
+        (
+            x: 15,
             y: 7,
         ): RecruitableCharacter(
             name: "Old Gareth",
@@ -8447,15 +8478,38 @@
         (
             x: 18,
             y: 1,
-        ): Treasure(
+        ): Container(
+            id: "container_18001",
             name: "Locked Chest",
             description: "",
-            loot: [
-                50,
-                51,
-                52,
-                109,
+            items: [
+                (
+                    item_id: 50,
+                    charges: 0,
+                ),
+                (
+                    item_id: 108,
+                    charges: 0,
+                ),
+                (
+                    item_id: 109,
+                    charges: 0,
+                ),
+                (
+                    item_id: 110,
+                    charges: 0,
+                ),
+                (
+                    item_id: 200,
+                    charges: 0,
+                ),
+                (
+                    item_id: 51,
+                    charges: 0,
+                ),
             ],
+            gold: 0,
+            gems: 0,
         ),
         (
             x: 18,

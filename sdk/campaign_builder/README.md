@@ -87,17 +87,10 @@ serialised to RON format.
 
 - **Registry Mode**: Browse, search, filter, and sort all registered creature
   mesh assets; open one for editing or register a new asset from disk
-- **Three-Panel Edit Mode**: Mesh list (left) | 3D preview (center) |
-  mesh properties (right)
-- **Undo/Redo**: Full command history for all mesh editing operations
-- **Workflow Integration**: Keyboard shortcuts, context menus, auto-save,
-  enhanced preview options (grid, axes, bounding box, wireframe, lighting)
-
-### Item Mesh Editor
-
-- **Registry/Edit Modes**: Same two-mode navigation as the Creature Asset Editor
-- **Visual Properties**: Colors, scale, emissive settings with live 3D preview
-- **Undo/Redo**: Full editing history
+- **Edit Mode**: Read-only 3D preview with creature level properties; enhanced
+  preview options (grid, axes, bounding box, wireframe, lighting)
+- **Undo/Redo**: Full command history for creature asset operations
+- **Workflow Integration**: Keyboard shortcuts, context menus, auto-save
 
 ### Model Importer
 
@@ -349,7 +342,6 @@ sdk/campaign_builder/
 │   ├── creatures_workflow.rs   # Unified workflow state (undo, shortcuts, menus)
 │   ├── dialogue_editor.rs      # Dialogue tree editor
 │   ├── furniture_editor.rs     # Furniture/prop definitions editor
-│   ├── item_mesh_editor.rs     # Item mesh asset editor
 │   ├── items_editor.rs         # Item database editor
 │   ├── keyboard_shortcuts.rs   # Keyboard shortcut manager
 │   ├── landscape_editor.rs     # Landscape definition palette/editor
@@ -380,7 +372,7 @@ sdk/campaign_builder/
     ├── furniture_properties_tests.rs
     ├── gui_integration_test.rs
     ├── map_data_validation.rs
-    ├── mesh_editing_tests.rs
+    ├── obj_importer_tests.rs
     ├── template_system_integration_tests.rs
     └── ui_improvements_test.rs
 ```

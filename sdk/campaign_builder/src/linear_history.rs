@@ -5,10 +5,7 @@
 //!
 //! This module provides [`LinearHistory<Op>`], a simple, bounded undo/redo
 //! container that tracks a *position* cursor within a flat `Vec` of
-//! operations. It is designed for mesh-editing workflows where each
-//! operation carries both the "before" and "after" state (e.g.,
-//! [`crate::mesh_vertex_editor::VertexOperation`] or
-//! [`crate::mesh_index_editor::IndexOperation`]).
+//! operations (each carrying "before" and "after" state).
 //!
 //! ## Semantics
 //!

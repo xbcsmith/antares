@@ -17,7 +17,7 @@
 
 use antares::domain::visual::{CreatureDefinition, CreatureReference, MeshTransform};
 use campaign_builder::creature_assets::CreatureAssetManager;
-use campaign_builder::creatures_editor::{CreaturesEditorState, PrimitiveType};
+use campaign_builder::creatures_editor::CreaturesEditorState;
 use campaign_builder::primitive_generators::*;
 
 #[test]
@@ -239,68 +239,6 @@ fn test_update_mesh_color() {
 }
 
 #[test]
-fn test_replace_mesh_with_primitive_cube() {
-    let mut state = CreaturesEditorState::new();
-
-    state.edit_buffer = CreatureDefinition {
-        id: 1,
-        name: "Test".to_string(),
-        meshes: vec![generate_sphere(1.0, 8, 8, [1.0, 0.0, 0.0, 1.0])],
-        mesh_transforms: vec![MeshTransform::identity()],
-        scale: 1.0,
-        color_tint: None,
-    };
-
-    // Replace with cube
-    state.primitive_type = PrimitiveType::Cube;
-    state.primitive_size = 2.0;
-    state.primitive_use_current_color = false;
-    state.primitive_custom_color = [0.0, 1.0, 0.0, 1.0];
-    state.selected_mesh_index = Some(0);
-
-    let new_mesh = generate_cube(state.primitive_size, state.primitive_custom_color);
-    state.edit_buffer.meshes[0] = new_mesh;
-
-    assert_eq!(state.edit_buffer.meshes[0].color, [0.0, 1.0, 0.0, 1.0]);
-    assert_eq!(state.edit_buffer.meshes[0].vertices.len(), 24); // Cube has 24 vertices
-}
-
-#[test]
-fn test_replace_mesh_with_primitive_sphere() {
-    let mut state = CreaturesEditorState::new();
-
-    state.edit_buffer = CreatureDefinition {
-        id: 1,
-        name: "Test".to_string(),
-        meshes: vec![generate_cube(1.0, [1.0, 0.0, 0.0, 1.0])],
-        mesh_transforms: vec![MeshTransform::identity()],
-        scale: 1.0,
-        color_tint: None,
-    };
-
-    // Replace with sphere
-    state.primitive_type = PrimitiveType::Sphere;
-    state.primitive_size = 1.5;
-    state.primitive_segments = 16;
-    state.primitive_rings = 16;
-    state.primitive_use_current_color = true;
-    state.selected_mesh_index = Some(0);
-
-    let current_color = state.edit_buffer.meshes[0].color;
-    let new_mesh = generate_sphere(
-        state.primitive_size,
-        state.primitive_segments,
-        state.primitive_rings,
-        current_color,
-    );
-    state.edit_buffer.meshes[0] = new_mesh;
-
-    assert_eq!(state.edit_buffer.meshes[0].color, [1.0, 0.0, 0.0, 1.0]);
-    // Sphere with 16 segments and 16 rings has (16+1) * (16+1) = 289 vertices
-    assert_eq!(state.edit_buffer.meshes[0].vertices.len(), 17 * 17);
-}
-
-#[test]
 fn test_creature_scale_multiplier() {
     let mut state = CreaturesEditorState::new();
 
@@ -368,92 +306,6 @@ fn test_save_asset_to_file() {
     assert_eq!(loaded_creature.name, creature.name);
     assert_eq!(loaded_creature.scale, creature.scale);
     assert_eq!(loaded_creature.meshes.len(), creature.meshes.len());
-}
-
-#[test]
-fn test_mesh_visibility_tracking() {
-    let mut state = CreaturesEditorState::new();
-
-    state.edit_buffer = CreatureDefinition {
-        id: 1,
-        name: "Test".to_string(),
-        meshes: vec![
-            generate_cube(1.0, [1.0, 0.0, 0.0, 1.0]),
-            generate_sphere(0.5, 8, 8, [0.0, 1.0, 0.0, 1.0]),
-            generate_cylinder(0.3, 1.0, 8, [0.0, 0.0, 1.0, 1.0]),
-        ],
-        mesh_transforms: vec![
-            MeshTransform::identity(),
-            MeshTransform::identity(),
-            MeshTransform::identity(),
-        ],
-        scale: 1.0,
-        color_tint: None,
-    };
-
-    // Initialize visibility
-    state.mesh_visibility = vec![true, true, true];
-
-    assert_eq!(state.mesh_visibility.len(), 3);
-    assert!(state.mesh_visibility[0]);
-    assert!(state.mesh_visibility[1]);
-    assert!(state.mesh_visibility[2]);
-
-    // Hide middle mesh
-    state.mesh_visibility[1] = false;
-
-    assert!(state.mesh_visibility[0]);
-    assert!(!state.mesh_visibility[1]);
-    assert!(state.mesh_visibility[2]);
-}
-
-#[test]
-fn test_primitive_type_enum() {
-    let cube = PrimitiveType::Cube;
-    let sphere = PrimitiveType::Sphere;
-    let cylinder = PrimitiveType::Cylinder;
-    let pyramid = PrimitiveType::Pyramid;
-    let cone = PrimitiveType::Cone;
-
-    assert_eq!(cube, PrimitiveType::Cube);
-    assert_eq!(sphere, PrimitiveType::Sphere);
-    assert_eq!(cylinder, PrimitiveType::Cylinder);
-    assert_eq!(pyramid, PrimitiveType::Pyramid);
-    assert_eq!(cone, PrimitiveType::Cone);
-
-    assert_ne!(cube, sphere);
-}
-
-#[test]
-fn test_uniform_scale_toggle() {
-    let mut state = CreaturesEditorState::new();
-
-    state.edit_buffer = CreatureDefinition {
-        id: 1,
-        name: "Test".to_string(),
-        meshes: vec![generate_cube(1.0, [1.0, 1.0, 1.0, 1.0])],
-        mesh_transforms: vec![MeshTransform::identity()],
-        scale: 1.0,
-        color_tint: None,
-    };
-
-    assert!(state.uniform_scale); // Default should be true
-
-    // When uniform scale is on, all axes should be equal
-    let mut transform = state.edit_buffer.mesh_transforms[0];
-    transform.scale = [2.0, 2.0, 2.0];
-    state.edit_buffer.mesh_transforms[0] = transform;
-
-    assert_eq!(transform.scale, [2.0, 2.0, 2.0]);
-
-    // Disable uniform scale
-    state.uniform_scale = false;
-
-    // Now can set different scales
-    transform.scale = [1.0, 2.0, 3.0];
-    state.edit_buffer.mesh_transforms[0] = transform;
-
-    assert_eq!(state.edit_buffer.mesh_transforms[0].scale, [1.0, 2.0, 3.0]);
 }
 
 #[test]

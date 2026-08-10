@@ -192,13 +192,14 @@ impl CreaturesEditorState {
     }
 
     /// Synchronise the preview renderer state from the current edit buffer.
+    ///
+    /// Always renders all meshes visible with no selection highlight,
+    /// since interactive mesh editing has been removed.
     pub(super) fn sync_preview_renderer_from_edit_buffer(
         &mut self,
     ) -> Result<(), CreatureEditorError> {
-        let visible = self.current_mesh_visibility();
         let preview_creature = self.edit_buffer.clone();
-        let selected_mesh_index = self.selected_mesh_index;
-        let stats = self.build_preview_statistics(&visible);
+        let stats = self.build_preview_statistics();
 
         let renderer = self
             .preview_renderer
@@ -212,8 +213,6 @@ impl CreaturesEditorState {
         renderer.options.background_color = self.background_color;
         renderer.camera.distance = self.camera_distance;
 
-        renderer.set_mesh_visibility(visible);
-        renderer.set_selected_mesh_index(selected_mesh_index);
         renderer.update_creature(Some(preview_creature));
 
         self.preview_state.options.show_grid = self.show_grid;
@@ -228,27 +227,17 @@ impl CreaturesEditorState {
         Ok(())
     }
 
-    /// Return a per-mesh visibility vector derived from `self.mesh_visibility`.
-    pub(super) fn current_mesh_visibility(&self) -> Vec<bool> {
-        self.edit_buffer
-            .meshes
-            .iter()
-            .enumerate()
-            .map(|(idx, _)| self.mesh_visibility.get(idx).copied().unwrap_or(true))
-            .collect()
-    }
-
-    /// Build a [`PreviewStatistics`] snapshot for the currently visible meshes.
-    pub(super) fn build_preview_statistics(&self, visible: &[bool]) -> PreviewStatistics {
+    /// Build a [`PreviewStatistics`] snapshot for all meshes.
+    ///
+    /// All meshes are always visible since interactive mesh editing has been removed.
+    pub(super) fn build_preview_statistics(&self) -> PreviewStatistics {
         let mut stats = PreviewStatistics::new();
         stats.mesh_count = self.edit_buffer.meshes.len();
-        stats.selected_meshes = usize::from(self.selected_mesh_index.is_some());
+        stats.selected_meshes = 0;
 
-        for (idx, mesh) in self.edit_buffer.meshes.iter().enumerate() {
-            if visible.get(idx).copied().unwrap_or(true) {
-                stats.vertex_count += mesh.vertices.len();
-                stats.triangle_count += mesh.indices.len() / 3;
-            }
+        for mesh in self.edit_buffer.meshes.iter() {
+            stats.vertex_count += mesh.vertices.len();
+            stats.triangle_count += mesh.indices.len() / 3;
         }
 
         stats

@@ -3335,6 +3335,14 @@ impl Map {
     /// save-game data (unlocked doors, accumulated trap chances) is preserved
     /// when a map is reloaded.
     ///
+    /// For each *newly created* `LockedDoor` entry (i.e. one with no prior
+    /// save data, so it starts locked), the door's tile is also marked
+    /// `blocked` and `is_special` so [`super::movement::is_locked_door_tile`]
+    /// / [`super::movement::move_party`] physically stop the party from
+    /// walking through it -- without this, the tile stays passable and the
+    /// door's dialogue/lock UI becomes purely cosmetic. `LockedContainer`
+    /// events don't block movement, so their tiles are left untouched.
+    ///
     /// Call this once after constructing or deserialising a `Map`.
     ///
     /// # Examples
@@ -3347,23 +3355,36 @@ impl Map {
     /// assert!(map.lock_states.is_empty()); // no LockedDoor events
     /// ```
     pub fn init_lock_states(&mut self) {
-        for event in self.events.values() {
-            match event {
+        let mut new_locks: Vec<(Position, String, u8, bool)> = Vec::new();
+        for (position, event) in self.events.iter() {
+            let (lock_id, initial_trap_chance, is_door) = match event {
                 MapEvent::LockedDoor {
                     lock_id,
                     initial_trap_chance,
                     ..
-                }
-                | MapEvent::LockedContainer {
+                } => (lock_id, initial_trap_chance, true),
+                MapEvent::LockedContainer {
                     lock_id,
                     initial_trap_chance,
                     ..
-                } if !self.lock_states.contains_key(lock_id) => {
-                    let mut state = LockState::new(lock_id.clone());
-                    state.trap_chance = *initial_trap_chance;
-                    self.lock_states.insert(lock_id.clone(), state);
+                } => (lock_id, initial_trap_chance, false),
+                _ => continue,
+            };
+            if !self.lock_states.contains_key(lock_id) {
+                new_locks.push((*position, lock_id.clone(), *initial_trap_chance, is_door));
+            }
+        }
+
+        for (position, lock_id, trap_chance, is_door) in new_locks {
+            let mut state = LockState::new(lock_id.clone());
+            state.trap_chance = trap_chance;
+            self.lock_states.insert(lock_id, state);
+
+            if is_door {
+                if let Some(tile) = self.get_tile_mut(position) {
+                    tile.blocked = true;
+                    tile.is_special = true;
                 }
-                _ => {}
             }
         }
     }
