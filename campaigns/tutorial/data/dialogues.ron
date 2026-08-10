@@ -2274,6 +2274,78 @@
         ),
     ),
     (
+        id: 501,
+        name: "Default Locked (No Key)",
+        root_node: 1,
+        nodes: {
+            1: (
+                id: 1,
+                text: "This is locked tight, and no ordinary key seems to fit. You\'ll need to find another way to open it.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Leave it for now.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+        },
+        speaker_name: None,
+        repeatable: true,
+        associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
+    ),
+    (
+        id: 502,
+        name: "Default Locked (Requires Key)",
+        root_node: 1,
+        nodes: {
+            1: (
+                id: 1,
+                text: "This is locked. You\'ll need to find the right key to open it.",
+                speaker_override: None,
+                choices: [
+                    (
+                        text: "Leave it for now.",
+                        target_node: None,
+                        conditions: [],
+                        actions: [],
+                        ends_dialogue: true,
+                        sdk_metadata: (
+                            managed_content: [],
+                        ),
+                    ),
+                ],
+                conditions: [],
+                actions: [],
+                is_terminal: false,
+                sdk_metadata: (
+                    managed_content: [],
+                ),
+            ),
+        },
+        speaker_name: None,
+        repeatable: true,
+        associated_quest: None,
+        sdk_metadata: (
+            managed_content: [],
+        ),
+    ),
+    (
         id: 999,
         name: "Default Innkeeper Greeting",
         root_node: 1,

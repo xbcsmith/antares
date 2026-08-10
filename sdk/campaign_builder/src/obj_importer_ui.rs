@@ -41,8 +41,13 @@ use crate::obj_importer::{
     ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
 };
 use crate::ui_helpers::TwoColumnLayout;
+use antares::domain::items::{
+    AccessoryData, AccessorySlot, AmmoData, AmmoType, ArmorClassification, ArmorData,
+    ConsumableData, ConsumableEffect, Item, ItemType, QuestData, WeaponClassification, WeaponData,
+};
 use antares::domain::types::{
-    FurnitureMeshId, LandscapeId, LandscapeMeshId, LANDSCAPE_ID_MIN, LANDSCAPE_MESH_ID_MIN,
+    CreatureId, DiceRoll, FurnitureMeshId, ItemId, LandscapeId, LandscapeMeshId, LANDSCAPE_ID_MIN,
+    LANDSCAPE_MESH_ID_MIN,
 };
 use antares::domain::visual::item_mesh::ItemMeshCategory;
 use antares::domain::visual::{CreatureDefinition, CreatureReference, MeshTransform};
@@ -167,6 +172,9 @@ enum ObjImporterExportError {
 
     #[error("Failed to write asset file: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("Cannot create a new item: all {} item IDs are in use", u8::MAX as u16 + 1)]
+    ItemIdSpaceExhausted,
 }
 
 /// Renders the OBJ importer tab and returns a signal when export completes.
@@ -569,6 +577,45 @@ pub(crate) fn suggest_next_furniture_id_from_dir(campaign_dir: Option<&Path>) ->
     }
 
     FURNITURE_MESH_ID_MIN
+}
+
+/// Returns the next available item mesh registry ID for importer exports.
+///
+/// The helper reads `data/item_mesh_registry.ron` when a campaign is open
+/// and returns the first unused ID starting at `4000` (the importer's
+/// existing default for the shared `creature_id`/item-mesh-ID field).
+/// Missing or unparsable registries fall back to `4000` so a new campaign
+/// can export its first item mesh without setup.
+///
+/// Mirrors [`suggest_next_furniture_id_from_dir`]. Without this, the
+/// importer never advanced its suggested ID after an Item export (unlike
+/// Furniture and Landscape), so every subsequent item mesh export reused the
+/// same ID and silently overwrote the previous item's mesh registry entry
+/// and `data/items.ron` definition.
+pub(crate) fn suggest_next_item_mesh_id_from_dir(campaign_dir: Option<&Path>) -> CreatureId {
+    const ITEM_MESH_ID_MIN: CreatureId = 4000;
+
+    let Some(campaign_dir) = campaign_dir else {
+        return ITEM_MESH_ID_MIN;
+    };
+
+    let registry_path = campaign_dir.join("data/item_mesh_registry.ron");
+    let Ok(refs) = read_ron_vec_or_empty::<CreatureReference>(&registry_path) else {
+        return ITEM_MESH_ID_MIN;
+    };
+
+    let used_ids: std::collections::HashSet<CreatureId> = refs
+        .iter()
+        .filter_map(|entry| (entry.id >= ITEM_MESH_ID_MIN).then_some(entry.id))
+        .collect();
+
+    for id in ITEM_MESH_ID_MIN..=CreatureId::MAX {
+        if !used_ids.contains(&id) {
+            return id;
+        }
+    }
+
+    ITEM_MESH_ID_MIN
 }
 
 fn render_idle_mode(
@@ -1895,6 +1942,7 @@ fn export_state_to_campaign_with_landscape_file(
                 &creature.name,
                 &relative_path,
             )?;
+            upsert_item_definition(campaign_dir, state, &creature)?;
         }
         ExportType::Furniture => {
             if let Some(parent) = absolute_path.parent() {
@@ -2085,6 +2133,164 @@ fn upsert_landscape_definition(
     }
     defs.sort_by_key(|definition| definition.id);
     write_ron_vec(&landscape_path, &defs)
+}
+
+/// Returns the next available [`ItemId`], or `None` when the `u8` ID space
+/// (0-255) is exhausted.
+///
+/// Unlike furniture/landscape IDs (`u32`, allocated from a range starting in
+/// the thousands), item IDs are a `u8`, so overflow is a real possibility on
+/// a large item roster and must be reported rather than silently wrapping or
+/// saturating into a duplicate ID.
+fn next_item_id(items: &[Item]) -> Option<ItemId> {
+    items
+        .iter()
+        .map(|item| item.id)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+}
+
+/// Picks a reasonable default [`ItemType`] for a freshly-imported item mesh
+/// based on the category selected in the importer, so a brand-new
+/// `data/items.ron` entry is playable immediately. Campaign authors are
+/// expected to fine-tune the generated stats afterward in the Items editor.
+fn default_item_type_for_mesh_category(category: ItemMeshCategory) -> ItemType {
+    match category {
+        ItemMeshCategory::Sword => ItemType::Weapon(WeaponData {
+            damage: DiceRoll::new(1, 8, 0),
+            bonus: 0,
+            hands_required: 1,
+            classification: WeaponClassification::MartialMelee,
+        }),
+        ItemMeshCategory::Dagger => ItemType::Weapon(WeaponData {
+            damage: DiceRoll::new(1, 4, 0),
+            bonus: 0,
+            hands_required: 1,
+            classification: WeaponClassification::Simple,
+        }),
+        ItemMeshCategory::Blunt => ItemType::Weapon(WeaponData {
+            damage: DiceRoll::new(1, 6, 0),
+            bonus: 0,
+            hands_required: 1,
+            classification: WeaponClassification::Blunt,
+        }),
+        ItemMeshCategory::Staff => ItemType::Weapon(WeaponData {
+            damage: DiceRoll::new(1, 6, 0),
+            bonus: 0,
+            hands_required: 2,
+            classification: WeaponClassification::Blunt,
+        }),
+        ItemMeshCategory::Bow => ItemType::Weapon(WeaponData {
+            damage: DiceRoll::new(1, 6, 0),
+            bonus: 0,
+            hands_required: 2,
+            classification: WeaponClassification::MartialRanged,
+        }),
+        ItemMeshCategory::BodyArmor => ItemType::Armor(ArmorData {
+            ac_bonus: 1,
+            weight: 10,
+            classification: ArmorClassification::Light,
+        }),
+        ItemMeshCategory::Helmet => ItemType::Armor(ArmorData {
+            ac_bonus: 1,
+            weight: 2,
+            classification: ArmorClassification::Helmet,
+        }),
+        ItemMeshCategory::Shield => ItemType::Armor(ArmorData {
+            ac_bonus: 1,
+            weight: 5,
+            classification: ArmorClassification::Shield,
+        }),
+        ItemMeshCategory::Boots => ItemType::Armor(ArmorData {
+            ac_bonus: 0,
+            weight: 2,
+            classification: ArmorClassification::Boots,
+        }),
+        ItemMeshCategory::Ring => ItemType::Accessory(AccessoryData {
+            slot: AccessorySlot::Ring,
+            classification: None,
+        }),
+        ItemMeshCategory::Amulet => ItemType::Accessory(AccessoryData {
+            slot: AccessorySlot::Amulet,
+            classification: None,
+        }),
+        ItemMeshCategory::Belt => ItemType::Accessory(AccessoryData {
+            slot: AccessorySlot::Belt,
+            classification: None,
+        }),
+        ItemMeshCategory::Cloak => ItemType::Accessory(AccessoryData {
+            slot: AccessorySlot::Cloak,
+            classification: None,
+        }),
+        ItemMeshCategory::Potion => ItemType::Consumable(ConsumableData {
+            effect: ConsumableEffect::HealHp(10),
+            is_combat_usable: true,
+            duration_minutes: None,
+        }),
+        ItemMeshCategory::Scroll => ItemType::Consumable(ConsumableData {
+            effect: ConsumableEffect::HealHp(10),
+            is_combat_usable: true,
+            duration_minutes: None,
+        }),
+        ItemMeshCategory::Ammo => ItemType::Ammo(AmmoData {
+            ammo_type: AmmoType::Arrow,
+            quantity: 20,
+        }),
+        ItemMeshCategory::QuestItem => ItemType::Quest(QuestData {
+            quest_id: String::new(),
+            is_key_item: false,
+        }),
+    }
+}
+
+/// Creates or updates the `data/items.ron` entry for an imported item mesh,
+/// mirroring [`upsert_furniture_definition`] / [`upsert_landscape_definition`].
+///
+/// Without this, exporting a brand-new item mesh (one with no existing
+/// `items.ron` entry whose `mesh_id` matches) only wrote the mesh RON file
+/// and the `item_mesh_registry.ron` entry -- the mesh was never playable
+/// because nothing in `items.ron` referenced it.
+fn upsert_item_definition(
+    campaign_dir: &Path,
+    state: &ObjImporterState,
+    creature: &CreatureDefinition,
+) -> Result<(), ObjImporterExportError> {
+    let items_path = campaign_dir.join("data/items.ron");
+    let mut items = read_ron_vec_or_empty::<Item>(&items_path)?;
+    let category = item_mesh_category_from_str(&state.category);
+    let id = match items.iter().find(|item| item.mesh_id == Some(creature.id)) {
+        Some(existing) => existing.id,
+        None => next_item_id(&items).ok_or(ObjImporterExportError::ItemIdSpaceExhausted)?,
+    };
+    let definition = Item {
+        id,
+        name: creature.name.clone(),
+        item_type: default_item_type_for_mesh_category(category),
+        base_cost: 10,
+        sell_cost: 5,
+        alignment_restriction: None,
+        constant_bonus: None,
+        temporary_bonus: None,
+        spell_effect: None,
+        max_charges: 0,
+        is_cursed: false,
+        icon_path: None,
+        tags: vec!["imported".to_string()],
+        mesh_descriptor_override: None,
+        mesh_id: Some(creature.id),
+    };
+
+    if let Some(existing) = items
+        .iter_mut()
+        .find(|existing| existing.mesh_id == Some(creature.id))
+    {
+        *existing = definition;
+    } else {
+        items.push(definition);
+    }
+    items.sort_by_key(|item| item.id);
+    write_ron_vec(&items_path, &items)
 }
 
 /// Updates `data/object_mesh_registry.ron`, inserting or replacing the entry for `mesh_key`.
@@ -2598,7 +2804,8 @@ mod tests {
         load_model_into_state, persist_custom_palette, preview_export_relative_path,
         show_obj_importer_tab, stage_imported_swatch_as_custom_draft,
         suggest_next_creature_id_from_dir, suggest_next_furniture_id_from_dir,
-        suggest_next_landscape_mesh_id_from_dir, ObjImportError, ObjImporterExportError,
+        suggest_next_item_mesh_id_from_dir, suggest_next_landscape_mesh_id_from_dir,
+        ObjImportError, ObjImporterExportError,
     };
     use crate::creature_id_manager::CreatureCategory;
     use crate::logging::Logger;
@@ -2606,6 +2813,7 @@ mod tests {
         ExportType, ImportSourceFormat, ImportedMaterialSwatch, ImportedMeshColorSource,
         ImportedMtlSourceKind, ImportedTexturePayload, ImporterMode, ObjImporterState,
     };
+    use antares::domain::items::{Item, ItemType};
     use antares::domain::types::{LANDSCAPE_ID_MIN, LANDSCAPE_MESH_ID_MIN};
     use antares::domain::visual::item_mesh::ItemMeshCategory;
     use antares::domain::visual::{
@@ -3566,6 +3774,144 @@ mod tests {
         assert_eq!(furniture_defs[0].mesh_id, Some(10042));
     }
 
+    /// Regression test: exporting a brand-new item mesh (no existing
+    /// `items.ron` entry references its mesh ID yet) must create a new
+    /// `data/items.ron` entry, exactly like Furniture and Landscape already
+    /// do. Previously the Item export path only wrote the mesh RON file and
+    /// the mesh registry entry, leaving the mesh unreferenced by any
+    /// playable item.
+    #[test]
+    fn test_export_item_creates_new_items_ron_entry_when_none_exists() {
+        let campaign_dir = tempdir().unwrap();
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Item;
+        state.creature_name = "Blazing Short Sword".to_string();
+        state.category = "Sword".to_string();
+        state.creature_id = 9042;
+
+        export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+
+        let mesh_registry = ron::from_str::<Vec<CreatureReference>>(
+            &fs::read_to_string(campaign_dir.path().join("data/item_mesh_registry.ron")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(mesh_registry.len(), 1);
+        assert_eq!(mesh_registry[0].id, 9042);
+
+        let items = ron::from_str::<Vec<Item>>(
+            &fs::read_to_string(campaign_dir.path().join("data/items.ron")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "Blazing Short Sword");
+        assert_eq!(items[0].mesh_id, Some(9042));
+        assert!(matches!(items[0].item_type, ItemType::Weapon(_)));
+    }
+
+    /// A second import of a mesh whose ID already has an `items.ron` entry
+    /// (matched via `mesh_id`) must update that entry in place rather than
+    /// creating a duplicate, mirroring furniture/landscape upsert semantics.
+    #[test]
+    fn test_export_item_upserts_existing_item_by_mesh_id() {
+        let campaign_dir = tempdir().unwrap();
+        fs::create_dir_all(campaign_dir.path().join("data")).unwrap();
+        let mut existing = crate::items_editor::ItemsEditorState::default_item();
+        existing.id = 5;
+        existing.name = "Old Short Sword".to_string();
+        existing.mesh_id = Some(9042);
+        fs::write(
+            campaign_dir.path().join("data/items.ron"),
+            ron::ser::to_string_pretty(&vec![existing], ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Item;
+        state.creature_name = "Blazing Short Sword".to_string();
+        state.category = "Sword".to_string();
+        state.creature_id = 9042;
+
+        export_state_to_campaign(&state, Some(campaign_dir.path())).unwrap();
+
+        let items = ron::from_str::<Vec<Item>>(
+            &fs::read_to_string(campaign_dir.path().join("data/items.ron")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, 5, "existing item ID must be preserved");
+        assert_eq!(items[0].name, "Blazing Short Sword");
+        assert_eq!(items[0].mesh_id, Some(9042));
+    }
+
+    /// A different mesh (distinct `creature.id`) must create a second,
+    /// independent `items.ron` entry rather than colliding with an existing
+    /// item that already exists under the same name (e.g. importing "Short
+    /// Sword" after "Blazing Short Sword" already exists).
+    #[test]
+    fn test_export_item_creates_separate_entries_for_distinct_mesh_ids() {
+        let campaign_dir = tempdir().unwrap();
+
+        let mut first = triangle_mesh_state();
+        first.export_type = ExportType::Item;
+        first.creature_name = "Short Sword".to_string();
+        first.category = "Sword".to_string();
+        first.creature_id = 9001;
+        export_state_to_campaign(&first, Some(campaign_dir.path())).unwrap();
+
+        let mut second = triangle_mesh_state();
+        second.export_type = ExportType::Item;
+        second.creature_name = "Blazing Short Sword".to_string();
+        second.category = "Sword".to_string();
+        second.creature_id = 9002;
+        export_state_to_campaign(&second, Some(campaign_dir.path())).unwrap();
+
+        let items = ron::from_str::<Vec<Item>>(
+            &fs::read_to_string(campaign_dir.path().join("data/items.ron")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(items.len(), 2);
+        assert!(items
+            .iter()
+            .any(|i| i.name == "Short Sword" && i.mesh_id == Some(9001)));
+        assert!(items
+            .iter()
+            .any(|i| i.name == "Blazing Short Sword" && i.mesh_id == Some(9002)));
+        assert_ne!(items[0].id, items[1].id);
+    }
+
+    /// Exhausting the `u8` item ID space must surface a clear error instead
+    /// of silently wrapping/duplicating an ID.
+    #[test]
+    fn test_export_item_id_space_exhausted_returns_error() {
+        let campaign_dir = tempdir().unwrap();
+        fs::create_dir_all(campaign_dir.path().join("data")).unwrap();
+        let items: Vec<Item> = (1..=255u8)
+            .map(|id| {
+                let mut item = crate::items_editor::ItemsEditorState::default_item();
+                item.id = id;
+                item.mesh_id = Some(20000 + id as u32);
+                item
+            })
+            .collect();
+        fs::write(
+            campaign_dir.path().join("data/items.ron"),
+            ron::ser::to_string_pretty(&items, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        let mut state = triangle_mesh_state();
+        state.export_type = ExportType::Item;
+        state.creature_name = "One Item Too Many".to_string();
+        state.category = "Sword".to_string();
+        state.creature_id = 30000;
+
+        let result = export_state_to_campaign(&state, Some(campaign_dir.path()));
+        assert!(matches!(
+            result,
+            Err(ObjImporterExportError::ItemIdSpaceExhausted)
+        ));
+    }
+
     #[test]
     fn test_suggest_next_landscape_mesh_id_uses_domain_min_without_registry() {
         let campaign_dir = tempdir().unwrap();
@@ -3724,6 +4070,122 @@ mod tests {
             suggest_next_furniture_id_from_dir(Some(campaign_dir.path())),
             10002
         );
+    }
+
+    #[test]
+    fn test_suggest_next_item_mesh_id_uses_default_min_without_registry() {
+        let campaign_dir = tempdir().unwrap();
+
+        assert_eq!(
+            suggest_next_item_mesh_id_from_dir(Some(campaign_dir.path())),
+            4000
+        );
+    }
+
+    #[test]
+    fn test_suggest_next_item_mesh_id_skips_used_registry_ids() {
+        let campaign_dir = tempdir().unwrap();
+        fs::create_dir_all(campaign_dir.path().join("data")).unwrap();
+        let registry = vec![
+            CreatureReference {
+                id: 4000,
+                name: "Short Sword".to_string(),
+                filepath: "assets/meshes/items/short_sword.ron".to_string(),
+            },
+            CreatureReference {
+                id: 4001,
+                name: "Blazing Short Sword".to_string(),
+                filepath: "assets/meshes/items/blazing_short_sword.ron".to_string(),
+            },
+        ];
+        fs::write(
+            campaign_dir.path().join("data/item_mesh_registry.ron"),
+            ron::ser::to_string_pretty(&registry, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            suggest_next_item_mesh_id_from_dir(Some(campaign_dir.path())),
+            4002
+        );
+    }
+
+    #[test]
+    fn test_suggest_next_item_mesh_id_fills_first_hole() {
+        let campaign_dir = tempdir().unwrap();
+        fs::create_dir_all(campaign_dir.path().join("data")).unwrap();
+        let registry = vec![
+            CreatureReference {
+                id: 4000,
+                name: "Short Sword".to_string(),
+                filepath: "assets/meshes/items/short_sword.ron".to_string(),
+            },
+            CreatureReference {
+                id: 4002,
+                name: "Long Sword".to_string(),
+                filepath: "assets/meshes/items/long_sword.ron".to_string(),
+            },
+        ];
+        fs::write(
+            campaign_dir.path().join("data/item_mesh_registry.ron"),
+            ron::ser::to_string_pretty(&registry, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            suggest_next_item_mesh_id_from_dir(Some(campaign_dir.path())),
+            4001
+        );
+    }
+
+    /// End-to-end regression test for the reported bug: exporting two
+    /// distinct item meshes back-to-back, refreshing the suggested ID via
+    /// [`suggest_next_item_mesh_id_from_dir`] between exports exactly like
+    /// the app's `ObjImporterUiSignal::Item` handler does, must not
+    /// overwrite the first mesh's registry entry or `items.ron` definition.
+    #[test]
+    fn test_sequential_item_exports_with_id_refresh_do_not_clobber_each_other() {
+        let campaign_dir = tempdir().unwrap();
+
+        let mut first = triangle_mesh_state();
+        first.export_type = ExportType::Item;
+        first.creature_name = "Short Sword".to_string();
+        first.category = "Sword".to_string();
+        first.creature_id = suggest_next_item_mesh_id_from_dir(Some(campaign_dir.path()));
+        export_state_to_campaign(&first, Some(campaign_dir.path())).unwrap();
+
+        // Simulate the app refreshing the suggested ID after the first
+        // export completes, then the author importing a second mesh without
+        // manually touching the ID field.
+        let mut second = triangle_mesh_state();
+        second.export_type = ExportType::Item;
+        second.creature_name = "Blazing Short Sword".to_string();
+        second.category = "Sword".to_string();
+        second.creature_id = suggest_next_item_mesh_id_from_dir(Some(campaign_dir.path()));
+        export_state_to_campaign(&second, Some(campaign_dir.path())).unwrap();
+
+        assert_ne!(
+            first.creature_id, second.creature_id,
+            "the suggested ID must advance between sequential item exports"
+        );
+
+        let mesh_registry = ron::from_str::<Vec<CreatureReference>>(
+            &fs::read_to_string(campaign_dir.path().join("data/item_mesh_registry.ron")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            mesh_registry.len(),
+            2,
+            "both mesh registry entries must survive"
+        );
+
+        let items = ron::from_str::<Vec<Item>>(
+            &fs::read_to_string(campaign_dir.path().join("data/items.ron")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(items.len(), 2, "both items.ron definitions must survive");
+        assert!(items.iter().any(|i| i.name == "Short Sword"));
+        assert!(items.iter().any(|i| i.name == "Blazing Short Sword"));
     }
 
     #[test]

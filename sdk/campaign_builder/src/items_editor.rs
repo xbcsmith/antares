@@ -16,8 +16,27 @@ use antares::domain::items::types::{
 };
 use antares::domain::types::DiceRoll;
 use antares::domain::visual::item_mesh::ItemMeshDescriptor;
+use antares::domain::visual::CreatureReference;
 use eframe::egui;
 use std::path::PathBuf;
+
+/// Reads `data/item_mesh_registry.ron` (written by the OBJ Importer's Item
+/// export) so the mesh-ID picker below can list imported meshes by name
+/// instead of requiring the author to know the raw numeric ID.
+///
+/// Returns an empty list when no campaign is open or the registry is
+/// missing/unparsable -- callers fall back to a plain numeric input in that
+/// case.
+fn browse_item_mesh_entries(campaign_dir: Option<&PathBuf>) -> Vec<CreatureReference> {
+    let Some(dir) = campaign_dir else {
+        return Vec::new();
+    };
+    let path = dir.join("data/item_mesh_registry.ron");
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    ron::from_str::<Vec<CreatureReference>>(&contents).unwrap_or_default()
+}
 
 /// Editor mode for items
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1040,6 +1059,62 @@ impl ItemsEditorState {
                         ui.label(format!("  {} (from classification)", prof_id));
                     } else {
                         ui.label("  None (anyone can use)");
+                    }
+                });
+
+                ui.add_space(10.0);
+
+                // ── Imported Mesh (links to an OBJ Importer Item export) ────
+                ui.group(|ui| {
+                    ui.heading("Imported Mesh");
+                    ui.add_space(4.0);
+
+                    let mesh_entries = browse_item_mesh_entries(ctx.campaign_dir);
+                    let mut use_custom_mesh = self.edit_buffer.mesh_id.is_some();
+
+                    if ui
+                        .checkbox(&mut use_custom_mesh, "Use custom OBJ-imported mesh")
+                        .changed()
+                    {
+                        self.edit_buffer.mesh_id = if use_custom_mesh {
+                            Some(mesh_entries.first().map(|e| e.id).unwrap_or(0))
+                        } else {
+                            None
+                        };
+                        ui.ctx().request_repaint();
+                    }
+
+                    if let Some(mesh_id) = self.edit_buffer.mesh_id.as_mut() {
+                        ui.horizontal(|ui| {
+                            ui.label("Mesh:");
+                            if mesh_entries.is_empty() {
+                                ui.add(egui::DragValue::new(mesh_id).speed(1.0));
+                            } else {
+                                let selected_text = mesh_entries
+                                    .iter()
+                                    .find(|entry| entry.id == *mesh_id)
+                                    .map(|entry| format!("{} — {}", entry.id, entry.name))
+                                    .unwrap_or_else(|| format!("{} (unknown)", mesh_id));
+                                egui::ComboBox::from_id_salt("item_mesh_id_selector")
+                                    .selected_text(selected_text)
+                                    .show_ui(ui, |ui| {
+                                        for entry in &mesh_entries {
+                                            ui.selectable_value(
+                                                mesh_id,
+                                                entry.id,
+                                                format!("{} — {}", entry.id, entry.name),
+                                            );
+                                        }
+                                    });
+                            }
+                        });
+                        ui.label(
+                            egui::RichText::new(
+                                "Links this item to a mesh exported via the OBJ Importer's Item export.",
+                            )
+                            .small()
+                            .weak(),
+                        );
                     }
                 });
 

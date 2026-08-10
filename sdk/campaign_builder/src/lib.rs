@@ -1445,7 +1445,13 @@ impl eframe::App for CampaignBuilderApp {
                         }
                         obj_importer_ui::ObjImporterUiSignal::Item => {
                             let importer_status = self.obj_importer_state.status_message.clone();
+                            self.load_items();
+                            let next_item_id = obj_importer_ui::suggest_next_item_mesh_id_from_dir(
+                                self.campaign_dir.as_deref(),
+                            );
+                            self.obj_importer_state.set_next_creature_id(next_item_id);
                             self.ui_state.status_message = importer_status;
+                            self.ui_state.active_tab = EditorTab::Items;
                             ui.ctx().request_repaint();
                         }
                         obj_importer_ui::ObjImporterUiSignal::Furniture => {

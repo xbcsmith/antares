@@ -164,8 +164,9 @@ impl CampaignBuilderApp {
 
     /// Synchronize importer state that depends on the active campaign.
     ///
-    /// This refreshes importer palette data plus suggested creature, furniture,
-    /// and landscape mesh IDs from the currently open campaign directory.
+    /// This refreshes importer palette data plus suggested creature, item,
+    /// furniture, and landscape mesh IDs from the currently open campaign
+    /// directory.
     ///
     /// # Examples
     ///
@@ -233,6 +234,12 @@ impl CampaignBuilderApp {
                 obj_importer_ui::suggest_next_furniture_id_from_dir(self.campaign_dir.as_deref());
             self.obj_importer_state
                 .set_next_furniture_id(next_furniture_id);
+        }
+
+        if self.obj_importer_state.export_type == obj_importer::ExportType::Item {
+            let next_item_id =
+                obj_importer_ui::suggest_next_item_mesh_id_from_dir(self.campaign_dir.as_deref());
+            self.obj_importer_state.set_next_creature_id(next_item_id);
         }
     }
 

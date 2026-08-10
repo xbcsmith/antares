@@ -32,7 +32,9 @@ Fixed - Game play issue. Casting First Aid always has no effect in combat.
 
 Fixed - Campaign Builder --> Edit NPC -->  Selecting a Creature ID using the Browse Button is painfully slow and the popup takes forever to render the scroll bars
 
-Chests respawn loot when you hit escape. Chest mesh are not showing up.
+Fixed - Chests respawn loot when you hit escape.
+
+Fixed - Chest mesh are not showing up.
 
 FIXED - Tutorial Map 4 problems.
 Portal from map 4 to map 2 is not working. Going through it takes me back to map 4 instead of map 2. THen I can't walk straight ahead on the map 4 when coming out of the Dark Forrest Portal. I can turn and walk thorough the trees but can not go two tiles straight ahead. When I do try to go straight ahead something is blocking the path. Strangly if you go back to the portal you get ambushed by 2 bandits that are supposed to be on map 2. I have set the destination to mape 2 (18,10) but I can't edit the portal destination location using the mouse in the Campaign Builder becasue the map is offest and no matter how wide I make the SDK window the map is still cut off.
@@ -46,3 +48,5 @@ FIXED - Player Overview in game should not try to rescale the length of the full
 FIXED - Save Game on map_2 in the middle of map. Load Game puts the party back at the first Inn. Recruitable NPC that were already recruited and are in your party are back to their starting points on the map. Creating duplicate versions of themselves.
 
 FIXED - Campaign Builder --> Importer --> Furniture --> Furniture Mesh Imports are overwriting last imported mesh even after saving. I imported a mesh and it assigned it Furniture ID 13. Next mesh overwrote it as Furniture ID 13.
+
+SDK Campaign Builder adding event Container on map 1. As I add initial items to the container once I get past 4 items I can not see the new items because there are no scroll bars. I should be able to add 100s of items to a container event and be able to scroll through them.

@@ -29,4 +29,9 @@
         name: "Shrub",
         filepath: "assets/meshes/landscape/brush/shrub.ron",
     ),
+    (
+        id: 11006,
+        name: "Pile of Rocks",
+        filepath: "assets/meshes/landscape/rock/pile_of_rocks.ron",
+    ),
 ]

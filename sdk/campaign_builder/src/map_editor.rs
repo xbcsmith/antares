@@ -8013,7 +8013,11 @@ impl MapsEditorState {
                     let mut remove_idx: Option<usize> = None;
                     egui::ScrollArea::vertical()
                         .id_salt("container_evt_items_scroll")
-                        .max_height(180.0)
+                        .max_height(220.0)
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
+                        )
+                        .stick_to_bottom(true)
                         .show(ui, |ui| {
                             for (i, &item_id) in event_editor.container_items.iter().enumerate() {
                                 ui.push_id(format!("container_item_{}", i), |ui| {
@@ -8233,7 +8237,11 @@ impl MapsEditorState {
                     let mut remove_locked_idx: Option<usize> = None;
                     egui::ScrollArea::vertical()
                         .id_salt("locked_container_evt_items_scroll")
-                        .max_height(120.0)
+                        .max_height(220.0)
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
+                        )
+                        .stick_to_bottom(true)
                         .show(ui, |ui| {
                             for (i, &item_id) in
                                 event_editor.locked_container_items.iter().enumerate()
