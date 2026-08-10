@@ -374,6 +374,16 @@ pub fn try_interact_locked_door_event(
     true
 }
 
+/// `(lock_id, name, key_item_id, dialogue_id, items)` extracted from a
+/// `MapEvent::LockedContainer`.
+type LockedContainerInfo = (
+    String,
+    String,
+    Option<ItemId>,
+    Option<DialogueId>,
+    Vec<crate::domain::character::InventorySlot>,
+);
+
 /// Tries to interact with a tile-based locked container event directly ahead.
 ///
 /// Returns `true` when a locked-container event was found and the interaction
@@ -389,27 +399,35 @@ pub fn try_interact_locked_container_event(
     start_dialogue_writer: &mut MessageWriter<StartDialogue>,
     pending_event_context: &mut PendingEventInteractionContext,
 ) -> bool {
-    let locked_container_info: Option<(String, String, Option<ItemId>, Option<DialogueId>)> =
-        game_state
-            .world
-            .get_current_map()
-            .and_then(|m| m.get_event(target))
-            .and_then(|e| {
-                if let MapEvent::LockedContainer {
-                    lock_id,
-                    name,
-                    key_item_id,
-                    dialogue_id,
-                    ..
-                } = e
-                {
-                    Some((lock_id.clone(), name.clone(), *key_item_id, *dialogue_id))
-                } else {
-                    None
-                }
-            });
+    let locked_container_info: Option<LockedContainerInfo> = game_state
+        .world
+        .get_current_map()
+        .and_then(|m| m.get_event(target))
+        .and_then(|e| {
+            if let MapEvent::LockedContainer {
+                lock_id,
+                name,
+                key_item_id,
+                dialogue_id,
+                items,
+                ..
+            } = e
+            {
+                Some((
+                    lock_id.clone(),
+                    name.clone(),
+                    *key_item_id,
+                    *dialogue_id,
+                    items.clone(),
+                ))
+            } else {
+                None
+            }
+        });
 
-    let Some((lock_id, container_name, key_item_id, dialogue_id)) = locked_container_info else {
+    let Some((lock_id, container_name, key_item_id, dialogue_id, container_items)) =
+        locked_container_info
+    else {
         return false;
     };
 
@@ -448,7 +466,7 @@ pub fn try_interact_locked_container_event(
                     id: id.clone(),
                     name: name.clone(),
                     description: String::new(),
-                    items: vec![],
+                    items: container_items.clone(),
                     gold: 0,
                     gems: 0,
                     mesh_id: None,
@@ -461,7 +479,7 @@ pub fn try_interact_locked_container_event(
                 id,
                 name,
                 description: String::new(),
-                items: vec![],
+                items: container_items,
                 gold: 0,
                 gems: 0,
                 mesh_id: None,
@@ -508,7 +526,7 @@ pub fn try_interact_locked_container_event(
                         id: id.clone(),
                         name: name.clone(),
                         description: String::new(),
-                        items: vec![],
+                        items: container_items.clone(),
                         gold: 0,
                         gems: 0,
                         mesh_id: None,
@@ -522,7 +540,7 @@ pub fn try_interact_locked_container_event(
                     id,
                     name: name.clone(),
                     description: String::new(),
-                    items: vec![],
+                    items: container_items,
                     gold: 0,
                     gems: 0,
                     mesh_id: None,
@@ -600,35 +618,46 @@ pub fn try_interact_npc_or_recruitable(
         return true;
     }
 
-    if let Some(MapEvent::RecruitableCharacter { .. }) = map.get_event(party_position) {
-        let event = map
-            .get_event(party_position)
-            .expect("Recruitable character event must still exist at current position")
-            .clone();
+    if let Some(MapEvent::RecruitableCharacter { character_id, .. }) = map.get_event(party_position)
+    {
+        // A character already recruited (in the roster/party) must not be
+        // re-triggerable even if a stale event lingers on the map (event
+        // removal at recruit time is keyed off a single dialogue tile and can
+        // miss characters recruited via another NPC's dialogue tree).
+        if !game_state.encountered_characters.contains(character_id) {
+            let event = map
+                .get_event(party_position)
+                .expect("Recruitable character event must still exist at current position")
+                .clone();
 
-        if let MapEvent::RecruitableCharacter {
-            name, character_id, ..
-        } = &event
-        {
-            info!(
-                "Interacting with recruitable character '{}' (ID: {}) at current position {:?}",
-                name, character_id, party_position
-            );
-            recruitment_context.0 = Some(RecruitmentContext {
-                character_id: character_id.clone(),
-                event_position: party_position,
+            if let MapEvent::RecruitableCharacter {
+                name, character_id, ..
+            } = &event
+            {
+                info!(
+                    "Interacting with recruitable character '{}' (ID: {}) at current position {:?}",
+                    name, character_id, party_position
+                );
+                recruitment_context.0 = Some(RecruitmentContext {
+                    character_id: character_id.clone(),
+                    event_position: party_position,
+                });
+            }
+
+            map_event_messages.write(MapEventTriggered {
+                event,
+                position: party_position,
             });
+            return true;
         }
-
-        map_event_messages.write(MapEventTriggered {
-            event,
-            position: party_position,
-        });
-        return true;
     }
 
     for position in adjacent_tiles {
-        if let Some(MapEvent::RecruitableCharacter { .. }) = map.get_event(position) {
+        if let Some(MapEvent::RecruitableCharacter { character_id, .. }) = map.get_event(position) {
+            if game_state.encountered_characters.contains(character_id) {
+                continue;
+            }
+
             let event = map
                 .get_event(position)
                 .expect("Recruitable character event must still exist at adjacent position")

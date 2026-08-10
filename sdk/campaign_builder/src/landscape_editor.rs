@@ -10,8 +10,10 @@
 use crate::ui_helpers::{
     show_standard_list_item, ItemAction, MetadataBadge, StandardListItemConfig, TwoColumnLayout,
 };
+use antares::domain::types::LandscapeId;
 use antares::domain::visual::{CreatureDefinition, CreatureReference};
 use antares::domain::world::landscape::{LandscapeCategory, LandscapeDefinition};
+use antares::sdk::database::MapDatabase;
 use eframe::egui;
 use std::fs;
 use std::path::Path;
@@ -89,6 +91,29 @@ pub struct LandscapeEditorState {
     /// errors (e.g. OBJ imported at 0.01 instead of 1.0) without leaving the
     /// Landscape Editor. Only meaningful when `edit_buffer.mesh_id` is `Some`.
     mesh_scale_buffer: f32,
+
+    /// Pending delete awaiting confirmation because the definition is still
+    /// placed on one or more maps. `None` when no delete is in progress, or
+    /// once a delete with zero map placements has already gone through
+    /// (those are removed immediately without a confirmation step).
+    pending_delete_confirm: Option<PendingDeleteConfirm>,
+}
+
+/// State for a landscape-definition delete that requires confirmation
+/// because it is still referenced by at least one map placement.
+///
+/// Deleting a [`LandscapeDefinition`] that's still placed on a map leaves a
+/// dangling `landscape_id` behind — the campaign then fails to load with a
+/// "references missing landscape ID" error the next time it's opened. This
+/// struct captures the id/name at the moment Delete was clicked so the
+/// confirmation dialog can show what would break, and so the actual removal
+/// (triggered separately, once confirmed) can re-locate the entry by id
+/// rather than trusting a list index that may have shifted by then.
+#[derive(Debug, Clone)]
+struct PendingDeleteConfirm {
+    id: LandscapeId,
+    name: String,
+    usage_count: usize,
 }
 
 impl LandscapeEditorState {
@@ -328,23 +353,105 @@ impl LandscapeEditorState {
         }
         if let Some(idx) = pending_delete {
             if idx < defs.len() {
-                let deleted = defs.remove(idx);
-                // Adjust the stored selection so it stays valid after the removal.
-                match self.selected_landscape {
-                    Some(sel) if sel == idx => self.selected_landscape = None,
-                    Some(sel) if sel > idx => self.selected_landscape = Some(sel - 1),
-                    _ => {}
+                let usage_count = count_landscape_placements(campaign_dir, defs[idx].id);
+                if usage_count == 0 {
+                    self.remove_landscape_definition(idx, defs, campaign_dir, unsaved_changes);
+                    ui.ctx().request_repaint();
+                } else {
+                    // Still placed on at least one map — deleting now would leave
+                    // a dangling landscape_id behind and break campaign loading.
+                    // Defer to a confirmation dialog instead of deleting outright.
+                    self.pending_delete_confirm = Some(PendingDeleteConfirm {
+                        id: defs[idx].id,
+                        name: defs[idx].name.clone(),
+                        usage_count,
+                    });
                 }
-                // Remove the associated mesh registry entry when the landscape
-                // had a custom mesh — keeps landscape_mesh_registry.ron in sync.
-                if let (Some(mesh_id), Some(dir)) = (deleted.mesh_id, campaign_dir) {
-                    let _ = remove_landscape_mesh_registry_entry(dir, mesh_id);
-                }
-                self.texture_validation_cache = None;
-                self.mesh_scale_preview_cache = None;
-                *unsaved_changes = true;
-                ui.ctx().request_repaint();
             }
+        }
+
+        self.show_delete_confirmation(ui, defs, campaign_dir, unsaved_changes);
+    }
+
+    /// Removes `defs[idx]` and its associated mesh registry entry (if any).
+    ///
+    /// Shared by the immediate-delete path (unused definitions) and the
+    /// confirmation dialog's "Delete Anyway" button (definitions still
+    /// placed on a map, deleted only after the author explicitly confirms).
+    fn remove_landscape_definition(
+        &mut self,
+        idx: usize,
+        defs: &mut Vec<LandscapeDefinition>,
+        campaign_dir: Option<&Path>,
+        unsaved_changes: &mut bool,
+    ) {
+        let deleted = defs.remove(idx);
+        // Adjust the stored selection so it stays valid after the removal.
+        match self.selected_landscape {
+            Some(sel) if sel == idx => self.selected_landscape = None,
+            Some(sel) if sel > idx => self.selected_landscape = Some(sel - 1),
+            _ => {}
+        }
+        // Remove the associated mesh registry entry when the landscape
+        // had a custom mesh — keeps landscape_mesh_registry.ron in sync.
+        if let (Some(mesh_id), Some(dir)) = (deleted.mesh_id, campaign_dir) {
+            let _ = remove_landscape_mesh_registry_entry(dir, mesh_id);
+        }
+        self.texture_validation_cache = None;
+        self.mesh_scale_preview_cache = None;
+        *unsaved_changes = true;
+    }
+
+    /// Renders the "still placed on a map" delete confirmation dialog, if a
+    /// delete is pending one. No-op when `pending_delete_confirm` is `None`.
+    fn show_delete_confirmation(
+        &mut self,
+        ui: &mut egui::Ui,
+        defs: &mut Vec<LandscapeDefinition>,
+        campaign_dir: Option<&Path>,
+        unsaved_changes: &mut bool,
+    ) {
+        let Some(pending) = self.pending_delete_confirm.clone() else {
+            return;
+        };
+        let mut open = true;
+        egui::Window::new("Confirm Landscape Deletion")
+            .open(&mut open)
+            .resizable(false)
+            .collapsible(false)
+            .show(ui.ctx(), |dialog_ui| {
+                dialog_ui.colored_label(
+                    egui::Color32::YELLOW,
+                    format!(
+                        "'{}' is placed on the map {} time(s).",
+                        pending.name, pending.usage_count
+                    ),
+                );
+                dialog_ui.label(
+                    "Deleting it now will leave those placements pointing at a \
+                     missing landscape ID — the campaign will fail to load until \
+                     they're removed or repointed in the Map Editor.",
+                );
+                dialog_ui.separator();
+                dialog_ui.horizontal_wrapped(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        self.pending_delete_confirm = None;
+                    }
+                    if ui.button("Delete Anyway").clicked() {
+                        if let Some(idx) = defs.iter().position(|def| def.id == pending.id) {
+                            self.remove_landscape_definition(
+                                idx,
+                                defs,
+                                campaign_dir,
+                                unsaved_changes,
+                            );
+                        }
+                        self.pending_delete_confirm = None;
+                    }
+                });
+            });
+        if !open {
+            self.pending_delete_confirm = None;
         }
     }
 
@@ -850,6 +957,36 @@ fn replace_top_level_scale(contents: &str, new_scale: f32) -> Option<String> {
     Some(result)
 }
 
+/// Counts how many map placements across the whole campaign reference
+/// `landscape_id`.
+///
+/// Used to warn before deleting a [`LandscapeDefinition`] that's still
+/// placed somewhere — deleting it without checking leaves those placements
+/// pointing at a landscape ID that no longer exists, which the campaign
+/// loader treats as a fatal validation error the next time it's opened.
+///
+/// Returns `0` when there is no open campaign (`campaign_dir` is `None`) or
+/// the campaign has no `data/maps` directory yet.
+fn count_landscape_placements(campaign_dir: Option<&Path>, landscape_id: LandscapeId) -> usize {
+    let Some(campaign_dir) = campaign_dir else {
+        return 0;
+    };
+    let maps_dir = campaign_dir.join("data/maps");
+    let Ok(maps) = MapDatabase::load_from_directory(&maps_dir) else {
+        return 0;
+    };
+    maps.all_maps()
+        .into_iter()
+        .filter_map(|map_id| maps.get_map(map_id))
+        .map(|map| {
+            map.landscape_placements
+                .iter()
+                .filter(|placement| placement.landscape_id == landscape_id)
+                .count()
+        })
+        .sum()
+}
+
 /// Removes the `landscape_mesh_registry.ron` entry whose `id` matches `mesh_id`.
 ///
 /// Called when a [`LandscapeDefinition`] that references a custom mesh is
@@ -1088,6 +1225,70 @@ mod tests {
         // Selection at 0 is unaffected by deleting index 2.
         assert_eq!(defs.len(), 2);
         assert_eq!(state.selected_landscape, Some(0));
+    }
+
+    #[test]
+    fn test_count_landscape_placements_returns_zero_without_campaign_dir() {
+        assert_eq!(count_landscape_placements(None, 1), 0);
+    }
+
+    #[test]
+    fn test_count_landscape_placements_returns_zero_without_maps_dir() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        // No `data/maps` directory created.
+        assert_eq!(count_landscape_placements(Some(dir.path()), 1), 0);
+    }
+
+    #[test]
+    fn test_count_landscape_placements_counts_across_maps() {
+        use antares::domain::types::Position;
+        use antares::domain::world::landscape::LandscapePlacement;
+        use antares::domain::world::Map;
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let maps_dir = dir.path().join("data/maps");
+        fs::create_dir_all(&maps_dir).unwrap();
+
+        let placement = |landscape_id: LandscapeId, x: i32, y: i32| LandscapePlacement {
+            landscape_id,
+            position: Position { x, y },
+            offset: None,
+            y_offset: None,
+            rotation_y: None,
+            scale: None,
+            color_tint: None,
+            blocking: None,
+        };
+
+        let mut map_1 = Map::new(1, "Map One".into(), "".into(), 20, 20);
+        map_1.landscape_placements.push(placement(1, 5, 5));
+        map_1.landscape_placements.push(placement(1, 6, 6));
+        map_1.landscape_placements.push(placement(2, 7, 7));
+
+        let mut map_2 = Map::new(2, "Map Two".into(), "".into(), 20, 20);
+        map_2.landscape_placements.push(placement(1, 1, 1));
+
+        fs::write(
+            maps_dir.join("map_1.ron"),
+            ron::ser::to_string_pretty(&map_1, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            maps_dir.join("map_2.ron"),
+            ron::ser::to_string_pretty(&map_2, ron::ser::PrettyConfig::new()).unwrap(),
+        )
+        .unwrap();
+
+        // landscape_id 1 is placed 2 times on map 1 and 1 time on map 2.
+        assert_eq!(count_landscape_placements(Some(dir.path()), 1), 3);
+        // landscape_id 2 is placed once, only on map 1.
+        assert_eq!(count_landscape_placements(Some(dir.path()), 2), 1);
+        // landscape_id 99 is never placed.
+        assert_eq!(count_landscape_placements(Some(dir.path()), 99), 0);
     }
 
     #[test]

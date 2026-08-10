@@ -134,7 +134,7 @@
         ],
     ),
     (
-        id: "tutorial_elf_cleric",
+        id: "isolde",
         name: "Isolde",
         race_id: "elf",
         class_id: "cleric",
@@ -194,7 +194,8 @@
         ),
         description: "Princess of Sunspire, Holy Warrior of the Radiant Shield, seeks to forge her own destiny through valor rather than birthright, proving her worth on the battlefield while safeguarding the helpless",
         is_premade: true,
-        starts_in_party: true,
+        starts_in_party: false,
+        creature_id: Some(1019),
         starting_spells: [
             261,
             258,
@@ -438,7 +439,7 @@
             base: 4,
             current: 4,
         )),
-        portrait_id: "apprentice_zara",
+        portrait_id: "zara",
         starting_gold: 10,
         starting_gems: 2,
         starting_food: 5,
@@ -461,7 +462,7 @@
         description: "An enthusiastic gnome apprentice from the Mage\'s Guild. Zara was separated from her mentor and seeks adventurers to help her complete her studies.",
         is_premade: true,
         starts_in_party: false,
-        creature_id: Some(1010),
+        creature_id: Some(1020),
         starting_spells: [
             1027,
             257,

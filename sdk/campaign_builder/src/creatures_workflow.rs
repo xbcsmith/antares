@@ -339,38 +339,6 @@ impl CreatureWorkflowState {
         }
     }
 
-    /// Transition into asset-editor mode and navigate into a specific mesh.
-    ///
-    /// Extends the breadcrumb trail with the mesh name.
-    ///
-    /// # Arguments
-    ///
-    /// * `file_name` - The `.ron` asset file name.
-    /// * `creature_name` - Display name of the creature.
-    /// * `mesh_name` - Display name of the selected mesh.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use campaign_builder::creatures_workflow::CreatureWorkflowState;
-    ///
-    /// let mut workflow = CreatureWorkflowState::new();
-    /// workflow.enter_mesh_editor("goblin.ron", "Goblin", "left_leg");
-    ///
-    /// let crumbs: Vec<&str> = workflow.breadcrumb_labels().collect();
-    /// assert_eq!(crumbs, ["Creatures", "Goblin", "left_leg"]);
-    /// ```
-    pub fn enter_mesh_editor(
-        &mut self,
-        file_name: impl Into<String>,
-        creature_name: impl Into<String>,
-        mesh_name: impl Into<String>,
-    ) {
-        self.enter_asset_editor(file_name, creature_name);
-        self.breadcrumbs
-            .push(EditorBreadcrumb::label_only(mesh_name.into()));
-    }
-
     /// Return to registry mode, discarding any unsaved changes silently.
     ///
     /// Callers are responsible for prompting the user before calling this
@@ -741,14 +709,6 @@ mod tests {
     }
 
     #[test]
-    fn test_enter_mesh_editor_extends_breadcrumbs() {
-        let mut workflow = make_workflow();
-        workflow.enter_mesh_editor("goblin.ron", "Goblin", "left_leg");
-        let labels: Vec<&str> = workflow.breadcrumb_labels().collect();
-        assert_eq!(labels, ["Creatures", "Goblin", "left_leg"]);
-    }
-
-    #[test]
     fn test_return_to_registry_resets_mode() {
         let mut workflow = make_workflow();
         workflow.enter_asset_editor("goblin.ron", "Goblin");
@@ -812,16 +772,6 @@ mod tests {
         let mut workflow = make_workflow();
         workflow.enter_asset_editor("goblin.ron", "Goblin");
         assert_eq!(workflow.breadcrumb_string(), "Creatures > Goblin");
-    }
-
-    #[test]
-    fn test_breadcrumb_string_mesh_editor() {
-        let mut workflow = make_workflow();
-        workflow.enter_mesh_editor("goblin.ron", "Goblin", "left_leg");
-        assert_eq!(
-            workflow.breadcrumb_string(),
-            "Creatures > Goblin > left_leg"
-        );
     }
 
     #[test]

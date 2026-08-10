@@ -200,10 +200,6 @@ fn test_registry_to_asset_navigation() {
     assert_eq!(workflow.current_creature_name(), Some("Orc"));
     assert_eq!(workflow.breadcrumb_string(), "Creatures > Orc");
 
-    workflow.enter_mesh_editor("orc.ron", "Orc", "club");
-    let labels: Vec<&str> = workflow.breadcrumb_labels().collect();
-    assert_eq!(labels, ["Creatures", "Orc", "club"]);
-
     workflow.return_to_registry();
 
     let mut creature = make_creature("Skeleton");

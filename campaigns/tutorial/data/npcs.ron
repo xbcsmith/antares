@@ -184,9 +184,9 @@
         id: "tutorial_mystic_astronomer",
         name: "Jyeshtha the Astronomer",
         description: "The Mystic leader of the Astronomers Temple",
-        portrait_id: "character_010",
+        portrait_id: "astronomer",
         dialogue_id: Some(1001),
-        creature_id: Some(1009),
+        creature_id: Some(1018),
         sprite: None,
         quest_ids: [
             8,

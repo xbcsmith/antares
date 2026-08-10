@@ -54,9 +54,7 @@ pub mod editor_context;
 pub mod editor_state;
 pub mod furniture_editor;
 pub mod icon;
-pub mod item_mesh_editor;
-pub mod item_mesh_undo_redo;
-pub mod item_mesh_workflow;
+
 pub mod items_editor;
 pub mod keyboard_shortcuts;
 pub mod landscape_editor;
@@ -67,11 +65,8 @@ pub mod logging;
 pub mod map_editor;
 pub mod material_editor;
 pub mod mesh_glb_io;
-pub mod mesh_index_editor;
-pub mod mesh_normal_editor;
 pub mod mesh_obj_io;
 pub mod mesh_validation;
-pub mod mesh_vertex_editor;
 pub mod monsters_editor;
 pub mod npc_editor;
 pub mod obj_importer;
@@ -646,7 +641,6 @@ pub enum EditorTab {
     Metadata,
     Config,
     Items,
-    ItemMeshes,
     Spells,
     Conditions,
     Monsters,
@@ -676,7 +670,6 @@ impl EditorTab {
             EditorTab::Metadata => "Metadata",
             EditorTab::Config => "Config",
             EditorTab::Items => "Items",
-            EditorTab::ItemMeshes => "Item Meshes",
             EditorTab::Spells => "Spells",
             EditorTab::Conditions => "Conditions",
             EditorTab::Monsters => "Monsters",
@@ -752,7 +745,6 @@ pub struct CampaignBuilderApp {
     pending_action: Option<PendingAction>,
 
     // ─── Special editors ─────────────────────────────────────────────────
-    item_mesh_editor_state: item_mesh_editor::ItemMeshEditorState,
     obj_importer_state: obj_importer::ObjImporterState,
 
     // ─── Runtime services ────────────────────────────────────────────────
@@ -802,7 +794,6 @@ impl Default for CampaignBuilderApp {
             campaign_dir: None,
             unsaved_changes: false,
             pending_action: None,
-            item_mesh_editor_state: item_mesh_editor::ItemMeshEditorState::new(),
             obj_importer_state: obj_importer::ObjImporterState::new(),
             undo_redo_manager: undo_redo::UndoRedoManager::new(),
             asset_manager: None,
@@ -1134,7 +1125,6 @@ impl eframe::App for CampaignBuilderApp {
                     EditorTab::Metadata,
                     EditorTab::Config,
                     EditorTab::Items,
-                    EditorTab::ItemMeshes,
                     EditorTab::Spells,
                     EditorTab::Conditions,
                     EditorTab::Monsters,
@@ -1233,31 +1223,6 @@ impl eframe::App for CampaignBuilderApp {
         // Central panel with editor content
         egui::CentralPanel::default().show(ui, |ui| match self.ui_state.active_tab {
             EditorTab::Metadata => self.show_metadata_editor(ui),
-            EditorTab::ItemMeshes => {
-                if let Some(signal) = self
-                    .item_mesh_editor_state
-                    .show(ui, self.campaign_dir.as_ref())
-                {
-                    match signal {
-                        item_mesh_editor::ItemMeshEditorSignal::OpenInItemsEditor(item_id) => {
-                            if let Some(idx) = self.campaign_data.items.iter().position(|it| it.id == item_id) {
-                                self.ui_state.active_tab = EditorTab::Items;
-                                self.editor_registry.items_editor_state.selected_item = Some(idx);
-                                self.editor_registry.items_editor_state.mode = items_editor::ItemsEditorMode::Edit;
-                                self.editor_registry.items_editor_state.edit_buffer = self.campaign_data.items[idx].clone();
-                                self.ui_state.status_message = format!("Opening item #{}", item_id);
-                                ui.ctx().request_repaint();
-                            }
-                        }
-                    }
-                }
-                // Cross-tab: items editor wants to open item mesh editor
-                if let Some(item_id) = self.editor_registry.items_editor_state.requested_open_item_mesh.take() {
-                    self.ui_state.active_tab = EditorTab::ItemMeshes;
-                    self.ui_state.status_message = format!("Opening Item Mesh Editor for item #{}", item_id);
-                    ui.ctx().request_repaint();
-                }
-            }
             EditorTab::Config => self.editor_registry.config_editor_state.show(
                 ui,
                 self.campaign_dir.as_ref(),
@@ -1279,13 +1244,7 @@ impl eframe::App for CampaignBuilderApp {
                     &self.campaign_data.spells,
                     &mut items_ctx,
                 );
-                // Handle cross-tab navigation: items editor wants to open the
-                // Item Mesh Editor for a specific item.
-                if let Some(item_id) = self.editor_registry.items_editor_state.requested_open_item_mesh.take() {
-                    self.ui_state.active_tab = EditorTab::ItemMeshes;
-                    self.ui_state.status_message = format!("Opening Item Mesh Editor for item #{}", item_id);
-                    ui.ctx().request_repaint();
-                }
+
             }
             EditorTab::Spells => {
                 let mut spells_ctx = EditorContext {
@@ -1443,6 +1402,10 @@ impl eframe::App for CampaignBuilderApp {
                 {
                     self.ui_state.active_tab = EditorTab::Importer;
                     self.obj_importer_state.export_type = obj_importer::ExportType::Furniture;
+                    let next_furniture_id = obj_importer_ui::suggest_next_furniture_id_from_dir(
+                        self.campaign_dir.as_deref(),
+                    );
+                    self.obj_importer_state.set_next_furniture_id(next_furniture_id);
                     self.ui_state.status_message =
                         "Opening OBJ Importer for furniture mesh work".to_string();
                     ui.ctx().request_repaint();
@@ -1482,15 +1445,22 @@ impl eframe::App for CampaignBuilderApp {
                         }
                         obj_importer_ui::ObjImporterUiSignal::Item => {
                             let importer_status = self.obj_importer_state.status_message.clone();
-                            if let Some(ref dir) = self.campaign_dir.clone() {
-                                self.item_mesh_editor_state.load_from_campaign(dir);
-                            }
+                            self.load_items();
+                            let next_item_id = obj_importer_ui::suggest_next_item_mesh_id_from_dir(
+                                self.campaign_dir.as_deref(),
+                            );
+                            self.obj_importer_state.set_next_creature_id(next_item_id);
                             self.ui_state.status_message = importer_status;
+                            self.ui_state.active_tab = EditorTab::Items;
                             ui.ctx().request_repaint();
                         }
                         obj_importer_ui::ObjImporterUiSignal::Furniture => {
                             let importer_status = self.obj_importer_state.status_message.clone();
                             self.load_furniture();
+                            let next_furniture_id = obj_importer_ui::suggest_next_furniture_id_from_dir(
+                                self.campaign_dir.as_deref(),
+                            );
+                            self.obj_importer_state.set_next_furniture_id(next_furniture_id);
                             self.ui_state.status_message = importer_status;
                             self.ui_state.active_tab = EditorTab::Furniture;
                             ui.ctx().request_repaint();
@@ -1644,6 +1614,8 @@ impl eframe::App for CampaignBuilderApp {
                 )
             }
             EditorTab::Dialogues => {
+                let dialogue_ids_before: Vec<u16> =
+                    self.campaign_data.dialogues.iter().map(|d| d.id).collect();
                 let mut dialogues_ctx = EditorContext {
                     campaign_dir: self.campaign_dir.as_ref(),
                     data_file: &self.campaign.dialogue_file,
@@ -1659,6 +1631,15 @@ impl eframe::App for CampaignBuilderApp {
                     &self.campaign_data.spells,
                     &mut dialogues_ctx,
                 );
+                // If the dialogue list changed (reload, new, delete) the map
+                // editor's autocomplete cache is now stale — mark it for rebuild.
+                let dialogue_ids_after: Vec<u16> =
+                    self.campaign_data.dialogues.iter().map(|d| d.id).collect();
+                if dialogue_ids_after != dialogue_ids_before {
+                    self.editor_registry
+                        .maps_editor_state
+                        .invalidate_dialogue_cache();
+                }
             }
             EditorTab::NPCs => {
                 // Always sync the stock_templates mirror from the editor state before

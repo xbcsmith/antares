@@ -1,4 +1,279 @@
-## Bug Fix: Save files written to project root instead of campaign folder
+## Phase 5: Documentation and Final Verification
+
+### Summary
+
+Completed the mesh editor removal by updating all documentation to reflect the
+current codebase state, verifying zero stale symbol references remain in any
+`.rs` source file, and confirming the full workspace test suite passes.
+
+### Files modified
+
+**`sdk/campaign_builder/README.md`**
+- Removed `### Item Mesh Editor` feature section (the tab and its backing files
+  were deleted in Phase 1)
+- Updated `### Creature Asset Editor` description: replaced the stale
+  "Three-Panel Edit Mode" bullet (mesh list + mesh properties) with an accurate
+  "Edit Mode" bullet describing the read-only 3D preview and creature properties
+  panel that remain
+- Removed `item_mesh_editor.rs` entry from the Source Layout architecture tree
+- Replaced `mesh_editing_tests.rs` in the tests list with `obj_importer_tests.rs`
+  (the replacement file created in Phase 3)
+
+### Stale symbol audit
+
+Repo-wide grep across all `*.rs` files for all removed symbols confirmed **zero**
+remaining references:
+
+| Symbol set | `.rs` matches |
+|---|---|
+| `item_mesh_editor`, `ItemMeshEditor`, `ItemMeshEditorState`, `ItemMeshEditorSignal` | 0 |
+| `mesh_ui`, `mesh_vertex_editor`, `mesh_normal_editor`, `mesh_index_editor` | 0 |
+| `enter_mesh_editor`, `PrimitiveType`, `PRIMITIVE_SEGMENTS_MAX` | 0 |
+
+References in `docs/explanation/finished/` (archived plans and implementation
+records) and `docs/explanation/mesh_editor_removal_implementation_plan.md` are
+legitimate historical context, not stale code — they were not modified.
+
+### Quality gates (full workspace)
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --all-features` — **5462/5462 passed**, 8 skipped
+
+### Manual SDK smoke test checklist
+
+✅ **All items verified by human on 2026-08-08:**
+
+1. ✅ The "Item Meshes" tab is absent from the sidebar
+2. ✅ Opening any creature shows only the read-only 3D preview and creature
+   properties (no mesh list, no mesh properties panel)
+3. ✅ The 3D preview controls (grid, wireframe, normals, axes, background colour,
+   camera distance) still function
+4. ✅ The Importer tab successfully imports a `.glb` file and a `.obj` file
+   end-to-end
+5. ✅ Opening `campaigns/tutorial` completes without error
+
+---
+
+## Phase 4: Remove Dead Breadcrumb Helper
+
+### Summary
+
+Removed the `enter_mesh_editor` breadcrumb-extension helper from
+`creatures_workflow.rs`. The function had zero production call sites — it was
+called only from its own `#[cfg(test)]` block and one integration test.
+Removing it eliminates dead API surface with no behavioural change.
+
+### Files modified
+
+**`sdk/campaign_builder/src/creatures_workflow.rs`**
+- Removed `pub fn enter_mesh_editor` (function body + full doc comment +
+  `# Examples` doctest block, L342–L372)
+- Removed internal unit test `fn test_enter_mesh_editor_extends_breadcrumbs`
+- Removed internal unit test `fn test_breadcrumb_string_mesh_editor`
+
+**`sdk/campaign_builder/tests/creature_workflow_tests.rs`**
+- Removed three lines from `fn test_registry_to_asset_navigation`:
+  the `workflow.enter_mesh_editor(...)` call and the two
+  `breadcrumb_labels` assertions that followed it
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check -p campaign_builder --all-targets --all-features` — 0 errors, 0 warnings
+- `cargo clippy -p campaign_builder --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run -p campaign_builder --all-features` — 2474/2474 passed
+
+---
+
+## Phase 3: Remove Orphaned Raw Mesh-Editing Modules
+
+### Summary
+
+Removed the three orphaned raw mesh-editing modules (`mesh_vertex_editor`,
+`mesh_normal_editor`, `mesh_index_editor`) that had no callers anywhere in the
+crate outside their own source and the now-deleted integration test file. The
+kept modules (`mesh_obj_io`, `mesh_validation`) retain full test coverage via
+the new `obj_importer_tests.rs`.
+
+### Files deleted
+
+- `sdk/campaign_builder/src/mesh_vertex_editor.rs` — vertex selection and
+  manipulation editor
+- `sdk/campaign_builder/src/mesh_normal_editor.rs` — normal calculation and
+  editing
+- `sdk/campaign_builder/src/mesh_index_editor.rs` — triangle index editor
+- `sdk/campaign_builder/tests/mesh_editing_tests.rs` — mixed test file
+  covering both deleted and kept modules (~938 lines)
+
+### Files modified
+
+**`sdk/campaign_builder/src/lib.rs`**
+- Removed three `pub mod` declarations: `mesh_index_editor`, `mesh_normal_editor`,
+  `mesh_vertex_editor`
+
+**`sdk/campaign_builder/src/linear_history.rs`**
+- Updated module-level doc comment to remove stale cross-references to
+  `crate::mesh_vertex_editor::VertexOperation` and
+  `crate::mesh_index_editor::IndexOperation`; replaced with a generic
+  description: "operations (each carrying 'before' and 'after' state)"
+
+### Files created
+
+**`sdk/campaign_builder/tests/obj_importer_tests.rs`**
+- SPDX header added
+- Ported all `mesh_obj_io` and `mesh_validation` tests from the deleted
+  `mesh_editing_tests.rs`: 9 validation tests, 6 OBJ import/export tests,
+  1 edge-case test (17 total)
+- Ported the two helper functions used by ported tests: `create_simple_triangle`,
+  `create_quad_mesh`
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check -p campaign_builder --all-targets --all-features` — 0 errors, 0 warnings
+- `cargo clippy -p campaign_builder --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run -p campaign_builder --all-features` — 2476/2476 passed
+
+---
+
+
+### Summary
+
+Removed the interactive mesh-list / mesh-properties panels from every creature
+edit screen in the Campaign Builder SDK, along with the primitive-replacement
+dialog and all associated dead state. The read-only 3D preview panel
+(`show_preview_panel`) and creature-level properties panel
+(`show_creature_level_properties`) are fully preserved and unchanged.
+
+### Files deleted
+
+- `sdk/campaign_builder/src/creatures_editor/mesh_ui.rs` — `show_mesh_properties_panel` (327 lines)
+
+### Files modified
+
+**`sdk/campaign_builder/src/creatures_editor/mod.rs`**
+- Removed `mod mesh_ui;` declaration and `use crate::mesh_validation;` import
+- Removed constants `PRIMITIVE_SEGMENTS_MAX`, `PRIMITIVE_RINGS_MAX`,
+  `PRIMITIVE_SOFT_TRIANGLE_BUDGET`
+- Removed `PrimitiveType` enum
+- Removed 16 editing-only struct fields from `CreaturesEditorState`:
+  `show_mesh_list`, `show_mesh_editor`, `selected_mesh_index`,
+  `mesh_edit_buffer`, `mesh_transform_buffer`, `mesh_visibility`,
+  `show_primitive_dialog`, `primitive_type`, `primitive_size`,
+  `primitive_segments`, `primitive_rings`, `primitive_use_current_color`,
+  `primitive_custom_color`, `primitive_preserve_transform`,
+  `primitive_keep_name`, `uniform_scale`
+- Removed all corresponding `Default` initializers
+- In `show_edit_mode`: replaced the four-panel layout (left mesh-list,
+  right mesh-properties, central preview, primitive dialog) with just the
+  `CentralPanel` preview + `Panel::bottom` creature-properties (both kept)
+- Cleaned up 3-field reset lines from Back-to-List, Cancel,
+  `revert_edit_buffer_from_registry` (both arms), `perform_save_as_with_path`,
+  and `back_to_registry`
+- Removed 6 functions: `show_mesh_list_panel`, `validate_selected_mesh`,
+  `estimate_primitive_geometry`, `show_primitive_replacement_dialog`,
+  `apply_primitive_replacement`, `_legacy_show_mesh_list_and_editor`
+- Removed `refresh_validation_state` per-mesh validation loop (orphaned after
+  `validate_selected_mesh` removal)
+- Removed test helpers `preview_selected_mesh_for_tests`,
+  `preview_visibility_for_tests`
+- Removed tests: `test_mesh_selection_state`,
+  `test_preview_sync_reflects_color_changes_and_visibility`,
+  `test_validate_selected_mesh_reports_invalid_mesh_errors`
+- Repaired tests: `test_preview_sync_clears_dirty_and_updates_statistics`
+  (removed deleted-field refs, updated `selected_meshes` assertion 1→0),
+  `test_preview_sync_reflects_transform_changes` (removed deleted-field refs)
+
+**`sdk/campaign_builder/src/creatures_editor/preview_panel.rs`**
+- `sync_preview_renderer_from_edit_buffer`: removed `selected_mesh_index`
+  variable, `set_selected_mesh_index` call, and `mesh_visibility`-based
+  visibility logic; now always renders all meshes
+- `current_mesh_visibility`: simplified to `vec![true; mesh_count]`
+- `build_preview_statistics`: removed `visible` parameter, iterates all meshes
+  unconditionally, `selected_meshes` hardcoded to `0`
+
+**`sdk/campaign_builder/tests/creature_asset_editor_tests.rs`**
+- Fixed import: removed `PrimitiveType` from the `use` statement
+- Removed 5 tests: `test_replace_mesh_with_primitive_cube`,
+  `test_replace_mesh_with_primitive_sphere`, `test_mesh_visibility_tracking`,
+  `test_primitive_type_enum`, `test_uniform_scale_toggle`
+
+**`sdk/campaign_builder/tests/creature_preview_integration_test.rs`**
+- Removed two deleted field assignments (`mesh_visibility`, `selected_mesh_index`)
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check -p campaign_builder --all-targets --all-features` — 0 errors, 0 warnings
+- `cargo clippy -p campaign_builder --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run -p campaign_builder --all-features` — 2572/2572 passed
+
+---
+
+
+### Summary
+
+Removed the interactive "Item Meshes" tab and its entire backing implementation
+from the Campaign Builder SDK. The user's workflow authors 3D models in Blender
+and imports them via the existing Importer tab; the in-SDK mesh editor was
+unused dead weight.
+
+### Files deleted
+
+- `sdk/campaign_builder/src/item_mesh_editor.rs` — full interactive mesh
+  editor (~3 071 lines)
+- `sdk/campaign_builder/src/item_mesh_workflow.rs` — workflow state (~472
+  lines)
+- `sdk/campaign_builder/src/item_mesh_undo_redo.rs` — undo/redo history
+
+### Files modified
+
+**`sdk/campaign_builder/src/lib.rs`**
+- Removed three `pub mod` declarations (`item_mesh_editor`,
+  `item_mesh_undo_redo`, `item_mesh_workflow`)
+- Removed `EditorTab::ItemMeshes` variant and its `name()` arm
+- Removed `item_mesh_editor_state` field from `CampaignBuilderApp` and its
+  `Default` initializer
+- Removed the `EditorTab::ItemMeshes` central-panel match arm (including the
+  `ItemMeshEditorSignal::OpenInItemsEditor` signal handler)
+- Removed cross-tab navigation guard inside the `EditorTab::Items` arm that
+  drained `requested_open_item_mesh` and switched to the now-deleted tab
+- Removed `item_mesh_editor_state.load_from_campaign()` call inside the
+  `ObjImporterUiSignal::Item` handler
+- Removed `EditorTab::ItemMeshes` from the sidebar tabs array
+
+**`sdk/campaign_builder/src/campaign_io.rs`**
+- Removed the item mesh asset load block in `do_open_campaign` (the
+  `load_from_campaign` call and surrounding log messages)
+
+**`sdk/campaign_builder/src/items_editor.rs`**
+- Removed `requested_open_item_mesh: Option<ItemId>` field and its doc
+  comment from `ItemsEditorState`
+- Removed corresponding `Default` initializer
+- Removed "✏️ Open in Item Mesh Editor" button and handler from `show_form`
+- Removed `ItemId` import (now unused)
+- Removed test `test_items_editor_requested_open_item_mesh_set_on_button`
+
+**`sdk/campaign_builder/src/objects_editor.rs`**
+- Updated module doc comment that referenced the now-deleted
+  `crate::item_mesh_editor`
+
+**`sdk/campaign_builder/src/map_editor.rs`**
+- Fixed pre-existing Clippy `manual_clamp` lint (`.min().max()` →
+  `.clamp()`) that blocked the `-D warnings` quality gate
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check -p campaign_builder --all-targets --all-features` — 0 errors,
+  0 warnings
+- `cargo clippy -p campaign_builder --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run -p campaign_builder --all-features` — 2580/2580 passed
+
+---
+
 
 ### Root cause
 

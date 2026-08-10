@@ -1005,6 +1005,107 @@ mod tests {
         );
     }
 
+    /// A fresh `LockedDoor` event must physically block its tile once
+    /// `init_lock_states` runs, so the party cannot simply walk through a
+    /// door the game is telling them is locked (regression test: previously
+    /// the tile stayed passable regardless of lock state).
+    #[test]
+    fn test_map_init_lock_states_blocks_tile_for_new_locked_door() {
+        use crate::domain::types::Position;
+        use crate::domain::world::types::{Map, MapEvent};
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(4, 4);
+        map.add_event(
+            pos,
+            MapEvent::LockedDoor {
+                name: "Barred Passage".to_string(),
+                lock_id: "gate_2000".to_string(),
+                key_item_id: Some(200),
+                initial_trap_chance: 25,
+                mesh_id: None,
+                dialogue_id: Some(9),
+            },
+        );
+
+        // Sanity: authored map data starts with the door's tile passable,
+        // matching what the campaign_builder validator requires (events
+        // cannot be placed on already-blocked tiles).
+        assert!(!map.get_tile(pos).unwrap().blocked);
+
+        map.init_lock_states();
+
+        let tile = map.get_tile(pos).unwrap();
+        assert!(
+            tile.blocked,
+            "a newly-locked LockedDoor tile must block movement"
+        );
+        assert!(
+            tile.is_special,
+            "the tile must be flagged as the locked-door sentinel is_locked_door_tile checks for"
+        );
+    }
+
+    /// `LockedContainer` events don't block movement -- only the door
+    /// variant should mark its tile blocked.
+    #[test]
+    fn test_map_init_lock_states_does_not_block_tile_for_locked_container() {
+        use crate::domain::types::Position;
+        use crate::domain::world::types::{Map, MapEvent};
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(6, 6);
+        map.add_event(
+            pos,
+            MapEvent::LockedContainer {
+                name: "Chest".to_string(),
+                lock_id: "chest_1".to_string(),
+                key_item_id: None,
+                items: Vec::new(),
+                initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
+            },
+        );
+
+        map.init_lock_states();
+
+        assert!(!map.get_tile(pos).unwrap().blocked);
+    }
+
+    /// A door that was already unlocked in prior save data must not have its
+    /// tile re-blocked when the map is reloaded.
+    #[test]
+    fn test_map_init_lock_states_does_not_reblock_tile_for_previously_unlocked_door() {
+        use crate::domain::types::Position;
+        use crate::domain::world::types::{Map, MapEvent};
+
+        let mut map = Map::new(1, "Test".to_string(), "Desc".to_string(), 10, 10);
+        let pos = Position::new(3, 3);
+        map.add_event(
+            pos,
+            MapEvent::LockedDoor {
+                name: "Already Open".to_string(),
+                lock_id: "open_door".to_string(),
+                key_item_id: None,
+                initial_trap_chance: 0,
+                mesh_id: None,
+                dialogue_id: None,
+            },
+        );
+
+        let mut unlocked = LockState::new("open_door");
+        unlocked.unlock();
+        map.lock_states.insert("open_door".to_string(), unlocked);
+
+        map.init_lock_states();
+
+        assert!(
+            !map.get_tile(pos).unwrap().blocked,
+            "a door already unlocked in save data must stay passable on reload"
+        );
+    }
+
     // ─── trap_effect_for_chance tests ────────────────────────────────────────
 
     /// `trap_effect_for_chance(45)` returns `Some("poison")` — in the 30–59
