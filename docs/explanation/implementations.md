@@ -268,6 +268,14 @@ navigation is untouched.
   including the title-fallback-to-name path; `showing_bio: true` without
   lore falls back to the normal stats layout, not a broken empty panel).
 
+**Audit follow-up**: a post-implementation audit against the plan's Phase 3
+testing requirements found the `B`-is-no-op-outside-Single-view case was true
+by construction (the handler is nested inside `if is_single`) but never
+asserted by a test. Added
+`test_character_sheet_input_b_key_is_noop_in_party_overview_view` in
+`character_sheet_ui.rs`, which presses `B` on a lore-bearing character while
+`cs.view == PartyOverview` and confirms `showing_bio` stays `false`.
+
 ### Quality gates (full workspace)
 
 - `cargo fmt --all` — clean
@@ -369,6 +377,21 @@ characters were left untouched.
 `docs/how-to/character_definition_ron_format.md`, and
 `docs/how-to/create_characters.md` each updated with the new `lore_file`
 field.
+
+**Audit follow-up**: a post-implementation audit against the plan's Phase 2
+deliverables found two gaps, both closed:
+- `src/application/save_game.rs` gained
+  `test_pre_lore_save_fixture_deserializes_with_lore_none`, which deserializes
+  the real pre-existing fixture `campaigns/tutorial/saves/save_20260809_072524.ron`
+  (which genuinely predates the `lore` field) and asserts every character
+  loads with `lore: None`. The prior regression test
+  (`test_lore_field_serde_default_deserializes` in `character.rs`) only
+  covered a synthetically-stripped save, not a real one.
+- `docs/how-to/character_definition_ron_format.md` gained a "Character Lore
+  File Format" subsection documenting the `CharacterLore` schema
+  (`backstory`, `profile.title/archetype/core_motivation/combat_style`) that
+  `lore_file` points to, which was previously only documented in
+  `docs/reference/campaign_content_format.md`.
 
 ### Quality gates (full workspace)
 

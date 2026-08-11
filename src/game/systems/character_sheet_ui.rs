@@ -1967,6 +1967,67 @@ mod tests {
     }
 
     #[test]
+    fn test_character_sheet_input_b_key_is_noop_in_party_overview_view() {
+        // B is gated on `is_single` (character_sheet_ui.rs `if is_single { ... }`
+        // wraps the B handling), so it must be a no-op in PartyOverview view
+        // even when the focused character has lore.
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::character_definition::{CharacterLore, CharacterProfile};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_systems(Update, character_sheet_input_system);
+
+        let mut hero = Character::new(
+            "Whisper".to_string(),
+            "elf".to_string(),
+            "robber".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        );
+        hero.lore = Some(CharacterLore {
+            backstory: "A nimble elf with a colorful past.".to_string(),
+            profile: CharacterProfile {
+                title: "The Quiet Step".to_string(),
+                archetype: "Trickster".to_string(),
+                core_motivation: "Freedom from her old crew".to_string(),
+                combat_style: "Hit-and-run skirmishing".to_string(),
+            },
+        });
+
+        let mut state = GameState::new();
+        state.party.add_member(hero).unwrap();
+        state.enter_character_sheet();
+        if let GameMode::CharacterSheet(ref mut cs) = state.mode {
+            cs.view = CharacterSheetView::PartyOverview;
+        } else {
+            panic!("expected CharacterSheet mode after enter_character_sheet");
+        }
+        app.insert_resource(GlobalState(state));
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyB);
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        if let GameMode::CharacterSheet(ref cs) = gs.0.mode {
+            assert!(
+                !cs.showing_bio,
+                "B must be a no-op in PartyOverview view, even with lore present"
+            );
+            assert_eq!(
+                cs.view,
+                CharacterSheetView::PartyOverview,
+                "B must not change the view either"
+            );
+        } else {
+            panic!("expected CharacterSheet mode after update");
+        }
+    }
+
+    #[test]
     fn test_character_sheet_input_b_key_toggles_off_on_second_press() {
         use crate::domain::character::{Alignment, Character, Sex};
         use crate::domain::character_definition::{CharacterLore, CharacterProfile};
