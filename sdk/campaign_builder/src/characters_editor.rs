@@ -17,10 +17,13 @@ use crate::ui_helpers::{
     StandardListItemConfig, ToolbarAction, TwoColumnLayout,
 };
 use antares::domain::character::{Alignment, Sex, Stats};
-use antares::domain::character_definition::{CharacterDefinition, StartingEquipment};
+use antares::domain::character_definition::{
+    CharacterDefinition, CharacterLore, CharacterProfile, StartingEquipment,
+};
 use antares::domain::classes::{ClassDefinition, SpellSchool as ClassSpellSchool};
 use antares::domain::items::types::Item;
 use antares::domain::magic::types::Spell;
+use antares::domain::path_security::validate_campaign_relative_path;
 use antares::domain::races::RaceDefinition;
 use antares::domain::types::{CreatureId, ItemId, SpellId};
 use eframe::egui;
@@ -255,7 +258,22 @@ pub struct CharacterEditBuffer {
     pub description: String,
     /// Path to an external RON file (relative to campaign root) with this
     /// character's long-form backstory/profile content.
+    ///
+    /// Read-only in the UI (see `show_character_form`'s Lore section) --
+    /// derived automatically from the character's name on save when unset
+    /// and any of the `lore_*` fields below are non-empty.
     pub lore_file: Option<String>,
+    /// Short honorific/epithet shown above the backstory in the in-game Bio
+    /// panel. Falls back to the character's name when empty.
+    pub lore_title: String,
+    /// One- or two-word narrative archetype (e.g. "Reluctant Hero").
+    pub lore_archetype: String,
+    /// The character's single driving motivation.
+    pub lore_core_motivation: String,
+    /// Short description of how the character fights.
+    pub lore_combat_style: String,
+    /// Long-form, multi-paragraph backstory text shown in the in-game Bio panel.
+    pub lore_backstory: String,
     pub is_premade: bool,
     /// Whether this character should start in the active party when a new game begins.
     /// When false, the character is intended to be recruitable / managed via inns.
@@ -312,6 +330,11 @@ impl Default for CharacterEditBuffer {
             starting_food: "10".to_string(),
             description: String::new(),
             lore_file: None,
+            lore_title: String::new(),
+            lore_archetype: String::new(),
+            lore_core_motivation: String::new(),
+            lore_combat_style: String::new(),
+            lore_backstory: String::new(),
             is_premade: false,
             starts_in_party: false,
             starting_items: Vec::new(),
@@ -436,6 +459,31 @@ impl CharactersEditorState {
                 starting_food: character.starting_food.to_string(),
                 description: character.description.clone(),
                 lore_file: character.lore_file.clone(),
+                lore_title: character
+                    .lore
+                    .as_ref()
+                    .map(|l| l.profile.title.clone())
+                    .unwrap_or_default(),
+                lore_archetype: character
+                    .lore
+                    .as_ref()
+                    .map(|l| l.profile.archetype.clone())
+                    .unwrap_or_default(),
+                lore_core_motivation: character
+                    .lore
+                    .as_ref()
+                    .map(|l| l.profile.core_motivation.clone())
+                    .unwrap_or_default(),
+                lore_combat_style: character
+                    .lore
+                    .as_ref()
+                    .map(|l| l.profile.combat_style.clone())
+                    .unwrap_or_default(),
+                lore_backstory: character
+                    .lore
+                    .as_ref()
+                    .map(|l| l.backstory.clone())
+                    .unwrap_or_default(),
                 is_premade: character.is_premade,
                 starts_in_party: character.starts_in_party,
                 starting_items: character.starting_items.clone(),
@@ -709,6 +757,41 @@ impl CharactersEditorState {
             Some(self.buffer.accessory2_id)
         };
 
+        // Build lore content from the buffer's Lore section fields. If every
+        // field is empty, the character has no lore -- clear any prior
+        // `lore_file` reference too, so the persisted state stays consistent
+        // with what the Lore section currently shows (no orphaned reference
+        // to content the user just cleared). The old lore RON file on disk,
+        // if any, is deliberately left in place rather than deleted -- an
+        // unreferenced file is a far safer failure mode for an editor to
+        // leave behind than automatically deleting user-authored content.
+        let lore_title = self.buffer.lore_title.trim().to_string();
+        let lore_archetype = self.buffer.lore_archetype.trim().to_string();
+        let lore_core_motivation = self.buffer.lore_core_motivation.trim().to_string();
+        let lore_combat_style = self.buffer.lore_combat_style.trim().to_string();
+        let lore_backstory = self.buffer.lore_backstory.trim().to_string();
+        let has_lore_content = !lore_title.is_empty()
+            || !lore_archetype.is_empty()
+            || !lore_core_motivation.is_empty()
+            || !lore_combat_style.is_empty()
+            || !lore_backstory.is_empty();
+        let (lore, lore_file) = if has_lore_content {
+            (
+                Some(CharacterLore {
+                    backstory: lore_backstory,
+                    profile: CharacterProfile {
+                        title: lore_title,
+                        archetype: lore_archetype,
+                        core_motivation: lore_core_motivation,
+                        combat_style: lore_combat_style,
+                    },
+                }),
+                self.buffer.lore_file.clone(),
+            )
+        } else {
+            (None, None)
+        };
+
         let character = CharacterDefinition {
             id: id.clone(),
             name,
@@ -733,8 +816,8 @@ impl CharactersEditorState {
                 accessory2,
             },
             description: self.buffer.description.clone(),
-            lore_file: self.buffer.lore_file.clone(),
-            lore: None,
+            lore_file,
+            lore,
             is_premade: self.buffer.is_premade,
             starts_in_party: self.buffer.starts_in_party,
             creature_id: if self.buffer.creature_id.is_empty() {
@@ -1141,12 +1224,50 @@ impl CharactersEditorState {
         selected_portrait
     }
 
-    /// Loads characters from a file path
+    /// Loads characters from a file path.
+    ///
+    /// `path` is expected to be `<campaign_root>/data/characters.ron` (the
+    /// established campaign layout), so the campaign root is derived as
+    /// `path.parent().parent()` -- the same derivation `sdk/database.rs`'s
+    /// `ContentDatabase::load_core` already uses for `asset_root`. When a
+    /// campaign root can be derived, each character's optional `lore_file`
+    /// is resolved into `character.lore` so the Lore section of the edit
+    /// form (see `start_edit_character`) has content to populate from.
+    ///
+    /// Unlike the game runtime's `CharacterDatabase::load_from_campaign`
+    /// (which hard-fails on a `lore_file` that fails path-security
+    /// validation, since it parses untrusted campaign content), every
+    /// failure mode here -- missing campaign root, unsafe path, unreadable
+    /// file, unparseable content -- is soft: the affected character simply
+    /// keeps `lore: None` and the rest of the roster still loads. The SDK
+    /// editor is a local-authoring tool for a trusted campaign author, not a
+    /// boundary against untrusted input, so failing the entire character
+    /// list over one bad lore reference would be poor editor UX for no
+    /// corresponding security benefit.
     pub fn load_from_file(&mut self, path: &std::path::Path) -> Result<(), CharacterEditorError> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| CharacterEditorError::ReadError(e.to_string()))?;
-        let characters: Vec<CharacterDefinition> =
+        let mut characters: Vec<CharacterDefinition> =
             ron::from_str(&content).map_err(|e| CharacterEditorError::ParseError(e.to_string()))?;
+
+        if let Some(campaign_root) = path.parent().and_then(|data_dir| data_dir.parent()) {
+            for character in &mut characters {
+                let Some(lore_file) = character.lore_file.clone() else {
+                    continue;
+                };
+                let Ok(resolved) = validate_campaign_relative_path(campaign_root, &lore_file)
+                else {
+                    continue;
+                };
+                let Ok(lore_contents) = std::fs::read_to_string(&resolved) else {
+                    continue;
+                };
+                if let Ok(lore) = ron::from_str::<CharacterLore>(&lore_contents) {
+                    character.lore = Some(lore);
+                }
+            }
+        }
+
         self.characters = characters;
         self.has_unsaved_changes = false;
         Ok(())
@@ -1171,16 +1292,59 @@ impl CharactersEditorState {
         self.creature_picker_open = false;
     }
 
-    /// Saves characters to a file path
-    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), CharacterEditorError> {
+    /// Saves characters to a file path.
+    ///
+    /// Follows `save_creatures`'s "parent file + per-entity files" pattern:
+    /// `path` (`characters.ron`) is the parent/registry file, written first;
+    /// each character with lore content also gets its own per-entity
+    /// `CharacterLore` RON file under `assets/characters/lore/`, derived
+    /// from `path`'s campaign root the same way `load_from_file` derives it.
+    ///
+    /// Any character with `lore.is_some()` but no `lore_file` yet gets one
+    /// auto-derived from its name (lowercased, spaces/apostrophes/hyphens
+    /// stripped) -- the same filename convention `save_creatures` uses for
+    /// creature registry entries -- so authoring lore purely through the
+    /// editor never requires hand-editing RON paths.
+    pub fn save_to_file(&mut self, path: &std::path::Path) -> Result<(), CharacterEditorError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| CharacterEditorError::DirectoryError(e.to_string()))?;
         }
+
+        for character in &mut self.characters {
+            if character.lore.is_some() && character.lore_file.is_none() {
+                let filename = character
+                    .name
+                    .to_lowercase()
+                    .replace(' ', "_")
+                    .replace('\'', "")
+                    .replace('-', "_");
+                character.lore_file = Some(format!("assets/characters/lore/{filename}.ron"));
+            }
+        }
+
         let content = ron::ser::to_string_pretty(&self.characters, Default::default())
             .map_err(|e| CharacterEditorError::SerializationError(e.to_string()))?;
         std::fs::write(path, content)
             .map_err(|e| CharacterEditorError::WriteError(e.to_string()))?;
+
+        if let Some(campaign_root) = path.parent().and_then(|data_dir| data_dir.parent()) {
+            for character in &self.characters {
+                let (Some(lore), Some(lore_file)) = (&character.lore, &character.lore_file) else {
+                    continue;
+                };
+                let lore_path = campaign_root.join(lore_file);
+                if let Some(lore_parent) = lore_path.parent() {
+                    std::fs::create_dir_all(lore_parent)
+                        .map_err(|e| CharacterEditorError::DirectoryError(e.to_string()))?;
+                }
+                let lore_contents = ron::ser::to_string_pretty(lore, Default::default())
+                    .map_err(|e| CharacterEditorError::SerializationError(e.to_string()))?;
+                std::fs::write(&lore_path, lore_contents)
+                    .map_err(|e| CharacterEditorError::WriteError(e.to_string()))?;
+            }
+        }
+
         Ok(())
     }
 
@@ -2240,6 +2404,68 @@ impl CharactersEditorState {
                     egui::TextEdit::multiline(&mut self.buffer.description)
                         .hint_text("Character backstory/biography...")
                         .desired_rows(4)
+                        .desired_width(f32::INFINITY),
+                );
+
+                ui.add_space(10.0);
+                ui.heading("Lore");
+                ui.label(
+                    egui::RichText::new(
+                        "Optional long-form content shown in the in-game Bio panel. \
+                         Leave every field below empty for no lore.",
+                    )
+                    .italics()
+                    .weak(),
+                );
+                match &self.buffer.lore_file {
+                    Some(path) => {
+                        ui.label(format!("Lore file: {path}"));
+                    }
+                    None => {
+                        ui.label(
+                            egui::RichText::new(
+                                "No lore file yet -- one will be created automatically on Save \
+                                 if any field below is filled in.",
+                            )
+                            .weak(),
+                        );
+                    }
+                }
+                egui::Grid::new("character_lore_grid")
+                    .num_columns(2)
+                    .spacing([10.0, 4.0])
+                    .show(ui, |ui| {
+                        ui.label("Title:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.buffer.lore_title)
+                                .hint_text("Falls back to the character's name when empty"),
+                        );
+                        ui.end_row();
+
+                        ui.label("Archetype:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.buffer.lore_archetype)
+                                .hint_text("e.g. \"Reluctant Hero\""),
+                        );
+                        ui.end_row();
+
+                        ui.label("Core Motivation:");
+                        ui.add(egui::TextEdit::singleline(
+                            &mut self.buffer.lore_core_motivation,
+                        ));
+                        ui.end_row();
+
+                        ui.label("Combat Style:");
+                        ui.add(egui::TextEdit::singleline(
+                            &mut self.buffer.lore_combat_style,
+                        ));
+                        ui.end_row();
+                    });
+                ui.label("Backstory:");
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.buffer.lore_backstory)
+                        .hint_text("Long-form, multi-paragraph backstory...")
+                        .desired_rows(6)
                         .desired_width(f32::INFINITY),
                 );
 
@@ -3822,6 +4048,252 @@ mod tests {
         assert!(path.exists());
         let contents = std::fs::read_to_string(&path).unwrap();
         assert!(contents.contains("test_char"));
+    }
+
+    // ── Lore editor round-trip ───────────────────────────────────────────────
+
+    #[test]
+    fn test_save_character_with_lore_creates_lore_file_and_sets_lore_file_path() {
+        let tmp = tempfile::tempdir().expect("Failed to create tempdir");
+        let dir = tmp.path().to_path_buf();
+
+        let mut state = CharactersEditorState::new();
+        state.last_campaign_dir = Some(dir.clone());
+        state.last_characters_file = Some("data/characters.ron".to_string());
+
+        state.start_new_character();
+        state.buffer.id = "old_gareth".to_string();
+        state.buffer.name = "Old Gareth".to_string();
+        state.buffer.race_id = "dwarf".to_string();
+        state.buffer.class_id = "knight".to_string();
+        state.buffer.lore_title = "The Grizzled Smith".to_string();
+        state.buffer.lore_archetype = "Reluctant Mentor".to_string();
+        state.buffer.lore_core_motivation = "One last worthy cause".to_string();
+        state.buffer.lore_combat_style = "Slow, heavy, unstoppable".to_string();
+        state.buffer.lore_backstory = "A grizzled dwarf veteran...".to_string();
+
+        state.save_character().expect("save_character must succeed");
+
+        // lore_file must be auto-derived from the character's name, mirroring
+        // save_creatures's filename convention (lowercase, spaces -> underscores).
+        let character = state
+            .characters
+            .iter()
+            .find(|c| c.id == "old_gareth")
+            .expect("character must be present");
+        assert_eq!(
+            character.lore_file.as_deref(),
+            Some("assets/characters/lore/old_gareth.ron")
+        );
+
+        let lore_path = dir.join("assets/characters/lore/old_gareth.ron");
+        assert!(
+            lore_path.exists(),
+            "per-entity lore file must be written on save"
+        );
+        let lore_contents = std::fs::read_to_string(&lore_path).unwrap();
+        assert!(lore_contents.contains("The Grizzled Smith"));
+        assert!(lore_contents.contains("A grizzled dwarf veteran..."));
+
+        let characters_ron = std::fs::read_to_string(dir.join("data/characters.ron")).unwrap();
+        assert!(characters_ron.contains("assets/characters/lore/old_gareth.ron"));
+    }
+
+    #[test]
+    fn test_save_character_without_lore_content_leaves_lore_file_none() {
+        let tmp = tempfile::tempdir().expect("Failed to create tempdir");
+        let dir = tmp.path().to_path_buf();
+
+        let mut state = CharactersEditorState::new();
+        state.last_campaign_dir = Some(dir.clone());
+        state.last_characters_file = Some("data/characters.ron".to_string());
+
+        state.start_new_character();
+        state.buffer.id = "no_lore_char".to_string();
+        state.buffer.name = "No Lore".to_string();
+        state.buffer.race_id = "human".to_string();
+        state.buffer.class_id = "knight".to_string();
+        // All lore_* fields left at their empty Default.
+
+        state.save_character().expect("save_character must succeed");
+
+        let character = state
+            .characters
+            .iter()
+            .find(|c| c.id == "no_lore_char")
+            .expect("character must be present");
+        assert!(character.lore.is_none());
+        assert!(character.lore_file.is_none());
+        assert!(!dir.join("assets/characters/lore").exists());
+    }
+
+    #[test]
+    fn test_save_character_clearing_lore_fields_clears_lore_file_reference() {
+        // Simulate re-editing a character that already had lore, but the user
+        // deletes all Lore section text before saving again: the stale
+        // lore_file reference must be cleared, not left pointing at content
+        // the edit buffer no longer represents.
+        let mut state = CharactersEditorState::new();
+        state.start_new_character();
+        state.buffer.id = "was_lore".to_string();
+        state.buffer.name = "Was Lore".to_string();
+        state.buffer.race_id = "human".to_string();
+        state.buffer.class_id = "knight".to_string();
+        state.buffer.lore_file = Some("assets/characters/lore/was_lore.ron".to_string());
+        // lore_* text fields all left empty -- no lore content in the buffer.
+
+        state.save_character().expect("save_character must succeed");
+
+        let character = state
+            .characters
+            .iter()
+            .find(|c| c.id == "was_lore")
+            .expect("character must be present");
+        assert!(character.lore.is_none());
+        assert!(
+            character.lore_file.is_none(),
+            "stale lore_file reference must be cleared when the Lore section is emptied"
+        );
+    }
+
+    #[test]
+    fn test_load_from_file_resolves_lore_file_into_character_lore() {
+        let tmp = tempfile::tempdir().expect("Failed to create tempdir");
+        let dir = tmp.path().to_path_buf();
+        let data_dir = dir.join("data");
+        let lore_dir = dir.join("assets/characters/lore");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        std::fs::create_dir_all(&lore_dir).unwrap();
+
+        std::fs::write(
+            lore_dir.join("kira.ron"),
+            r#"(
+    backstory: "A young warrior.",
+    profile: (
+        title: "The Earnest Blade",
+        archetype: "Eager Novice",
+        core_motivation: "Prove herself",
+        combat_style: "Sword and shield",
+    ),
+)"#,
+        )
+        .unwrap();
+
+        let characters = vec![{
+            let mut c = CharacterDefinition::new(
+                "kira".to_string(),
+                "Kira".to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Female,
+                Alignment::Good,
+            );
+            c.lore_file = Some("assets/characters/lore/kira.ron".to_string());
+            c
+        }];
+        let characters_ron = ron::ser::to_string_pretty(&characters, Default::default()).unwrap();
+        let characters_path = data_dir.join("characters.ron");
+        std::fs::write(&characters_path, characters_ron).unwrap();
+
+        let mut state = CharactersEditorState::new();
+        state
+            .load_from_file(&characters_path)
+            .expect("load_from_file must succeed");
+
+        let loaded = &state.characters[0];
+        let lore = loaded.lore.as_ref().expect("lore must be resolved");
+        assert_eq!(lore.backstory, "A young warrior.");
+        assert_eq!(lore.profile.title, "The Earnest Blade");
+    }
+
+    #[test]
+    fn test_load_from_file_missing_lore_file_leaves_lore_none() {
+        let tmp = tempfile::tempdir().expect("Failed to create tempdir");
+        let dir = tmp.path().to_path_buf();
+        let data_dir = dir.join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        let characters = vec![{
+            let mut c = CharacterDefinition::new(
+                "ghost".to_string(),
+                "Ghost".to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Neutral,
+            );
+            c.lore_file = Some("assets/characters/lore/does_not_exist.ron".to_string());
+            c
+        }];
+        let characters_ron = ron::ser::to_string_pretty(&characters, Default::default()).unwrap();
+        let characters_path = data_dir.join("characters.ron");
+        std::fs::write(&characters_path, characters_ron).unwrap();
+
+        let mut state = CharactersEditorState::new();
+        state
+            .load_from_file(&characters_path)
+            .expect("load_from_file must succeed despite the missing lore_file");
+
+        assert!(state.characters[0].lore.is_none());
+    }
+
+    #[test]
+    fn test_start_edit_character_populates_lore_buffer_fields() {
+        let mut state = CharactersEditorState::new();
+        let mut character = CharacterDefinition::new(
+            "whisper".to_string(),
+            "Whisper".to_string(),
+            "elf".to_string(),
+            "robber".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        );
+        character.lore = Some(CharacterLore {
+            backstory: "A nimble elf with a colorful past.".to_string(),
+            profile: CharacterProfile {
+                title: "The Quiet Step".to_string(),
+                archetype: "Trickster".to_string(),
+                core_motivation: "Freedom from her old crew".to_string(),
+                combat_style: "Hit-and-run skirmishing".to_string(),
+            },
+        });
+        state.characters.push(character);
+
+        state.start_edit_character(0);
+
+        assert_eq!(state.buffer.lore_title, "The Quiet Step");
+        assert_eq!(state.buffer.lore_archetype, "Trickster");
+        assert_eq!(
+            state.buffer.lore_core_motivation,
+            "Freedom from her old crew"
+        );
+        assert_eq!(state.buffer.lore_combat_style, "Hit-and-run skirmishing");
+        assert_eq!(
+            state.buffer.lore_backstory,
+            "A nimble elf with a colorful past."
+        );
+    }
+
+    #[test]
+    fn test_start_edit_character_without_lore_leaves_lore_buffer_fields_empty() {
+        let mut state = CharactersEditorState::new();
+        let character = CharacterDefinition::new(
+            "aldric".to_string(),
+            "Aldric".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        state.characters.push(character);
+
+        state.start_edit_character(0);
+
+        assert!(state.buffer.lore_title.is_empty());
+        assert!(state.buffer.lore_archetype.is_empty());
+        assert!(state.buffer.lore_core_motivation.is_empty());
+        assert!(state.buffer.lore_combat_style.is_empty());
+        assert!(state.buffer.lore_backstory.is_empty());
     }
 
     #[test]

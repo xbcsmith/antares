@@ -355,10 +355,10 @@ edit.
 
 #### 4.5 Deliverables
 
-- [ ] Lore section in the character editor
-- [ ] `docs/how-to/create_characters.md` — "Using the Campaign Builder →
+- [x] Lore section in the character editor
+- [x] `docs/how-to/create_characters.md` — "Using the Campaign Builder →
       Editor Features" section updated to mention the new Lore section
-- [ ] Load/save wired through `campaign_io.rs`
+- [x] Load/save wired through `campaign_io.rs`
 
 #### 4.6 Success Criteria
 

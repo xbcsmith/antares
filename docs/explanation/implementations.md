@@ -1,3 +1,119 @@
+## Character Bio & Navigation, Phase 4: Campaign Builder (SDK) Lore Editor Support
+
+### Summary
+
+Implemented Phase 4 of
+`docs/explanation/character_bio_and_navigation_implementation_plan.md`: a
+Lore section in the Campaign Builder's Characters editor, so
+`CharacterLore`/`CharacterProfile` content (added in Phase 2, consumed by
+the in-game Bio panel added in Phase 3) is fully editable without hand-editing
+RON files.
+
+### Design choices
+
+- **`lore_file` is read-only in the UI**, auto-derived from the character's
+  name on save (lowercased, spaces/apostrophes/hyphens stripped) when unset
+  -- the same filename convention `save_creatures` already uses for the
+  creature registry. The plan only asked for a "`lore_file` display," and
+  auto-derivation means authoring lore purely through the editor never
+  requires typing a RON path by hand.
+- **Clearing all five Lore fields clears `lore_file` too** (not just
+  `lore`), so the persisted state always matches what the Lore section
+  currently shows -- no orphaned reference to content the buffer no longer
+  represents. The old per-entity RON file on disk, if any, is deliberately
+  *not* deleted -- an unreferenced leftover file is a far safer failure mode
+  for an editor to leave behind than automatically deleting user-authored
+  content.
+- **`load_from_file`/`save_to_file` derive the campaign root from the
+  `characters.ron` path itself** (`path.parent().parent()`, the same
+  derivation `sdk/database.rs`'s `ContentDatabase::load_core` already uses
+  for `asset_root`) rather than changing either method's signature to take
+  an explicit campaign-root parameter. The plan named
+  `load_characters_from_campaign` (`campaign_io.rs`) as the integration
+  point; that function already just delegates to
+  `CharactersEditorState::load_from_file`, so putting the resolution there
+  satisfies the plan's "load/save wired through `campaign_io.rs`"
+  deliverable without a signature change rippling to its other caller
+  (a test).
+- **Every lore-resolution failure mode is soft** (missing campaign root,
+  unsafe path, unreadable file, unparseable content) -- unlike the game
+  runtime's `CharacterDatabase::load_from_campaign`, which hard-fails on a
+  `lore_file` that fails path-security validation because it parses
+  untrusted campaign content. The SDK editor is a local-authoring tool for a
+  trusted campaign author, not a security boundary, so failing the whole
+  character list over one bad lore reference would be poor editor UX for no
+  corresponding security benefit. This deviation is documented in the doc
+  comment on `load_from_file`.
+- **`save_to_file` mirrors `save_creatures`'s "parent file + per-entity
+  files" pattern**: `characters.ron` (parent) is written first, then every
+  character with non-empty lore content gets its own per-entity
+  `CharacterLore` RON file written under `assets/characters/lore/` --
+  unconditionally re-written on every save, same as `save_creatures`
+  regenerates every creature file every time (idempotent for
+  untouched entries).
+
+### Files modified
+
+**`sdk/campaign_builder/src/characters_editor.rs`**
+- `CharacterEditBuffer`: added `lore_title`, `lore_archetype`,
+  `lore_core_motivation`, `lore_combat_style`, `lore_backstory` (all
+  `String`) alongside the existing `lore_file: Option<String>` from Phase 2.
+- `start_edit_character`: populates the five new buffer fields from
+  `character.lore` when present, empty strings otherwise.
+- `save_character`: builds `Option<CharacterLore>` from the buffer's five
+  lore fields (`None` when all are empty after trimming, which also clears
+  `lore_file`); previously this was hardcoded to `lore: None`.
+- `load_from_file`: now resolves each character's `lore_file` into
+  `character.lore` via `validate_campaign_relative_path`, soft-failing on
+  every error mode (see Design choices above).
+- `save_to_file`: signature changed `&self` -> `&mut self`; derives a
+  `lore_file` for any character with `lore.is_some() && lore_file.is_none()`,
+  then writes one per-entity lore RON file per character with lore content,
+  creating `assets/characters/lore/` as needed.
+- `show_character_form`: new "Lore" section (read-only `lore_file` display +
+  a 2-column `Grid` for title/archetype/core_motivation/combat_style +a
+  multiline backstory `TextEdit`) inserted between the existing Description
+  section and the Back to List / Save / Cancel action row -- no new
+  `ScrollArea`/`ComboBox`/panel, since the whole form already lives inside
+  one `ScrollArea::vertical().id_salt("character_form_scroll")`.
+- 7 new tests: `save_character` building/clearing lore + auto-deriving
+  `lore_file`; `load_from_file` resolving a valid lore_file and tolerating a
+  missing one; `start_edit_character` populating (and not populating) the
+  buffer's lore fields.
+
+**`docs/how-to/create_characters.md`** — "Editor Features" bullet list and
+the "Creating a Character in the Editor" numbered walkthrough both updated
+to mention the new Lore section (Phase 4 deliverable).
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+  (verified both at the workspace root and explicitly scoped to
+  `-p campaign_builder`, see note below)
+- `cargo nextest run --all-features` — **5497/5497 passed** (antares crate)
+- `cargo nextest run -p campaign_builder --all-features` — **2496/2496
+  passed** (this crate is a separate workspace member; the root
+  `cargo nextest run --all-features` invocation only covers the root
+  `antares` package by default since the workspace root is itself a
+  package -- `-p campaign_builder` must be passed explicitly to exercise it,
+  which this phase's scope of change warranted doing in full, not just for
+  the new tests)
+- `cargo test --doc -- character_definition::CharacterLore
+  character_definition::CharacterProfile` — 2/2 passed (unchanged from
+  Phase 2; no new doctests were needed for this phase's SDK-only changes)
+- Manual: launched `./target/debug/campaign-builder` (initializes cleanly,
+  no crash) and `./target/debug/antares --campaign campaigns/tutorial`
+  (still loads the Phase-2-authored lore content cleanly). Interactive
+  keyboard/mouse-driven verification of the actual Lore section UI in the
+  live window was not possible in this sandbox (no Accessibility/System
+  Events permission) -- covered instead by the 7 new unit tests, which
+  exercise the real `save_character`/`load_from_file`/`save_to_file`/
+  `start_edit_character` code paths against tempdir fixtures.
+
+---
+
 ## Character Bio & Navigation, Phase 3: Bio Panel UI + Keyboard Access
 
 ### Summary
