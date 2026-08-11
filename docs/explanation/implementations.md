@@ -1,3 +1,102 @@
+## Character Bio & Navigation, Phase 5: Mouse Input Fix for Character Sheet
+
+### Summary
+
+Implemented Phase 5 of
+`docs/explanation/character_bio_and_navigation_implementation_plan.md`, the
+final phase of the Character Bio & Navigation plan: fixed the root cause of
+`GameMode::CharacterSheet`'s mouse-click regressions (Identified Issues #2-3
+in the plan) and resolved the HUD-portrait click-through that compounded it.
+Also added a mouse-clickable "Bio" button, since Phase 3 only wired the Bio
+panel to the keyboard (`B` key) and Phase 5's own success criteria requires
+"mouse and keyboard... both fully functional in every Character Sheet view."
+
+### Files modified
+
+**`src/game/systems/input/mode_guards.rs`**
+- Added `GameMode::CharacterSheet(_)` to `movement_blocked_for_mode`'s match
+  arms, matching every other modal screen. `interaction_blocked_for_mode`
+  and `input_blocked_for_mode` both delegate to `movement_blocked_for_mode`
+  internally, so this single change fixes both -- the plan named both
+  functions as line-range targets, but the second was already covered by
+  the first's delegation; there was no separate match arm list to edit in
+  `interaction_blocked_for_mode`.
+- This closes the actual root cause identified in the plan: without this
+  guard, `handle_exploration_input_interact`/`handle_exploration_input_movement`
+  only stood down via the `egui_wants_any_pointer_input` run condition,
+  written in `PostUpdate` -- one frame after the Character Sheet UI draws in
+  `Update` -- so exploration movement/interaction input could leak through
+  on the frame the sheet opened or closed.
+- 3 new tests (`movement_blocked_for_mode`/`interaction_blocked_for_mode`/
+  `input_blocked_for_mode`, all asserting `true` for `CharacterSheet`),
+  mirroring the existing per-mode test convention in this file.
+
+**`src/game/systems/hud.rs`**
+- Removed `GameMode::CharacterSheet(_)` from `portrait_click_allowed`.
+  Previously, a HUD portrait click while the sheet was already open called
+  `enter_character_sheet_at` directly, double-handling the same click
+  alongside whatever the sheet's own egui widgets did with it -- the root
+  cause named in the plan's Identified Issue #3.
+- Updated `portrait_click_allowed` and `handle_portrait_click_system`'s doc
+  comments to describe the new blocked mode and why.
+- Replaced `test_handle_portrait_click_when_already_in_sheet_updates_index`
+  (which asserted the now-removed "click a second portrait to retarget the
+  open sheet" behavior) with
+  `test_handle_portrait_click_blocked_when_sheet_already_open`, asserting
+  the click is blocked and focus is unaffected. Added
+  `test_portrait_click_not_allowed_character_sheet` alongside the file's
+  other single-mode `portrait_click_allowed` tests. Confirmed the two
+  remaining `portrait_click_allowed` assertions that touch `CharacterSheet`
+  mode indirectly (`test_handle_portrait_click_selects_correct_party_index`,
+  `test_handle_portrait_click_opens_sheet_in_exploration`/`_in_combat`) all
+  check the mode *before* entering the sheet, so they were unaffected.
+
+**`src/game/systems/character_sheet_ui.rs`**
+- Added a mouse-clickable "Bio"/"Hide Bio" button next to the existing
+  "Party Overview"/"Next >"/"< Prev" buttons in the Single-view header,
+  gated on `character.lore.is_some()` (same condition as the `B` key and
+  hint), calling the same `CharacterSheetState::toggle_bio()` the keyboard
+  shortcut uses. This wasn't in Phase 5's deliverables list, but the
+  phase's own success criteria ("mouse and keyboard are both fully
+  functional in every Character Sheet view") and testing requirements
+  (which mention "the new Bio button") both call for it, and Phase 3 had
+  only wired the toggle to the keyboard.
+- Updated the module doc's Single-view ASCII diagram to show the new
+  button.
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --all-features` — **5501/5501 passed**, 8 skipped (root
+  `antares` crate; full regression run, not just the new/touched tests,
+  since blocking exploration input in a new mode is exactly the kind of
+  change that can surface hidden cross-system assumptions)
+- `cargo nextest run -p campaign_builder --all-features` — **2496/2496
+  passed** (unaffected by this phase, run anyway for full-workspace
+  confidence -- see the Phase 4 entry below for why this must be invoked
+  explicitly with `-p`)
+- `cargo test --doc -- mode_guards portrait_click_allowed` and
+  `cargo test --doc -- character_sheet` (targeted, not the full workspace
+  doctest suite) — 4/4 and 15/15 passed
+- Manual: launched `./target/debug/antares --campaign campaigns/tutorial`,
+  confirmed it starts and runs without panicking for 12+ seconds.
+  Interactive mouse-driven verification of the actual click behavior in the
+  live window (Party Overview "View" buttons, the new Bio button, blocked
+  portrait clicks) was not possible in this sandbox (no Accessibility/
+  System Events permission, consistent with every prior phase in this
+  plan) -- covered instead by the mode-guard/portrait-click unit tests
+  above, which exercise the real blocking predicates the input systems
+  gate on.
+
+### Plan status
+
+This completes all 5 phases of
+`docs/explanation/character_bio_and_navigation_implementation_plan.md`.
+
+---
+
 ## Character Bio & Navigation, Phase 4: Campaign Builder (SDK) Lore Editor Support
 
 ### Summary

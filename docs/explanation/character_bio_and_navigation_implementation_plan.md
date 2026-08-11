@@ -403,8 +403,8 @@ the double-handling bug in the first place.
 
 #### 5.4 Deliverables
 
-- [ ] `CharacterSheet` added to mode guards
-- [ ] Portrait click-through resolved
+- [x] `CharacterSheet` added to mode guards
+- [x] Portrait click-through resolved
 
 #### 5.5 Success Criteria
 

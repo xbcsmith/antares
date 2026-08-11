@@ -20,7 +20,7 @@
 //!
 //! ```text
 //! ┌──────────────────────────────────────────────────────────────────────┐
-//! │  Aldric — Level 3 Human Knight                [< Prev] [Next >]       │
+//! │  Aldric — Level 3 Human Knight        [< Prev] [Next >] [Bio]         │
 //! │                                                [Party Overview]       │
 //! ├───────────┬──────────────────────────┬────────────────────────────────┤
 //! │           │  Aldric                  │  Equipment:                    │
@@ -589,6 +589,14 @@ fn render_single_view(
             if ui.small_button("Party Overview").clicked() {
                 if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
                     cs.toggle_view();
+                }
+            }
+            if character.lore.is_some() {
+                let bio_label = if showing_bio { "Hide Bio" } else { "Bio" };
+                if ui.small_button(bio_label).clicked() {
+                    if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                        cs.toggle_bio();
+                    }
                 }
             }
             if ui.small_button("Next >").clicked() {
