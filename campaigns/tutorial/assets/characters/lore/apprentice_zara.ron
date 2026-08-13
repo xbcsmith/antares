@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 (
-    backstory: "Zara joined the Mage\'s Guild younger than most gnomes are permitted to, having pestered the enrolling masters with enough demonstrated aptitude and sheer persistence that they relented ahead of schedule. She has approached her studies ever since with the same combination of enthusiasm and impatience — devouring every scroll and lecture she can reach, occasionally to the frustration of tutors who would prefer she master the basics before attempting the spectacular.\n\nHer mentor, a well-traveled battle-mage assigned to oversee her practical training, brought her out from the Guild\'s halls to learn spellcraft the way it is actually used: under pressure, in unfamiliar places, against real danger rather than practice dummies. It was during one such expedition that the two became separated amid confusion Zara still does not fully understand, leaving her alone in unfamiliar country with her spellbook, her nerve, and considerably more theory than field experience.\n\nRather than wait idly for rescue, Zara has resolved to treat the situation as an unplanned but valid continuation of her studies — find her mentor, prove she can handle herself in the meantime, and return to the Guild with a tale worth telling instead of one worth pitying. She is earnest to a fault, quick to volunteer her magic for any task, and only occasionally over her depth.",
+    backstory: "Zara was never one to sit still in a classroom. While most apprentices at the Mage\'s Guild were content mastering the predictable flow of elemental magic, Zara became fascinated by Lumina-weaving—the art of capturing and shaping the subtle light found in both nature and the cosmos. She spent her days documenting how different flowers reflected moonlight and her nights trying to trap actual sparks of starlight into tiny glass spheres.\n\nHer life changed during the Great Alignment, when a volatile experiment to weave a Living Constellation went slightly awry. The resulting burst of prismatic light didn\'t just dazzle her classmates; it physically separated her from her beloved mentor, Master Elian. While the Guild believed she was lost in the shimmering debris of the spell, Zara realized that magic is best learned by experiencing it firsthand. She now carries her glowing staff and a notebook full of half-finished theories, traveling the world to find new sources of light and eventually prove her findings to the Guild—and reunite with her mentor.",
     profile: (
-        title: "The Guild's Lost Apprentice",
-        archetype: "Earnest Student",
-        core_motivation: "To reunite with her mentor and prove herself capable in the field",
-        combat_style: "Eager but still-developing spellcasting; leans on prepared cantrips and support magic",
+        title: "Luminous Scholar, Weaver of the Prismatic Spark",
+        archetype: "Gnome Sorcerer / Cosmic Apprentice",
+        core_motivation: "To master Lumina-weaving and discover every hidden magical secret the world has to offer while searching for her lost mentor.",
+        combat_style: "Ranged magic specialist. Zara uses her staff to cast bursts of Lumina energy, creating dazzling area-of-effect light spells that can both blind enemies and illuminate dark dungeons.",
     ),
 )

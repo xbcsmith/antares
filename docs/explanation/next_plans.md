@@ -8,6 +8,99 @@
 
 The SDK Campaign Builder needs a way to specify custom fonts for campaigns.
 
+## Campaign / Story
+
+## Campaign / Story
+
+### Party Member Dialogue — Option A (Talk Button on Character Sheet)
+
+Once a character is recruited, there is currently no way to speak with them.
+This plan adds a lightweight in-party conversation system through the existing
+character sheet UI.
+
+#### Step 1 — Add `party_dialogue_id` to the character data
+
+- Add an optional `party_dialogue_id: Option<u32>` field to the character
+  domain struct and to each premade entry in `characters.ron`
+- Assign ids in the 200-series range (201–208 for the eight premade characters)
+
+#### Step 2 — Create party dialogue trees (ids 201–208)
+
+- One short dialogue per character (2–4 nodes) that reflects their current
+  story context
+- Content drawn from the lore files in
+  `campaigns/tutorial/assets/characters/lore/`
+- Characters comment on where the party is in the story — something different
+  before and after reaching the Astronomer's Temple, for example
+- `repeatable: true` so the player can check in at any time
+
+#### Step 3 — Wire a Talk button to the character sheet
+
+- Add a "Talk" button to the character sheet UI (already exists in
+  `src/game/systems/`)
+- On press: look up the active character's `party_dialogue_id`, open the
+  dialogue system with that id
+- If `party_dialogue_id` is `None`, show a brief fallback line ("They have
+  nothing to say right now.")
+
+#### Out of scope for now
+
+- State-conditional dialogue branches (different text per act) — can be layered
+  on top once the basic system exists
+- Location-reactive banter (Option C) — separate feature, tracked separately
+
+---
+
+### Eonir the Still — Act IV Boss Fight (Option A)
+
+Eonir is currently an NPC with dialogue (`tutorial_lich_eonir`). To make him
+fightable at the end of Act IV while keeping the persuade/fight fork, we use
+the classic separate-entity approach: the NPC handles all dialogue and the
+`lich_king_eonir` creature handles the boss combat.
+
+#### Step 1 — Add the Lich King creature entry
+
+- Add `lich_king_eonir` to `campaigns/tutorial/data/creatures.ron`
+- Give him boss-tier stats befitting a lich who has been still for centuries:
+  high endurance, high magic resistance, low speed (he rarely moves)
+- Assign regeneration and any special attacks (gravity, shadow barrier) that
+  match the `eonir.md` combat description
+- Use `creature_id: 1021` — the same ID already on the `tutorial_lich_eonir`
+  NPC entry so the two are paired by convention
+
+#### Step 2 — Add a combat dialogue branch to Eonir's dialogue
+
+- In the dialogue file for `dialogue_id: 1003`, add a branch that represents
+  the party refusing to negotiate (or failing the persuasion check)
+- The combat branch sets an outcome flag, e.g. `eonir_combat_triggered`, that
+  the map/event system can react to
+- The peaceful branch sets `eonir_relic_returned` and resolves the quest
+
+#### Step 3 — Map event: NPC → monster swap
+
+- On the Frostspire Peaks map, add an event that watches for
+  `eonir_combat_triggered`
+- When the flag fires: despawn `tutorial_lich_eonir` NPC, spawn
+  `lich_king_eonir` monster at the same tile, begin combat
+- After combat ends (party wins): set `eonir_defeated`, remove the spawn
+  point, trigger the relic-return quest step
+
+#### Step 4 — Post-combat quest resolution
+
+- Both the peaceful path (`eonir_relic_returned`) and the combat path
+  (`eonir_defeated`) should converge on the same Act V quest step: the party
+  carries the jade icosahedron back to Jyeshtha
+- The NPC `tutorial_lich_eonir` should not reappear after either outcome
+
+#### Out of scope for now
+
+- Evil-playthrough support (attacking friendly NPCs, faction hostility) — this
+  is tracked as a future Option B/C item
+- Multiple boss phases — can be added to `lich_king_eonir` later without
+  touching the NPC or dialogue layers
+
+---
+
 ## Game Engine
 
 ### Bevy Migration

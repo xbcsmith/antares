@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 (
-    backstory: "Sirius was never a patient student. The elven war-colleges that raised him prize careful study, decades of measured incantation before a single bolt of force is loosed in anger, and Sirius found that tradition insufferable. He learned faster by testing his spells against real opposition — bandits, wild beasts, the occasional overconfident rival — than by copying diagrams in a candlelit scriptorium, and his tutors eventually gave up trying to slow him down.\n\nThat impatience earned him a reputation among the elder mages as reckless, even dangerous, and Sirius has made something of a game out of living up to it. He delights in the moment an opponent realizes, too late, that the young elf across from them is not merely posturing. There is little cruelty in it, more the satisfaction of a craftsman whose tools finally work exactly as intended, but he rarely troubles himself to explain the difference to those on the receiving end of his lightning.\n\nHe travels now less out of any grand purpose than restlessness — a hunger to find spellcasters and monsters worth the effort of a real duel, and perhaps, though he would never admit it aloud, a quiet wish to be taken seriously by the colleges that dismissed him. Sirius fights first and philosophizes later, if at all.",
+    backstory: "In the subterranean reaches where the light of the sun rarely touches the earth, Sirius rose to prominence not by lineage, but by sheer arcane willpower. As a Dark Elf scholar, he spent centuries mastering the Void-Weave—a form of sorcery that draws energy from the spaces between stars and the silence of the deep.\n\nUnlike his peers who sought to use magic for utility or beauty, Sirius viewed the arcane as a ladder of dominance. He became known as a relentless mage, one who would spend weeks perfecting a single spell just to ensure it could best a rival or overcome a daunting obstacle. His journey across the surface world is not a casual stroll; it is a calculated pursuit of untapped magical reservoirs and legendary artifacts. To Sirius, every enemy encountered is an opportunity to test his mastery, and every ally is either a useful tool or a potential student in his long-term study of the cosmos.",
     profile: (
-        title: "The Merciless Spark",
-        archetype: "Reckless Prodigy",
-        core_motivation: "To prove his impatient, combat-tested magic superior to his tutors' caution",
-        combat_style: "Aggressive offensive spellcasting, direct damage bolts, eager to duel",
+        title: "Master of the Obsidian Veil, Archon of the Void-Weave",
+        archetype: "Shadow Sorcerer / Void Mage",
+        core_motivation: "To achieve absolute mastery over the arcane arts and to command the flow of magic as a master commands an orchestra.",
+        combat_style: "High-impact area control. Sirius favors heavy-hitting arcane blasts and shadow manipulation, using his staff to anchor powerful spells that can crush enemies or warp the environment around him.",
     ),
 )

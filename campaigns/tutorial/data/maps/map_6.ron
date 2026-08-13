@@ -3,7 +3,7 @@
     width: 20,
     height: 20,
     name: "The Harrow Downs",
-    description: "Haunted, burial mounds filled with tombs of men from an advanced ancient civilization.",
+    description: "Ancient burial mounds where the tombs of a long-dead civilization have begun opening from the inside.",
     tiles: [
         (
             terrain: Grass,

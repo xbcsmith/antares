@@ -1,3 +1,190 @@
+## Dialogue Overhaul: All Characters Recruitable, Lore-Consistent Trees
+
+### Summary
+
+Complete overhaul of `campaigns/tutorial/data/dialogues.ron`. Fixed a critical
+duplicate-id bug (Eonir was incorrectly assigned id 1003, colliding with Isolde).
+Rewrote the two placeholder NPC dialogues (Arcturus, Aetheris), rewrote both
+existing stub recruitment dialogues (Zara, Whisper), expanded Jyeshtha with the
+full Eonir reveal, applied lore-consistent text polish to all service NPCs, and
+created four new recruitment dialogues so every premade character is now
+recruitable. Updated `npcs.ron` to reference Eonir's corrected id.
+
+### Critical Bug Fix
+
+- `tutorial_lich_eonir` dialogue was id 1003 (duplicate of Isolde Dawnfang)
+- Eonir reassigned to **id 1004**; `npcs.ron` `dialogue_id` updated to match
+
+### Full Rewrites
+
+| id | Old name | New name | Notes |
+|----|----------|----------|-------|
+| 1 | Arcturus Story | Arcturus - The Eternal Wanderer | 6 nodes; Cosmic Weave lore, quest hook for instruments |
+| 2 | Arcturus Brother Story | Aetheris - The Void-Drifter | 6 nodes; Dark Forest hut, Void-Weave origin, leads to Arcturus |
+| 101 | Apprentice Zara Recruitment | same | 6 nodes; Lumina-weaving, Great Alignment, Master Elian |
+| 102 | Whisper Recruitment | same | 6 nodes; Vespera Moonshadow, Silver Spires, locksmith cover |
+
+### Expanded
+
+- **id 1001 Jyeshtha** — renamed to *The Glass Sea Watcher*; fixed encoding
+  corruption (`â\u{80}\u{94}` → `—`); node 2 now delivers the full Eonir reveal
+  (jade icosahedron stolen by Eonir Xavian Stalix, Vaelgrim, the stillness);
+  node 5 now points to Frostspire Peaks as the destination
+
+### Text Polish (structure preserved, text updated)
+
+ids 3, 4, 5, 6, 7, 8, 9, 10, 11, 1002 — all updated to reference Velmoria
+world lore: the Cosmic Weave, the Great Gloom, Ashvale settlements, the
+stillness spreading from the north, goblin scouts as directed outriders,
+Harrow Downs opening from the inside, Arcturus's instruments.
+
+### New Recruitment Dialogues
+
+| id | Character | character_id | Notes |
+|----|-----------|-------------|-------|
+| 104 | Kira Valerius | `tutorial_human_knight` | 7 nodes; Eldoria exile, Void-Blight, party leader |
+| 105 | Sirius Xylanthir | `tutorial_elf_sorcerer` | 6 nodes; Dark Elf, Void-Weave, demands worthy enemies |
+| 106 | Mira | `tutorial_human_cleric` | 6 nodes; Great Gloom, Order of the Resplendent Dawn |
+| 107 | Old Gareth | `old_gareth` | 7 nodes; Aethelgard, Great Tremor, Core Shield, reluctant veteran |
+
+### All Recruitable Characters — Dialogue Map
+
+| Character | Dialogue id | Status |
+|-----------|------------|--------|
+| Kira | 104 | New |
+| Sirius | 105 | New |
+| Isolde | 1003 | Existing (excellent quality, unchanged) |
+| Mira | 106 | New |
+| Old Gareth | 107 | New |
+| Whisper | 102 | Rewritten |
+| Apprentice Zara | 101 | Rewritten |
+| Zhaya | 1000 | Existing (good quality, unchanged) |
+
+### Follow-Up Needed
+
+`characters.ron` does not yet have a `dialogue_id` field on character entries.
+The game will need a mechanism to wire each character's in-world encounter to
+their recruitment dialogue (ids 100–107, 1000, 1003). This is tracked under
+the Option A / recruitable-characters feature work.
+
+---
+
+## Map Names, Descriptions & Frostspire Peaks (map_8)
+
+### Summary
+
+Updated `name` and `description` fields across all seven existing maps to align
+with *The Stillness Prophecy* world lore. Fixed the long-standing typo
+"Dark Forrest" → "Dark Forest" and added the missing apostrophe in
+"Astronomer's Temple". Created `map_8.ron` — Frostspire Peaks, the 40×40
+Act IV final map where the confrontation with Eonir takes place.
+
+### Files modified
+
+**`campaigns/tutorial/data/maps/map_1.ron`** — Town Square
+- Description updated: Ashvale settlement, Kira's gathering point
+
+**`campaigns/tutorial/data/maps/map_2.ron`** — Dark Forest *(typo fixed)*
+- Name: "Dark Forrest" → "Dark Forest"
+- Description updated: goblin scouts, something larger stirring
+
+**`campaigns/tutorial/data/maps/map_3.ron`** — Ancient Ruins
+- Description updated: kobolds and goblins, Arcturus's stolen astrolabe
+
+**`campaigns/tutorial/data/maps/map_4.ron`** — Arcturus's Cave
+- Description updated: foothills of Mount Ashkarron
+
+**`campaigns/tutorial/data/maps/map_5.ron`** — Mountain Pass
+- Description updated: hidden village, first rumours of the stillness
+
+**`campaigns/tutorial/data/maps/map_6.ron`** — The Harrow Downs
+- Description updated: tombs opening from the inside
+
+**`campaigns/tutorial/data/maps/map_7.ron`** — Astronomer's Temple *(apostrophe fixed)*
+- Name: "Astronomers Temple" → "Astronomer's Temple"
+- Description updated: Glass Sea pyramid, Jyeshtha's vigil
+
+**`campaigns/tutorial/data/maps/map_8.ron`** — Frostspire Peaks *(new)*
+- 40×40 (1 600 tiles), matching map_7 in size
+- `maps_dir: "data/maps/"` in campaign.ron picks it up automatically
+- Layout zones:
+  - Mountain border + flanking canyon walls
+  - Frozen tundra approach from the south (y=28-38), sparse ice-rock obstacles
+  - Outer castle walls (Stone/Normal) with south gate at x=19-20 (y=27)
+  - Castle courtyard (Stone floor, lit)
+  - Inner keep walls with inner gate at x=19-20 (y=22)
+  - Eonir's sanctum (y=13-21, x=13-26): Stone floor, `is_dark: true`
+  - Jagged northern frostspire peaks beyond the castle (y=1-7)
+
+---
+
+## Lore Files & NPC Updates: The Stillness Prophecy Character Pass
+
+### Summary
+
+Updated all eight premade-character lore files under
+`campaigns/tutorial/assets/characters/lore/` using the canonical lore prompts
+in `campaigns/tutorial/prompts/lore/`. Updated matching `description` fields in
+`campaigns/tutorial/data/characters.ron` and
+`campaigns/tutorial/data/npcs.ron`. Added new NPC **Eonir the Still**
+(`tutorial_lich_eonir`) — the Lich King antagonist of Act IV.
+
+### Files modified
+
+**`campaigns/tutorial/assets/characters/lore/kira.ron`**
+- Backstory: Eldoria origin, Void-Blight, knight-errant in exile
+- Title: *The Exile Knight, Blade of the Shattered Shore*
+- Archetype: Soldier / Versatile Warrior
+
+**`campaigns/tutorial/assets/characters/lore/old_gareth.ron`**
+- Backstory: Master Architect of Aethelgard, Great Tremor, the Core Shield
+- Title: *The Last Pillar of Aethelgard, Warden of the Core Shield*
+- Archetype: Bastion Guardian / Stalwart Tank
+
+**`campaigns/tutorial/assets/characters/lore/isolde.ron`**
+- Backstory: Sunspire Dynasty princess, secret War Cleric training, rode to war
+- Title: *Princess of Sunspire, Holy Warrior of the Radiant Shield*
+- Archetype: War Cleric / Martial Divine Champion
+
+**`campaigns/tutorial/assets/characters/lore/mira.ron`**
+- Backstory: Village outpost against the Great Gloom, Order of the Resplendent Dawn
+- Title: *The Radiant Sentinel, Acolyte of the Eternal Spark*
+- Archetype: Light Cleric / Holy Guardian
+
+**`campaigns/tutorial/assets/characters/lore/sirius.ron`**
+- Backstory: Dark Elf scholar from subterranean reaches, Void-Weave mastery
+- Title: *Master of the Obsidian Veil, Archon of the Void-Weave*
+- Archetype: Shadow Sorcerer / Void Mage
+
+**`campaigns/tutorial/assets/characters/lore/whisper.ron`**
+- Backstory: Vespera Moonshadow, High Elf of the Silver Spires, traded nobility for stealth
+- Title: *The Ghost of the Silver Spires, Master of the Unseen Key*
+- Archetype: High Elf Rogue / Shadow Assassin
+
+**`campaigns/tutorial/assets/characters/lore/apprentice_zara.ron`**
+- Backstory: Lumina-weaving obsession, Great Alignment experiment, separated from Master Elian
+- Title: *Luminous Scholar, Weaver of the Prismatic Spark*
+- Archetype: Gnome Sorcerer / Cosmic Apprentice
+
+**`campaigns/tutorial/assets/characters/lore/zhaya.ron`**
+- Backstory: Eastern Peaks monasteries, Astrologer's Path visions, pilgrimage to the Astronomers Temple
+- Title: *Celestial Monk, Seeker of the Star-Bound Truth*
+- Archetype: Astral Monk / Fate-Reader
+
+**`campaigns/tutorial/data/characters.ron`**
+- Updated `description` for Kira, Sirius, Mira, Old Gareth, Whisper, Apprentice Zara, and Zhaya
+- Isolde's description was already aligned with the prompt; no change
+
+**`campaigns/tutorial/data/npcs.ron`**
+- Updated `description` for `tutorial_wizard_arcturus` (Arcturus, Eternal Wanderer)
+- Updated `description` for `tutorial_wizard_arcturus_brother` (Aetheris, Void-Drifter)
+- Updated `description` for `tutorial_mystic_astronomer` (Jyeshtha, Glass Sea watcher)
+- Added new entry `tutorial_lich_eonir` — Eonir the Still, Sovereign of Stillness
+  - `creature_id`: 1021, `dialogue_id`: 1003, `faction`: "Sovereign of Stillness"
+  - `portrait_id`: "eonir_still" (asset to be created)
+
+---
+
 ## Character Bio & Navigation, Phase 5: Mouse Input Fix for Character Sheet
 
 ### Summary

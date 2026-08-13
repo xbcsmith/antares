@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 (
-    backstory: "Isolde is the eldest daughter of the ruling house of Sunspire, born to a throne she has never wanted to simply inherit. From childhood she watched courtiers bow to her title rather than to anything she had actually done, and the hollowness of that deference settled into her early. When she came of age to join the Radiant Shield, the holy order sworn to defend Sunspire\'s people, she petitioned to train alongside its warrior-clerics rather than take the ceremonial post her family expected of her.\n\nHer training was not softened for her rank. The Shield\'s masters drilled her in blade and prayer alike, and Isolde bears the calluses and old training-yard scars to prove she asked for no exceptions. She earned her place in the order\'s ranks the same way any commoner recruit would have — through discipline, endurance, and a willingness to stand at the front line where the danger is greatest, healing hands ready the moment steel gives way to need.\n\nNow she travels beyond Sunspire\'s borders, seeking dangers worth facing and people worth protecting who have never heard her family name and never will need to. She does not renounce her birthright, but she refuses to let it define her worth. To Isolde, valor proven in the field is the only crown that means anything.",
+    backstory: "Born the youngest princess of the Sunspire Dynasty, Isolde spent her youth confined to pristine marble halls while her older brothers were taught the art of war. While the royal court expected her to serve as a diplomatic figurehead, Isolde secretly spent nights training with heavy war maces and studying sacred combat litanies under the temple guard.\n\nWhen a shadowy host threatened the borderlands, the king forbade Isolde from joining the vanguard, deeming her safety paramount to the realm\'s lineage. Refusing to watch her people fall from behind safe castle walls, Isolde traded her silk robes for heavy scale plate, bound her radiant amber crest to her shield, and rode into the night under a mantle of absolute secrecy. Taking the mantle of a War Cleric, she now travels the frontlines, determined to prove that her place is not in the shadow of a throne, but in the white-hot center of battle delivering divine justice to those who protect the innocent.",
     profile: (
-        title: "Princess of Sunspire",
-        archetype: "Noble Renegade",
-        core_motivation: "To earn her own worth through valor rather than accept it by birthright",
-        combat_style: "Front-line holy warrior, blending disciplined swordplay with protective divine magic",
+        title: "Princess of Sunspire, Holy Warrior of the Radiant Shield",
+        archetype: "War Cleric / Martial Divine Champion",
+        core_motivation: "To forge her own destiny through valor rather than birthright, proving her worth on the battlefield while safeguarding the helpless.",
+        combat_style: "Frontline martial support, using divine solar energy channeled through her war mace and staff to blind foes and bolster allies.",
     ),
 )

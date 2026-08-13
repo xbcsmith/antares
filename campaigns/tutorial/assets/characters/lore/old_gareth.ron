@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 (
-    backstory: "Long before he was the dwarf who keeps the town\'s forge running, Gareth was a name spoken with some respect in adventuring circles — a stout warrior who had cleared his share of goblin warrens and stood his ground in fights younger fighters still tell exaggerated versions of. He carries the dents and scars of that life honestly, and the townsfolk who know him only as the smith rarely guess how many of his old wounds came from something sharper than a hammer slipping.\n\nHe hung up his adventuring gear for reasons he does not discuss freely — a mission that cost him companions he could not save, and a tiredness in his bones that no amount of dwarven stubbornness could argue away. The smithy gave him a quieter purpose: shaping honest steel for honest folk, close enough to the road that he can still hear when trouble is stirring, far enough from it that he told himself he was done answering that call.\n\nBut old habits and older debts have a way of catching up with a man, even a dwarf who thought his fighting days were behind him. When a cause proves worthy enough — and few things move Old Gareth besides genuine need — he will set down the hammer, take up shield and blade once more, and remind whoever is watching exactly why his name once meant something on a battlefield.",
+    backstory: "Gareth Deepstone was once the Master Architect and High Protector of Aethelgard, a sprawling city carved into the very heart of the Ironpeak Mountains. While others were content to live within its sturdy cobalt walls, Gareth dedicated his life to ensuring those walls never faltered. He was the Last Pillar—the dwarf who stood at the epicenter of the Great Tremor that shattered his home.\n\nWhen the mountain groaned and split, most fled toward the valleys, but Gareth anchored himself in the city\'s main dome, bracing the falling stone with his own strength so the citizens could escape to safety. He survived the collapse, though his armor is forever scarred by the falling peak and his beard dusted with the silver silt of centuries.\n\nNow a wanderer, he carries the Core Shield—a masterwork forged from the very center of the shattered mountain. It is said that as long as Gareth holds it aloft, the steady heartbeat of Ironpeak still pulses within the metal. He travels not just to find a new home, but to seek out tall stories worthy of being carved into the memory of his fallen city, serving as a moving fortress for any adventurer lucky enough to stand in his shadow.",
     profile: (
-        title: "The Smith of Old Wars",
-        archetype: "Reluctant Veteran",
-        core_motivation: "To answer one more worthy cause before his fighting days are truly over",
-        combat_style: "Defensive, seasoned melee; heavy armor, shield discipline, and hard-earned patience",
+        title: "The Last Pillar of Aethelgard, Warden of the Core Shield",
+        archetype: "Bastion Guardian / Stalwart Tank",
+        core_motivation: "To preserve the legacy of his shattered home and provide an unbreakable sanctuary for those who walk beside him.",
+        combat_style: "Walking fortress approach — Gareth favors slow, inevitable movement, using immense strength to absorb the brunt of enemy attacks while delivering heavy, ground-shaking strikes with his masterwork axe.",
     ),
 )

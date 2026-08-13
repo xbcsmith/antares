@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 (
-    backstory: "Kira was raised on the edge of the tutorial lands, the daughter of a militia sergeant who taught her to hold a shield before she could properly hold a spoon. She grew up watching caravans pass through on the road south, listening to the guards\' stories of monsters in the hills and ruins beneath the old watchtowers, and decided early on that she would rather live those stories than simply hear them told at the hearth.\n\nHer training was unglamorous but thorough. Years of drills in the village square, blunted blades and bruised knuckles, taught her the fundamentals other knights sometimes skip past in their hurry toward flourish and reputation: how to plant her feet, how to read an opponent\'s shoulders before their sword arm moves, how to keep a shield wall from breaking. She has no noble house behind her name and no grand prophecy pointing the way forward — only the conviction that competence, honestly earned, is its own kind of nobility.\n\nWhen word reached her village that adventurers were needed to look into troubles along the road, Kira did not hesitate. She sees it as her chance to prove that the discipline of her training was not wasted, and that a farmer\'s daughter with a sword can stand as tall as any highborn champion. She is plainspoken, a little too trusting of first impressions, and fiercely loyal to anyone who fights beside her.",
+    backstory: "Kira was once a high-ranking knight in the kingdom of Eldoria, situated on the western coast across the Great Sea. For centuries, Eldoria flourished as a beacon of art and chivalry until it fell victim to the Void-Blight—a creeping, necrotic corruption that drained color from the world and turned its heroes into hollow husks.\n\nAs her home crumbled under the weight of this spreading darkness, Kira led a small contingent of survivors across the churning waters to reach these new lands. Now, she wanders as a knight-errant, seeking out pockets of injustice to correct, hoping one day to gather enough strength and allies to return and reclaim Eldoria from the encroaching shadow.",
     profile: (
-        title: "The Earnest Blade",
-        archetype: "Eager Novice",
-        core_motivation: "To prove that hard-won skill matters more than birthright",
-        combat_style: "Disciplined sword-and-shield melee, front line, straightforward and unflinching",
+        title: "The Exile Knight, Blade of the Shattered Shore",
+        archetype: "Soldier / Versatile Warrior",
+        core_motivation: "To strike down injustice wherever it appears, while carrying the heavy weight of a lost kingdom in her heart.",
+        combat_style: "A balanced and reliable approach, utilizing steady defense and impactful strikes to manage both offense and protection.",
     ),
 )

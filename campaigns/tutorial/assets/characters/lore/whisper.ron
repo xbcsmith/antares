@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 (
-    backstory: "Whisper introduces herself as a locksmith, and in a narrow, technical sense this is even true — there are very few locks she has met that stayed shut once she decided otherwise. What she declines to mention is which side of the transaction she was usually on when that skill was first sharpened, or why she left the city where she learned it in something of a hurry.\n\nHer past among the rooftops and back alleys of a larger elven settlement taught her more than lockpicking. She reads a room\'s exits before its conversation, disarms a trap the way other people shake hands, and has an instinct for when a job has gone from profitable to dangerous that has kept her alive longer than several former associates who lacked it. She rarely speaks of that life directly, preferring wry deflection to confession, though the occasional old contact still recognizes her on sight — usually with more alarm than warmth.\n\nWhat drew her toward honest company and open roads is a question she has not fully answered even to herself, though it likely has something to do with wanting to be more than the sum of what she took. She has not entirely left her old habits behind, and probably never will, but these days she is at least choosier about which locks deserve opening.",
+    backstory: "Vespera was born into the opulent, high-society life of the Silver Spires, where High Elves live in perpetual grace and architectural perfection. However, while her peers were content with the predictable luxury of the court, Vespera found herself drawn to the in-between spaces—the secret passageways, the forgotten corridors, and the mysteries hidden behind every door.\n\nShe eventually traded her status for a life of stealth, moving from the palace to the bustling city streets below. To the common folk, she is known as Whisper, a mysterious figure who can navigate the most complex urban labyrinths without making a sound. While she officially presents herself as a master locksmith—a practical, humble trade—it is a clever cover for her true expertise. Her ability to dismantle an intricate mechanical trap with a single flick of her wrist reveals a life spent dodging spikes and swinging blades in the city\'s most dangerous back alleys. She doesn\'t just unlock doors; she unlocks secrets, often stealing the most precious one before anyone even notices she was there.",
     profile: (
-        title: "The Silver-Fingered",
-        archetype: "Unreformed Rogue",
-        core_motivation: "To stay a step ahead of her past while deciding what she wants to become instead",
-        combat_style: "Stealth, traps, and quick opportunistic strikes; avoids prolonged direct confrontation",
+        title: "The Ghost of the Silver Spires, Master of the Unseen Key",
+        archetype: "High Elf Rogue / Shadow Assassin",
+        core_motivation: "To master the art of the unseen—moving through the world without being noticed, but leaving an indelible mark on the secrets she uncovers.",
+        combat_style: "High-mobility skirmisher. She favors a hit-and-run approach, using her dagger for surgical precision in close quarters and her bow to pick off enemies from the shadows before they even realize she\'s present.",
     ),
 )
