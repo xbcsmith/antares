@@ -20,7 +20,7 @@
 //!
 //! ```text
 //! ┌──────────────────────────────────────────────────────────────────────┐
-//! │  Aldric — Level 3 Human Knight                [< Prev] [Next >]       │
+//! │  Aldric — Level 3 Human Knight        [< Prev] [Next >] [Bio]         │
 //! │                                                [Party Overview]       │
 //! ├───────────┬──────────────────────────┬────────────────────────────────┤
 //! │           │  Aldric                  │  Equipment:                    │
@@ -32,7 +32,56 @@
 //! │           │  Core Stats / Combat /    │                                 │
 //! │           │  Conditions / Experience  │                                 │
 //! ├───────────┴──────────────────────────┴────────────────────────────────┤
-//! │  [Esc] Close   [Tab] Next   [Shift+Tab] Prev   [O] Overview            │
+//! │  [Esc] Close  [B] Bio  [Tab] Next  [Shift+Tab] Prev  [O] Overview      │
+//! └──────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! # Layout — Bio panel (Single view overlay)
+//!
+//! `[B] Bio` toggles a full replacement of the portrait/stats/equipment
+//! columns above with the focused character's long-form backstory and
+//! profile ([`CharacterLore`]) -- title, archetype, a scrollable wrapped
+//! backstory, core motivation, and combat style. The hint and key are only
+//! shown/active when the focused character has lore content
+//! (`character.lore.is_some()`); Esc/O/navigation continue to work
+//! unchanged underneath it, since this is a flag on top of
+//! [`CharacterSheetView::Single`], not a third view variant.
+//!
+//! ```text
+//! ┌──────────────────────────────────────────────────────────────────────┐
+//! │  Aldric — Level 3 Human Knight                [< Prev] [Next >]       │
+//! │                                                [Party Overview]       │
+//! ├──────────────────────────────────────────────────────────────────────┤
+//! │  The Wandering Blade                                                  │
+//! │  Reluctant Hero                                                       │
+//! │  ────────────────────────────────────────────────────────────────    │
+//! │  Born in the ashes of a burned village...  (scrollable, wrapped)      │
+//! │                                                                        │
+//! │  Core Motivation                                                      │
+//! │  Redemption for a broken oath                                         │
+//! │                                                                        │
+//! │  Combat Style                                                         │
+//! │  Aggressive melee, high-risk openings                                 │
+//! ├──────────────────────────────────────────────────────────────────────┤
+//! │  [Esc] Close  [B] Bio  [Tab] Next  [Shift+Tab] Prev  [O] Overview      │
+//! └──────────────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! # Layout — Party Overview
+//!
+//! A `(cols, rows)` grid of compact per-member cards
+//! ([`party_overview_grid_dimensions`]), fully keyboard-navigable: the
+//! keyboard-selected card (`CharacterSheetState::focused_index`, reused as
+//! the grid highlight) is drawn with a visible highlighted border.
+//!
+//! ```text
+//! ┌──────────────────────────────────────────────────────────────────────┐
+//! │                                              [Single View]  Party ... │
+//! │        [Esc/P] Close  [O] Single  [1-6] Select  [Enter] View  [↑↓←→]  │
+//! ├───────────────────┬───────────────────┬────────────────────────────┤
+//! │  Aldric  (card)    │  Mira    (card)    │  Borin   (card)             │
+//! ├───────────────────┴───────────────────┴────────────────────────────┤
+//! │  Selene  (card, highlighted border)                                   │
 //! └──────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
@@ -40,11 +89,22 @@
 //!
 //! 1. `P` key → `GameState::enter_character_sheet()` (in
 //!    `input/global_toggles.rs`).
-//! 2. [`character_sheet_input_system`] drives navigation:
-//!    - **Tab** / **→**       — focus next party member (Single view).
-//!    - **Shift+Tab** / **←** — focus previous party member (Single view).
-//!    - **O**                 — toggle between Single and Party Overview.
-//!    - **Esc**               — close and restore previous mode.
+//! 2. [`character_sheet_input_system`] drives navigation. Single view:
+//!    - **Tab** / **→**       — focus next party member.
+//!    - **Shift+Tab** / **←** — focus previous party member.
+//!    - **1–6**               — jump directly to that party member (configurable).
+//!    - **B**                 — toggle the Bio panel overlay (only when the
+//!      focused character has lore content).
+//!
+//!    Party Overview:
+//!    - **↑ / ↓ / ← / →** — move the highlighted card through the grid,
+//!      wrapping at edges.
+//!    - **Enter** / **Space** — open Single view for the highlighted card.
+//!    - **1–6**               — jump-select a card without leaving Party Overview.
+//!
+//!    Both views:
+//!    - **O**   — toggle between Single and Party Overview.
+//!    - **Esc** — close and restore previous mode.
 //! 3. [`character_sheet_ui_system`] renders the egui panel every frame.
 //! 4. [`character_sheet_cleanup_system`] is a documented no-op: this is a
 //!    pure-egui UI with no Bevy entities to despawn.
@@ -54,6 +114,7 @@ use crate::application::resources::GameContent;
 use crate::application::GameMode;
 use crate::domain::campaign::LevelUpMode;
 use crate::domain::character::{Alignment, Sex};
+use crate::domain::character_definition::CharacterLore;
 use crate::domain::progression::experience_for_level_with_config;
 use crate::domain::skill_resolver::{SkillResolver, SkillResolverContext};
 use crate::domain::skills::{SkillCategory, SkillGrantSource};
@@ -61,6 +122,7 @@ use crate::game::resources::game_data::GameDataResource;
 use crate::game::resources::GlobalState;
 use crate::game::systems::hud::{get_portrait_color, FullPortraitAssets};
 use crate::game::systems::input::{GameAction, InputConfigResource};
+use crate::game::systems::inventory_ui_common::SELECT_HIGHLIGHT_COLOR;
 use crate::game::systems::ui_helpers::{three_column, UI_HINT_COLOR, UI_TITLE_COLOR};
 use crate::sdk::database::ContentDatabase;
 use bevy::prelude::*;
@@ -143,11 +205,26 @@ impl Plugin for CharacterSheetPlugin {
 
 /// Handles keyboard input while in `CharacterSheet` mode.
 ///
-/// - **Esc**           — close and restore previous mode.
-/// - **Tab** (no shift) / **→** — focus next party member (Single view).
-/// - **Shift+Tab** / **←**     — focus previous party member (Single view).
-/// - **O**             — toggle between Single and Party Overview.
-/// - **1–6**           — jump directly to that party member (Single view, configurable).
+/// **Single view:**
+/// - **Esc**                    — close and restore previous mode.
+/// - **Tab** (no shift) / **→** — focus next party member.
+/// - **Shift+Tab** / **←**      — focus previous party member.
+/// - **1–6**                    — jump directly to that party member (configurable).
+/// - **B**                      — toggle the Bio panel overlay; only takes effect
+///   when the focused character has lore content (`character.lore.is_some()`),
+///   otherwise a no-op.
+///
+/// **Party Overview:**
+/// - **↑ / ↓ / ← / →** — move the highlighted card through the grid, wrapping
+///   at edges (`←`/`→` reuse
+///   [`CharacterSheetState::focus_next`](crate::application::character_sheet_state::CharacterSheetState::focus_next)/`focus_prev`;
+///   `↑`/`↓` use
+///   [`CharacterSheetState::focus_up`](crate::application::character_sheet_state::CharacterSheetState::focus_up)/`focus_down`).
+/// - **Enter** / **Space**      — open Single view for the highlighted card.
+/// - **1–6**                    — jump-select a card without leaving Party Overview.
+///
+/// **Both views:**
+/// - **O**  — toggle between Single and Party Overview.
 pub fn character_sheet_input_system(
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
     input_config: Option<Res<InputConfigResource>>,
@@ -165,45 +242,97 @@ pub fn character_sheet_input_system(
         return;
     }
 
-    // Navigation only makes sense in Single view
+    // Single view uses Tab/Shift+Tab/Left/Right focus stepping; Party Overview
+    // uses full grid navigation (see below). Both branches also share the
+    // unconditional digit-key jump-select at the end of this function.
     let is_single = if let GameMode::CharacterSheet(ref cs) = global_state.0.mode {
         cs.view == CharacterSheetView::Single
     } else {
-        false
-    };
-    if !is_single {
         return;
-    }
+    };
 
     // Read party_size before any mutable mode borrows
     let party_size = global_state.0.party.members.len();
 
     let shift_held = kb.pressed(KeyCode::ShiftLeft) || kb.pressed(KeyCode::ShiftRight);
 
-    // ── Tab / Shift-Tab ──────────────────────────────────────────────────────
-    if kb.just_pressed(KeyCode::Tab) {
-        if shift_held {
+    if is_single {
+        // ── B: toggle Bio panel (only when the focused character has lore) ────
+        if kb.just_pressed(KeyCode::KeyB) {
+            let focused_index = if let GameMode::CharacterSheet(ref cs) = global_state.0.mode {
+                cs.focused_index
+            } else {
+                0
+            };
+            let has_lore = global_state
+                .0
+                .party
+                .members
+                .get(focused_index)
+                .is_some_and(|c| c.lore.is_some());
+            if has_lore {
+                if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                    cs.toggle_bio();
+                }
+            }
+            return;
+        }
+
+        // ── Tab / Shift-Tab ──────────────────────────────────────────────────
+        if kb.just_pressed(KeyCode::Tab) {
+            if shift_held {
+                if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                    cs.focus_prev(party_size);
+                }
+            } else if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                cs.focus_next(party_size);
+            }
+            return;
+        }
+
+        // ── Arrow keys ───────────────────────────────────────────────────────
+        if kb.just_pressed(KeyCode::ArrowRight) {
+            if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                cs.focus_next(party_size);
+            }
+        } else if kb.just_pressed(KeyCode::ArrowLeft) {
             if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
                 cs.focus_prev(party_size);
             }
-        } else if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
-            cs.focus_next(party_size);
         }
-        return;
-    }
-
-    // ── Arrow keys ───────────────────────────────────────────────────────────
-    if kb.just_pressed(KeyCode::ArrowRight) {
-        if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
-            cs.focus_next(party_size);
-        }
-    } else if kb.just_pressed(KeyCode::ArrowLeft) {
-        if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
-            cs.focus_prev(party_size);
+    } else {
+        // ── Party Overview: grid navigation ─────────────────────────────────
+        let (cols, _rows) = party_overview_grid_dimensions(party_size);
+        if kb.just_pressed(KeyCode::ArrowRight) {
+            if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                cs.focus_next(party_size);
+            }
+        } else if kb.just_pressed(KeyCode::ArrowLeft) {
+            if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                cs.focus_prev(party_size);
+            }
+        } else if kb.just_pressed(KeyCode::ArrowDown) {
+            if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                cs.focus_down(party_size, cols);
+            }
+        } else if kb.just_pressed(KeyCode::ArrowUp) {
+            if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                cs.focus_up(party_size, cols);
+            }
+        } else if kb.just_pressed(KeyCode::Enter)
+            || kb.just_pressed(KeyCode::NumpadEnter)
+            || kb.just_pressed(KeyCode::Space)
+        {
+            if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                cs.view = CharacterSheetView::Single;
+            }
+            return;
         }
     }
 
     // ── Digit keys (1–6): configurable character select while sheet is open ──
+    // Works in both views. Only jump-selects `focused_index`; never changes
+    // `cs.view` (unlike Enter/Space/card click, which also switch to Single).
     if let Some(ref icr) = input_config {
         for i in 0..6_usize {
             if icr
@@ -259,6 +388,7 @@ fn character_sheet_ui_system(
     };
     let focused_index = cs_state.focused_index;
     let current_view = cs_state.view.clone();
+    let showing_bio = cs_state.showing_bio;
 
     // Resolve portrait key for the focused character.
     // Lowercased portrait_id if set, otherwise lowercased name -- same convention as HUD.
@@ -340,11 +470,12 @@ fn character_sheet_ui_system(
                         full_portrait_id,
                         portrait_key: &portrait_key,
                         portrait_natural_size,
+                        showing_bio,
                     },
                 );
             }
             CharacterSheetView::PartyOverview => {
-                render_party_overview(ui, &mut global_state, party_len);
+                render_party_overview(ui, &mut global_state, party_len, focused_index);
             }
         });
 }
@@ -406,6 +537,10 @@ struct SingleViewParams<'a> {
     /// Used to scale the rendered portrait to [`PORTRAIT_WIDTH`] wide while
     /// preserving its original aspect ratio instead of stretching it.
     portrait_natural_size: Option<(u32, u32)>,
+    /// Whether the Bio panel overlay (`CharacterSheetState::showing_bio`) is
+    /// active. Only takes visual effect when the focused character also has
+    /// lore content -- see [`render_single_view`].
+    showing_bio: bool,
 }
 
 /// Renders the detailed single-character panel from grouped [`SingleViewParams`].
@@ -423,6 +558,7 @@ fn render_single_view(
         full_portrait_id,
         portrait_key,
         portrait_natural_size,
+        showing_bio,
     } = params;
 
     if party_len == 0 {
@@ -453,6 +589,14 @@ fn render_single_view(
             if ui.small_button("Party Overview").clicked() {
                 if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
                     cs.toggle_view();
+                }
+            }
+            if character.lore.is_some() {
+                let bio_label = if showing_bio { "Hide Bio" } else { "Bio" };
+                if ui.small_button(bio_label).clicked() {
+                    if let GameMode::CharacterSheet(ref mut cs) = global_state.0.mode {
+                        cs.toggle_bio();
+                    }
                 }
             }
             if ui.small_button("Next >").clicked() {
@@ -486,6 +630,10 @@ fn render_single_view(
             ui.colored_label(UI_HINT_COLOR, "[Esc/P] Close");
             ui.separator();
             ui.colored_label(UI_HINT_COLOR, "[O] Overview");
+            if character.lore.is_some() {
+                ui.separator();
+                ui.colored_label(UI_HINT_COLOR, "[B] Bio");
+            }
             ui.separator();
             ui.colored_label(UI_HINT_COLOR, "[1-6] Select");
             ui.separator();
@@ -496,6 +644,16 @@ fn render_single_view(
     });
 
     ui.separator();
+
+    // Bio panel is an overlay on Single view (not a peer of the normal
+    // stats layout): when active and the focused character has lore, it
+    // fully replaces the portrait/stats/equipment columns below.
+    if showing_bio {
+        if let Some(lore) = character.lore.clone() {
+            render_bio_panel(ui, &character.name, &lore);
+            return;
+        }
+    }
 
     let available = ui.available_size();
     let sep_total = (1.0 + 2.0 * ui.spacing().item_spacing.x) * 2.0;
@@ -781,6 +939,54 @@ fn render_single_view(
     );
 }
 
+/// Renders the Bio panel overlay: a character's long-form backstory and
+/// profile, in place of the normal portrait/stats/equipment columns.
+///
+/// Uses a single [`egui::ScrollArea`] rather than [`three_column`] -- the
+/// content is one flowing column (title, archetype, wrapped backstory,
+/// motivation, combat style), so the multi-column layout helper this module
+/// uses elsewhere would be unnecessary here.
+///
+/// # Arguments
+///
+/// * `character_name` -- fallback title when `lore.profile.title` is empty.
+/// * `lore` -- the resolved [`CharacterLore`] content to display.
+fn render_bio_panel(ui: &mut egui::Ui, character_name: &str, lore: &CharacterLore) {
+    let title = if lore.profile.title.is_empty() {
+        character_name
+    } else {
+        lore.profile.title.as_str()
+    };
+
+    egui::ScrollArea::vertical()
+        .id_salt("character_sheet_bio_scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.colored_label(
+                UI_TITLE_COLOR,
+                egui::RichText::new(title).strong().size(18.0),
+            );
+            if !lore.profile.archetype.is_empty() {
+                ui.colored_label(STAT_EMPTY_COLOR, &lore.profile.archetype);
+            }
+            ui.add_space(8.0);
+            ui.separator();
+
+            ui.add_space(4.0);
+            ui.label(&lore.backstory);
+
+            ui.add_space(12.0);
+            ui.colored_label(UI_TITLE_COLOR, "Core Motivation");
+            ui.separator();
+            ui.label(&lore.profile.core_motivation);
+
+            ui.add_space(12.0);
+            ui.colored_label(UI_TITLE_COLOR, "Combat Style");
+            ui.separator();
+            ui.label(&lore.profile.combat_style);
+        });
+}
+
 /// Renders a single core-stat row showing `base / current`.
 ///
 /// The current value is highlighted amber when it differs from base.
@@ -1023,9 +1229,15 @@ fn party_overview_grid_dimensions(party_len: usize) -> (usize, usize) {
 }
 
 /// Renders one compact party-overview character card.
+///
+/// `highlighted` marks the card as the current keyboard-selected grid cell
+/// (`CharacterSheetState::focused_index` while in Party Overview): it draws
+/// with [`SELECT_HIGHLIGHT_COLOR`] instead of the default border, giving a
+/// non-mouse user visible feedback for where grid navigation currently is.
 fn render_party_overview_card(
     ui: &mut egui::Ui,
     character: &crate::domain::character::Character,
+    highlighted: bool,
 ) -> bool {
     let hp_frac = if character.hp.base > 0 {
         character.hp.current as f32 / character.hp.base as f32
@@ -1040,9 +1252,15 @@ fn render_party_overview_card(
         egui::Color32::from_rgb(60, 200, 60)
     };
 
+    let border_stroke = if highlighted {
+        egui::Stroke::new(2.0_f32, SELECT_HIGHLIGHT_COLOR)
+    } else {
+        egui::Stroke::new(1.0_f32, egui::Color32::DARK_GRAY)
+    };
+
     egui::Frame::default()
         .inner_margin(egui::Margin::same(8))
-        .stroke(egui::Stroke::new(1.0_f32, egui::Color32::DARK_GRAY))
+        .stroke(border_stroke)
         .show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             ui.vertical(|ui| {
@@ -1109,7 +1327,16 @@ fn render_party_overview_card(
 }
 
 /// Renders the compact party overview as an all-member card grid.
-fn render_party_overview(ui: &mut egui::Ui, global_state: &mut GlobalState, party_len: usize) {
+///
+/// `focused_index` is `CharacterSheetState::focused_index`, reused as the
+/// keyboard grid-navigation highlight in this view -- see
+/// [`render_party_overview_card`]'s `highlighted` parameter.
+fn render_party_overview(
+    ui: &mut egui::Ui,
+    global_state: &mut GlobalState,
+    party_len: usize,
+    focused_index: usize,
+) {
     if party_len == 0 {
         ui.colored_label(STAT_EMPTY_COLOR, "No party members.");
         return;
@@ -1137,6 +1364,22 @@ fn render_party_overview(ui: &mut egui::Ui, global_state: &mut GlobalState, part
             );
         });
     });
+
+    // -- Hint line: keyboard shortcuts only, mirrors the Single-view hint row.
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.colored_label(UI_HINT_COLOR, "[Esc/P] Close");
+            ui.separator();
+            ui.colored_label(UI_HINT_COLOR, "[O] Single");
+            ui.separator();
+            ui.colored_label(UI_HINT_COLOR, "[1-6] Select");
+            ui.separator();
+            ui.colored_label(UI_HINT_COLOR, "[Enter] View");
+            ui.separator();
+            ui.colored_label(UI_HINT_COLOR, "[\u{2191}\u{2193}\u{2190}\u{2192}] Move");
+        });
+    });
+
     ui.separator();
 
     // Clone the whole active party, not just the focused member. The overview
@@ -1172,7 +1415,11 @@ fn render_party_overview(ui: &mut egui::Ui, global_state: &mut GlobalState, part
                             if let Some(character) = members.get(idx) {
                                 ui.push_id(idx, |ui| {
                                     ui.allocate_ui(egui::vec2(card_w, card_h), |ui| {
-                                        if render_party_overview_card(ui, character) {
+                                        if render_party_overview_card(
+                                            ui,
+                                            character,
+                                            idx == focused_index,
+                                        ) {
                                             pending_focus = Some(idx);
                                         }
                                     });
@@ -1394,7 +1641,7 @@ mod tests {
         let ctx = egui::Context::default();
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                render_party_overview(ui, &mut gs, 4);
+                render_party_overview(ui, &mut gs, 4, 2);
             });
         });
 
@@ -1440,8 +1687,8 @@ mod tests {
         let ctx = egui::Context::default();
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                render_party_overview_card(ui, &plain);
-                render_party_overview_card(ui, &poisoned);
+                render_party_overview_card(ui, &plain, false);
+                render_party_overview_card(ui, &poisoned, true);
             });
         });
         // No panic across both an empty-conditions and a conditioned
@@ -1510,6 +1757,342 @@ mod tests {
             panic!("expected CharacterSheet mode");
         }
     }
+
+    // ── Party Overview keyboard navigation (real App-harness tests) ─────────
+    //
+    // Unlike the inline-simulation tests above, these actually run
+    // `character_sheet_input_system` through `App::update()` -- the pattern
+    // used by `skill_training_ui.rs`'s `test_skill_training_escape_key_exits_mode`.
+
+    /// Builds a minimal `App` with a party of `party_size` members in
+    /// `PartyOverview` view at `focused_index`, presses `key` for one frame,
+    /// runs `character_sheet_input_system`, and returns the resulting
+    /// `(focused_index, view)`.
+    fn run_party_overview_key_press(
+        party_size: usize,
+        focused_index: usize,
+        key: KeyCode,
+    ) -> (usize, CharacterSheetView) {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_systems(Update, character_sheet_input_system);
+
+        let mut state = GameState::new();
+        for i in 0..party_size {
+            let hero = Character::new(
+                format!("Member{i}"),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            state.party.add_member(hero).unwrap();
+        }
+        state.enter_character_sheet();
+        if let GameMode::CharacterSheet(ref mut cs) = state.mode {
+            cs.view = CharacterSheetView::PartyOverview;
+            cs.focused_index = focused_index;
+        }
+        app.insert_resource(GlobalState(state));
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(key);
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        if let GameMode::CharacterSheet(ref cs) = gs.0.mode {
+            (cs.focused_index, cs.view.clone())
+        } else {
+            panic!("expected CharacterSheet mode after update");
+        }
+    }
+
+    #[test]
+    fn test_character_sheet_input_party_overview_arrow_keys_move_focused_index() {
+        // 4-member party -> (cols, rows) = (3, 2) via party_overview_grid_dimensions.
+        // Right: focus_next wrap.
+        let (idx, view) = run_party_overview_key_press(4, 0, KeyCode::ArrowRight);
+        assert_eq!(idx, 1);
+        assert_eq!(view, CharacterSheetView::PartyOverview);
+
+        // Left: focus_prev wrap.
+        let (idx, _) = run_party_overview_key_press(4, 0, KeyCode::ArrowLeft);
+        assert_eq!(idx, 3);
+
+        // Down: row0,col0 -> row1,col0 (idx 3, which exists).
+        let (idx, _) = run_party_overview_key_press(4, 0, KeyCode::ArrowDown);
+        assert_eq!(idx, 3);
+
+        // Up: row1,col0 (idx 3) -> row0,col0 (idx 0).
+        let (idx, _) = run_party_overview_key_press(4, 3, KeyCode::ArrowUp);
+        assert_eq!(idx, 0);
+    }
+
+    #[test]
+    fn test_character_sheet_input_party_overview_enter_switches_to_single_view() {
+        let (idx, view) = run_party_overview_key_press(3, 1, KeyCode::Enter);
+        assert_eq!(idx, 1, "Enter must not change the highlighted index");
+        assert_eq!(view, CharacterSheetView::Single);
+    }
+
+    #[test]
+    fn test_character_sheet_input_party_overview_space_switches_to_single_view() {
+        let (idx, view) = run_party_overview_key_press(3, 2, KeyCode::Space);
+        assert_eq!(idx, 2, "Space must not change the highlighted index");
+        assert_eq!(view, CharacterSheetView::Single);
+    }
+
+    #[test]
+    fn test_character_sheet_input_party_overview_digit_key_selects_without_switching_view() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::sdk::game_config::ControlsConfig;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        let config = ControlsConfig::default();
+        let key_map = crate::game::systems::input::KeyMap::from_controls_config(&config);
+        app.insert_resource(InputConfigResource {
+            controls: config,
+            key_map,
+        });
+        app.add_systems(Update, character_sheet_input_system);
+
+        let mut state = GameState::new();
+        for name in ["Alpha", "Beta", "Gamma"] {
+            let hero = Character::new(
+                name.to_string(),
+                "human".to_string(),
+                "knight".to_string(),
+                Sex::Male,
+                Alignment::Good,
+            );
+            state.party.add_member(hero).unwrap();
+        }
+        state.enter_character_sheet();
+        if let GameMode::CharacterSheet(ref mut cs) = state.mode {
+            cs.view = CharacterSheetView::PartyOverview;
+        }
+        app.insert_resource(GlobalState(state));
+
+        // Default config: "3" is bound to SelectCharacter(2).
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Digit3);
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        if let GameMode::CharacterSheet(ref cs) = gs.0.mode {
+            assert_eq!(cs.focused_index, 2);
+            assert_eq!(
+                cs.view,
+                CharacterSheetView::PartyOverview,
+                "digit-key select must not switch view away from PartyOverview"
+            );
+        } else {
+            panic!("expected CharacterSheet mode after update");
+        }
+    }
+
+    // ── Bio panel keyboard access (real App-harness tests) ──────────────────
+
+    /// Builds a minimal `App` with a single-member party in `Single` view,
+    /// optionally giving that member lore content, presses `B`, runs
+    /// `character_sheet_input_system`, and returns the resulting
+    /// `showing_bio` flag.
+    fn run_bio_key_press(has_lore: bool) -> bool {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::character_definition::{CharacterLore, CharacterProfile};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_systems(Update, character_sheet_input_system);
+
+        let mut hero = Character::new(
+            "Whisper".to_string(),
+            "elf".to_string(),
+            "robber".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        );
+        if has_lore {
+            hero.lore = Some(CharacterLore {
+                backstory: "A nimble elf with a colorful past.".to_string(),
+                profile: CharacterProfile {
+                    title: "The Quiet Step".to_string(),
+                    archetype: "Trickster".to_string(),
+                    core_motivation: "Freedom from her old crew".to_string(),
+                    combat_style: "Hit-and-run skirmishing".to_string(),
+                },
+            });
+        }
+
+        let mut state = GameState::new();
+        state.party.add_member(hero).unwrap();
+        state.enter_character_sheet();
+        app.insert_resource(GlobalState(state));
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyB);
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        if let GameMode::CharacterSheet(ref cs) = gs.0.mode {
+            cs.showing_bio
+        } else {
+            panic!("expected CharacterSheet mode after update");
+        }
+    }
+
+    #[test]
+    fn test_character_sheet_input_b_key_toggles_bio_when_character_has_lore() {
+        assert!(
+            run_bio_key_press(true),
+            "B must toggle showing_bio on for a character with lore"
+        );
+    }
+
+    #[test]
+    fn test_character_sheet_input_b_key_is_noop_without_lore() {
+        assert!(
+            !run_bio_key_press(false),
+            "B must be a no-op for a character without lore"
+        );
+    }
+
+    #[test]
+    fn test_character_sheet_input_b_key_is_noop_in_party_overview_view() {
+        // B is gated on `is_single` (character_sheet_ui.rs `if is_single { ... }`
+        // wraps the B handling), so it must be a no-op in PartyOverview view
+        // even when the focused character has lore.
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::character_definition::{CharacterLore, CharacterProfile};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_systems(Update, character_sheet_input_system);
+
+        let mut hero = Character::new(
+            "Whisper".to_string(),
+            "elf".to_string(),
+            "robber".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        );
+        hero.lore = Some(CharacterLore {
+            backstory: "A nimble elf with a colorful past.".to_string(),
+            profile: CharacterProfile {
+                title: "The Quiet Step".to_string(),
+                archetype: "Trickster".to_string(),
+                core_motivation: "Freedom from her old crew".to_string(),
+                combat_style: "Hit-and-run skirmishing".to_string(),
+            },
+        });
+
+        let mut state = GameState::new();
+        state.party.add_member(hero).unwrap();
+        state.enter_character_sheet();
+        if let GameMode::CharacterSheet(ref mut cs) = state.mode {
+            cs.view = CharacterSheetView::PartyOverview;
+        } else {
+            panic!("expected CharacterSheet mode after enter_character_sheet");
+        }
+        app.insert_resource(GlobalState(state));
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyB);
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        if let GameMode::CharacterSheet(ref cs) = gs.0.mode {
+            assert!(
+                !cs.showing_bio,
+                "B must be a no-op in PartyOverview view, even with lore present"
+            );
+            assert_eq!(
+                cs.view,
+                CharacterSheetView::PartyOverview,
+                "B must not change the view either"
+            );
+        } else {
+            panic!("expected CharacterSheet mode after update");
+        }
+    }
+
+    #[test]
+    fn test_character_sheet_input_b_key_toggles_off_on_second_press() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::character_definition::{CharacterLore, CharacterProfile};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_systems(Update, character_sheet_input_system);
+
+        let mut hero = Character::new(
+            "Whisper".to_string(),
+            "elf".to_string(),
+            "robber".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        );
+        hero.lore = Some(CharacterLore {
+            backstory: "A nimble elf with a colorful past.".to_string(),
+            profile: CharacterProfile {
+                title: "The Quiet Step".to_string(),
+                archetype: "Trickster".to_string(),
+                core_motivation: "Freedom from her old crew".to_string(),
+                combat_style: "Hit-and-run skirmishing".to_string(),
+            },
+        });
+
+        let mut state = GameState::new();
+        state.party.add_member(hero).unwrap();
+        state.enter_character_sheet();
+        app.insert_resource(GlobalState(state));
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyB);
+        app.update();
+
+        {
+            let gs = app.world().resource::<GlobalState>();
+            let GameMode::CharacterSheet(ref cs) = gs.0.mode else {
+                panic!("expected CharacterSheet mode");
+            };
+            assert!(cs.showing_bio, "first B press must turn the panel on");
+        }
+
+        // Release and re-press to simulate a second, separate keypress.
+        // `just_pressed` is only cleared by an `InputPlugin` system that
+        // `MinimalPlugins` doesn't run, so it must be cleared manually here
+        // (mirrors the pattern in `combat.rs`'s Tab-wrap test) -- otherwise
+        // the stale `just_pressed` flag from the first press would still be
+        // set on the next `app.update()`, toggling the panel an extra time.
+        {
+            let mut kb = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            kb.release(KeyCode::KeyB);
+            kb.clear_just_pressed(KeyCode::KeyB);
+            kb.press(KeyCode::KeyB);
+        }
+        app.update();
+
+        let gs = app.world().resource::<GlobalState>();
+        let GameMode::CharacterSheet(ref cs) = gs.0.mode else {
+            panic!("expected CharacterSheet mode");
+        };
+        assert!(!cs.showing_bio, "second B press must turn the panel off");
+    }
+
     /// Verifies `render_single_view` does not panic when no full-portrait
     /// `TextureId` is provided (the common case at startup).
     ///
@@ -1550,11 +2133,114 @@ mod tests {
                         full_portrait_id: None,
                         portrait_key: "aldric",
                         portrait_natural_size: None,
+                        showing_bio: false,
                     },
                 );
             });
         });
         // Reaching here without panic = pass
+    }
+
+    /// Verifies `render_single_view` renders the Bio panel overlay (instead
+    /// of the normal portrait/stats/equipment columns) without panic when
+    /// `showing_bio` is set and the focused character has lore, including
+    /// the title-fallback-to-name path (empty `profile.title`).
+    #[test]
+    fn test_render_single_view_shows_bio_panel_when_showing_bio_and_lore_present() {
+        use crate::domain::character::{Alignment, Character, Sex};
+        use crate::domain::character_definition::{CharacterLore, CharacterProfile};
+
+        let mut state = GameState::new();
+        let mut ch = Character::new(
+            "Whisper".to_string(),
+            "elf".to_string(),
+            "robber".to_string(),
+            Sex::Female,
+            Alignment::Neutral,
+        );
+        ch.lore = Some(CharacterLore {
+            backstory: "A nimble elf with a colorful past.".to_string(),
+            profile: CharacterProfile {
+                title: String::new(), // empty -- must fall back to character name
+                archetype: "Trickster".to_string(),
+                core_motivation: "Freedom from her old crew".to_string(),
+                combat_style: "Hit-and-run skirmishing".to_string(),
+            },
+        });
+        state.party.add_member(ch).unwrap();
+        state.enter_character_sheet();
+
+        let mut gs = crate::game::resources::GlobalState(state);
+        let campaign_config = crate::domain::campaign::CampaignConfig::default();
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_single_view(
+                    ui,
+                    &mut gs,
+                    SingleViewParams {
+                        party_len: 1,
+                        focused_index: 0,
+                        campaign_config: &campaign_config,
+                        level_db: None,
+                        content_db: None,
+                        full_portrait_id: None,
+                        portrait_key: "whisper",
+                        portrait_natural_size: None,
+                        showing_bio: true,
+                    },
+                );
+            });
+        });
+        // Reaching here without panic = pass
+    }
+
+    /// Verifies `render_single_view` falls back to the normal
+    /// portrait/stats/equipment layout (not the Bio panel) when
+    /// `showing_bio` is set but the focused character has no lore --
+    /// mirrors the input-system gating so the UI can never show a Bio panel
+    /// for a lore-less character even if `showing_bio` were somehow true.
+    #[test]
+    fn test_render_single_view_ignores_showing_bio_without_lore() {
+        use crate::domain::character::{Alignment, Character, Sex};
+
+        let mut state = GameState::new();
+        let ch = Character::new(
+            "Aldric".to_string(),
+            "human".to_string(),
+            "knight".to_string(),
+            Sex::Male,
+            Alignment::Good,
+        );
+        assert!(ch.lore.is_none());
+        state.party.add_member(ch).unwrap();
+        state.enter_character_sheet();
+
+        let mut gs = crate::game::resources::GlobalState(state);
+        let campaign_config = crate::domain::campaign::CampaignConfig::default();
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_single_view(
+                    ui,
+                    &mut gs,
+                    SingleViewParams {
+                        party_len: 1,
+                        focused_index: 0,
+                        campaign_config: &campaign_config,
+                        level_db: None,
+                        content_db: None,
+                        full_portrait_id: None,
+                        portrait_key: "aldric",
+                        portrait_natural_size: None,
+                        showing_bio: true,
+                    },
+                );
+            });
+        });
+        // Reaching here without panic = pass (normal stats layout rendered)
     }
 
     /// Verifies the hint bar renders without panic after the `[1-6] Select`
@@ -1594,6 +2280,7 @@ mod tests {
                         full_portrait_id: None,
                         portrait_key: "mira_windwhisper",
                         portrait_natural_size: None,
+                        showing_bio: false,
                     },
                 );
                 // Hint bar -- verify it renders without panic
@@ -1745,6 +2432,7 @@ mod tests {
                         full_portrait_id: None,
                         portrait_key: "elara_silverveil",
                         portrait_natural_size: None,
+                        showing_bio: false,
                     },
                 );
             });
@@ -1807,6 +2495,7 @@ mod tests {
                         full_portrait_id: None,
                         portrait_key: "aldric",
                         portrait_natural_size: None,
+                        showing_bio: false,
                     },
                 );
             });
@@ -1972,6 +2661,7 @@ mod tests {
                         full_portrait_id: None,
                         portrait_key: "gareth",
                         portrait_natural_size: None,
+                        showing_bio: false,
                     },
                 );
             });

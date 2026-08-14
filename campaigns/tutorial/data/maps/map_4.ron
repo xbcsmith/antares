@@ -2,8 +2,8 @@
     id: 4,
     width: 20,
     height: 20,
-    name: "Arcturus\'s Cave",
-    description: "A mysterious cave belonging to the wizard Arcturus",
+    name: "Ashkarron Foothills",
+    description: "A cave carved into the foothills of Mount Ashkarron, home to the wizard Arcturus and his arcane instruments.",
     tiles: [
         (
             terrain: Stone,

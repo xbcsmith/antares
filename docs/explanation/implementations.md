@@ -1,3 +1,658 @@
+## Dialogue Overhaul: All Characters Recruitable, Lore-Consistent Trees
+
+### Summary
+
+Complete overhaul of `campaigns/tutorial/data/dialogues.ron`. Fixed a critical
+duplicate-id bug (Eonir was incorrectly assigned id 1003, colliding with Isolde).
+Rewrote the two placeholder NPC dialogues (Arcturus, Aetheris), rewrote both
+existing stub recruitment dialogues (Zara, Whisper), expanded Jyeshtha with the
+full Eonir reveal, applied lore-consistent text polish to all service NPCs, and
+created four new recruitment dialogues so every premade character is now
+recruitable. Updated `npcs.ron` to reference Eonir's corrected id.
+
+### Critical Bug Fix
+
+- `tutorial_lich_eonir` dialogue was id 1003 (duplicate of Isolde Dawnfang)
+- Eonir reassigned to **id 1004**; `npcs.ron` `dialogue_id` updated to match
+
+### Full Rewrites
+
+| id | Old name | New name | Notes |
+|----|----------|----------|-------|
+| 1 | Arcturus Story | Arcturus - The Eternal Wanderer | 6 nodes; Cosmic Weave lore, quest hook for instruments |
+| 2 | Arcturus Brother Story | Aetheris - The Void-Drifter | 6 nodes; Dark Forest hut, Void-Weave origin, leads to Arcturus |
+| 101 | Apprentice Zara Recruitment | same | 6 nodes; Lumina-weaving, Great Alignment, Master Elian |
+| 102 | Whisper Recruitment | same | 6 nodes; Vespera Moonshadow, Silver Spires, locksmith cover |
+
+### Expanded
+
+- **id 1001 Jyeshtha** — renamed to *The Glass Sea Watcher*; fixed encoding
+  corruption (`â\u{80}\u{94}` → `—`); node 2 now delivers the full Eonir reveal
+  (jade icosahedron stolen by Eonir Xavian Stalix, Vaelgrim, the stillness);
+  node 5 now points to Frostspire Peaks as the destination
+
+### Text Polish (structure preserved, text updated)
+
+ids 3, 4, 5, 6, 7, 8, 9, 10, 11, 1002 — all updated to reference Velmoria
+world lore: the Cosmic Weave, the Great Gloom, Ashvale settlements, the
+stillness spreading from the north, goblin scouts as directed outriders,
+Harrow Downs opening from the inside, Arcturus's instruments.
+
+### New Recruitment Dialogues
+
+| id | Character | character_id | Notes |
+|----|-----------|-------------|-------|
+| 104 | Kira Valerius | `tutorial_human_knight` | 7 nodes; Eldoria exile, Void-Blight, party leader |
+| 105 | Sirius Xylanthir | `tutorial_elf_sorcerer` | 6 nodes; Dark Elf, Void-Weave, demands worthy enemies |
+| 106 | Mira | `tutorial_human_cleric` | 6 nodes; Great Gloom, Order of the Resplendent Dawn |
+| 107 | Old Gareth | `old_gareth` | 7 nodes; Aethelgard, Great Tremor, Core Shield, reluctant veteran |
+
+### All Recruitable Characters — Dialogue Map
+
+| Character | Dialogue id | Status |
+|-----------|------------|--------|
+| Kira | 104 | New |
+| Sirius | 105 | New |
+| Isolde | 1003 | Existing (excellent quality, unchanged) |
+| Mira | 106 | New |
+| Old Gareth | 107 | New |
+| Whisper | 102 | Rewritten |
+| Apprentice Zara | 101 | Rewritten |
+| Zhaya | 1000 | Existing (good quality, unchanged) |
+
+### Follow-Up Needed
+
+`characters.ron` does not yet have a `dialogue_id` field on character entries.
+The game will need a mechanism to wire each character's in-world encounter to
+their recruitment dialogue (ids 100–107, 1000, 1003). This is tracked under
+the Option A / recruitable-characters feature work.
+
+---
+
+## Map Names, Descriptions & Frostspire Peaks (map_8)
+
+### Summary
+
+Updated `name` and `description` fields across all seven existing maps to align
+with *The Stillness Prophecy* world lore. Fixed the long-standing typo
+"Dark Forrest" → "Dark Forest" and added the missing apostrophe in
+"Astronomer's Temple". Created `map_8.ron` — Frostspire Peaks, the 40×40
+Act IV final map where the confrontation with Eonir takes place.
+
+### Files modified
+
+**`campaigns/tutorial/data/maps/map_1.ron`** — Town Square
+- Description updated: Ashvale settlement, Kira's gathering point
+
+**`campaigns/tutorial/data/maps/map_2.ron`** — Dark Forest *(typo fixed)*
+- Name: "Dark Forrest" → "Dark Forest"
+- Description updated: goblin scouts, something larger stirring
+
+**`campaigns/tutorial/data/maps/map_3.ron`** — Ancient Ruins
+- Description updated: kobolds and goblins, Arcturus's stolen astrolabe
+
+**`campaigns/tutorial/data/maps/map_4.ron`** — Arcturus's Cave
+- Description updated: foothills of Mount Ashkarron
+
+**`campaigns/tutorial/data/maps/map_5.ron`** — Mountain Pass
+- Description updated: hidden village, first rumours of the stillness
+
+**`campaigns/tutorial/data/maps/map_6.ron`** — The Harrow Downs
+- Description updated: tombs opening from the inside
+
+**`campaigns/tutorial/data/maps/map_7.ron`** — Astronomer's Temple *(apostrophe fixed)*
+- Name: "Astronomers Temple" → "Astronomer's Temple"
+- Description updated: Glass Sea pyramid, Jyeshtha's vigil
+
+**`campaigns/tutorial/data/maps/map_8.ron`** — Frostspire Peaks *(new)*
+- 40×40 (1 600 tiles), matching map_7 in size
+- `maps_dir: "data/maps/"` in campaign.ron picks it up automatically
+- Layout zones:
+  - Mountain border + flanking canyon walls
+  - Frozen tundra approach from the south (y=28-38), sparse ice-rock obstacles
+  - Outer castle walls (Stone/Normal) with south gate at x=19-20 (y=27)
+  - Castle courtyard (Stone floor, lit)
+  - Inner keep walls with inner gate at x=19-20 (y=22)
+  - Eonir's sanctum (y=13-21, x=13-26): Stone floor, `is_dark: true`
+  - Jagged northern frostspire peaks beyond the castle (y=1-7)
+
+---
+
+## Lore Files & NPC Updates: The Stillness Prophecy Character Pass
+
+### Summary
+
+Updated all eight premade-character lore files under
+`campaigns/tutorial/assets/characters/lore/` using the canonical lore prompts
+in `campaigns/tutorial/prompts/lore/`. Updated matching `description` fields in
+`campaigns/tutorial/data/characters.ron` and
+`campaigns/tutorial/data/npcs.ron`. Added new NPC **Eonir the Still**
+(`tutorial_lich_eonir`) — the Lich King antagonist of Act IV.
+
+### Files modified
+
+**`campaigns/tutorial/assets/characters/lore/kira.ron`**
+- Backstory: Eldoria origin, Void-Blight, knight-errant in exile
+- Title: *The Exile Knight, Blade of the Shattered Shore*
+- Archetype: Soldier / Versatile Warrior
+
+**`campaigns/tutorial/assets/characters/lore/old_gareth.ron`**
+- Backstory: Master Architect of Aethelgard, Great Tremor, the Core Shield
+- Title: *The Last Pillar of Aethelgard, Warden of the Core Shield*
+- Archetype: Bastion Guardian / Stalwart Tank
+
+**`campaigns/tutorial/assets/characters/lore/isolde.ron`**
+- Backstory: Sunspire Dynasty princess, secret War Cleric training, rode to war
+- Title: *Princess of Sunspire, Holy Warrior of the Radiant Shield*
+- Archetype: War Cleric / Martial Divine Champion
+
+**`campaigns/tutorial/assets/characters/lore/mira.ron`**
+- Backstory: Village outpost against the Great Gloom, Order of the Resplendent Dawn
+- Title: *The Radiant Sentinel, Acolyte of the Eternal Spark*
+- Archetype: Light Cleric / Holy Guardian
+
+**`campaigns/tutorial/assets/characters/lore/sirius.ron`**
+- Backstory: Dark Elf scholar from subterranean reaches, Void-Weave mastery
+- Title: *Master of the Obsidian Veil, Archon of the Void-Weave*
+- Archetype: Shadow Sorcerer / Void Mage
+
+**`campaigns/tutorial/assets/characters/lore/whisper.ron`**
+- Backstory: Vespera Moonshadow, High Elf of the Silver Spires, traded nobility for stealth
+- Title: *The Ghost of the Silver Spires, Master of the Unseen Key*
+- Archetype: High Elf Rogue / Shadow Assassin
+
+**`campaigns/tutorial/assets/characters/lore/apprentice_zara.ron`**
+- Backstory: Lumina-weaving obsession, Great Alignment experiment, separated from Master Elian
+- Title: *Luminous Scholar, Weaver of the Prismatic Spark*
+- Archetype: Gnome Sorcerer / Cosmic Apprentice
+
+**`campaigns/tutorial/assets/characters/lore/zhaya.ron`**
+- Backstory: Eastern Peaks monasteries, Astrologer's Path visions, pilgrimage to the Astronomers Temple
+- Title: *Celestial Monk, Seeker of the Star-Bound Truth*
+- Archetype: Astral Monk / Fate-Reader
+
+**`campaigns/tutorial/data/characters.ron`**
+- Updated `description` for Kira, Sirius, Mira, Old Gareth, Whisper, Apprentice Zara, and Zhaya
+- Isolde's description was already aligned with the prompt; no change
+
+**`campaigns/tutorial/data/npcs.ron`**
+- Updated `description` for `tutorial_wizard_arcturus` (Arcturus, Eternal Wanderer)
+- Updated `description` for `tutorial_wizard_arcturus_brother` (Aetheris, Void-Drifter)
+- Updated `description` for `tutorial_mystic_astronomer` (Jyeshtha, Glass Sea watcher)
+- Added new entry `tutorial_lich_eonir` — Eonir the Still, Sovereign of Stillness
+  - `creature_id`: 1021, `dialogue_id`: 1003, `faction`: "Sovereign of Stillness"
+  - `portrait_id`: "eonir_still" (asset to be created)
+
+---
+
+## Character Bio & Navigation, Phase 5: Mouse Input Fix for Character Sheet
+
+### Summary
+
+Implemented Phase 5 of
+`docs/explanation/character_bio_and_navigation_implementation_plan.md`, the
+final phase of the Character Bio & Navigation plan: fixed the root cause of
+`GameMode::CharacterSheet`'s mouse-click regressions (Identified Issues #2-3
+in the plan) and resolved the HUD-portrait click-through that compounded it.
+Also added a mouse-clickable "Bio" button, since Phase 3 only wired the Bio
+panel to the keyboard (`B` key) and Phase 5's own success criteria requires
+"mouse and keyboard... both fully functional in every Character Sheet view."
+
+### Files modified
+
+**`src/game/systems/input/mode_guards.rs`**
+- Added `GameMode::CharacterSheet(_)` to `movement_blocked_for_mode`'s match
+  arms, matching every other modal screen. `interaction_blocked_for_mode`
+  and `input_blocked_for_mode` both delegate to `movement_blocked_for_mode`
+  internally, so this single change fixes both -- the plan named both
+  functions as line-range targets, but the second was already covered by
+  the first's delegation; there was no separate match arm list to edit in
+  `interaction_blocked_for_mode`.
+- This closes the actual root cause identified in the plan: without this
+  guard, `handle_exploration_input_interact`/`handle_exploration_input_movement`
+  only stood down via the `egui_wants_any_pointer_input` run condition,
+  written in `PostUpdate` -- one frame after the Character Sheet UI draws in
+  `Update` -- so exploration movement/interaction input could leak through
+  on the frame the sheet opened or closed.
+- 3 new tests (`movement_blocked_for_mode`/`interaction_blocked_for_mode`/
+  `input_blocked_for_mode`, all asserting `true` for `CharacterSheet`),
+  mirroring the existing per-mode test convention in this file.
+
+**`src/game/systems/hud.rs`**
+- Removed `GameMode::CharacterSheet(_)` from `portrait_click_allowed`.
+  Previously, a HUD portrait click while the sheet was already open called
+  `enter_character_sheet_at` directly, double-handling the same click
+  alongside whatever the sheet's own egui widgets did with it -- the root
+  cause named in the plan's Identified Issue #3.
+- Updated `portrait_click_allowed` and `handle_portrait_click_system`'s doc
+  comments to describe the new blocked mode and why.
+- Replaced `test_handle_portrait_click_when_already_in_sheet_updates_index`
+  (which asserted the now-removed "click a second portrait to retarget the
+  open sheet" behavior) with
+  `test_handle_portrait_click_blocked_when_sheet_already_open`, asserting
+  the click is blocked and focus is unaffected. Added
+  `test_portrait_click_not_allowed_character_sheet` alongside the file's
+  other single-mode `portrait_click_allowed` tests. Confirmed the two
+  remaining `portrait_click_allowed` assertions that touch `CharacterSheet`
+  mode indirectly (`test_handle_portrait_click_selects_correct_party_index`,
+  `test_handle_portrait_click_opens_sheet_in_exploration`/`_in_combat`) all
+  check the mode *before* entering the sheet, so they were unaffected.
+
+**`src/game/systems/character_sheet_ui.rs`**
+- Added a mouse-clickable "Bio"/"Hide Bio" button next to the existing
+  "Party Overview"/"Next >"/"< Prev" buttons in the Single-view header,
+  gated on `character.lore.is_some()` (same condition as the `B` key and
+  hint), calling the same `CharacterSheetState::toggle_bio()` the keyboard
+  shortcut uses. This wasn't in Phase 5's deliverables list, but the
+  phase's own success criteria ("mouse and keyboard are both fully
+  functional in every Character Sheet view") and testing requirements
+  (which mention "the new Bio button") both call for it, and Phase 3 had
+  only wired the toggle to the keyboard.
+- Updated the module doc's Single-view ASCII diagram to show the new
+  button.
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --all-features` — **5501/5501 passed**, 8 skipped (root
+  `antares` crate; full regression run, not just the new/touched tests,
+  since blocking exploration input in a new mode is exactly the kind of
+  change that can surface hidden cross-system assumptions)
+- `cargo nextest run -p campaign_builder --all-features` — **2496/2496
+  passed** (unaffected by this phase, run anyway for full-workspace
+  confidence -- see the Phase 4 entry below for why this must be invoked
+  explicitly with `-p`)
+- `cargo test --doc -- mode_guards portrait_click_allowed` and
+  `cargo test --doc -- character_sheet` (targeted, not the full workspace
+  doctest suite) — 4/4 and 15/15 passed
+- Manual: launched `./target/debug/antares --campaign campaigns/tutorial`,
+  confirmed it starts and runs without panicking for 12+ seconds.
+  Interactive mouse-driven verification of the actual click behavior in the
+  live window (Party Overview "View" buttons, the new Bio button, blocked
+  portrait clicks) was not possible in this sandbox (no Accessibility/
+  System Events permission, consistent with every prior phase in this
+  plan) -- covered instead by the mode-guard/portrait-click unit tests
+  above, which exercise the real blocking predicates the input systems
+  gate on.
+
+### Plan status
+
+This completes all 5 phases of
+`docs/explanation/character_bio_and_navigation_implementation_plan.md`.
+
+---
+
+## Character Bio & Navigation, Phase 4: Campaign Builder (SDK) Lore Editor Support
+
+### Summary
+
+Implemented Phase 4 of
+`docs/explanation/character_bio_and_navigation_implementation_plan.md`: a
+Lore section in the Campaign Builder's Characters editor, so
+`CharacterLore`/`CharacterProfile` content (added in Phase 2, consumed by
+the in-game Bio panel added in Phase 3) is fully editable without hand-editing
+RON files.
+
+### Design choices
+
+- **`lore_file` is read-only in the UI**, auto-derived from the character's
+  name on save (lowercased, spaces/apostrophes/hyphens stripped) when unset
+  -- the same filename convention `save_creatures` already uses for the
+  creature registry. The plan only asked for a "`lore_file` display," and
+  auto-derivation means authoring lore purely through the editor never
+  requires typing a RON path by hand.
+- **Clearing all five Lore fields clears `lore_file` too** (not just
+  `lore`), so the persisted state always matches what the Lore section
+  currently shows -- no orphaned reference to content the buffer no longer
+  represents. The old per-entity RON file on disk, if any, is deliberately
+  *not* deleted -- an unreferenced leftover file is a far safer failure mode
+  for an editor to leave behind than automatically deleting user-authored
+  content.
+- **`load_from_file`/`save_to_file` derive the campaign root from the
+  `characters.ron` path itself** (`path.parent().parent()`, the same
+  derivation `sdk/database.rs`'s `ContentDatabase::load_core` already uses
+  for `asset_root`) rather than changing either method's signature to take
+  an explicit campaign-root parameter. The plan named
+  `load_characters_from_campaign` (`campaign_io.rs`) as the integration
+  point; that function already just delegates to
+  `CharactersEditorState::load_from_file`, so putting the resolution there
+  satisfies the plan's "load/save wired through `campaign_io.rs`"
+  deliverable without a signature change rippling to its other caller
+  (a test).
+- **Every lore-resolution failure mode is soft** (missing campaign root,
+  unsafe path, unreadable file, unparseable content) -- unlike the game
+  runtime's `CharacterDatabase::load_from_campaign`, which hard-fails on a
+  `lore_file` that fails path-security validation because it parses
+  untrusted campaign content. The SDK editor is a local-authoring tool for a
+  trusted campaign author, not a security boundary, so failing the whole
+  character list over one bad lore reference would be poor editor UX for no
+  corresponding security benefit. This deviation is documented in the doc
+  comment on `load_from_file`.
+- **`save_to_file` mirrors `save_creatures`'s "parent file + per-entity
+  files" pattern**: `characters.ron` (parent) is written first, then every
+  character with non-empty lore content gets its own per-entity
+  `CharacterLore` RON file written under `assets/characters/lore/` --
+  unconditionally re-written on every save, same as `save_creatures`
+  regenerates every creature file every time (idempotent for
+  untouched entries).
+
+### Files modified
+
+**`sdk/campaign_builder/src/characters_editor.rs`**
+- `CharacterEditBuffer`: added `lore_title`, `lore_archetype`,
+  `lore_core_motivation`, `lore_combat_style`, `lore_backstory` (all
+  `String`) alongside the existing `lore_file: Option<String>` from Phase 2.
+- `start_edit_character`: populates the five new buffer fields from
+  `character.lore` when present, empty strings otherwise.
+- `save_character`: builds `Option<CharacterLore>` from the buffer's five
+  lore fields (`None` when all are empty after trimming, which also clears
+  `lore_file`); previously this was hardcoded to `lore: None`.
+- `load_from_file`: now resolves each character's `lore_file` into
+  `character.lore` via `validate_campaign_relative_path`, soft-failing on
+  every error mode (see Design choices above).
+- `save_to_file`: signature changed `&self` -> `&mut self`; derives a
+  `lore_file` for any character with `lore.is_some() && lore_file.is_none()`,
+  then writes one per-entity lore RON file per character with lore content,
+  creating `assets/characters/lore/` as needed.
+- `show_character_form`: new "Lore" section (read-only `lore_file` display +
+  a 2-column `Grid` for title/archetype/core_motivation/combat_style +a
+  multiline backstory `TextEdit`) inserted between the existing Description
+  section and the Back to List / Save / Cancel action row -- no new
+  `ScrollArea`/`ComboBox`/panel, since the whole form already lives inside
+  one `ScrollArea::vertical().id_salt("character_form_scroll")`.
+- 7 new tests: `save_character` building/clearing lore + auto-deriving
+  `lore_file`; `load_from_file` resolving a valid lore_file and tolerating a
+  missing one; `start_edit_character` populating (and not populating) the
+  buffer's lore fields.
+
+**`docs/how-to/create_characters.md`** — "Editor Features" bullet list and
+the "Creating a Character in the Editor" numbered walkthrough both updated
+to mention the new Lore section (Phase 4 deliverable).
+
+### Quality gates
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+  (verified both at the workspace root and explicitly scoped to
+  `-p campaign_builder`, see note below)
+- `cargo nextest run --all-features` — **5497/5497 passed** (antares crate)
+- `cargo nextest run -p campaign_builder --all-features` — **2496/2496
+  passed** (this crate is a separate workspace member; the root
+  `cargo nextest run --all-features` invocation only covers the root
+  `antares` package by default since the workspace root is itself a
+  package -- `-p campaign_builder` must be passed explicitly to exercise it,
+  which this phase's scope of change warranted doing in full, not just for
+  the new tests)
+- `cargo test --doc -- character_definition::CharacterLore
+  character_definition::CharacterProfile` — 2/2 passed (unchanged from
+  Phase 2; no new doctests were needed for this phase's SDK-only changes)
+- Manual: launched `./target/debug/campaign-builder` (initializes cleanly,
+  no crash) and `./target/debug/antares --campaign campaigns/tutorial`
+  (still loads the Phase-2-authored lore content cleanly). Interactive
+  keyboard/mouse-driven verification of the actual Lore section UI in the
+  live window was not possible in this sandbox (no Accessibility/System
+  Events permission) -- covered instead by the 7 new unit tests, which
+  exercise the real `save_character`/`load_from_file`/`save_to_file`/
+  `start_edit_character` code paths against tempdir fixtures.
+
+---
+
+## Character Bio & Navigation, Phase 3: Bio Panel UI + Keyboard Access
+
+### Summary
+
+Implemented Phase 3 of
+`docs/explanation/character_bio_and_navigation_implementation_plan.md`: a
+keyboard-accessible Bio panel in the Character Sheet's Single view, showing
+the long-form `CharacterLore` content added in Phase 2. The panel is an
+overlay flag on top of `CharacterSheetView::Single`, not a third view
+variant, so every existing `view` match, Esc/O toggling, and Tab/Arrow/digit
+navigation is untouched.
+
+### Files modified
+
+**`src/application/character_sheet_state.rs`**
+- Added `showing_bio: bool` to `CharacterSheetState` (next to `view`),
+  initialized to `false` in `new()`.
+- Added `toggle_bio()`, an unconditional flip mirroring `toggle_view()`'s
+  style, with a doctest.
+- New unit tests: flip false→true, flip back to false, and independence from
+  `view` (toggling one must not affect the other).
+
+**`src/game/systems/character_sheet_ui.rs`**
+- `character_sheet_input_system`: new `B` handler inside the `is_single`
+  branch, gated on the focused character's `lore.is_some()` (looked up via
+  `focused_index` read from `CharacterSheetState` before the mutable
+  re-borrow) -- a no-op (but still `return`s, mirroring the `O`/`Enter`
+  handlers) when the character has no lore.
+- `SingleViewParams` gained a `showing_bio: bool` field, threaded from
+  `character_sheet_ui_system` (which already reads `cs_state`).
+- `render_single_view`: when `showing_bio` and the focused character has
+  lore, renders `render_bio_panel(...)` and returns early instead of the
+  normal portrait/three-column stats layout.
+- New `render_bio_panel`: single-column `egui::ScrollArea` (not
+  `three_column` -- the content is one flowing column, so the multi-column
+  helper isn't needed here) showing `profile.title` (falls back to the
+  character's name when empty), `profile.archetype`, the wrapped
+  `backstory`, `profile.core_motivation`, and `profile.combat_style`.
+- Single-view hint bar: `[B] Bio` now renders between `[O] Overview` and
+  `[1-6] Select`, only when the focused character has lore.
+- Module doc comment: added a "Layout — Bio panel" section (ASCII diagram +
+  description) and a `B` bullet in the Flow section's Single-view key list,
+  matching the existing convention of keeping doc and rendered hints in
+  sync.
+- Fixed the 5 existing test-only `SingleViewParams { ... }` struct literals
+  with `showing_bio: false`.
+- New tests: 3 real `App`-harness tests for the `B` key (toggles on for a
+  character with lore, no-op without lore, toggles off on a second distinct
+  press -- the last one required `clear_just_pressed`, since `MinimalPlugins`
+  doesn't run the `InputPlugin` system that normally clears `just_pressed`
+  between frames, following the existing pattern in `combat.rs`'s Tab-wrap
+  test); 2 `render_single_view` smoke tests (Bio panel renders without panic
+  including the title-fallback-to-name path; `showing_bio: true` without
+  lore falls back to the normal stats layout, not a broken empty panel).
+
+**Audit follow-up**: a post-implementation audit against the plan's Phase 3
+testing requirements found the `B`-is-no-op-outside-Single-view case was true
+by construction (the handler is nested inside `if is_single`) but never
+asserted by a test. Added
+`test_character_sheet_input_b_key_is_noop_in_party_overview_view` in
+`character_sheet_ui.rs`, which presses `B` on a lore-bearing character while
+`cs.view == PartyOverview` and confirms `showing_bio` stays `false`.
+
+### Quality gates (full workspace)
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --all-features` — **5497/5497 passed**, 8 skipped
+- `cargo test --doc -- character_sheet` (targeted, not the full workspace
+  doctest suite) — **15/15 passed**, including the new `toggle_bio` doctest
+- Manual verification: launched `./target/debug/antares --campaign
+  campaigns/tutorial`, confirmed it starts and runs without panicking for
+  12+ seconds with the (now lore-populated) tutorial campaign loaded.
+  Interactive keyboard-driven verification of the actual Bio panel toggle
+  in the live window was not possible in this sandbox (no Accessibility/
+  System Events permission to script keystrokes into the native app
+  window) -- covered instead by the real `App`-harness input tests above,
+  which exercise the actual `character_sheet_input_system` Bevy system.
+
+---
+
+## Character Bio & Navigation, Phase 2: Character Backstory & Profile Data Model
+
+### Summary
+
+Implemented Phase 2 of
+`docs/explanation/character_bio_and_navigation_implementation_plan.md`: a new
+optional, long-form lore content model for characters, layered on top of the
+existing short `description` field without touching it. A character's
+`lore_file` (relative to the campaign root) points to an external RON file
+holding a `CharacterLore` (`backstory` + a `CharacterProfile` of
+`title`/`archetype`/`core_motivation`/`combat_style`); `CharacterDatabase::
+load_from_campaign` resolves it, with warn-and-continue semantics for missing
+or invalid *referenced* files (only a `lore_file` value that fails
+path-security validation is a hard load error). All 8 premade tutorial
+characters now have authored lore content.
+
+### Files modified
+
+**`src/domain/character_definition.rs`**
+- Added `CharacterLore` and `CharacterProfile` structs (`Serialize`,
+  `Deserialize`, `Eq`), each with doc comments and a runnable doctest.
+- Added `lore_file: Option<String>` (serialized, `#[serde(default)]`,
+  `skip_serializing_if`) and `lore: Option<CharacterLore>` (`#[serde(skip)]`,
+  not authored directly) to `CharacterDefinition`, placed next to
+  `description`. Updated the `CharacterDefinitionDef` shadow struct, its
+  `From` impl, `CharacterDefinition::new()`, and the struct's top-of-file
+  doctest example accordingly.
+- Added `CharacterDatabase::load_from_campaign(data_dir, campaign_root)`,
+  mirroring `CreatureDatabase::load_from_registry` for
+  `validate_campaign_relative_path`-based resolution but *not* for error
+  handling: path-security failures are hard errors; a missing/unreadable/
+  unparseable referenced file only logs a warning and leaves that
+  character's `lore` as `None`, and loading continues.
+- `instantiate()` now copies `lore: self.lore.clone()` onto the runtime
+  `Character`, alongside `portrait_id`.
+- Fixed all 10 in-file `CharacterDefinition { ... }` struct-literal test call
+  sites (RON string literals were unaffected -- `lore_file` defaults via
+  `#[serde(default)]` on the shadow struct).
+- New tests: `CharacterLore` round-trip serialization; `load_from_campaign`
+  for no-`lore_file`, missing-file, invalid-RON, valid-lore, and
+  path-traversal-rejection cases (all via `tempfile::TempDir`, following the
+  existing `creature_database.rs` test template).
+
+**`src/domain/character.rs`**
+- Added `lore: Option<CharacterLore>` to `Character`, `#[serde(default)]` so
+  pre-existing save files without the field still deserialize. Updated
+  `Character::new()`.
+- New regression test `test_lore_field_serde_default_deserializes`, mirroring
+  the existing `test_timed_stat_boost_serde_default_deserializes` convention
+  (serialize, strip the field from the RON string, confirm it still
+  deserializes with the field defaulting to `None`).
+
+**`src/domain/items/equipment_validation.rs`**
+- Added `lore: None` to the one other `Character { ... }` struct literal in
+  the codebase (a test fixture).
+
+**`src/sdk/database.rs`**
+- Swapped `CharacterDatabase::load_from_file` → `load_from_campaign` at both
+  `ContentDatabase` call sites: `load_campaign_with_skills_file` (already had
+  `campaign_path`) and `load_core` (passes the already-derived `asset_root`
+  as the campaign root, the same value used for creature/landscape/furniture
+  asset resolution).
+
+**`sdk/campaign_builder/src/characters_editor.rs` / `asset_manager.rs`**
+- Threaded `lore_file` through `CharacterEditBuffer` (`start_edit_character`
+  populates it from the character being edited, `save_character` writes it
+  back), so editing/saving a character via the SDK no longer silently
+  discards its `lore_file` reference. Fixed the remaining struct-literal
+  sites (test code) with `lore_file: None, lore: None`. No lore-editing UI
+  was added -- that's a later phase; this only prevents a save-time
+  regression of Phase 2's own new field.
+
+**Content**: 8 `CharacterLore` RON files authored under
+`campaigns/tutorial/assets/characters/lore/` (Kira, Sirius, Isolde, Mira, Old
+Gareth, Whisper, Apprentice Zara, Zhaya), referenced via `lore_file` from
+`campaigns/tutorial/data/characters.ron`. The 3 non-premade template
+characters were left untouched.
+
+**Docs**: `docs/reference/campaign_content_format.md`,
+`docs/how-to/character_definition_ron_format.md`, and
+`docs/how-to/create_characters.md` each updated with the new `lore_file`
+field.
+
+**Audit follow-up**: a post-implementation audit against the plan's Phase 2
+deliverables found two gaps, both closed:
+- `src/application/save_game.rs` gained
+  `test_pre_lore_save_fixture_deserializes_with_lore_none`, which deserializes
+  the real pre-existing fixture `campaigns/tutorial/saves/save_20260809_072524.ron`
+  (which genuinely predates the `lore` field) and asserts every character
+  loads with `lore: None`. The prior regression test
+  (`test_lore_field_serde_default_deserializes` in `character.rs`) only
+  covered a synthetically-stripped save, not a real one.
+- `docs/how-to/character_definition_ron_format.md` gained a "Character Lore
+  File Format" subsection documenting the `CharacterLore` schema
+  (`backstory`, `profile.title/archetype/core_motivation/combat_style`) that
+  `lore_file` points to, which was previously only documented in
+  `docs/reference/campaign_content_format.md`.
+
+### Quality gates (full workspace)
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --all-features` — **5489/5489 passed**, 8 skipped
+  (includes the tutorial campaign integration tests, which now load all 8
+  characters' lore content end-to-end through `load_from_campaign`)
+- `cargo test --doc -- character_definition` (targeted, not the full
+  workspace doctest suite) — **28/28 passed**, including the new
+  `CharacterLore`/`CharacterProfile`/`load_from_campaign` doctests
+- `cargo check -p campaign_builder --all-targets --all-features` — 0 errors
+
+---
+
+## Character Bio & Navigation, Phase 1: Party Overview Keyboard Navigation
+
+### Summary
+
+Implemented Phase 1 of
+`docs/explanation/character_bio_and_navigation_implementation_plan.md`: full
+keyboard navigation for the Character Sheet's Party Overview grid, which
+previously had no keyboard support at all (`character_sheet_input_system`
+early-returned unless `view == Single`). Party Overview now supports arrow-key
+grid movement, Enter/Space to open Single view, digit-key jump-select in both
+views, a visible highlight on the keyboard-selected card, and an updated hint
+bar. `CharacterSheetState.focused_index` is reused as the Party Overview
+highlight index -- no new state field was introduced.
+
+### Files modified
+
+**`src/application/character_sheet_state.rs`**
+- Added `focus_up(&mut self, party_size: usize, cols: usize)` and
+  `focus_down(&mut self, party_size: usize, cols: usize)` -- row-step grid
+  navigation with wrapping, alongside the existing `focus_next`/`focus_prev`.
+  Handles the ragged-last-row case (party size not evenly divisible by `cols`)
+  and the single-row degenerate case (`focus_down` wraps to itself).
+- 7 new unit tests covering normal movement, top/bottom wrap, empty-party
+  no-op, the ragged-row case, and the single-row no-op.
+
+**`src/game/systems/character_sheet_ui.rs`**
+- `character_sheet_input_system`: restructured the `is_single` early-return
+  into an `if is_single {...} else {...}` branch. The Party Overview branch
+  handles `↑↓←→` (reusing `focus_next`/`focus_prev` for `←→`, new
+  `focus_up`/`focus_down` for `↑↓`) and `Enter`/`NumpadEnter`/`Space` (opens
+  Single view for the highlighted card). The digit-key (1-6) select loop now
+  runs unconditionally after the branch, so it works in both views; it only
+  changes `focused_index`, never `view`.
+- `render_party_overview_card` gained a `highlighted: bool` param; when set,
+  draws the card's border with the existing
+  `inventory_ui_common::SELECT_HIGHLIGHT_COLOR` (reused, no new color
+  constant) instead of the default grey stroke.
+- `render_party_overview` gained a `focused_index: usize` param (threaded from
+  `character_sheet_ui_system`, which already had it) to compute the
+  highlighted card, plus a new hint-bar row matching the Single-view style:
+  `[Esc/P] Close  [O] Single  [1-6] Select  [Enter] View  [↑↓←→] Move`.
+- Module doc comment (ASCII diagram + Flow section) updated to document the
+  Party Overview keyboard vocabulary alongside the existing Single-view one.
+- 5 new real `App`-harness tests (following the `skill_training_ui.rs`
+  `App::new()` + `MinimalPlugins` + `app.update()` pattern, which actually
+  runs `character_sheet_input_system` rather than simulating its logic
+  inline) covering arrow-key movement, Enter/Space view-switch, and
+  digit-key select without a view change.
+
+### Quality gates (full workspace)
+
+- `cargo fmt --all` — clean
+- `cargo check --all-targets --all-features` — 0 errors
+- `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings
+- `cargo nextest run --all-features` — **5482/5482 passed**, 8 skipped
+
+---
+
 ## Phase 5: Documentation and Final Verification
 
 ### Summary

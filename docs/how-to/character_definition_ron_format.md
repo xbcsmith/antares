@@ -175,6 +175,7 @@ hp_override: Some((base: 50, current: 30)),  // Wounded: 30/50 HP
 | `starting_items` | Vec<ItemId> | `[]` | Item IDs from `items.ron` (inventory) |
 | `starting_equipment` | Equipment | empty | Equipped items (see below) |
 | `description` | String | `""` | Character backstory/description |
+| `lore_file` | Option<String> | None | Path (relative to campaign root) to an external RON file with long-form backstory/profile content |
 | `is_premade` | bool | false | True for pre-made characters, false for templates |
 | `starts_in_party` | bool | false | True if character joins starting party |
 
@@ -193,6 +194,48 @@ starting_equipment: (
 ```
 
 **Note:** All equipment slots default to `None` if omitted.
+
+### Character Lore File Format
+
+`lore_file` points to a separate RON file (relative to the campaign root)
+holding long-form backstory content — this is distinct from the short
+`description` field above, and is shown in-game via the Character Sheet's
+Bio panel (press `B` on a character with lore).
+
+```ron
+// characters.ron
+(
+    id: "kira",
+    // ...
+    lore_file: Some("assets/characters/lore/kira.ron"),
+)
+```
+
+```ron
+// assets/characters/lore/kira.ron
+(
+    backstory: "Kira was raised on the edge of the tutorial lands...",
+    profile: (
+        title: "The Earnest Blade",
+        archetype: "Eager Novice",
+        core_motivation: "To prove that hard-won skill matters more than birthright",
+        combat_style: "Disciplined sword-and-shield melee, front line, straightforward and unflinching",
+    ),
+)
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `backstory` | String | Long-form, multi-paragraph biography text (scrollable in the Bio panel) |
+| `profile.title` | String | Short honorific/epithet shown in place of the character's name (falls back to name if empty) |
+| `profile.archetype` | String | One-line role/trope summary, e.g. "Eager Novice" |
+| `profile.core_motivation` | String | What drives the character |
+| `profile.combat_style` | String | How the character fights |
+
+**Error handling:** a missing, unreadable, or unparseable `lore_file` never
+fails the campaign load — the character simply loads with `lore: None` and a
+warning is logged. Only a malformed path (absolute, or containing `..`
+traversal) is a hard load error.
 
 ## Validation Rules
 

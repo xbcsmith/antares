@@ -2,8 +2,8 @@
     id: 2,
     width: 20,
     height: 20,
-    name: "Dark Forrest",
-    description: "A dense forest filled with danger and mystery",
+    name: "Dark Forest",
+    description: "A dense and ancient woodland thick with goblin scouts—and worse things stirring in the deep wood.",
     tiles: [
         (
             terrain: Forest,

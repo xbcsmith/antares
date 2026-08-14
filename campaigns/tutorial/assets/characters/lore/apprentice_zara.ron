@@ -1,0 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Brett Smith <xbcsmith@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
+(
+    backstory: "Zara was never one to sit still in a classroom. While most apprentices at the Mage\'s Guild were content mastering the predictable flow of elemental magic, Zara became fascinated by Lumina-weaving—the art of capturing and shaping the subtle light found in both nature and the cosmos. She spent her days documenting how different flowers reflected moonlight and her nights trying to trap actual sparks of starlight into tiny glass spheres.\n\nHer life changed during the Great Alignment, when a volatile experiment to weave a Living Constellation went slightly awry. The resulting burst of prismatic light didn\'t just dazzle her classmates; it physically separated her from her beloved mentor, Master Elian. While the Guild believed she was lost in the shimmering debris of the spell, Zara realized that magic is best learned by experiencing it firsthand. She now carries her glowing staff and a notebook full of half-finished theories, traveling the world to find new sources of light and eventually prove her findings to the Guild—and reunite with her mentor.",
+    profile: (
+        title: "Luminous Scholar, Weaver of the Prismatic Spark",
+        archetype: "Gnome Sorcerer / Cosmic Apprentice",
+        core_motivation: "To master Lumina-weaving and discover every hidden magical secret the world has to offer while searching for her lost mentor.",
+        combat_style: "Ranged magic specialist. Zara uses her staff to cast bursts of Lumina energy, creating dazzling area-of-effect light spells that can both blind enemies and illuminate dark dungeons.",
+    ),
+)
